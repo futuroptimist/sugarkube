@@ -1,0 +1,29 @@
+name: Docs
+on:
+  push:
+    paths:
+      - 'docs/**'
+      - 'README.md'
+
+jobs:
+  spellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install aspell dictionaries
+        run: sudo apt-get update && sudo apt-get install -y aspell aspell-en
+      - name: Spell check markdown & docs
+        uses: rojopolis/spellcheck-github-actions@0.35.0
+        with:
+          config_path: .spellcheck.yaml
+  linkcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v1
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - run: |
+          uv pip install --system linkchecker
+          linkchecker README.md docs/ || true
