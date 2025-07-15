@@ -102,3 +102,12 @@ repurpose
 config
 PRs
 changelogs
+
+Sugarkube
+SBCs
+Fritzing
+KiCad
+LiFePO4
+MPPT
+Victron
+aluminium
