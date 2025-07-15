@@ -1,0 +1,18 @@
+name: Spellcheck
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**.md'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install aspell
+        run: sudo apt-get update && sudo apt-get install -y aspell aspell-en
+      - name: Spell check
+        uses: rojopolis/spellcheck-github-actions@0.35.0
+        with:
+          config_path: .spellcheck.yaml
