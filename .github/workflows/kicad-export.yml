@@ -1,0 +1,19 @@
+name: KiCad CI
+on:
+  push:
+    paths: ['elex/**/*.kicad_sch', 'elex/**/*.kicad_pcb']
+
+jobs:
+  kicad-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-for-kicad/generate-kicad-files@v1.1
+        with:
+          schematic_pdf: true
+          gerber: true
+          bom: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kicad-build
+          path: kicad-export/**

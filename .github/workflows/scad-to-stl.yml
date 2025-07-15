@@ -1,0 +1,22 @@
+name: Build STL
+on:
+  push:
+    paths: ['cad/**/*.scad']
+  workflow_dispatch:
+
+jobs:
+  build-stl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenSCAD
+        run: sudo apt-get update && sudo apt-get install -y openscad
+      - name: Render all .scad -> .stl
+        run: |
+          mkdir -p stl
+          find cad -name '*.scad' -print0 | xargs -0 -n1 -I{} bash scripts/openscad_render.sh "{}"
+      - name: Upload STL artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stl-files
+          path: stl/**
