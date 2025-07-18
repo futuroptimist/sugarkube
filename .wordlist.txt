@@ -113,3 +113,6 @@ Victron
 aluminium
 sugarkube
 LiFePO
+heatset
+openscad
+stl
