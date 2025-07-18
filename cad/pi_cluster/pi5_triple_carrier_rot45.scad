@@ -14,8 +14,11 @@ hole_spacing_y     = 49;         // short-direction hole spacing (mm)
 plate_thickness    = 4;          // base-plate thickness (mm)
 
 gap_between_boards = 18;         // service gap between rotated PCBs (mm)
-edge_margin        = 10;         // free space around array (mm)
-port_clearance     = 8;          // extra space for micro-HDMI/USB plugs (mm)
+
+// tighter outer margins
+edge_margin        = 5;          // was 10 mm
+// still enough room for plugs but less overshoot
+port_clearance     = 6;          // was 8 mm
 
 board_angle        = 45;         // rotation of each PCB (deg)
 
