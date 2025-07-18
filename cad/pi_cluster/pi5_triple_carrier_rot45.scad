@@ -1,5 +1,5 @@
 /**********************************************************************
- * pi5_triple_carrier_rot45.scad  ·  v2.0 (heat-set insert support)
+ * pi5_triple_carrier_v3_flat.scad  ·  v2.0 (heat-set insert support)
  * Triple-Raspberry-Pi-5 carrier, 45° rotated PCB orientation
  *********************************************************************/
 
@@ -13,14 +13,14 @@ hole_spacing_x     = 58;         // long-direction hole spacing (mm)
 hole_spacing_y     = 49;         // short-direction hole spacing (mm)
 plate_thickness    = 4;          // base-plate thickness (mm)
 
-gap_between_boards = 18;         // service gap between rotated PCBs (mm)
+gap_between_boards = 10;         // service gap between rotated PCBs (mm)
 
 // tighter outer margins
 edge_margin        = 5;          // was 10 mm
 // still enough room for plugs but less overshoot
 port_clearance     = 6;          // was 8 mm
 
-board_angle        = 45;         // rotation of each PCB (deg)
+board_angle        = 0;          // rotation of each PCB (deg)
 
 /* ---------- STANDOFF & INSERT OPTIONS ---------- */
 standoff_height = 6;             // pillar height under PCB (mm)
