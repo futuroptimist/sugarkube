@@ -4,7 +4,9 @@
  *********************************************************************/
 
 /* ---------- USER-EDITABLE PARAMETERS ---------- */
-num_pis            = 3;          // how many Pi-5s
+/* layout of Pi boards as [x,y] offsets forming a 2x2 grid with one corner empty */
+pi_positions = [[0,0], [1,0], [0,1]];
+num_pis     = len(pi_positions); // how many Pi-5s
 board_len          = 85;         // X-size of Pi-5 PCB  (mm)
 board_wid          = 56;         // Y-size of Pi-5 PCB  (mm)
 hole_spacing_x     = 58;         // long-direction hole spacing (mm)
@@ -44,8 +46,14 @@ thread_facets = 32;     // helix resolution
 rotX = abs(board_len*cos(board_angle)) + abs(board_wid*sin(board_angle));
 rotY = abs(board_len*sin(board_angle)) + abs(board_wid*cos(board_angle));
 
-plate_len = num_pis*rotX + (num_pis-1)*gap_between_boards + 2*edge_margin;
-plate_wid = rotY + 2*edge_margin + 2*port_clearance;
+board_spacing_x = rotX + gap_between_boards;
+board_spacing_y = rotY + gap_between_boards;
+
+max_x = max([for(p=pi_positions) p[0]]);
+max_y = max([for(p=pi_positions) p[1]]);
+
+plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*edge_margin;
+plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*edge_margin + 2*port_clearance;
 
 /* ---------- HELPERS ---------- */
 function rot2d(v, ang) = [
@@ -102,9 +110,9 @@ difference()
     head_r = 2.5;  // counterbore radius (5 mm diameter)
     head_h = 1.6;  // depth of screw head recess
 
-    for (i=[0:num_pis-1]) {
-        pcb_cx = edge_margin + rotX/2 + i*(rotX + gap_between_boards);
-        pcb_cy = edge_margin + port_clearance + rotY/2;
+    for (pos = pi_positions) {
+        pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
+        pcb_cy = edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
 
         for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
         for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
@@ -116,9 +124,9 @@ difference()
 }
 
 /* ---------- STANDOFF ARRAY ---------- */
-for (i=[0:num_pis-1]) {
-    pcb_cx = edge_margin + rotX/2 + i*(rotX + gap_between_boards);
-    pcb_cy = edge_margin + port_clearance + rotY/2;
+for (pos = pi_positions) {
+    pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
+    pcb_cy = edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
 
     for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
     for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
