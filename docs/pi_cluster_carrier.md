@@ -21,3 +21,21 @@ openscad -D standoff_mode="printed"  -o triple_printed.stl cad/pi_cluster/pi5_tr
 ```
 
 See the main [build guide](build_guide.md) for assembly details.
+
+## Mounting hardware
+
+For the strongest hold install brass heat‑set inserts in each printed
+standoff.  Use a single long screw per corner that threads down through
+an 11 mm brass spacer and the Pi board into the insert.  This keeps the
+underside flat and lets you stack an M.2 HAT or other accessory on top.
+
+| Part   | Spec                                 | Example listing                          |
+| ------ | ------------------------------------ | ---------------------------------------- |
+| Screw  | M2.5 × 18 mm pan head                | "M2.5×18 Phillips pan head"              |
+| Spacer | M2.5 female‑female, 11 mm long       | "M2.5×11 mm brass hex standoff"          |
+| Insert | M2.5 heat‑set, 3.6 mm OD × 3 mm long | "M2.5×3 mm brass heat‑set insert"        |
+
+Screw from the top and gently tighten until the screw stops against the
+blind insert.  If you prefer screws from the bottom, print the
+`through` variant instead and use M2.5 × 10 mm screws up into the same
+spacers.
