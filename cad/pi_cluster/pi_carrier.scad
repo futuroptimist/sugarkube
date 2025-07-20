@@ -2,6 +2,10 @@
 ```markdown
 # Raspberry Pi 5 Triple-Stack Carrier
 
+| Screw | Standoff | Insert |
+|-------|----------|--------|
+| M2.5 × 18 mm | 11 mm | 3.5 mm OD × 4 mm |
+
 | Variation | Description |
 |-----------|-------------|
 | `"blind"` (default) | Standoffs sized for blind-hole heat-set inserts. |
@@ -30,10 +34,10 @@ plate_thickness = 2.0;
 standoff_height = 6.0;
 standoff_diam = 6.0;
 
-insert_od = 3.6;      // heat-set insert outer diameter
-insert_length = 3.0;  // insert length
-hole_diam = 3.5;      // hole size for insert or screw
-insert_pocket_depth = 3.7;
+insert_od         = 3.5;         // outer Ø matches HANGLIFE inserts
+insert_length     = 4.0;         // full length of the insert
+insert_pocket_depth = insert_length + 0.7; // keeps 0.7 mm extra for chamfer
+hole_diam         = insert_od + 0.1;       // slip-fit pilot
 lead_chamfer = 0.5;
 screw_clearance_diam = 3.0; // through-hole clearance
 
