@@ -1,10 +1,10 @@
 # 🍧 sugarkube
 
-[![Docs](https://img.shields.io/github/actions/workflow/status/futuroptimist/sugarkube/.github/workflows/docs.yml?label=docs)](https://github.com/futuroptimist/sugarkube/actions/workflows/docs.yml)
-[![Spellcheck](https://img.shields.io/github/actions/workflow/status/futuroptimist/sugarkube/.github/workflows/spellcheck.yml?label=spellcheck)](https://github.com/futuroptimist/sugarkube/actions/workflows/spellcheck.yml)
-[![KiCad](https://img.shields.io/github/actions/workflow/status/futuroptimist/sugarkube/.github/workflows/kicad-export.yml?label=kicad)](https://github.com/futuroptimist/sugarkube/actions/workflows/kicad-export.yml)
-[![STL](https://img.shields.io/github/actions/workflow/status/futuroptimist/sugarkube/.github/workflows/scad-to-stl.yml?label=stl)](https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml)
-[![License](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
+[![docs](https://github.com/futuroptimist/sugarkube/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/futuroptimist/sugarkube/actions/workflows/docs.yml)
+[![spellcheck](https://github.com/futuroptimist/sugarkube/actions/workflows/spellcheck.yml/badge.svg?branch=main)](https://github.com/futuroptimist/sugarkube/actions/workflows/spellcheck.yml)
+[![kicad](https://github.com/futuroptimist/sugarkube/actions/workflows/kicad-export.yml/badge.svg?branch=main)](https://github.com/futuroptimist/sugarkube/actions/workflows/kicad-export.yml)
+[![stl](https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml/badge.svg?branch=main)](https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml)
+[![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
 
 An accessible k3s platform for Raspberry Pis and other SBCs integrated with an off-grid solar setup.  This repository also documents the solar cube art installation for powering aquarium air pumps and small computers.
 
