@@ -33,7 +33,9 @@ underside flat and lets you stack an M.2 HAT or other accessory on top.
 | ------ | ------------------------------------ | ---------------------------------------- |
 | Screw  | M2.5 × 18 mm pan head                | "M2.5×18 Phillips pan head"              |
 | Spacer | M2.5 female‑female, 11 mm long       | "M2.5×11 mm brass hex standoff"          |
-| Insert | M2.5 heat‑set, 3.6 mm OD × 3 mm long | "M2.5×3 mm brass heat‑set insert"        |
+| Insert | M2.5 heat‑set, 3.5 mm OD × 4 mm long (HANGLIFE B0CS6YVJYD) | "HANGLIFE M2.5 × D3.5 × L4 brass insert" |
+
+- These dimensions match the Amazon Prime HANGLIFE inserts (3.5 mm outer diameter, 4 mm length). No other changes are needed to the 18 mm screw or 11 mm standoff.
 
 Screw from the top and gently tighten until the screw stops against the
 blind insert.  If you prefer screws from the bottom, print the
