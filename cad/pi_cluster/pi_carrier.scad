@@ -4,7 +4,7 @@
 
 | Screw | Standoff | Insert |
 |-------|----------|--------|
-| M2.5 × 18 mm | 11 mm | 3.5 mm OD × 4 mm |
+| M2.5 × 18 mm screw | 11 mm standoff | 3.5 mm OD × 4 mm insert |
 
 | Variation | Description |
 |-----------|-------------|
