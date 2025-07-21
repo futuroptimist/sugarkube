@@ -1,4 +1,4 @@
-name: Build STL
+name: Build and Commit STL
 on:
   push:
     paths: ['cad/**/*.scad']
@@ -7,20 +7,40 @@ on:
 jobs:
   build-stl:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        mode: [heatset, printed]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # fetch full history so we can push tags/commits
+
       - name: Install OpenSCAD
         run: sudo apt-get update && sudo apt-get install -y openscad
-      - name: Render all .scad -> .stl (${{ matrix.mode }})
+
+      - name: Render all .scad -> .stl (heatset & printed)
         run: |
-          mkdir -p stl
-          export STANDOFF_MODE=${{ matrix.mode }}
-          find cad -name '*.scad' -print0 | xargs -0 -n1 -I{} bash scripts/openscad_render.sh "{}"
-      - name: Upload STL artefacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: stl-${{ matrix.mode }}
-          path: stl/*_${{ matrix.mode }}.stl
+          set -e
+          chmod +x scripts/openscad_render.sh
+          modes=(heatset printed)
+          for mode in "${modes[@]}"; do
+            echo "Rendering in $mode mode"
+            export STANDOFF_MODE="$mode"
+            # create stl directory if missing
+            mkdir -p stl
+            find cad -name '*.scad' -print0 | xargs -0 -n1 -I{} bash scripts/openscad_render.sh "{}"
+          done
+
+      - name: Commit regenerated STLs (if changed)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          if [[ -n $(git status --porcelain stl) ]]; then
+            echo "Changes detected in stl directory, committing..."
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git config --global user.name "github-actions[bot]"
+            git add stl
+            git commit -m "chore(stl): auto-regenerate STL files for ${{ github.sha }}"
+            git push "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:${{ github.ref }}
+          else
+            echo "No changes to commit."
+          fi
