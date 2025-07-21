@@ -20,7 +20,7 @@ edge_margin        = 5;          // was 10 mm
 // still enough room for plugs but less overshoot
 port_clearance     = 6;          // was 8 mm
 
-board_angle        = 0;          // rotation of each PCB (deg)
+board_angle        = 45;          // rotation of each PCB (deg)
 
 /* ---------- STANDOFF & INSERT OPTIONS ---------- */
 standoff_height = 6;             // pillar height under PCB (mm)

@@ -47,7 +47,7 @@ countersink_depth = 1.6;
 nut_flat = 5.0;   // across flats for M2.5 nut
 nut_thick = 2.0;
 
-board_angle = 45;
+board_angle = 0;
 gap_between_boards = 10;
 edge_margin = 5;
 port_clearance = 6;
