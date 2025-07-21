@@ -4,6 +4,10 @@ on:
     paths: ['cad/**/*.scad']
   workflow_dispatch:
 
+# Grant token write permissions so auto-commit can push back updated STLs
+permissions:
+  contents: write
+
 jobs:
   build-stl:
     runs-on: ubuntu-latest
@@ -26,7 +30,7 @@ jobs:
             export STANDOFF_MODE="$mode"
             # create stl directory if missing
             mkdir -p stl
-            find cad -name '*.scad' -print0 | xargs -0 -n1 -I{} bash scripts/openscad_render.sh "{}"
+            find cad -name '*.scad' -print0 | xargs -0 -I{} bash scripts/openscad_render.sh "{}"
           done
 
       - name: Commit regenerated STLs (if changed)
