@@ -12,7 +12,7 @@ An accessible k3s platform for Raspberry Pis and other SBCs integrated with an o
 
 - `cad/` — OpenSCAD models of structural parts.  See `docs/pi_cluster_carrier.md` for the Pi carrier plate.
 - `stl/` — generated STL files (via GitHub Actions)
-- `elex/` — KiCad and Fritzing electronics schematics
+- `elex/` — KiCad and Fritzing electronics schematics *(placeholders; actual designs forthcoming)*
 - `docs/` — build instructions and safety notes
 - `scripts/` — helper scripts for rendering and exports
 
