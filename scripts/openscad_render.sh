@@ -9,4 +9,6 @@ if [ -n "$STANDOFF_MODE" ]; then
 fi
 output="stl/${base}${mode_suffix}.stl"
 mkdir -p "$(dirname "$output")"
-openscad -o "$output" --export-format binstl -D standoff_mode=\"${STANDOFF_MODE}\" "$FILE"
+xvfb-run --auto-servernum \
+  openscad -o "$output" --export-format binstl \
+  -D standoff_mode=\"${STANDOFF_MODE}\" "$FILE"

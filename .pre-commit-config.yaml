@@ -7,6 +7,11 @@ repos:
       - id: check-yaml
   - repo: local
     hooks:
+      - id: build-stls
+        name: build STL files
+        entry: bash scripts/gen_stls.sh
+        language: system
+        pass_filenames: false
       - id: run-checks
         name: run project checks
         entry: bash scripts/checks.sh

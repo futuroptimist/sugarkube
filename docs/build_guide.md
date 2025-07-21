@@ -4,7 +4,7 @@ This project uses 20x20 aluminium extrusion to suspend four 100W solar panels ar
 
 1. Print the brackets from `cad/solar_cube`.
 2. Print the triple Pi carrier from `cad/pi_cluster` if building a Pi cluster.
-   STL files for both insert variants are generated automatically under `stl/`.
+   STL files for both insert variants are generated automatically under `stl/` by the pre-commit hook (not stored in Git).
 3. Assemble the extrusion cube using M5 hardware.
 4. Mount the solar panels using the printed brackets.
 5. Wire the panels to the Victron MPPT charge controller as shown in the `elex/power_ring` schematic.
