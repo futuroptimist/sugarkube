@@ -54,22 +54,23 @@ module kevlar_arc(r){
 }
 
 module kevlar_loop(face_id){
-  if(!SHOW_WIRES) return;
-  loop_r = PROFILE/2 + CORD_DIA;
-  xoffs = [-PANEL_W/4,PANEL_W/4];
-  top_z = -OUTER/2 + PROFILE + PANEL_L;
-  if(face_id==0){
-    for(xo=xoffs)
-      translate([xo,OUTER/2+panel_gap,top_z]) kevlar_arc(loop_r);
-  }else if(face_id==2){
-    for(xo=xoffs)
-      translate([xo,-OUTER/2-panel_gap,top_z]) rotate([0,180,0]) kevlar_arc(loop_r);
-  }else if(face_id==1){
-    for(yo=xoffs)
-      translate([OUTER/2+panel_gap,yo,top_z]) rotate([0,0,90]) kevlar_arc(loop_r);
-  }else if(face_id==3){
-    for(yo=xoffs)
-      translate([-OUTER/2-panel_gap,yo,top_z]) rotate([0,0,-90]) kevlar_arc(loop_r);
+  if(SHOW_WIRES){
+    loop_r = PROFILE/2 + CORD_DIA;
+    xoffs = [-PANEL_W/4,PANEL_W/4];
+    top_z = -OUTER/2 + PROFILE + PANEL_L;
+    if(face_id==0){
+      for(xo=xoffs)
+        translate([xo,OUTER/2+panel_gap,top_z]) kevlar_arc(loop_r);
+    }else if(face_id==2){
+      for(xo=xoffs)
+        translate([xo,-OUTER/2-panel_gap,top_z]) rotate([0,180,0]) kevlar_arc(loop_r);
+    }else if(face_id==1){
+      for(yo=xoffs)
+        translate([OUTER/2+panel_gap,yo,top_z]) rotate([0,0,90]) kevlar_arc(loop_r);
+    }else if(face_id==3){
+      for(yo=xoffs)
+        translate([-OUTER/2-panel_gap,yo,top_z]) rotate([0,0,-90]) kevlar_arc(loop_r);
+    }
   }
 }
 
