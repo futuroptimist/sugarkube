@@ -33,4 +33,3 @@ Printed threads work best with a fine nozzle (0.4 mm or smaller) and four or mo
 - **3D printing:** Use PLA or PETG with at least 40 % infill for structural parts. Ensure your printer is calibrated so holes come out accurately.
 - **Soldering:** Keep your iron clean and tinned. Rest it in a safe stand when not in use.
 - **Assembly:** Test‑fit the hardware before final tightening. If threads feel rough, back out and remove any debris.
-
