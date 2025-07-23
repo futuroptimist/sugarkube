@@ -14,6 +14,7 @@ An accessible k3s platform for Raspberry Pis and other SBCs integrated with an o
 - `stl/` — generated STL files (via GitHub Actions)
 - `elex/` — KiCad and Fritzing electronics schematics *(placeholders; actual designs forthcoming)*
 - `docs/` — build instructions and safety notes
+- `docs/insert_basics.md` — guide for heat-set inserts and printed threads
 - `scripts/` — helper scripts for rendering and exports
 
 Run `pre-commit run --all-files` before committing.

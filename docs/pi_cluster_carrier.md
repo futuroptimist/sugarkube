@@ -4,6 +4,8 @@ This design mounts three Raspberry Pi 5 boards on a common plate. Each Pi is rot
 
 The model lives at `cad/pi_cluster/pi5_triple_carrier_rot45.scad`.  STL files for both heat‑set and printed‑thread variants are generated automatically under `stl/` by GitHub Actions whenever the SCAD file changes.
 You can edit the `pi_positions` array near the top of the file to tweak the arrangement if your printer allows a larger build area.
+For an overview of insert installation and printed threads see [insert_basics.md](insert_basics.md).
+
 
 Use OpenSCAD to preview and tweak parameters:
 
