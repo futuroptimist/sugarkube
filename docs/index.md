@@ -4,4 +4,4 @@ Welcome to **sugarkube**, a solar-powered off-grid platform for Raspberry Pi and
 
 ![solar cube](images/solar_cube.jpg)
 
-See [build_guide.md](build_guide.md) for assembly steps.  The Pi cluster carrier is documented in [pi_cluster_carrier.md](pi_cluster_carrier.md).
+See [build_guide.md](build_guide.md) for assembly steps.  The Pi cluster carrier is documented in [pi_cluster_carrier.md](pi_cluster_carrier.md). For tips on heat‑set inserts and printed threads see [insert_basics.md](insert_basics.md).
