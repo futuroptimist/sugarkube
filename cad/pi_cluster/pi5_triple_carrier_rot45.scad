@@ -22,6 +22,17 @@ port_clearance     = 6;          // was 8 mm
 
 board_angle        = 45;          // rotation of each PCB (deg)
 
+/* ---------- FASTENER CHECK ---------- */
+screw_length     = 20;   // length of the M2.5 pan-head screw in millimetres
+spacer_length    = 11;   // nominal brass spacer height
+
+/* Ensure the selected screw is long enough:
+     screw ≥ spacer + Pi-PCB (1.6 mm) + minimum engagement (3 mm)
+*/
+required_len = spacer_length + 1.6 + 3;
+assert(screw_length >= required_len,
+       str("Screw too short: need at least ", required_len, " mm"));
+
 /* ---------- STANDOFF & INSERT OPTIONS ---------- */
 standoff_height = 6;             // pillar height under PCB (mm)
 standoff_diam   = 6;             // outer diameter of standoff (mm)
