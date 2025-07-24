@@ -10,7 +10,10 @@ SKIP = shutil.which("openscad") is None
 @pytest.mark.skipif(SKIP, reason="OpenSCAD not installed")
 @pytest.mark.parametrize("mode", ["heatset", "printed"])
 def test_stl_generation(mode: str, tmp_path):
-    """Compile every SCAD in both standoff modes and ensure we get a non-empty STL."""
+    """Compile each SCAD in both standoff modes.
+
+    Ensure we get a non-empty STL output.
+    """
 
     scad_files = list(Path("cad").rglob("*.scad"))
     assert scad_files, "no scad files found"
@@ -25,7 +28,7 @@ def test_stl_generation(mode: str, tmp_path):
                 "--export-format",
                 "binstl",
                 "-D",
-                f"standoff_mode=\"{mode}\"",
+                f'standoff_mode="{mode}"',
                 str(scad),
             ],
             check=True,
