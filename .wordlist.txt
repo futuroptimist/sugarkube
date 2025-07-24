@@ -121,3 +121,11 @@ Bambu
 HANGLIFE
 YVJYD
 B0CS6YVJYD
+multimeter
+resettable
+crimpers
+Wh
+chemistries
+AGM
+SLA
+PWM
