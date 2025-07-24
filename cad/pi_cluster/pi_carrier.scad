@@ -34,7 +34,7 @@ plate_thickness = 2.0;
 standoff_height = 6.0;
 standoff_diam = 6.0;
 
-insert_od         = 3.5;         // outer Ø matches HANGLIFE inserts
+insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert
 insert_pocket_depth = insert_length + 0.7; // keeps 0.7 mm extra for chamfer
 hole_diam         = insert_od + 0.1;       // slip-fit pilot

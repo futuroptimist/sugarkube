@@ -23,7 +23,7 @@ port_clearance     = 6;          // was 8 mm
 board_angle        = 45;          // rotation of each PCB (deg)
 
 /* ---------- FASTENER CHECK ---------- */
-screw_length     = 20;   // length of the M2.5 pan-head screw in millimetres
+screw_length     = 22;   // length of the M2.5 pan-head screw in millimetres
 spacer_length    = 11;   // nominal brass spacer height
 
 /* Ensure the selected screw is long enough:

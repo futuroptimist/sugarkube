@@ -33,11 +33,11 @@ underside flat and lets you stack an M.2 HAT or other accessory on top.
 
 | Part   | Spec                                 | Example listing                          |
 | ------ | ------------------------------------ | ---------------------------------------- |
-| Screw  | **M2.5 × 20 mm pan head**            | "M2.5×20 Phillips pan head"              |
+| Screw  | **M2.5 × 22 mm pan head**            | "M2.5×22 Phillips pan head"              |
 | Spacer | M2.5 female‑female, 11 mm long       | "M2.5×11 mm brass hex standoff"          |
-| Insert | M2.5 heat‑set, 3.5 mm OD × 4 mm long (HANGLIFE B0CS6YVJYD) | "HANGLIFE M2.5 × D3.5 × L4 brass insert" |
+| Insert | M2.5 heat‑set, 3.5 mm OD × 4 mm long | "M2.5 × D3.5 × L4 brass insert" |
 
-- These dimensions match the Amazon Prime HANGLIFE inserts (3.5 mm outer diameter, 4 mm length). The extra 2 mm on a 20 mm screw guarantees at least 3 mm of bite in the insert even if your brass spacer is slightly oversize or you add a washer.
+- These dimensions match common brass inserts (3.5 mm outer diameter, 4 mm length). Using a 22 mm screw guarantees at least 3 mm of bite in the insert even if your brass spacer is slightly oversize or you add a washer.
 
 Screw from the top and gently tighten until the screw stops against the
 blind insert.  If you prefer screws from the bottom, print the
