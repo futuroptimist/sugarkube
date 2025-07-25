@@ -19,3 +19,8 @@ dictionary.dic
 .venv/
 playwright-report/
 test-results/
+kicad-export/
+*-backups*/
+*.kicad_prl
+*-cache.lib
+fp-info-cache/

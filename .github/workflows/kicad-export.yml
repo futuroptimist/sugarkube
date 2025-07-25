@@ -8,11 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-for-kicad/generate-kicad-files@v1.1
-        with:
-          schematic_pdf: true
-          gerber: true
-          bom: true
+      - name: Install KiCad
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kicad
+      - name: Generate outputs
+        run: bash scripts/kicad_export.sh elex/power_ring/power_ring.kicad_pcb
       - uses: actions/upload-artifact@v4
         with:
           name: kicad-build
