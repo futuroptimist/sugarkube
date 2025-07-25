@@ -11,7 +11,7 @@ An accessible k3s platform for Raspberry Pis and other SBCs integrated with an o
 ## Repository layout
 
 - `cad/` — OpenSCAD models of structural parts.  See `docs/pi_cluster_carrier.md` for the Pi carrier plate.
-- `elex/` — KiCad and Fritzing electronics schematics including the `power_ring` board
+- `elex/` — KiCad and Fritzing electronics schematics including the `power_ring` board (see `elex/power_ring/specs.md`)
 - `docs/` — build instructions, safety notes, and learning resources
 - `docs/solar_basics.md` — introduction to how solar panels generate power
 - `docs/electronics_basics.md` — essential circuits and tools

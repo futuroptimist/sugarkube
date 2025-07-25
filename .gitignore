@@ -20,3 +20,7 @@ dictionary.dic
 playwright-report/
 test-results/
 kicad-export/
+*-backups*/
+*.kicad_prl
+*-cache.lib
+fp-info-cache/
