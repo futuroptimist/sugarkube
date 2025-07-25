@@ -8,8 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install KiCad
+      - name: Install latest KiCad
         run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-7.0-releases
           sudo apt-get update
           sudo apt-get install -y kicad
       - name: Generate outputs
