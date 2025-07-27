@@ -10,4 +10,4 @@ Included files:
 - `power_ring.kicad_sym` and `power_ring_schlib.kicad_sym` – symbol libraries
 - `power_ring.pretty/` – footprint library
 
-Open the project in KiCad 7 or newer and modify the schematic to suit your power distribution needs (for example, add screw terminals, fuses and test points).  Run `scripts/kicad_export.sh elex/power_ring/power_ring.kicad_pcb` to produce Gerber files, a PDF schematic and a BOM in `kicad-export/`.
+Open the project in **KiCad 8** or newer and modify the schematic to suit your power distribution needs (for example, add screw terminals, fuses and test points).  Run `scripts/kicad_export.sh elex/power_ring/power_ring.kicad_pcb` to produce Gerber files, a PDF schematic and a BOM in `kicad-export/`.
