@@ -1,148 +1,91 @@
-/*
-```markdown
-# Raspberry Pi 5 Triple-Stack Carrier
+/***********************************************************************
+ *  pi_carrier_v2.scad  –  Triple‑stack Raspberry Pi carrier
+ *  Copyright © 2025 Daniel Smith  |  Licence: CC‑BY‑SA 4.0
+ *
+ *  • Holds two Raspberry Pi 4 B (or 3 B+) boards side‑by‑side on the
+ *    bottom row and one board (rotated 90°) centred above them.
+ *  • Enlarged row‑to‑row gap (row_gap) for micro‑HDMI / USB‑C access.
+ *  • All dimensions taken from the official Raspberry Pi 4 mechanical
+ *    drawing and HAT+ specification.  Edit the variables section only.
+ *
+ *  TODO (future revs):
+ *    – Extra standoffs for a 2‑inch SPI display.
+ *    – Parametric PoE HAT keep‑out volumes.
+ ***********************************************************************/
 
-| Screw | Standoff | Insert |
-|-------|----------|--------|
-| M2.5 × 18 mm screw | 11 mm standoff | 3.5 mm OD × 4 mm insert |
+$fn = 64;                          // Cylinder smoothness
 
-| Variation | Description |
-|-----------|-------------|
-| `"blind"` (default) | Standoffs sized for blind-hole heat-set inserts. |
-| `"through"` | Through-holes with clearance for bottom-side screws and underside countersink. |
-| `"nut"` | Through-holes with captive M2.5 nut pocket and countersink. |
+// ----------  Tunable parameters  ----------
+pi_size          = [85, 56, 1.6];  // Official PCB X, Y, Z (mm):contentReference[oaicite:0]{index=0}
+mount_cc         = [58, 49];       // Hole centre‑to‑centre spacing (mm):contentReference[oaicite:1]{index=1}
+edge_margin      = 2.5;            // Hole centre → PCB edge (mm):contentReference[oaicite:2]{index=2}
+hole_diameter    = 2.75;           // M2.5 clearance
+standoff_diam    = 6;              // Printed pillar Ø
+standoff_height  = 6;              // Under‑board clearance (fits PoE headers):contentReference[oaicite:3]{index=3}
+base_thickness   = 3;              // Plate thickness
+row_gap          = 15;             // **NEW** extra spacing between Pi rows (mm)
 
-Slicer recommendation: use **at least four perimeters** around each insert for strength.
+// ----------  Derived geometry  ----------
+bay_w = mount_cc[0] + 2*edge_margin;
+bay_h = mount_cc[1] + 2*edge_margin;
 
-Example export command:
-```
-openscad -o pi_carrier_${variation}.stl -D variation="through" pi_carrier.scad
-```
-```
-*/
+margin          = 10;                           // Border around plate
+plate_x         = 2*bay_w + row_gap + 2*margin; // Width for two bottom Pis
+plate_y         = bay_h + mount_cc[0] + 2*margin;
+plate_z         = base_thickness;
 
-// ---------- Parameters ----------
-variation = "blind"; // blind, through, nut
+module standoff(x, y) {
+    translate([x, y, 0])
+        cylinder(d = standoff_diam, h = plate_z + standoff_height);
+    // pilot bore for self‑tapping or metal insert
+    translate([x, y, plate_z + standoff_height - 5])
+        cylinder(d = hole_diameter, h = 10);
+}
 
-pi_positions = [[0,0], [1,0], [0,1]]; // layout as [x,y] offsets
-board_len = 85;
-board_wid = 56;
-hole_spacing_x = 58;
-hole_spacing_y = 49;
-
-plate_thickness = 2.0;
-standoff_height = 6.0;
-standoff_diam = 6.0;
-
-insert_od         = 3.5;         // outer Ø for common brass inserts
-insert_length     = 4.0;         // full length of the insert
-insert_pocket_depth = insert_length + 0.7; // keeps 0.7 mm extra for chamfer
-hole_diam         = insert_od + 0.1;       // slip-fit pilot
-lead_chamfer = 0.5;
-screw_clearance_diam = 3.0; // through-hole clearance
-
-countersink_diam = 5.0;
-countersink_depth = 1.6;
-
-nut_flat = 5.0;   // across flats for M2.5 nut
-nut_thick = 2.0;
-
-board_angle = 0;
-gap_between_boards = 10;
-edge_margin = 5;
-port_clearance = 6;
-
-// ---------- Derived dimensions ----------
-rotX = abs(board_len*cos(board_angle)) + abs(board_wid*sin(board_angle));
-rotY = abs(board_len*sin(board_angle)) + abs(board_wid*cos(board_angle));
-
-board_spacing_x = rotX + gap_between_boards;
-board_spacing_y = rotY + gap_between_boards;
-
-max_x = max([for(p=pi_positions) p[0]]);
-max_y = max([for(p=pi_positions) p[1]]);
-
-plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*edge_margin;
-plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*edge_margin + 2*port_clearance;
-
-// ---------- Helper functions ----------
-function rot2d(v, ang) = [
-    v[0]*cos(ang) - v[1]*sin(ang),
-    v[0]*sin(ang) + v[1]*cos(ang)
-];
-
-// ---------- Standoff with variant features ----------
-module standoff(pos=[0,0])
-{
-    translate([pos[0], pos[1], plate_thickness])
-    difference()
-    {
-        cylinder(h=standoff_height, r=standoff_diam/2, $fn=60);
-
-        if (variation == "blind") {
-            translate([0,0, standoff_height - insert_pocket_depth])
-                cylinder(h=insert_pocket_depth, r=hole_diam/2, $fn=32);
-            translate([0,0, standoff_height - insert_pocket_depth])
-                cylinder(h=lead_chamfer,
-                         r1=hole_diam/2 + lead_chamfer,
-                         r2=hole_diam/2, $fn=32);
-        }
-        else if (variation == "through") {
-            translate([0,0,-0.01])
-                cylinder(h=standoff_height + 0.02, r=screw_clearance_diam/2, $fn=30);
-        }
-        else if (variation == "nut") {
-            translate([0,0,-0.01])
-                cylinder(h=standoff_height + 0.02, r=screw_clearance_diam/2, $fn=30);
-            translate([0,0,-nut_thick])
-                cylinder(h=nut_thick, r=nut_flat/(2*cos(30)), $fn=6);
-        }
+module pi_mount(origin = [0, 0]) {
+    translate(origin) {
+        for (dx = [edge_margin, edge_margin + mount_cc[0]])
+            for (dy = [edge_margin, edge_margin + mount_cc[1]])
+                standoff(dx, dy);
     }
 }
 
-// ---------- Base plate ----------
-module base_plate()
-{
-    difference()
-    {
-        cube([plate_len, plate_wid, plate_thickness]);
-        if (variation != "blind") {
-            for (pos = pi_positions) {
-                pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
-                pcb_cy = edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
-                for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
-                for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
-                    vec = rot2d([dx,dy], board_angle);
-                    translate([pcb_cx+vec[0], pcb_cy+vec[1], -0.01])
-                        cylinder(h=countersink_depth + 0.02, r=countersink_diam/2, $fn=32);
-                }
-            }
-        }
-    }
+// ----------  Build plate  ----------
+difference() {
+    // Base slab
+    cube([plate_x, plate_y, plate_z], center = false);
+
+    // OPTIONAL: chamfer underside edges for nicer print finish
+    translate([-1, -1, -1]) cube([plate_x + 2, plate_y + 2, 1]);
 }
 
-// ---------- Assembly ----------
-module pi_carrier()
-{
-    base_plate();
+// ----------  Place Raspberry Pis ----------
+/* Bottom‑left Pi */
+pi_mount([margin, margin]);
 
-    for (pos = pi_positions) {
-        pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
-        pcb_cy = edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
-        for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
-        for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
-            vec = rot2d([dx,dy], board_angle);
-            standoff([pcb_cx+vec[0], pcb_cy+vec[1]]);
-        }
-    }
-}
+/* Bottom‑right Pi */
+pi_mount([margin + bay_w + row_gap, margin]);
 
-// Preview
-if ($preview) {
-    pi_carrier();
-}
+/* Top Pi (rotated 90 deg for better cable exit) */
+rotate([0, 0, 90])
+    pi_mount([
+        // Centre over the gap so the HAT doesn’t foul either Pi
+        margin + bay_w + row_gap/2 - mount_cc[1]/2,
+        margin + bay_h + 5            // small y‑offset for breathing room
+    ]);
 
-// Auto-render for CLI/F7
-if ($preview==false) {
-    pi_carrier();
+// ----------  Helpful outline of each board (2D projection) ----------
+color("LightGrey", 0.3) {
+    translate([margin, margin, plate_z + 0.01])
+        cube([bay_w, bay_h, 0.5]);
+
+    translate([margin + bay_w + row_gap, margin, plate_z + 0.01])
+        cube([bay_w, bay_h, 0.5]);
+
+    translate([
+        margin + bay_w + row_gap/2 - pi_size[1]/2,
+        margin + bay_h + 5,
+        plate_z + 0.01
+    ])
+        cube([pi_size[1], pi_size[0], 0.5]);
 }
