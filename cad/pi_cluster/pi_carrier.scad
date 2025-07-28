@@ -23,7 +23,7 @@ hole_diameter    = 2.75;           // M2.5 clearance
 standoff_diam    = 6;              // Printed pillar Ø
 standoff_height  = 6;              // Under‑board clearance (fits PoE headers):contentReference[oaicite:3]{index=3}
 base_thickness   = 3;              // Plate thickness
-row_gap          = 15;             // **NEW** extra spacing between Pi rows (mm)
+row_gap          = 25;             // +10 mm breathing room for HDMI/USB-C plugs
 
 // ----------  Derived geometry  ----------
 bay_w = mount_cc[0] + 2*edge_margin;
