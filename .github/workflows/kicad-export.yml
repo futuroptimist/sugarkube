@@ -1,21 +1,28 @@
 name: KiCad CI
 on:
   push:
-    paths: ['elex/**/*.kicad_sch', 'elex/**/*.kicad_pcb']
+    paths:
+      - 'elex/**/*.kicad_*'
 
 jobs:
-  kicad-export:
+  kibot:
     runs-on: ubuntu-latest
+    # Kibot action pulls its own container image with KiCad + Python
     steps:
       - uses: actions/checkout@v4
-      - name: Install latest KiCad
-        run: |
-          sudo add-apt-repository --yes ppa:kicad/kicad-8.0-releases
-          sudo apt-get update
-          sudo apt-get install -y kicad
-      - name: Generate outputs
-        run: bash scripts/kicad_export.sh elex/power_ring/power_ring.kicad_pcb
-      - uses: actions/upload-artifact@v4
+
+      - name: Fabricate board with KiBot
+        uses: INTI-CMNB/kibot@v2
         with:
-          name: kicad-build
-          path: kicad-export/**
+          board: elex/power_ring/power_ring.kicad_pcb
+          # optional: point to a *.kibot.yaml config if you have one
+          # config: .kibot/power_ring.yaml
+          dir: build/power_ring
+
+      - name: Upload fab outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: power_ring-fab
+          path: |
+            build/power_ring/**/*.zip
+            build/power_ring/**/*.pdf

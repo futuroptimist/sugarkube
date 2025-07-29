@@ -1,0 +1,8 @@
+preflight: []
+outputs:
+  gerbers:
+    type: gerber
+    dir: gerbers
+  assembly:
+    type: position
+    dir: fab
