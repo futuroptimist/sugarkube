@@ -8,6 +8,13 @@
 [![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
 
 An accessible k3s platform for Raspberry Pis and other SBCs integrated with an off-grid solar setup.  This repository also documents the solar cube art installation for powering aquarium air pumps and small computers.
+The cube also doubles as a living trellis. Climbing plants weave through the aluminium extrusion while shade-loving herbs thrive beneath the panels. Hanging baskets can clip onto the frame so the installation is surrounded by greenery.
+
+### What's in a name?
+
+"Sugarkube" refers to both the aluminium cube covered in solar panels **and**
+the helper scripts that provide "syntactic sugar" for Kubernetes.  Throughout
+the docs you will see the term used in both contexts.
 
 ## Repository layout
 
@@ -18,6 +25,7 @@ An accessible k3s platform for Raspberry Pis and other SBCs integrated with an o
 - `docs/electronics_basics.md` — essential circuits and tools
 - `docs/power_system_design.md` — sizing batteries and charge controllers
 - `docs/insert_basics.md` — guide for heat-set inserts and printed threads
+- `docs/network_setup.md` — connect the Pi cluster to your network
 - `scripts/` — helper scripts for rendering and exports
 
 Run `pre-commit run --all-files` before committing.
