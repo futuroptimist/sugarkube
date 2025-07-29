@@ -12,7 +12,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Fabricate board with KiBot
-        uses: INTI-CMNB/kibot@v2
+        # Use a container image with KiCad 9 to open the project
+        uses: INTI-CMNB/kibot@v2_k9
         with:
           board: elex/power_ring/power_ring.kicad_pcb
           config: .kibot/power_ring.yaml
