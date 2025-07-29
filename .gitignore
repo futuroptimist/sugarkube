@@ -24,3 +24,5 @@ kicad-export/
 *.kicad_prl
 *-cache.lib
 fp-info-cache/
+coverage.xml
+.coverage

@@ -16,7 +16,7 @@ if [ -f package.json ]; then
 fi
 
 # run tests
-pytest -q
+pytest --cov=. --cov-report=xml --cov-report=term -q
 
 # docs checks
 if command -v pyspelling >/dev/null 2>&1 && [ -f .spellcheck.yaml ]; then

@@ -16,6 +16,8 @@ repos:
           - isort
           - black
           - pytest
+          - pytest-cov
+          - coverage
           - linkchecker
           - requests
           - Flask
