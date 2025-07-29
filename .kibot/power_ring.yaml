@@ -6,3 +6,9 @@ outputs:
   assembly:
     type: position
     dir: fab
+  schematic:
+    type: schematic_pdf
+    dir: fab
+  bom:
+    type: bom
+    dir: fab
