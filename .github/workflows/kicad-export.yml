@@ -11,6 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install KiCad
+        run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-7.0-releases
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y kicad kicad-cli
+
+      - name: Export KiCad files
+        uses: actions-for-kicad/generate-kicad-files@v1.1
+        with:
+          schematic_pdf: true
+          gerber: true
+          bom: true
+
       - name: Fabricate board with KiBot
         # Use the KiBot action pinned to the k9 container tag
         # This ships a KiCad 9 environment able to load the board
