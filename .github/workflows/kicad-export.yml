@@ -15,8 +15,7 @@ jobs:
         uses: INTI-CMNB/kibot@v2
         with:
           board: elex/power_ring/power_ring.kicad_pcb
-          # optional: point to a *.kibot.yaml config if you have one
-          # config: .kibot/power_ring.yaml
+          config: .kibot/power_ring.yaml
           dir: build/power_ring
 
       - name: Upload fab outputs
