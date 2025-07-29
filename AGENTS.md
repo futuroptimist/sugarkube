@@ -1,25 +1,28 @@
 # 🤖 AGENTS
 
-This repository uses lightweight LLM helpers inspired by the [flywheel](https://github.com/futuroptimist/flywheel) project.
+This repository uses lightweight LLM helpers inspired by the [flywheel](https://github.com/futuroptimist/flywheel) project. It follows the [AGENTS.md spec](https://gist.github.com/dpaluy/cc42d59243b0999c1b3f9cf60dfd3be6) and [agentsmd.net](https://agentsmd.net/AGENTS.md).
 
 ## Code Linter Agent
 - **When:** every PR
-- **Does:** run pre-commit checks via `scripts/checks.sh` and suggest fixes.
+- **Does:** run `scripts/checks.sh` via pre-commit to lint, format and test.
 
 ## Docs Agent
-- **When:** docs or README change
-- **Does:** spell-check and link-check documentation.
+- **When:** documentation or README change
+- **Does:** run `pyspelling` and `linkchecker` to validate docs.
 
 ## CAD Agent
-
-- **When:** any `.scad` file changes (push or PR).
+- **When:** `.scad` files change
 - **Does:**
-  1. Compiles every SCAD twice – once with `standoff_mode="heatset"` and once with `standoff_mode="printed"` – ensuring both variants render without errors (see `tests/cad_regress_test.py`).
-  2. Automatically regenerates the matching `*.stl` meshes via the `Build and Commit STL` workflow and pushes them back if they differ.
-  3. Fails the run if compilation or regeneration fails, preventing broken geometry from being merged.
+  1. Render each SCAD in `heatset` and `printed` modes.
+  2. Regenerate `*.stl` meshes and push them if changed.
+  3. Fail if compilation or regeneration fails.
+
+## KiCad Agent
+- **When:** KiCad schematic or PCB files change
+- **Does:** export Gerbers, PDF schematics and BOM via `scripts/kicad_export.sh`.
 
 ### STL merge safety
+STL files are treated as binary artefacts. `.gitattributes` marks them with `merge=ours` so merges remain conflict-free.
 
-STL files are treated as binary artefacts. A root‐level `.gitattributes` file marks `*.stl` as `merge=ours`; this prevents interactive merge conflicts by favouring the current branch’s copy and letting CI regenerate clean meshes on the resulting commit.
-
-Before pushing changes run `pre-commit run --all-files`.
+### Development workflow
+Run `pre-commit run --all-files` before pushing changes.
