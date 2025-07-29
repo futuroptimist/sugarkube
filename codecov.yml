@@ -7,6 +7,7 @@ coverage:
     patch:
       default:
         target: 90
-ignore: []
+ignore:
+  - tests/*
 comment:
   layout: "header, diff"
