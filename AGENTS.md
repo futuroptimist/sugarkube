@@ -19,7 +19,7 @@ This repository uses lightweight LLM helpers inspired by the [flywheel](https://
 
 ## KiCad Agent
 - **When:** KiCad schematic or PCB files change
-- **Does:** export Gerbers, PDF schematics and BOM via `scripts/kicad_export.sh`.
+- **Does:** run the [KiBot action](https://github.com/INTI-CMNB/kibot) with `.kibot/power_ring.yaml` to export Gerbers, PDF schematics and BOM.
 
 ### STL merge safety
 STL files are treated as binary artefacts. `.gitattributes` marks them with `merge=ours` so merges remain conflict-free.
