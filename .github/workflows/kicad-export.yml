@@ -7,12 +7,13 @@ on:
 jobs:
   kibot:
     runs-on: ubuntu-latest
-    # Kibot action pulls its own container image with KiCad + Python
+    # Kibot action pulls its own container image with KiCad 9 + Python
     steps:
       - uses: actions/checkout@v4
 
       - name: Fabricate board with KiBot
-        # Use a container image with KiCad 9 to open the project
+        # Use the KiBot action pinned to the k9 container tag
+        # This ships a KiCad 9 environment able to load the board
         uses: INTI-CMNB/kibot@v2_k9
         with:
           board: elex/power_ring/power_ring.kicad_pcb
