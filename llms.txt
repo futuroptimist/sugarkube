@@ -2,7 +2,10 @@
 
 > Off-grid k3s cluster with solar power. Contains 3D printed parts, KiCad schematics and build docs.
 
+Plants grow up and around the cube, taking advantage of the shade cast by the solar panels.
 This repository provides hardware designs and instructions for building a solar-powered Raspberry Pi cluster.
+The word *sugarkube* is used both for the solar cube itself and for helper
+scripts that provide "syntactic sugar" for Kubernetes.
 
 ## Docs
 - [Build guide](docs/build_guide.md)
@@ -10,6 +13,7 @@ This repository provides hardware designs and instructions for building a solar-
 - [Electronics basics](docs/electronics_basics.md)
 - [Power system design](docs/power_system_design.md)
 - [Insert basics](docs/insert_basics.md)
+- [Network setup](docs/network_setup.md)
 
 ## CAD
 - [OpenSCAD models](cad/)

@@ -126,3 +126,16 @@ chemistries
 AGM
 SLA
 PWM
+
+Preconfigure
+Ctrl
+Shift
+Imager
+SSID
+hostname
+PoE
+HATs
+walkthrough
+Kubernetes
+Wi-Fi
+WiFi
