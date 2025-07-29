@@ -39,3 +39,4 @@ STANDOFF_MODE=heatset bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_
 ```
 
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
+See [llms.txt](llms.txt) for an overview suitable for language models.
