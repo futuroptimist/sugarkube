@@ -1,12 +1,10 @@
-name: Build and Commit STL
+name: Build STL Artifacts
 on:
   push:
     paths: ['cad/**/*.scad']
   workflow_dispatch:
 
-# Grant token write permissions so auto-commit can push back updated STLs
-permissions:
-  contents: write
+# No special permissions required
 
 jobs:
   build-stl:
@@ -33,18 +31,8 @@ jobs:
             find cad -name '*.scad' -print0 | xargs -0 -I{} bash scripts/openscad_render.sh "{}"
           done
 
-      - name: Commit regenerated STLs (if changed)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          if [[ -n $(git status --porcelain stl) ]]; then
-            echo "Changes detected in stl directory, committing..."
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git config --global user.name "github-actions[bot]"
-            git add stl
-            git commit -m "chore(stl): auto-regenerate STL files for ${{ github.sha }}"
-            git push "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:${{ github.ref }}
-          else
-            echo "No changes to commit."
-          fi
+      - name: Upload STL artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stl-${{ github.sha }}
+          path: stl/

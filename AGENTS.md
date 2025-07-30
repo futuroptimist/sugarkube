@@ -23,7 +23,7 @@ The name **sugarkube** has two meanings:
 - **When:** `.scad` files change
 - **Does:**
   1. Render each SCAD in `heatset` and `printed` modes.
-  2. Regenerate `*.stl` meshes and push them if changed.
+  2. Export `*.stl` meshes as workflow artifacts (not committed).
   3. Fail if compilation or regeneration fails.
 
 ## KiCad Agent
@@ -31,8 +31,8 @@ The name **sugarkube** has two meanings:
 - **Does:** run the [KiBot action](https://github.com/INTI-CMNB/kibot) with `.kibot/power_ring.yaml` to export Gerbers, PDF schematics and BOM. The project
   requires **KiCad 9** so we use the `v2_k9` container tag.
 
-### STL merge safety
-STL files are treated as binary artefacts. `.gitattributes` marks them with `merge=ours` so merges remain conflict-free.
+### STL generation
+STL meshes are not stored in the repository. The `scad-to-stl.yml` workflow renders them after each commit and exposes the files as downloadable artifacts.
 
 ### Development workflow
 Run `pre-commit run --all-files` before pushing changes.

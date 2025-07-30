@@ -4,7 +4,8 @@ This project uses 20x20 aluminium extrusion to suspend four 100W solar panels ar
 
 5. Wire the panels to the Victron MPPT charge controller.  The KiCad schematic and board specs live under `elex/power_ring`.
 2. Print the triple Pi carrier from `cad/pi_cluster` if building a Pi cluster.
-   STL files for both insert variants are generated automatically under `stl/`.
+   STL files for both insert variants are published as artifacts by GitHub
+   Actions.
 3. Assemble the extrusion cube using M5 hardware.
 4. Mount the solar panels using the printed brackets.
 5. Wire the panels to the Victron MPPT charge controller.  The KiCad schematic and board specs live under `elex/power_ring`.
