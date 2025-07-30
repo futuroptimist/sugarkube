@@ -8,6 +8,7 @@ Greenery is encouraged around the cube. Vines can climb the extrusion while herb
 ## Getting Started
 - [build_guide.md](build_guide.md) — step-by-step assembly instructions
 - [pi_cluster_carrier.md](pi_cluster_carrier.md) — details on the Raspberry Pi mounting plate
+- [lcd_mount.md](lcd_mount.md) — optional 1602 LCD placement
 - [insert_basics.md](insert_basics.md) — heat-set inserts and printed threads
 - [network_setup.md](network_setup.md) — connect the cluster to your network
 

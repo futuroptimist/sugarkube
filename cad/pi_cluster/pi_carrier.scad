@@ -28,6 +28,14 @@ gap_between_boards = 45;
 edge_margin = 5;
 port_clearance = 6;
 
+// Optional 1602 LCD module (80x36 mm PCB)
+// Disable by default; set to true to add the LCD mount
+include_lcd = false;
+lcd_len = 80;
+lcd_wid = 36;
+lcd_hole_spacing_x = 75;
+lcd_hole_spacing_y = 31;
+
 // ---------- Derived dimensions ----------
 rotX = abs(board_len*cos(board_angle)) + abs(board_wid*sin(board_angle));
 rotY = abs(board_len*sin(board_angle)) + abs(board_wid*cos(board_angle));
@@ -93,6 +101,14 @@ module base_plate()
                         cylinder(h=countersink_depth + 0.02, r=countersink_diam/2, $fn=32);
                 }
             }
+            if (include_lcd) {
+                lcd_cx = edge_margin + rotX/2 + board_spacing_x;
+                lcd_cy = edge_margin + port_clearance + rotY/2 + board_spacing_y;
+                for (dx = [-lcd_hole_spacing_x/2, lcd_hole_spacing_x/2])
+                for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
+                    translate([lcd_cx+dx, lcd_cy+dy, -0.01])
+                        cylinder(h=countersink_depth + 0.02, r=countersink_diam/2, $fn=32);
+            }
         }
     }
 }
@@ -110,6 +126,14 @@ module pi_carrier()
             vec = rot2d([dx,dy], board_angle);
             standoff([pcb_cx+vec[0], pcb_cy+vec[1]]);
         }
+    }
+
+    if (include_lcd) {
+        lcd_cx = edge_margin + rotX/2 + board_spacing_x;
+        lcd_cy = edge_margin + port_clearance + rotY/2 + board_spacing_y;
+        for (dx = [-lcd_hole_spacing_x/2, lcd_hole_spacing_x/2])
+        for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
+            standoff([lcd_cx+dx, lcd_cy+dy]);
     }
 }
 

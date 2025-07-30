@@ -26,3 +26,4 @@ build/
 fp-info-cache/
 coverage.xml
 .coverage
+stl/
