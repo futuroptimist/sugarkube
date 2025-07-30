@@ -26,6 +26,7 @@ the docs you will see the term used in both contexts.
 - `docs/power_system_design.md` — sizing batteries and charge controllers
 - `docs/insert_basics.md` — guide for heat-set inserts and printed threads
 - `docs/network_setup.md` — connect the Pi cluster to your network
+- `docs/lcd_mount.md` — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
 
 Run `pre-commit run --all-files` before committing.
@@ -40,8 +41,8 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-STL files are produced automatically by CI for each OpenSCAD model. To render
-a variant locally you can run:
+STL files are produced automatically by CI for each OpenSCAD model and can be
+downloaded from the workflow run. To render a variant locally you can run:
 
 ```bash
 STANDOFF_MODE=heatset bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
