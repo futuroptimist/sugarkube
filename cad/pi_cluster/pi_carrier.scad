@@ -29,7 +29,8 @@ edge_margin = 5;
 port_clearance = 6;
 
 // Optional 1602 LCD module (80x36 mm PCB)
-include_lcd = true;          // set false to omit the display
+// enable by setting to true
+include_lcd = false;
 lcd_len = 80;
 lcd_wid = 36;
 lcd_hole_spacing_x = 75;
