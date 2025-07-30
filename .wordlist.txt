@@ -139,3 +139,5 @@ walkthrough
 Kubernetes
 Wi-Fi
 WiFi
+lcd
+LCD
