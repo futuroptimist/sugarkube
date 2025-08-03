@@ -3,15 +3,18 @@ on:
   push:
     paths:
       - 'elex/**/*.kicad_*'
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
   kibot:
     runs-on: ubuntu-latest
+    # KiBot action pulls its own container image with KiCad 9
     steps:
       - uses: actions/checkout@v4
 
       - name: Fabricate board with KiBot
-        # Use the KiBot action pinned to the KiCad 9 container
+        # Use the KiBot action pinned to the k9 container tag
         uses: INTI-CMNB/kibot@v2_k9
         with:
           board: elex/power_ring/power_ring.kicad_pcb
@@ -25,3 +28,10 @@ jobs:
           path: |
             build/power_ring/**/*.zip
             build/power_ring/**/*.pdf
+
+      - name: Upload workflow logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-logs
+          path: /github/workflow

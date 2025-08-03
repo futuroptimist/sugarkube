@@ -27,9 +27,10 @@ The name **sugarkube** has two meanings:
   3. Fail if compilation or regeneration fails.
 
 ## KiCad Agent
-- **When:** KiCad schematic or PCB files change
+- **When:** KiCad schematic or PCB files change and on a weekly schedule
 - **Does:** run the [KiBot action](https://github.com/INTI-CMNB/kibot) with `.kibot/power_ring.yaml` to export Gerbers, PDF schematics and BOM. The project
   requires **KiCad 9** so we use the `v2_k9` container tag.
+- **Logs:** workflow logs are uploaded as artifacts so non-admins can download failure details.
 
 ### STL generation
 STL meshes are not stored in the repository. The `scad-to-stl.yml` workflow renders them after each commit and exposes the files as downloadable artifacts.
