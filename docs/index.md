@@ -18,3 +18,8 @@ Greenery is encouraged around the cube. Vines can climb the extrusion while herb
 - [power_system_design.md](power_system_design.md) — sizing batteries and choosing a charge controller
 
 Start with the basics and progress toward a fully autonomous solar cube.
+
+## LLM Prompts
+- [prompts-codex.md](prompts-codex.md) — baseline Codex instructions for maintaining the repo
+- [prompts-codex-cad.md](prompts-codex-cad.md) — keep OpenSCAD models rendering cleanly
+- [prompts-codex-docs.md](prompts-codex-docs.md) — refine build guides and reference docs
