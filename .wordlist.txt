@@ -23,6 +23,7 @@ cli
 configs
 dev
 dspace
+elex
 eslint
 eslintrc
 frictionless
