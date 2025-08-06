@@ -41,6 +41,13 @@ pre-commit install
 pre-commit run --all-files
 ```
 
+If you update documentation, verify spelling and links:
+
+```bash
+pyspelling -c .spellcheck.yaml
+linkchecker README.md docs/
+```
+
 STL files are produced automatically by CI for each OpenSCAD model and can be
 downloaded from the workflow run. To render a variant locally you can run:
 
