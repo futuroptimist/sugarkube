@@ -2,6 +2,11 @@
 set -e
 
 FILE=$1
+if [ -z "$FILE" ]; then
+  echo "Usage: $0 path/to/model.scad" >&2
+  exit 1
+fi
+
 base=$(basename "$FILE" .scad)
 mode_suffix=""
 if [ -n "$STANDOFF_MODE" ]; then
