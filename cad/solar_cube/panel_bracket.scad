@@ -10,6 +10,7 @@
 size          = 40;           // leg length (mm)
 thickness     = 3;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
+hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 
 // insert / screw parameters
 insert_od         = 5.0;      // brass insert outer Ø (mm)
@@ -35,7 +36,9 @@ module l_bracket()
   }
 
   /* drill hole at centre of base leg for mounting */
-  translate([beam_width/2, size/2, 0])
+  translate([beam_width/2 + hole_offset[0],
+            size/2       + hole_offset[1],
+            0])
   {
     if (standoff_mode == "printed") {
       // through-hole
