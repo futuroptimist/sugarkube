@@ -41,9 +41,10 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, verify spelling and links:
+If you update documentation, install spell-check tools and verify spelling and links:
 
 ```bash
+pip install pyspelling linkchecker
 pyspelling -c .spellcheck.yaml
 linkchecker README.md docs/
 ```

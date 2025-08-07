@@ -1,7 +1,10 @@
 # Sugarkube
 
-Welcome to **sugarkube**, a solar-powered off-grid platform for Raspberry Pi and aquarium aeration. This repo tracks CAD models, electronics schematics, and documentation so anyone can replicate the setup.
-Greenery is encouraged around the cube. Vines can climb the extrusion while herbs and shade-loving plants enjoy the cover of the solar panels.
+Welcome to **sugarkube**, a solar-powered off-grid platform for Raspberry Pis and aquarium aeration.
+This repo tracks CAD models, electronics schematics, and documentation
+so anyone can replicate the setup.
+Greenery is encouraged around the cube. Vines can climb the extrusion while
+herbs and shade-loving plants enjoy the cover of the solar panels.
 
 ![solar cube](images/solar_cube.jpg)
 
@@ -15,7 +18,8 @@ Greenery is encouraged around the cube. Vines can climb the extrusion while herb
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work
 - [electronics_basics.md](electronics_basics.md) — wiring, tools, and safety
-- [power_system_design.md](power_system_design.md) — sizing batteries and choosing a charge controller
+- [power_system_design.md](power_system_design.md) — sizing batteries and choosing a
+  charge controller
 
 Start with the basics and progress toward a fully autonomous solar cube.
 
