@@ -51,10 +51,13 @@ linkchecker README.md docs/
 STL files are produced automatically by CI for each OpenSCAD model and can be
 downloaded from the workflow run. To render a variant locally you can run:
 
-Set `STANDOFF_MODE` to `heatset` for heat-set inserts or `printed` for 3D-printed threads.
+The script uses the model's default `standoff_mode` (`heatset`) when
+`STANDOFF_MODE` is unset. Set `STANDOFF_MODE=printed` to generate
+3D-printed threads.
 
 ```bash
-STANDOFF_MODE=heatset bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
+bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
+STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 ```
 
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
