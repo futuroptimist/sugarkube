@@ -1,4 +1,11 @@
-variation = "blind"; // blind, through, nut
+// STANDOFF_MODE is passed via -D by openscad_render.sh
+// "heatset" → blind hole sized for brass insert
+// "printed" → simple through-hole
+// "nut"     → through-hole with hex recess
+standoff_mode = "heatset";
+variation = standoff_mode == "printed" ? "through"
+          : standoff_mode == "heatset" ? "blind"
+          : standoff_mode;
 
 pi_positions = [[0,0], [1,0], [0,1]]; // layout as [x,y] offsets
 board_len = 85;

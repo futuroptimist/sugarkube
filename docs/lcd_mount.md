@@ -9,7 +9,9 @@ LCD support is disabled by default. Enable the display by setting
 then render the model:
 
 ```bash
-openscad cad/pi_cluster/pi_carrier.scad
+bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
+STANDOFF_MODE=printed \
+  bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
 ```
 
 Rotate the LCD or tweak offsets if your board slightly differs. The
