@@ -14,4 +14,9 @@ if [ -n "$STANDOFF_MODE" ]; then
 fi
 output="stl/${base}${mode_suffix}.stl"
 mkdir -p "$(dirname "$output")"
-openscad -o "$output" --export-format binstl -D standoff_mode=\"${STANDOFF_MODE}\" "$FILE"
+cmd=(openscad -o "$output" --export-format binstl)
+if [ -n "$STANDOFF_MODE" ]; then
+  cmd+=(-D "standoff_mode=\"${STANDOFF_MODE}\"")
+fi
+cmd+=("$FILE")
+"${cmd[@]}"
