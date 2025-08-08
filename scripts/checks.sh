@@ -22,4 +22,6 @@ pytest --cov=. --cov-report=xml --cov-report=term -q
 if command -v pyspelling >/dev/null 2>&1 && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml || true
 fi
-linkchecker README.md docs/ || true
+if command -v linkchecker >/dev/null 2>&1; then
+  linkchecker README.md docs/ || true
+fi
