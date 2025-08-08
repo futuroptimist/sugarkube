@@ -30,3 +30,30 @@ printf '%s ' "$@" > "$LOG_FILE"
 
     args = log_file.read_text()
     assert "-D" not in args
+
+
+def test_errors_when_file_missing(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "called"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        f"""#!/usr/bin/env bash
+echo called > {marker}
+"""
+    )
+    openscad.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    missing = tmp_path / "missing.scad"
+    result = subprocess.run(
+        ["bash", "scripts/openscad_render.sh", str(missing)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "File not found" in result.stderr
+    assert not marker.exists()

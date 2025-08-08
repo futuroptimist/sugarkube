@@ -61,5 +61,8 @@ bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 ```
 
+The helper script validates that the provided `.scad` file exists and prints a helpful
+error if it does not.
+
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
 See [llms.txt](llms.txt) for an overview suitable for language models.
