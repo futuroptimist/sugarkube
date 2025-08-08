@@ -25,13 +25,26 @@ Boot the control-plane Pi first. After it appears on your router install
 curl -sfL https://get.k3s.io | sh -
 ```
 
+Display the worker join token:
+
+```sh
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+
 Boot the remaining Pis and join them as workers once they can ping the
-control-plane node. Use the token printed on the server:
+control-plane node:
 
 ```sh
 curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<node-token> sh -
 ```
 
+Verify the cluster:
+
+```sh
+sudo kubectl get nodes
+```
+
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed
-walkthrough.
+walkthrough. For more options consult the
+[k3s quick start](https://docs.k3s.io/quick-start) guide.
