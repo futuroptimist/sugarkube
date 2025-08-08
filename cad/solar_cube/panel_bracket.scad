@@ -25,31 +25,33 @@ standoff_mode = "heatset";
 
 module l_bracket()
 {
-  /* build the two legs */
-  union() {
-    // base leg lying flat (XY plane)
-    cube([beam_width, size, thickness]);
+  difference() {
+    /* build the two legs */
+    union() {
+      // base leg lying flat (XY plane)
+      cube([beam_width, size, thickness]);
 
-    // vertical leg (XZ plane)
-    translate([0, size - thickness, 0])
-      cube([beam_width, thickness, size]);
-  }
+      // vertical leg (XZ plane)
+      translate([0, size - thickness, 0])
+        cube([beam_width, thickness, size]);
+    }
 
-  /* drill hole at centre of base leg for mounting */
-  translate([beam_width/2 + hole_offset[0],
-            size/2       + hole_offset[1],
-            0])
-  {
-    if (standoff_mode == "printed") {
-      // through-hole
-      cylinder(h=thickness + 0.2, r=screw_clearance/2, $fn=32);
-    } else {
-      // blind hole for insert
-      translate([0,0,thickness - insert_length - 0.1])
-        cylinder(h=insert_length + 0.2, r=insert_hole_diam/2, $fn=40);
-      // chamfer
-      translate([0,0,thickness - insert_length - chamfer])
-        cylinder(h=chamfer, r1=insert_hole_diam/2 + chamfer, r2=insert_hole_diam/2, $fn=32);
+    /* drill hole at centre of base leg for mounting */
+    translate([beam_width/2 + hole_offset[0],
+              size/2       + hole_offset[1],
+              0])
+    {
+      if (standoff_mode == "printed") {
+        // through-hole
+        cylinder(h=thickness + 0.2, r=screw_clearance/2, $fn=32);
+      } else {
+        // blind hole for insert
+        translate([0,0,thickness - insert_length - 0.1])
+          cylinder(h=insert_length + 0.2, r=insert_hole_diam/2, $fn=40);
+        // chamfer
+        translate([0,0,thickness - insert_length - chamfer])
+          cylinder(h=chamfer, r1=insert_hole_diam/2 + chamfer, r2=insert_hole_diam/2, $fn=32);
+      }
     }
   }
 }
