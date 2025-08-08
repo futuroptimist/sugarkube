@@ -2,12 +2,14 @@
 /*
   Parametric 2020-extrusion cube frame
 
-  edge:  overall exterior dimension (mm)
-  beam:  extrusion width (typically 20 mm)
+  edge:     overall exterior dimension (mm)
+  beam:     extrusion width (typically 20 mm)
+  centered: shift frame to origin when true
 */
 
 edge = 500;        // exterior size of the cube (mm)
 beam = 20;         // t-slot extrusion width
+centered = true;   // translate to origin
 
 module extrusion_frame(edge, beam)
 {
@@ -32,6 +34,9 @@ module extrusion_frame(edge, beam)
       cube([beam, edge, beam]);
 }
 
-// shift so that the cube is centered at the origin, matching other models
-translate([-edge/2, -edge/2, -edge/2])
+// optionally centre the cube at the origin
+if (centered)
+  translate([-edge/2, -edge/2, -edge/2])
+    extrusion_frame(edge, beam);
+else
   extrusion_frame(edge, beam);
