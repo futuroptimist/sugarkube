@@ -51,6 +51,19 @@ If you need the token again, view it on the control-plane node:
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
+## Manage from a workstation
+
+To run `kubectl` from your laptop, copy the kubeconfig generated on the
+control-plane node and secure it locally:
+
+```sh
+scp pi@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
+chmod 600 ~/.kube/config
+```
+
+Edit the file and replace the server IP with the control-plane address.
+Now `kubectl get nodes` works from your workstation.
+
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed
 walkthrough. For more options consult the
