@@ -11,6 +11,7 @@ size          = 40;           // leg length (mm)
 thickness     = 4;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
+gusset        = true;         // add triangular support in inner corner
 
 // insert / screw parameters
 insert_od         = 5.0;      // brass insert outer Ø (mm)
@@ -34,6 +35,13 @@ module l_bracket()
       // vertical leg (XZ plane)
       translate([0, size - thickness, 0])
         cube([beam_width, thickness, size]);
+
+      // optional gusset to reinforce the corner
+      if (gusset)
+        translate([0, size - thickness, 0])
+          rotate([0,90,0])
+            linear_extrude(height=beam_width)
+              polygon([[0,0],[thickness,0],[0,thickness]]);
     }
 
     /* drill hole at centre of base leg for mounting */
