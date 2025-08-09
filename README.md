@@ -50,19 +50,18 @@ linkchecker README.md docs/
 ```
 
 STL files are produced automatically by CI for each OpenSCAD model and can be
-downloaded from the workflow run. To render a variant locally you can run:
-
-The script uses the model's default `standoff_mode` (`heatset`) when
-`STANDOFF_MODE` is unset. Set `STANDOFF_MODE=printed` to generate
-3D-printed threads.
+downloaded from the workflow run. To render a variant locally, run:
 
 ```bash
 bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 ```
 
-The helper script validates that the provided `.scad` file exists and that `openscad`
-is on your `PATH`, printing a helpful error when something is missing.
+By default the script uses the model's `standoff_mode` value (`heatset`).
+Set `STANDOFF_MODE=printed` to generate 3D-printed threads.
+
+The helper script validates that the provided `.scad` file exists and prints a helpful
+error if it does not.
 
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
 See [llms.txt](llms.txt) for an overview suitable for language models.
