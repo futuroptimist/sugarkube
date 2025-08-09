@@ -21,6 +21,7 @@ Silicon cells generate a voltage when exposed to light. Cells are wired in serie
 - Use outdoor‑rated connectors and wire gauges sized for the expected current.
 
 ## Example Budget
-Four 100 W panels wired in parallel can deliver roughly 20 A at 18 V to the charge controller. Over a six‑hour sunny day you might collect around 600 Wh.
+Four 100 W panels wired in parallel can deliver roughly 20 A at 18 V to the charge controller.
+Over a six‑hour sunny day this yields about 2 kWh (20 A × 18 V × 6 h ≈ 2.1 kWh).
 
 That energy then charges the battery and powers small loads like an aquarium pump or Raspberry Pi.
