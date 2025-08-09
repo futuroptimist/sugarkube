@@ -8,6 +8,7 @@ junction box.
    insert variants are published as artifacts by GitHub Actions.
 2. Assemble the extrusion cube using M5 hardware.
 3. Mount the solar panels using the printed brackets.
+   Each has a gusset that stiffens the corner.
 4. Attach the battery leads to the MPPT charge controller before any solar wiring. Refer to the
    controller's manual for the recommended connection order. The KiCad schematic and board specs
    live under [elex/power_ring](../elex/power_ring/).
