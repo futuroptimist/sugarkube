@@ -11,6 +11,11 @@ if [ ! -f "$FILE" ]; then
   exit 1
 fi
 
+if [[ "$FILE" != *.scad ]]; then
+  echo "Expected .scad file: $FILE" >&2
+  exit 1
+fi
+
 if ! command -v openscad >/dev/null 2>&1; then
   echo "OpenSCAD not found in PATH" >&2
   exit 1
