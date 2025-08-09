@@ -57,3 +57,21 @@ echo called > {marker}
     assert result.returncode != 0
     assert "File not found" in result.stderr
     assert not marker.exists()
+
+
+def test_errors_when_openscad_missing(tmp_path):
+    env = os.environ.copy()
+    env["PATH"] = str(tmp_path)
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "scripts/openscad_render.sh",
+            "cad/pi_cluster/pi5_triple_carrier_rot45.scad",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "OpenSCAD not found" in result.stderr
