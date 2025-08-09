@@ -7,10 +7,12 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 
 1. Download and launch [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 2. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open **advanced options**.
-3. Enter your WiFi **SSID** and **password**, enable **SSH**, and set a unique hostname and user for each Pi.
+3. Enter your WiFi **SSID** and **password**, enable **SSH**, and set a unique
+   hostname and user for each Pi.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
-6. Boot each Pi once to confirm it connects; `ssh pi@<hostname>.local` and run `passwd` to change the default password.
+6. Boot each Pi once to confirm it connects.
+   `ssh <user>@<hostname>.local` and run `passwd` to change the default password.
 
 ## Switch and PoE
 
@@ -54,11 +56,12 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 
 ## Manage from a workstation
 
-To run `kubectl` from your laptop, copy the kubeconfig generated on the
-control-plane node and secure it locally:
+To run `kubectl` from your laptop, first create a kube directory and then
+copy the kubeconfig generated on the control-plane node:
 
 ```sh
-scp pi@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
+mkdir -p ~/.kube
+scp <user>@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 chmod 600 ~/.kube/config
 ```
 

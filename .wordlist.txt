@@ -138,6 +138,7 @@ PoE
 HATs
 walkthrough
 Kubernetes
+kube
 kubeconfig
 Wi-Fi
 WiFi
