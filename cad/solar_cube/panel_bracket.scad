@@ -16,7 +16,7 @@ gusset        = true;         // add triangular support in inner corner
 // insert / screw parameters
 insert_od         = 5.0;      // brass insert outer Ø (mm)
 insert_length     = 5.0;
-insert_clearance  = 0.10;     // interference amount (mm)
+insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
 screw_clearance   = 5.2;      // through-hole Ø for M5 (mm)
 chamfer           = 0.6;      // lead-in chamfer (mm)
