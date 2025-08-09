@@ -60,8 +60,8 @@ STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_
 By default the script uses the model's `standoff_mode` value (`heatset`).
 Set `STANDOFF_MODE=printed` to generate 3D-printed threads.
 
-The helper script validates that the provided `.scad` file exists and prints a helpful
-error if it does not.
+The helper script validates that the provided path ends with `.scad` and that the file exists,
+printing a helpful error if these checks fail.
 
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
 See [llms.txt](llms.txt) for an overview suitable for language models.

@@ -75,3 +75,32 @@ def test_errors_when_openscad_missing(tmp_path):
     )
     assert result.returncode != 0
     assert "OpenSCAD not found" in result.stderr
+
+
+def test_errors_when_extension_wrong(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "called"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        f"""#!/usr/bin/env bash
+echo called > {marker}
+"""
+    )
+    openscad.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    wrong = tmp_path / "model.txt"
+    wrong.write_text("not scad")
+
+    result = subprocess.run(
+        ["bash", "scripts/openscad_render.sh", str(wrong)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Expected .scad file" in result.stderr
+    assert not marker.exists()
