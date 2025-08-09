@@ -21,6 +21,9 @@ insert_hole_diam  = insert_od - insert_clearance;
 screw_clearance   = 5.2;      // through-hole Ø for M5 (mm)
 chamfer           = 0.6;      // lead-in chamfer (mm)
 
+assert(insert_length < thickness,
+       "insert_length must be < thickness to maintain a blind hole");
+
 // read from CLI (-D standoff_mode="printed"/"heatset")
 standoff_mode = "heatset";
 

@@ -15,7 +15,7 @@ hole_spacing_y = 49;
 
 plate_thickness = 2.0;
 standoff_height = 6.0;
-standoff_diam = 6.0;
+standoff_diam = 6.5;   // increased for added strength
 
 insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert

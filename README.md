@@ -28,6 +28,7 @@ the docs you will see the term used in both contexts.
 - `docs/network_setup.md` — connect the Pi cluster to your network
 - `docs/lcd_mount.md` — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
+- `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
 
@@ -60,8 +61,8 @@ STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_
 By default the script uses the model's `standoff_mode` value (`heatset`).
 Set `STANDOFF_MODE=printed` to generate 3D-printed threads.
 
-The helper script validates that the provided `.scad` file exists and prints a helpful
-error if it does not.
+The helper script validates that the provided `.scad` file exists and that
+OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
 
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
 See [llms.txt](llms.txt) for an overview suitable for language models.
