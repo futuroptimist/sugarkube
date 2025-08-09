@@ -46,8 +46,8 @@ standoff_mode   = "heatset";
 /* ---- heat-set insert geometry (M2 short, 3 mm OD, 3 mm long) ---- */
 insert_od         = 3.00;        // outer diameter of the insert (mm)
 insert_length     = 3.00;        // nominal length (mm)
-insert_clearance  = 0.10;        // designed undersize for interference fit (mm)
-insert_hole_diam  = insert_od - insert_clearance; // about 2.9 mm
+insert_clearance  = 0.20;        // designed undersize for interference fit (mm)
+insert_hole_diam  = insert_od - insert_clearance; // about 2.8 mm
 insert_chamfer    = 0.5;         // chamfer to guide the soldering tip
 
 /* ---- screw / printed thread geometry (unchanged) ---- */

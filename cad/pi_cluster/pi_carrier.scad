@@ -20,7 +20,8 @@ standoff_diam = 6.0;
 insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert
 insert_pocket_depth = insert_length + 0.7; // keeps 0.7 mm extra for chamfer
-hole_diam         = insert_od + 0.1;       // slip-fit pilot
+insert_clearance  = 0.2;         // designed undersize for interference fit
+hole_diam         = insert_od - insert_clearance;
 lead_chamfer = 0.5;
 screw_clearance_diam = 3.0; // through-hole clearance
 

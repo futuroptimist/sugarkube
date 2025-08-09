@@ -8,6 +8,7 @@ Heat‑set inserts are knurled brass cylinders that melt into a printed hole. On
 
 - Choose inserts with an outer diameter around **3.5 mm** and **4 mm** length for M2.5 screws.
 - Size the hole **0.1–0.2 mm smaller** than the insert’s outer diameter so the plastic grips the knurling.
+- Sugarkube models default to a **0.2 mm** undersize which suits typical brass inserts.
 - Use a soldering iron with a flat or conical tip. Set it around **200–220 °C** and press the insert flush with gentle downward pressure.
 - Let each insert cool for a few seconds before removing the tip to avoid pulling it back out.
 
