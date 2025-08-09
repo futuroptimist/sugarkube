@@ -7,8 +7,8 @@
   A variable of that name is passed in by the CI render script.
 */
 
-size          = 40;           // leg length (mm)
-thickness     = 6;            // plate thickness (mm)
+size          = 45;           // leg length (mm)
+thickness     = 4;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
