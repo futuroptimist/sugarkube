@@ -28,6 +28,7 @@ the docs you will see the term used in both contexts.
 - `docs/network_setup.md` — connect the Pi cluster to your network
 - `docs/lcd_mount.md` — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
+- `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
 
