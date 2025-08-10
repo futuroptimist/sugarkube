@@ -140,6 +140,7 @@ walkthrough
 Kubernetes
 kube
 kubeconfig
+kubectl
 Wi-Fi
 WiFi
 lcd
