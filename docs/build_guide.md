@@ -12,8 +12,11 @@ junction box.
 4. Attach the battery leads to the MPPT charge controller before any solar wiring. Refer to the
    controller's manual for the recommended connection order. The KiCad schematic and board specs
    live under [elex/power_ring](../elex/power_ring/).
-5. Wire the solar panels to the controller once the battery is present, observing polarity.
-6. Install the 12 V air pump and Raspberry Pi on dedicated protection: a 15 A breaker for the pump
-   and a 5 A fuse for the Pi. Verify battery voltage with a multimeter before powering devices.
+5. Before connecting the array, verify each panel's open-circuit voltage and polarity with a
+   multimeter. Join panels with MC4 connectors and 12 AWG wire, then attach them to the controller.
+6. Install the 12 V air pump and Raspberry Pi on dedicated protection: a 15 A breaker for the pump
+   and a 5 A fuse for the Pi. Verify battery voltage with a multimeter before powering devices.
+7. Tidy and secure all wiring. Confirm the charge controller shows a charging indicator before
+   closing the enclosure.
 
 For details on electronics and safety precautions see [SAFETY.md](SAFETY.md).
