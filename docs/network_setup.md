@@ -11,8 +11,10 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    hostname and user for each Pi.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
-6. Boot each Pi once to confirm it connects.
-   `ssh <user>@<hostname>.local` and run `passwd` to change the default password.
+6. Boot each Pi once to confirm it connects. From another machine run
+   `ping <hostname>.local` and then `ssh <user>@<hostname>.local` to change the
+   default password with `passwd`. If mDNS fails, use the IP shown on your
+   router's client list.
 
 ## Switch and PoE
 
@@ -21,8 +23,8 @@ PoE+ (802.3at) you can power the Pis with PoE HATs; otherwise use USB‑C suppli
 
 ## Join the cluster
 
-Boot the control-plane Pi first. Once it shows up on your router's client list,
-install `k3s`:
+Boot the control-plane Pi first. Once it appears on your router's client list,
+install `k3s` on that node as root:
 
 ```sh
 curl -sfL https://get.k3s.io | sh -
@@ -36,7 +38,7 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 
 Boot the remaining Pis and join them as workers once they can ping the
 control-plane node. Use the token printed on the server (also stored at
-`/var/lib/rancher/k3s/server/node-token`):
+`/var/lib/rancher/k3s/server/node-token`) and run the installer as root:
 
 ```sh
 curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<node-token> sh -

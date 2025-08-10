@@ -142,6 +142,7 @@ kube
 kubeconfig
 Wi-Fi
 WiFi
+mDNS
 lcd
 LCD
 todo
