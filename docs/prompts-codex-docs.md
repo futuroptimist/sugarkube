@@ -17,8 +17,8 @@ Keep the documentation clear and accurate.
 CONTEXT:
 - Docs live in `docs/`.
 - Follow AGENTS.md for style and testing requirements.
-- Run `pre-commit run --all-files`; ensure `pyspelling` and `linkchecker`
-  succeed.
+- Run `pre-commit run --all-files`; ensure `pyspelling` (requires `aspell`) and
+  `linkchecker` succeed.
 
 REQUEST:
 1. Choose a markdown file in `docs/` that needs clarification or an update.
