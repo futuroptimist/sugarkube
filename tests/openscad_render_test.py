@@ -59,6 +59,16 @@ echo called > {marker}
     assert not marker.exists()
 
 
+def test_errors_when_arg_missing():
+    result = subprocess.run(
+        ["bash", "scripts/openscad_render.sh"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Usage:" in result.stderr
+
+
 def test_errors_when_openscad_missing(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
