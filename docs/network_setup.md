@@ -34,6 +34,9 @@ Display the worker join token:
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
+Keep this token handy; it's stored at
+`/var/lib/rancher/k3s/server/node-token` if you need it later.
+
 Boot the remaining Pis and join them as workers once they can ping the
 control-plane node. Use the token printed on the server (also stored at
 `/var/lib/rancher/k3s/server/node-token`):
@@ -48,16 +51,10 @@ Verify the cluster:
 sudo kubectl get nodes
 ```
 
-If you need the token again, view it on the control-plane node:
-
-```sh
-sudo cat /var/lib/rancher/k3s/server/node-token
-```
-
 ## Manage from a workstation
 
-To run `kubectl` from your laptop, first create a kube directory and then
-copy the kubeconfig generated on the control-plane node:
+Install `kubectl` on your laptop using your package manager, then create a
+kube directory and copy the kubeconfig generated on the control-plane node:
 
 ```sh
 mkdir -p ~/.kube
