@@ -11,8 +11,8 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    hostname and user for each Pi.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
-6. Boot each Pi once to confirm it connects.
-   `ssh <user>@<hostname>.local` and run `passwd` to change the default password.
+6. Boot each Pi once to confirm it connects, then `ssh <user>@<hostname>.local` and
+   run `passwd` to change the default password.
 
 ## Switch and PoE
 
