@@ -51,7 +51,8 @@ linkchecker README.md docs/
 ```
 
 STL files are produced automatically by CI for each OpenSCAD model and can be
-downloaded from the workflow run. To render a variant locally, run:
+downloaded from the workflow run. Provide a `.scad` file path to render a
+variant locally:
 
 ```bash
 bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
