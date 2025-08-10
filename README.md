@@ -42,16 +42,19 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, install spell-check tools and verify spelling and links:
+If you update documentation, install spell-check tools and verify spelling and links. `pyspelling`
+relies on `aspell`, so make sure it is installed as well:
 
 ```bash
 pip install pyspelling linkchecker
+sudo apt-get install aspell
 pyspelling -c .spellcheck.yaml
 linkchecker README.md docs/
 ```
 
 STL files are produced automatically by CI for each OpenSCAD model and can be
-downloaded from the workflow run. To render a variant locally, run:
+downloaded from the workflow run. Provide a `.scad` file path to render a
+variant locally:
 
 ```bash
 bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
