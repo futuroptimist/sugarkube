@@ -42,10 +42,12 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, install spell-check tools and verify spelling and links:
+If you update documentation, install spell-check tools and verify spelling and links. `pyspelling`
+relies on `aspell`, so make sure it is installed as well:
 
 ```bash
 pip install pyspelling linkchecker
+sudo apt-get install aspell
 pyspelling -c .spellcheck.yaml
 linkchecker README.md docs/
 ```

@@ -18,7 +18,7 @@ Keep the project healthy by making small, well-tested improvements.
 CONTEXT:
 - Follow AGENTS.md and README.md.
 - Run `pre-commit run --all-files` to lint, test and validate docs.
-- On documentation changes ensure `pyspelling -c .spellcheck.yaml` and
+- On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell`) and
   `linkchecker README.md docs/` succeed.
 
 REQUEST:
