@@ -148,3 +148,5 @@ lcd
 LCD
 todo
 undersize
+
+AWG
