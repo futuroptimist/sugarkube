@@ -56,16 +56,18 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 
 ## Manage from a workstation
 
-To run `kubectl` from your laptop, first create a kube directory and then
-copy the kubeconfig generated on the control-plane node:
+To run `kubectl` from your laptop, ensure the
+[kubectl client is installed](https://kubernetes.io/docs/tasks/tools/#kubectl).
+Copy the kubeconfig generated on the control-plane node and update its
+server address:
 
 ```sh
 mkdir -p ~/.kube
 scp <user>@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
+sed -i "s/127.0.0.1/<server-ip>/g" ~/.kube/config
 chmod 600 ~/.kube/config
 ```
 
-Edit the file and replace the server IP with the control-plane address.
 Now `kubectl get nodes` works from your workstation.
 
 See the deployment guide at
