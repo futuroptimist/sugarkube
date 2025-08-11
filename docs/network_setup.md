@@ -56,8 +56,12 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 
 ## Manage from a workstation
 
-To run `kubectl` from your laptop, first create a kube directory and then
-copy the kubeconfig generated on the control-plane node:
+Install `kubectl` on your laptop first. On Debian-based systems run
+`sudo apt install kubectl` or follow the
+[official installation guide](https://kubernetes.io/docs/tasks/tools/).
+
+Next, create a kube directory and copy the kubeconfig generated on the
+control-plane node:
 
 ```sh
 mkdir -p ~/.kube
