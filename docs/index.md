@@ -9,6 +9,9 @@ herbs and shade-loving plants enjoy the cover of the solar panels.
 ![solar cube](images/solar_cube.jpg)
 
 ## Getting Started
+Review the safety notes before working with power components.
+
+- [SAFETY.md](SAFETY.md) — wiring and battery safety guidelines
 - [build_guide.md](build_guide.md) — step-by-step assembly instructions
 - [pi_cluster_carrier.md](pi_cluster_carrier.md) — details on the Raspberry Pi mounting plate
 - [lcd_mount.md](lcd_mount.md) — optional 1602 LCD placement
