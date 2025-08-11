@@ -26,6 +26,9 @@ install `k3s`:
 
 ```sh
 curl -sfL https://get.k3s.io | sh -
+
+# Wait for the service to report Ready
+sudo kubectl get nodes
 ```
 
 Display the worker join token:
@@ -63,10 +66,12 @@ copy the kubeconfig generated on the control-plane node:
 mkdir -p ~/.kube
 scp <user>@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 chmod 600 ~/.kube/config
+sed -i "s/127.0.0.1/<server-ip>/" ~/.kube/config
+export KUBECONFIG=~/.kube/config
 ```
 
-Edit the file and replace the server IP with the control-plane address.
-Now `kubectl get nodes` works from your workstation.
+The `sed` command swaps the default localhost address for the control-plane
+IP so `kubectl get nodes` works from your workstation.
 
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed
