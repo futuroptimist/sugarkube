@@ -4,8 +4,9 @@ This project uses 20x20 aluminium extrusion to suspend four 100 W solar panels a
 The battery, charge controller, and electronics mount inside a marine battery box and a small
 junction box.
 
-1. Print the triple Pi carrier from `cad/pi_cluster` if building a Pi cluster. STL files for both
-   insert variants are published as artifacts by GitHub Actions.
+1. Print the triple Pi carrier from `cad/pi_cluster` if building a Pi cluster.
+   Download STL files for either insert variant from the latest
+   [scad-to-stl workflow run][stl-workflow] in GitHub Actions.
 2. Assemble the extrusion cube using M5 hardware.
 3. Mount the solar panels using the printed brackets.
    Each has a gusset that stiffens the corner.
@@ -20,3 +21,5 @@ junction box.
    closing the enclosure.
 
 For details on electronics and safety precautions see [SAFETY.md](SAFETY.md).
+
+[stl-workflow]: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
