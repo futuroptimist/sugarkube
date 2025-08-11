@@ -140,8 +140,10 @@ walkthrough
 Kubernetes
 kube
 kubeconfig
+kubectl
 Wi-Fi
 WiFi
+mDNS
 lcd
 LCD
 todo
@@ -149,3 +151,5 @@ undersize
 sfL
 kubectl
 sudo
+
+AWG

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FILE=$1
-if [ -z "$FILE" ]; then
+if [ "$#" -lt 1 ]; then
   echo "Usage: $0 path/to/model.scad" >&2
   exit 1
 fi
+
+FILE=$1
 if [ ! -f "$FILE" ]; then
   echo "File not found: $FILE" >&2
   exit 1
