@@ -12,6 +12,7 @@ thickness     = 6;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
+gusset_size   = thickness;    // leg length of gusset triangle (mm)
 
 // insert / screw parameters
 insert_od         = 5.0;      // brass insert outer Ø (mm)
@@ -23,6 +24,8 @@ chamfer           = 0.6;      // lead-in chamfer (mm)
 
 assert(insert_length < thickness,
        "insert_length must be < thickness to maintain a blind hole");
+assert(gusset_size <= size,
+       "gusset_size must be ≤ leg length");
 
 // read from CLI (-D standoff_mode="printed"/"heatset")
 standoff_mode = "heatset";
@@ -44,7 +47,7 @@ module l_bracket()
         translate([0, size - thickness, 0])
           rotate([0,90,0])
             linear_extrude(height=beam_width)
-              polygon([[0,0],[thickness,0],[0,thickness]]);
+              polygon([[0,0],[gusset_size,0],[0,gusset_size]]);
     }
 
     /* drill hole at centre of base leg for mounting */
