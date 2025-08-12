@@ -29,6 +29,7 @@ printf '%s ' "$@" > "$LOG_FILE"
     )
 
     args = log_file.read_text()
+    assert "stl/pi_cluster/pi5_triple_carrier_rot45.stl" in args
     assert "-D" not in args
 
 

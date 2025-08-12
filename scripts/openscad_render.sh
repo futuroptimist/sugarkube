@@ -22,12 +22,13 @@ if ! command -v openscad >/dev/null 2>&1; then
   exit 1
 fi
 
-base=$(basename "$FILE" .scad)
+rel=${FILE%.scad}
+rel=${rel#cad/}
 mode_suffix=""
 if [ -n "${STANDOFF_MODE:-}" ]; then
   mode_suffix="_$STANDOFF_MODE"
 fi
-output="stl/${base}${mode_suffix}.stl"
+output="stl/${rel}${mode_suffix}.stl"
 mkdir -p "$(dirname "$output")"
 cmd=(openscad -o "$output" --export-format binstl)
 if [ -n "${STANDOFF_MODE:-}" ]; then
