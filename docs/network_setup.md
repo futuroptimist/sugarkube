@@ -60,20 +60,20 @@ sudo kubectl get nodes
 
 To run `kubectl` from your laptop, ensure the
 [kubectl client is installed](https://kubernetes.io/docs/tasks/tools/#kubectl).
-Copy the kubeconfig generated on the control-plane node and update its
-server address:
+Copy the kubeconfig generated on the control-plane node, update its
+server address, and verify access:
 
 ```sh
 mkdir -p ~/.kube
 scp <user>@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 sed -i "s/127.0.0.1/<server-ip>/g" ~/.kube/config
 chmod 600 ~/.kube/config
-sed -i "s/127.0.0.1/<server-ip>/" ~/.kube/config
 export KUBECONFIG=~/.kube/config
+kubectl get nodes
 ```
 
 The `sed` command swaps the default localhost address for the control-plane
-IP so `kubectl get nodes` works from your workstation.
+IP, and `kubectl get nodes` confirms your workstation can reach the cluster.
 
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed
