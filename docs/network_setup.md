@@ -60,8 +60,8 @@ sudo kubectl get nodes
 
 To run `kubectl` from your laptop, ensure the
 [kubectl client is installed](https://kubernetes.io/docs/tasks/tools/#kubectl).
-Copy the kubeconfig generated on the control-plane node and update its
-server address:
+Copy the kubeconfig generated on the control-plane node, update its
+server address, and verify access:
 
 ```sh
 mkdir -p ~/.kube
@@ -73,7 +73,7 @@ kubectl get nodes
 ```
 
 The `sed` command swaps the default localhost address for the control-plane
-IP so `kubectl` can reach the cluster from your workstation.
+IP, and `kubectl get nodes` confirms your workstation can reach the cluster.
 
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed
