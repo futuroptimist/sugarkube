@@ -71,7 +71,7 @@ def test_errors_when_arg_missing():
 
 def test_errors_when_openscad_missing(tmp_path):
     env = os.environ.copy()
-    env["PATH"] = str(tmp_path)
+    env["PATH"] = "/usr/bin"
 
     result = subprocess.run(
         [
@@ -114,3 +114,21 @@ echo called > {marker}
     assert result.returncode != 0
     assert "Expected .scad file" in result.stderr
     assert not marker.exists()
+
+
+def test_errors_when_standoff_mode_invalid():
+    env = os.environ.copy()
+    env["STANDOFF_MODE"] = "invalid"
+
+    result = subprocess.run(
+        [
+            "bash",
+            "scripts/openscad_render.sh",
+            "cad/pi_cluster/pi_carrier.scad",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Invalid STANDOFF_MODE" in result.stderr

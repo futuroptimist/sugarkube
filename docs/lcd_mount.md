@@ -19,3 +19,5 @@ STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.
 Rotate the LCD or tweak offsets if your board slightly differs. The
 extra standoffs avoid the Pi mounting holes so you can add the display
 without enlarging the plate.
+
+Valid `STANDOFF_MODE` values are `heatset` (default) and `printed`.
