@@ -20,7 +20,7 @@ insert_length     = 5.0;
 insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
 screw_clearance   = 5.2;      // through-hole Ø for M5 (mm)
-chamfer           = 0.6;      // lead-in chamfer (mm)
+chamfer           = 0.6;      // shared lead-in chamfer (mm)
 
 assert(insert_length < thickness,
        "insert_length must be < thickness to maintain a blind hole");
@@ -56,8 +56,11 @@ module l_bracket()
               0])
     {
       if (standoff_mode == "printed") {
-        // through-hole
+        // through-hole with chamfer
         cylinder(h=thickness + 0.2, r=screw_clearance/2, $fn=32);
+        translate([0,0,thickness - chamfer])
+          cylinder(h=chamfer, r1=screw_clearance/2 + chamfer,
+                   r2=screw_clearance/2, $fn=32);
       } else {
         // blind hole for insert
         translate([0,0,thickness - insert_length - 0.1])

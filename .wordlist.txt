@@ -153,3 +153,5 @@ kubectl
 sudo
 
 AWG
+chamfer
+Chamfer

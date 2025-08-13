@@ -32,5 +32,6 @@ Printed threads work best with a fine nozzle (0.4 mm or smaller) and four or mo
 
 - **CAD:** OpenSCAD parameters are plain text values near the top of each file. Adjust them to move boards or change standoff sizes, then preview with `openscad`.
 - **3D printing:** Use PLA or PETG with at least 40 % infill for structural parts. Ensure your printer is calibrated so holes come out accurately.
+- **Chamfer through-holes:** A ~0.5 mm chamfer guides screws and avoids any elephant's foot flare.
 - **Soldering:** Keep your iron clean and tinned. Rest it in a safe stand when not in use.
 - **Assembly:** Test‑fit the hardware before final tightening. If threads feel rough, back out and remove any debris.
