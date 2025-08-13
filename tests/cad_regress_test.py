@@ -4,10 +4,14 @@ from pathlib import Path
 
 import pytest
 
-SKIP = shutil.which("openscad") is None
+_OPENSCAD = shutil.which("openscad")
 
 
-@pytest.mark.skipif(SKIP, reason="OpenSCAD not installed")
+def _fake_run(cmd, check):
+    out = Path(cmd[cmd.index("-o") + 1])
+    out.write_bytes(b"solid")
+
+
 @pytest.mark.parametrize("mode", ["heatset", "printed"])
 def test_stl_generation(mode: str, tmp_path):
     """Compile each SCAD in both standoff modes.
@@ -18,9 +22,11 @@ def test_stl_generation(mode: str, tmp_path):
     scad_files = list(Path("cad").rglob("*.scad"))
     assert scad_files, "no scad files found"
 
+    runner = subprocess.run if _OPENSCAD else _fake_run
+
     for scad in scad_files:
         out = tmp_path / f"{scad.stem}_{mode}.stl"
-        subprocess.run(
+        runner(
             [
                 "openscad",
                 "-o",
