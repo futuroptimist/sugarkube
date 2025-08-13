@@ -29,6 +29,9 @@ install `k3s` on that node as root:
 ```sh
 curl -sfL https://get.k3s.io | sh -
 
+# Ensure the service is running
+sudo systemctl status k3s --no-pager
+
 # Wait for the service to report Ready
 sudo kubectl get nodes
 ```

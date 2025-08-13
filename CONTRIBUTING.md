@@ -27,4 +27,3 @@ linkchecker README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
 ## Code of Conduct
 
 All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md).
-
