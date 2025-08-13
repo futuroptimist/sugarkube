@@ -4,6 +4,9 @@ The basic Pi carrier can host a 1602 I²C LCD in the free quadrant.
 Its standoffs match the common 80×36 mm module with holes 3 mm from each
 edge (75 mm × 31 mm spacing).
 
+The base plate includes rounded corners set by `corner_radius` (default 5 mm)
+to make handling safer.
+
 LCD support is disabled by default. To add the display set
 `include_lcd = true` near the top of `cad/pi_cluster/pi_carrier.scad`
 and render the model from the repository root:
