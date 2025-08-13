@@ -12,7 +12,7 @@ thickness     = 6;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
-gusset_size   = thickness;    // leg length of gusset triangle (mm)
+gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
 
 // insert / screw parameters
 insert_od         = 5.0;      // brass insert outer Ø (mm)
@@ -20,12 +20,14 @@ insert_length     = 5.0;
 insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
 screw_clearance   = 5.2;      // through-hole Ø for M5 (mm)
-chamfer           = 0.6;      // lead-in chamfer (mm)
+chamfer           = 0.8;      // lead-in chamfer (mm)
 
 assert(insert_length < thickness,
        "insert_length must be < thickness to maintain a blind hole");
 assert(gusset_size <= size,
        "gusset_size must be ≤ leg length");
+assert(insert_length + chamfer <= thickness,
+       "insert_length + chamfer must be ≤ thickness");
 
 // read from CLI (-D standoff_mode="printed"/"heatset")
 standoff_mode = "heatset";
