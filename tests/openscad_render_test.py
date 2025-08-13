@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -71,8 +72,16 @@ def test_errors_when_arg_missing():
 
 
 def test_errors_when_openscad_missing(tmp_path):
+    fake_path = tmp_path / "bin"
+    fake_path.mkdir()
+    # Symlink required utilities but omit openscad to simulate absence
+    for cmd in ["basename", "dirname", "mkdir"]:
+        target = shutil.which(cmd)
+        assert target is not None
+        (fake_path / cmd).symlink_to(target)
+
     env = os.environ.copy()
-    env["PATH"] = "/usr/bin"
+    env["PATH"] = str(fake_path)
 
     result = subprocess.run(
         [

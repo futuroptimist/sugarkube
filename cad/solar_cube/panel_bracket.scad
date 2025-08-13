@@ -56,15 +56,27 @@ module l_bracket()
               0])
     {
       if (standoff_mode == "printed") {
-        // through-hole
-        cylinder(h=thickness + 0.2, r=screw_clearance/2, $fn=32);
+        // through-hole with lead-in chamfers on both faces
+        union() {
+          // main clearance hole
+          cylinder(h=thickness + 0.2, r=screw_clearance/2, $fn=32);
+          // bottom chamfer
+          translate([0,0,-0.1])
+            cylinder(h=chamfer, r1=screw_clearance/2 + chamfer,
+                     r2=screw_clearance/2, $fn=32);
+          // top chamfer
+          translate([0,0,thickness - chamfer + 0.1])
+            cylinder(h=chamfer, r1=screw_clearance/2,
+                     r2=screw_clearance/2 + chamfer, $fn=32);
+        }
       } else {
         // blind hole for insert
         translate([0,0,thickness - insert_length - 0.1])
           cylinder(h=insert_length + 0.2, r=insert_hole_diam/2, $fn=40);
         // chamfer
         translate([0,0,thickness - insert_length - chamfer])
-          cylinder(h=chamfer, r1=insert_hole_diam/2 + chamfer, r2=insert_hole_diam/2, $fn=32);
+          cylinder(h=chamfer, r1=insert_hole_diam/2 + chamfer,
+                   r2=insert_hole_diam/2, $fn=32);
       }
     }
   }
