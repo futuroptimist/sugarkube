@@ -20,4 +20,3 @@ Thanks for your interest in improving sugarkube!
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 By participating you agree to uphold its terms.
-
