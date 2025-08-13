@@ -14,6 +14,7 @@ hole_spacing_x = 58;
 hole_spacing_y = 49;
 
 plate_thickness = 2.0;
+corner_radius   = 5.0;  // round base corners to avoid sharp edges
 standoff_height = 6.0;
 standoff_diam = 6.5;   // increased for added strength
 
@@ -97,7 +98,10 @@ module base_plate()
 {
     difference()
     {
-        cube([plate_len, plate_wid, plate_thickness]);
+        linear_extrude(height=plate_thickness)
+            offset(r=corner_radius)
+                square([plate_len - 2*corner_radius,
+                        plate_wid - 2*corner_radius]);
         if (variation != "blind") {
             for (pos = pi_positions) {
                 pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
