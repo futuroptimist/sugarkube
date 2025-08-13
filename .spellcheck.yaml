@@ -3,6 +3,8 @@ matrix:
   - name: markdown
     sources:
       - README.md
+      - CONTRIBUTING.md
+      - CODE_OF_CONDUCT.md
       - docs/**/*.md
     dictionary:
       wordlists:
