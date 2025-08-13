@@ -69,5 +69,10 @@ and `printed` are accepted.
 The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
 
+## Community
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for ways to help.
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 See [AGENTS.md](AGENTS.md) for included LLM assistants.
 See [llms.txt](llms.txt) for an overview suitable for language models.

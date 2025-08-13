@@ -1,22 +1,29 @@
 # Contributing
 
-Thanks for your interest in improving sugarkube!
+Thanks for helping improve sugarkube!
 
 ## Workflow
 
-- Fork the repository and create a branch named `codex/<feature>`.
-- Install dependencies and set up pre-commit:
-  ```bash
-  npm ci
-  pre-commit install
-  ```
-- Run the full check suite before pushing:
-  ```bash
-  pre-commit run --all-files
-  ```
-- Open a pull request with a clear description and references to any issues.
+- Fork the repository and create a feature branch.
+- Install tooling:
+
+```bash
+pip install pre-commit pyspelling linkchecker
+sudo apt-get install aspell
+pre-commit install
+```
+
+- Run all checks before committing:
+
+```bash
+pre-commit run --all-files
+pyspelling -c .spellcheck.yaml
+linkchecker README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
+```
+
+- Use the commit format `emoji : summary` with a short body.
+- Open a pull request once CI passes.
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
-By participating you agree to uphold its terms.
+All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md).
