@@ -41,22 +41,24 @@ Display the worker join token:
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
-Keep this token handy; it's stored at
-`/var/lib/rancher/k3s/server/node-token` if you need it later.
+The token is stored at `/var/lib/rancher/k3s/server/node-token`; copy it for
+later.
 
-Boot the remaining Pis and join them as workers once they can ping the
-control-plane node. Use the token printed on the server (also stored at
-`/var/lib/rancher/k3s/server/node-token`) and run the installer as root:
+Boot the remaining Pis once they can reach the control-plane node. Replace
+`<server-ip>` with the control-plane's IP and `<node-token>` with the value
+above, then run the installer as root:
 
 ```sh
 curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<node-token> sh -
 ```
 
-Verify the cluster:
+Watch the nodes join:
 
 ```sh
-sudo kubectl get nodes
+sudo kubectl get nodes -w
 ```
+
+Press <kbd>Ctrl</kbd>+<kbd>C</kbd> once all nodes show `Ready` to exit the watch.
 
 ## Manage from a workstation
 
