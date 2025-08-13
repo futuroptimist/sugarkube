@@ -35,4 +35,4 @@ jobs:
         with:
           name: workflow-logs
           path: ${{ runner.temp }}/_github_workflow
-          if-no-files-found: ignore
+          if-no-files-found: warn
