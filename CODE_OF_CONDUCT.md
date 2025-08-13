@@ -43,4 +43,3 @@ Conduct:
 This Code of Conduct is adapted from the [Contributor Covenant][homepage].
 
 [homepage]: https://www.contributor-covenant.org
-
