@@ -41,5 +41,5 @@ cmd=(openscad -o "$output" --export-format binstl)
 if [ -n "${STANDOFF_MODE:-}" ]; then
   cmd+=(-D "standoff_mode=\"${STANDOFF_MODE}\"")
 fi
-cmd+=("$FILE")
+cmd+=(-- "$FILE")
 "${cmd[@]}"

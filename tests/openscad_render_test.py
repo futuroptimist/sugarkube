@@ -1,5 +1,6 @@
 import os
 import subprocess
+from pathlib import Path
 
 
 def test_script_respects_model_default(tmp_path):
@@ -132,3 +133,35 @@ def test_errors_when_standoff_mode_invalid():
     )
     assert result.returncode != 0
     assert "Invalid STANDOFF_MODE" in result.stderr
+
+
+def test_handles_leading_dash_filename(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log_file = tmp_path / "args.log"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        """#!/usr/bin/env bash
+printf '%s ' "$@" > "$LOG_FILE"
+"""
+    )
+    openscad.chmod(0o755)
+
+    scad = tmp_path / "-model.scad"
+    scad.write_text("cube();")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["LOG_FILE"] = str(log_file)
+
+    script = Path(__file__).resolve().parents[1] / "scripts/openscad_render.sh"
+    subprocess.run(
+        ["bash", str(script), str(scad)],
+        check=True,
+        env=env,
+        cwd=tmp_path,
+    )
+
+    args = log_file.read_text().strip().split()
+    assert "--" in args
+    assert args[args.index("--") + 1] == str(scad)
