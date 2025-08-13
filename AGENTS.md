@@ -4,7 +4,7 @@ This repository uses lightweight LLM helpers inspired by the [flywheel](https://
 
 The name **sugarkube** has two meanings:
 
-1. The physical aluminium cube with solar panels that houses a Pi-based k3s
+1. The physical aluminum cube with solar panels that houses a Pi-based k3s
    cluster.
    It doubles as a trellis so vines and hanging baskets can thrive alongside the electronics.
 2. "Syntactic sugar for Kubernetes"—the helper scripts and automation that make

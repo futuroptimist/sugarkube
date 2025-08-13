@@ -1,6 +1,6 @@
 # Build Guide
 
-This project uses 20x20 aluminium extrusion to suspend four 100 W solar panels around a cube.
+This project uses 20x20 aluminum extrusion to suspend four 100 W solar panels around a cube.
 The battery, charge controller, and electronics mount inside a marine battery box and a small
 junction box.
 

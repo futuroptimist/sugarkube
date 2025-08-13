@@ -111,7 +111,7 @@ KiCad
 LiFePO4
 MPPT
 Victron
-aluminium
+aluminum
 sugarkube
 LiFePO
 heatset

@@ -3,13 +3,15 @@ matrix:
   - name: markdown
     sources:
       - README.md
+      - CONTRIBUTING.md
+      - CODE_OF_CONDUCT.md
       - docs/**/*.md
     dictionary:
       wordlists:
         - .wordlist.txt
     aspell:
       lang: en
-      d: en_US
+      d: en_US  # enforce U.S. English
     pipeline:
       - pyspelling.filters.markdown
       - pyspelling.filters.html:
