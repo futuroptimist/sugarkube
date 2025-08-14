@@ -35,7 +35,7 @@ assert(screw_length >= required_len,
 
 /* ---------- STANDOFF & INSERT OPTIONS ---------- */
 standoff_height = 6;             // pillar height under PCB (mm)
-standoff_diam   = 6;             // outer diameter of standoff (mm)
+standoff_diam   = 6.5;           // increased for added strength (mm)
 
 /* Choose one of:
  *  "printed"   → generate printable ISO metric threads (M2.5)
