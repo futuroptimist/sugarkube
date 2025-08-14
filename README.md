@@ -44,12 +44,12 @@ pre-commit run --all-files
 ```
 
 If you update documentation, install spell-check tools and verify spelling and links.
-`pyspelling` relies on `aspell`, so make sure it is installed as well. pre-commit runs
-these checks and fails if spelling or links are broken:
+`pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). Ensure they are
+installed. pre-commit runs these checks and fails if spelling or links are broken:
 
 ```bash
 pip install pyspelling linkchecker
-sudo apt-get install aspell
+sudo apt-get install aspell aspell-en
 pyspelling -c .spellcheck.yaml
 linkchecker README.md docs/
 ```
