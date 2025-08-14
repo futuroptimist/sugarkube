@@ -10,6 +10,7 @@
 size          = 40;           // leg length (mm)
 thickness     = 6;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
+edge_radius   = 1;            // rounding radius for outer edges (mm)
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
 gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
@@ -28,9 +29,23 @@ assert(gusset_size <= size,
        "gusset_size must be ≤ leg length");
 assert(insert_length + chamfer <= thickness,
        "insert_length + chamfer must be ≤ thickness");
+assert(edge_radius*2 <= min([beam_width, size, thickness]),
+       "edge_radius too large for given dimensions");
 
 // read from CLI (-D standoff_mode="printed"/"heatset")
 standoff_mode = "heatset";
+
+/* rounded cube helper */
+module rounded_cube(dims, r)
+{
+  if (r <= 0)
+    cube(dims);
+  else
+    minkowski() {
+      cube([dims[0]-2*r, dims[1]-2*r, dims[2]-2*r]);
+      sphere(r);
+    }
+}
 
 module l_bracket()
 {
@@ -38,11 +53,11 @@ module l_bracket()
     /* build the two legs */
     union() {
       // base leg lying flat (XY plane)
-      cube([beam_width, size, thickness]);
+      rounded_cube([beam_width, size, thickness], edge_radius);
 
       // vertical leg (XZ plane)
       translate([0, size - thickness, 0])
-        cube([beam_width, thickness, size]);
+        rounded_cube([beam_width, thickness, size], edge_radius);
 
       // optional gusset to reinforce the corner
       if (gusset)

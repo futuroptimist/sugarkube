@@ -19,7 +19,8 @@ the docs you will see the term used in both contexts.
 ## Repository layout
 
 - `cad/` — OpenSCAD models of structural parts.  See `docs/pi_cluster_carrier.md` for the
-  Pi carrier plate and `cad/solar_cube/panel_bracket.scad` for the solar panel bracket.
+  Pi carrier plate and `cad/solar_cube/panel_bracket.scad` for the solar panel bracket
+  with an `edge_radius` parameter to round its outer edges.
 - `elex/` — KiCad and Fritzing electronics schematics including the `power_ring` board (see `elex/power_ring/specs.md`)
 - `docs/` — build instructions, safety notes, and learning resources
 - `docs/solar_basics.md` — introduction to how solar panels generate power
