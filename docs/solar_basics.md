@@ -20,8 +20,15 @@ Silicon cells generate a voltage when exposed to light. Cells are wired in serie
 - **Parallel** connections add current but keep voltage the same.
 - Use outdoor‑rated connectors and wire gauges sized for the expected current.
 
+### Charge Controllers
+Never connect panels directly to a battery. Route them through a charge controller
+which regulates voltage and prevents overcharging. Attach the controller to the battery first,
+then connect the panel leads so the controller powers up safely.
+
 ## Example Budget
 Four 100 W panels wired in parallel can deliver roughly 20 A at 18 V to the charge controller.
 Over a six‑hour sunny day this yields about 2 kWh (20 A × 18 V × 6 h ≈ 2.1 kWh).
 
 That energy then charges the battery and powers small loads like an aquarium pump or Raspberry Pi.
+
+See [power_system_design.md](power_system_design.md) for guidance on sizing batteries and selecting a controller.
