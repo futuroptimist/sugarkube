@@ -19,7 +19,8 @@ insert_od         = 5.0;      // brass insert outer Ø (mm)
 insert_length     = 5.0;
 insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
-screw_clearance   = 5.2;      // through-hole Ø for M5 (mm)
+screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
+screw_clearance   = screw_nominal + 0.2; // through-hole Ø with clearance (mm)
 chamfer           = 0.8;      // lead-in chamfer (mm)
 
 assert(insert_length < thickness,
