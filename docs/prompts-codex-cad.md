@@ -26,7 +26,7 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
    bash scripts/openscad_render.sh <path/to.scad> # defaults to heatset
-   STANDOFF_MODE=printed bash scripts/openscad_render.sh <path/to.scad>
+   STANDOFF_MODE=printed bash scripts/openscad_render.sh <path/to.scad> # case-insensitive
 4. Commit updated SCAD sources and any documentation.
 
 OUTPUT:

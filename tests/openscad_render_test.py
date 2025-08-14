@@ -144,6 +144,38 @@ def test_errors_when_standoff_mode_invalid():
     assert "Invalid STANDOFF_MODE" in result.stderr
 
 
+def test_standoff_mode_case_insensitive(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log_file = tmp_path / "args.log"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        """#!/usr/bin/env bash
+printf '%s ' "$@" > "$LOG_FILE"
+""",
+    )
+    openscad.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["LOG_FILE"] = str(log_file)
+    env["STANDOFF_MODE"] = "PRINTED"
+
+    subprocess.run(
+        [
+            "bash",
+            "scripts/openscad_render.sh",
+            "cad/pi_cluster/pi_carrier.scad",
+        ],
+        check=True,
+        env=env,
+    )
+
+    args = log_file.read_text().split()
+    assert "-D" in args
+    assert 'standoff_mode="printed"' in args
+
+
 def test_handles_leading_dash_filename(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

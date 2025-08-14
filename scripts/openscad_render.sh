@@ -19,10 +19,12 @@ fi
 
 base=$(basename "$FILE" .scad)
 mode_suffix=""
+standoff_mode=""
 if [ -n "${STANDOFF_MODE:-}" ]; then
-  case "$STANDOFF_MODE" in
+  standoff_mode="${STANDOFF_MODE,,}"
+  case "$standoff_mode" in
     heatset|printed)
-      mode_suffix="_$STANDOFF_MODE"
+      mode_suffix="_$standoff_mode"
       ;;
     *)
       echo "Invalid STANDOFF_MODE: $STANDOFF_MODE (expected 'heatset' or 'printed')" >&2
@@ -38,8 +40,8 @@ fi
 output="stl/${base}${mode_suffix}.stl"
 mkdir -p "$(dirname "$output")"
 cmd=(openscad -o "$output" --export-format binstl)
-if [ -n "${STANDOFF_MODE:-}" ]; then
-  cmd+=(-D "standoff_mode=\"${STANDOFF_MODE}\"")
+if [ -n "$standoff_mode" ]; then
+  cmd+=(-D "standoff_mode=\"${standoff_mode}\"")
 fi
 cmd+=(-- "$FILE")
 "${cmd[@]}"
