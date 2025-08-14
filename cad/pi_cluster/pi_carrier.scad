@@ -16,7 +16,7 @@ hole_spacing_y = 49;
 plate_thickness = 2.0;
 corner_radius   = 5.0;  // round base corners to avoid sharp edges
 standoff_height = 6.0;
-standoff_diam = 6.5;   // increased for added strength
+standoff_diam = 7.0;   // widened for added insert grip
 
 insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert
