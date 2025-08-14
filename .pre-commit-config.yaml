@@ -18,6 +18,7 @@ repos:
           - pytest
           - pytest-cov
           - coverage
+          - pyspelling
           - linkchecker
           - requests
           - Flask

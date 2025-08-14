@@ -43,9 +43,9 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, install spell-check tools and verify spelling and links.
-`pyspelling` relies on `aspell`, so make sure it is installed as well. pre-commit runs
-these checks and fails if spelling or links are broken:
+If you update documentation, verify spelling and links. pre-commit installs
+`pyspelling` and `linkchecker` automatically but they require the `aspell` package.
+To run the checks manually outside pre-commit:
 
 ```bash
 pip install pyspelling linkchecker
