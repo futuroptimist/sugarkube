@@ -21,6 +21,8 @@ pyspelling -c .spellcheck.yaml
 linkchecker README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
 ```
 
+The pre-commit script also checks links in these files.
+
 - Use the commit format `emoji : summary` with a short body.
 - Open a pull request once CI passes.
 
