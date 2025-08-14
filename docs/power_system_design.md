@@ -7,7 +7,9 @@ Several chemistries are common in small solar installations:
 - **Lead-acid** (SLA or AGM) – inexpensive but heavy and less tolerant of deep discharge.
 - **LiFePO4** – lightweight and long-lived, ideal for off-grid electronics.
 
-Choose a capacity large enough for a day or two of autonomy. Multiply your daily watt-hour use by the number of backup days.
+Choose a capacity large enough for a day or two of autonomy.
+Multiply your daily watt-hour use by the number of backup days, then divide by the battery's usable
+depth of discharge (0.8 for LiFePO4, ~0.5 for lead-acid).
 
 ## Charge Controllers
 A controller regulates the energy from the panels into the battery.
