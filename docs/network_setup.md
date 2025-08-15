@@ -57,7 +57,13 @@ above, then run the installer as root:
 curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<node-token> sh -
 ```
 
-Watch the nodes join:
+After the script finishes, confirm the agent service started on the worker:
+
+```sh
+sudo systemctl status k3s-agent --no-pager
+```
+
+On the control-plane node, watch the cluster recognize each worker as it joins:
 
 ```sh
 sudo kubectl get nodes -w
