@@ -94,6 +94,7 @@ PETG
 explainer
 PLA
 STL
+STLs
 retightened
 http
 localhost
@@ -154,3 +155,6 @@ sudo
 systemctl
 
 AWG
+GPIO
+SCL
+SDA

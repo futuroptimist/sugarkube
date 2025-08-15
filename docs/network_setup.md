@@ -77,12 +77,15 @@ mkdir -p ~/.kube
 scp <user>@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 sed -i "s/127.0.0.1/<server-ip>/g" ~/.kube/config
 chmod 600 ~/.kube/config
+echo "export KUBECONFIG=$HOME/.kube/config" >> ~/.bashrc
 export KUBECONFIG=~/.kube/config
 kubectl get nodes
 ```
 
 The `sed` command swaps the default localhost address for the control-plane
-IP, and `kubectl get nodes` confirms your workstation can reach the cluster.
+IP. Appending the `KUBECONFIG` line to your shell profile makes the setting
+persistent, and `kubectl get nodes` confirms your workstation can reach the
+cluster.
 
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed

@@ -12,6 +12,7 @@ board_wid          = 56;         // Y-size of Pi-5 PCB  (mm)
 hole_spacing_x     = 58;         // long-direction hole spacing (mm)
 hole_spacing_y     = 49;         // short-direction hole spacing (mm)
 plate_thickness    = 4;          // base-plate thickness (mm)
+corner_radius     = 5;          // round base corners to avoid sharp edges
 
 gap_between_boards = 10;         // service gap between rotated PCBs (mm)
 
@@ -118,7 +119,10 @@ module standoff(pos=[0,0])
 /* ---------- PLATE BASE ---------- */
 difference()
 {
-    cube([plate_len, plate_wid, plate_thickness]);
+    linear_extrude(height=plate_thickness)
+        offset(r=corner_radius)
+            square([plate_len - 2*corner_radius,
+                    plate_wid - 2*corner_radius]);
 
     /* screw-head relief */
     head_r = 2.5;  // counterbore radius (5 mm diameter)
