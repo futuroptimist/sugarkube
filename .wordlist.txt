@@ -155,3 +155,6 @@ sudo
 systemctl
 
 AWG
+GPIO
+SCL
+SDA

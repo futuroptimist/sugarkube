@@ -19,8 +19,17 @@ bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
 STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
 ```
 
-Rotate the LCD or tweak offsets if your board slightly differs. The
-extra standoffs avoid the Pi mounting holes so you can add the display
-without enlarging the plate.
+## Enable I²C and Connect
+
+After printing the mount, enable the I²C interface and wire the display:
+
+1. On each Pi run `sudo raspi-config nonint do_i2c 0` or use `sudo raspi-config` and enable
+   I²C under *Interface Options*.
+2. Attach SDA to GPIO2 (pin 3) and SCL to GPIO3 (pin 5). Connect 5 V and ground to power the
+   module.
+3. Install `i2c-tools` and confirm the screen appears at `0x27` or `0x3F` with `i2cdetect -y 1`.
+
+Rotate the LCD or tweak offsets if your board slightly differs. The extra standoffs avoid the Pi
+mounting holes so you can add the display without enlarging the plate.
 
 Valid `STANDOFF_MODE` values are `heatset` (default) and `printed`. Values are case-insensitive.
