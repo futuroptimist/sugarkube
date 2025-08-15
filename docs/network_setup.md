@@ -69,16 +69,17 @@ Press <kbd>Ctrl</kbd>+<kbd>C</kbd> once all nodes show `Ready` to exit the watch
 
 To run `kubectl` from your laptop, ensure the
 [kubectl client is installed](https://kubernetes.io/docs/tasks/tools/#kubectl).
-Copy the kubeconfig generated on the control-plane node, update its
-server address, and verify access:
+Copy the kubeconfig generated on the control-plane node (it's owned by
+`root`, so fetch it using the `root` account), update its server
+address, and verify access:
 
 ```sh
 mkdir -p ~/.kube
-scp <user>@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
+scp root@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 sed -i "s/127.0.0.1/<server-ip>/g" ~/.kube/config
 chmod 600 ~/.kube/config
 echo "export KUBECONFIG=$HOME/.kube/config" >> ~/.bashrc
-export KUBECONFIG=~/.kube/config
+source ~/.bashrc
 kubectl get nodes
 ```
 
