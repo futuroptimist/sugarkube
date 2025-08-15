@@ -48,7 +48,8 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, install spell-check tools and verify spelling and links.
+If you update documentation, install spell-check tools and verify spelling and links,
+including `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`.
 `pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). Ensure they are
 installed. pre-commit runs these checks and fails if spelling or links are broken:
 
@@ -56,7 +57,7 @@ installed. pre-commit runs these checks and fails if spelling or links are broke
 pip install pyspelling linkchecker
 sudo apt-get install aspell aspell-en
 pyspelling -c .spellcheck.yaml
-linkchecker README.md docs/
+linkchecker --no-warnings README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
 ```
 
 STL files are produced automatically by CI for each OpenSCAD model and can be
