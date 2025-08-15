@@ -18,18 +18,21 @@ the docs you will see the term used in both contexts.
 
 ## Repository layout
 
-- `cad/` — OpenSCAD models of structural parts.  See `docs/pi_cluster_carrier.md` for the
-  Pi carrier plate and `cad/solar_cube/panel_bracket.scad` for the solar panel bracket
-  with an `edge_radius` parameter to round its outer edges and `standoff_mode`
-  options for `printed`, `heatset` or `nut` fasteners.
-- `elex/` — KiCad and Fritzing electronics schematics including the `power_ring` board (see `elex/power_ring/specs.md`)
+- `cad/` — OpenSCAD models of structural parts. See
+  [docs/pi_cluster_carrier.md](docs/pi_cluster_carrier.md) for the Pi carrier plate and
+  [cad/solar_cube/panel_bracket.scad](cad/solar_cube/panel_bracket.scad) for the solar
+  panel bracket with an `edge_radius` parameter to round its outer edges.
+- `elex/` — KiCad and Fritzing electronics schematics including the `power_ring`
+  board (see [elex/power_ring/specs.md](elex/power_ring/specs.md))
 - `docs/` — build instructions, safety notes, and learning resources
-- `docs/solar_basics.md` — introduction to how solar panels generate power
-- `docs/electronics_basics.md` — essential circuits and tools
-- `docs/power_system_design.md` — sizing batteries and charge controllers
-- `docs/insert_basics.md` — guide for heat-set inserts and printed threads
-- `docs/network_setup.md` — connect the Pi cluster to your network
-- `docs/lcd_mount.md` — optional 1602 LCD standoff locations
+- [docs/solar_basics.md](docs/solar_basics.md) — introduction to how solar panels generate
+  power
+- [docs/electronics_basics.md](docs/electronics_basics.md) — essential circuits and tools
+- [docs/power_system_design.md](docs/power_system_design.md) — sizing batteries and
+  charge controllers
+- [docs/insert_basics.md](docs/insert_basics.md) — guide for heat-set inserts and printed threads
+- [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
+- [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
 - `tests/` — quick checks for helper scripts and documentation
 
