@@ -7,5 +7,6 @@ This setup uses a 12 V LiFePO4 battery and outdoor wiring. Follow these precau
 - Disconnect the solar panels before wiring the controller to avoid live voltage.
 - Fuse the air pump branch at 15 A and the Raspberry Pi buck converter at 5 A.
 - Verify polarity with a multimeter before powering devices.
+- Disconnect the battery before working on wiring and remove metal jewelry to avoid shorts.
 - Route cables so water cannot drip onto connectors; use cable glands and strain relief.
 - Wear eye protection while crimping and avoid short circuits when working on the battery.
