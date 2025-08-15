@@ -10,7 +10,8 @@ junction box.
 2. Assemble the extrusion cube using M5 hardware.
 3. Mount the solar panels using the printed brackets.
    Each has a gusset that stiffens the corner.
-4. Attach the battery leads to the MPPT charge controller before any solar wiring. Refer to the
+4. Attach the battery leads to the MPPT charge controller before any solar wiring.
+   Install a 60 A fuse within 18 cm (7 in) of the battery's positive terminal and refer to the
    controller's manual for the recommended connection order. The KiCad schematic and board specs
    live under [elex/power_ring](../elex/power_ring/).
 5. Before connecting the array, verify each panel's open-circuit voltage and polarity with a
