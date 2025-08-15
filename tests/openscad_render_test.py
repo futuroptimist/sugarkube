@@ -206,3 +206,35 @@ printf '%s ' "$@" > "$LOG_FILE"
     args = log_file.read_text().strip().split()
     assert "--" in args
     assert args[args.index("--") + 1] == str(scad)
+
+
+def test_accepts_uppercase_extension(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log_file = tmp_path / "args.log"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        """#!/usr/bin/env bash
+printf '%s ' "$@" > "$LOG_FILE"
+""",
+    )
+    openscad.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["LOG_FILE"] = str(log_file)
+
+    scad = tmp_path / "MODEL.SCAD"
+    scad.write_text("cube();")
+
+    script = Path(__file__).resolve().parents[1] / "scripts/openscad_render.sh"
+    subprocess.run(
+        ["bash", str(script), str(scad)],
+        check=True,
+        env=env,
+        cwd=tmp_path,
+    )
+
+    args = log_file.read_text().split()
+    output = args[args.index("-o") + 1]
+    assert output == "stl/MODEL.stl"

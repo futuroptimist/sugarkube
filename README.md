@@ -72,6 +72,7 @@ and `printed` are accepted.
 The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
 It also separates options from the file path with `--`, allowing filenames that begin with a dash.
+The `.scad` extension is matched case-insensitively, so `MODEL.SCAD` works too.
 
 ## Community
 

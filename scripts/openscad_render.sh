@@ -11,13 +11,13 @@ if [ ! -f "$FILE" ]; then
   echo "File not found: $FILE" >&2
   exit 1
 fi
-
-if [[ "$FILE" != *.scad ]]; then
+ext="${FILE##*.}"
+if [[ "${ext,,}" != scad ]]; then
   echo "Expected .scad file: $FILE" >&2
   exit 1
 fi
 
-base=$(basename "$FILE" .scad)
+base=$(basename "$FILE" ".$ext")
 mode_suffix=""
 standoff_mode=""
 if [ -n "${STANDOFF_MODE:-}" ]; then
