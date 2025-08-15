@@ -2,6 +2,10 @@
 ### Added
 * pi_carrier: rounded base corners via new `corner_radius` parameter
 * panel_bracket: parameterise screw size via `screw_nominal`
+* panel_bracket: add `nut` standoff_mode for captive hex recess
+
+### Changed
+* panel_bracket: increase default edge radius to 2 mm for smoother corners
 
 ### Fixed
 * pi_carrier: standoff length increased from 20 mm to 22 mm (flush fit with PoE HAT)

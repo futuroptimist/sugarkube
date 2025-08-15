@@ -1,16 +1,17 @@
 /*
   Parametric L-bracket for mounting solar panels to 2020 extrusion
 
-  Generates two variants:
+  Generates three variants:
     standoff_mode="printed" → through-hole for machine screw
     standoff_mode="heatset" → blind hole sized for brass insert
+    standoff_mode="nut"     → through-hole with hex recess
   A variable of that name is passed in by the CI render script.
 */
 
 size          = 40;           // leg length (mm)
 thickness     = 6;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
-edge_radius   = 1;            // rounding radius for outer edges (mm)
+edge_radius   = 2;            // rounding radius for outer edges (mm)
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
 gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
@@ -23,6 +24,8 @@ insert_hole_diam  = insert_od - insert_clearance;
 screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
 screw_clearance   = screw_nominal + 0.2; // through-hole Ø with clearance (mm)
 chamfer           = 0.8;      // lead-in chamfer (mm)
+nut_flat          = 8.0;      // across flats for M5 nut (mm)
+nut_thick         = 4.0;      // nut thickness (mm)
 
 assert(insert_length < thickness,
        "insert_length must be < thickness to maintain a blind hole");
@@ -32,8 +35,10 @@ assert(insert_length + chamfer <= thickness,
        "insert_length + chamfer must be ≤ thickness");
 assert(edge_radius*2 <= min([beam_width, size, thickness]),
        "edge_radius too large for given dimensions");
+assert(nut_thick <= thickness,
+       "nut_thick must be ≤ thickness");
 
-// read from CLI (-D standoff_mode="printed"/"heatset")
+// read from CLI (-D standoff_mode="printed"/"heatset"/"nut")
 standoff_mode = "heatset";
 
 /* rounded cube helper */
@@ -83,6 +88,16 @@ module l_bracket()
             cylinder(h=chamfer, r1=screw_clearance/2 + chamfer,
                      r2=screw_clearance/2, $fn=32);
           // top chamfer
+          translate([0,0,thickness - chamfer + 0.1])
+            cylinder(h=chamfer, r1=screw_clearance/2,
+                     r2=screw_clearance/2 + chamfer, $fn=32);
+        }
+      } else if (standoff_mode == "nut") {
+        // through-hole with captive hex recess on underside
+        union() {
+          cylinder(h=thickness + 0.2, r=screw_clearance/2, $fn=32);
+          translate([0,0,-nut_thick + 0.1])
+            cylinder(h=nut_thick, r=nut_flat/(2*cos(30)), $fn=6);
           translate([0,0,thickness - chamfer + 0.1])
             cylinder(h=chamfer, r1=screw_clearance/2,
                      r2=screw_clearance/2 + chamfer, $fn=32);
