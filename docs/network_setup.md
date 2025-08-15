@@ -81,6 +81,8 @@ export KUBECONFIG=~/.kube/config
 kubectl get nodes
 ```
 
+On macOS, run `sed -i '' "s/127.0.0.1/<server-ip>/g" ~/.kube/config` to avoid creating a backup file.
+
 The `sed` command swaps the default localhost address for the control-plane
 IP, and `kubectl get nodes` confirms your workstation can reach the cluster.
 
