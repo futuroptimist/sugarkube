@@ -17,7 +17,7 @@ if [[ "${ext,,}" != scad ]]; then
   exit 1
 fi
 
-base=$(basename "$FILE" ".$ext")
+base=$(basename -- "$FILE" ".$ext")
 mode_suffix=""
 standoff_mode=""
 if [ -n "${STANDOFF_MODE:-}" ]; then
