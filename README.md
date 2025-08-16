@@ -55,7 +55,8 @@ installed. pre-commit runs these checks and fails if spelling or links are broke
 
 ```bash
 pip install pyspelling linkchecker
-sudo apt-get install aspell aspell-en
+sudo apt-get install aspell aspell-en  # Debian/Ubuntu
+brew install aspell                    # macOS
 pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
 ```
