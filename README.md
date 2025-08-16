@@ -61,8 +61,9 @@ linkchecker --no-warnings README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
 ```
 
 STL files are produced automatically by CI for each OpenSCAD model and can be
-downloaded from the workflow run. Provide a `.scad` file path to render a
-variant locally:
+downloaded from the workflow run. Provide a single `.scad` file path to render a
+variant locally. The script exits with a usage message if extra arguments are
+supplied:
 
 ```bash
 bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
