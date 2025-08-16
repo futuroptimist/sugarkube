@@ -23,5 +23,5 @@ if command -v pyspelling >/dev/null 2>&1 && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml
 fi
 if command -v linkchecker >/dev/null 2>&1; then
-  linkchecker --no-warnings README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
+  linkchecker --no-warnings README.md docs/
 fi

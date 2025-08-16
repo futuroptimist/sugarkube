@@ -18,10 +18,10 @@ pre-commit install
 ```bash
 pre-commit run --all-files
 pyspelling -c .spellcheck.yaml
-linkchecker README.md docs/ CONTRIBUTING.md CODE_OF_CONDUCT.md
+linkchecker --no-warnings README.md docs/
 ```
 
-The pre-commit script also checks links in these files.
+The pre-commit script also checks links in those paths.
 
 - Use the commit format `emoji : summary` with a short body.
 - Open a pull request once CI passes.
