@@ -159,5 +159,8 @@ AWG
 GPIO
 SCL
 SDA
+Avahi
+Bonjour
+responder
 DHCP
 IPs
