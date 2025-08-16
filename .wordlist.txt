@@ -135,6 +135,7 @@ Shift
 Imager
 SSID
 hostname
+DHCP
 PoE
 HATs
 walkthrough

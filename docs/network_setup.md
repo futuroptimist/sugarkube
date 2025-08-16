@@ -13,10 +13,11 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
 6. Boot each Pi once to confirm it connects. From another machine run
    `ping <hostname>.local` and then `ssh <user>@<hostname>.local` to change the
-   default password with `passwd`. If mDNS fails, ensure your workstation
-   has an mDNS responder (Avahi on Linux, Bonjour on macOS/Windows) or use
-   the IP shown on your router's client list.
-7. For SSH logins without a password, generate a key if needed with
+   default password with `passwd`. If mDNS fails, use the IP shown on your
+   router's client list.
+7. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
+   consistent even if mDNS stops working.
+8. For SSH logins without a password, generate a key if needed with
    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
    `ssh-copy-id <user>@<hostname>.local`
 
