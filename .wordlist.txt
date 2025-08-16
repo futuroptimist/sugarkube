@@ -162,3 +162,5 @@ SDA
 Avahi
 Bonjour
 responder
+DHCP
+IPs
