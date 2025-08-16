@@ -71,6 +71,35 @@ def test_errors_when_arg_missing():
     assert "Usage:" in result.stderr
 
 
+def test_errors_when_extra_arg(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "called"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        f"""#!/usr/bin/env bash
+echo called > {marker}
+""",
+    )
+    openscad.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    scad = tmp_path / "model.scad"
+    scad.write_text("cube();")
+
+    result = subprocess.run(
+        ["bash", "scripts/openscad_render.sh", str(scad), "extra"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Usage:" in result.stderr
+    assert not marker.exists()
+
+
 def test_errors_when_openscad_missing(tmp_path):
     fake_path = tmp_path / "bin"
     fake_path.mkdir()

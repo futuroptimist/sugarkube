@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 path/to/model.scad" >&2
+if [ "$#" -ne 1 ]; then
+  echo "Usage: $(basename "$0") path/to/model.scad" >&2
   exit 1
 fi
 
