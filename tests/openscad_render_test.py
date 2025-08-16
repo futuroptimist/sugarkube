@@ -184,7 +184,7 @@ def test_handles_leading_dash_filename(tmp_path):
     openscad.write_text(
         """#!/usr/bin/env bash
 printf '%s ' "$@" > "$LOG_FILE"
-"""
+""",
     )
     openscad.chmod(0o755)
 
