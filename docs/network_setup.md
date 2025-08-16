@@ -15,8 +15,8 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    `ping <hostname>.local` and then `ssh <user>@<hostname>.local` to change the
    default password with `passwd`. If mDNS fails, use the IP shown on your
    router's client list.
-7. Reserve a DHCP address for each Pi in your router so their IPs stay
-   consistent for the cluster.
+7. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
+   consistent even if mDNS stops working.
 8. For SSH logins without a password, generate a key if needed with
    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
    `ssh-copy-id <user>@<hostname>.local`
