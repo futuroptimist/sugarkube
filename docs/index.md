@@ -17,6 +17,8 @@ Review the safety notes before working with power components.
 - [lcd_mount.md](lcd_mount.md) — optional 1602 LCD placement
 - [insert_basics.md](insert_basics.md) — heat-set inserts and printed threads
 - [network_setup.md](network_setup.md) — connect the cluster to your network
+- [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
+- [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work
@@ -30,3 +32,5 @@ Start with the basics and progress toward a fully autonomous solar cube.
 - [prompts-codex.md](prompts-codex.md) — baseline Codex instructions for maintaining the repo
 - [prompts-codex-cad.md](prompts-codex-cad.md) — keep OpenSCAD models rendering cleanly
 - [prompts-codex-docs.md](prompts-codex-docs.md) — refine build guides and reference docs
+- [prompts-codex-pi-image.md](prompts-codex-pi-image.md) — maintain the Pi image tooling
+- [prompts-codex-docker-repo.md](prompts-codex-docker-repo.md) — improve Docker repo guides
