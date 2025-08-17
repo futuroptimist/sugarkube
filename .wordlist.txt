@@ -173,3 +173,9 @@ preconfigure
 preloaded
 Dockerfile
 walkthroughs
+namespace
+namespaces
+NVMe
+SSDs
+KVM
+raspi

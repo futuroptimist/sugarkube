@@ -23,5 +23,5 @@ It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image u
 
 ## GitHub Actions
 
-Building a full OS image in CI is heavy. If GitHub Actions proves too slow,
-run `scripts/build_pi_image.sh` locally on a Linux machine with Docker.
+The `pi-image` workflow builds the OS image with `scripts/build_pi_image.sh` and uploads `sugarkube.img.xz` as an artifact.
+Download it from the Actions tab or run the script locally if you need customizations.
