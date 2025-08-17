@@ -18,6 +18,7 @@ Review the safety notes before working with power components.
 - [insert_basics.md](insert_basics.md) — heat-set inserts and printed threads
 - [network_setup.md](network_setup.md) — connect the cluster to your network
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
+- [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 
 ## Learn the Fundamentals
