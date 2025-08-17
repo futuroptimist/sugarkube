@@ -32,6 +32,11 @@ The name **sugarkube** has two meanings:
   requires **KiCad 9** so we use the `v2_k9` container tag.
 - **Logs:** workflow logs are uploaded as artifacts so non-admins can download failure details.
 
+## Outage Agent
+- **When:** a script or workflow fails repeatedly
+- **Does:** add a JSON record under `outages/` using `schema.json` describing the
+  root cause and resolution.
+
 ### STL generation
 STL meshes are not stored in the repository. The `scad-to-stl.yml` workflow renders them after each commit and exposes the files as downloadable artifacts.
 
