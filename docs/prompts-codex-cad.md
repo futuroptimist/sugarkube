@@ -20,6 +20,7 @@ CONTEXT:
 - Render each model in both `heatset` and `printed` modes.
 - Follow AGENTS.md and README.md for repository conventions.
 - Run `pre-commit run --all-files` after changes.
+- Log tool failures in `outages/` per `outages/schema.json`.
 
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
