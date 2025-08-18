@@ -25,6 +25,9 @@ scripts that provide "syntactic sugar" for Kubernetes.
 ## Schematics
 - [Power ring board](elex/power_ring/README.md)
 
+## Outages
+- Incident reports live in `outages/` as JSON following `outages/schema.json`.
+
 ## Optional
 - [AGENTS spec](https://agentsmd.net/AGENTS.md)
 - [llms.txt proposal](https://llmstxt.org/index.md)

@@ -19,6 +19,7 @@ CONTEXT:
 - Follow AGENTS.md for style and testing requirements.
 - Run `pre-commit run --all-files`; ensure `pyspelling` (requires `aspell` and `aspell-en`)
   and `linkchecker` succeed.
+- Record recurring issues in `outages/` using the JSON schema.
 
 REQUEST:
 1. Choose a markdown file in `docs/` that needs clarification or an update.

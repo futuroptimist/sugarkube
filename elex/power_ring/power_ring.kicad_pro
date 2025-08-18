@@ -470,7 +470,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "custom_pads_test.kicad_pro",
+    "filename": "power_ring.kicad_pro",
     "version": 3
   },
   "net_settings": {

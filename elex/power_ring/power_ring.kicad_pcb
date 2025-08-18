@@ -174,7 +174,7 @@
 			)
 		)
 		(path "/00000000-0000-0000-0000-000056a7cec8")
-		(sheetfile "Fichier: custom_pads_test.kicad_sch")
+            (sheetfile "Fichier: power_ring.kicad_sch")
 		(attr smd)
 		(fp_line
 			(start -4.8 -3.2)
@@ -343,7 +343,7 @@
 			)
 		)
 		(path "/00000000-0000-0000-0000-00005a3a4ef2")
-		(sheetfile "Fichier: custom_pads_test.kicad_sch")
+            (sheetfile "Fichier: power_ring.kicad_sch")
 		(attr smd)
 		(fp_line
 			(start -20 -10)
@@ -609,7 +609,7 @@
 			)
 		)
 		(path "/00000000-0000-0000-0000-00005a3a4e22")
-		(sheetfile "Fichier: custom_pads_test.kicad_sch")
+            (sheetfile "Fichier: power_ring.kicad_sch")
 		(fp_line
 			(start -20 -10)
 			(end 1.499999 -10)
@@ -1094,7 +1094,7 @@
 			)
 		)
 		(path "/00000000-0000-0000-0000-000056a7ce3b")
-		(sheetfile "Fichier: custom_pads_test.kicad_sch")
+           (sheetfile "Fichier: power_ring.kicad_sch")
 		(fp_circle
 			(center 0 0)
 			(end 12.065 -11.938)
