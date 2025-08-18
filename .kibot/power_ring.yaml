@@ -1,14 +1,17 @@
+kibot:
+  version: 1
+
 preflight: []
 outputs:
-  gerbers:
+  - name: gerbers
     type: gerber
     dir: gerbers
-  assembly:
+  - name: assembly
     type: position
     dir: fab
-  schematic:
-    type: schematic_pdf
+  - name: schematic
+    type: pdf_sch_print
     dir: fab
-  bom:
+  - name: bom
     type: bom
     dir: fab

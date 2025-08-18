@@ -1,0 +1,10 @@
+{
+  "id": "kicad-export-unknown-output-type",
+  "date": "2025-08-18",
+  "component": "kicad-export workflow",
+  "rootCause": "KiBot config used unsupported output type 'schematic_pdf', causing workflow failure.",
+  "resolution": "Renamed the schematic output to 'pdf_sch_print' in .kibot/power_ring.yaml.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/17030266883"
+  ]
+}

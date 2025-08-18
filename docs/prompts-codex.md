@@ -20,6 +20,7 @@ CONTEXT:
 - Run `pre-commit run --all-files` to lint, test and validate docs.
 - On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and
   `aspell-en`) and `linkchecker README.md docs/` succeed.
+- Log persistent failures in `outages/` as JSON per `outages/schema.json`.
 
 REQUEST:
 1. Identify a small bug fix or documentation clarification.

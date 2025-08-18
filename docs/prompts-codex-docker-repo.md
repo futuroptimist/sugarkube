@@ -19,6 +19,7 @@ CONTEXT:
 - The base image and tunnel setup live in `docs/pi_image_cloudflare.md`.
 - New walkthroughs belong in `docs/docker_repo_walkthrough.md`.
 - Run `pre-commit run --all-files`; ensure `pyspelling` and `linkchecker` pass.
+- File recurring deployment failures in `outages/` per `outages/schema.json`.
 
 REQUEST:
 1. Expand the walkthrough or add examples.
