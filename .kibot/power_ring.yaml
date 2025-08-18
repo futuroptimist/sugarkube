@@ -1,3 +1,6 @@
+kibot:
+  version: 1
+
 preflight: []
 outputs:
   gerbers:

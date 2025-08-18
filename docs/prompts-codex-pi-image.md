@@ -19,6 +19,7 @@ CONTEXT:
 - `scripts/build_pi_image.sh` builds an image locally or in CI.
 - `docs/pi_image_cloudflare.md` is the user guide.
 - Run `pre-commit run --all-files`; ensure `pyspelling` and `linkchecker` pass.
+- Document persistent build issues in `outages/` using the schema.
 
 REQUEST:
 1. Refine the image build script or cloud-init files.
