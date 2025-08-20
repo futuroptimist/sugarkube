@@ -8,7 +8,8 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 1. Download and launch [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 2. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open **advanced options**.
 3. Enter your WiFi **SSID** and **password**, enable **SSH**, and set a unique
-   hostname and user for each Pi.
+   hostname and user for each Pi. Optionally paste your SSH public key into the
+   *authorized keys* field to allow key-based logins on first boot.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
 6. Boot each Pi once to confirm it connects. From another machine run
@@ -17,7 +18,7 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    router's client list.
 7. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
    consistent even if mDNS stops working.
-8. For SSH logins without a password, generate a key if needed with
+8. If you skipped adding a key earlier, generate one with
    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
    `ssh-copy-id <user>@<hostname>.local`
 
