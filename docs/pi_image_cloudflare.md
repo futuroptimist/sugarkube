@@ -14,9 +14,11 @@ projects such as token.place and dspace.
 
 ## Checklist
 
-- [ ] Build or download a Raspberry Pi OS image.
+- [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh` now embeds
+      `scripts/cloud-init/user-data.yaml` and only uses `sudo` when required.
 - [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
-- [ ] Place `scripts/cloud-init/user-data.yaml` on the SD card's boot partition as `user-data`.
+- [ ] (Optional) If building the image manually, place `scripts/cloud-init/user-data.yaml`
+      on the SD card's boot partition as `user-data`.
 - [ ] Flash the image with Raspberry Pi Imager.
 - [ ] Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
 - [ ] Cloud-init writes `/opt/sugarkube/docker-compose.cloudflared.yml`; verify it exists.
