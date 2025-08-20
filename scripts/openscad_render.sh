@@ -21,7 +21,7 @@ base=$(basename -- "$FILE" ".$ext")
 mode_suffix=""
 standoff_mode=""
 if [ -n "${STANDOFF_MODE:-}" ]; then
-  standoff_mode="${STANDOFF_MODE,,}"
+  standoff_mode="$(printf '%s' "${STANDOFF_MODE,,}" | xargs)"
   case "$standoff_mode" in
     heatset|printed)
       mode_suffix="_$standoff_mode"

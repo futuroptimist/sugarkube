@@ -8,7 +8,8 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 1. Download and launch [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 2. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open **advanced options**.
 3. Enter your WiFi **SSID** and **password**, enable **SSH**, and set a unique
-   hostname and user for each Pi.
+   hostname and user for each Pi. Optionally paste your SSH public key into the
+   *authorized keys* field to allow key-based logins on first boot.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
 6. Boot each Pi once to confirm it connects. From another machine run
@@ -17,7 +18,7 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    router's client list.
 7. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
    consistent even if mDNS stops working.
-8. For SSH logins without a password, generate a key if needed with
+8. If you skipped adding a key earlier, generate one with
    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
    `ssh-copy-id <user>@<hostname>.local`
 
@@ -29,10 +30,15 @@ PoE+ (802.3at) you can power the Pis with PoE HATs; otherwise use USB‑C suppli
 ## Join the cluster
 
 Boot the control-plane Pi first. Once it appears on your router's client list,
-update the OS and install `k3s` on that node as root:
+update the OS, disable swap, and install `k3s` on that node as root:
 
 ```sh
 sudo apt update && sudo apt full-upgrade -y
+
+# Disable swap; k3s refuses to start if swap is active
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
 curl -sfL https://get.k3s.io | sh -
 
 # Ensure the service is running
@@ -49,7 +55,7 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
 The token is stored at `/var/lib/rancher/k3s/server/node-token`; copy it for
-later.
+later. Treat this token like a password and keep it private.
 
 Boot the remaining Pis once they can reach the control-plane node. Replace
 `<server-ip>` with the control-plane's IP and `<node-token>` with the value

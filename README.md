@@ -7,8 +7,13 @@
 [![Coverage](https://codecov.io/gh/futuroptimist/sugarkube/branch/main/graph/badge.svg)](https://codecov.io/gh/futuroptimist/sugarkube)
 [![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
 
-An accessible k3s platform for Raspberry Pis and other SBCs integrated with an off-grid solar setup. This repository also documents the solar cube art installation that powers aquarium air pumps and small computers.
-The cube also doubles as a living trellis. Climbing plants weave through the aluminium extrusions while shade-loving herbs thrive beneath the panels. Hanging baskets can clip onto the frame so the installation is surrounded by greenery.
+An accessible k3s platform for Raspberry Pis and SBCs, integrated with an off-grid solar setup.
+The repository also covers the solar cube art installation,
+which powers aquarium air pumps and small computers.
+The cube also doubles as a living trellis.
+Climbing plants weave through the aluminium extrusions while shade-loving herbs thrive
+beneath the panels.
+Hanging baskets can clip onto the frame so the installation is surrounded by greenery.
 
 ### What's in a name?
 
@@ -60,6 +65,8 @@ pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
 ```
 
+The `--no-warnings` flag avoids non-zero exits from benign Markdown parsing warnings.
+
 STL files are produced automatically by CI for each OpenSCAD model and can be
 downloaded from the workflow run. Provide a single `.scad` file path to render a
 variant locally. The script exits with a usage message if extra arguments are
@@ -71,8 +78,8 @@ STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_
 ```
 
 By default the script uses the model's `standoff_mode` value (`heatset`).
-Set `STANDOFF_MODE=printed` to generate 3D-printed threads. Values are case-insensitive; `heatset`
-and `printed` are accepted.
+Set `STANDOFF_MODE=printed` to generate 3D-printed threads. Values are case-insensitive and ignore
+surrounding whitespace; `heatset` and `printed` are accepted.
 
 The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.

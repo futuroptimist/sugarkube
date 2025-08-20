@@ -15,7 +15,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
-git clone --depth 1 https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
+PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
+git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
+  https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
 cp "${REPO_ROOT}/scripts/cloud-init/user-data.yaml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cd "${WORK_DIR}/pi-gen"

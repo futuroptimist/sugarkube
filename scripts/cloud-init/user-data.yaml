@@ -6,9 +6,18 @@ packages:
   - curl
   - git
   - cloudflared
+write_files:
+  - path: /opt/sugarkube/docker-compose.cloudflared.yml
+    permissions: '0644'
+    content: |
+      services:
+        tunnel:
+          image: cloudflare/cloudflared:latest
+          restart: unless-stopped
+          command: tunnel run
+          env_file:
+            - /opt/sugarkube/.cloudflared.env
 runcmd:
   - [bash, -c, 'usermod -aG docker pi']
-  - [bash, -c, 'mkdir -p /opt/sugarkube']
-  - [bash, -c, 'curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/cloud-init/docker-compose.cloudflared.yml -o /opt/sugarkube/docker-compose.cloudflared.yml']
   - [bash, -c, 'touch /opt/sugarkube/.cloudflared.env']
   - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
