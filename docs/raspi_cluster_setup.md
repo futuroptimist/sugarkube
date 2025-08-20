@@ -11,7 +11,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 - Optional KVM for shared keyboard, video, and mouse access
 
 ## Prerequisites
-- A workstation with [Raspberry Pi Imager](https://www.raspberrypi.org/software/) installed
+- A workstation with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) installed
 - Basic networking knowledge. Review [network_setup.md](network_setup.md) for static IPs
 - SSH client (e.g. `ssh` on macOS/Linux or PuTTY on Windows)
 - Internet connection to download images and packages
@@ -21,13 +21,15 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 2. Optional: verify the checksum with `sha256sum`
 3. Flash the image to a microSD card using Raspberry Pi Imager
    - Set hostname, enable SSH, and create a user with a strong password
+   - Use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to enter advanced options and configure WiFi SSID, password, and locale
    - The same image can be reused for all nodes
 
 ## 2. Boot and clone to SSD
 1. Insert the card into a Pi on the carrier and power on with monitor or KVM attached
 2. Verify the NVMe drive shows up: `lsblk`
-3. Clone the SD card to the SSD: `sudo rpi-clone sda -f`
-4. Shut down the Pi, remove the SD card, and power back on to confirm the SSD boots
+3. Install rpi-clone if missing: `sudo apt install -y rpi-clone`
+4. Clone the SD card to the SSD: `sudo rpi-clone sda -f`
+5. Shut down the Pi, remove the SD card, and power back on to confirm the SSD boots
 
 ## 3. Enable SSD boot (if needed)
 1. Run `sudo raspi-config` → Advanced Options → Boot Order → `NVMe/USB`

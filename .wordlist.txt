@@ -179,6 +179,7 @@ NVMe
 SSDs
 KVM
 raspi
+rpi
 PuTTY
 microSD
 filesystem
