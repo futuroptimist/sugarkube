@@ -2,12 +2,14 @@
 set -euo pipefail
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires Docker and roughly 10 GB of free disk space.
+# Requires Docker, xz and roughly 10 GB of free disk space.
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required" >&2
-  exit 1
-fi
+for cmd in docker xz; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "$cmd is required" >&2
+    exit 1
+  fi
+done
 
 # Use sudo only when not running as root. Some CI containers omit sudo.
 SUDO=""
@@ -36,5 +38,6 @@ ENABLE_SSH=1
 CFG
 ${SUDO} ./build.sh
 mv deploy/*.img "${REPO_ROOT}/sugarkube.img"
-ls -lh "${REPO_ROOT}/sugarkube.img"
-echo "Image written to ${REPO_ROOT}/sugarkube.img"
+xz -T0 "${REPO_ROOT}/sugarkube.img"
+ls -lh "${REPO_ROOT}/sugarkube.img.xz"
+echo "Image written to ${REPO_ROOT}/sugarkube.img.xz"
