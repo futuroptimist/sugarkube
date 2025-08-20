@@ -183,6 +183,7 @@ rpi
 PuTTY
 microSD
 filesystem
+whitespace
 fstab
 sed
 swapoff
