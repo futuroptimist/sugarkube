@@ -10,6 +10,7 @@ It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image u
 ## Checklist
 
 - [ ] Build or download a Raspberry Pi OS image.
+- [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
 - [ ] Place `scripts/cloud-init/user-data.yaml` on the SD card's boot partition as `user-data`.
 - [ ] Flash the image with Raspberry Pi Imager.
 - [ ] Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
@@ -23,5 +24,6 @@ It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image u
 
 ## GitHub Actions
 
-The `pi-image` workflow builds the OS image with `scripts/build_pi_image.sh` and uploads `sugarkube.img.xz` as an artifact.
+The `pi-image` workflow builds the OS image with `scripts/build_pi_image.sh`, compresses it to
+`sugarkube.img.xz` and uploads it as an artifact.
 Download it from the Actions tab or run the script locally if you need customizations.

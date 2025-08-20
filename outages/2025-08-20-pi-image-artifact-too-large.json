@@ -1,0 +1,10 @@
+{
+  "id": "pi-image-artifact-too-large",
+  "date": "2025-08-20",
+  "component": "pi-image workflow",
+  "rootCause": "Uncompressed Raspberry Pi image exceeded GitHub Actions artifact limit, blocking uploads.",
+  "resolution": "Updated build_pi_image.sh to compress the image with xz before uploading.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/blob/main/scripts/build_pi_image.sh"
+  ]
+}

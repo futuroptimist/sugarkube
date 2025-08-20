@@ -3,6 +3,7 @@ package_update: true
 packages:
   - docker.io
   - docker-compose-plugin
+  - curl
   - git
   - cloudflared
 runcmd:
