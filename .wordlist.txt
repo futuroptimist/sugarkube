@@ -182,3 +182,4 @@ raspi
 PuTTY
 microSD
 filesystem
+whitespace
