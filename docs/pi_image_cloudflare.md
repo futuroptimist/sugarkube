@@ -16,6 +16,7 @@ It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image u
 - [ ] Reboot and verify `/opt/sugarkube/docker-compose.cloudflared.yml` exists.
 - [ ] Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
 - [ ] Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
+- [ ] Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.
 - [ ] Clone target projects:
   - [ ] `git clone https://github.com/futuroptimist/token.place.git`
   - [ ] `git clone https://github.com/democratizedspace/dspace.git`
