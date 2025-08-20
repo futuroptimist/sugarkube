@@ -172,6 +172,7 @@ subdomain
 preconfigure
 preloaded
 Dockerfile
+Dockerfiles
 walkthroughs
 namespace
 namespaces
