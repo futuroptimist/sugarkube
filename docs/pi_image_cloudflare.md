@@ -5,7 +5,9 @@ Raspberry Pi deployment so it can host multiple projects such as
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace).
 
-It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image using `cloud-init`.
+It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image using
+`cloud-init`. The `build_pi_image.sh` script clones `pi-gen` using the `PI_GEN_BRANCH`
+environment variable, defaulting to `bookworm` for reproducible builds.
 
 ## Checklist
 
@@ -13,7 +15,7 @@ It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image u
 - [ ] Place `scripts/cloud-init/user-data.yaml` on the SD card's boot partition as `user-data`.
 - [ ] Flash the image with Raspberry Pi Imager.
 - [ ] Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
-- [ ] Reboot and verify `/opt/sugarkube/docker-compose.cloudflared.yml` exists.
+- [ ] Cloud-init writes `/opt/sugarkube/docker-compose.cloudflared.yml`; verify it exists.
 - [ ] Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
 - [ ] Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
 - [ ] Clone target projects:
@@ -23,5 +25,6 @@ It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image u
 
 ## GitHub Actions
 
-The `pi-image` workflow builds the OS image with `scripts/build_pi_image.sh` and uploads `sugarkube.img.xz` as an artifact.
-Download it from the Actions tab or run the script locally if you need customizations.
+The `pi-image` workflow builds the OS image with `scripts/build_pi_image.sh` and
+uploads `sugarkube.img.xz` as an artifact. Download it from the Actions tab or run
+the script locally if you need customizations.
