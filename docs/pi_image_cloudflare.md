@@ -6,6 +6,9 @@ Raspberry Pi deployment so it can host multiple projects such as
 [dspace](https://github.com/democratizedspace/dspace).
 
 It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image using `cloud-init`.
+Use the prepared image to deploy containerized apps. The companion guide
+[docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
+projects such as token.place and dspace.
 
 ## Checklist
 
