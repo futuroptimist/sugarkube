@@ -1,0 +1,10 @@
+{
+  "id": "pi-image-build-sudo-missing",
+  "date": "2025-08-20",
+  "component": "pi-image build script",
+  "rootCause": "build_pi_image.sh always invoked sudo, failing in minimal containers that lack sudo",
+  "resolution": "script now detects root execution and only uses sudo when necessary",
+  "references": [
+    "scripts/build_pi_image.sh"
+  ]
+}
