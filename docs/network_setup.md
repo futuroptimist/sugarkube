@@ -29,10 +29,15 @@ PoE+ (802.3at) you can power the Pis with PoE HATs; otherwise use USB‑C suppli
 ## Join the cluster
 
 Boot the control-plane Pi first. Once it appears on your router's client list,
-update the OS and install `k3s` on that node as root:
+update the OS, disable swap, and install `k3s` on that node as root:
 
 ```sh
 sudo apt update && sudo apt full-upgrade -y
+
+# Disable swap; k3s refuses to start if swap is active
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
 curl -sfL https://get.k3s.io | sh -
 
 # Ensure the service is running
