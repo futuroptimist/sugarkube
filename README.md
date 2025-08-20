@@ -65,6 +65,8 @@ pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
 ```
 
+The `--no-warnings` flag avoids non-zero exits from benign Markdown parsing warnings.
+
 STL files are produced automatically by CI for each OpenSCAD model and can be
 downloaded from the workflow run. Provide a single `.scad` file path to render a
 variant locally. The script exits with a usage message if extra arguments are
