@@ -21,6 +21,8 @@ pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
 ```
 
+The `--no-warnings` flag suppresses parse warnings so the command exits cleanly.
+
 The pre-commit script also checks links in those paths.
 
 - Use the commit format `emoji : summary` with a short body.

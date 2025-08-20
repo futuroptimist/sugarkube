@@ -22,7 +22,7 @@ steps work for any repository.
    Replace the URLs with any other repository that contains a `Dockerfile`.
 
 ## 3. Build or start containers
-1. Change into the repo directory: `cd token.place`.
+1. Change into the repo directory.
 2. If the repo provides `docker-compose.yml`:
    ```sh
    cp .env.example .env   # if the project uses an env file
@@ -30,10 +30,28 @@ steps work for any repository.
    ```
 3. If the repo only has a `Dockerfile`:
    ```sh
-   docker build -t tokenplace .
-   docker run -d --name tokenplace -p 3000:3000 tokenplace
+   docker build -t myapp .
+   docker run -d --name myapp -p 8080:8080 myapp
    ```
    Adjust port numbers and image names to match the project.
+
+### Examples
+
+#### token.place (single Dockerfile)
+
+```sh
+cd /opt/projects/token.place
+docker build -f docker/Dockerfile.server -t tokenplace .
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+```
+
+#### dspace (docker-compose)
+
+```sh
+cd /opt/projects/dspace/frontend
+cp .env.example .env  # if present
+docker compose up -d
+```
 
 ## 4. Expose services through Cloudflare
 1. Edit `/opt/sugarkube/docker-compose.cloudflared.yml` and add a new
