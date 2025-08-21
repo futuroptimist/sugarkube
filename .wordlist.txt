@@ -187,6 +187,8 @@ whitespace
 fstab
 sed
 swapoff
+CI
+ci
 
 kibot
 yaml
