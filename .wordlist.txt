@@ -187,3 +187,5 @@ whitespace
 fstab
 sed
 swapoff
+CI
+ci
