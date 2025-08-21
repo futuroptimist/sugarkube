@@ -187,3 +187,8 @@ whitespace
 fstab
 sed
 swapoff
+
+kibot
+yaml
+kicad
+KiBot
