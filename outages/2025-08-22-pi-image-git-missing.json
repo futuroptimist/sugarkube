@@ -1,0 +1,11 @@
+{
+  "id": "2025-08-22-pi-image-git-missing",
+  "date": "2025-08-22",
+  "component": "pi-image",
+  "rootCause": "Pi image build script failed when git was absent",
+  "resolution": "Added git to build script's pre-flight checks and updated docs",
+  "references": [
+    "scripts/build_pi_image.sh",
+    "docs/pi_image_cloudflare.md"
+  ]
+}
