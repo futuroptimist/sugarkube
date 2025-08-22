@@ -74,6 +74,7 @@ solarpunk
 Futuroptimist's
 LLMs
 Anthropic
+aspell
 democratizedspace
 CLIs
 dir
