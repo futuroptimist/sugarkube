@@ -1,0 +1,10 @@
+{
+  "id": "kicad-export-missing-pcbnew-module",
+  "date": "2025-08-22",
+  "component": "kicad-export workflow",
+  "rootCause": "KiBot failed to import pcbnew because KiCad 7's Python module is incompatible with Python 3.12; project requires KiCad 9.",
+  "resolution": "Run KiBot in the KiCad 9 container or install a compatible pcbnew Python module.",
+  "references": [
+    "https://github.com/INTI-CMNB/kibot"
+  ]
+}

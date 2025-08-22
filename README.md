@@ -67,6 +67,10 @@ linkchecker --no-warnings README.md docs/
 
 The `--no-warnings` flag avoids non-zero exits from benign Markdown parsing warnings.
 
+If the repository includes a `package.json` but `npm` or `package-lock.json`
+are missing, `scripts/checks.sh` will warn and skip JavaScript-specific
+checks.
+
 STL files are produced automatically by CI for each OpenSCAD model and can be
 downloaded from the workflow run. Provide a single `.scad` file path to render a
 variant locally. The script exits with a usage message if extra arguments are
@@ -79,7 +83,8 @@ STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_
 
 By default the script uses the model's `standoff_mode` value (`heatset`).
 Set `STANDOFF_MODE=printed` to generate 3D-printed threads. Values are case-insensitive and ignore
-surrounding whitespace; `heatset` and `printed` are accepted.
+surrounding whitespace; `heatset` and `printed` are accepted. Supplying only
+whitespace uses the model's default `standoff_mode`.
 
 The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.

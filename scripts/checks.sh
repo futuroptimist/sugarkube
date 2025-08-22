@@ -8,17 +8,35 @@ black --check . --exclude ".venv/"
 
 # js checks
 if [ -f package.json ]; then
-  npm ci
-  npx playwright install --with-deps
-  npm run lint
-  npm run format:check
-  npm test -- --coverage
+  if command -v npm >/dev/null 2>&1; then
+    if [ -f package-lock.json ]; then
+      npm ci
+      npx playwright install --with-deps
+      npm run lint
+      npm run format:check
+      npm test -- --coverage
+    else
+      echo "package-lock.json not found, skipping JS checks" >&2
+    fi
+  else
+    echo "npm not found, skipping JS checks" >&2
+  fi
 fi
 
 # run tests
 pytest --cov=. --cov-report=xml --cov-report=term -q
 
 # docs checks
+if ! command -v aspell >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y aspell aspell-en
+  elif command -v brew >/dev/null 2>&1; then
+    brew install aspell
+  else
+    echo "aspell not found" >&2
+    exit 1
+  fi
+fi
 # Only run the spell checker when both `pyspelling` and its `aspell` backend
 # are available. Some environments (like minimal CI containers) do not include
 # the `aspell` binary by default which would cause `pyspelling` to error.  In
