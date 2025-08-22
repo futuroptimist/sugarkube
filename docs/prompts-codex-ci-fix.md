@@ -17,7 +17,7 @@ Diagnose and fix continuous integration failures so all checks pass.
 CONTEXT:
 - Follow AGENTS.md for workflow and testing requirements.
 - Run `pre-commit run --all-files` to reproduce failures; it executes `scripts/checks.sh`.
-- Ensure `pyspelling -c .spellcheck.yaml` and `linkchecker README.md docs/` succeed.
+- Ensure `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/` succeed.
 - Install missing dependencies with `pip` or `npm` as needed.
 
 REQUEST:

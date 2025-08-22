@@ -19,7 +19,7 @@ CONTEXT:
 - Follow AGENTS.md and README.md.
 - Run `pre-commit run --all-files` to lint, test and validate docs.
 - On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-  `aspell-en`) and `linkchecker README.md docs/` succeed.
+  `aspell-en`) and `linkchecker --no-warnings README.md docs/` succeed.
 - Log persistent failures in `outages/` as JSON per `outages/schema.json`.
 
 REQUEST:
