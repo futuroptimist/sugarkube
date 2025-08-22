@@ -194,3 +194,4 @@ kibot
 yaml
 kicad
 KiBot
+xz

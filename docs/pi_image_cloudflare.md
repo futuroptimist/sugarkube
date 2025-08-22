@@ -8,14 +8,18 @@ Raspberry Pi deployment so it can host multiple projects such as
 It bakes Docker, the compose plugin, and a Cloudflare Tunnel into the OS image
 using `cloud-init`. The `build_pi_image.sh` script clones `pi-gen` using the
 `PI_GEN_BRANCH` environment variable, defaulting to `bookworm` for reproducible
-builds. Use the prepared image to deploy containerized apps. The companion guide
+builds. Set `IMG_NAME` to override the output image name. The script verifies
+that Docker, git, and xz are installed. Use the prepared image to deploy
+containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace.
 
 ## Checklist
 
-- [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh` now embeds
-      `scripts/cloud-init/user-data.yaml` and only uses `sudo` when required.
+- [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh`
+      now embeds `scripts/cloud-init/user-data.yaml`, checks for Docker, git,
+      and xz, and only uses `sudo` when required. Set `IMG_NAME` to change the
+      image filename.
 - [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
 - [ ] (Optional) If building the image manually, place `scripts/cloud-init/user-data.yaml`
       on the SD card's boot partition as `user-data`.

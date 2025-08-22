@@ -1,0 +1,11 @@
+{
+  "id": "pi-image-git-missing",
+  "date": "2025-08-22",
+  "component": "build_pi_image.sh",
+  "rootCause": "pi-gen build failed because git was not installed in the environment.",
+  "resolution": "Added git to the required command check and updated documentation.",
+  "references": [
+    "scripts/build_pi_image.sh",
+    "docs/pi_image_cloudflare.md"
+  ]
+}
