@@ -19,6 +19,16 @@ fi
 pytest --cov=. --cov-report=xml --cov-report=term -q
 
 # docs checks
+if ! command -v aspell >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y aspell aspell-en
+  elif command -v brew >/dev/null 2>&1; then
+    brew install aspell
+  else
+    echo "aspell not found" >&2
+    exit 1
+  fi
+fi
 if command -v pyspelling >/dev/null 2>&1 && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml
 fi
