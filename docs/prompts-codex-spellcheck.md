@@ -17,7 +17,7 @@ Keep Markdown documentation free of spelling errors.
 CONTEXT:
 - Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`.
 - Add legitimate new words to `.wordlist.txt`.
-- Follow AGENTS.md and run `pre-commit run --all-files`; ensure `linkchecker README.md docs/` also passes.
+- Follow AGENTS.md and run `pre-commit run --all-files`; ensure `linkchecker --no-warnings README.md docs/` also passes.
 
 REQUEST:
 1. Run the spellcheck and review results.
