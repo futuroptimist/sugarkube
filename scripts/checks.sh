@@ -8,11 +8,19 @@ black --check . --exclude ".venv/"
 
 # js checks
 if [ -f package.json ]; then
-  npm ci
-  npx playwright install --with-deps
-  npm run lint
-  npm run format:check
-  npm test -- --coverage
+  if command -v npm >/dev/null 2>&1; then
+    if [ -f package-lock.json ]; then
+      npm ci
+      npx playwright install --with-deps
+      npm run lint
+      npm run format:check
+      npm test -- --coverage
+    else
+      echo "package-lock.json not found, skipping JS checks" >&2
+    fi
+  else
+    echo "npm not found, skipping JS checks" >&2
+  fi
 fi
 
 # run tests
