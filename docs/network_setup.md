@@ -16,9 +16,11 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    `ping <hostname>.local` and then `ssh <user>@<hostname>.local` to change the
    default password with `passwd`. If mDNS fails, use the IP shown on your
    router's client list.
-7. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
+7. After logging in, update packages so each Pi starts with the latest fixes:
+   `sudo apt update && sudo apt full-upgrade -y`
+8. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
    consistent even if mDNS stops working.
-8. If you skipped adding a key earlier, generate one with
+9. If you skipped adding a key earlier, generate one with
    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
    `ssh-copy-id <user>@<hostname>.local`
 
