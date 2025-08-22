@@ -22,9 +22,15 @@ projects such as token.place and dspace.
 - [ ] Flash the image with Raspberry Pi Imager.
 - [ ] Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
 - [ ] Cloud-init writes `/opt/sugarkube/docker-compose.cloudflared.yml`; verify it exists.
-- [ ] Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
-- [ ] Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
-- [ ] Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.
+- [ ] Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` as
+       `TUNNEL_TOKEN=<token>` and restrict the file with `chmod 600`.
+- [ ] Start the tunnel:
+       `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`
+       then watch the logs:
+       `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -f`.
+- [ ] Confirm the tunnel is running:
+      `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps`
+      should show `cloudflared` as `Up`.
 - [ ] Clone target projects:
   - [ ] `git clone https://github.com/futuroptimist/token.place.git`
   - [ ] `git clone https://github.com/democratizedspace/dspace.git`
