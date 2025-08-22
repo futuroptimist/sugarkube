@@ -1274,7 +1274,7 @@
 		(layer "Edge.Cuts")
 		(uuid "fe9dd4af-9c39-4231-b588-395a35cc7f25")
 	)
-	(gr_text "Test"
+	(gr_text "SugarKube"
 		(at 159.3 91.4 0)
 		(layer "F.Cu")
 		(uuid "e2ecccdd-5374-4255-9fc5-749bd4111d55")
