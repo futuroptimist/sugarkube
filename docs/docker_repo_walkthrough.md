@@ -34,6 +34,11 @@ steps work for any repository.
    docker run -d --name myapp -p 8080:8080 myapp
    ```
    Adjust port numbers and image names to match the project.
+4. Verify the service responds:
+   ```sh
+   docker ps
+   curl http://localhost:8080
+   ```
 
 ### Examples
 
@@ -43,6 +48,7 @@ steps work for any repository.
 cd /opt/projects/token.place
 docker build -f docker/Dockerfile.server -t tokenplace .
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+curl http://localhost:5000  # should return HTML
 ```
 
 #### dspace (docker-compose)
@@ -51,11 +57,21 @@ docker run -d --name tokenplace -p 5000:5000 tokenplace
 cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
+docker compose ps
+curl http://localhost:3000
 ```
 
 ## 4. Expose services through Cloudflare
 1. Edit `/opt/sugarkube/docker-compose.cloudflared.yml` and add a new
-   `ingress` rule mapping a subdomain to the container's port.
+   `ingress` rule mapping a subdomain to the container's port. Example:
+   ```yaml
+   ingress:
+     - hostname: tokenplace.example.com
+       service: http://localhost:5000
+     - hostname: dspace.example.com
+       service: http://localhost:3000
+     - service: http_status:404
+   ```
 2. Restart the tunnel:
    ```sh
    docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
@@ -66,5 +82,15 @@ docker compose up -d
 - List running containers: `docker ps`.
 - Stop a container: `docker stop tokenplace`.
 - View logs: `docker compose logs -f`.
+
+## 6. Update services
+1. Pull the latest code:
+   ```sh
+   cd /opt/projects/<repo>
+   git pull
+   ```
+2. Rebuild and restart:
+   - Compose project: `docker compose up -d --build`
+   - Single Dockerfile: `docker build -t myapp . && docker restart myapp`
 
 Repeat these steps for each repository you want to deploy.
