@@ -23,6 +23,9 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 9. If you skipped adding a key earlier, generate one with
    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
    `ssh-copy-id <user>@<hostname>.local`
+10. After verifying key-based SSH access, disable password logins for security.
+    Edit `/etc/ssh/sshd_config` to set `PasswordAuthentication no` and restart
+    the service: `sudo systemctl restart ssh`.
 
 ## Switch and PoE
 
