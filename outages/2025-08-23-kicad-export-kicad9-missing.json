@@ -1,0 +1,11 @@
+{
+  "id": "kicad-export-kicad9-missing",
+  "date": "2025-08-23",
+  "component": "kicad-export",
+  "rootCause": "kibot failed: KiCad 7 cannot open KiCad 9 project files, leading to 'Error loading PCB file'",
+  "resolution": "Install KiCad 9 and ensure its Python modules are on PYTHONPATH to allow KiBot exports",
+  "references": [
+    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml",
+    "kibot-check"
+  ]
+}
