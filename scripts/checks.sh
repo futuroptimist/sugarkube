@@ -33,8 +33,7 @@ if ! command -v aspell >/dev/null 2>&1; then
   elif command -v brew >/dev/null 2>&1; then
     brew install aspell
   else
-    echo "aspell not found" >&2
-    exit 1
+    echo "aspell not found, skipping spell check" >&2
   fi
 fi
 # Only run the spell checker when both `pyspelling` and its `aspell` backend
@@ -45,6 +44,6 @@ fi
 if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml
 fi
-if command -v linkchecker >/dev/null 2>&1; then
+if command -v linkchecker >/dev/null 2>&1 && [ -f README.md ] && [ -d docs ]; then
   linkchecker --no-warnings README.md docs/
 fi

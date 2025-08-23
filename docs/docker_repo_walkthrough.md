@@ -9,6 +9,11 @@ steps work for any repository.
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
 2. Confirm you can SSH to the Pi: `ssh pi@<hostname>.local`.
+3. Confirm Docker and the compose plugin are available:
+   ```sh
+   docker --version
+   docker compose version
+   ```
 
 ## 2. Clone a repository
 1. Choose a location for projects, e.g. `/opt/projects`.
