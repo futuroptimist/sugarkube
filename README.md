@@ -46,7 +46,9 @@ Run `pre-commit run --all-files` before committing.
 ## Getting Started
 
 ```bash
-git clone git@github.com:futuroptimist/sugarkube.git
+git clone https://github.com/futuroptimist/sugarkube.git
+# or with SSH:
+# git clone git@github.com:futuroptimist/sugarkube.git
 cd sugarkube
 pip install pre-commit
 pre-commit install
