@@ -67,6 +67,8 @@ linkchecker --no-warnings README.md docs/
 
 The `--no-warnings` flag avoids non-zero exits from benign Markdown parsing warnings.
 
+Include `--check-extern` to validate external URLs as well.
+
 If the repository includes a `package.json` but `npm` or `package-lock.json`
 are missing, `scripts/checks.sh` will warn and skip JavaScript-specific
 checks.
