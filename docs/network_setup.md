@@ -18,14 +18,12 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    router's client list.
 7. After logging in, update packages so each Pi starts with the latest fixes:
    `sudo apt update && sudo apt full-upgrade -y`
-8. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
+8. Reboot to ensure kernel updates apply before moving on.
+9. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
    consistent even if mDNS stops working.
-9. If you skipped adding a key earlier, generate one with
-   `ssh-keygen -t ed25519`, then copy your public key to each Pi:
-   `ssh-copy-id <user>@<hostname>.local`
-10. After verifying key-based SSH access, disable password logins for security.
-    Edit `/etc/ssh/sshd_config` to set `PasswordAuthentication no` and restart
-    the service: `sudo systemctl restart ssh`.
+10. If you skipped adding a key earlier, generate one with
+    `ssh-keygen -t ed25519`, then copy your public key to each Pi:
+    `ssh-copy-id <user>@<hostname>.local`
 
 ## Switch and PoE
 
