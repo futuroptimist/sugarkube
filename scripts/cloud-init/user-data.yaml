@@ -27,3 +27,4 @@ runcmd:
   - [bash, -c, 'usermod -aG docker pi']
   - [bash, -c, 'touch /opt/sugarkube/.cloudflared.env']
   - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
+  - [systemctl, enable, --now, docker]

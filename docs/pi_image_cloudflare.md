@@ -8,22 +8,25 @@ Raspberry Pi deployment so it can host multiple projects such as
 It bakes Docker, the compose plugin, the Cloudflare apt repository, and a
 Cloudflare Tunnel into the OS image using `cloud-init`. The `build_pi_image.sh`
 script clones `pi-gen` using the `PI_GEN_BRANCH` environment variable,
-defaulting to `bookworm` for reproducible builds. Use the prepared image to
-deploy containerized apps. The companion guide
+defaulting to `bookworm` for reproducible builds. Ensure `docker`, `xz` and
+`git` are installed before running it. Use the prepared image to deploy
+containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace.
 
 ## Checklist
 
-- [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh` now embeds
-      `scripts/cloud-init/user-data.yaml` and only uses `sudo` when required.
+- [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh`
+      now embeds `scripts/cloud-init/user-data.yaml`, verifies `docker`, `xz`
+      and `git` are installed, and only uses `sudo` when required.
 - [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
 - [ ] (Optional) If building the image manually, place `scripts/cloud-init/user-data.yaml`
       on the SD card's boot partition as `user-data`.
 - [ ] Flash the image with Raspberry Pi Imager.
 - [ ] Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
-- [ ] Cloud-init adds the Cloudflare apt repo and writes
-      `/opt/sugarkube/docker-compose.cloudflared.yml`; verify both exist.
+- [ ] Cloud-init adds the Cloudflare apt repo, writes
+      `/opt/sugarkube/docker-compose.cloudflared.yml`, and enables the Docker
+      service; verify all three.
 - [ ] Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
 - [ ] Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
 - [ ] Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.
