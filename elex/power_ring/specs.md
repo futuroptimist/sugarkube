@@ -17,5 +17,6 @@ This document outlines the intended features for the Sugarkube power distributio
 
 - Test points for measuring battery voltage
 - Silkscreen labels for polarity and connector numbers
+- Title block comments record decoupling guidelines and export checks
 
 These requirements are a starting point – modify the KiCad project as needed and update this file when the schematic changes.
