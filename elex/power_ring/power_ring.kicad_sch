@@ -5,7 +5,8 @@
 	(uuid "2323577b-cad3-4f70-b734-06368b53e30c")
 	(paper "A4")
         (title_block
-                (comment 1 "Place decoupling capacitors near power pins. Add test points for each rail")
+                (comment 1 "Place decoupling capacitors near power pins")
+                (comment 2 "Keep high-current traces short")
         )
 	(lib_symbols
 		(symbol "custom_pads_test:Antenna"
