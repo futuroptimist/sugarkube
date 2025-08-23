@@ -20,6 +20,11 @@ steps work for any repository.
    git clone https://github.com/democratizedspace/dspace.git
    ```
    Replace the URLs with any other repository that contains a `Dockerfile`.
+3. Confirm the expected files exist:
+   ```sh
+   ls token.place/docker              # shows Dockerfile.server
+   ls dspace/frontend/docker-compose.yml
+   ```
 
 ## 3. Build or start containers
 1. Change into the repo directory.
@@ -48,7 +53,9 @@ steps work for any repository.
 cd /opt/projects/token.place
 docker build -f docker/Dockerfile.server -t tokenplace .
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker ps | grep tokenplace
 curl http://localhost:5000  # should return HTML
+docker logs tokenplace --tail 20
 ```
 
 #### dspace (docker-compose)
@@ -59,6 +66,7 @@ cp .env.example .env  # if present
 docker compose up -d
 docker compose ps
 curl http://localhost:3000
+docker compose logs --tail=20
 ```
 
 ## 4. Expose services through Cloudflare
@@ -76,12 +84,16 @@ curl http://localhost:3000
    ```sh
    docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
    ```
-3. Visit the Cloudflare-managed URL to verify the service is reachable.
+3. Visit the Cloudflare-managed URL to verify the service is reachable:
+   ```sh
+   curl https://tokenplace.example.com
+   curl https://dspace.example.com
+   ```
 
 ## 5. Manage containers
 - List running containers: `docker ps`.
 - Stop a container: `docker stop tokenplace`.
-- View logs: `docker compose logs -f`.
+- View logs: `docker logs tokenplace` or `docker compose logs -f`.
 
 ## 6. Update services
 1. Pull the latest code:
