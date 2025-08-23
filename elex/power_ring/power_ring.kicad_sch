@@ -6,6 +6,7 @@
 	(paper "A4")
         (title_block
                 (comment 1 "Place decoupling capacitors near power pins")
+                (comment 2 "Include test points for voltage monitoring")
         )
 	(lib_symbols
 		(symbol "custom_pads_test:Antenna"

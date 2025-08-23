@@ -1,0 +1,8 @@
+{
+  "id": "2025-08-23-kicad-export-no-kicad",
+  "date": "2025-08-23",
+  "component": "kicad-export",
+  "rootCause": "KiCad not installed; pcbnew Python module missing prevents KiBot export",
+  "resolution": "Install KiCad 9 and ensure pcbnew Python module is in PYTHONPATH",
+  "references": []
+}
