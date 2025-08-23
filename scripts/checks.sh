@@ -29,7 +29,16 @@ pytest --cov=. --cov-report=xml --cov-report=term -q
 # docs checks
 if ! command -v aspell >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update && sudo apt-get install -y aspell aspell-en
+    SUDO=""
+    if [ "$(id -u)" -ne 0 ]; then
+      if command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+      else
+        echo "Run as root or install sudo" >&2
+        exit 1
+      fi
+    fi
+    $SUDO apt-get update && $SUDO apt-get install -y aspell aspell-en
   elif command -v brew >/dev/null 2>&1; then
     brew install aspell
   else
