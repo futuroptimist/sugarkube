@@ -10,7 +10,8 @@ Included files:
 - `power_ring.kicad_sym` and `power_ring_schlib.kicad_sym` – symbol libraries
 - `power_ring.pretty/` – footprint library
 
-A title block comment reminds you to place decoupling capacitors near power pins for easy review.
+A title block comment reminds you to place decoupling capacitors near power pins, and
+a second note encourages keeping high-current traces short for better performance.
 
 Open the project in **KiCad 9** or newer and modify the schematic to suit your power distribution needs (for example, add screw terminals, fuses and test points).  Use [KiBot](https://github.com/INTI-CMNB/KiBot) with `.kibot/power_ring.yaml` or run the GitHub workflow to produce Gerber files, a PDF schematic and a BOM in `build/power_ring/`.
 

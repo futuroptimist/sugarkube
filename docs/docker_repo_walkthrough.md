@@ -2,8 +2,10 @@
 
 This guide shows how to run any GitHub project that ships a `Dockerfile` or
 `docker-compose.yml` on the Raspberry Pi image preloaded with Docker and a
-Cloudflare Tunnel. Token.place and dspace are real-world examples, but the
-steps work for any repository.
+Cloudflare Tunnel. The walkthrough uses
+[token.place](https://github.com/futuroptimist/token.place) and
+[dspace](https://github.com/democratizedspace/dspace) as real-world examples,
+but the steps apply to any repository.
 
 ## 1. Prepare the Pi
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
@@ -20,6 +22,8 @@ steps work for any repository.
    git clone https://github.com/democratizedspace/dspace.git
    ```
    Replace the URLs with any other repository that contains a `Dockerfile`.
+3. Review the project's README for architecture-specific notes and required
+   environment variables.
 
 ## 3. Build or start containers
 1. Change into the repo directory.
@@ -39,6 +43,12 @@ steps work for any repository.
    docker ps
    curl http://localhost:8080
    ```
+5. View logs if startup fails:
+   ```sh
+   docker logs myapp
+   # or
+   docker compose logs -f
+   ```
 
 ### Examples
 
@@ -48,6 +58,7 @@ steps work for any repository.
 cd /opt/projects/token.place
 docker build -f docker/Dockerfile.server -t tokenplace .
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000  # should return HTML
 ```
 
@@ -58,6 +69,7 @@ cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
 docker compose ps
+docker compose logs -f
 curl http://localhost:3000
 ```
 
