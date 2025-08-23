@@ -4,6 +4,9 @@
 	(generator_version "9.0")
 	(uuid "2323577b-cad3-4f70-b734-06368b53e30c")
 	(paper "A4")
+        (title_block
+                (comment 1 "Place decoupling capacitors near power pins")
+        )
 	(lib_symbols
 		(symbol "custom_pads_test:Antenna"
 			(pin_numbers
