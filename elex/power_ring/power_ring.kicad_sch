@@ -8,7 +8,7 @@
                 (comment 1 "Place decoupling capacitors near power pins")
                 (comment 2 "Keep high-current traces short")
         )
-	(lib_symbols
+        (lib_symbols
 		(symbol "custom_pads_test:Antenna"
 			(pin_numbers
 				(hide yes)
