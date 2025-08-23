@@ -33,7 +33,7 @@ def test_skips_js_checks_when_package_lock_missing(tmp_path):
         f.chmod(0o755)
 
     env = os.environ.copy()
-    env["PATH"] = f"/bin:{fake_bin}"
+    env["PATH"] = f"{fake_bin}:/bin"
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
