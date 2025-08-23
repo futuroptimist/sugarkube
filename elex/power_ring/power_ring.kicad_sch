@@ -6,7 +6,7 @@
 	(paper "A4")
         (title_block
                 (comment 1 "Place decoupling capacitors near power pins")
-                (comment 2 "Regulator footprints match latest datasheet")
+                (comment 2 "Keep high-current traces short")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"

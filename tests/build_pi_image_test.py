@@ -1,5 +1,7 @@
 import os
+import shutil
 import subprocess
+from pathlib import Path
 
 
 def test_requires_docker(tmp_path):
@@ -33,12 +35,35 @@ def test_requires_xz(tmp_path):
     assert "xz is required" in result.stderr
 
 
+def test_requires_git(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name, content in {
+        "docker": "#!/bin/sh\nexit 0\n",
+        "xz": "#!/bin/sh\nexit 0\n",
+    }.items():
+        path = fake_bin / name
+        path.write_text(content)
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "git is required" in result.stderr
+
+
 def test_requires_sudo_when_non_root(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     for name, content in {
         "docker": "#!/bin/sh\nexit 0\n",
         "xz": "#!/bin/sh\nexit 0\n",
+        "git": "#!/bin/sh\nexit 0\n",
         "id": "#!/bin/sh\necho 1000\n",
     }.items():
         path = fake_bin / name
@@ -54,3 +79,82 @@ def test_requires_sudo_when_non_root(tmp_path):
     )
     assert result.returncode != 0
     assert "Run as root or install sudo" in result.stderr
+
+
+def _setup_build_env(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    git_log = tmp_path / "git_args.log"
+
+    (fake_bin / "docker").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "docker").chmod(0o755)
+
+    xz = fake_bin / "xz"
+    xz.write_text('#!/bin/bash\n[ "$1" = "-T0" ] && shift\nmv "$1" "$1.xz"\n')
+    xz.chmod(0o755)
+
+    git_stub = (
+        f"#!/bin/bash\n"
+        f'echo "$@" > "{git_log}"\n'
+        "target=${!#}\n"
+        'mkdir -p "$target/stage2/01-sys-tweaks"\n'
+        "cat <<'EOF' > \"$target/build.sh\"\n"
+        "#!/bin/bash\n"
+        "mkdir -p deploy\n"
+        "touch deploy/sugarkube.img\n"
+        "EOF\n"
+        'chmod +x "$target/build.sh"\n'
+    )
+    git = fake_bin / "git"
+    git.write_text(git_stub)
+    git.chmod(0o755)
+
+    (fake_bin / "id").write_text("#!/bin/sh\necho 0\n")
+    (fake_bin / "id").chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["GIT_LOG"] = str(git_log)
+    return env
+
+
+def _run_build_script(tmp_path, env):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_src = repo_root / "scripts" / "build_pi_image.sh"
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    script = script_dir / "build_pi_image.sh"
+    script.write_text(script_src.read_text())
+    script.chmod(0o755)
+
+    ci_dir = script_dir / "cloud-init"
+    ci_dir.mkdir(parents=True)
+    user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"
+    shutil.copy(user_src, ci_dir / "user-data.yaml")
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    git_args = Path(env["GIT_LOG"]).read_text()
+    return result, git_args
+
+
+def test_uses_default_pi_gen_branch(tmp_path):
+    env = _setup_build_env(tmp_path)
+    result, git_args = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    assert "--branch bookworm" in git_args
+    assert (tmp_path / "sugarkube.img.xz").exists()
+
+
+def test_respects_pi_gen_branch_env(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["PI_GEN_BRANCH"] = "legacy"
+    result, git_args = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    assert "--branch legacy" in git_args
+    assert (tmp_path / "sugarkube.img.xz").exists()
