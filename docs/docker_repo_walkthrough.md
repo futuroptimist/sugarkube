@@ -16,10 +16,15 @@ steps work for any repository.
    ```sh
    mkdir -p /opt/projects
    cd /opt/projects
-   git clone https://github.com/futuroptimist/token.place.git
-   git clone https://github.com/democratizedspace/dspace.git
+   git clone --depth=1 https://github.com/futuroptimist/token.place.git
+   git clone --depth=1 https://github.com/democratizedspace/dspace.git
    ```
    Replace the URLs with any other repository that contains a `Dockerfile`.
+3. Confirm the clone includes container config files:
+   ```sh
+   ls token.place/docker    # token.place stores Dockerfiles under docker/
+   ls dspace/frontend       # dspace ships a compose file in frontend/
+   ```
 
 ## 3. Build or start containers
 1. Change into the repo directory.
@@ -39,6 +44,11 @@ steps work for any repository.
    docker ps
    curl http://localhost:8080
    ```
+5. Tail logs for troubleshooting:
+   ```sh
+   docker logs -f myapp          # single-container project
+   docker compose logs -f        # compose project
+   ```
 
 ### Examples
 
@@ -48,6 +58,7 @@ steps work for any repository.
 cd /opt/projects/token.place
 docker build -f docker/Dockerfile.server -t tokenplace .
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker logs -f tokenplace &      # watch startup logs
 curl http://localhost:5000  # should return HTML
 ```
 
@@ -58,6 +69,7 @@ cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
 docker compose ps
+docker compose logs -f &
 curl http://localhost:3000
 ```
 
