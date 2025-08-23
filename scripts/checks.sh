@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure required Python tooling is available
+if ! command -v flake8 >/dev/null 2>&1; then
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install --system \
+      flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+      >/dev/null 2>&1
+  else
+    pip install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+      >/dev/null 2>&1
+  fi
+fi
+
 # python checks
 flake8 . --exclude=.venv
 isort --check-only . --skip .venv
@@ -51,7 +63,8 @@ fi
 # the `aspell` binary by default which would cause `pyspelling` to error.  In
 # those cases we silently skip the spelling check instead of failing the whole
 # pre-commit run.
-if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 && [ -f .spellcheck.yaml ]; then
+if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 \
+  && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml
 fi
 if command -v linkchecker >/dev/null 2>&1; then
