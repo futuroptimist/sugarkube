@@ -39,5 +39,8 @@ CFG
 ${SUDO} ./build.sh
 mv deploy/*.img "${REPO_ROOT}/sugarkube.img"
 xz -T0 "${REPO_ROOT}/sugarkube.img"
-ls -lh "${REPO_ROOT}/sugarkube.img.xz"
+sha256sum "${REPO_ROOT}/sugarkube.img.xz" > \
+  "${REPO_ROOT}/sugarkube.img.xz.sha256"
+ls -lh "${REPO_ROOT}/sugarkube.img.xz" \
+  "${REPO_ROOT}/sugarkube.img.xz.sha256"
 echo "Image written to ${REPO_ROOT}/sugarkube.img.xz"
