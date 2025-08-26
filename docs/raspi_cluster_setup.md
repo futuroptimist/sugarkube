@@ -17,9 +17,9 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 - Internet connection to download images and packages
 
 ## 1. Prepare the OS image
-1. Download `sugarkube.img.xz` from the latest
-   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
-   or build it locally with `./scripts/build_pi_image.sh`
+1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
+   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml),
+   or download it manually from the Actions tab. Alternatively, you can build it locally with `./scripts/build_pi_image.sh`.
 2. Optional: verify the checksum with `sha256sum`
 3. Flash the image to a microSD card using Raspberry Pi Imager
    - Set a unique hostname, enable SSH, and create a user with a strong password
