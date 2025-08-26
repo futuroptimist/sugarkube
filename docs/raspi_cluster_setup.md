@@ -55,6 +55,8 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```bash
    sudo kubectl get nodes
    ```
+5. (Optional) Copy `/etc/rancher/k3s/k3s.yaml` to your workstation for remote
+   `kubectl` access.
 
 ## 6. Deploy applications
 1. Clone the repositories:
