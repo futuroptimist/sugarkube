@@ -17,10 +17,12 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 - Internet connection to download images and packages
 
 ## 1. Prepare the OS image
-1. Download `sugarkube.img.xz` from the latest [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
+1. Download `sugarkube.img.xz` from the latest
+   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
+   or build it locally with `./scripts/build_pi_image.sh`
 2. Optional: verify the checksum with `sha256sum`
 3. Flash the image to a microSD card using Raspberry Pi Imager
-   - Set hostname, enable SSH, and create a user with a strong password
+   - Set a unique hostname, enable SSH, and create a user with a strong password
    - Use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to enter advanced options and configure WiFi SSID, password, and locale
    - The same image can be reused for all nodes
 
@@ -53,6 +55,8 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```bash
    sudo kubectl get nodes
    ```
+5. (Optional) Copy `/etc/rancher/k3s/k3s.yaml` to your workstation for remote
+   `kubectl` access.
 
 ## 6. Deploy applications
 1. Clone the repositories:

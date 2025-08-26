@@ -12,13 +12,17 @@ defaulting to `bookworm` for reproducible builds. Ensure `docker`, `xz` and
 `git` are installed before running it. Use the prepared image to deploy
 containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
-projects such as token.place and dspace.
+projects such as token.place and dspace. Use the resulting image to bootstrap a
+three-node k3s cluster; see [raspi_cluster_setup.md](raspi_cluster_setup.md)
+for onboarding steps.
 
 ## Checklist
 
 - [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh`
       now embeds `scripts/cloud-init/user-data.yaml`, verifies `docker`, `xz`
       and `git` are installed, and only uses `sudo` when required.
+- [ ] Fetch the latest prebuilt image with `gh run download -n pi-image` or
+      grab it from the Actions tab.
 - [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
 - [ ] (Optional) If building the image manually, place `scripts/cloud-init/user-data.yaml`
       on the SD card's boot partition as `user-data`.

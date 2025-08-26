@@ -170,6 +170,7 @@ cloudflared
 SSD
 cloudflare
 subdomain
+prebuilt
 preconfigure
 preloaded
 Dockerfile
