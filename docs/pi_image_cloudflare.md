@@ -18,7 +18,8 @@ projects such as token.place and dspace.
 
 - [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh`
       now embeds `scripts/cloud-init/user-data.yaml`, verifies `docker`, `xz`
-      and `git` are installed, and only uses `sudo` when required.
+      and `git` are installed, and only uses `sudo` when required. 
+      `scripts/download_pi_image.sh` fetches the latest prebuilt image via the GitHub CLI.
 - [ ] Verify the download: `sha256sum -c sugarkube.img.xz.sha256`.
 - [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
 - [ ] (Optional) If building the image manually, place `scripts/cloud-init/user-data.yaml`
