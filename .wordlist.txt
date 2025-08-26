@@ -196,3 +196,4 @@ yaml
 kicad
 KiBot
 nonint
+prebuilt
