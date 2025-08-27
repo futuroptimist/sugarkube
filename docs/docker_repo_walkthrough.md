@@ -11,7 +11,12 @@ but the steps apply to any repository.
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
 2. Confirm you can SSH to the Pi: `ssh pi@<hostname>.local`.
-3. Optionally update packages and reboot:
+3. Ensure the Cloudflare Tunnel container is running:
+   ```sh
+   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps
+   ```
+   `cloudflared` should display `Up`.
+4. Optionally update packages and reboot:
    ```sh
    sudo apt update && sudo apt upgrade -y
    sudo reboot
@@ -27,6 +32,11 @@ but the steps apply to any repository.
    git clone https://github.com/democratizedspace/dspace.git
    ```
    Replace the URLs with any other repository that contains a `Dockerfile`.
+   If you prefer the GitHub CLI:
+   ```sh
+   gh repo clone futuroptimist/token.place
+   gh repo clone democratizedspace/dspace
+   ```
 3. Review the project's README for architecture-specific notes and required
    environment variables.
 
