@@ -35,6 +35,7 @@ but the steps apply to any repository.
 2. If the repo provides `docker-compose.yml`:
    ```sh
    cp .env.example .env   # if the project uses an env file
+   docker compose pull    # fetch pre-built multi-arch images
    docker compose up -d   # build and start containers in the background
    ```
 3. If the repo only has a `Dockerfile`:
@@ -43,14 +44,22 @@ but the steps apply to any repository.
    docker run -d --name myapp -p 8080:8080 myapp
    ```
    Adjust port numbers and image names to match the project.
-4. Verify the service responds:
+4. If the project doesn't publish ARM images, build for the Pi:
+   ```sh
+   docker buildx build --platform linux/arm64 -t myapp . --load
+   ```
+   For example, token.place builds with:
+   ```sh
+   docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+   ```
+5. Verify the service responds:
    ```sh
    docker ps
    curl http://localhost:8080
    ```
    Substitute the correct port for your project (5000 for token.place,
    3000 for dspace).
-5. View logs if startup fails:
+6. View logs if startup fails:
    ```sh
    docker logs myapp
    # or
@@ -63,7 +72,7 @@ but the steps apply to any repository.
 
 ```sh
 cd /opt/projects/token.place
-docker build -f docker/Dockerfile.server -t tokenplace .
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
 docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000  # should return HTML
@@ -74,6 +83,7 @@ curl http://localhost:5000  # should return HTML
 ```sh
 cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
+docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs -f
