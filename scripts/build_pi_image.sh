@@ -11,6 +11,12 @@ for cmd in docker xz git sha256sum; do
   fi
 done
 
+# Ensure the Docker daemon is running; otherwise builds will fail later
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker daemon is not running or not accessible" >&2
+  exit 1
+fi
+
 # Use sudo only when not running as root. Some CI containers omit sudo.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then

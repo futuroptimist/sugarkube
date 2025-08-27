@@ -21,7 +21,9 @@ dirname=$(dirname "$OUTPUT")
 mkdir -p "$dirname"
 
 gh run download "$RUN_ID" --name sugarkube-img --dir "$dirname"
-
-mv "$dirname/sugarkube.img.xz" "$OUTPUT"
+downloaded="$dirname/sugarkube.img.xz"
+if [ "$(basename "$OUTPUT")" != "sugarkube.img.xz" ]; then
+  mv "$downloaded" "$OUTPUT"
+fi
 ls -lh "$OUTPUT"
 echo "Image saved to $OUTPUT"
