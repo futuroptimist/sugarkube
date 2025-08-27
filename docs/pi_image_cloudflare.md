@@ -8,9 +8,9 @@ Raspberry Pi deployment so it can host multiple projects such as
 It bakes Docker, the compose plugin, the Cloudflare apt repository, and a
 Cloudflare Tunnel into the OS image using `cloud-init`. The `build_pi_image.sh`
 script clones `pi-gen` using the `PI_GEN_BRANCH` environment variable,
-defaulting to `bookworm` for reproducible builds. Ensure `docker`, `xz` and
-`git` are installed before running it. Use the prepared image to deploy
-containerized apps. The companion guide
+defaulting to `bookworm` for reproducible builds. Ensure `docker` (with its
+daemon running), `xz` and `git` are installed before running it. Use the
+prepared image to deploy containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
 three-node k3s cluster; see [raspi_cluster_setup.md](raspi_cluster_setup.md)
@@ -19,10 +19,11 @@ for onboarding steps.
 ## Checklist
 
 - [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh`
-      now embeds `scripts/cloud-init/user-data.yaml`, verifies `docker`, `xz`
-      and `git` are installed, and only uses `sudo` when required. 
-      `scripts/download_pi_image.sh` fetches the latest prebuilt image via the GitHub CLI, 
-      or you can grab it from the Actions tab with `gh run download -n pi-image`.
+      now embeds `scripts/cloud-init/user-data.yaml`, verifies `docker` is
+      available (and its daemon is running), `xz` and `git` are installed, and
+      only uses `sudo` when required. `scripts/download_pi_image.sh` fetches the
+      latest prebuilt image via the GitHub CLI, or you can grab it from the
+      Actions tab with `gh run download -n pi-image`.
 - [ ] Verify the download: `sha256sum -c sugarkube.img.xz.sha256`.
 - [ ] If downloaded, decompress it with `xz -d sugarkube.img.xz`.
 - [ ] (Optional) If building the image manually, place `scripts/cloud-init/user-data.yaml`
