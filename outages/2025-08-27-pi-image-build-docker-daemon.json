@@ -1,0 +1,11 @@
+{
+  "id": "2025-08-27-pi-image-build-docker-daemon",
+  "date": "2025-08-27",
+  "component": "pi-image build script",
+  "rootCause": "build_pi_image.sh failed when the Docker daemon was stopped, leaving a cryptic error",
+  "resolution": "script now checks that the Docker daemon is running before starting the build",
+  "references": [
+    "scripts/build_pi_image.sh",
+    "docs/pi_image_cloudflare.md"
+  ]
+}

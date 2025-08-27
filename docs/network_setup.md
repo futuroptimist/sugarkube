@@ -18,7 +18,7 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    router's client list.
 7. After logging in, update packages so each Pi starts with the latest fixes:
    `sudo apt update && sudo apt full-upgrade -y`
-8. Reboot to ensure kernel updates apply before moving on.
+8. Reboot to ensure kernel updates apply before moving on: `sudo reboot`.
 9. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
    consistent even if mDNS stops working.
 10. If you skipped adding a key earlier, generate one with
