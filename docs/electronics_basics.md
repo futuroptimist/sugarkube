@@ -10,6 +10,7 @@ Beginners can start here to learn the fundamentals needed to assemble the power 
 
 ### Measuring
 - Use a multimeter to check voltage at the battery terminals.
+- Never measure resistance on a powered circuit; disconnect power first to protect your meter.
 - Clamp meters allow measuring current without breaking the circuit.
 
 ### Soldering Tips
