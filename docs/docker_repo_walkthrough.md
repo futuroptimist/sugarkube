@@ -80,6 +80,34 @@ docker compose logs -f
 curl http://localhost:3000
 ```
 
+### Build for ARM with Docker `buildx`
+
+Some repositories only ship x86_64 images. Use Docker `buildx` to compile an arm64
+image for the Pi's CPU.
+
+```sh
+docker buildx create --name pi --use  # run once to enable buildx
+```
+
+#### token.place
+
+```sh
+cd /opt/projects/token.place
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace .
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+```
+
+#### dspace
+
+```sh
+cd /opt/projects/dspace/frontend
+docker buildx build --platform linux/arm64 -t dspace-frontend .
+docker compose up -d
+```
+
+The `--platform` flag forces an arm64 build; omit it if the upstream image
+already supports arm64.
+
 ## 4. Expose services through Cloudflare
 1. Edit `/opt/sugarkube/docker-compose.cloudflared.yml` and add a new
    `ingress` rule mapping a subdomain to the container's port. Example:
