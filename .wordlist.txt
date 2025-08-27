@@ -112,6 +112,7 @@ Fritzing
 KiCad
 LiFePO4
 MPPT
+PV
 Victron
 aluminium
 sugarkube
