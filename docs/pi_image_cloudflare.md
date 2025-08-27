@@ -13,8 +13,8 @@ into the OS image. The `build_pi_image.sh` script clones `pi-gen` using the
 `PI_GEN_BRANCH` environment variable, defaulting to `bookworm` for reproducible
 builds. Set `IMG_NAME` to change the image name or `OUTPUT_DIR` to control
 where artifacts are written. Ensure `docker` (with its daemon running), `xz`,
-and `git` are installed before running it. Use the prepared image to deploy
-containerized apps. The companion guide
+`git`, and `sha256sum` are installed before running it. Use the prepared image
+to deploy containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
 three-node k3s cluster; see [raspi_cluster_setup.md](raspi_cluster_setup.md)
@@ -24,8 +24,8 @@ for onboarding steps.
 
 - [ ] Build or download a Raspberry Pi OS image. `scripts/build_pi_image.sh`
       embeds `scripts/cloud-init/user-data.yaml`, verifies `docker` (and its
-      daemon is running), `xz` and `git` are installed, honors `IMG_NAME` and
-      `OUTPUT_DIR`, and only uses `sudo` when required.
+      daemon is running), `xz`, `git`, and `sha256sum` are installed, honors
+      `IMG_NAME` and `OUTPUT_DIR`, and only uses `sudo` when required.
       `scripts/download_pi_image.sh` fetches the latest prebuilt image via the
       GitHub CLI, or you can grab it from the Actions tab with
       `gh run download -n pi-image`.
@@ -36,8 +36,9 @@ for onboarding steps.
 - [ ] Flash the image with Raspberry Pi Imager.
 - [ ] Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
 - [ ] Cloud-init adds the Cloudflare apt repo, writes
-      `/opt/sugarkube/docker-compose.cloudflared.yml`, and enables the Docker
-      service; verify all three.
+      `/opt/sugarkube/docker-compose.cloudflared.yml`, pre-creates
+      `/opt/sugarkube/.cloudflared.env` with `0600` permissions, and enables the
+      Docker service; verify all three.
 - [ ] Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
 - [ ] Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
 - [ ] Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.
