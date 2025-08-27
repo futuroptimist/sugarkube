@@ -23,8 +23,11 @@ write_files:
           command: tunnel run
           env_file:
             - /opt/sugarkube/.cloudflared.env
+  - path: /opt/sugarkube/.cloudflared.env
+    permissions: '0600'
+    content: |
+      TUNNEL_TOKEN=""
 runcmd:
   - [bash, -c, 'usermod -aG docker pi']
-  - [bash, -c, 'touch /opt/sugarkube/.cloudflared.env']
   - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
   - [systemctl, enable, --now, docker]

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires Docker, xz, git and roughly 10 GB of free disk space.
+# Requires Docker, xz, git, sha256sum and roughly 10 GB of free disk space.
 
-for cmd in docker xz git; do
+for cmd in docker xz git sha256sum; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1

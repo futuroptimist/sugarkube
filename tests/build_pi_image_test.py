@@ -64,6 +64,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "docker": "#!/bin/sh\nexit 0\n",
         "xz": "#!/bin/sh\nexit 0\n",
         "git": "#!/bin/sh\nexit 0\n",
+        "sha256sum": "#!/bin/sh\nexit 0\n",
         "id": "#!/bin/sh\necho 1000\n",
     }.items():
         path = fake_bin / name
