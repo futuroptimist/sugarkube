@@ -2,7 +2,7 @@
 
 This guide shows how to run any GitHub project that ships a `Dockerfile` or
 `docker-compose.yml` on the Raspberry Pi image preloaded with Docker and a
-Cloudflare Tunnel. The walkthrough uses
+[Cloudflare Tunnel](https://www.cloudflare.com/products/tunnel/). The walkthrough uses
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) as real-world examples,
 but the steps apply to any repository.
@@ -15,6 +15,11 @@ but the steps apply to any repository.
    ```sh
    sudo apt update && sudo apt upgrade -y
    sudo reboot
+   ```
+4. Verify Docker is running and the compose plugin is available:
+   ```sh
+   sudo systemctl status docker --no-pager
+   docker compose version
    ```
 
 ## 2. Clone a repository
