@@ -10,6 +10,9 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 OUTPUT="${1:-sugarkube.img.xz}"
+if [ -d "$OUTPUT" ] || [[ "$OUTPUT" == */ ]]; then
+  OUTPUT="${OUTPUT%/}/sugarkube.img.xz"
+fi
 
 RUN_ID=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId')
 if [ -z "$RUN_ID" ]; then
@@ -22,6 +25,9 @@ mkdir -p "$dirname"
 
 gh run download "$RUN_ID" --name sugarkube-img --dir "$dirname"
 
-mv "$dirname/sugarkube.img.xz" "$OUTPUT"
+src="$dirname/sugarkube.img.xz"
+if [ "$src" != "$OUTPUT" ]; then
+  mv "$src" "$OUTPUT"
+fi
 ls -lh "$OUTPUT"
 echo "Image saved to $OUTPUT"

@@ -55,6 +55,15 @@ pre-commit install
 pre-commit run --all-files
 ```
 
+Fetch the latest pre-built Pi image with the GitHub CLI:
+
+```bash
+scripts/download_pi_image.sh      # saves as ./sugarkube.img.xz
+scripts/download_pi_image.sh out/ # saves to out/sugarkube.img.xz
+```
+
+Authenticate `gh` with access to the repository before running the script.
+
 If you update documentation, install spell-check tools and verify spelling and links.
 `pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). The
 `scripts/checks.sh` helper tries to install them via `apt-get` when missing. pre-commit
