@@ -198,3 +198,7 @@ kicad
 KiBot
 nonint
 prebuilt
+
+linkchecker
+pyspelling
+sugarkube's
