@@ -56,7 +56,41 @@ def test_downloads_artifact(tmp_path):
     assert (tmp_path / "out.img.xz").exists()
 
 
-def test_accepts_directory_output(tmp_path):
+def test_errors_when_no_run_found(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "download_called"
+    gh = fake_bin / "gh"
+    gh.write_text(
+        f"#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  exit 0\n"
+        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
+        f"  echo called > {marker}\n"
+        "  exit 0\n"
+        "else\n"
+        "  exit 1\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "no pi-image workflow runs found" in result.stderr
+    assert not marker.exists()
+
+
+def test_uses_default_output(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     src = tmp_path / "src.img.xz"
@@ -82,14 +116,12 @@ def test_accepts_directory_output(tmp_path):
     env["GH_SRC"] = str(src)
     base = Path(__file__).resolve().parents[1]
     script = base / "scripts" / "download_pi_image.sh"
-    outdir = tmp_path / "images"
-    outdir.mkdir()
     result = subprocess.run(
-        ["/bin/bash", str(script), str(outdir)],
+        ["/bin/bash", str(script)],
         env=env,
         cwd=tmp_path,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
-    assert (outdir / "sugarkube.img.xz").exists()
+    assert (tmp_path / "sugarkube.img.xz").exists()
