@@ -33,6 +33,11 @@ A controller regulates the energy from the panels into the battery.
 
 For a four-panel array, a 20 A MPPT controller provides room to grow and keeps charging efficient.
 
+When wiring panels, ensure the array's open-circuit voltage stays below the controller's PV limit.
+A pair of ~22 V panels in series produces about 44 V; two such strings in parallel (2S2P) balance
+voltage and current while remaining within a 50 V controller's rating. Parallel strings increase
+current, so confirm the controller's amperage capacity exceeds the combined short-circuit current.
+
 ## Energy Budget Example
 A Raspberry Pi draws roughly 10 W. Running 24 h uses 240 Wh. Add 20 Wh for a small air pump and
 40 Wh for conversion losses for a total of ~300 Wh per day.

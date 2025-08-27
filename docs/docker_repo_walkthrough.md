@@ -2,7 +2,7 @@
 
 This guide shows how to run any GitHub project that ships a `Dockerfile` or
 `docker-compose.yml` on the Raspberry Pi image preloaded with Docker and a
-Cloudflare Tunnel. The walkthrough uses
+[Cloudflare Tunnel](https://www.cloudflare.com/products/tunnel/). The walkthrough uses
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) as real-world examples,
 but the steps apply to any repository.
@@ -11,10 +11,20 @@ but the steps apply to any repository.
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
 2. Confirm you can SSH to the Pi: `ssh pi@<hostname>.local`.
-3. Optionally update packages and reboot:
+3. Ensure the Cloudflare Tunnel container is running:
+   ```sh
+   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps
+   ```
+   `cloudflared` should display `Up`.
+4. Optionally update packages and reboot:
    ```sh
    sudo apt update && sudo apt upgrade -y
    sudo reboot
+   ```
+4. Verify Docker is running and the compose plugin is available:
+   ```sh
+   sudo systemctl status docker --no-pager
+   docker compose version
    ```
 
 ## 2. Clone a repository
@@ -27,6 +37,11 @@ but the steps apply to any repository.
    git clone https://github.com/democratizedspace/dspace.git
    ```
    Replace the URLs with any other repository that contains a `Dockerfile`.
+   If you prefer the GitHub CLI:
+   ```sh
+   gh repo clone futuroptimist/token.place
+   gh repo clone democratizedspace/dspace
+   ```
 3. Review the project's README for architecture-specific notes and required
    environment variables.
 
@@ -35,6 +50,7 @@ but the steps apply to any repository.
 2. If the repo provides `docker-compose.yml`:
    ```sh
    cp .env.example .env   # if the project uses an env file
+   docker compose pull    # fetch pre-built multi-arch images
    docker compose up -d   # build and start containers in the background
    ```
 3. If the repo only has a `Dockerfile`:
@@ -43,14 +59,22 @@ but the steps apply to any repository.
    docker run -d --name myapp -p 8080:8080 myapp
    ```
    Adjust port numbers and image names to match the project.
-4. Verify the service responds:
+4. If the project doesn't publish ARM images, build for the Pi:
+   ```sh
+   docker buildx build --platform linux/arm64 -t myapp . --load
+   ```
+   For example, token.place builds with:
+   ```sh
+   docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+   ```
+5. Verify the service responds:
    ```sh
    docker ps
    curl http://localhost:8080
    ```
    Substitute the correct port for your project (5000 for token.place,
    3000 for dspace).
-5. View logs if startup fails:
+6. View logs if startup fails:
    ```sh
    docker logs myapp
    # or
@@ -63,7 +87,7 @@ but the steps apply to any repository.
 
 ```sh
 cd /opt/projects/token.place
-docker build -f docker/Dockerfile.server -t tokenplace .
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
 docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000  # should return HTML
@@ -74,11 +98,40 @@ curl http://localhost:5000  # should return HTML
 ```sh
 cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
+docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs -f
 curl http://localhost:3000
 ```
+
+### Build for ARM with Docker `buildx`
+
+Some repositories only ship x86_64 images. Use Docker `buildx` to compile an arm64
+image for the Pi's CPU.
+
+```sh
+docker buildx create --name pi --use  # run once to enable buildx
+```
+
+#### token.place
+
+```sh
+cd /opt/projects/token.place
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace .
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+```
+
+#### dspace
+
+```sh
+cd /opt/projects/dspace/frontend
+docker buildx build --platform linux/arm64 -t dspace-frontend .
+docker compose up -d
+```
+
+The `--platform` flag forces an arm64 build; omit it if the upstream image
+already supports arm64.
 
 ## 4. Expose services through Cloudflare
 1. Edit `/opt/sugarkube/docker-compose.cloudflared.yml` and add a new
