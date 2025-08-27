@@ -28,3 +28,24 @@ REQUEST:
 OUTPUT:
 A pull request describing the fix and showing passing checks.
 ```
+
+## Upgrade Prompt
+Type: evergreen
+
+Use this prompt to refine sugarkube's own prompt documentation.
+
+```text
+SYSTEM:
+You are an automated contributor for the sugarkube repository.
+Follow `AGENTS.md` and `README.md`.
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+`linkchecker --no-warnings README.md docs/` before committing.
+
+USER:
+1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
+2. Fix outdated instructions, links, or formatting.
+3. Run the commands above.
+
+OUTPUT:
+A pull request with the improved prompt doc and passing checks.
+```
