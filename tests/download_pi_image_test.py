@@ -54,3 +54,30 @@ def test_downloads_artifact(tmp_path):
     )
     assert result.returncode == 0
     assert (tmp_path / "out.img.xz").exists()
+
+
+def test_errors_when_no_runs(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  exit 0\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "no pi-image workflow runs found" in result.stderr
