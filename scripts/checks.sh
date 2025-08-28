@@ -36,7 +36,7 @@ if [ -f package.json ]; then
 fi
 
 # run tests
-pytest --cov=. --cov-report=xml --cov-report=term -q
+PYTHONPATH="${PYTHONPATH:-}:$(pwd)" pytest -q
 
 # docs checks
 if ! command -v aspell >/dev/null 2>&1; then

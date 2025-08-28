@@ -18,8 +18,23 @@ Hanging baskets can clip onto the frame so the installation is surrounded by gre
 ### What's in a name?
 
 "Sugarkube" refers to both the aluminium cube covered in solar panels **and**
-the helper scripts that provide "syntactic sugar" for Kubernetes.  Throughout
+the helper scripts that provide "syntactic sugar" for Kubernetes. Throughout
 the docs you will see the term used in both contexts.
+
+## Quickstart: build on GitHub Actions
+
+Use the `pi-image` workflow to build Raspberry Pi OS images in CI.
+From the repository page select **Actions → pi-image → Run workflow**, then
+choose the `pi_model` (`pi5` or `pi4`) and `standoff_mode` (`heatset` or
+`printed`).
+
+Each matrix build uploads artifacts named
+`pi-image-<pi_model>-<standoff_mode>-<git_sha>` containing the image, a
+`manifest.json` and a `.sha256` checksum. Verify downloads with:
+
+```bash
+sha256sum -c *.sha256
+```
 
 ## Repository layout
 

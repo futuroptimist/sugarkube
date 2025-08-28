@@ -2,47 +2,133 @@ name: pi-image
 
 on:
   workflow_dispatch:
+    inputs:
+      pi_model:
+        description: 'Pi model to build'
+        type: choice
+        options: [all, pi5, pi4]
+        default: all
+      standoff_mode:
+        description: 'Standoff mode'
+        type: choice
+        options: [all, heatset, printed]
+        default: all
+      pi_gen_branch:
+        description: 'pi-gen branch'
+        default: bookworm
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pi_model: >-
+          ${{ fromJSON(inputs.pi_model == 'all' && '["pi5","pi4"]' || format('["{0}"]', inputs.pi_model)) }}
+        standoff_mode: >-
+          ${{ fromJSON(inputs.standoff_mode == 'all' && '["heatset","printed"]' || format('["{0}"]', inputs.standoff_mode)) }}
+    env:
+      PI_GEN_BRANCH: ${{ inputs.pi_gen_branch || 'bookworm' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare APT cache
+      - id: prereqs
+        name: Check prerequisites
+        run: ./scripts/check_prereqs.sh
+      - name: Determine environment keys
+        id: env
         run: |
-          sudo mkdir -p /var/cache/apt/archives
-          sudo chown -R "$USER" /var/cache/apt/archives
-      - name: Restore APT cache
-        uses: actions/cache@v4
+          echo "os_codename=$(lsb_release -sc)" >> $GITHUB_OUTPUT
+      - name: Resolve pi-gen revision
+        id: pigen-ref
+        run: |
+          echo "rev=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git ${{ env.PI_GEN_BRANCH }} | cut -f1)" >> $GITHUB_OUTPUT
+      - name: Restore APT caches
+        id: cache-apt
+        uses: actions/cache/restore@v4
         with:
-          path: /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/pi-image.yml') }}
+          path: |
+            /var/cache/apt/archives
+            ~/.cache/apt
+          key: apt-${{ steps.env.outputs.os_codename }}-${{ steps.pigen-ref.outputs.rev }}
+          restore-keys: |
+            apt-${{ steps.env.outputs.os_codename }}-
       - name: Install pi-gen dependencies
         run: |
           sudo add-apt-repository -y universe
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             quilt qemu-user-static debootstrap libarchive-tools arch-test
+      - name: Save APT cache
+        if: steps.cache-apt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /var/cache/apt/archives
+            ~/.cache/apt
+          key: apt-${{ steps.env.outputs.os_codename }}-${{ steps.pigen-ref.outputs.rev }}
       - name: Restore pi-gen Docker image
         id: cache-pigen
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/cache/pi-gen.tar
-          key: pigen-${{ runner.os }}-bookworm
+          key: pigen-${{ runner.os }}-${{ env.PI_GEN_BRANCH }}
       - name: Load cached pi-gen image
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
+      - name: Restore pi-gen work cache
+        id: cache-work
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/pi-gen/work
+          key: work-${{ steps.env.outputs.os_codename }}-${{ steps.pigen-ref.outputs.rev }}
+          restore-keys: |
+            work-${{ steps.env.outputs.os_codename }}-
       - name: Build Raspberry Pi OS image
+        id: build
         env:
           ARM64: 1
+          PI_GEN_DIR: ~/pi-gen
+          IMG_NAME: pi-image-${{ matrix.pi_model }}-${{ matrix.standoff_mode }}
+          STANDOFF_MODE: ${{ matrix.standoff_mode }}
         run: sudo ./scripts/build_pi_image.sh
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/cache
           docker image save pi-gen:latest -o ~/cache/pi-gen.tar
+      - name: Save pi-gen work cache
+        if: steps.cache-work.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/pi-gen/work
+          key: work-${{ steps.env.outputs.os_codename }}-${{ steps.pigen-ref.outputs.rev }}
+      - name: Generate manifest
+        run: |
+          cat <<MANIFEST > manifest.json
+          {
+            "pi_model": "${{ matrix.pi_model }}",
+            "standoff_mode": "${{ matrix.standoff_mode }}",
+            "pi_gen_branch": "${{ env.PI_GEN_BRANCH }}",
+            "git_sha": "${{ github.sha }}",
+            "build_time_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          MANIFEST
       - name: Upload artifact
+        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: sugarkube-img
-          path: sugarkube.img.xz
+          name: pi-image-${{ matrix.pi_model }}-${{ matrix.standoff_mode }}-${{ github.sha }}
+          path: |
+            pi-image-${{ matrix.pi_model }}-${{ matrix.standoff_mode }}.img.xz
+            pi-image-${{ matrix.pi_model }}-${{ matrix.standoff_mode }}.img.xz.sha256
+            manifest.json
+      - name: Summary
+        if: always()
+        run: |
+          echo "prereqs: ${{ steps.prereqs.outcome }}"
+          echo "build: ${{ steps.build.outcome }}"
+          echo "upload: ${{ steps.upload.outcome }}"

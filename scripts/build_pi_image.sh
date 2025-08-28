@@ -29,19 +29,34 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WORK_DIR=$(mktemp -d)
-trap 'rm -rf "${WORK_DIR}"' EXIT
+
+# Allow reusing a persistent pi-gen checkout for caching purposes.
+# When PI_GEN_DIR is provided the directory is not cleaned up and any
+# existing clone is re-used; otherwise a temporary directory is created.
+PI_GEN_DIR="${PI_GEN_DIR:-}"
+if [ -n "$PI_GEN_DIR" ]; then
+  mkdir -p "$PI_GEN_DIR"
+  WORK_DIR="$PI_GEN_DIR"
+else
+  WORK_DIR=$(mktemp -d)
+  trap 'rm -rf "${WORK_DIR}"' EXIT
+fi
 
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 ARM64="${ARM64:-1}"
 
-git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
-  https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
+if [ ! -d "${WORK_DIR}/.git" ]; then
+  git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
+    https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}"
+else
+  git -C "${WORK_DIR}" fetch origin "${PI_GEN_BRANCH}"
+  git -C "${WORK_DIR}" reset --hard "origin/${PI_GEN_BRANCH}"
+fi
 cp "${REPO_ROOT}/scripts/cloud-init/user-data.yaml" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
-cd "${WORK_DIR}/pi-gen"
+  "${WORK_DIR}/stage2/01-sys-tweaks/user-data"
+cd "${WORK_DIR}"
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
