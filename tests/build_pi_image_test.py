@@ -91,7 +91,11 @@ def _setup_build_env(tmp_path):
     (fake_bin / "docker").chmod(0o755)
 
     xz = fake_bin / "xz"
-    xz.write_text('#!/bin/bash\n[ "$1" = "-T0" ] && shift\nmv "$1" "$1.xz"\n')
+    xz.write_text(
+        "#!/bin/bash\n"
+        'while [ "${1#-}" != "$1" ]; do shift; done\n'
+        'mv "$1" "$1.xz"\n'
+    )
     xz.chmod(0o755)
 
     git_stub = (

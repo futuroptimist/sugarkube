@@ -49,7 +49,8 @@ ARM64=${ARM64}
 CFG
 ${SUDO} ./build.sh
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
-xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
+# Use a faster xz compression level to reduce build time
+xz -T0 -3 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
   "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
 ls -lh "${OUTPUT_DIR}/${IMG_NAME}.img.xz" \

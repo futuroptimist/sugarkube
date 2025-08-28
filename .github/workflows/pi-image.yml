@@ -8,11 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Enable universe repository
+        run: sudo add-apt-repository -y universe
       - name: Install pi-gen dependencies
-        run: |
-          sudo add-apt-repository -y universe
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
             quilt qemu-user-static debootstrap libarchive-tools arch-test
       - name: Build Raspberry Pi OS image
         env:
