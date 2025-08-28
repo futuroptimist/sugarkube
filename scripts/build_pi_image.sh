@@ -35,6 +35,7 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
+ARM64="${ARM64:-1}"
 
 git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
   https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
@@ -44,6 +45,7 @@ cd "${WORK_DIR}/pi-gen"
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
+ARM64=${ARM64}
 CFG
 ${SUDO} ./build.sh
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"

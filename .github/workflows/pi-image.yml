@@ -12,12 +12,12 @@ jobs:
         run: |
           sudo add-apt-repository -y universe
           sudo apt-get update
-          sudo apt-get install -y \
-            quilt qemu-user-static debootstrap libarchive-tools arch-test
+          sudo apt-get install -y --no-install-recommends \
+            quilt qemu-user-static debootstrap libarchive-tools
       - name: Build Raspberry Pi OS image
+        env:
+          ARM64: 1
         run: sudo ./scripts/build_pi_image.sh
-      - name: Compress image
-        run: xz -9 --keep sugarkube.img
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
