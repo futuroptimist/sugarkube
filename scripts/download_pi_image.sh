@@ -21,9 +21,23 @@ dirname=$(dirname "$OUTPUT")
 mkdir -p "$dirname"
 
 gh run download "$RUN_ID" --name sugarkube-img --dir "$dirname"
-downloaded="$dirname/sugarkube.img.xz"
-if [ "$(basename "$OUTPUT")" != "sugarkube.img.xz" ]; then
-  mv "$downloaded" "$OUTPUT"
+img="$dirname/sugarkube.img.xz"
+sha="$dirname/sugarkube.img.xz.sha256"
+
+if [ "$(realpath "$img")" != "$(realpath "$OUTPUT")" ]; then
+  mv "$img" "$OUTPUT"
 fi
-ls -lh "$OUTPUT"
-echo "Image saved to $OUTPUT"
+if [ -f "$sha" ]; then
+  dest_sha="${OUTPUT}.sha256"
+  if [ "$(realpath "$sha")" != "$(realpath "$dest_sha")" ]; then
+    mv "$sha" "$dest_sha"
+  fi
+fi
+
+if [ -f "${OUTPUT}.sha256" ]; then
+  ls -lh "$OUTPUT" "${OUTPUT}.sha256"
+  echo "Image saved to $OUTPUT with checksum ${OUTPUT}.sha256"
+else
+  ls -lh "$OUTPUT"
+  echo "Image saved to $OUTPUT"
+fi
