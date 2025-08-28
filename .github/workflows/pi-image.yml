@@ -23,12 +23,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             quilt qemu-user-static debootstrap libarchive-tools arch-test
+      - name: Compute pi-gen cache key
+        id: pigen-key
+        run: |
+          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git refs/heads/bookworm | cut -f1)
+          echo "key=pigen-${RUNNER_OS}-bookworm-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
       - name: Restore pi-gen Docker image
         id: cache-pigen
         uses: actions/cache@v4
         with:
           path: ~/cache/pi-gen.tar
-          key: pigen-${{ runner.os }}-bookworm
+          key: ${{ steps.pigen-key.outputs.key }}
       - name: Load cached pi-gen image
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
