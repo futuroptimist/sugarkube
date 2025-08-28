@@ -47,4 +47,6 @@ for onboarding steps.
 The `pi-image` workflow builds the OS image with `scripts/build_pi_image.sh`,
 compresses it to `sugarkube.img.xz`, and uploads it as an artifact. Download it
 from the [workflow artifacts](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
-or run the script locally if you need customizations.
+or run the script locally if you need customizations. The workflow rotates its
+cached pi-gen Docker image monthly by hashing the upstream branch, ensuring each
+build pulls in the latest security updates.
