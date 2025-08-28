@@ -2,47 +2,124 @@ name: pi-image
 
 on:
   workflow_dispatch:
+    inputs:
+      pi_model:
+        description: 'JSON array of Pi models'
+        default: '["pi5","pi4"]'
+        required: false
+      standoff_mode:
+        description: 'JSON array of standoff modes'
+        default: '["heatset","printed"]'
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pi_model: ${{ fromJSON(inputs.pi_model) }}
+        standoff_mode: ${{ fromJSON(inputs.standoff_mode) }}
+    env:
+      PI_GEN_BRANCH: bookworm
     steps:
       - uses: actions/checkout@v4
+        id: checkout
+      - name: Determine cache keys
+        id: vars
+        run: |
+          echo "os=$(lsb_release -sc)" >> "$GITHUB_OUTPUT"
+          echo "pigen_rev=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git refs/heads/$PI_GEN_BRANCH | cut -f1)" >> "$GITHUB_OUTPUT"
       - name: Prepare APT cache
+        id: prepare-apt
         run: |
           sudo mkdir -p /var/cache/apt/archives
           sudo chown -R "$USER" /var/cache/apt/archives
+          mkdir -p ~/.cache/apt
       - name: Restore APT cache
+        id: cache-apt
         uses: actions/cache@v4
         with:
-          path: /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/pi-image.yml') }}
-      - name: Install pi-gen dependencies
-        run: |
-          sudo add-apt-repository -y universe
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            quilt qemu-user-static debootstrap libarchive-tools arch-test
+          path: |
+            /var/cache/apt/archives
+            ~/.cache/apt
+          key: ${{ runner.os }}-apt-${{ steps.vars.outputs.os }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+      - name: Restore pi-gen work cache
+        id: cache-work
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pi-gen-work
+          key: pigen-work-${{ steps.vars.outputs.os }}-${{ steps.vars.outputs.pigen_rev }}
+          restore-keys: |
+            pigen-work-${{ steps.vars.outputs.os }}-
+            pigen-work-
       - name: Restore pi-gen Docker image
         id: cache-pigen
         uses: actions/cache@v4
         with:
           path: ~/cache/pi-gen.tar
-          key: pigen-${{ runner.os }}-bookworm
+          key: pigen-${{ runner.os }}-${{ env.PI_GEN_BRANCH }}
       - name: Load cached pi-gen image
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
+      - name: Check prerequisites
+        id: prereqs
+        run: bash scripts/check_prereqs.sh
+      - name: Install pi-gen dependencies
+        id: deps
+        run: |
+          sudo add-apt-repository -y universe
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            quilt qemu-user-static debootstrap libarchive-tools arch-test
       - name: Build Raspberry Pi OS image
+        id: build
         env:
           ARM64: 1
-        run: sudo ./scripts/build_pi_image.sh
+          IMG_NAME: sugarkube
+        run: |
+          export PI_GEN_WORK_DIR=$HOME/.cache/pi-gen-work
+          sudo PI_GEN_WORK_DIR="$PI_GEN_WORK_DIR" ./scripts/build_pi_image.sh
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/cache
           docker image save pi-gen:latest -o ~/cache/pi-gen.tar
+      - name: Create manifest
+        id: manifest
+        run: |
+          cat <<EOF > manifest.json
+          {
+            "pi_model": "${{ matrix.pi_model }}",
+            "standoff_mode": "${{ matrix.standoff_mode }}",
+            "pi_gen_branch": "${{ env.PI_GEN_BRANCH }}",
+            "git_sha": "${GITHUB_SHA}",
+            "build_time_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
       - name: Upload artifact
+        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: sugarkube-img
-          path: sugarkube.img.xz
+          name: pi-image-${{ matrix.pi_model }}-${{ matrix.standoff_mode }}-${{ github.sha }}
+          path: |
+            sugarkube.img.xz
+            sugarkube.img.xz.sha256
+            manifest.json
+      - name: Summary
+        if: always()
+        run: |
+          echo checkout=${{ steps.checkout.outcome }}
+          echo vars=${{ steps.vars.outcome }}
+          echo prepare-apt=${{ steps.prepare-apt.outcome }}
+          echo cache-apt=${{ steps.cache-apt.outcome }}
+          echo cache-work=${{ steps.cache-work.outcome }}
+          echo cache-pigen=${{ steps.cache-pigen.outcome }}
+          echo prereqs=${{ steps.prereqs.outcome }}
+          echo deps=${{ steps.deps.outcome }}
+          echo build=${{ steps.build.outcome }}
+          echo upload=${{ steps.upload.outcome }}

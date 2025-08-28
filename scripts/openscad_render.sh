@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# helper for CI; no functional changes
 
 if [ "$#" -ne 1 ]; then
   echo "Usage: $(basename "$0") path/to/model.scad" >&2
