@@ -8,16 +8,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare APT cache
+        run: |
+          sudo mkdir -p /var/cache/apt/archives
+          sudo chown -R "$USER" /var/cache/apt/archives
+      - name: Restore APT cache
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/pi-image.yml') }}
       - name: Install pi-gen dependencies
         run: |
           sudo add-apt-repository -y universe
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             quilt qemu-user-static debootstrap libarchive-tools arch-test
+      - name: Restore pi-gen Docker image
+        id: cache-pigen
+        uses: actions/cache@v4
+        with:
+          path: ~/cache/pi-gen.tar
+          key: pigen-${{ runner.os }}-bookworm
+      - name: Load cached pi-gen image
+        if: steps.cache-pigen.outputs.cache-hit == 'true'
+        run: docker load -i ~/cache/pi-gen.tar
       - name: Build Raspberry Pi OS image
         env:
           ARM64: 1
         run: sudo ./scripts/build_pi_image.sh
+      - name: Save pi-gen Docker image
+        if: steps.cache-pigen.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/cache
+          docker image save pi-gen:latest -o ~/cache/pi-gen.tar
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
