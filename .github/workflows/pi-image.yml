@@ -70,12 +70,17 @@ jobs:
             /var/cache/apt/archives
             ~/.cache/apt
           key: apt-${{ steps.env.outputs.os_codename }}-${{ steps.pigen-ref.outputs.rev }}
+      - name: Compute pi-gen cache key
+        id: pigen-key
+        run: |
+          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git refs/heads/bookworm | cut -f1)
+          echo "key=pigen-${RUNNER_OS}-bookworm-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
       - name: Restore pi-gen Docker image
         id: cache-pigen
         uses: actions/cache/restore@v4
         with:
           path: ~/cache/pi-gen.tar
-          key: pigen-${{ runner.os }}-${{ env.PI_GEN_BRANCH }}
+          key: ${{ steps.pigen-key.outputs.key }}
       - name: Load cached pi-gen image
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
