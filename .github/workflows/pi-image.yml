@@ -13,7 +13,7 @@ jobs:
           sudo add-apt-repository -y universe
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            quilt qemu-user-static debootstrap libarchive-tools
+            quilt qemu-user-static debootstrap libarchive-tools arch-test
       - name: Build Raspberry Pi OS image
         env:
           ARM64: 1
