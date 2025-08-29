@@ -76,7 +76,11 @@ IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
 ARM64=${ARM64}
 CFG
-${SUDO} ./build.sh
+echo "Starting pi-gen build..."
+# Stream output line-by-line so GitHub Actions shows progress and doesn't
+# appear to hang during the lengthy build.
+${SUDO} stdbuf -oL -eL ./build.sh
+echo "pi-gen build finished"
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
