@@ -18,9 +18,11 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 
 ## 1. Prepare the OS image
 1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
-   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml),
-   or download it manually from the Actions tab.
-   
+   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml).
+   The script verifies the SHA256 checksum and writes `sugarkube.img.xz.sha256`
+   alongside the image.  Alternatively, download the artifact manually from the
+   Actions tab.
+
    Alternatively, build locally:
    - Linux/macOS: `./scripts/build_pi_image.sh`
    - Windows (PowerShell):
@@ -35,7 +37,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
      # vmIdleTimeout=7200
      # Then apply and rerun build:
      wsl --shutdown
-     
+
      # Build the image
      powershell -ExecutionPolicy Bypass -File .\scripts\build_pi_image.ps1
      ```
@@ -43,7 +45,8 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
      - Requires Docker Desktop running and Git for Windows installed
      - The script auto-falls back to a Dockerized build and sets up binfmt/qemu
      - Expect 45–120 minutes on Windows; ensure ≥30 GB free disk
-2. Verify the checksum: `sha256sum -c sugarkube.img.xz.sha256`
+2. If you downloaded the image manually, verify the checksum:
+   `sha256sum -c sugarkube.img.xz.sha256`
 3. Flash the image to a microSD card using Raspberry Pi Imager
    - Set a unique hostname (e.g., `sugar-01`, `sugar-02`, `sugar-03`), enable SSH, and create a user with a strong password
    - Use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to enter advanced options and configure WiFi SSID, password, and locale

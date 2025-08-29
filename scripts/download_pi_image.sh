@@ -32,9 +32,12 @@ if [ -f "$sha" ]; then
   if [ ! -e "$dest_sha" ] || [ "$(realpath "$sha")" != "$(realpath "$dest_sha")" ]; then
     mv "$sha" "$dest_sha"
   fi
+  base="$(basename "$OUTPUT")"
+  sed -i "s|$(basename "$img")|$base|" "$dest_sha"
 fi
 
 if [ -f "${OUTPUT}.sha256" ]; then
+  sha256sum -c "${OUTPUT}.sha256"
   ls -lh "$OUTPUT" "${OUTPUT}.sha256"
   echo "Image saved to $OUTPUT with checksum ${OUTPUT}.sha256"
 else

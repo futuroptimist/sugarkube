@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -125,3 +126,87 @@ def test_uses_default_output(tmp_path):
     )
     assert result.returncode == 0
     assert (tmp_path / "sugarkube.img.xz").exists()
+
+
+def test_verifies_checksum(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    src = tmp_path / "src.img.xz"
+    data = b"data"
+    src.write_bytes(data)
+    sha = hashlib.sha256(data).hexdigest()
+    sha_file = tmp_path / "src.img.xz.sha256"
+    sha_file.write_text(f"{sha}  sugarkube.img.xz\n")
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  echo 42\n"
+        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
+        "  shift 2\n"
+        '  while [ "$1" != --dir ]; do shift; done\n'
+        "  dir=$2\n"
+        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
+        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
+        "else\n"
+        "  exit 1\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["GH_SRC"] = str(src)
+    env["GH_SHA"] = str(sha_file)
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script), "out.img.xz"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "out.img.xz").exists()
+    assert (tmp_path / "out.img.xz.sha256").exists()
+
+
+def test_fails_on_checksum_mismatch(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    src = tmp_path / "src.img.xz"
+    src.write_bytes(b"data")
+    sha_file = tmp_path / "src.img.xz.sha256"
+    sha_file.write_text("0" * 64 + "  sugarkube.img.xz\n")
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  echo 42\n"
+        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
+        "  shift 2\n"
+        '  while [ "$1" != --dir ]; do shift; done\n'
+        "  dir=$2\n"
+        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
+        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
+        "else\n"
+        "  exit 1\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["GH_SRC"] = str(src)
+    env["GH_SHA"] = str(sha_file)
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script), "out.img.xz"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
