@@ -58,7 +58,7 @@
 
 ## CI Considerations
 - CI can run the official container path with the same env mirrors and qcow2
-- Artifacts: upload `<IMG_NAME>.img.xz` and checksum; retain `deploy/` in run artifacts if needed
+- Artifacts: upload `IMG_NAME.img.xz` and checksum; retain `deploy/` in run artifacts if needed
 
 ## Operations & Recovery
 - If apt stalls: rerun; caches and retries reduce recurrence
