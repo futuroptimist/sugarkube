@@ -204,10 +204,10 @@ linkchecker
 pyspelling
 sugarkube's
 PowerShell
-WSL
-localhostForwarding
 powershell
-vmIdleTimeout
+WSL
 wsl
 wslconfig
+localhostForwarding
+vmIdleTimeout
 GPT
