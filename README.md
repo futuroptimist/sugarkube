@@ -24,9 +24,10 @@ the docs you will see the term used in both contexts.
 ## Repository layout
 
 - `cad/` — OpenSCAD models of structural parts. See
-  [docs/pi_cluster_carrier.md](docs/pi_cluster_carrier.md) for the Pi carrier plate and
+  [docs/pi_cluster_carrier.md](docs/pi_cluster_carrier.md) for the Pi carrier plate,
   [cad/solar_cube/panel_bracket.scad](cad/solar_cube/panel_bracket.scad) for the solar
-  panel bracket with an `edge_radius` parameter (default 3 mm) to round its outer edges.
+  panel bracket with an `edge_radius` parameter (default 3 mm) to round its outer edges,
+  and [cad/solar_cube/frame.scad](cad/solar_cube/frame.scad) for a parametric 2020 cube frame.
 - `elex/` — KiCad and Fritzing electronics schematics including the `power_ring`
   board (see [elex/power_ring/specs.md](elex/power_ring/specs.md))
 - `docs/` — build instructions, safety notes, and learning resources
