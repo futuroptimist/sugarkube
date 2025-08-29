@@ -32,10 +32,18 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
-PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
+ARM64="${ARM64:-1}"
+# Clone the arm64 branch when building 64-bit images to avoid generating
+# both architectures and exhausting disk space.
+if [ -z "${PI_GEN_BRANCH:-}" ]; then
+  if [ "$ARM64" -eq 1 ]; then
+    PI_GEN_BRANCH="arm64"
+  else
+    PI_GEN_BRANCH="bookworm"
+  fi
+fi
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
-ARM64="${ARM64:-1}"
 
 git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
   https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
