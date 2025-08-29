@@ -71,10 +71,17 @@ install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" 
 
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
+APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
 ARM64=${ARM64}
+APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
+RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
+APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
+DEBIAN_MIRROR=http://deb.debian.org/debian
+APT_OPTS="${APT_OPTS}"
 CFG
 ${SUDO} ./build.sh
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
