@@ -5,7 +5,7 @@ set -euo pipefail
 # Requires Docker, xz, git, sha256sum and roughly 10 GB of free disk space.
 # Set PI_GEN_URL to override the default pi-gen repository.
 
-for cmd in docker xz git sha256sum; do
+for cmd in docker xz git sha256sum curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -46,6 +46,14 @@ WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
+RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
+for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
+  if ! curl -fsI "$url" >/dev/null; then
+    echo "Cannot reach $url" >&2
+    exit 1
+  fi
+done
 
 ARM64="${ARM64:-1}"
 # Clone the arm64 branch when building 64-bit images to avoid generating
@@ -66,10 +74,8 @@ if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   exit 1
 fi
 
-# Allow callers to override the build timeout
-BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
-
-git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
+git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
+  "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
 
 cp "${CLOUD_INIT_PATH:-${USER_DATA}}" \
@@ -80,6 +86,9 @@ install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" 
 
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
+
+# Allow callers to override the build timeout
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 
 APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
@@ -93,7 +102,7 @@ APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
 RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
-APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"
+APT_OPTS="${APT_OPTS}"
 CFG
 
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)

@@ -9,6 +9,7 @@ jobs:
     env:
       ARM64: 1
       DEBIAN_FRONTEND: noninteractive
+      BUILD_TIMEOUT: 7200
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,9 +24,15 @@ jobs:
           df -h
       - name: Install pi-gen dependencies
         run: |
-          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
-            quilt qemu-user-static debootstrap libarchive-tools arch-test
+          sudo apt-get -o Acquire::Retries=5 \
+                       -o Acquire::http::Timeout=30 \
+                       -o Acquire::https::Timeout=30 \
+                       update
+          sudo apt-get -o Acquire::Retries=5 \
+                       -o Acquire::http::Timeout=30 \
+                       -o Acquire::https::Timeout=30 \
+                       install -y --no-install-recommends \
+                       quilt qemu-user-static debootstrap libarchive-tools arch-test
       - name: Clean up apt cache and temp files
         run: |
           sudo apt-get clean
@@ -50,7 +57,8 @@ jobs:
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
       - name: Build Raspberry Pi OS image
-        run: sudo ./scripts/build_pi_image.sh
+        timeout-minutes: 120
+        run: sudo env BUILD_TIMEOUT=7200 ./scripts/build_pi_image.sh
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'
         run: |

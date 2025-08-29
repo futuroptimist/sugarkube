@@ -86,6 +86,13 @@ def test_docker_daemon_must_be_running(tmp_path):
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
+    for name in ["curl", "timeout"]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = str(fake_bin)
     result = subprocess.run(
@@ -107,6 +114,8 @@ def test_requires_sudo_when_non_root(tmp_path):
         "git": "#!/bin/sh\nexit 0\n",
         "sha256sum": "#!/bin/sh\nexit 0\n",
         "id": "#!/bin/sh\necho 1000\n",
+        "curl": "#!/bin/sh\nexit 0\n",
+        "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -157,6 +166,14 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     git = fake_bin / "git"
     git.write_text(git_stub)
     git.chmod(0o755)
+
+    for name in ["curl", "timeout"]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
 
     (fake_bin / "id").write_text("#!/bin/sh\necho 0\n")
     (fake_bin / "id").chmod(0o755)
@@ -224,6 +241,14 @@ def test_respects_pi_gen_branch_env(tmp_path):
 
 def test_copies_cloudflared_compose(tmp_path):
     env = _setup_build_env(tmp_path, check_compose=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+
+
+def test_build_without_timeout_binary(tmp_path):
+    env = _setup_build_env(tmp_path)
+    fake_bin = Path(env["PATH"].split(":")[0])
+    (fake_bin / "timeout").unlink()
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
 
