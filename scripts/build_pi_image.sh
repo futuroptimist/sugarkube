@@ -68,6 +68,9 @@ IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
 
+# Build only the minimal lite image by default to keep CI fast
+PI_GEN_STAGES="${PI_GEN_STAGES:-stage0 stage1 stage2}"
+
 git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
@@ -97,6 +100,7 @@ RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
 APT_OPTS="${APT_OPTS}"
+STAGE_LIST="${PI_GEN_STAGES}"
 CFG
 
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
