@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -25,7 +26,15 @@ def test_requires_docker(tmp_path):
 def test_requires_xz(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    for name in ["curl", "docker", "git", "sha256sum", "stdbuf", "timeout"]:
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "unzip",
+    ]:
         path = fake_bin / name
         if name == "timeout":
             path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
@@ -53,6 +62,7 @@ def test_requires_git(tmp_path):
         "curl": "#!/bin/sh\nexit 0\n",
         "docker": "#!/bin/sh\nexit 0\n",
         "xz": "#!/bin/sh\nexit 0\n",
+        "unzip": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -72,7 +82,7 @@ def test_requires_git(tmp_path):
 def test_requires_sha256sum(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    for name in ["curl", "docker", "xz", "git"]:
+    for name in ["curl", "docker", "xz", "git", "unzip"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -88,13 +98,45 @@ def test_requires_sha256sum(tmp_path):
     assert "sha256sum is required" in result.stderr
 
 
+def test_requires_unzip(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "xz",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "unzip is required" in result.stderr
+
+
 def test_docker_daemon_must_be_running(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum"]:
+    for name in ["xz", "git", "sha256sum", "unzip"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -131,6 +173,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "curl": "#!/bin/sh\nexit 0\n",
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
         "stdbuf": "#!/bin/sh\nexit 0\n",
+        "unzip": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -163,6 +206,21 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     sha.write_text('#!/bin/sh\necho 0  "$1"\n')
     sha.chmod(0o755)
 
+    unzip = fake_bin / "unzip"
+    unzip.write_text(
+        f'#!/bin/sh\n{sys.executable} - "$@" <<"PY"\n'
+        "import sys, zipfile, fnmatch\n"
+        "archive=sys.argv[2]\n"
+        "pattern=sys.argv[3]\n"
+        "zf=zipfile.ZipFile(archive)\n"
+        "out=sys.stdout.buffer\n"
+        "for name in zf.namelist():\n"
+        "  if fnmatch.fnmatch(name, pattern):\n"
+        "    out.write(zf.read(name))\n"
+        "PY\n"
+    )
+    unzip.chmod(0o755)
+
     compose_check = (
         "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
         "docker-compose.cloudflared.yml ]] || exit 1\n"
@@ -177,8 +235,12 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         f"cat <<'EOF' > \"$target/build.sh\"\n"
         "#!/bin/bash\n"
         f"{compose_check}"
-        "mkdir -p deploy\n"
-        "touch deploy/sugarkube.img\n"
+        "python - <<'PY'\n"
+        "import zipfile, pathlib\n"
+        "pathlib.Path('deploy').mkdir(exist_ok=True)\n"
+        "with zipfile.ZipFile('deploy/sugarkube.img.zip','w') as zf:\n"
+        "    zf.writestr('sugarkube.img','')\n"
+        "PY\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -186,7 +248,7 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     git.write_text(git_stub)
     git.chmod(0o755)
 
-    for name in ["curl", "timeout", "stdbuf"]:
+    for name in ["curl", "timeout", "stdbuf", "unzip"]:
         path = fake_bin / name
         if name == "timeout":
             path.write_text(
