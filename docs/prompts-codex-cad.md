@@ -7,7 +7,7 @@ slug: 'prompts-codex-cad'
 
 Use this prompt whenever 3D models need updating or verification.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository focused on 3D assets.
 
