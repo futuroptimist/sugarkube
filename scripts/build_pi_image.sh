@@ -5,7 +5,7 @@ set -euo pipefail
 # Requires Docker, xz, git, sha256sum and roughly 10 GB of free disk space.
 # Set PI_GEN_URL to override the default pi-gen repository.
 
-for cmd in docker xz git sha256sum; do
+for cmd in docker xz git sha256sum curl timeout; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -40,6 +40,14 @@ WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
+RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
+for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
+  if ! curl -fsI "$url" >/dev/null; then
+    echo "Cannot reach $url" >&2
+    exit 1
+  fi
+done
 
 ARM64="${ARM64:-1}"
 # Clone the arm64 branch when building 64-bit images to avoid generating
@@ -60,7 +68,8 @@ if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   exit 1
 fi
 
-git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
+git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
+  "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
 
 cp "${CLOUD_INIT_PATH:-${USER_DATA}}" \
@@ -71,12 +80,15 @@ install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" 
 
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-14400}"
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
 ARM64=${ARM64}
+DEBIAN_MIRROR="${DEBIAN_MIRROR}"
+RPI_MIRROR="${RPI_MIRROR}"
 CFG
-${SUDO} ./build.sh
+timeout "${BUILD_TIMEOUT}" ${SUDO} ./build.sh
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
