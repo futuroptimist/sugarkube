@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires Docker, xz, git, sha256sum and roughly 10 GB of free disk space.
-# Set PI_GEN_URL to override the default pi-gen repository.
+# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz and roughly 10 GB of
+# free disk space. Set PI_GEN_URL to override the default pi-gen repository.
 
-for cmd in docker xz git sha256sum curl; do
+for cmd in curl docker git sha256sum stdbuf timeout xz; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1

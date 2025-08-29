@@ -43,9 +43,12 @@ Env
 MSYS
 Parametrize
 Raspbian
+coreutils
 env
 failover
+frontend
 qcow
+qcow2
 macOS
 md
 npm
@@ -222,14 +225,4 @@ localhostForwarding
 vmIdleTimeout
 overcurrent
 GPT
-Env
-MSYS
-qcow2
-Raspbian
-CPUs
-Parametrize
-failover
-env
-qcow
-frontend
 runtime
