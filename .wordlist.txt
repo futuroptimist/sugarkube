@@ -203,3 +203,11 @@ prebuilt
 linkchecker
 pyspelling
 sugarkube's
+
+wsl
+wslconfig
+WSL
+PowerShell
+powershell
+localhostForwarding
+vmIdleTimeout

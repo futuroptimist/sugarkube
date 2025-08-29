@@ -323,5 +323,3 @@ finally {
     try { Remove-Item -Recurse -Force -- $workDir } catch { }
   }
 }
-
-

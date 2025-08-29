@@ -7,7 +7,7 @@ slug: 'prompts-codex-cad'
 
 Use this prompt whenever 3D models need updating or verification.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository focused on 3D assets.
 
@@ -26,8 +26,9 @@ REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
 2. Modify geometry or parameters as required.
 3. Render the model via:
-   bash scripts/openscad_render.sh <path/to.scad> # defaults to heatset
-   STANDOFF_MODE=printed bash scripts/openscad_render.sh <path/to.scad> # case-insensitive
+    ./scripts/openscad_render.sh path/to/model.scad # heatset (default)
+    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad # case-insensitive
+
 4. Commit updated SCAD sources and any documentation.
 
 OUTPUT:
