@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires Docker, xz, git, sha256sum and roughly 10 GB of free disk space.
-# Set PI_GEN_URL to override the default pi-gen repository.
+# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, unzip and roughly
+# 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
+# repository.
 
-for cmd in docker xz git sha256sum curl; do
+for cmd in curl docker git sha256sum stdbuf timeout xz unzip; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -68,6 +69,9 @@ IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
 
+# Build only the minimal lite image by default to keep CI fast
+PI_GEN_STAGES="${PI_GEN_STAGES:-stage0 stage1 stage2}"
+
 git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
@@ -97,6 +101,7 @@ RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
 APT_OPTS="${APT_OPTS}"
+STAGE_LIST="${PI_GEN_STAGES}"
 CFG
 
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
@@ -112,7 +117,15 @@ echo "Starting pi-gen build..."
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
 
-mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+if compgen -G "deploy/*.img" > /dev/null; then
+  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+elif compgen -G "deploy/*.img.zip" > /dev/null; then
+  unzip -q deploy/*.img.zip -d deploy
+  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+else
+  echo "No image file found in deploy/" >&2
+  exit 1
+fi
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
   "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"

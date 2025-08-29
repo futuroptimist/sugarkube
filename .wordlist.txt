@@ -1,3 +1,4 @@
+< htmlcontent >
 AES
 AGM
 AWG
@@ -16,6 +17,7 @@ DEPENDABOT
 DHCP
 DoS
 Dockerfile
+Env
 ESLint
 Fritzing
 Futuroptimist's
@@ -99,6 +101,7 @@ cloudflare
 cloudflared
 config
 configs
+coreutils
 crimpers
 customizations
 democratizedspace
@@ -115,6 +118,7 @@ failover
 filesystem
 frac
 frictionless
+frontend
 fstab
 futuroptimist
 gabriel
@@ -165,6 +169,7 @@ preloaded
 prettierrc
 pyspelling
 qcow
+qcow2
 raspi
 release-drafter
 repo
