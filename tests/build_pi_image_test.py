@@ -57,6 +57,47 @@ def test_requires_git(tmp_path):
     assert "git is required" in result.stderr
 
 
+def test_requires_sha256sum(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in ["docker", "xz", "git"]:
+        path = fake_bin / name
+        path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "sha256sum is required" in result.stderr
+
+
+def test_docker_daemon_must_be_running(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
+    docker.chmod(0o755)
+    for name in ["xz", "git", "sha256sum"]:
+        path = fake_bin / name
+        path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Docker daemon is not running or not accessible" in result.stderr
+
+
 def test_requires_sudo_when_non_root(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
