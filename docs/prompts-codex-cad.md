@@ -1,9 +1,9 @@
 ---
-title: 'Sugarkube Codex CAD Prompt'
+title: 'Sugarkube CAD Prompt'
 slug: 'prompts-codex-cad'
 ---
 
-# LLM CAD Prompt
+# OpenAI GPT CAD Prompt
 
 Use this prompt whenever 3D models need updating or verification.
 
@@ -29,8 +29,8 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   bash scripts/openscad_render.sh <path/to.scad>                       # defaults to heatset
-   STANDOFF_MODE=printed bash scripts/openscad_render.sh <path/to.scad> # case-insensitive
+   bash scripts/openscad_render.sh path/to/model.scad # defaults to heatset
+   STANDOFF_MODE=printed bash scripts/openscad_render.sh path/to/model.scad # case-insensitive
    ```
 4. Commit updated SCAD sources and any documentation.
 
