@@ -17,15 +17,34 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 - Internet connection to download images and packages
 
 ## 1. Prepare the OS image
-1. From the Actions tab, trigger the
-   [pi-image workflow](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
-   to build `sugarkube.img.xz` on a GitHub runner. You can also build it locally
-   with `./scripts/build_pi_image.sh`.
-2. After the run completes, download the image and checksum with
-   `scripts/download_pi_image.sh` or fetch them manually from the workflow
-   artifacts.
-3. Verify the checksum: `sha256sum -c sugarkube.img.xz.sha256`
-4. Flash the image to a microSD card using Raspberry Pi Imager
+1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
+   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml),
+   or download it manually from the Actions tab.
+   
+   Alternatively, build locally:
+   - Linux/macOS: `./scripts/build_pi_image.sh`
+   - Windows (PowerShell):
+     ```powershell
+     # Optional: increase WSL/WSL2 resources for Docker Desktop (recommended)
+     # File: C:\Users\<you>\.wslconfig
+     # [wsl2]
+     # memory=64GB
+     # processors=24
+     # swap=16GB
+     # localhostForwarding=true
+     # vmIdleTimeout=7200
+     # Then apply and rerun build:
+     wsl --shutdown
+     
+     # Build the image
+     powershell -ExecutionPolicy Bypass -File .\scripts\build_pi_image.ps1
+     ```
+     Notes:
+     - Requires Docker Desktop running and Git for Windows installed
+     - The script auto-falls back to a Dockerized build and sets up binfmt/qemu
+     - Expect 45–120 minutes on Windows; ensure ≥30 GB free disk
+2. Verify the checksum: `sha256sum -c sugarkube.img.xz.sha256`
+3. Flash the image to a microSD card using Raspberry Pi Imager
    - Set a unique hostname (e.g., `sugar-01`, `sugar-02`, `sugar-03`), enable SSH, and create a user with a strong password
    - Use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to enter advanced options and configure WiFi SSID, password, and locale
    - The same image can be reused for all nodes
