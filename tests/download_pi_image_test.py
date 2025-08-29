@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -127,13 +128,14 @@ def test_uses_default_output(tmp_path):
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
-def test_moves_checksum_to_output(tmp_path):
+def test_downloads_without_realpath(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     src = tmp_path / "src.img.xz"
     src.write_text("data")
     sha = tmp_path / "src.img.xz.sha256"
     sha.write_text("sum  sugarkube.img.xz\n")
+
     gh = fake_bin / "gh"
     gh.write_text(
         "#!/bin/bash\n"
@@ -141,31 +143,36 @@ def test_moves_checksum_to_output(tmp_path):
         "  echo 42\n"
         'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
         "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
+        '  while [ \"$1\" != --dir ]; do shift; done\n'
         "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
+        '  cp \"$GH_SRC\" \"$dir/sugarkube.img.xz\"\n'
+        '  cp \"$GH_SHA\" \"$dir/sugarkube.img.xz.sha256\"\n'
         "else\n"
         "  exit 1\n"
         "fi\n"
     )
     gh.chmod(0o755)
 
-    out_dir = tmp_path / "out"
-    out_path = out_dir / "custom.img.xz"
+    # Symlink required utilities but omit realpath
+    for cmd in ["dirname", "mkdir", "mv", "ls", "cp"]:
+        target = shutil.which(cmd)
+        assert target is not None
+        (fake_bin / cmd).symlink_to(target)
+
     env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PATH"] = str(fake_bin)
     env["GH_SRC"] = str(src)
     env["GH_SHA"] = str(sha)
+
     base = Path(__file__).resolve().parents[1]
     script = base / "scripts" / "download_pi_image.sh"
     result = subprocess.run(
-        ["/bin/bash", str(script), str(out_path)],
+        ["/bin/bash", str(script), "out.img.xz"],
         env=env,
         cwd=tmp_path,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
-    assert out_path.exists()
-    assert (out_dir / "custom.img.xz.sha256").exists()
+    assert (tmp_path / "out.img.xz").exists()
+    assert (tmp_path / "out.img.xz.sha256").exists()
