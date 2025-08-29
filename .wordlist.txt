@@ -198,15 +198,3 @@ yaml
 kicad
 KiBot
 nonint
-prebuilt
-
-linkchecker
-pyspelling
-sugarkube's
-PowerShell
-powershell
-WSL
-wsl
-wslconfig
-localhostForwarding
-vmIdleTimeout
