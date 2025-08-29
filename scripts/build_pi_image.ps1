@@ -18,7 +18,10 @@ param(
   [string]$PiGenBranch = $(if ($env:PI_GEN_BRANCH) { $env:PI_GEN_BRANCH } else { 'bookworm' }),
   [string]$ImageName   = $(if ($env:IMG_NAME) { $env:IMG_NAME } else { 'sugarkube' }),
   [string]$OutputDir   = $(if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { (Resolve-Path "$PSScriptRoot\..").Path }),
-  [int]$Arm64          = $(if ($env:ARM64) { [int]$env:ARM64 } else { 1 })
+  [int]$Arm64          = $(if ($env:ARM64) { [int]$env:ARM64 } else { 1 }),
+  [string]$DebianMirror = $(if ($env:DEBIAN_MIRROR) { $env:DEBIAN_MIRROR } else { 'https://deb.debian.org/debian' }),
+  [string]$RpiMirror    = $(if ($env:RPI_MIRROR) { $env:RPI_MIRROR } else { 'https://archive.raspberrypi.com/debian' }),
+  [int]$TimeoutSec     = $(if ($env:BUILD_TIMEOUT) { [int]$env:BUILD_TIMEOUT } else { 14400 })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -119,7 +122,8 @@ function Invoke-BuildPiGen {
     [Parameter(Mandatory=$true)][string]$OutputDir,
     [Parameter(Mandatory=$true)][string]$PiGenBranch,
     [Parameter(Mandatory=$true)][int]$Arm64,
-    [Parameter(Mandatory=$true)][string]$RepoRoot
+    [Parameter(Mandatory=$true)][string]$RepoRoot,
+    [int]$TimeoutSec = 14400
   )
 
   # Prefer WSL; fall back to Git Bash if available
@@ -127,8 +131,15 @@ function Invoke-BuildPiGen {
   $gitBash = Get-GitBashPath
   if ($gitBash) {
     $msysPath = Convert-ToMsysPath -WindowsPath $PiGenPath
-    & $gitBash -lc "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && ./build.sh"
-    if ($LASTEXITCODE -ne 0) { throw "pi-gen build failed under Git Bash (exit $LASTEXITCODE)" }
+    $cmd = "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; " +
+      "set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && ./build.sh"
+    $args = '-lc', $cmd
+    $proc = Start-Process -FilePath $gitBash -ArgumentList $args -NoNewWindow -PassThru
+    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+      $proc.Kill()
+      throw "pi-gen build timed out after $TimeoutSec seconds"
+    }
+    if ($proc.ExitCode -ne 0) { throw "pi-gen build failed under Git Bash (exit $($proc.ExitCode))" }
     return
   }
 
@@ -138,8 +149,14 @@ function Invoke-BuildPiGen {
     $distro = Get-WslDistroWithBash -WslPath $wsl
     if ($distro) {
       $linuxPath = Convert-ToWslLinuxPath -WindowsPath $PiGenPath
-      & $wsl -d $distro -- bash -lc "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && ./build.sh"
-      if ($LASTEXITCODE -ne 0) { throw "pi-gen build failed under WSL ($distro) (exit $LASTEXITCODE)" }
+      $cmd = "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && ./build.sh"
+      $args = '-d', $distro, '--', 'bash', '-lc', $cmd
+      $proc = Start-Process -FilePath $wsl -ArgumentList $args -NoNewWindow -PassThru
+      if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+        $proc.Kill()
+        throw "pi-gen build failed under WSL ($distro): timeout after $TimeoutSec seconds"
+      }
+      if ($proc.ExitCode -ne 0) { throw "pi-gen build failed under WSL ($distro) (exit $($proc.ExitCode))" }
       return
     }
   }
@@ -153,14 +170,18 @@ function Invoke-BuildPiGenDocker {
     [Parameter(Mandatory=$true)][string]$OutputDir,
     [Parameter(Mandatory=$true)][string]$PiGenBranch,
     [Parameter(Mandatory=$true)][string]$ImageName,
-    [Parameter(Mandatory=$true)][int]$Arm64
+    [Parameter(Mandatory=$true)][int]$Arm64,
+    [int]$TimeoutSec = 14400
   )
 
   $hostRoot = (Resolve-Path $RepoRoot).Path
   $hostOut = (Resolve-Path $OutputDir).Path
   # Ensure binfmt handlers are installed on the Docker host for ARM emulation
-  & docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Failed to install binfmt handlers on host" }
+  $proc = Start-Process -FilePath docker -ArgumentList @(
+    'run','--privileged','--rm','tonistiigi/binfmt','--install','arm64,arm'
+  ) -NoNewWindow -PassThru
+  if (-not $proc.WaitForExit(600000)) { $proc.Kill() }
+  if ($proc.ExitCode -ne 0) { throw "Failed to install binfmt handlers on host" }
   $bash = @'
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -211,8 +232,16 @@ cp "$artifact" /out/{1}.img
   $tempScript = Join-Path $hostRoot '.pigen-build.sh'
   try {
     $bashLF | Set-Content -NoNewline -Encoding Ascii -- $tempScript
-    & docker run --rm --privileged -v "${hostRoot}:/host" -v "${hostOut}:/out" debian:bookworm bash -lc "bash /host/.pigen-build.sh"
-    if ($LASTEXITCODE -ne 0) { throw "pi-gen Docker run failed (exit $LASTEXITCODE)" }
+    $args = @(
+      'run','--rm','--privileged','-v',"${hostRoot}:/host",'-v',
+      "${hostOut}:/out",'debian:bookworm','bash','-lc','bash /host/.pigen-build.sh'
+    )
+    $proc = Start-Process -FilePath docker -ArgumentList $args -NoNewWindow -PassThru
+    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+      $proc.Kill()
+      throw "pi-gen Docker run timed out after $TimeoutSec seconds"
+    }
+    if ($proc.ExitCode -ne 0) { throw "pi-gen Docker run failed (exit $($proc.ExitCode))" }
   } finally {
     if (Test-Path $tempScript) { Remove-Item -Force -- $tempScript }
   }
@@ -269,6 +298,16 @@ Test-CommandAvailable docker
 Test-CommandAvailable git
 Invoke-Docker-Info
 
+$urls = @($DebianMirror, $RpiMirror, 'https://github.com')
+foreach ($u in $urls) {
+  try {
+    Invoke-WebRequest -Method Head -Uri $u -TimeoutSec 10 | Out-Null
+  } catch {
+    Write-Error "Cannot reach $u"
+    exit 1
+  }
+}
+
 # Paths and working directory
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $workDir = New-TemporaryDirectory
@@ -295,14 +334,16 @@ try {
   $config += ('IMG_NAME="' + $ImageName + '"')
   $config += "ENABLE_SSH=1"
   $config += "ARM64=$Arm64"
+  $config += ('DEBIAN_MIRROR="' + $DebianMirror + '"')
+  $config += ('RPI_MIRROR="' + $RpiMirror + '"')
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
 
   # Run the build (prefer local shell; fallback to containerized pi-gen)
   try {
-    Invoke-BuildPiGen -PiGenPath $piGenDir -ImageName $ImageName -OutputDir $OutputDir -PiGenBranch $PiGenBranch -Arm64 $Arm64 -RepoRoot $repoRoot
+    Invoke-BuildPiGen -PiGenPath $piGenDir -ImageName $ImageName -OutputDir $OutputDir -PiGenBranch $PiGenBranch -Arm64 $Arm64 -RepoRoot $repoRoot -TimeoutSec $TimeoutSec
   } catch {
     Write-Warning "Local shell build failed: $($_.Exception.Message). Falling back to Dockerized pi-gen."
-    Invoke-BuildPiGenDocker -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64
+    Invoke-BuildPiGenDocker -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
   }
 
   # Collect artifact
