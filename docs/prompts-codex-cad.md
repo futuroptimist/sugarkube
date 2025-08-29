@@ -21,6 +21,8 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` after changes. If docs are updated, also run
   `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log tool failures in [`outages/`](../outages/) per
   [`outages/schema.json`](../outages/schema.json).
 
