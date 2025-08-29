@@ -181,3 +181,58 @@ Repeat these steps for each repository you want to deploy.
 - If a deployment fails repeatedly, record it under
   [`outages/`](../outages/README.md) using
   [`outages/schema.json`](../outages/schema.json).
+
+## 8. End-to-end examples
+
+These examples combine the cloning, build, and Cloudflare steps for two projects.
+
+### token.place behind Cloudflare
+
+```sh
+cd /opt/projects/token.place
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server \
+  -t tokenplace . --load
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+```
+
+Add an ingress rule:
+
+```yaml
+# /opt/sugarkube/docker-compose.cloudflared.yml
+ingress:
+  - hostname: tokenplace.example.com
+    service: http://localhost:5000
+  - service: http_status:404
+```
+
+Restart the tunnel and verify:
+
+```sh
+docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
+curl https://tokenplace.example.com
+```
+
+### dspace behind Cloudflare
+
+```sh
+cd /opt/projects/dspace/frontend
+cp .env.example .env  # populate as needed
+docker compose up -d
+```
+
+Add another ingress rule:
+
+```yaml
+# /opt/sugarkube/docker-compose.cloudflared.yml
+ingress:
+  - hostname: dspace.example.com
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+Restart the tunnel and verify:
+
+```sh
+docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
+curl https://dspace.example.com
+```
