@@ -7,8 +7,8 @@ avahi
 bambu
 bonjour
 ci
-cli
 clis
+cli
 cloudflare
 cloudflared
 config
@@ -55,6 +55,8 @@ json
 js
 kibot
 kicad
+kibot
+kicad
 kube
 kubeconfig
 kubectl
@@ -71,7 +73,7 @@ macos
 makefile
 md
 mdns
-microSD
+microsd
 msys
 multimeter
 namespace
@@ -101,7 +103,6 @@ pypi
 pyspelling
 qcow
 qcow2
-raspberry
 raspbian
 readme
 release-drafter
@@ -111,9 +112,9 @@ repos
 repurpose
 resettable
 roadmap
+rsa
 runtime
 runbook
-rsa
 scl
 sda
 sed
