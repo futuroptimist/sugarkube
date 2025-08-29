@@ -143,10 +143,10 @@ def test_downloads_without_realpath(tmp_path):
         "  echo 42\n"
         'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
         "  shift 2\n"
-        '  while [ \"$1\" != --dir ]; do shift; done\n'
+        '  while [ "$1" != --dir ]; do shift; done\n'
         "  dir=$2\n"
-        '  cp \"$GH_SRC\" \"$dir/sugarkube.img.xz\"\n'
-        '  cp \"$GH_SHA\" \"$dir/sugarkube.img.xz.sha256\"\n'
+        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
+        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
         "else\n"
         "  exit 1\n"
         "fi\n"
