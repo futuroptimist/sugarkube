@@ -207,6 +207,7 @@ PowerShell
 powershell
 WSL
 wsl
+wslconfig
 localhostForwarding
 vmIdleTimeout
-wslconfig
+GPT
