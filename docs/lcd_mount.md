@@ -5,7 +5,8 @@ Its standoffs match the common 80×36 mm module with holes 3 mm from each
 edge (75 mm × 31 mm spacing).
 
 The base plate includes rounded corners set by `corner_radius` (default 5 mm)
-to make handling safer.
+to make handling safer. Standoff pillars now use a 6.3 mm diameter to conserve
+material while gripping heat‑set inserts firmly.
 
 LCD support is disabled by default. To add the display set
 `include_lcd = true` near the top of `cad/pi_cluster/pi_carrier.scad`

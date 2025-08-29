@@ -7,7 +7,7 @@
         (title_block
                 (comment 1 "Place decoupling capacitors near power pins")
                 (comment 2 "Keep high-current traces short")
-                (comment 3 "Label polarity on connectors")
+                (comment 3 "Label polarity and voltage on connectors")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
