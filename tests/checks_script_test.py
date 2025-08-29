@@ -92,6 +92,57 @@ def test_installs_aspell_as_root_without_sudo(tmp_path):
     assert any("install" in line for line in log)
 
 
+def test_installs_aspell_with_sudo_when_non_root(tmp_path):
+    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
+    script = tmp_path / "checks.sh"
+    script.write_text(script_src.read_text())
+    script.chmod(0o755)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    sudo_log = tmp_path / "sudo.log"
+    for cmd in [
+        "flake8",
+        "isort",
+        "black",
+        "pytest",
+        "pyspelling",
+        "linkchecker",
+        "apt-get",
+        "sudo",
+        "id",
+    ]:
+        f = fake_bin / cmd
+        if cmd == "sudo":
+            f.write_text(
+                f"""#!/bin/bash
+echo "$@" >> {sudo_log}
+"$@"
+"""
+            )
+        elif cmd == "id":
+            f.write_text("#!/bin/bash\necho 1000\n")
+        else:
+            f.write_text("#!/bin/bash\nexit 0\n")
+        f.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    lines = sudo_log.read_text().splitlines()
+    assert any("apt-get update" in line for line in lines)
+    assert any("apt-get install" in line for line in lines)
+
+
 def test_skips_js_checks_when_npm_missing(tmp_path):
     script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
     script = tmp_path / "checks.sh"
