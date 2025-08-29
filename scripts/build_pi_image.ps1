@@ -21,6 +21,8 @@ param(
   [int]$Arm64          = $(if ($env:ARM64) { [int]$env:ARM64 } else { 1 })
 )
 
+$BuildTimeout = $(if ($env:BUILD_TIMEOUT) { $env:BUILD_TIMEOUT } else { '4h' })
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -127,7 +129,7 @@ function Invoke-BuildPiGen {
   $gitBash = Get-GitBashPath
   if ($gitBash) {
     $msysPath = Convert-ToMsysPath -WindowsPath $PiGenPath
-    & $gitBash -lc "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && ./build.sh"
+    & $gitBash -lc "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && timeout '$BuildTimeout' ./build.sh"
     if ($LASTEXITCODE -ne 0) { throw "pi-gen build failed under Git Bash (exit $LASTEXITCODE)" }
     return
   }
@@ -138,7 +140,7 @@ function Invoke-BuildPiGen {
     $distro = Get-WslDistroWithBash -WslPath $wsl
     if ($distro) {
       $linuxPath = Convert-ToWslLinuxPath -WindowsPath $PiGenPath
-      & $wsl -d $distro -- bash -lc "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && ./build.sh"
+      & $wsl -d $distro -- bash -lc "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && timeout '$BuildTimeout' ./build.sh"
       if ($LASTEXITCODE -ne 0) { throw "pi-gen build failed under WSL ($distro) (exit $LASTEXITCODE)" }
       return
     }
@@ -196,10 +198,10 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
 chmod +x ./build.sh
-./build.sh
+timeout {3} ./build.sh
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
 cp "$artifact" /out/{1}.img
-'@ -f $PiGenBranch, $ImageName, $Arm64
+'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout
   $bashLF = ($bash -replace "`r`n","`n").Trim()
 
   $tempScript = Join-Path $hostRoot '.pigen-build.sh'

@@ -66,6 +66,9 @@ if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   exit 1
 fi
 
+# Allow callers to override the build timeout
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
+
 git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
 
@@ -90,7 +93,7 @@ APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
 RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
-APT_OPTS="${APT_OPTS}"
+APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"
 CFG
 
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
@@ -101,7 +104,7 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   ${SUDO} mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
 
-${SUDO} ./build.sh
+${SUDO} timeout "${BUILD_TIMEOUT}" ./build.sh
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
