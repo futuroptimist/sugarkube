@@ -182,11 +182,9 @@ function Invoke-BuildPiGenDocker {
   $hostRoot = (Resolve-Path $RepoRoot).Path
   $hostOut = (Resolve-Path $OutputDir).Path
   # Ensure binfmt handlers are installed on the Docker host for ARM emulation
-  $proc = Start-Process -FilePath docker -ArgumentList @(
-    'run','--privileged','--rm','tonistiigi/binfmt','--install','arm64,arm'
-  ) -NoNewWindow -PassThru
-  if (-not $proc.WaitForExit(600000)) { $proc.Kill() }
-  if ($proc.ExitCode -ne 0) { throw "Failed to install binfmt handlers on host" }
+  & docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
+  # Do not fail hard here; some environments return non-zero despite emulators being present
+  if ($LASTEXITCODE -ne 0) { Write-Warning "binfmt installer returned exit code $LASTEXITCODE; continuing" }
   $bash = @'
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -231,19 +229,44 @@ cp "$artifact" /out/{1}.img
   $tempScript = Join-Path $hostRoot '.pigen-build.sh'
   try {
     $bashLF | Set-Content -NoNewline -Encoding Ascii -- $tempScript
-    $args = @(
-      'run','--rm','--privileged','-v',"${hostRoot}:/host",'-v',
-      "${hostOut}:/out",'debian:bookworm','bash','-lc','bash /host/.pigen-build.sh'
-    )
-    $proc = Start-Process -FilePath docker -ArgumentList $args -NoNewWindow -PassThru
-    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
-      $proc.Kill()
-      throw "pi-gen Docker run timed out after $TimeoutSec seconds"
-    }
-    if ($proc.ExitCode -ne 0) { throw "pi-gen Docker run failed (exit $($proc.ExitCode))" }
+    & docker run --rm --privileged -v "${hostRoot}:/host" -v "${hostOut}:/out" debian:bookworm bash -lc "bash /host/.pigen-build.sh"
+    if ($LASTEXITCODE -ne 0) { throw "pi-gen Docker run failed (exit $LASTEXITCODE)" }
   } finally {
     if (Test-Path $tempScript) { Remove-Item -Force -- $tempScript }
   }
+}
+
+function Invoke-BuildPiGenOfficial {
+  param(
+    [Parameter(Mandatory=$true)][string]$RepoRoot,
+    [Parameter(Mandatory=$true)][string]$OutputDir,
+    [Parameter(Mandatory=$true)][string]$PiGenBranch,
+    [Parameter(Mandatory=$true)][string]$ImageName,
+    [Parameter(Mandatory=$true)][int]$Arm64,
+    [int]$TimeoutSec = 14400
+  )
+
+  $hostRoot = (Resolve-Path $RepoRoot).Path
+  $hostOut = (Resolve-Path $OutputDir).Path
+  & docker volume create pigen-work-cache | Out-Null
+  & docker volume create pigen-apt-cache | Out-Null
+  $userData = Join-Path $hostRoot 'scripts\cloud-init\user-data.yaml'
+  $cfCompose = Join-Path $hostRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
+
+  & docker run --rm --privileged \
+    -e IMG_NAME=$ImageName -e ENABLE_SSH=1 -e ARM64=$Arm64 -e USE_QCOW2=1 \
+    -e APT_OPTS='--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true' \
+    -e APT_MIRROR=$env:DEBIAN_MIRROR -e DEBIAN_MIRROR=$env:DEBIAN_MIRROR \
+    -e RASPBIAN_MIRROR='http://raspbian.raspberrypi.org/raspbian' \
+    -e APT_MIRROR_RASPBERRYPI='http://archive.raspberrypi.org/debian' \
+    -e PI_GEN_BRANCH=$PiGenBranch \
+    -v "${hostOut}:/pi-gen/deploy" \
+    -v pigen-work-cache:/pi-gen/work \
+    -v pigen-apt-cache:/var/cache/apt \
+    -v "${userData}:/pi-gen/stage2/01-sys-tweaks/user-data:ro" \
+    -v "${cfCompose}:/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml:ro" \
+    ghcr.io/raspberrypi/pigen:latest bash -lc "cd /pi-gen && ./build.sh"
+  if ($LASTEXITCODE -ne 0) { throw "pi-gen official image run failed (exit $LASTEXITCODE)" }
 }
 
 function Compress-XZ {
@@ -346,14 +369,18 @@ try {
     '-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
   $config += ('APT_OPTS="' + $aptOpts + '"')
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
-}
 
   # Run the build (prefer local shell; fallback to containerized pi-gen)
   try {
     Invoke-BuildPiGen -PiGenPath $piGenDir -ImageName $ImageName -OutputDir $OutputDir -PiGenBranch $PiGenBranch -Arm64 $Arm64 -RepoRoot $repoRoot -TimeoutSec $TimeoutSec
   } catch {
-    Write-Warning "Local shell build failed: $($_.Exception.Message). Falling back to Dockerized pi-gen."
-    Invoke-BuildPiGenDocker -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    Write-Warning "Local shell build failed: $($_.Exception.Message). Trying official pigen image."
+    try {
+      Invoke-BuildPiGenOfficial -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    } catch {
+      Write-Warning "Official pigen image failed: $($_.Exception.Message). Falling back to Debian container method."
+      Invoke-BuildPiGenDocker -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    }
   }
 
   # Collect artifact
