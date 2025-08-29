@@ -20,7 +20,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
    [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml),
    or download it manually from the Actions tab.
-   
+
    Alternatively, build locally:
    - Linux/macOS: `./scripts/build_pi_image.sh`
    - Windows (PowerShell):
@@ -35,11 +35,12 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
      # vmIdleTimeout=7200
      # Then apply and rerun build:
      wsl --shutdown
-     
+
      # Build the image
      powershell -ExecutionPolicy Bypass -File .\scripts\build_pi_image.ps1
      ```
      Notes:
+     - Setting `localhostForwarding=true` forwards WSL ports to Windows
      - Requires Docker Desktop running and Git for Windows installed
      - The script auto-falls back to a Dockerized build and sets up binfmt/qemu
      - Expect 45–120 minutes on Windows; ensure ≥30 GB free disk
