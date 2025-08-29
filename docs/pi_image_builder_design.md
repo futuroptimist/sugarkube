@@ -59,7 +59,7 @@
 
 ## CI Considerations
 - CI can run the official container path with the same env mirrors and qcow2
-  - Artifacts: upload `IMG_NAME.img.xz` and checksum; retain `deploy/` in run artifacts if needed
+- Artifacts: upload `IMG_NAME.img.xz` and checksum; retain `deploy/` in run artifacts if needed
 - Default `PI_GEN_STAGES` only builds `stage0`–`stage2` so CI skips heavyweight desktop
   packages. Override to build a full image.
 

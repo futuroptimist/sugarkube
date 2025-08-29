@@ -185,14 +185,33 @@ function Invoke-BuildPiGenDocker {
   & docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
   # Do not fail hard here; some environments return non-zero despite emulators being present
   if ($LASTEXITCODE -ne 0) { Write-Warning "binfmt installer returned exit code $LASTEXITCODE; continuing" }
+  # Pick a reachable Raspbian mirror to avoid intermittent outages
+  $raspbianCandidates = @(
+    'http://raspbian.raspberrypi.org/raspbian',
+    'http://raspbian.mirrorservice.org/raspbian',
+    'http://archive.raspbian.org/raspbian'
+  )
+  $raspbianMirror = $raspbianCandidates[0]
+  foreach ($m in $raspbianCandidates) {
+    try {
+      Invoke-WebRequest -Method Head -TimeoutSec 5 -Uri $m | Out-Null
+      $raspbianMirror = $m
+      break
+    } catch { }
+  }
   $bash = @'
 set -e
 export DEBIAN_FRONTEND=noninteractive
-apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y \
+APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+for i in 1 2 3 4 5; do
+  if apt-get $APT_OPTS update; then break; fi; sleep 5;
+done
+for i in 1 2 3 4 5; do
+  if apt-get $APT_OPTS install -y \
   quilt parted qemu-user-static debootstrap zerofree zip dosfstools \
   libcap2-bin libarchive-tools rsync xxd file kmod bc gpg pigz arch-test \
-  git xz-utils ca-certificates curl bash coreutils binfmt-support
+  git xz-utils ca-certificates curl bash coreutils binfmt-support; then break; fi; sleep 5;
+done
 #!/bin/bash
 # rely on host-registered qemu binfmt (installed before container run)
 mkdir -p /work
@@ -205,12 +224,11 @@ cat > config <<CFG
 IMG_NAME="{1}"
 ENABLE_SSH=1
 ARM64={2}
-APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
-RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
+APT_MIRROR={4}
+RASPBIAN_MIRROR={4}
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
-APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
--o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"
+APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
 CFG
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
@@ -223,7 +241,7 @@ chmod +x ./build.sh
 timeout {3} ./build.sh
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
 cp "$artifact" /out/{1}.img
-'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout
+'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout, $raspbianMirror
   $bashLF = ($bash -replace "`r`n","`n").Trim()
 
   $tempScript = Join-Path $hostRoot '.pigen-build.sh'
@@ -253,12 +271,15 @@ function Invoke-BuildPiGenOfficial {
   $userData = Join-Path $hostRoot 'scripts\cloud-init\user-data.yaml'
   $cfCompose = Join-Path $hostRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
 
+  $raspbianMirror = 'http://raspbian.raspberrypi.org/raspbian'
+  $archiveMirror = 'http://archive.raspberrypi.org/debian'
+  $debMirror = 'http://deb.debian.org/debian'
+
   & docker run --rm --privileged \
     -e IMG_NAME=$ImageName -e ENABLE_SSH=1 -e ARM64=$Arm64 -e USE_QCOW2=1 \
-    -e APT_OPTS='--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true' \
-    -e APT_MIRROR=$env:DEBIAN_MIRROR -e DEBIAN_MIRROR=$env:DEBIAN_MIRROR \
-    -e RASPBIAN_MIRROR='http://raspbian.raspberrypi.org/raspbian' \
-    -e APT_MIRROR_RASPBERRYPI='http://archive.raspberrypi.org/debian' \
+    -e APT_OPTS='--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0' \
+    -e APT_MIRROR=$debMirror -e DEBIAN_MIRROR=$debMirror \
+    -e RASPBIAN_MIRROR=$raspbianMirror -e APT_MIRROR_RASPBERRYPI=$archiveMirror \
     -e PI_GEN_BRANCH=$PiGenBranch \
     -v "${hostOut}:/pi-gen/deploy" \
     -v pigen-work-cache:/pi-gen/work \
@@ -325,7 +346,7 @@ Invoke-Docker-Info
 if ($LASTEXITCODE -ne 0) { throw "Failed to install binfmt handlers on host" }
 
 # Verify required mirrors and GitHub are reachable before proceeding
-$urls = @($DebianMirror, $RpiMirror, 'https://github.com')
+$urls = @($DebianMirror, $RpiMirror, 'http://raspbian.raspberrypi.org/raspbian', 'https://github.com')
 foreach ($u in $urls) {
   try {
     Invoke-WebRequest -Method Head -Uri $u -TimeoutSec 10 | Out-Null
@@ -343,6 +364,18 @@ try {
 
   # Clone pi-gen
   & git clone --depth 1 --branch "$PiGenBranch" https://github.com/RPi-Distro/pi-gen.git -- "$piGenDir"
+  # Normalize any stale raspbian mirror references in pi-gen to the canonical .org host
+  try {
+    $textFileGlobs = @('*.sh','*.list','*.sources','*.cfg','config','*.conf','*.env','*.mk')
+    $candidateFiles = @()
+    foreach ($g in $textFileGlobs) { $candidateFiles += Get-ChildItem -Path $piGenDir -Recurse -File -Filter $g -ErrorAction SilentlyContinue }
+    foreach ($f in $candidateFiles) {
+      $raw = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
+      if ($null -ne $raw -and $raw -match 'raspbian\.raspberrypi\.com') {
+        ($raw -replace 'raspbian\.raspberrypi\.com','raspbian.raspberrypi.org') | Set-Content -NoNewline -LiteralPath $f.FullName
+      }
+    }
+  } catch { Write-Warning "Failed to normalize raspbian mirror references: $($_.Exception.Message)" }
 
   # Copy cloud-init user-data
   $srcUserData = Join-Path $repoRoot 'scripts\cloud-init\user-data.yaml'
@@ -365,8 +398,9 @@ try {
   $config += 'RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian'
   $config += 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian'
   $config += 'DEBIAN_MIRROR=http://deb.debian.org/debian'
-  $aptOpts = '-o Acquire::Retries=5 -o Acquire::http::Timeout=30 ' +
-    '-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
+  $aptOpts = '--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 ' +
+    '-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true ' +
+    '-o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0'
   $config += ('APT_OPTS="' + $aptOpts + '"')
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
 

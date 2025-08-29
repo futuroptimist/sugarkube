@@ -204,6 +204,14 @@ sed
 swapoff
 CI
 ci
+Env
+env
+MSYS
+qcow
+Raspbian
+CPUs
+Parametrize
+failover
 
 kibot
 yaml
