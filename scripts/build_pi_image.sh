@@ -50,6 +50,7 @@ git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
 cp "${REPO_ROOT}/scripts/cloud-init/user-data.yaml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cd "${WORK_DIR}/pi-gen"
+export DEBIAN_FRONTEND=noninteractive
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
