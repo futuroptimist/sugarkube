@@ -11,7 +11,8 @@ repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. The `build_pi_image.sh` script clones `pi-gen` using the
 `PI_GEN_BRANCH` environment variable, defaulting to `bookworm` for reproducible
-builds. Set `IMG_NAME` to change the image name or `OUTPUT_DIR` to control
+builds. Set `PI_GEN_URL` to use a fork or mirror if the default repository is
+unavailable. Set `IMG_NAME` to change the image name or `OUTPUT_DIR` to control
 where artifacts are written. Ensure `docker` (with its daemon running), `xz`,
 `git`, and `sha256sum` are installed before running it. Use the prepared image
 to deploy containerized apps. The companion guide

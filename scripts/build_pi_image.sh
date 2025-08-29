@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
 # Requires Docker, xz, git, sha256sum and roughly 10 GB of free disk space.
+# Set PI_GEN_URL to override the default pi-gen repository.
 
 for cmd in docker xz git sha256sum; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -32,6 +33,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
+PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
+
 ARM64="${ARM64:-1}"
 # Clone the arm64 branch when building 64-bit images to avoid generating
 # both architectures and exhausting disk space.
@@ -45,8 +48,8 @@ fi
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 
-git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
-  https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
+git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL}" \
+  "${WORK_DIR}/pi-gen"
 cp "${REPO_ROOT}/scripts/cloud-init/user-data.yaml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cd "${WORK_DIR}/pi-gen"
