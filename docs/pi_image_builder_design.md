@@ -11,7 +11,7 @@
   - `scripts/cloud-init/user-data.yaml` (cloud-init seed including Cloudflare compose file)
   - Environment variables: `PI_GEN_BRANCH` (default `bookworm`), `IMG_NAME` (default `sugarkube`), `ARM64` (default `1`), optional `OUTPUT_DIR`
 - Outputs:
-  - `<IMG_NAME>.img.xz` and `<IMG_NAME>.img.xz.sha256` in `OUTPUT_DIR`
+  - `${IMG_NAME}.img.xz` and `${IMG_NAME}.img.xz.sha256` in `OUTPUT_DIR`
 
 ## Build Strategies
 
@@ -58,7 +58,7 @@
 
 ## CI Considerations
 - CI can run the official container path with the same env mirrors and qcow2
-- Artifacts: upload `<IMG_NAME>.img.xz` and checksum; retain `deploy/` in run artifacts if needed
+- Artifacts: upload `${IMG_NAME}.img.xz` and checksum; retain `deploy/` in run artifacts if needed
 
 ## Operations & Recovery
 - If apt stalls: rerun; caches and retries reduce recurrence
