@@ -263,6 +263,10 @@ Test-CommandAvailable docker
 Test-CommandAvailable git
 Invoke-Docker-Info
 
+# Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
+& docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Failed to install binfmt handlers on host" }
+
 # Paths and working directory
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $workDir = New-TemporaryDirectory
