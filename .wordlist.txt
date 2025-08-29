@@ -210,3 +210,4 @@ wsl
 wslconfig
 localhostForwarding
 vmIdleTimeout
+GPT
