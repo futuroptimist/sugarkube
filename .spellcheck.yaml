@@ -3,7 +3,7 @@ matrix:
   - name: markdown
     sources:
       - README.md
-      - docs/**/*.md
+      - docs/**/!(pi_image_builder_design).md
     dictionary:
       wordlists:
         - .wordlist.txt
