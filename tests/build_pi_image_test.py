@@ -46,6 +46,38 @@ def test_requires_xz(tmp_path):
     assert "xz is required" in result.stderr
 
 
+def test_requires_unzip(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "unzip is required" in result.stderr
+
+
 def test_requires_git(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -126,7 +158,7 @@ def test_docker_daemon_must_be_running(tmp_path):
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum"]:
+    for name in ["xz", "git", "sha256sum", "unzip"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -232,18 +264,20 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     )
     git_stub = (
         f"#!/bin/bash\n"
-        f'echo "$@" > "{git_log}"\n'
+        f'echo \"$@\" > \"{git_log}\"\n'
         "target=${!#}\n"
-        'mkdir -p "$target/stage2/01-sys-tweaks"\n'
+        'mkdir -p \"$target/stage2/01-sys-tweaks\"\n'
         f"cat <<'EOF' > \"$target/build.sh\"\n"
         "#!/bin/bash\n"
         f"{compose_check}"
         "mkdir -p deploy\n"
-        "touch deploy/sugarkube.img\n"
-        "cp deploy/sugarkube.img deploy/sugarkube.img.zip\n"
-        "rm deploy/sugarkube.img\n"
+        "python3 - <<'PY'\n"
+        "import zipfile\n"
+        "with zipfile.ZipFile('deploy/sugarkube.img.zip', 'w') as zf:\n"
+        "    zf.writestr('sugarkube.img', '')\n"
+        "PY\n"
         "EOF\n"
-        'chmod +x "$target/build.sh"\n'
+        'chmod +x \"$target/build.sh\"\n'
     )
     git = fake_bin / "git"
     git.write_text(git_stub)
@@ -253,13 +287,13 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         path = fake_bin / name
         if name == "timeout":
             path.write_text(
-                '#!/bin/sh\nfirst="$1"\nshift\n'
-                'if [ -n "$TIMEOUT_LOG" ]; then\n'
-                '  echo $first > "$TIMEOUT_LOG"\n'
-                'fi\nexec "$@"\n'
+                '#!/bin/sh\nfirst=\"$1\"\nshift\n'
+                'if [ -n \"$TIMEOUT_LOG\" ]; then\n'
+                '  echo $first > \"$TIMEOUT_LOG\"\n'
+                'fi\nexec \"$@\"\n'
             )
         elif name == "stdbuf":
-            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+            path.write_text('#!/bin/sh\nshift\nshift\nexec \"$@\"\n')
         else:
             path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
