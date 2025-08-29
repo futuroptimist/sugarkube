@@ -20,8 +20,9 @@ junction box.
 5. Before connecting the array, verify each panel's open-circuit voltage and
    polarity with a multimeter. Join panels with MC4 connectors and 12 AWG wire,
    then attach them to the controller.
-6. Install the 12 V air pump and Raspberry Pi on dedicated protection: a 15 A breaker for the pump
-   and a 5 A fuse for the Pi. Verify battery voltage with a multimeter before powering devices.
+6. Install the 12 V air pump and Raspberry Pi with dedicated overcurrent protection.
+   Route the pump through a 15 A breaker and the Pi through a 5 A fuse.
+   Verify battery voltage and polarity with a multimeter before powering devices.
 7. Tidy and secure all wiring. Confirm the charge controller shows a charging indicator before
    closing the enclosure.
 
