@@ -19,7 +19,8 @@ CONTEXT:
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export STL meshes into
   [`stl/`](../stl/). The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml)
   regenerates these models as artifacts; do not commit `.stl` files.
-- Render each model in both `heatset` and `printed` modes.
+- Render each model in both `heatset` and `printed` modes. The `STANDOFF_MODE`
+  value is case-insensitive and defaults to `heatset`.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` after changes. For documentation updates, also run
   `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
@@ -34,7 +35,7 @@ REQUEST:
 
    ```bash
    ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
-   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+   STANDOFF_MODE=PRINTED ./scripts/openscad_render.sh path/to/model.scad  # value is case-insensitive
    ```
 
 4. Commit updated SCAD sources and any documentation.
