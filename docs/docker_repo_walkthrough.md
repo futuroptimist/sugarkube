@@ -21,10 +21,14 @@ but the steps apply to any repository.
    sudo apt update && sudo apt upgrade -y
    sudo reboot
    ```
-4. Verify Docker is running and the compose plugin is available:
+5. Verify Docker is running and the compose plugin is available:
+    ```sh
+    sudo systemctl status docker --no-pager
+    docker compose version
+    ```
+6. Tail the Cloudflare tunnel logs to confirm it connected:
    ```sh
-   sudo systemctl status docker --no-pager
-   docker compose version
+   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -n 20
    ```
 
 ## 2. Clone a repository
@@ -48,11 +52,12 @@ but the steps apply to any repository.
 ## 3. Build or start containers
 1. Change into the repo directory.
 2. If the repo provides `docker-compose.yml`:
-   ```sh
-   cp .env.example .env   # if the project uses an env file
-   docker compose pull    # fetch pre-built multi-arch images
-   docker compose up -d   # build and start containers in the background
-   ```
+    ```sh
+    cp .env.example .env   # if the project uses an env file
+    docker compose pull    # fetch pre-built multi-arch images
+    docker compose config  # validate configuration
+    docker compose up -d   # build and start containers in the background
+    ```
 3. If the repo only has a `Dockerfile`:
    ```sh
    docker build -t myapp .
@@ -99,6 +104,7 @@ curl http://localhost:5000  # should return HTML
 cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
 docker compose pull
+docker compose config
 docker compose up -d
 docker compose ps
 docker compose logs -f
@@ -159,6 +165,7 @@ already supports arm64.
 - Stop a container: `docker stop tokenplace`.
 - View logs: `docker compose logs -f`.
 - Remove a container: `docker rm tokenplace`.
+- Shut down a compose project: `docker compose down`.
 - Delete old images and networks: `docker system prune`.
 
 ## 6. Update services
@@ -180,4 +187,16 @@ Repeat these steps for each repository you want to deploy.
   ```
 - If a deployment fails repeatedly, record it under
   [`outages/`](../outages/README.md) using
-  [`outages/schema.json`](../outages/schema.json).
+  [`outages/schema.json`](../outages/schema.json). Example:
+  ```json
+  {
+    "id": "2025-01-15-tokenplace-startup",
+    "date": "2025-01-15",
+    "component": "token.place",
+    "rootCause": "Missing ENV var",
+    "resolution": "Added SECRET_KEY to env file",
+    "references": [
+      "https://github.com/futuroptimist/token.place/pull/123"
+    ]
+  }
+  ```
