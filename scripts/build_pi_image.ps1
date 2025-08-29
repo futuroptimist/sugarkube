@@ -21,6 +21,8 @@ param(
   [int]$Arm64          = $(if ($env:ARM64) { [int]$env:ARM64 } else { 1 })
 )
 
+$BuildTimeout = $(if ($env:BUILD_TIMEOUT) { $env:BUILD_TIMEOUT } else { '4h' })
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -127,7 +129,7 @@ function Invoke-BuildPiGen {
   $gitBash = Get-GitBashPath
   if ($gitBash) {
     $msysPath = Convert-ToMsysPath -WindowsPath $PiGenPath
-    & $gitBash -lc "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && ./build.sh"
+    & $gitBash -lc "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && timeout '$BuildTimeout' ./build.sh"
     if ($LASTEXITCODE -ne 0) { throw "pi-gen build failed under Git Bash (exit $LASTEXITCODE)" }
     return
   }
@@ -138,7 +140,7 @@ function Invoke-BuildPiGen {
     $distro = Get-WslDistroWithBash -WslPath $wsl
     if ($distro) {
       $linuxPath = Convert-ToWslLinuxPath -WindowsPath $PiGenPath
-      & $wsl -d $distro -- bash -lc "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && ./build.sh"
+      & $wsl -d $distro -- bash -lc "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && timeout '$BuildTimeout' ./build.sh"
       if ($LASTEXITCODE -ne 0) { throw "pi-gen build failed under WSL ($distro) (exit $LASTEXITCODE)" }
       return
     }
@@ -202,10 +204,10 @@ echo 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian' >> config
 echo 'DEBIAN_MIRROR=http://deb.debian.org/debian' >> config
 echo 'APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"' >> config
 chmod +x ./build.sh
-./build.sh
+timeout {3} ./build.sh
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
 cp "$artifact" /out/{1}.img
-'@ -f $PiGenBranch, $ImageName, $Arm64
+'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout
   $bashLF = ($bash -replace "`r`n","`n").Trim()
 
   $tempScript = Join-Path $hostRoot '.pigen-build.sh'
@@ -295,6 +297,11 @@ try {
   $config += ('IMG_NAME="' + $ImageName + '"')
   $config += "ENABLE_SSH=1"
   $config += "ARM64=$Arm64"
+  $config += 'APT_MIRROR=http://raspbian.raspberrypi.org/raspbian'
+  $config += 'RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian'
+  $config += 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian'
+  $config += 'DEBIAN_MIRROR=http://deb.debian.org/debian'
+  $config += 'APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"'
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
 
   # Run the build (prefer local shell; fallback to containerized pi-gen)
