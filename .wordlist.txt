@@ -203,11 +203,12 @@ prebuilt
 linkchecker
 pyspelling
 sugarkube's
-
+POSIX
 PowerShell
-WSL
-localhostForwarding
 powershell
-vmIdleTimeout
+WSL
 wsl
 wslconfig
+localhostForwarding
+vmIdleTimeout
+GPT
