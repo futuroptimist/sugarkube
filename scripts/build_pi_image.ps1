@@ -269,6 +269,10 @@ Test-CommandAvailable docker
 Test-CommandAvailable git
 Invoke-Docker-Info
 
+# Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
+& docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Failed to install binfmt handlers on host" }
+
 # Paths and working directory
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $workDir = New-TemporaryDirectory
@@ -295,6 +299,11 @@ try {
   $config += ('IMG_NAME="' + $ImageName + '"')
   $config += "ENABLE_SSH=1"
   $config += "ARM64=$Arm64"
+  $config += 'APT_MIRROR=http://raspbian.raspberrypi.org/raspbian'
+  $config += 'RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian'
+  $config += 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian'
+  $config += 'DEBIAN_MIRROR=http://deb.debian.org/debian'
+  $config += 'APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"'
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
 
   # Run the build (prefer local shell; fallback to containerized pi-gen)
