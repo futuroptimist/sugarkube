@@ -133,6 +133,9 @@ def test_downloads_without_realpath(tmp_path):
     fake_bin.mkdir()
     src = tmp_path / "src.img.xz"
     src.write_text("data")
+    sha = tmp_path / "src.img.xz.sha256"
+    sha.write_text("sum  sugarkube.img.xz\n")
+
     gh = fake_bin / "gh"
     gh.write_text(
         "#!/bin/bash\n"
@@ -140,9 +143,10 @@ def test_downloads_without_realpath(tmp_path):
         "  echo 42\n"
         'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
         "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
+        '  while [ \"$1\" != --dir ]; do shift; done\n'
         "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
+        '  cp \"$GH_SRC\" \"$dir/sugarkube.img.xz\"\n'
+        '  cp \"$GH_SHA\" \"$dir/sugarkube.img.xz.sha256\"\n'
         "else\n"
         "  exit 1\n"
         "fi\n"
@@ -158,6 +162,8 @@ def test_downloads_without_realpath(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(fake_bin)
     env["GH_SRC"] = str(src)
+    env["GH_SHA"] = str(sha)
+
     base = Path(__file__).resolve().parents[1]
     script = base / "scripts" / "download_pi_image.sh"
     result = subprocess.run(
@@ -169,3 +175,4 @@ def test_downloads_without_realpath(tmp_path):
     )
     assert result.returncode == 0
     assert (tmp_path / "out.img.xz").exists()
+    assert (tmp_path / "out.img.xz.sha256").exists()
