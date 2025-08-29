@@ -203,6 +203,7 @@ prebuilt
 linkchecker
 pyspelling
 sugarkube's
+POSIX
 PowerShell
 powershell
 WSL
