@@ -3,6 +3,7 @@
 * pi_carrier: rounded base corners via new `corner_radius` parameter
 * panel_bracket: parameterise screw size via `screw_nominal`
 * panel_bracket: add `nut` standoff_mode for captive hex recess
+* pi5_triple_carrier_rot45: add `nut` standoff_mode for captive hex nuts
 
 ### Changed
 * panel_bracket: increase default edge radius to 2 mm for smoother corners

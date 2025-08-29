@@ -1,10 +1,10 @@
 # Pi Cluster Carrier
 
-This design mounts three Raspberry Pi 5 boards on a common plate. Each Pi is rotated 45° so the USB and Ethernet ports remain accessible. By default the boards are arranged in a 2×2 grid with one corner empty so the plate fits on printers with a 256 mm build area (e.g. the Bambu Lab A1). Brass heat‑set inserts can be used for durability, or you can print threads directly.
+This design mounts three Raspberry Pi 5 boards on a common plate. Each Pi is rotated 45° so the USB and Ethernet ports remain accessible. By default the boards are arranged in a 2×2 grid with one corner empty so the plate fits on printers with a 256 mm build area (e.g. the Bambu Lab A1). Brass heat‑set inserts, printed threads, or captive hex nuts can be used for durability.
 
 The base corners are rounded with a configurable `corner_radius` parameter (default 5 mm) to soften sharp edges.
 
-The model lives at `cad/pi_cluster/pi5_triple_carrier_rot45.scad`.  STL files for both heat‑set and printed‑thread variants are produced by GitHub Actions and published as artifacts whenever the SCAD file changes.
+The model lives at `cad/pi_cluster/pi5_triple_carrier_rot45.scad`.  STL files for heat-set, printed-thread, and nut variants are produced by GitHub Actions and published as artifacts whenever the SCAD file changes.
 You can edit the `pi_positions` array near the top of the file to tweak the arrangement if your printer allows a larger build area.
 For an overview of insert installation and printed threads see [insert_basics.md](insert_basics.md).
 
@@ -22,6 +22,8 @@ To render one variant manually:
 openscad -D standoff_mode="heatset" -o triple.stl cad/pi_cluster/pi5_triple_carrier_rot45.scad
 # printed-thread version
 openscad -D standoff_mode="printed"  -o triple_printed.stl cad/pi_cluster/pi5_triple_carrier_rot45.scad
+# captive-nut version
+openscad -D standoff_mode="nut"      -o triple_nut.stl cad/pi_cluster/pi5_triple_carrier_rot45.scad
 ```
 
 See the main [build guide](build_guide.md) for assembly details.

@@ -205,6 +205,37 @@ printf '%s ' "$@" > "$LOG_FILE"
     assert 'standoff_mode="printed"' in args
 
 
+def test_standoff_mode_nut(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log_file = tmp_path / "args.log"
+    openscad = fake_bin / "openscad"
+    openscad.write_text(
+        """#!/usr/bin/env bash
+printf '%s ' "$@" > "$LOG_FILE"
+""",
+    )
+    openscad.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["LOG_FILE"] = str(log_file)
+    env["STANDOFF_MODE"] = "nut"
+
+    subprocess.run(
+        [
+            "bash",
+            "scripts/openscad_render.sh",
+            "cad/pi_cluster/pi_carrier.scad",
+        ],
+        check=True,
+        env=env,
+    )
+
+    args = log_file.read_text().split()
+    assert 'standoff_mode="nut"' in args
+
+
 def test_standoff_mode_adds_suffix_to_output(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
