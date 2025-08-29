@@ -20,7 +20,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
    [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml),
    or download it manually from the Actions tab.
-   
+
    Alternatively, build locally:
    - Linux/macOS: `./scripts/build_pi_image.sh`
    - Windows (PowerShell):
@@ -35,7 +35,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
      # vmIdleTimeout=7200
      # Then apply and rerun build:
      wsl --shutdown
-     
+
      # Build the image
      powershell -ExecutionPolicy Bypass -File .\scripts\build_pi_image.ps1
      ```
@@ -94,7 +94,9 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```
 
 ## 7. Expose with Cloudflare Tunnel
-1. Copy `docker-compose.cloudflared.yml` to `/opt/sugarkube/` on each node
+1. Verify `/opt/sugarkube/docker-compose.cloudflared.yml` exists; the build script
+   embeds it. If missing, copy `scripts/cloud-init/docker-compose.cloudflared.yml`
+   from this repo.
 2. Store the tunnel token in `/opt/sugarkube/.cloudflared.env`
 3. Start the tunnel:
    ```bash
