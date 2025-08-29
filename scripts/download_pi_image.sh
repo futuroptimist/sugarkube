@@ -24,12 +24,13 @@ gh run download "$RUN_ID" --name sugarkube-img --dir "$dirname"
 img="$dirname/sugarkube.img.xz"
 sha="$dirname/sugarkube.img.xz.sha256"
 
-if [ ! -e "$OUTPUT" ] || [ "$(realpath "$img")" != "$(realpath "$OUTPUT")" ]; then
+# Use -ef to avoid the non-POSIX realpath command
+if [ ! -e "$OUTPUT" ] || ! [ "$img" -ef "$OUTPUT" ]; then
   mv "$img" "$OUTPUT"
 fi
 if [ -f "$sha" ]; then
   dest_sha="${OUTPUT}.sha256"
-  if [ ! -e "$dest_sha" ] || [ "$(realpath "$sha")" != "$(realpath "$dest_sha")" ]; then
+  if [ ! -e "$dest_sha" ] || ! [ "$sha" -ef "$dest_sha" ]; then
     mv "$sha" "$dest_sha"
   fi
 fi
