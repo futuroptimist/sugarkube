@@ -6,6 +6,7 @@
 
 ### Changed
 * panel_bracket: increase default edge radius to 2 mm for smoother corners
+* pi_carrier: reduce standoff diameter to 6.3 mm to save material
 
 ### Fixed
 * pi_carrier: standoff length increased from 20 mm to 22 mm (flush fit with PoE HAT)
