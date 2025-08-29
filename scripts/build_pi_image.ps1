@@ -389,6 +389,7 @@ try {
   New-Item -ItemType Directory -Force -Path $composeDir | Out-Null
   Copy-Item -Force $srcCompose (Join-Path $composeDir 'docker-compose.cloudflared.yml')
 
+
   # Write pi-gen config
   $config = @()
   $config += ('IMG_NAME="' + $ImageName + '"')

@@ -19,7 +19,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
-if ! docker run --privileged --rm tonistiigi/binfmt --install arm64,arm >/dev/null 2>&1; then
+if ! docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null 2>&1; then
   echo "Failed to install binfmt handlers on host" >&2
   exit 1
 fi
@@ -89,6 +89,7 @@ BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 
 APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
+APT_OPTS+=' -o APT::Install-Recommends=false -o APT::Install-Suggests=false'
 
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
