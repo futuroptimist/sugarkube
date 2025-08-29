@@ -21,11 +21,12 @@ but the steps apply to any repository.
    sudo apt update && sudo apt upgrade -y
    sudo reboot
    ```
-4. Verify Docker is running and the compose plugin is available:
+5. Verify Docker is running and the compose plugin is available:
    ```sh
    sudo systemctl status docker --no-pager
    docker compose version
    ```
+   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
 
 ## 2. Clone a repository
 1. Choose a location for projects, e.g. `/opt/projects`.
