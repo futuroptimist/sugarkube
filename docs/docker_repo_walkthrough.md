@@ -30,6 +30,7 @@ but the steps apply to any repository.
    ```sh
    docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -n 20
    ```
+   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
 
 ## 2. Clone a repository
 1. Choose a location for projects, e.g. `/opt/projects`.
