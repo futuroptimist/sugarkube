@@ -213,3 +213,11 @@ localhostForwarding
 vmIdleTimeout
 overcurrent
 GPT
+Raspbian
+env
+CPUs
+Parametrize
+failover
+frontend
+MSYS
+qcow
