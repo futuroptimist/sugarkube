@@ -38,6 +38,14 @@ io
 isort
 json
 js
+CPUs
+Env
+MSYS
+Parametrize
+Raspbian
+env
+failover
+qcow
 macOS
 md
 npm
