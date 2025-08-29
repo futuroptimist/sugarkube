@@ -125,9 +125,10 @@ else
   # pi-gen may emit either .img.zip or plain .zip archives
   zips=(deploy/*.img.zip deploy/*.zip)
   if ((${#zips[@]} > 0)); then
-    unzip -p "${zips[0]}" '*.img' > "${OUTPUT_DIR}/${IMG_NAME}.img"
+    unzip -q "${zips[0]}" -d deploy
+    mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
   else
-    echo "No image file produced" >&2
+    echo "No image file found in deploy/" >&2
     exit 1
   fi
 fi
