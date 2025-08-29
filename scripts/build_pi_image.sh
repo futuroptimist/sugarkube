@@ -117,20 +117,15 @@ echo "Starting pi-gen build..."
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
 
-shopt -s nullglob
-imgs=(deploy/*.img)
-if ((${#imgs[@]} > 0)); then
-  mv "${imgs[0]}" "${OUTPUT_DIR}/${IMG_NAME}.img"
+if compgen -G "deploy/*.img" > /dev/null; then
+  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+elif compgen -G "deploy/*.img.zip" > /dev/null; then
+  unzip -q deploy/*.img.zip -d deploy
+  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
 else
-  zips=(deploy/*.img.zip)
-  if ((${#zips[@]} > 0)); then
-    unzip -p "${zips[0]}" '*.img' > "${OUTPUT_DIR}/${IMG_NAME}.img"
-  else
-    echo "No image file produced" >&2
-    exit 1
-  fi
+  echo "No image file found in deploy/" >&2
+  exit 1
 fi
-shopt -u nullglob
 
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \

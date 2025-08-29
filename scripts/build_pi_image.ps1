@@ -228,6 +228,7 @@ APT_MIRROR={4}
 RASPBIAN_MIRROR={4}
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
+COMPRESSION=none
 APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
 CFG
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
@@ -280,6 +281,7 @@ function Invoke-BuildPiGenOfficial {
     -e APT_OPTS='--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0' \
     -e APT_MIRROR=$debMirror -e DEBIAN_MIRROR=$debMirror \
     -e RASPBIAN_MIRROR=$raspbianMirror -e APT_MIRROR_RASPBERRYPI=$archiveMirror \
+    -e COMPRESSION=none \
     -e PI_GEN_BRANCH=$PiGenBranch \
     -v "${hostOut}:/pi-gen/deploy" \
     -v pigen-work-cache:/pi-gen/work \
@@ -419,13 +421,28 @@ try {
 
   # Collect artifact
   $deployDir = Join-Path $piGenDir 'deploy'
-  if (-not (Test-Path $deployDir)) { throw "pi-gen did not produce a deploy directory. See build logs above." }
-  $builtImg = Get-ChildItem -Path $deployDir -Filter *.img -ErrorAction Stop | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $builtImg) { throw "No .img produced in $deployDir" }
+  if (-not (Test-Path $deployDir)) { 
+    # Try OUTPUT_DIR if using containerized builds
+    $maybeImg = Join-Path $OutputDir ("$ImageName.img")
+    if (Test-Path $maybeImg) {
+      $builtImg = Get-Item $maybeImg
+    } else {
+      $builtImg = Get-ChildItem -Path $OutputDir -Filter *.img -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
+  } else {
+    $builtImg = Get-ChildItem -Path $deployDir -Filter *.img -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  }
+  if (-not $builtImg) { throw "No .img produced in $deployDir or $OutputDir" }
 
   New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
   $finalImg = Join-Path $OutputDir ("$ImageName.img")
-  Move-Item -Force $builtImg.FullName $finalImg
+  if ($builtImg.DirectoryName -ne (Resolve-Path $OutputDir).Path) {
+    Move-Item -Force $builtImg.FullName $finalImg
+  } else {
+    if ($builtImg.Name -ne (Split-Path -Leaf $finalImg)) {
+      Move-Item -Force $builtImg.FullName $finalImg
+    }
+  }
 
   # Compress and checksum
   $xzPath = Compress-XZ -ImagePath $finalImg
