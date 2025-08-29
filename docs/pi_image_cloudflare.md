@@ -20,8 +20,10 @@ with `RPI_MIRROR` and `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
 Ensure `curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`,
-`timeout`, and `xz` are installed before running it; `stdbuf` and `timeout`
-come from GNU coreutils. Use the prepared image to deploy
+`timeout`, `unzip`, and `xz` are installed before running it; `stdbuf` and
+`timeout` come from GNU coreutils. The script handles pi-gen's default
+`.img.zip` output by unzipping before recompressing to xz. Use the prepared
+image to deploy
 containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a

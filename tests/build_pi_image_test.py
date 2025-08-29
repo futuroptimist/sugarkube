@@ -88,13 +88,45 @@ def test_requires_sha256sum(tmp_path):
     assert "sha256sum is required" in result.stderr
 
 
+def test_requires_unzip(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "xz",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "unzip is required" in result.stderr
+
+
 def test_docker_daemon_must_be_running(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum"]:
+    for name in ["xz", "git", "sha256sum", "unzip"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -127,6 +159,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "xz": "#!/bin/sh\nexit 0\n",
         "git": "#!/bin/sh\nexit 0\n",
         "sha256sum": "#!/bin/sh\nexit 0\n",
+        "unzip": "#!/bin/sh\nexit 0\n",
         "id": "#!/bin/sh\necho 1000\n",
         "curl": "#!/bin/sh\nexit 0\n",
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
@@ -147,7 +180,11 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
-def _setup_build_env(tmp_path, check_compose: bool = False):
+def _setup_build_env(
+    tmp_path,
+    check_compose: bool = False,
+    zip_output: bool = False,
+):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git_args.log"
@@ -159,6 +196,10 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     xz.write_text('#!/bin/bash\n[ "$1" = "-T0" ] && shift\nmv "$1" "$1.xz"\n')
     xz.chmod(0o755)
 
+    unzip = fake_bin / "unzip"
+    unzip.write_text('#!/bin/sh\ncat "$2"\n')
+    unzip.chmod(0o755)
+
     sha = fake_bin / "sha256sum"
     sha.write_text('#!/bin/sh\necho 0  "$1"\n')
     sha.chmod(0o755)
@@ -169,6 +210,11 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         if check_compose
         else ""
     )
+    output_cmd = (
+        "touch deploy/sugarkube.img\n"
+        if not zip_output
+        else "echo dummy > deploy/sugarkube.img.zip\n"
+    )
     git_stub = (
         f"#!/bin/bash\n"
         f'echo "$@" > "{git_log}"\n'
@@ -178,7 +224,7 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         "#!/bin/bash\n"
         f"{compose_check}"
         "mkdir -p deploy\n"
-        "touch deploy/sugarkube.img\n"
+        f"{output_cmd}"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -270,6 +316,13 @@ def test_copies_cloudflared_compose(tmp_path):
     env = _setup_build_env(tmp_path, check_compose=True)
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
+
+
+def test_handles_zipped_pi_gen_output(tmp_path):
+    env = _setup_build_env(tmp_path, zip_output=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    assert (tmp_path / "sugarkube.img.xz").exists()
 
 
 def test_build_without_timeout_binary(tmp_path):

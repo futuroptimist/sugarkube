@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz and roughly 10 GB of
-# free disk space. Set PI_GEN_URL to override the default pi-gen repository.
+# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, unzip and roughly
+# 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
+# repository.
 
-for cmd in curl docker git sha256sum stdbuf timeout xz; do
+for cmd in curl docker git sha256sum stdbuf timeout xz unzip; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -116,7 +117,15 @@ echo "Starting pi-gen build..."
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
 
-mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+if ls deploy/*.img >/dev/null 2>&1; then
+  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+elif ls deploy/*.img.zip >/dev/null 2>&1; then
+  unzip -p deploy/*.img.zip > "${OUTPUT_DIR}/${IMG_NAME}.img"
+else
+  echo "No image file found in deploy/" >&2
+  exit 1
+fi
+
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
   "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
