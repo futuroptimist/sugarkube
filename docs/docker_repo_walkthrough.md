@@ -173,6 +173,23 @@ already supports arm64.
 
 Repeat these steps for each repository you want to deploy.
 
+### token.place
+
+```sh
+cd /opt/projects/token.place
+git pull
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+docker restart tokenplace
+```
+
+### dspace
+
+```sh
+cd /opt/projects/dspace/frontend
+git pull
+docker compose up -d --build
+```
+
 ## 7. Troubleshooting and outages
 - Check logs for errors:
   ```sh
@@ -181,3 +198,7 @@ Repeat these steps for each repository you want to deploy.
 - If a deployment fails repeatedly, record it under
   [`outages/`](../outages/README.md) using
   [`outages/schema.json`](../outages/schema.json).
+- `exec format error`: rebuild images with
+  `docker buildx build --platform linux/arm64` (token.place requires this).
+- `address already in use`: adjust port mappings if 5000 or 3000 are occupied
+  (token.place uses 5000, dspace uses 3000).
