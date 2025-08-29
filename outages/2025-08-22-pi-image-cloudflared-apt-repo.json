@@ -6,6 +6,6 @@
   "resolution": "Add cloud-init apt source for Cloudflare to install cloudflared from upstream repo",
   "references": [
     "scripts/cloud-init/user-data.yaml",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }

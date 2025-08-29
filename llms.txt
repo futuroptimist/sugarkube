@@ -15,7 +15,7 @@ scripts that provide "syntactic sugar" for Kubernetes.
 - [Power system design](docs/power_system_design.md)
 - [Insert basics](docs/insert_basics.md)
 - [Network setup](docs/network_setup.md)
-- [Pi image with Cloudflare tunnel](docs/pi_image_cloudflare.md)
+    - [Pi image for k3s](docs/pi_image.md)
 - [Docker repo deployment walkthrough](docs/docker_repo_walkthrough.md)
 
 ## CAD

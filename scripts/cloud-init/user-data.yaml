@@ -1,24 +1,10 @@
 #cloud-config
 package_update: true
-apt:
-  sources:
-    cloudflare:
-      source: "deb [arch=arm64] https://pkg.cloudflare.com/ bookworm main"
-      keyid: FBA8C0EE63617C5EED695C43254B391D8CACCBF8
-      keyserver: https://keyserver.ubuntu.com
 packages:
   - docker.io
   - docker-compose-plugin
   - curl
   - git
-  - cloudflared
-write_files:
-  - path: /opt/sugarkube/.cloudflared.env
-    permissions: '0600'
-    content: |
-      TUNNEL_TOKEN=""
 runcmd:
   - [bash, -c, 'usermod -aG docker pi']
-  - [bash, -c, 'mkdir -p /opt/sugarkube']
-  - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
   - [systemctl, enable, --now, docker]

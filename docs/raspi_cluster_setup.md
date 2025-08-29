@@ -93,19 +93,11 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    kubectl apply -f k8s/
    ```
 
-## 7. Expose with Cloudflare Tunnel
-1. Copy `docker-compose.cloudflared.yml` to `/opt/sugarkube/` on each node
-2. Store the tunnel token in `/opt/sugarkube/.cloudflared.env`
-3. Start the tunnel:
-   ```bash
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
-   ```
-
-## 8. Create environments
+## 7. Create environments
 Use k3s namespaces `dev`, `int`, and `prod` to separate deployments. CI can promote images between namespaces after validation.
 
-## 9. Promote to production
+## 8. Promote to production
 Tag a release in the integration namespace as golden and deploy that tag to `prod`. Roll back by redeploying the previous known-good tag if needed.
 
 ## Next steps
-Explore [network_setup.md](network_setup.md) for networking tips and [pi_image_cloudflare.md](pi_image_cloudflare.md) for details on exposing services securely.
+Explore [network_setup.md](network_setup.md) for networking tips and [pi_image.md](pi_image.md) for image build steps.

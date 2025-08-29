@@ -6,6 +6,6 @@
   "resolution": "script now accepts PI_GEN_URL so a mirror can be used",
   "references": [
     "scripts/build_pi_image.sh",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }

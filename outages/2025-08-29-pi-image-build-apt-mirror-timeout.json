@@ -6,6 +6,6 @@
   "resolution": "defaulted to raspbian.raspberrypi.com mirror and added retry logic",
   "references": [
     "scripts/build_pi_image.ps1",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }

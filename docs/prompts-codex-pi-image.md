@@ -5,7 +5,7 @@ slug: 'prompts-codex-pi-image'
 
 # Codex Pi Image Prompt
 
-Use this prompt to evolve the Raspberry Pi OS image and Cloudflare tunnel setup.
+Use this prompt to evolve the Raspberry Pi OS image for the k3s cluster.
 
 ```
 SYSTEM:
@@ -17,7 +17,7 @@ Improve the Pi image build tooling and deployment docs.
 CONTEXT:
 - Cloud-init config lives under [`scripts/cloud-init/`](../scripts/cloud-init/).
 - [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh) builds an image locally or in CI.
-- [`pi_image_cloudflare.md`](./pi_image_cloudflare.md) is the user guide.
+- [`pi_image.md`](./pi_image.md) is the user guide.
 - Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
   `linkchecker --no-warnings README.md docs/`.
 - Log persistent build issues in [`outages/`](../outages/) per

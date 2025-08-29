@@ -1,7 +1,0 @@
-services:
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run
-    env_file:
-      - /opt/sugarkube/.cloudflared.env

@@ -6,6 +6,6 @@
   "resolution": "script now checks that the Docker daemon is running before starting the build",
   "references": [
     "scripts/build_pi_image.sh",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }

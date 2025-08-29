@@ -1,36 +1,26 @@
 # Docker Repo Deployment Walkthrough
 
 This guide shows how to run any GitHub project that ships a `Dockerfile` or
-`docker-compose.yml` on the Raspberry Pi image preloaded with Docker and a
-[Cloudflare Tunnel](https://www.cloudflare.com/products/tunnel/). The walkthrough uses
-[token.place](https://github.com/futuroptimist/token.place) and
-[dspace](https://github.com/democratizedspace/dspace) as real-world examples,
-but the steps apply to any repository.
+`docker-compose.yml` on the Raspberry Pi image preloaded with Docker. The
+walkthrough uses [token.place](https://github.com/futuroptimist/token.place)
+and [dspace](https://github.com/democratizedspace/dspace) as real-world
+examples, but the steps apply to any repository.
 
 ## 1. Prepare the Pi
-1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
-   start the Cloudflare Tunnel.
+1. Follow [pi_image.md](pi_image.md) to flash the SD card.
 2. Confirm you can SSH to the Pi: `ssh pi@<hostname>.local`.
-3. Ensure the Cloudflare Tunnel container is running:
-   ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps
-   ```
-   `cloudflared` should display `Up`.
-4. Optionally update packages and reboot:
+3. Optionally update packages and reboot:
    ```sh
    sudo apt update && sudo apt upgrade -y
    sudo reboot
    ```
-5. Verify Docker is running and the compose plugin is available:
-    ```sh
-    sudo systemctl status docker --no-pager
-    docker compose version
-    ```
-6. Tail the Cloudflare tunnel logs to confirm it connected:
+4. Verify Docker is running and the compose plugin is available:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -n 20
+   sudo systemctl status docker --no-pager
+   docker compose version
    ```
-   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
+   If `docker compose version` fails, install the plugin:
+   `sudo apt install docker-compose-plugin`
 
 ## 2. Clone a repository
 1. Choose a location for projects, e.g. `/opt/projects`.
@@ -170,28 +160,7 @@ docker compose up -d
 The `--platform` flag forces an arm64 build; omit it if the upstream image
 already supports arm64.
 
-## 4. Expose services through Cloudflare
-1. Edit `/opt/sugarkube/docker-compose.cloudflared.yml` and add a new
-   `ingress` rule mapping a subdomain to the container's port. Example:
-   ```yaml
-   ingress:
-     - hostname: tokenplace.example.com
-       service: http://localhost:5000
-     - hostname: dspace.example.com
-       service: http://localhost:3000
-     - service: http_status:404
-   ```
-2. Restart the tunnel:
-   ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
-   ```
-3. Visit the Cloudflare-managed URL to verify the service is reachable:
-   ```sh
-   curl https://tokenplace.example.com
-   curl https://dspace.example.com
-   ```
-
-## 5. Manage containers
+## 4. Manage containers
 - List running containers: `docker ps`.
 - Stop a container: `docker stop tokenplace`.
 - Stop a compose stack: `docker compose down`.
@@ -200,7 +169,7 @@ already supports arm64.
 - Shut down a compose project: `docker compose down`.
 - Delete old images and networks: `docker system prune`.
 
-## 6. Update services
+## 5. Update services
 1. Pull the latest code:
    ```sh
    cd /opt/projects/<repo>
@@ -212,7 +181,7 @@ already supports arm64.
 
 Repeat these steps for each repository you want to deploy.
 
-## 7. Troubleshooting and outages
+## 6. Troubleshooting and outages
 - Check logs for errors:
   ```sh
   docker compose logs --tail=50

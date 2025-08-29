@@ -6,6 +6,6 @@
   "resolution": "script now creates the output directory before moving artifacts",
   "references": [
     "scripts/build_pi_image.sh",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }

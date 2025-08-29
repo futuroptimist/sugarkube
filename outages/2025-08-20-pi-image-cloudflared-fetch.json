@@ -6,6 +6,6 @@
   "resolution": "Embed docker-compose.cloudflared.yml via cloud-init write_files to remove network dependency",
   "references": [
     "scripts/cloud-init/user-data.yaml",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }

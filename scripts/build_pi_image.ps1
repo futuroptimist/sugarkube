@@ -217,8 +217,6 @@ done
 mkdir -p /work
 git clone --depth 1 --branch '{0}' https://github.com/RPi-Distro/pi-gen.git /work/pi-gen
 install -D -m 0644 /host/scripts/cloud-init/user-data.yaml /work/pi-gen/stage2/01-sys-tweaks/user-data
-install -D -m 0644 /host/scripts/cloud-init/docker-compose.cloudflared.yml \
-  /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml
 cd /work/pi-gen
 cat > config <<CFG
 IMG_NAME="{1}"
@@ -269,7 +267,6 @@ function Invoke-BuildPiGenOfficial {
   & docker volume create pigen-work-cache | Out-Null
   & docker volume create pigen-apt-cache | Out-Null
   $userData = Join-Path $hostRoot 'scripts\cloud-init\user-data.yaml'
-  $cfCompose = Join-Path $hostRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
 
   $raspbianMirror = 'http://raspbian.raspberrypi.org/raspbian'
   $archiveMirror = 'http://archive.raspberrypi.org/debian'
@@ -285,7 +282,6 @@ function Invoke-BuildPiGenOfficial {
     -v pigen-work-cache:/pi-gen/work \
     -v pigen-apt-cache:/var/cache/apt \
     -v "${userData}:/pi-gen/stage2/01-sys-tweaks/user-data:ro" \
-    -v "${cfCompose}:/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml:ro" \
     ghcr.io/raspberrypi/pigen:latest bash -lc "cd /pi-gen && ./build.sh"
   if ($LASTEXITCODE -ne 0) { throw "pi-gen official image run failed (exit $LASTEXITCODE)" }
 }
@@ -383,11 +379,6 @@ try {
   New-Item -ItemType Directory -Force -Path $destDir | Out-Null
   Copy-Item -Force $srcUserData (Join-Path $destDir 'user-data')
 
-  # Copy Cloudflare compose file
-  $srcCompose = Join-Path $repoRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
-  $composeDir = Join-Path $destDir 'files\opt\sugarkube'
-  New-Item -ItemType Directory -Force -Path $composeDir | Out-Null
-  Copy-Item -Force $srcCompose (Join-Path $composeDir 'docker-compose.cloudflared.yml')
 
   # Write pi-gen config
   $config = @()

@@ -147,7 +147,7 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
-def _setup_build_env(tmp_path, check_compose: bool = False):
+def _setup_build_env(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git_args.log"
@@ -163,20 +163,13 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     sha.write_text('#!/bin/sh\necho 0  "$1"\n')
     sha.chmod(0o755)
 
-    compose_check = (
-        "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
-        "docker-compose.cloudflared.yml ]] || exit 1\n"
-        if check_compose
-        else ""
-    )
     git_stub = (
         f"#!/bin/bash\n"
         f'echo "$@" > "{git_log}"\n'
         "target=${!#}\n"
         'mkdir -p "$target/stage2/01-sys-tweaks"\n'
-        f"cat <<'EOF' > \"$target/build.sh\"\n"
+        "cat <<'EOF' > \"$target/build.sh\"\n"
         "#!/bin/bash\n"
-        f"{compose_check}"
         "mkdir -p deploy\n"
         "touch deploy/sugarkube.img\n"
         "EOF\n"
@@ -223,10 +216,6 @@ def _run_build_script(tmp_path, env):
     ci_dir.mkdir(parents=True)
     user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
-    compose_src = (
-        repo_root / "scripts" / "cloud-init" / "docker-compose.cloudflared.yml"
-    )
-    shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -266,12 +255,6 @@ def test_respects_pi_gen_branch_env(tmp_path):
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
-def test_copies_cloudflared_compose(tmp_path):
-    env = _setup_build_env(tmp_path, check_compose=True)
-    result, _ = _run_build_script(tmp_path, env)
-    assert result.returncode == 0
-
-
 def test_build_without_timeout_binary(tmp_path):
     env = _setup_build_env(tmp_path)
     fake_bin = Path(env["PATH"].split(":")[0])
@@ -301,8 +284,3 @@ def test_respects_build_timeout_env(tmp_path):
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert log.read_text().strip() == "2h"
-
-
-def test_powershell_script_mentions_cloudflared_compose():
-    text = Path("scripts/build_pi_image.ps1").read_text()
-    assert "docker-compose.cloudflared.yml" in text

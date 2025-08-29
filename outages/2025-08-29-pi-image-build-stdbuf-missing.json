@@ -6,6 +6,6 @@
   "resolution": "Check for stdbuf and timeout before build and install coreutils when missing",
   "references": [
     "scripts/build_pi_image.sh",
-    "docs/pi_image_cloudflare.md"
+    "docs/pi_image.md"
   ]
 }
