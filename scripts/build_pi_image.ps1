@@ -24,7 +24,7 @@ param(
   [int]$TimeoutSec     = $(if ($env:BUILD_TIMEOUT) { [int]$env:BUILD_TIMEOUT } else { 14400 })
 )
 
-$BuildTimeout = $(if ($env:BUILD_TIMEOUT) { $env:BUILD_TIMEOUT } else { '4h' })
+$BuildTimeout = $(if ($env:BUILD_TIMEOUT) { $env:BUILD_TIMEOUT } else { '8h' })
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -239,7 +239,16 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
 chmod +x ./build.sh
+set +e
 timeout {3} ./build.sh
+code=$?
+set -e
+if [ "$code" -eq 124 ]; then
+  echo "pi-gen timed out after {3}. Retrying once without timeout..."
+  ./build.sh
+elif [ "$code" -ne 0 ]; then
+  exit "$code"
+fi
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
 cp "$artifact" /out/{1}.img
 '@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout, $raspbianMirror
