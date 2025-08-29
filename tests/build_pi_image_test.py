@@ -88,6 +88,38 @@ def test_requires_sha256sum(tmp_path):
     assert "sha256sum is required" in result.stderr
 
 
+def test_requires_unzip(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "unzip is required" in result.stderr
+
+
 def test_docker_daemon_must_be_running(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -107,6 +139,16 @@ def test_docker_daemon_must_be_running(tmp_path):
         else:
             path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
+    unzip = fake_bin / "unzip"
+    unzip.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-p" ]; then\n'
+        '  cat "$2"\n'
+        "else\n"
+        '  cat "$1"\n'
+        "fi\n"
+    )
+    unzip.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = str(fake_bin)
     result = subprocess.run(
@@ -131,6 +173,14 @@ def test_requires_sudo_when_non_root(tmp_path):
         "curl": "#!/bin/sh\nexit 0\n",
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
         "stdbuf": "#!/bin/sh\nexit 0\n",
+        "unzip": (
+            "#!/bin/sh\n"
+            'if [ "$1" = "-p" ]; then\n'
+            '  cat "$2"\n'
+            "else\n"
+            '  cat "$1"\n'
+            "fi\n"
+        ),
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -163,6 +213,17 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     sha.write_text('#!/bin/sh\necho 0  "$1"\n')
     sha.chmod(0o755)
 
+    unzip = fake_bin / "unzip"
+    unzip.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-p" ]; then\n'
+        '  cat "$2"\n'
+        "else\n"
+        '  cat "$1"\n'
+        "fi\n"
+    )
+    unzip.chmod(0o755)
+
     compose_check = (
         "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
         "docker-compose.cloudflared.yml ]] || exit 1\n"
@@ -179,6 +240,8 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         f"{compose_check}"
         "mkdir -p deploy\n"
         "touch deploy/sugarkube.img\n"
+        "cp deploy/sugarkube.img deploy/sugarkube.img.zip\n"
+        "rm deploy/sugarkube.img\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
