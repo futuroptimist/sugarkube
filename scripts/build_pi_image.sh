@@ -29,6 +29,12 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
+USER_DATA="${CLOUD_INIT_DIR}/user-data.yaml"
+if [ ! -f "${USER_DATA}" ]; then
+  echo "Missing cloud-init user-data: ${USER_DATA}" >&2
+  exit 1
+fi
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -47,10 +53,13 @@ OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 
 git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
   https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
-cp "${REPO_ROOT}/scripts/cloud-init/user-data.yaml" \
+
+cp "${USER_DATA:-${REPO_ROOT}/scripts/cloud-init/user-data.yaml}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
+
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 cat > config <<CFG

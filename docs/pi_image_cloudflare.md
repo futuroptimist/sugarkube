@@ -12,8 +12,9 @@ repository, and a
 into the OS image. The `build_pi_image.sh` script clones `pi-gen` using the
 `PI_GEN_BRANCH` environment variable, defaulting to `bookworm` for reproducible
 builds. Set `IMG_NAME` to change the image name or `OUTPUT_DIR` to control
-where artifacts are written. Ensure `docker` (with its daemon running), `xz`,
-`git`, and `sha256sum` are installed before running it. Use the prepared image
+where artifacts are written. Override `CLOUD_INIT_DIR` to load a custom cloud-init
+configuration. Ensure `docker` (with its daemon running), `xz`, `git`, and `sha256sum`
+are installed before running it. Use the prepared image
 to deploy containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
