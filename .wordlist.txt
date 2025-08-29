@@ -86,6 +86,7 @@ brightgreen
 SHA
 YOURTOKEN
 htmlcontent
+<htmlcontent>
 installable
 OpenSCAD
 LaTeX
