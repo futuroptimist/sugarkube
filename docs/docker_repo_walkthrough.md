@@ -125,6 +125,23 @@ docker compose logs -f
 curl http://localhost:3000
 ```
 
+#### token.place and dspace together
+
+Run both sample projects side by side to confirm the Pi can host multiple
+containers. Start token.place, then launch the dspace frontend in the
+neighboring directory:
+
+```sh
+cd /opt/projects/token.place
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+cd ../dspace/frontend
+cp .env.example .env  # if present
+docker compose up -d
+curl http://localhost:5000  # token.place
+curl http://localhost:3000  # dspace
+```
+
 ### Build for ARM with Docker `buildx`
 
 Some repositories only ship x86_64 images. Use Docker `buildx` to compile an arm64

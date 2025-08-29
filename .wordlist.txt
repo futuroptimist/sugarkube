@@ -222,3 +222,5 @@ Parametrize
 failover
 env
 qcow
+frontend
+runtime

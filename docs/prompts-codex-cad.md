@@ -3,7 +3,7 @@ title: 'Sugarkube CAD Prompt'
 slug: 'prompts-codex-cad'
 ---
 
-# OpenAI GPT CAD Prompt
+# Codex CAD Prompt
 
 Use this prompt whenever 3D models need updating or verification.
 
@@ -21,9 +21,10 @@ CONTEXT:
   models as artifacts; do not commit `.stl` files.
 - Render each model in both `heatset` and `printed` modes.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes. If docs are updated, also run
-  `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
-- Log tool failures in [`outages/`](../outages/) per
+- Run `pre-commit run --all-files` after changes. For doc updates, also run
+  `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
+  `linkchecker --no-warnings README.md docs/`.
+- Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
@@ -51,8 +52,9 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-`linkchecker --no-warnings README.md docs/` before committing.
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
+`aspell` and `aspell-en`), and `linkchecker --no-warnings README.md docs/`
+before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
