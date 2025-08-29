@@ -59,3 +59,5 @@ from the [workflow artifacts](https://github.com/futuroptimist/sugarkube/actions
 or run the script locally if you need customizations. The workflow rotates its
 cached pi-gen Docker image monthly by hashing the upstream branch, ensuring each
 build pulls in the latest security updates.
+The build script streams output line-by-line so GitHub Actions logs show
+progress during the long-running image creation process.

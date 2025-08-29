@@ -104,7 +104,11 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   ${SUDO} mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
 
-${SUDO} timeout "${BUILD_TIMEOUT}" ./build.sh
+echo "Starting pi-gen build..."
+# Stream output line-by-line so GitHub Actions shows progress and doesn't appear to hang
+${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
+echo "pi-gen build finished"
+
 mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
 xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
