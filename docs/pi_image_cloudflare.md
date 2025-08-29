@@ -19,6 +19,8 @@ Debian mirrors and passes `APT_OPTS` so apt retries on transient timeouts.
 Use `BUILD_TIMEOUT` to adjust the maximum build duration (default: `4h`). Use
 `CLOUD_INIT_PATH` (or override `CLOUD_INIT_DIR`) to load a custom cloud-init
 configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+To avoid random apt timeouts, the script pins primary Raspberry Pi and Debian
+mirrors and adds retry/timeout options.
 Ensure `docker` (with its daemon running), `xz`, `git`, and `sha256sum` are
 installed before running it. Use the prepared image to deploy containerized
 apps. The companion guide

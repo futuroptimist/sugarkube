@@ -166,8 +166,8 @@ function Invoke-BuildPiGenDocker {
   $bash = @'
 set -e
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y \
+apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y \
   quilt parted qemu-user-static debootstrap zerofree zip dosfstools \
   libcap2-bin libarchive-tools rsync xxd file kmod bc gpg pigz arch-test \
   git xz-utils ca-certificates curl bash coreutils binfmt-support
@@ -183,12 +183,12 @@ cat > config <<CFG
 IMG_NAME="{1}"
 ENABLE_SSH=1
 ARM64={2}
-# Prefer primary mirrors
 APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
 RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
-APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"
+APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"
 CFG
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
@@ -197,12 +197,6 @@ fi
 if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
-# Prefer primary mirrors to avoid flaky community mirrors
-echo 'APT_MIRROR=http://raspbian.raspberrypi.org/raspbian' >> config
-echo 'RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian' >> config
-echo 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian' >> config
-echo 'DEBIAN_MIRROR=http://deb.debian.org/debian' >> config
-echo 'APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"' >> config
 chmod +x ./build.sh
 timeout {3} ./build.sh
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
@@ -271,6 +265,10 @@ Test-CommandAvailable docker
 Test-CommandAvailable git
 Invoke-Docker-Info
 
+# Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
+& docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Failed to install binfmt handlers on host" }
+
 # Paths and working directory
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $workDir = New-TemporaryDirectory
@@ -301,7 +299,9 @@ try {
   $config += 'RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian'
   $config += 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian'
   $config += 'DEBIAN_MIRROR=http://deb.debian.org/debian'
-  $config += 'APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true"'
+  $aptOpts = '-o Acquire::Retries=5 -o Acquire::http::Timeout=30 ' +
+    '-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
+  $config += ('APT_OPTS="' + $aptOpts + '"')
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
 
   # Run the build (prefer local shell; fallback to containerized pi-gen)
