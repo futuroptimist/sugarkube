@@ -5,7 +5,7 @@ slug: 'prompts-codex-cad'
 
 # Codex CAD Prompt
 
-Use this prompt whenever 3D models need updating or verification.
+Use this prompt when 3D models need updating or verification.
 
 ```text
 SYSTEM:
@@ -17,8 +17,8 @@ Keep OpenSCAD sources current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export STL meshes into
-  `stl/`. The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) renders these
-  models as artifacts; do not commit `.stl` files.
+  [`stl/`](../stl/). The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml)
+  renders these models as artifacts; do not commit `.stl` files.
 - Render each model in both `heatset` and `printed` modes.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` after changes. For doc updates, also run
