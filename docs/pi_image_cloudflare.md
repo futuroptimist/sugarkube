@@ -9,21 +9,19 @@ deployment into a reusable image capable of hosting multiple projects, including
 It uses `cloud-init` to bake Docker, the compose plugin, the Cloudflare apt
 repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-into the OS image. The `build_pi_image.sh` script clones `pi-gen` using the
-`PI_GEN_BRANCH` environment variable, defaulting to `bookworm` for reproducible
-builds. Set `PI_GEN_URL` to use a fork or mirror if the default repository is
-unavailable. Set `IMG_NAME` to change the image name or `OUTPUT_DIR` to control
+into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
+`PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
+64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
+unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. To
-avoid flaky community mirrors the build pins the official Raspberry Pi and
-Debian mirrors and passes `APT_OPTS` so apt retries on transient timeouts.
-Use `BUILD_TIMEOUT` to adjust the maximum build duration (default: `4h`). Use
-`CLOUD_INIT_PATH` (or override `CLOUD_INIT_DIR`) to load a custom cloud-init
-configuration instead of the default `scripts/cloud-init/user-data.yaml`.
-To avoid random apt timeouts, the script pins primary Raspberry Pi and Debian
-mirrors and adds retry/timeout options.
-Ensure `docker` (with its daemon running), `xz`, `git`, and `sha256sum` are
-installed before running it. Use the prepared image to deploy containerized
-apps. The companion guide
+reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
+passes `APT_OPTS` so apt retries on transient timeouts. Override the mirrors
+with `RPI_MIRROR` and `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
+adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
+cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+Ensure `docker` (with its daemon running), `xz`, `git`, `curl`, and
+`sha256sum` are installed before running it. Use the prepared image to deploy
+containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
 three-node k3s cluster; see [raspi_cluster_setup.md](raspi_cluster_setup.md)

@@ -36,10 +36,9 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
-USER_DATA="${CLOUD_INIT_DIR}/user-data.yaml"
-if [ ! -f "${USER_DATA}" ]; then
-  echo "Missing cloud-init user-data: ${USER_DATA}" >&2
+CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${REPO_ROOT}/scripts/cloud-init/user-data.yaml}"
+if [ ! -f "${CLOUD_INIT_PATH}" ]; then
+  echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
   exit 1
 fi
 WORK_DIR=$(mktemp -d)
@@ -68,17 +67,12 @@ fi
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
-CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${REPO_ROOT}/scripts/cloud-init/user-data.yaml}"
-if [ ! -f "${CLOUD_INIT_PATH}" ]; then
-  echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
-  exit 1
-fi
 
 git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
 
-cp "${CLOUD_INIT_PATH:-${USER_DATA}}" \
+cp "${CLOUD_INIT_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
