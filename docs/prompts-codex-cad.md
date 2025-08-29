@@ -18,10 +18,10 @@ CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export STL meshes into
   [`stl/`](../stl/). The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml)
-  renders these models as artifacts; do not commit `.stl` files.
+  regenerates these models as artifacts; do not commit `.stl` files.
 - Render each model in both `heatset` and `printed` modes.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes. For doc updates, also run
+- Run `pre-commit run --all-files` after changes. For documentation updates, also run
   `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
   `linkchecker --no-warnings README.md docs/`.
 - Log tool failures in [`outages/`](../outages/) using
