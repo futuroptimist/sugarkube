@@ -8,12 +8,10 @@
 [![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
 
 An accessible k3s platform for Raspberry Pis and SBCs, integrated with an off-grid solar setup.
-The repository also covers the solar cube art installation,
-which powers aquarium air pumps and small computers.
-The cube also doubles as a living trellis.
-Climbing plants weave through the aluminium extrusions while shade-loving herbs thrive
-beneath the panels.
-Hanging baskets can clip onto the frame so the installation is surrounded by greenery.
+The repository also covers the solar cube art installation, which powers aquarium air pumps and
+small computers. It doubles as a living trellis—climbing plants weave through the aluminium
+extrusions while shade-loving herbs thrive beneath the panels. Hanging baskets can clip onto the
+frame so the installation is surrounded by greenery.
 
 ### What's in a name?
 
@@ -40,6 +38,8 @@ the docs you will see the term used in both contexts.
 - [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
+  - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; uses
+    POSIX `-ef` instead of `realpath` for better macOS compatibility
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
