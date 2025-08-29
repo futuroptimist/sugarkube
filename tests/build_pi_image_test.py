@@ -170,7 +170,12 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     for name in ["curl", "timeout"]:
         path = fake_bin / name
         if name == "timeout":
-            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+            path.write_text(
+                '#!/bin/sh\nfirst="$1"\nshift\n'
+                'if [ -n "$TIMEOUT_LOG" ]; then\n'
+                '  echo $first > "$TIMEOUT_LOG"\n'
+                'fi\nexec "$@"\n'
+            )
         else:
             path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -251,6 +256,16 @@ def test_build_without_timeout_binary(tmp_path):
     (fake_bin / "timeout").unlink()
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
+
+
+def test_respects_build_timeout_env(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["BUILD_TIMEOUT"] = "2h"
+    log = tmp_path / "timeout.log"
+    env["TIMEOUT_LOG"] = str(log)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    assert log.read_text().strip() == "2h"
 
 
 def test_powershell_script_mentions_cloudflared_compose():
