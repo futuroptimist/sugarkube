@@ -15,16 +15,19 @@ PURPOSE:
 Improve the Pi image build tooling and deployment docs.
 
 CONTEXT:
-- Cloud-init config lives under `scripts/cloud-init/`.
-- `scripts/build_pi_image.sh` builds an image locally or in CI.
-- `docs/pi_image_cloudflare.md` is the user guide.
-- Run `pre-commit run --all-files`; ensure `pyspelling` and `linkchecker` pass.
-- Document persistent build issues in `outages/` using the schema.
+- Cloud-init config lives under [`scripts/cloud-init/`](../scripts/cloud-init/).
+- [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh) builds an image locally or in CI.
+- [`pi_image_cloudflare.md`](./pi_image_cloudflare.md) is the user guide.
+- Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+  `linkchecker --no-warnings README.md docs/`.
+- Log persistent build issues in [`outages/`](../outages/) per
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Refine the image build script or cloud-init files.
 2. Update relevant documentation.
-3. Run `pre-commit run --all-files` and confirm success.
+3. Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+   `linkchecker --no-warnings README.md docs/`, confirming success.
 
 OUTPUT:
 A pull request with passing checks and a concise summary.
