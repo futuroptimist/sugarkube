@@ -8,12 +8,10 @@
 [![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
 
 An accessible k3s platform for Raspberry Pis and SBCs, integrated with an off-grid solar setup.
-The repository also covers the solar cube art installation,
-which powers aquarium air pumps and small computers.
-The cube also doubles as a living trellis.
-Climbing plants weave through the aluminium extrusions while shade-loving herbs thrive
-beneath the panels.
-Hanging baskets can clip onto the frame so the installation is surrounded by greenery.
+The repository also covers the solar cube art installation, which powers aquarium air pumps and
+small computers. It doubles as a living trellis—climbing plants weave through the aluminium
+extrusions while shade-loving herbs thrive beneath the panels. Hanging baskets can clip onto the
+frame so the installation is surrounded by greenery.
 
 ### What's in a name?
 
