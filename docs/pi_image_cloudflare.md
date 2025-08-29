@@ -13,9 +13,14 @@ into the OS image. The `build_pi_image.sh` script clones `pi-gen` using the
 `PI_GEN_BRANCH` environment variable, defaulting to `bookworm` for reproducible
 builds. Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. Set `IMG_NAME` to change the image name or `OUTPUT_DIR` to control
-where artifacts are written; the script creates the directory if needed. Use
+where artifacts are written; the script creates the directory if needed. To
+avoid flaky community mirrors the build pins the official Raspberry Pi and
+Debian mirrors and passes `APT_OPTS` so apt retries on transient timeouts.
+Use `BUILD_TIMEOUT` to adjust the maximum build duration (default: `4h`). Use
 `CLOUD_INIT_PATH` (or override `CLOUD_INIT_DIR`) to load a custom cloud-init
 configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+To avoid random apt timeouts, the script pins primary Raspberry Pi and Debian
+mirrors and adds retry/timeout options.
 Ensure `docker` (with its daemon running), `xz`, `git`, and `sha256sum` are
 installed before running it. Use the prepared image to deploy containerized
 apps. The companion guide
