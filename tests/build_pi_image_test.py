@@ -46,6 +46,38 @@ def test_requires_xz(tmp_path):
     assert "xz is required" in result.stderr
 
 
+def test_requires_unzip(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "unzip is required" in result.stderr
+
+
 def test_requires_git(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -164,6 +196,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "curl": "#!/bin/sh\nexit 0\n",
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
         "stdbuf": "#!/bin/sh\nexit 0\n",
+        "unzip": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -210,11 +243,19 @@ def _setup_build_env(
         if check_compose
         else ""
     )
-    output_cmd = (
-        "touch deploy/sugarkube.img\n"
-        if not zip_output
-        else "echo dummy > deploy/sugarkube.img.zip\n"
-    )
+
+    if zip_output:
+        output_cmd = (
+            "python3 - <<'PY'\n"
+            "import zipfile, pathlib\n"
+            "pathlib.Path('deploy').mkdir(exist_ok=True)\n"
+            "with zipfile.ZipFile('deploy/sugarkube.img.zip', 'w') as zf:\n"
+            "    zf.writestr('sugarkube.img', '')\n"
+            "PY\n"
+        )
+    else:
+        output_cmd = "touch deploy/sugarkube.img\n"
+
     git_stub = (
         f"#!/bin/bash\n"
         f'echo "$@" > "{git_log}"\n'
