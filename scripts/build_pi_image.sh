@@ -66,6 +66,9 @@ git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL:-https://github.co
 cp "${CLOUD_INIT_PATH:-${USER_DATA}}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 
+install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
+
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 cat > config <<CFG

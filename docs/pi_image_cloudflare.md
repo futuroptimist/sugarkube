@@ -32,10 +32,10 @@ for onboarding steps.
 2. Flash the image with Raspberry Pi Imager. Open the tool, choose **Use custom**,
    browse for the downloaded file, and write it to your SD card.
 3. Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
-4. Cloud-init adds the Cloudflare apt repo, writes
-   `/opt/sugarkube/docker-compose.cloudflared.yml`, pre-creates
+4. The build script copies `docker-compose.cloudflared.yml` into
+   `/opt/sugarkube/`. Cloud-init adds the Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, and enables the
-   Docker service; verify all three.
+   Docker service; verify both files and the service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
 6. Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
 7. Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.

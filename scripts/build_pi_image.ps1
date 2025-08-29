@@ -174,6 +174,8 @@ apt-get install -y \
 mkdir -p /work
 git clone --depth 1 --branch '{0}' https://github.com/RPi-Distro/pi-gen.git /work/pi-gen
 install -D -m 0644 /host/scripts/cloud-init/user-data.yaml /work/pi-gen/stage2/01-sys-tweaks/user-data
+install -D -m 0644 /host/scripts/cloud-init/docker-compose.cloudflared.yml \
+  /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml
 cd /work/pi-gen
 cat > config <<CFG
 IMG_NAME="{1}"
@@ -281,6 +283,12 @@ try {
   $destDir = Join-Path $piGenDir 'stage2\01-sys-tweaks'
   New-Item -ItemType Directory -Force -Path $destDir | Out-Null
   Copy-Item -Force $srcUserData (Join-Path $destDir 'user-data')
+
+  # Copy Cloudflare compose file
+  $srcCompose = Join-Path $repoRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
+  $composeDir = Join-Path $destDir 'files\opt\sugarkube'
+  New-Item -ItemType Directory -Force -Path $composeDir | Out-Null
+  Copy-Item -Force $srcCompose (Join-Path $composeDir 'docker-compose.cloudflared.yml')
 
   # Write pi-gen config
   $config = @()

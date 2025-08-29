@@ -13,16 +13,6 @@ packages:
   - git
   - cloudflared
 write_files:
-  - path: /opt/sugarkube/docker-compose.cloudflared.yml
-    permissions: '0644'
-    content: |
-      services:
-        tunnel:
-          image: cloudflare/cloudflared:latest
-          restart: unless-stopped
-          command: tunnel run
-          env_file:
-            - /opt/sugarkube/.cloudflared.env
   - path: /opt/sugarkube/.cloudflared.env
     permissions: '0600'
     content: |
