@@ -82,14 +82,16 @@ def test_docker_daemon_must_be_running(tmp_path):
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum"]:
+    for name in ["xz", "git", "sha256sum", "stdbuf"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
-    for name in ["curl", "timeout"]:
+    for name in ["curl", "timeout", "stdbuf"]:
         path = fake_bin / name
         if name == "timeout":
             path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
         else:
             path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -116,6 +118,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "id": "#!/bin/sh\necho 1000\n",
         "curl": "#!/bin/sh\nexit 0\n",
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+        "stdbuf": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -144,6 +147,10 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     xz.write_text('#!/bin/bash\n[ "$1" = "-T0" ] && shift\nmv "$1" "$1.xz"\n')
     xz.chmod(0o755)
 
+    sha = fake_bin / "sha256sum"
+    sha.write_text('#!/bin/sh\necho 0  "$1"\n')
+    sha.chmod(0o755)
+
     compose_check = (
         "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
         "docker-compose.cloudflared.yml ]] || exit 1\n"
@@ -167,10 +174,12 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
     git.write_text(git_stub)
     git.chmod(0o755)
 
-    for name in ["curl", "timeout"]:
+    for name in ["curl", "timeout", "stdbuf"]:
         path = fake_bin / name
         if name == "timeout":
             path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
         else:
             path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -209,7 +218,8 @@ def _run_build_script(tmp_path, env):
         capture_output=True,
         text=True,
     )
-    git_args = Path(env["GIT_LOG"]).read_text()
+    git_log_path = Path(env["GIT_LOG"])
+    git_args = git_log_path.read_text() if git_log_path.exists() else ""
     return result, git_args
 
 
@@ -249,8 +259,11 @@ def test_build_without_timeout_binary(tmp_path):
     env = _setup_build_env(tmp_path)
     fake_bin = Path(env["PATH"].split(":")[0])
     (fake_bin / "timeout").unlink()
+    # Remove system PATH so timeout is truly absent
+    env["PATH"] = str(fake_bin)
     result, _ = _run_build_script(tmp_path, env)
-    assert result.returncode == 0
+    assert result.returncode != 0
+    assert "timeout is required" in result.stderr
 
 
 def test_powershell_script_mentions_cloudflared_compose():

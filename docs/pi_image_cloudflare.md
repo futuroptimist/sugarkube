@@ -19,8 +19,9 @@ passes `APT_OPTS` so apt retries on transient timeouts. Override the mirrors
 with `RPI_MIRROR` and `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
-Ensure `docker` (with its daemon running), `xz`, `git`, `curl`, and
-`sha256sum` are installed before running it. Use the prepared image to deploy
+Ensure `docker` (with its daemon running), `xz`, `git`, `curl`, `timeout`,
+`stdbuf`, and `sha256sum` are installed before running it; the latter two come
+from GNU coreutils. Use the prepared image to deploy
 containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
