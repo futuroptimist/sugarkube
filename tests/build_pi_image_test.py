@@ -82,7 +82,7 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
-def _setup_build_env(tmp_path):
+def _setup_build_env(tmp_path, check_compose: bool = False):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git_args.log"
@@ -94,13 +94,20 @@ def _setup_build_env(tmp_path):
     xz.write_text('#!/bin/bash\n[ "$1" = "-T0" ] && shift\nmv "$1" "$1.xz"\n')
     xz.chmod(0o755)
 
+    compose_check = (
+        "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
+        "docker-compose.cloudflared.yml ]] || exit 1\n"
+        if check_compose
+        else ""
+    )
     git_stub = (
         f"#!/bin/bash\n"
         f'echo "$@" > "{git_log}"\n'
         "target=${!#}\n"
         'mkdir -p "$target/stage2/01-sys-tweaks"\n'
-        "cat <<'EOF' > \"$target/build.sh\"\n"
+        f"cat <<'EOF' > \"$target/build.sh\"\n"
         "#!/bin/bash\n"
+        f"{compose_check}"
         "mkdir -p deploy\n"
         "touch deploy/sugarkube.img\n"
         "EOF\n"
@@ -132,6 +139,10 @@ def _run_build_script(tmp_path, env):
     ci_dir.mkdir(parents=True)
     user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
+    compose_src = (
+        repo_root / "scripts" / "cloud-init" / "docker-compose.cloudflared.yml"
+    )
+    shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -168,3 +179,9 @@ def test_respects_pi_gen_branch_env(tmp_path):
     assert result.returncode == 0
     assert "--branch legacy" in git_args
     assert (tmp_path / "sugarkube.img.xz").exists()
+
+
+def test_copies_cloudflared_compose(tmp_path):
+    env = _setup_build_env(tmp_path, check_compose=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
