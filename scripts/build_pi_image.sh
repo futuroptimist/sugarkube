@@ -53,10 +53,19 @@ if [ -z "${PI_GEN_BRANCH:-}" ]; then
 fi
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
+mkdir -p "${OUTPUT_DIR}"
+CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${REPO_ROOT}/scripts/cloud-init/user-data.yaml}"
+if [ ! -f "${CLOUD_INIT_PATH}" ]; then
+  echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
+  exit 1
+fi
 
-git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL}" \
+git clone --depth 1 --branch "${PI_GEN_BRANCH}" "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
-cp "${USER_DATA}" "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+
+cp "${CLOUD_INIT_PATH:-${USER_DATA}}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 cat > config <<CFG
