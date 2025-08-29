@@ -29,6 +29,12 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
+USER_DATA="${CLOUD_INIT_DIR}/user-data.yaml"
+if [ ! -f "${USER_DATA}" ]; then
+  echo "Missing cloud-init user-data: ${USER_DATA}" >&2
+  exit 1
+fi
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -53,7 +59,7 @@ fi
 
 git clone --depth 1 --branch "${PI_GEN_BRANCH}" \
   https://github.com/RPi-Distro/pi-gen.git "${WORK_DIR}/pi-gen"
-cp "${CLOUD_INIT_PATH}" \
+cp "${CLOUD_INIT_PATH:-${USER_DATA}}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
