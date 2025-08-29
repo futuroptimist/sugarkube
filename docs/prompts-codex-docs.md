@@ -17,14 +17,15 @@ Keep the documentation clear and accurate.
 CONTEXT:
 - Docs live in `docs/`.
 - Follow AGENTS.md for style and testing requirements.
-- Run `pre-commit run --all-files`; ensure `pyspelling` (requires `aspell` and `aspell-en`)
-  and `linkchecker` succeed.
+- Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+  `linkchecker --no-warnings README.md docs/` (requires `aspell` and `aspell-en`).
 - Record recurring issues in `outages/` using the JSON schema.
 
 REQUEST:
 1. Choose a markdown file in `docs/` that needs clarification or an update.
 2. Improve wording, fix links, or add missing steps.
-3. Re-run `pre-commit run --all-files` and confirm no errors.
+3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+   `linkchecker --no-warnings README.md docs/` and confirm no errors.
 
 OUTPUT:
 A pull request with the refined documentation and passing checks.

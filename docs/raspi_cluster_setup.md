@@ -20,7 +20,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
    [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml).
    The script verifies the SHA256 checksum and writes `sugarkube.img.xz.sha256`
-   alongside the image.  Alternatively, download the artifact manually from the
+   alongside the image. Alternatively, download the artifact manually from the
    Actions tab.
 
    Alternatively, build locally:
