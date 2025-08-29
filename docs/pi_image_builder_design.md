@@ -8,10 +8,13 @@
 
 ## Inputs / Outputs
 - Inputs:
-  - `scripts/cloud-init/user-data.yaml` (cloud-init seed including Cloudflare compose file)
+- `scripts/cloud-init/user-data.yaml` (cloud-init seed)
+- `scripts/cloud-init/docker-compose.cloudflared.yml` (Cloudflare Tunnel compose file)
   - Environment variables: `PI_GEN_BRANCH` (default `bookworm`), `IMG_NAME` (default `sugarkube`), `ARM64` (default `1`), optional `OUTPUT_DIR`, `PI_GEN_STAGES` (default `stage0 stage1 stage2`)
 - Outputs:
-  - `IMG_NAME.img.xz` and `IMG_NAME.img.xz.sha256` in `OUTPUT_DIR`
+  - `IMG_NAME.img.xz` and `IMG_NAME.img.xz.sha256` in `OUTPUT_DIR`. pi-gen
+    exports a `*.img.zip` which this script unzips before recompressing to
+    `xz`.
 
 ## Build Strategies
 
@@ -27,7 +30,7 @@
   - `/pi-gen/work` → persistent Docker volume `pigen-work-cache`
   - `/var/cache/apt` → persistent Docker volume `pigen-apt-cache`
   - `stage2/01-sys-tweaks/user-data` → host `scripts/cloud-init/user-data.yaml`
-  - `stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml` → host compose
+  - `stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml` → host compose file
 - Env:
   - `IMG_NAME`, `ENABLE_SSH=1`, `ARM64`, `USE_QCOW2=1`
   - Mirrors: `APT_MIRROR`, `RASPBIAN_MIRROR`, `APT_MIRROR_RASPBIAN`, `APT_MIRROR_RASPBERRYPI`, `DEBIAN_MIRROR`
@@ -43,7 +46,7 @@
 
 ## Reliability Features
 - Mirror hardening: default to `deb.debian.org` and official Raspberry Pi mirrors
-- `APT_OPTS` with retries, timeouts, and `--fix-missing`
+- `APT_OPTS` with retries, timeouts, `--fix-missing`, and disabled recommends
 - `USE_QCOW2=1` for faster, space-efficient stages and resilient restarts
 - Persistent `work` and APT cache volumes in official path
 - Host `binfmt` installation via `tonistiigi/binfmt` (arm, arm64)
@@ -59,7 +62,8 @@
 
 ## CI Considerations
 - CI can run the official container path with the same env mirrors and qcow2
-- Artifacts: upload `IMG_NAME.img.xz` and checksum; retain `deploy/` in run artifacts if needed
+  - Artifacts: upload `IMG_NAME.img.xz` and checksum; retain `deploy/` (with the
+    original `*.img.zip`) in run artifacts if needed
 - Default `PI_GEN_STAGES` only builds `stage0`–`stage2` so CI skips heavyweight desktop
   packages. Override to build a full image.
 
