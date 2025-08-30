@@ -160,6 +160,14 @@ elif compgen -G "deploy/*.img.zip" > /dev/null; then
   xz -T0 "${OUT_IMG%.xz}"
 else
   echo "No image file found in deploy/" >&2
+  if ls deploy/* >/dev/null 2>&1; then
+    echo "Contents of deploy/:" >&2
+    ls -lh deploy >&2
+  fi
+  if [ -f deploy/build.log ]; then
+    echo "Last 20 lines of deploy/build.log:" >&2
+    tail -n 20 deploy/build.log >&2
+  fi
   exit 1
 fi
 
