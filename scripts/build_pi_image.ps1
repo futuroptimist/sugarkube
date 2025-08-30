@@ -195,6 +195,8 @@ function Invoke-BuildPiGenDocker {
   if ($LASTEXITCODE -ne 0) { Write-Warning "binfmt installer returned exit code $LASTEXITCODE; continuing" }
   # Pick a reachable Raspbian mirror to avoid intermittent outages
   $raspbianCandidates = @(
+    'http://mirror.fcix.net/raspbian/raspbian',
+    'http://mirrors.ocf.berkeley.edu/raspbian/raspbian',
     'http://raspbian.raspberrypi.org/raspbian',
     'http://raspbian.mirrorservice.org/raspbian',
     'http://archive.raspbian.org/raspbian'
@@ -308,6 +310,19 @@ Acquire::https::Timeout "30";
 Acquire::http::Pipeline-Depth "0";
 Acquire::Queue-Mode "access";
 EOR
+# Ensure any lists written by pi-gen use FCIX mirror and run a safe dist-upgrade
+cat > /work/pi-gen/stage0/00-configure-apt/01-run.sh <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+  sed -i 's#http://raspbian\.raspberrypi\.com/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+done
+APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+apt-get $APT_OPTS_DEFAULT update
+apt-get $APT_OPTS_DEFAULT -o Dpkg::Options::="--force-confnew" dist-upgrade -y || apt-get $APT_OPTS_DEFAULT -o Dpkg::Options::="--force-confnew" dist-upgrade -y --fix-missing
+EOSH
+chmod +x /work/pi-gen/stage0/00-configure-apt/01-run.sh
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
 fi
