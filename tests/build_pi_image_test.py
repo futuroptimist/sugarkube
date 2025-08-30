@@ -361,6 +361,14 @@ def test_respects_build_timeout_env(tmp_path):
     assert log.read_text().strip() == "2h"
 
 
+def test_requires_cloud_init_file(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["CLOUD_INIT_PATH"] = str(tmp_path / "missing.yaml")
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Cloud-init file not found" in result.stderr
+
+
 def test_powershell_script_mentions_cloudflared_compose():
     text = Path("scripts/build_pi_image.ps1").read_text()
     assert "docker-compose.cloudflared.yml" in text
