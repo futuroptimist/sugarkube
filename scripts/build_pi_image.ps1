@@ -356,10 +356,8 @@ function Write-SHA256File {
 
 function Ensure-DockerNetwork {
   param([Parameter(Mandatory=$true)][string]$Name)
-  try {
-    & docker network inspect $Name | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "absent" }
-  } catch {
+  & docker network inspect $Name | Out-Null
+  if ($LASTEXITCODE -ne 0) {
     & docker network create $Name | Out-Null
   }
 }
@@ -369,9 +367,9 @@ function Ensure-AptCacheProxy {
   Ensure-DockerNetwork -Name $net
   # Create persistent cache volume
   & docker volume create sugarkube-apt-cache | Out-Null
-  # Start or recreate apt-cacher-ng
-  $exists = (& docker ps -a --format '{{.Names}}' | Select-String -SimpleMatch 'sugarkube-apt-cache').Length -gt 0
-  if ($exists) {
+  # Start or create apt-cacher-ng container
+  & docker container inspect sugarkube-apt-cache | Out-Null
+  if ($LASTEXITCODE -eq 0) {
     & docker start sugarkube-apt-cache | Out-Null
   } else {
     & docker run -d --name sugarkube-apt-cache --network $net -p 3142:3142 `
