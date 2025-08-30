@@ -4,6 +4,39 @@ import subprocess
 from pathlib import Path
 
 
+def test_requires_curl(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+        "unzip",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "curl is required" in result.stderr
+
+
 def test_requires_docker(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -359,6 +392,14 @@ def test_respects_build_timeout_env(tmp_path):
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert log.read_text().strip() == "2h"
+
+
+def test_requires_cloud_init_file(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["CLOUD_INIT_PATH"] = str(tmp_path / "missing.yaml")
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Cloud-init file not found" in result.stderr
 
 
 def test_powershell_script_mentions_cloudflared_compose():

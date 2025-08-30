@@ -16,7 +16,7 @@ frame so the installation is surrounded by greenery.
 ### What's in a name?
 
 "Sugarkube" refers to both the aluminium cube covered in solar panels **and**
-the helper scripts that provide "syntactic sugar" for Kubernetes.  Throughout
+the helper scripts that provide "syntactic sugar" for Kubernetes. Throughout
 the docs you will see the term used in both contexts.
 
 ## Repository layout

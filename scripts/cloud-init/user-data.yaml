@@ -16,6 +16,7 @@ write_files:
   - path: /opt/sugarkube/.cloudflared.env
     permissions: '0600'
     content: |
+      # Inject with TUNNEL_TOKEN env var or edit after boot
       TUNNEL_TOKEN=""
 runcmd:
   - [bash, -c, 'usermod -aG docker pi']

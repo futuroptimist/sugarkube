@@ -23,9 +23,9 @@ CONTEXT:
 - Render each model in both `heatset` and `printed` modes. `STANDOFF_MODE` is case-insensitive and
   defaults to `heatset`.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes.
-- For doc updates, also run `pyspelling -c .spellcheck.yaml` and
-  `linkchecker --no-warnings README.md docs/` (requires `aspell` and `aspell-en`).
+- Run `pre-commit run --all-files` after changes.  
+  For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
+  `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
