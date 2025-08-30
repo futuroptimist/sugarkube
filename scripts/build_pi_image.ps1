@@ -211,7 +211,7 @@ function Invoke-BuildPiGenDocker {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
-export http_proxy="{6}" https_proxy="{6}" HTTP_PROXY="{6}" HTTPS_PROXY="{6}"
+export http_proxy="__HOST_PROXY__" https_proxy="__HOST_PROXY__" HTTP_PROXY="__HOST_PROXY__" HTTPS_PROXY="__HOST_PROXY__"
 for i in 1 2 3 4 5; do
   if apt-get $APT_OPTS update; then break; fi; sleep 5;
 done
@@ -224,7 +224,7 @@ done
 #!/bin/bash
 # rely on host-registered qemu binfmt (installed before container run)
 mkdir -p /work
-git clone --depth 1 --branch '{0}' https://github.com/RPi-Distro/pi-gen.git /work/pi-gen
+git clone --depth 1 --branch '__PIGEN_BRANCH__' https://github.com/RPi-Distro/pi-gen.git /work/pi-gen
 install -D -m 0644 /host/scripts/cloud-init/user-data.yaml /work/pi-gen/stage2/01-sys-tweaks/user-data
 install -D -m 0644 /host/scripts/cloud-init/docker-compose.cloudflared.yml \
   /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml
@@ -267,17 +267,17 @@ chmod +x /work/pi-gen/tools/debootstrap-with-fallback
 # Patch stage0 to use the wrapper (first word 'debootstrap' at call site)
 sed -i 's/^\([[:space:]]*\)debootstrap /\1\/work\/pi-gen\/tools\/debootstrap-with-fallback /' /work/pi-gen/stage0/prerun.sh
 cat > config <<CFG
-IMG_NAME="{1}"
+IMG_NAME="__IMG_NAME__"
 ENABLE_SSH=1
-ARM64={2}
-APT_MIRROR={4}
-RASPBIAN_MIRROR={4}
+ARM64=__ARM64__
+APT_MIRROR=__RASPBIAN_MIRROR__
+RASPBIAN_MIRROR=__RASPBIAN_MIRROR__
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
 SECURITY_MIRROR=http://security.debian.org/debian-security
 APT_COMPONENTS="main contrib non-free non-free-firmware"
 COMPRESSION=none
-APT_PROXY={6}
+APT_PROXY=__APT_PROXY__
 DEBOOTSTRAP_EXTRA_ARGS="--components=main,contrib,non-free,non-free-firmware"
 DEBOOTSTRAP_INCLUDE="libnftnl11"
 APT_OPTS="--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
@@ -291,11 +291,11 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
 fi
 chmod +x ./build.sh
 set +e
-timeout {3} ./build.sh
+timeout __TIMEOUT__ ./build.sh
 code=$?
 set -e
 if [ "$code" -eq 124 ]; then
-  echo "pi-gen timed out after {3}. Retrying once without timeout..."
+  echo "pi-gen timed out after __TIMEOUT__. Retrying once without timeout..."
   ./build.sh
 elif [ "$code" -ne 0 ]; then
   if grep -Rqs "Couldn't download packages" work/*/stage0/debootstrap.log; then
@@ -306,8 +306,15 @@ elif [ "$code" -ne 0 ]; then
   fi
 fi
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
-cp "$artifact" /out/{1}.img
-'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout, $raspbianMirror, $HostProxy, $AptProxy
+cp "$artifact" /out/__IMG_NAME__.img
+'@
+  $bash = $bash.Replace('__PIGEN_BRANCH__', $PiGenBranch)
+  $bash = $bash.Replace('__IMG_NAME__', $ImageName)
+  $bash = $bash.Replace('__ARM64__', $Arm64.ToString())
+  $bash = $bash.Replace('__TIMEOUT__', $BuildTimeout)
+  $bash = $bash.Replace('__RASPBIAN_MIRROR__', $raspbianMirror)
+  $bash = $bash.Replace('__HOST_PROXY__', $HostProxy)
+  $bash = $bash.Replace('__APT_PROXY__', $AptProxy)
   $bashLF = ($bash -replace "`r`n","`n").Trim()
 
   $tempScript = Join-Path $hostRoot (".pigen-build-" + [System.Guid]::NewGuid().ToString('N') + ".sh")
