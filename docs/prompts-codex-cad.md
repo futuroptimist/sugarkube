@@ -17,14 +17,15 @@ Keep OpenSCAD sources current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export STL meshes into
-  [`stl/`](../stl/). The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml)
-  regenerates these models as artifacts; do not commit `.stl` files.
-- Render each model in both `heatset` and `printed` modes. The `STANDOFF_MODE`
-  value is case-insensitive and defaults to `heatset`.
+  [`stl/`](../stl/).
+- The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
+  as artifacts. Do not commit `.stl` files.
+- Render each model in both `heatset` and `printed` modes. `STANDOFF_MODE` is case-insensitive and
+  defaults to `heatset`.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes. For documentation updates, also run
-  `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
-  `linkchecker --no-warnings README.md docs/`.
+- Run `pre-commit run --all-files` after changes.
+- For doc updates, also run `pyspelling -c .spellcheck.yaml` and
+  `linkchecker --no-warnings README.md docs/` (requires `aspell` and `aspell-en`).
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
@@ -33,10 +34,10 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
 
-   ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
-   STANDOFF_MODE=PRINTED ./scripts/openscad_render.sh path/to/model.scad  # value is case-insensitive
-   ```
+    ```bash
+    ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
+    STANDOFF_MODE=PRINTED ./scripts/openscad_render.sh path/to/model.scad # case-insensitive
+    ```
 
 4. Commit updated SCAD sources and any documentation.
 
