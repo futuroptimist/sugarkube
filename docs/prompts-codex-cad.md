@@ -25,6 +25,8 @@ CONTEXT:
 - Run `pre-commit run --all-files` after changes. For documentation updates, also run
   `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
   `linkchecker --no-warnings README.md docs/`.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
@@ -35,7 +37,7 @@ REQUEST:
 
    ```bash
    ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
-   STANDOFF_MODE=PRINTED ./scripts/openscad_render.sh path/to/model.scad  # value is case-insensitive
+   STANDOFF_MODE=PRINTED ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    ```
 
 4. Commit updated SCAD sources and any documentation.
@@ -54,8 +56,8 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow `AGENTS.md` and `README.md`.
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
-`aspell` and `aspell-en`), and `linkchecker --no-warnings README.md docs/`
-before committing.
+`aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
+`git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
