@@ -315,8 +315,14 @@ cat > /work/pi-gen/stage0/00-configure-apt/01-run.sh <<'EOSH'
 #!/bin/bash
 set -euo pipefail
 shopt -s nullglob
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-  sed -i 's#http://raspbian\.raspberrypi\.com/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+# Rewrite any sources in /etc/apt to FCIX (handles .list and .sources files)
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  if [ -f "$f" ]; then
+    sed -i 's#http://raspbian\.raspberrypi\.com/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+    sed -i 's#https://raspbian\.raspberrypi\.com/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+    sed -i 's#http://raspbian\.raspberrypi\.org/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+    sed -i 's#https://raspbian\.raspberrypi\.org/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+  fi
 done
 APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
 apt-get $APT_OPTS_DEFAULT update
