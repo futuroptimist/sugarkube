@@ -125,21 +125,34 @@ echo "Starting pi-gen build..."
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
 
-if compgen -G "deploy/*.img" > /dev/null; then
-  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
-  xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
-elif compgen -G "deploy/*.img.zip" > /dev/null; then
-  unzip -q deploy/*.img.zip -d deploy
-  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
-  xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
-elif compgen -G "deploy/*.img.xz" > /dev/null; then
-  mv deploy/*.img.xz "${OUTPUT_DIR}/${IMG_NAME}.img.xz"
-else
+# Locate the image produced by pi-gen, allowing for nested deploy paths
+img_path="$(find deploy -maxdepth 2 -type f -name '*.img.xz' | head -n1)"
+
+# Handle zip or raw images if no compressed artifact was produced
+if [ -z "${img_path}" ]; then
+  zip_path="$(find deploy -maxdepth 2 -type f -name '*.img.zip' | head -n1)"
+  if [ -n "${zip_path}" ]; then
+    unzip -q "${zip_path}" -d "$(dirname "${zip_path}")"
+    raw_path="$(find deploy -maxdepth 2 -type f -name '*.img' | head -n1)"
+    if [ -n "${raw_path}" ]; then
+      xz -T0 "${raw_path}"
+      img_path="${raw_path}.xz"
+    fi
+  else
+    raw_path="$(find deploy -maxdepth 2 -type f -name '*.img' | head -n1)"
+    if [ -n "${raw_path}" ]; then
+      xz -T0 "${raw_path}"
+      img_path="${raw_path}.xz"
+    fi
+  fi
+fi
+
+if [ -z "${img_path}" ]; then
   echo "No image file found in deploy/" >&2
   exit 1
 fi
-sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
-  "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
-ls -lh "${OUTPUT_DIR}/${IMG_NAME}.img.xz" \
-  "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
+
+cp "${img_path}" "${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
+ls -lh "${OUTPUT_DIR}/${IMG_NAME}.img.xz" "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
 echo "Image written to ${OUTPUT_DIR}/${IMG_NAME}.img.xz"

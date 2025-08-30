@@ -69,5 +69,5 @@ jobs:
         with:
           name: sugarkube-img
           path: |
-            sugarkube.img.xz
-            sugarkube.img.xz.sha256
+            ./sugarkube.img.xz
+            ./sugarkube.img.xz.sha256
