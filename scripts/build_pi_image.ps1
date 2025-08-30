@@ -203,6 +203,7 @@ function Invoke-BuildPiGenDocker {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+export http_proxy="{6}" https_proxy="{6}" HTTP_PROXY="{6}" HTTPS_PROXY="{6}"
 for i in 1 2 3 4 5; do
   if apt-get $APT_OPTS update; then break; fi; sleep 5;
 done
@@ -229,6 +230,7 @@ RASPBIAN_MIRROR={4}
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
 COMPRESSION=none
+APT_PROXY={6}
 APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
 CFG
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
@@ -251,13 +253,13 @@ elif [ "$code" -ne 0 ]; then
 fi
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
 cp "$artifact" /out/{1}.img
-'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout, $raspbianMirror
+'@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout, $raspbianMirror, $HostProxy, $AptProxy
   $bashLF = ($bash -replace "`r`n","`n").Trim()
 
   $tempScript = Join-Path $hostRoot '.pigen-build.sh'
   try {
     $bashLF | Set-Content -NoNewline -Encoding Ascii -- $tempScript
-    & docker run --rm --privileged -v "${hostRoot}:/host" -v "${hostOut}:/out" debian:bookworm bash -lc "bash /host/.pigen-build.sh"
+    & docker run --rm --privileged --network sugarkube-build -v "${hostRoot}:/host" -v "${hostOut}:/out" debian:bookworm bash -lc "bash /host/.pigen-build.sh"
     if ($LASTEXITCODE -ne 0) { throw "pi-gen Docker run failed (exit $LASTEXITCODE)" }
   } finally {
     if (Test-Path $tempScript) { Remove-Item -Force -- $tempScript }
@@ -285,19 +287,24 @@ function Invoke-BuildPiGenOfficial {
   $archiveMirror = 'http://archive.raspberrypi.org/debian'
   $debMirror = 'http://deb.debian.org/debian'
 
-  & docker run --rm --privileged \
-    -e IMG_NAME=$ImageName -e ENABLE_SSH=1 -e ARM64=$Arm64 -e USE_QCOW2=1 \
-    -e APT_OPTS='--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0' \
-    -e APT_MIRROR=$debMirror -e DEBIAN_MIRROR=$debMirror \
-    -e RASPBIAN_MIRROR=$raspbianMirror -e APT_MIRROR_RASPBERRYPI=$archiveMirror \
-    -e COMPRESSION=none \
-    -e PI_GEN_BRANCH=$PiGenBranch \
-    -v "${hostOut}:/pi-gen/deploy" \
-    -v pigen-work-cache:/pi-gen/work \
-    -v pigen-apt-cache:/var/cache/apt \
-    -v "${userData}:/pi-gen/stage2/01-sys-tweaks/user-data:ro" \
-    -v "${cfCompose}:/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml:ro" \
-    ghcr.io/raspberrypi/pigen:latest bash -lc "cd /pi-gen && ./build.sh"
+  $dockerArgs = @(
+    'run','--rm','--privileged',
+    '--network','sugarkube-build',
+    '-e',"IMG_NAME=$ImageName", '-e','ENABLE_SSH=1', '-e',"ARM64=$Arm64", '-e','USE_QCOW2=1',
+    '-e','APT_OPTS=--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0',
+    '-e',"APT_MIRROR=$debMirror", '-e',"DEBIAN_MIRROR=$debMirror",
+    '-e',"RASPBIAN_MIRROR=$raspbianMirror", '-e',"APT_MIRROR_RASPBERRYPI=$archiveMirror",
+    '-e','COMPRESSION=none',
+    '-e',"http_proxy=$AptProxy", '-e',"https_proxy=$AptProxy", '-e',"HTTP_PROXY=$AptProxy", '-e',"HTTPS_PROXY=$AptProxy",
+    '-e',"PI_GEN_BRANCH=$PiGenBranch",
+    '-v',"${hostOut}:/pi-gen/deploy",
+    '-v','pigen-work-cache:/pi-gen/work',
+    '-v','pigen-apt-cache:/var/cache/apt',
+    '-v',"${userData}:/pi-gen/stage2/01-sys-tweaks/user-data:ro",
+    '-v',"${cfCompose}:/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml:ro",
+    'ghcr.io/raspberrypi/pigen:latest','bash','-lc','cd /pi-gen && ./build.sh'
+  )
+  & docker @dockerArgs
   if ($LASTEXITCODE -ne 0) { throw "pi-gen official image run failed (exit $LASTEXITCODE)" }
 }
 
@@ -347,10 +354,48 @@ function Write-SHA256File {
   return $out
 }
 
+function Ensure-DockerNetwork {
+  param([Parameter(Mandatory=$true)][string]$Name)
+  try {
+    & docker network inspect $Name | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "absent" }
+  } catch {
+    & docker network create $Name | Out-Null
+  }
+}
+
+function Ensure-AptCacheProxy {
+  $net = 'sugarkube-build'
+  Ensure-DockerNetwork -Name $net
+  # Create persistent cache volume
+  & docker volume create sugarkube-apt-cache | Out-Null
+  # Start or recreate apt-cacher-ng
+  $exists = (& docker ps -a --format '{{.Names}}' | Select-String -SimpleMatch 'sugarkube-apt-cache').Length -gt 0
+  if ($exists) {
+    & docker start sugarkube-apt-cache | Out-Null
+  } else {
+    & docker run -d --name sugarkube-apt-cache --network $net -p 3142:3142 `
+      -v sugarkube-apt-cache:/var/cache/apt-cacher-ng `
+      --restart unless-stopped sameersbn/apt-cacher-ng:latest | Out-Null
+  }
+  # Wait until proxy responds
+  for ($i=0; $i -lt 20; $i++) {
+    try {
+      Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 -Uri 'http://localhost:3142/acng-report.html' | Out-Null
+      break
+    } catch { Start-Sleep -Seconds 1 }
+  }
+}
+
 # Preconditions
 Test-CommandAvailable docker
 Test-CommandAvailable git
 Invoke-Docker-Info
+
+# Start apt-cacher-ng proxy and network for reliable apt
+Ensure-AptCacheProxy
+$AptProxy = 'http://sugarkube-apt-cache:3142'
+$HostProxy = 'http://host.docker.internal:3142'
 
 # Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
 & docker run --privileged --rm tonistiigi/binfmt --install arm64,arm | Out-Null
@@ -366,6 +411,10 @@ foreach ($u in $urls) {
     exit 1
   }
 }
+
+# Ensure Docker network and apt-cacher-ng proxy are running
+Ensure-DockerNetwork -Name 'sugarkube-build'
+Ensure-AptCacheProxy
 
 # Paths and working directory
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
