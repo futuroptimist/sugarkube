@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REQUIRED_SPACE_GB="${REQUIRED_SPACE_GB:-10}"
+
+check_space() {
+  local dir="$1"
+  local avail_kb required_kb
+  avail_kb=$(df -Pk "$dir" | awk 'NR==2 {print $4}')
+  required_kb=$((REQUIRED_SPACE_GB * 1024 * 1024))
+  if [ "$avail_kb" -lt "$required_kb" ]; then
+    echo "Need at least ${REQUIRED_SPACE_GB}GB free in $dir" >&2
+    exit 1
+  fi
+}
+
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
 # Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, unzip and roughly
 # 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
@@ -52,6 +65,9 @@ fi
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
+# Ensure temporary and output locations have enough space
+check_space "$(dirname "${WORK_DIR}")"
+
 PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
@@ -75,6 +91,7 @@ fi
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
+check_space "${OUTPUT_DIR}"
 
 # Build only the minimal lite image by default to keep CI fast
 PI_GEN_STAGES="${PI_GEN_STAGES:-stage0 stage1 stage2}"
@@ -83,8 +100,12 @@ git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
 
-cp "${CLOUD_INIT_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+if [ -n "${TUNNEL_TOKEN:-}" ]; then
+  echo "Embedding Cloudflare token into cloud-init"
+  sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"
+fi
 
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
@@ -106,8 +127,8 @@ ARM64=${ARM64}
 # Prefer primary mirrors to avoid flaky community mirrors and set apt timeouts
 APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
 RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
-APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
-DEBIAN_MIRROR=http://deb.debian.org/debian
+APT_MIRROR_RASPBERRYPI=${RPI_MIRROR}
+DEBIAN_MIRROR=${DEBIAN_MIRROR}
 APT_OPTS="${APT_OPTS}"
 STAGE_LIST="${PI_GEN_STAGES}"
 CFG
