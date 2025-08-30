@@ -293,6 +293,21 @@ Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::http::Proxy::http://archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::https://archive.raspberrypi.com "DIRECT";
 EOP
+# Force Raspbian mirror to a reliable mirror (FCIX) for all later stages
+mkdir -p /work/pi-gen/stage0/00-configure-apt/files/etc/apt/sources.list.d
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/sources.list.d/raspi.list <<EOS
+deb http://mirror.fcix.net/raspbian/raspbian bookworm main contrib non-free non-free-firmware rpi
+deb http://archive.raspberrypi.com/debian bookworm main
+EOS
+# Increase apt retries permanently in the image
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/80-retries <<EOR
+Acquire::Retries "10";
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::http::Pipeline-Depth "0";
+Acquire::Queue-Mode "access";
+EOR
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
 fi
