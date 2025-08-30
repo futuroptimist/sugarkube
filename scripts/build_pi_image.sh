@@ -125,21 +125,27 @@ echo "Starting pi-gen build..."
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
 
+OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+
 if compgen -G "deploy/*.img" > /dev/null; then
-  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
-  xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
+  cp deploy/*.img "${OUT_IMG%.xz}"
+  xz -T0 "${OUT_IMG%.xz}"
 elif compgen -G "deploy/*.img.zip" > /dev/null; then
   unzip -q deploy/*.img.zip -d deploy
-  mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
-  xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
+  cp deploy/*.img "${OUT_IMG%.xz}"
+  xz -T0 "${OUT_IMG%.xz}"
 elif compgen -G "deploy/*.img.xz" > /dev/null; then
-  mv deploy/*.img.xz "${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+  cp deploy/*.img.xz "${OUT_IMG}"
 else
   echo "No image file found in deploy/" >&2
   exit 1
 fi
-sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
-  "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
-ls -lh "${OUTPUT_DIR}/${IMG_NAME}.img.xz" \
-  "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
-echo "Image written to ${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+
+if [ ! -f "${OUT_IMG}" ]; then
+  echo "Expected image ${OUT_IMG} not found" >&2
+  exit 1
+fi
+
+sha256sum "${OUT_IMG}" > "${OUT_IMG}.sha256"
+ls -lh "${OUT_IMG}" "${OUT_IMG}.sha256"
+echo "Image written to ${OUT_IMG}"
