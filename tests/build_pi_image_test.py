@@ -180,7 +180,9 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
-def _setup_build_env(tmp_path, check_compose: bool = False):
+def _setup_build_env(
+    tmp_path, check_compose: bool = False, precompressed: bool = False
+):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git_args.log"
@@ -202,6 +204,21 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         if check_compose
         else ""
     )
+    image_cmd = (
+        "python3 - <<'PY'\n"
+        "import zipfile\n"
+        "with zipfile.ZipFile('deploy/sugarkube.img.zip', 'w') as zf:\n"
+        "    zf.writestr('sugarkube.img', '')\n"
+        "PY\n"
+    )
+    if precompressed:
+        image_cmd = (
+            "python3 - <<'PY'\n"
+            "import lzma, pathlib\n"
+            "pathlib.Path('deploy/sugarkube.img.xz').write_bytes("
+            "lzma.compress(b''))\n"
+            "PY\n"
+        )
     git_stub = (
         f"#!/bin/bash\n"
         f'echo "$@" > "{git_log}"\n'
@@ -211,11 +228,7 @@ def _setup_build_env(tmp_path, check_compose: bool = False):
         "#!/bin/bash\n"
         f"{compose_check}"
         "mkdir -p deploy\n"
-        "python3 - <<'PY'\n"
-        "import zipfile\n"
-        "with zipfile.ZipFile('deploy/sugarkube.img.zip', 'w') as zf:\n"
-        "    zf.writestr('sugarkube.img', '')\n"
-        "PY\n"
+        f"{image_cmd}"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -301,6 +314,14 @@ def test_respects_pi_gen_branch_env(tmp_path):
     assert result.returncode == 0
     assert "--branch legacy" in git_args
     assert (tmp_path / "sugarkube.img.xz").exists()
+
+
+def test_handles_precompressed_pi_gen_output(tmp_path):
+    env = _setup_build_env(tmp_path, precompressed=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    assert (tmp_path / "sugarkube.img.xz").exists()
+    assert not (tmp_path / "sugarkube.img.xz.xz").exists()
 
 
 def test_copies_cloudflared_compose(tmp_path):

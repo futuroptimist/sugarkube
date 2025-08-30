@@ -431,7 +431,7 @@ try {
 
   # Collect artifact
   $deployDir = Join-Path $piGenDir 'deploy'
-  if (-not (Test-Path $deployDir)) { 
+  if (-not (Test-Path $deployDir)) {
     # Try OUTPUT_DIR if using containerized builds
     $maybeImg = Join-Path $OutputDir ("$ImageName.img")
     if (Test-Path $maybeImg) {
