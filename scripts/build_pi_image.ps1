@@ -230,6 +230,7 @@ install -D -m 0644 /host/scripts/cloud-init/docker-compose.cloudflared.yml \
   /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml
 cd /work/pi-gen
 # Inject a debootstrap fallback wrapper to try multiple mirrors if fetch fails
+mkdir -p /work/pi-gen/tools
 cat > /work/pi-gen/tools/debootstrap-with-fallback << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
