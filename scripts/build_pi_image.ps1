@@ -195,6 +195,8 @@ function Invoke-BuildPiGenDocker {
   if ($LASTEXITCODE -ne 0) { Write-Warning "binfmt installer returned exit code $LASTEXITCODE; continuing" }
   # Pick a reachable Raspbian mirror to avoid intermittent outages
   $raspbianCandidates = @(
+    'http://mirror.fcix.net/raspbian/raspbian',
+    'http://mirrors.ocf.berkeley.edu/raspbian/raspbian',
     'http://raspbian.raspberrypi.org/raspbian',
     'http://raspbian.mirrorservice.org/raspbian',
     'http://archive.raspbian.org/raspbian'
@@ -293,6 +295,40 @@ Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::http::Proxy::http://archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::https://archive.raspberrypi.com "DIRECT";
 EOP
+# Force Raspbian mirror to a reliable mirror (FCIX) for all later stages
+mkdir -p /work/pi-gen/stage0/00-configure-apt/files/etc/apt/sources.list.d
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/sources.list.d/raspi.list <<EOS
+deb http://mirror.fcix.net/raspbian/raspbian bookworm main contrib non-free non-free-firmware rpi
+deb http://archive.raspberrypi.com/debian bookworm main
+EOS
+# Increase apt retries permanently in the image
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/80-retries <<EOR
+Acquire::Retries "10";
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::http::Pipeline-Depth "0";
+Acquire::Queue-Mode "access";
+EOR
+# Ensure any lists written by pi-gen use FCIX mirror and run a safe dist-upgrade
+cat > /work/pi-gen/stage0/00-configure-apt/01-run.sh <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+# Rewrite any sources in /etc/apt to FCIX (handles .list and .sources files)
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  if [ -f "$f" ]; then
+    sed -i 's#http://raspbian\.raspberrypi\.com/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+    sed -i 's#https://raspbian\.raspberrypi\.com/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+    sed -i 's#http://raspbian\.raspberrypi\.org/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+    sed -i 's#https://raspbian\.raspberrypi\.org/raspbian#http://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+  fi
+done
+APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+apt-get $APT_OPTS_DEFAULT update
+apt-get $APT_OPTS_DEFAULT -o Dpkg::Options::="--force-confnew" dist-upgrade -y || apt-get $APT_OPTS_DEFAULT -o Dpkg::Options::="--force-confnew" dist-upgrade -y --fix-missing
+EOSH
+chmod +x /work/pi-gen/stage0/00-configure-apt/01-run.sh
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
 fi

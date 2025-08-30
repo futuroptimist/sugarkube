@@ -103,6 +103,11 @@ check_space "${OUTPUT_DIR}"
 
 # Build only the minimal lite image by default to keep CI fast
 PI_GEN_STAGES="${PI_GEN_STAGES:-stage0 stage1 stage2}"
+# Abort early if no stages were requested
+if [[ -z "${PI_GEN_STAGES// }" ]]; then
+  echo "PI_GEN_STAGES must include at least one stage" >&2
+  exit 1
+fi
 
 git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
@@ -168,7 +173,16 @@ elif compgen -G "deploy/*.img.zip" > /dev/null; then
   xz -T0 "${OUT_IMG%.xz}"
 else
   echo "No image file found in deploy/; directory contents:" >&2
-  ls -al deploy >&2 || echo "(deploy directory missing)" >&2
+  if ls deploy/* >/dev/null 2>&1; then
+    echo "Contents of deploy/:" >&2
+    ls -lh deploy >&2
+  else
+    echo "(deploy directory missing or empty)" >&2
+  fi
+  if [ -f deploy/build.log ]; then
+    echo "Last 20 lines of deploy/build.log:" >&2
+    tail -n 20 deploy/build.log >&2
+  fi
   exit 1
 fi
 
