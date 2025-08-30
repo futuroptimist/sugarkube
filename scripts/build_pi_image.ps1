@@ -237,9 +237,13 @@ APT_MIRROR={4}
 RASPBIAN_MIRROR={4}
 APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
 DEBIAN_MIRROR=http://deb.debian.org/debian
+SECURITY_MIRROR=http://security.debian.org/debian-security
+APT_COMPONENTS="main contrib non-free non-free-firmware"
 COMPRESSION=none
 APT_PROXY={6}
-APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+DEBOOTSTRAP_EXTRA_ARGS="--components=main,contrib,non-free,non-free-firmware"
+DEBOOTSTRAP_INCLUDE="libnftnl11"
+APT_OPTS="--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
 CFG
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
@@ -257,7 +261,12 @@ if [ "$code" -eq 124 ]; then
   echo "pi-gen timed out after {3}. Retrying once without timeout..."
   ./build.sh
 elif [ "$code" -ne 0 ]; then
-  exit "$code"
+  if grep -Rqs "Couldn't download packages" work/*/stage0/debootstrap.log; then
+    echo "Transient debootstrap fetch error detected. Retrying build once..."
+    ./build.sh
+  else
+    exit "$code"
+  fi
 fi
 artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
 cp "$artifact" /out/{1}.img
@@ -303,6 +312,7 @@ function Invoke-BuildPiGenOfficial {
   $raspbianMirror = 'http://raspbian.raspberrypi.org/raspbian'
   $archiveMirror = 'http://archive.raspberrypi.org/debian'
   $debMirror = 'http://deb.debian.org/debian'
+  $securityMirror = 'http://security.debian.org/debian-security'
 
   # Skip if GHCR is not accessible (avoids auth errors)
   & docker manifest inspect ghcr.io/raspberrypi/pigen:latest | Out-Null
@@ -314,9 +324,13 @@ function Invoke-BuildPiGenOfficial {
     'run','--rm','--privileged',
     '--network','sugarkube-build',
     '-e',"IMG_NAME=$ImageName", '-e','ENABLE_SSH=1', '-e',"ARM64=$Arm64", '-e','USE_QCOW2=1',
-    '-e','APT_OPTS=--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0',
+    '-e','APT_OPTS=--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0',
     '-e',"APT_MIRROR=$debMirror", '-e',"DEBIAN_MIRROR=$debMirror",
+    '-e',"SECURITY_MIRROR=$securityMirror",
     '-e',"RASPBIAN_MIRROR=$raspbianMirror", '-e',"APT_MIRROR_RASPBERRYPI=$archiveMirror",
+    '-e','APT_COMPONENTS=main contrib non-free non-free-firmware',
+    '-e','DEBOOTSTRAP_EXTRA_ARGS=--components=main,contrib,non-free,non-free-firmware',
+    '-e','DEBOOTSTRAP_INCLUDE=libnftnl11',
     '-e','COMPRESSION=none',
     '-e',"http_proxy=$AptProxy", '-e',"https_proxy=$AptProxy", '-e',"HTTP_PROXY=$AptProxy", '-e',"HTTPS_PROXY=$AptProxy",
     '-e',"PI_GEN_BRANCH=$PiGenBranch",
@@ -480,10 +494,14 @@ try {
   $config += 'RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian'
   $config += 'APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian'
   $config += 'DEBIAN_MIRROR=http://deb.debian.org/debian'
-  $aptOpts = '--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 ' +
+  $config += 'SECURITY_MIRROR=http://security.debian.org/debian-security'
+  $config += 'APT_COMPONENTS="main contrib non-free non-free-firmware"'
+  $aptOpts = '--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 ' +
     '-o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true ' +
     '-o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0'
   $config += ('APT_OPTS="' + $aptOpts + '"')
+  $config += 'DEBOOTSTRAP_EXTRA_ARGS="--components=main,contrib,non-free,non-free-firmware"'
+  $config += 'DEBOOTSTRAP_INCLUDE="libnftnl11"'
   $config -join "`n" | Set-Content -NoNewline (Join-Path $piGenDir 'config')
 
   # Run the build (prefer local shell; fallback to containerized pi-gen)
