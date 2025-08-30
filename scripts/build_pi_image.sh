@@ -95,6 +95,11 @@ check_space "${OUTPUT_DIR}"
 
 # Build only the minimal lite image by default to keep CI fast
 PI_GEN_STAGES="${PI_GEN_STAGES:-stage0 stage1 stage2}"
+# Abort early if no stages were requested
+if [[ -z "${PI_GEN_STAGES// }" ]]; then
+  echo "PI_GEN_STAGES must include at least one stage" >&2
+  exit 1
+fi
 
 git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
