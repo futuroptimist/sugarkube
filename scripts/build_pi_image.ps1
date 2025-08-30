@@ -91,15 +91,16 @@ function Get-WSLPath {
 }
 
 function Get-GitBashPath {
-  $cmd = Get-Command bash.exe -ErrorAction SilentlyContinue
-  if ($cmd -and (Test-Path $cmd.Source)) { return $cmd.Source }
+  # Prefer Git for Windows bash over legacy WSL bash shim
   $candidates = @(
-    'C:\Program Files\Git\bin\bash.exe',
-    'C:\Program Files\Git\usr\bin\bash.exe',
-    'C:\Program Files (x86)\Git\bin\bash.exe',
-    'C:\Program Files (x86)\Git\usr\bin\bash.exe'
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe'
   )
   foreach ($p in $candidates) { if (Test-Path $p) { return $p } }
+  $cmd = Get-Command bash.exe -ErrorAction SilentlyContinue
+  if ($cmd -and (Test-Path $cmd.Source) -and ($cmd.Source -notmatch 'System32\\bash.exe')) { return $cmd.Source }
   return $null
 }
 
@@ -256,10 +257,19 @@ cp "$artifact" /out/{1}.img
 '@ -f $PiGenBranch, $ImageName, $Arm64, $BuildTimeout, $raspbianMirror, $HostProxy, $AptProxy
   $bashLF = ($bash -replace "`r`n","`n").Trim()
 
-  $tempScript = Join-Path $hostRoot '.pigen-build.sh'
+  $tempScript = Join-Path $hostRoot (".pigen-build-" + [System.Guid]::NewGuid().ToString('N') + ".sh")
   try {
-    $bashLF | Set-Content -NoNewline -Encoding Ascii -- $tempScript
-    & docker run --rm --privileged --network sugarkube-build -v "${hostRoot}:/host" -v "${hostOut}:/out" debian:bookworm bash -lc "bash /host/.pigen-build.sh"
+    if (Test-Path $tempScript) { Remove-Item -Force -- $tempScript }
+    for ($i=0; $i -lt 5; $i++) {
+      try {
+        $bashLF | Set-Content -NoNewline -Encoding Ascii -- $tempScript
+        break
+      } catch {
+        Start-Sleep -Milliseconds 200
+        if ($i -eq 4) { throw }
+      }
+    }
+    & docker run --rm --privileged --network sugarkube-build -v "${hostRoot}:/host" -v "${hostOut}:/out" debian:bookworm bash -lc "bash /host/$(Split-Path -Leaf $tempScript)"
     if ($LASTEXITCODE -ne 0) { throw "pi-gen Docker run failed (exit $LASTEXITCODE)" }
   } finally {
     if (Test-Path $tempScript) { Remove-Item -Force -- $tempScript }
