@@ -284,6 +284,14 @@ DEBOOTSTRAP_INCLUDE="libnftnl11"
 APT_OPTS="--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
 CFG
 # Ensure binfmt_misc mount exists for pi-gen checks (harmless if already mounted)
+# Also stage apt proxy config with host-specific bypass to avoid proxy 503s from archive.raspberrypi.com
+mkdir -p /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/99proxy <<EOP
+Acquire::http::Proxy "__APT_PROXY__";
+Acquire::https::Proxy "__APT_PROXY__";
+Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
+Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
+EOP
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
 fi
