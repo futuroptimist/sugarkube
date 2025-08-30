@@ -15,8 +15,9 @@ into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. To
 reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
-passes `APT_OPTS` so apt retries on transient timeouts. Override the mirrors
-with `RPI_MIRROR` and `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
+passes `APT_OPTS` so apt retries on transient timeouts. Override the Raspberry Pi
+packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) and
+the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
 Set `TUNNEL_TOKEN` to bake a Cloudflare token into

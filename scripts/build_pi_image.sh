@@ -127,8 +127,8 @@ ARM64=${ARM64}
 # Prefer primary mirrors to avoid flaky community mirrors and set apt timeouts
 APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
 RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
-APT_MIRROR_RASPBERRYPI=http://archive.raspberrypi.org/debian
-DEBIAN_MIRROR=http://deb.debian.org/debian
+APT_MIRROR_RASPBERRYPI=${RPI_MIRROR}
+DEBIAN_MIRROR=${DEBIAN_MIRROR}
 APT_OPTS="${APT_OPTS}"
 STAGE_LIST="${PI_GEN_STAGES}"
 CFG
