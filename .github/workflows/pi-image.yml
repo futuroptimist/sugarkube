@@ -1,10 +1,38 @@
 name: pi-image
 
 on:
+  # Keep manual builds for the heavy job
   workflow_dispatch:
+  # Also run the lightweight unit tests automatically when relevant bits change
+  pull_request:
+    paths:
+      - 'scripts/collect_pi_image.sh'
+      - 'tests/**'
+      - '.github/workflows/pi-image.yml'
 
 jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install collector dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends libarchive-tools xz-utils
+      - name: Run artifact detection unit tests
+        run: bash tests/artifact_detection_test.sh
+
   build:
+    # Only run the expensive image build when manually dispatched
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       ARM64: 1
@@ -14,6 +42,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
       - name: Free up disk space
         run: |
           sudo apt-get clean
@@ -22,58 +51,66 @@ jobs:
             /usr/local/share/boost
           docker system prune -af || true
           df -h
+
       - name: Install pi-gen dependencies
         run: |
           sudo apt-get -o Acquire::Retries=5 \
-                       -o Acquire::http::Timeout=30 \
-                       -o Acquire::https::Timeout=30 \
-                       update
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
           sudo apt-get -o Acquire::Retries=5 \
-                       -o Acquire::http::Timeout=30 \
-                       -o Acquire::https::Timeout=30 \
-                       install -y --no-install-recommends \
-                       quilt qemu-user-static debootstrap libarchive-tools arch-test
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends \
+            quilt qemu-user-static debootstrap libarchive-tools arch-test xz-utils
+
       - name: Clean up apt cache and temp files
         run: |
           sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /tmp/*
+          sudo rm -rf /var/lib/apt/lists/* /tmp/*
+
       - name: Compute pi-gen cache key
         id: pigen-key
         run: |
           branch=bookworm
-          if [ "$ARM64" = "1" ]; then
+          if [ "${ARM64}" = "1" ]; then
             branch=arm64
           fi
           ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/${branch}" | cut -f1)
           echo "key=pigen-${RUNNER_OS}-${branch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
+
       - name: Restore pi-gen Docker image
         id: cache-pigen
         uses: actions/cache@v4
         with:
           path: ~/cache/pi-gen.tar
           key: ${{ steps.pigen-key.outputs.key }}
+
       - name: Load cached pi-gen image
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
+
       - name: Build Raspberry Pi OS image
         timeout-minutes: 120
         run: |
-          sudo env BUILD_TIMEOUT=7200 ./scripts/build_pi_image.sh
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            echo "Build failed"
-            exit "$status"
-          fi
-          if ! ls ./sugarkube.img* >/dev/null 2>&1; then
-            echo "No image found after build"
-            exit 1
-          fi
+          sudo env BUILD_TIMEOUT="${BUILD_TIMEOUT}" ./scripts/build_pi_image.sh
+
+      - name: List deploy directory
+        if: always()
+        run: |
+          echo "--- list of deploy ---"
+          find deploy -maxdepth 3 -type f -printf "%p\t%k KB\n" | sort || true
+
+      - name: Collect image artifact
+        run: |
+          bash scripts/collect_pi_image.sh deploy ./sugarkube.img.xz
+
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/cache
           docker image save pi-gen:latest -o ~/cache/pi-gen.tar
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
