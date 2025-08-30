@@ -15,13 +15,18 @@ into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. To
 reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
-passes `APT_OPTS` so apt retries on transient timeouts. Override the mirrors
-with `RPI_MIRROR` and `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
+passes `APT_OPTS` so apt retries on transient timeouts. Override the Raspberry Pi
+packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) and
+the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+Set `TUNNEL_TOKEN` to bake a Cloudflare token into
+`/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
 Ensure `curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`,
 `timeout`, and `xz` are installed before running it; `stdbuf` and `timeout`
-come from GNU coreutils. Use the prepared image to deploy
+come from GNU coreutils. The script checks that both the temporary and output
+directories have at least 10 GB free before starting. Use the prepared image to
+deploy
 containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
@@ -42,13 +47,16 @@ for onboarding steps.
    `/opt/sugarkube/start-cloudflared.sh`, and enables the Docker service; verify
    both files and the service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` before the
-   first boot to launch the tunnel automatically, or edit the file later.
-6. If the token was added after boot, start the tunnel manually with
-   `bash /opt/sugarkube/start-cloudflared.sh`.
-7. Confirm the tunnel is running:
+   first boot (to launch automatically), or edit the file later if you didn’t
+   provide `TUNNEL_TOKEN` during the build.
+6. If the token was added after boot, you can either:
+   - Run `bash /opt/sugarkube/start-cloudflared.sh` to launch manually, or
+   - Start the tunnel with  
+     `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
+7. Confirm the tunnel is running:  
    `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should
    show `cloudflared` as `Up`.
-8. View the tunnel logs to confirm a connection:
+8. View the tunnel logs to confirm a connection:  
    `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -f`.
 9. Clone target projects:
    - `git clone https://github.com/futuroptimist/token.place.git`
