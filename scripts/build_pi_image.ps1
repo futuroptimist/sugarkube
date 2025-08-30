@@ -229,6 +229,43 @@ install -D -m 0644 /host/scripts/cloud-init/user-data.yaml /work/pi-gen/stage2/0
 install -D -m 0644 /host/scripts/cloud-init/docker-compose.cloudflared.yml \
   /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml
 cd /work/pi-gen
+# Inject a debootstrap fallback wrapper to try multiple mirrors if fetch fails
+cat > /work/pi-gen/tools/debootstrap-with-fallback << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+log() { echo "[debootstrap-fallback] $*"; }
+# Capture args; last arg is mirror
+args=("$@")
+mirror="${args[${#args[@]}-1]}"
+# Fallback mirrors to try if initial mirror fails
+fallbacks=(
+  "$mirror"
+  "http://raspbian.raspberrypi.com/raspbian"
+  "http://mirror.fcix.net/raspbian/raspbian"
+  "http://mirrors.ocf.berkeley.edu/raspbian/raspbian"
+  "http://archive.raspbian.org/raspbian"
+)
+for m in "${fallbacks[@]}"; do
+  log "Attempting debootstrap with mirror: $m"
+  args[${#args[@]}-1]="$m"
+  if debootstrap "${args[@]}"; then
+    log "debootstrap succeeded with mirror: $m"
+    exit 0
+  fi
+  if grep -Rqs "Couldn't download packages" stage0/debootstrap.log 2>/dev/null || true; then
+    log "Transient failure with $m, trying next mirror..."
+    continue
+  else
+    log "Non-transient failure; aborting"
+    exit 1
+  fi
+done
+log "All mirrors failed"
+exit 1
+EOF
+chmod +x /work/pi-gen/tools/debootstrap-with-fallback
+# Patch stage0 to use the wrapper (first word 'debootstrap' at call site)
+sed -i 's/^\([[:space:]]*\)debootstrap /\1\/work\/pi-gen\/tools\/debootstrap-with-fallback /' /work/pi-gen/stage0/prerun.sh
 cat > config <<CFG
 IMG_NAME="{1}"
 ENABLE_SSH=1
