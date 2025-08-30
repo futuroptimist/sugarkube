@@ -100,8 +100,12 @@ git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
 
-cp "${CLOUD_INIT_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+if [ -n "${TUNNEL_TOKEN:-}" ]; then
+  echo "Embedding Cloudflare token into cloud-init"
+  sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"
+fi
 
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
