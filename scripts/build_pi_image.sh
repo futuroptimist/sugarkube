@@ -127,15 +127,16 @@ echo "pi-gen build finished"
 
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
-if compgen -G "deploy/*.img" > /dev/null; then
+# Check for already compressed image, or fall back to raw/zip and compress
+if compgen -G "deploy/*.img.xz" > /dev/null; then
+  cp deploy/*.img.xz "${OUT_IMG}"
+elif compgen -G "deploy/*.img" > /dev/null; then
   cp deploy/*.img "${OUT_IMG%.xz}"
   xz -T0 "${OUT_IMG%.xz}"
 elif compgen -G "deploy/*.img.zip" > /dev/null; then
   unzip -q deploy/*.img.zip -d deploy
   cp deploy/*.img "${OUT_IMG%.xz}"
   xz -T0 "${OUT_IMG%.xz}"
-elif compgen -G "deploy/*.img.xz" > /dev/null; then
-  cp deploy/*.img.xz "${OUT_IMG}"
 else
   echo "No image file found in deploy/" >&2
   exit 1
