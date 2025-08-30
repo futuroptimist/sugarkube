@@ -278,7 +278,6 @@ DEBIAN_MIRROR=http://deb.debian.org/debian
 SECURITY_MIRROR=http://security.debian.org/debian-security
 APT_COMPONENTS="main contrib non-free non-free-firmware"
 COMPRESSION=none
-APT_PROXY=__APT_PROXY__
 DEBOOTSTRAP_EXTRA_ARGS="--components=main,contrib,non-free,non-free-firmware"
 DEBOOTSTRAP_INCLUDE="libnftnl11"
 APT_OPTS="--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
@@ -291,6 +290,8 @@ Acquire::http::Proxy "__APT_PROXY__";
 Acquire::https::Proxy "__APT_PROXY__";
 Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
+Acquire::http::Proxy::http://archive.raspberrypi.com "DIRECT";
+Acquire::https::Proxy::https://archive.raspberrypi.com "DIRECT";
 EOP
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
