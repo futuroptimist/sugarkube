@@ -133,18 +133,25 @@ function Invoke-BuildPiGen {
   $gitBash = Get-GitBashPath
   if ($gitBash) {
     $msysPath = Convert-ToMsysPath -WindowsPath $PiGenPath
-    $cmd = "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; " +
-      "set -exuo pipefail; cd '$msysPath' && chmod +x ./build.sh && ./build.sh"
-    $args = '-lc', $cmd
-    $proc = Start-Process -FilePath $gitBash -ArgumentList $args -NoNewWindow -PassThru
-    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
-      $proc.Kill()
-      throw "pi-gen build timed out after $TimeoutSec seconds"
+    # Verify the path is visible inside Git Bash; otherwise fall back
+    $testArgs = '-lc', ("test -d '" + $msysPath + "' || exit 88")
+    $testProc = Start-Process -FilePath $gitBash -ArgumentList $testArgs -NoNewWindow -PassThru
+    $testProc.WaitForExit() | Out-Null
+    if ($testProc.ExitCode -ne 0) { $gitBash = $null }
+    else {
+      $cmd = "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; " +
+        "set -exuo pipefail; cd '" + $msysPath + "' && chmod +x ./build.sh && ./build.sh"
+      $args = '-lc', $cmd
+      $proc = Start-Process -FilePath $gitBash -ArgumentList $args -NoNewWindow -PassThru
+      if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+        $proc.Kill()
+        throw "pi-gen build timed out after $TimeoutSec seconds"
+      }
+      if ($proc.ExitCode -ne 0) {
+        throw "pi-gen build failed under Git Bash (exit $($proc.ExitCode))"
+      }
+      return
     }
-    if ($proc.ExitCode -ne 0) {
-      throw "pi-gen build failed under Git Bash (exit $($proc.ExitCode))"
-    }
-    return
   }
 
   # Fallback to WSL if Git Bash not available
@@ -296,6 +303,12 @@ function Invoke-BuildPiGenOfficial {
   $raspbianMirror = 'http://raspbian.raspberrypi.org/raspbian'
   $archiveMirror = 'http://archive.raspberrypi.org/debian'
   $debMirror = 'http://deb.debian.org/debian'
+
+  # Skip if GHCR is not accessible (avoids auth errors)
+  & docker manifest inspect ghcr.io/raspberrypi/pigen:latest | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "skip-official"
+  }
 
   $dockerArgs = @(
     'run','--rm','--privileged',
