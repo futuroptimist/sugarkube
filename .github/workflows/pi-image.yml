@@ -58,7 +58,17 @@ jobs:
         run: docker load -i ~/cache/pi-gen.tar
       - name: Build Raspberry Pi OS image
         timeout-minutes: 120
-        run: sudo env BUILD_TIMEOUT=7200 ./scripts/build_pi_image.sh
+        run: |
+          sudo env BUILD_TIMEOUT=7200 ./scripts/build_pi_image.sh
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "Build failed"
+            exit "$status"
+          fi
+          if ! ls ./sugarkube.img* >/dev/null 2>&1; then
+            echo "No image found after build"
+            exit 1
+          fi
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'
         run: |
