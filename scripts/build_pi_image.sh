@@ -127,14 +127,17 @@ echo "pi-gen build finished"
 
 if compgen -G "deploy/*.img" > /dev/null; then
   mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+  xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 elif compgen -G "deploy/*.img.zip" > /dev/null; then
   unzip -q deploy/*.img.zip -d deploy
   mv deploy/*.img "${OUTPUT_DIR}/${IMG_NAME}.img"
+  xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
+elif compgen -G "deploy/*.img.xz" > /dev/null; then
+  mv deploy/*.img.xz "${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 else
   echo "No image file found in deploy/" >&2
   exit 1
 fi
-xz -T0 "${OUTPUT_DIR}/${IMG_NAME}.img"
 sha256sum "${OUTPUT_DIR}/${IMG_NAME}.img.xz" > \
   "${OUTPUT_DIR}/${IMG_NAME}.img.xz.sha256"
 ls -lh "${OUTPUT_DIR}/${IMG_NAME}.img.xz" \
