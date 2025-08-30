@@ -62,6 +62,14 @@ if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
   exit 1
 fi
+if [ ! -s "${CLOUD_INIT_PATH}" ]; then
+  echo "Cloud-init file is empty: ${CLOUD_INIT_PATH}" >&2
+  exit 1
+fi
+if ! head -n1 "${CLOUD_INIT_PATH}" | grep -q '^#cloud-config'; then
+  echo "Cloud-init file missing #cloud-config header: ${CLOUD_INIT_PATH}" >&2
+  exit 1
+fi
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -164,10 +172,12 @@ elif compgen -G "deploy/*.img.zip" > /dev/null; then
   cp deploy/*.img "${OUT_IMG%.xz}"
   xz -T0 "${OUT_IMG%.xz}"
 else
-  echo "No image file found in deploy/" >&2
+  echo "No image file found in deploy/; directory contents:" >&2
   if ls deploy/* >/dev/null 2>&1; then
     echo "Contents of deploy/:" >&2
     ls -lh deploy >&2
+  else
+    echo "(deploy directory missing or empty)" >&2
   fi
   if [ -f deploy/build.log ]; then
     echo "Last 20 lines of deploy/build.log:" >&2
