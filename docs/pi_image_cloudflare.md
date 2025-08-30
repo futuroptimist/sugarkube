@@ -38,11 +38,16 @@ for onboarding steps.
 3. Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
 4. The build script copies `docker-compose.cloudflared.yml` into
    `/opt/sugarkube/`. Cloud-init adds the Cloudflare apt repo, pre-creates
-   `/opt/sugarkube/.cloudflared.env` with `0600` permissions, and enables the
-   Docker service; verify both files and the service.
-5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env`.
-6. Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
-7. Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.
+   `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs
+   `/opt/sugarkube/start-cloudflared.sh`, and enables the Docker service; verify
+   both files and the service.
+5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` before the
+   first boot to launch the tunnel automatically, or edit the file later.
+6. If the token was added after boot, start the tunnel manually with
+   `bash /opt/sugarkube/start-cloudflared.sh`.
+7. Confirm the tunnel is running:
+   `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should
+   show `cloudflared` as `Up`.
 8. View the tunnel logs to confirm a connection:
    `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -f`.
 9. Clone target projects:
