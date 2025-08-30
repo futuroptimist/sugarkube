@@ -40,6 +40,8 @@ the docs you will see the term used in both contexts.
 - `scripts/` — helper scripts for rendering and exports
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; uses
     POSIX `-ef` instead of `realpath` for better macOS compatibility
+  - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
+    preloaded; needs a valid `user-data.yaml` and ~10 GB free disk space
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
