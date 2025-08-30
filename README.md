@@ -43,6 +43,11 @@ the docs you will see the term used in both contexts.
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
+Scan staged changes for credentials:
+
+```bash
+git diff --cached | scripts/scan-secrets.py
+```
 
 ## Getting Started
 
