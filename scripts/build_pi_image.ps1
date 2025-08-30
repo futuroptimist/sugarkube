@@ -298,6 +298,7 @@ fi
 if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 chmod +x ./build.sh
 set +e
 timeout __TIMEOUT__ ./build.sh
