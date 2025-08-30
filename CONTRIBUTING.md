@@ -19,6 +19,7 @@ pre-commit install
 pre-commit run --all-files
 pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
+git diff --cached | ./scripts/scan-secrets.py
 ```
 
 The `--no-warnings` flag suppresses parse warnings so the command exits cleanly.
