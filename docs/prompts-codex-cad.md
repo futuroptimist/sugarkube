@@ -23,10 +23,10 @@ CONTEXT:
 - Render each model in both `heatset` and `printed` modes. `STANDOFF_MODE` is case-insensitive and
   defaults to `heatset`.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes.  
+- Run `pre-commit run --all-files` after changes.
   For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
   `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
-- Scan staged changes for secrets with:  
+- Scan staged changes for secrets with:
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
