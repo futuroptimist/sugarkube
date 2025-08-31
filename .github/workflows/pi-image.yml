@@ -90,10 +90,25 @@ jobs:
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
 
+      - name: Verify pi-gen Docker image
+        if: steps.cache-pigen.outputs.cache-hit == 'true'
+        run: |
+          if ! docker image inspect pi-gen:latest > /dev/null 2>&1; then
+            echo "pi-gen:latest Docker image not found!"
+            exit 1
+          fi
+
       - name: Build Raspberry Pi OS image
         timeout-minutes: 120
         run: |
           sudo env BUILD_TIMEOUT="${BUILD_TIMEOUT}" ./scripts/build_pi_image.sh
+
+      - name: Verify pi-gen Docker image
+        run: |
+          if ! docker image inspect pi-gen:latest > /dev/null 2>&1; then
+            echo "pi-gen:latest Docker image not found!"
+            exit 1
+          fi
 
       - name: List deploy directory
         if: always()
