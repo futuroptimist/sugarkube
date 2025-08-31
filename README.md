@@ -38,8 +38,9 @@ the docs you will see the term used in both contexts.
 - [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
-  - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; uses
-    POSIX `-ef` instead of `realpath` for better macOS compatibility
+  - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI;
+    requires `gh` to be installed and authenticated. Uses POSIX `-ef` instead
+    of `realpath` for better macOS compatibility
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
     preloaded; needs a valid `user-data.yaml` and ~10 GB free disk space
 - `tests/` — quick checks for helper scripts and documentation
@@ -71,7 +72,8 @@ pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
 ```
 
-The `--no-warnings` flag avoids non-zero exits from benign Markdown parsing warnings.
+The `--no-warnings` flag prevents linkchecker from returning a non-zero exit
+code on benign Markdown parsing warnings.
 
 If the repository includes a `package.json` but `npm` or `package-lock.json`
 are missing, `scripts/checks.sh` will warn and skip JavaScript-specific
