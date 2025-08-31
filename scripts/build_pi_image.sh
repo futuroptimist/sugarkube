@@ -9,7 +9,8 @@ check_space() {
   avail_kb=$(df -Pk "$dir" | awk 'NR==2 {print $4}')
   required_kb=$((REQUIRED_SPACE_GB * 1024 * 1024))
   if [ "$avail_kb" -lt "$required_kb" ]; then
-    echo "Need at least ${REQUIRED_SPACE_GB}GB free in $dir" >&2
+    local avail_gb=$((avail_kb / 1024 / 1024))
+    echo "Need at least ${REQUIRED_SPACE_GB}GB free in $dir (only ${avail_gb}GB available)" >&2
     exit 1
   fi
 }
@@ -115,6 +116,9 @@ git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
 
 USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+if [ "$ARM64" -ne 1 ]; then
+  sed -i 's/arch=arm64/arch=armhf/' "${USER_DATA}"
+fi
 if [ -n "${TUNNEL_TOKEN:-}" ]; then
   echo "Embedding Cloudflare token into cloud-init"
   sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"

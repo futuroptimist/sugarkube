@@ -20,12 +20,15 @@ packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) 
 the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+`REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
+The script rewrites the Cloudflare apt source architecture to `armhf` when
+`ARM64=0` so 32-bit builds install the correct packages.
 Set `TUNNEL_TOKEN` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
 Ensure `curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`,
 `timeout`, and `xz` are installed before running it; `stdbuf` and `timeout`
 come from GNU coreutils. The script checks that both the temporary and output
-directories have at least 10 GB free before starting. Use the prepared image to
+directories meet this free-space requirement before starting. Use the prepared image to
 deploy
 containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
