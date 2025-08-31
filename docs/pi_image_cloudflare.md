@@ -22,6 +22,8 @@ adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
 Set `TUNNEL_TOKEN` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
+The script curls the Debian, Raspberry Pi, and pi-gen repositories with a 10 second timeout
+before building; override this via the `URL_CHECK_TIMEOUT` environment variable.
 Ensure `curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`,
 `timeout`, and `xz` are installed before running it; `stdbuf` and `timeout`
 come from GNU coreutils. The script checks that both the temporary and output

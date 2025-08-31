@@ -79,8 +79,9 @@ check_space "$(dirname "${WORK_DIR}")"
 PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
+URL_CHECK_TIMEOUT="${URL_CHECK_TIMEOUT:-10}"
 for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
-  if ! curl -fsI "$url" >/dev/null; then
+  if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" "$url" >/dev/null; then
     echo "Cannot reach $url" >&2
     exit 1
   fi
