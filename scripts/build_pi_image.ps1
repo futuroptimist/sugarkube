@@ -141,8 +141,8 @@ function Invoke-BuildPiGen {
     else {
       $cmd = "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; " +
         "set -exuo pipefail; cd '" + $msysPath + "' && chmod +x ./build.sh && ./build.sh"
-      $args = '-lc', $cmd
-      $proc = Start-Process -FilePath $gitBash -ArgumentList $args -NoNewWindow -PassThru
+      $bashArgs = '-lc', $cmd
+      $proc = Start-Process -FilePath $gitBash -ArgumentList $bashArgs -NoNewWindow -PassThru
       if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
         $proc.Kill()
         throw "pi-gen build timed out after $TimeoutSec seconds"
@@ -161,8 +161,8 @@ function Invoke-BuildPiGen {
     if ($distro) {
       $linuxPath = Convert-ToWslLinuxPath -WindowsPath $PiGenPath
       $cmd = "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && ./build.sh"
-      $args = '-d', $distro, '--', 'bash', '-lc', $cmd
-      $proc = Start-Process -FilePath $wsl -ArgumentList $args -NoNewWindow -PassThru
+      $wslArgs = '-d', $distro, '--', 'bash', '-lc', $cmd
+      $proc = Start-Process -FilePath $wsl -ArgumentList $wslArgs -NoNewWindow -PassThru
       if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
         $proc.Kill()
         throw "pi-gen build failed under WSL ($distro): timeout after $TimeoutSec seconds"
@@ -300,6 +300,12 @@ Acquire::https::Timeout "30";
 Acquire::http::Pipeline-Depth "0";
 Acquire::Queue-Mode "access";
 EOR
+# Bypass apt proxy for Raspberry Pi archive to avoid 503s from apt-cacher
+mkdir -p /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<EOP
+Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
+Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
+EOP
 # Ensure any lists written by pi-gen use FCIX mirror and run a safe dist-upgrade
 cat > /work/pi-gen/stage0/00-configure-apt/01-run.sh <<'EOSH'
 #!/bin/bash
@@ -421,7 +427,7 @@ function Invoke-BuildPiGenOfficial {
     '-e','DEBOOTSTRAP_EXTRA_ARGS=--components=main,contrib,non-free,non-free-firmware',
     '-e','DEBOOTSTRAP_INCLUDE=libnftnl11',
     '-e','COMPRESSION=none',
-    '-e',"http_proxy=$AptProxy", '-e',"https_proxy=$AptProxy", '-e',"HTTP_PROXY=$AptProxy", '-e',"HTTPS_PROXY=$AptProxy",
+    # Avoid sending the RPi archive traffic through proxy cache to prevent 503s
     '-e',"PI_GEN_BRANCH=$PiGenBranch",
     '-v',"${hostOut}:/pi-gen/deploy",
     '-v','pigen-work-cache:/pi-gen/work',
@@ -480,7 +486,7 @@ function Write-SHA256File {
   return $out
 }
 
-function Ensure-DockerNetwork {
+function New-DockerNetworkIfMissing {
   param([Parameter(Mandatory=$true)][string]$Name)
   & docker network inspect $Name | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -488,9 +494,9 @@ function Ensure-DockerNetwork {
   }
 }
 
-function Ensure-AptCacheProxy {
+function Start-AptCacheProxy {
   $net = 'sugarkube-build'
-  Ensure-DockerNetwork -Name $net
+  New-DockerNetworkIfMissing -Name $net
   # Create persistent cache volume
   & docker volume create sugarkube-apt-cache | Out-Null
   # Start or create apt-cacher-ng container
