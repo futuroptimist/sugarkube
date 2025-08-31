@@ -15,11 +15,11 @@ check_space() {
 }
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, unzip and roughly
+# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, bsdtar and roughly
 # 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
 # repository.
 
-for cmd in curl docker git sha256sum stdbuf timeout xz unzip; do
+for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -161,36 +161,5 @@ echo "pi-gen build finished"
 
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
-# Check for already compressed image, or fall back to raw/zip and compress
-if compgen -G "deploy/*.img.xz" > /dev/null; then
-  cp deploy/*.img.xz "${OUT_IMG}"
-elif compgen -G "deploy/*.img" > /dev/null; then
-  cp deploy/*.img "${OUT_IMG%.xz}"
-  xz -T0 "${OUT_IMG%.xz}"
-elif compgen -G "deploy/*.img.zip" > /dev/null; then
-  unzip -q deploy/*.img.zip -d deploy
-  cp deploy/*.img "${OUT_IMG%.xz}"
-  xz -T0 "${OUT_IMG%.xz}"
-else
-  echo "No image file found in deploy/; directory contents:" >&2
-  if ls deploy/* >/dev/null 2>&1; then
-    echo "Contents of deploy/:" >&2
-    ls -lh deploy >&2
-  else
-    echo "(deploy directory missing or empty)" >&2
-  fi
-  if [ -f deploy/build.log ]; then
-    echo "Last 20 lines of deploy/build.log:" >&2
-    tail -n 20 deploy/build.log >&2
-  fi
-  exit 1
-fi
-
-if [ ! -f "${OUT_IMG}" ]; then
-  echo "Expected image ${OUT_IMG} not found" >&2
-  exit 1
-fi
-
-sha256sum "${OUT_IMG}" > "${OUT_IMG}.sha256"
-ls -lh "${OUT_IMG}" "${OUT_IMG}.sha256"
+bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
 echo "Image written to ${OUT_IMG}"
