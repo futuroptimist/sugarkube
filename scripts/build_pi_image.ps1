@@ -501,3 +501,6 @@ function Ensure-AptCacheProxy {
   } else {
     & docker run -d --name sugarkube-apt-cache --network $net -p 3142:3142 `
       -v sugarkube-apt-cache:/var/cache/apt-cacher-ng `
+      --restart unless-stopped sameersbn/apt-cacher-ng:latest | Out-Null
+  }
+}
