@@ -321,6 +321,7 @@ for m in "${try_mirrors[@]}"; do
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
     if [ -f "$f" ]; then
       sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+      sed -i -E "s#https?://raspbian\.raspberrypi\.(com|org)/raspbian#${m}#g" "$f" || true
     fi
   done
   if apt-get $APT_OPTS_DEFAULT update; then
@@ -333,6 +334,32 @@ for m in "${try_mirrors[@]}"; do
 done
 EOSH
 chmod +x /work/pi-gen/stage0/00-configure-apt/01-run.sh
+
+# Mirror rewrite safeguard at stage2 as well
+mkdir -p /work/pi-gen/stage2/00-configure-apt
+cat > /work/pi-gen/stage2/00-configure-apt/01-run.sh <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+try_mirrors=(
+  "https://mirror.fcix.net/raspbian/raspbian"
+  "https://mirrors.ocf.berkeley.edu/raspbian/raspbian"
+  "https://raspbian.raspberrypi.org/raspbian"
+)
+APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+for m in "${try_mirrors[@]}"; do
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    if [ -f "$f" ]; then
+      sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+      sed -i -E "s#https?://raspbian\.raspberrypi\.(com|org)/raspbian#${m}#g" "$f" || true
+    fi
+  done
+  if apt-get $APT_OPTS_DEFAULT update; then
+    break
+  fi
+done
+EOSH
+chmod +x /work/pi-gen/stage2/00-configure-apt/01-run.sh
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
 fi
