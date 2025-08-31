@@ -20,8 +20,9 @@ CONTEXT:
   [`stl/`](../stl/).
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
   as artifacts. Do not commit `.stl` files.
-- Render each model in both `heatset` and `printed` modes. Set `STANDOFF_MODE` (case-insensitive)
-  to choose the mode; leaving it unset renders `heatset`.
+- Render each model in both `heatset` and `printed` modes. The script uses the model's
+  `standoff_mode` value (usually `heatset`) when `STANDOFF_MODE` isn't set and treats input
+  case-insensitively.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` after changes.
   For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
@@ -37,7 +38,7 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # heatset by default
+   ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    ```
 
