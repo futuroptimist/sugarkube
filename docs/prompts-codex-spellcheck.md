@@ -7,7 +7,7 @@ slug: 'prompts-codex-spellcheck'
 
 Use this prompt to catch and correct spelling issues in Markdown docs.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
@@ -15,9 +15,10 @@ PURPOSE:
 Keep Markdown documentation free of spelling errors.
 
 CONTEXT:
-- Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`.
+- Run `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) to scan `README.md` and `docs/`.
 - Add legitimate new words to `.wordlist.txt`.
-- Follow AGENTS.md and run `pre-commit run --all-files`; ensure `linkchecker --no-warnings README.md docs/` also passes.
+- Follow [`AGENTS.md`](../AGENTS.md) and run `pre-commit run --all-files`.
+  Ensure `linkchecker --no-warnings README.md docs/` also passes.
 
 REQUEST:
 1. Run the spellcheck and review results.
