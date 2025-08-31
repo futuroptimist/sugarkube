@@ -11,11 +11,11 @@ but the steps apply to any repository.
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
 2. Confirm you can SSH to the Pi: `ssh pi@<hostname>.local`.
-3. Ensure the Cloudflare Tunnel container is running:
+3. Ensure the Cloudflare Tunnel service is running:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps
+   systemctl status cloudflared-compose --no-pager
    ```
-   `cloudflared` should display `Up`.
+   It should display `active`.
 4. Optionally update packages and reboot:
    ```sh
    sudo apt update && sudo apt upgrade -y
@@ -28,7 +28,7 @@ but the steps apply to any repository.
     ```
 6. Tail the Cloudflare tunnel logs to confirm it connected:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -n 20
+   journalctl -u cloudflared-compose -n 20 --no-pager
    ```
    If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
 
@@ -181,9 +181,9 @@ already supports arm64.
        service: http://localhost:3000
      - service: http_status:404
    ```
-2. Restart the tunnel:
+2. Restart the tunnel service:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
+   sudo systemctl restart cloudflared-compose
    ```
 3. Visit the Cloudflare-managed URL to verify the service is reachable:
    ```sh
