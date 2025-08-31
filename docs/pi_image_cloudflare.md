@@ -5,7 +5,6 @@ This guide expands the
 deployment into a reusable image capable of hosting multiple projects, including
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace).
-
 It uses `cloud-init` to bake Docker, the compose plugin, the Cloudflare apt
 repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
@@ -20,6 +19,10 @@ packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) 
 the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+
+`REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.  
+The script rewrites the Cloudflare apt source architecture to `armhf` when
+`ARM64=0` so 32-bit builds install the correct packages.  
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image

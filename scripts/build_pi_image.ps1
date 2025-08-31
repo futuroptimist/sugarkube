@@ -405,8 +405,22 @@ elif [ "$code" -ne 0 ]; then
     exit "$code"
   fi
 fi
-artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
-cp "$artifact" /out/__IMG_NAME__.img
+artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1 || true)
+if [ -n "$artifact" ]; then
+  cp "$artifact" /out/__IMG_NAME__.img
+else
+  zipfile=$(find deploy -maxdepth 1 -name "*.zip" | head -n1 || true)
+  if [ -n "$zipfile" ]; then
+    imgname=$(bsdtar -tf "$zipfile" | grep -m1 '\.img$' || true)
+    if [ -n "$imgname" ]; then
+      bsdtar -xOf "$zipfile" "$imgname" > /out/__IMG_NAME__.img
+    else
+      echo "No .img found inside $zipfile" >&2; exit 1
+    fi
+  else
+    echo "No image artifact found in deploy/" >&2; exit 1
+  fi
+fi
 '@
   $bash = $bash.Replace('__PIGEN_BRANCH__', $PiGenBranch)
   $bash = $bash.Replace('__IMG_NAME__', $ImageName)
