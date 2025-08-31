@@ -14,7 +14,7 @@ def test_requires_curl(tmp_path):
         "stdbuf",
         "timeout",
         "xz",
-        "unzip",
+        "bsdtar",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -58,7 +58,15 @@ def test_requires_docker(tmp_path):
 def test_requires_xz(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    for name in ["curl", "docker", "git", "sha256sum", "stdbuf", "timeout"]:
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "bsdtar",
+    ]:
         path = fake_bin / name
         if name == "timeout":
             path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
@@ -79,7 +87,7 @@ def test_requires_xz(tmp_path):
     assert "xz is required" in result.stderr
 
 
-def test_requires_unzip(tmp_path):
+def test_requires_bsdtar(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     for name in [
@@ -108,7 +116,7 @@ def test_requires_unzip(tmp_path):
         text=True,
     )
     assert result.returncode != 0
-    assert "unzip is required" in result.stderr
+    assert "bsdtar is required" in result.stderr
 
 
 def test_requires_git(tmp_path):
@@ -159,7 +167,7 @@ def test_docker_daemon_must_be_running(tmp_path):
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum", "unzip"]:
+    for name in ["xz", "git", "sha256sum", "bsdtar"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -196,7 +204,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "curl": "#!/bin/sh\nexit 0\n",
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
         "stdbuf": "#!/bin/sh\nexit 0\n",
-        "unzip": "#!/bin/sh\nexit 0\n",
+        "bsdtar": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -224,12 +232,36 @@ def _setup_build_env(
     (fake_bin / "docker").chmod(0o755)
 
     xz = fake_bin / "xz"
-    xz.write_text('#!/bin/bash\n[ "$1" = "-T0" ] && shift\nmv "$1" "$1.xz"\n')
+    xz.write_text(
+        """#!/bin/sh
+while [ "${1#-}" != "$1" ]; do shift; done
+cat "$1"
+"""
+    )
     xz.chmod(0o755)
-
     sha = fake_bin / "sha256sum"
     sha.write_text('#!/bin/sh\necho 0  "$1"\n')
     sha.chmod(0o755)
+
+    bsdtar = fake_bin / "bsdtar"
+    bsdtar.write_text(
+        """#!/bin/sh
+if [ "$1" = "-xf" ]; then
+  zipfile=$2; shift 2
+  if [ "$1" = "-C" ]; then
+    dir=$2
+    python3 - "$zipfile" "$dir" <<'PY'
+import sys, zipfile
+zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
+PY
+  fi
+fi
+"""
+    )
+    bsdtar.chmod(0o755)
+    mount = fake_bin / "mount"
+    mount.write_text("#!/bin/sh\nexit 0\n")
+    mount.chmod(0o755)
 
     compose_check = (
         "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
@@ -254,7 +286,7 @@ def _setup_build_env(
         )
     git_stub = (
         f"#!/bin/bash\n"
-        f'echo "$@" > "{git_log}"\n'
+        f'echo "$@" >> "{git_log}"\n'
         "target=${!#}\n"
         'mkdir -p "$target/stage2/01-sys-tweaks"\n'
         f"cat <<'EOF' > \"$target/build.sh\"\n"
@@ -301,6 +333,11 @@ def _run_build_script(tmp_path, env):
     script = script_dir / "build_pi_image.sh"
     script.write_text(script_src.read_text())
     script.chmod(0o755)
+
+    collect_src = repo_root / "scripts" / "collect_pi_image.sh"
+    collect = script_dir / "collect_pi_image.sh"
+    collect.write_text(collect_src.read_text())
+    collect.chmod(0o755)
 
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
