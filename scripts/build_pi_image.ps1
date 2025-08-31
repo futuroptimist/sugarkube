@@ -141,8 +141,8 @@ function Invoke-BuildPiGen {
     else {
       $cmd = "export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'; " +
         "set -exuo pipefail; cd '" + $msysPath + "' && chmod +x ./build.sh && ./build.sh"
-      $args = '-lc', $cmd
-      $proc = Start-Process -FilePath $gitBash -ArgumentList $args -NoNewWindow -PassThru
+      $bashArgs = '-lc', $cmd
+      $proc = Start-Process -FilePath $gitBash -ArgumentList $bashArgs -NoNewWindow -PassThru
       if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
         $proc.Kill()
         throw "pi-gen build timed out after $TimeoutSec seconds"
@@ -161,8 +161,8 @@ function Invoke-BuildPiGen {
     if ($distro) {
       $linuxPath = Convert-ToWslLinuxPath -WindowsPath $PiGenPath
       $cmd = "set -exuo pipefail; cd '$linuxPath' && chmod +x ./build.sh && ./build.sh"
-      $args = '-d', $distro, '--', 'bash', '-lc', $cmd
-      $proc = Start-Process -FilePath $wsl -ArgumentList $args -NoNewWindow -PassThru
+      $wslArgs = '-d', $distro, '--', 'bash', '-lc', $cmd
+      $proc = Start-Process -FilePath $wsl -ArgumentList $wslArgs -NoNewWindow -PassThru
       if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
         $proc.Kill()
         throw "pi-gen build failed under WSL ($distro): timeout after $TimeoutSec seconds"
@@ -315,7 +315,8 @@ APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire
 for m in "${try_mirrors[@]}"; do
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
     if [ -f "$f" ]; then
-      sed -i "s#https\?://\(raspbian\.raspberrypi\.(com\|org)\|mirror\.fcix\.net\|mirrors\.ocf\.berkeley\.edu\)/raspbian#${m}#g" "$f" || true
+      # Replace any raspbian mirror host with the chosen mirror (handles redirector domains too)
+      sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
     fi
   done
   if apt-get $APT_OPTS_DEFAULT update; then
@@ -399,7 +400,7 @@ function Invoke-BuildPiGenOfficial {
   $userData = Join-Path $hostRoot 'scripts\cloud-init\user-data.yaml'
   $cfCompose = Join-Path $hostRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
 
-  $raspbianMirror = 'http://raspbian.raspberrypi.org/raspbian'
+  $raspbianMirror = 'https://mirror.fcix.net/raspbian/raspbian'
   $archiveMirror = 'http://archive.raspberrypi.org/debian'
   $debMirror = 'http://deb.debian.org/debian'
   $securityMirror = 'http://security.debian.org/debian-security'
@@ -481,7 +482,7 @@ function Write-SHA256File {
   return $out
 }
 
-function Ensure-DockerNetwork {
+function New-DockerNetworkIfMissing {
   param([Parameter(Mandatory=$true)][string]$Name)
   & docker network inspect $Name | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -489,9 +490,9 @@ function Ensure-DockerNetwork {
   }
 }
 
-function Ensure-AptCacheProxy {
+function Start-AptCacheProxy {
   $net = 'sugarkube-build'
-  Ensure-DockerNetwork -Name $net
+  New-DockerNetworkIfMissing -Name $net
   # Create persistent cache volume
   & docker volume create sugarkube-apt-cache | Out-Null
   # Start or create apt-cacher-ng container
@@ -503,4 +504,62 @@ function Ensure-AptCacheProxy {
       -v sugarkube-apt-cache:/var/cache/apt-cacher-ng `
       --restart unless-stopped sameersbn/apt-cacher-ng:latest | Out-Null
   }
+}
+
+# --- Main execution ---
+try {
+  Write-Host "[sugarkube] Starting Raspberry Pi image build..."
+
+  # Basic dependency checks
+  Test-CommandAvailable -Name 'docker'
+  Test-CommandAvailable -Name 'git'
+  Invoke-Docker-Info
+
+  # Establish shared docker network and apt cache proxy
+  Write-Host "[sugarkube] Ensuring docker network and apt cache proxy..."
+  Start-AptCacheProxy
+
+  # Proxies for containers on the shared network
+  $script:HostProxy = 'http://sugarkube-apt-cache:3142'
+  $script:AptProxy  = 'http://sugarkube-apt-cache:3142'
+
+  $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+
+  # Attempt official pi-gen image first; fall back if unavailable
+  $built = $false
+  try {
+    Write-Host "[sugarkube] Attempting build with official pi-gen image..."
+    Invoke-BuildPiGenOfficial -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    $built = $true
+  } catch {
+    if ($_.Exception.Message -eq 'skip-official') {
+      Write-Host "[sugarkube] Official pi-gen image unavailable; falling back to Debian-based builder..."
+    } else {
+      Write-Warning ("[sugarkube] Official build failed: {0}" -f $_.Exception.Message)
+      Write-Host "[sugarkube] Falling back to Debian-based builder..."
+    }
+  }
+
+  if (-not $built) {
+    Invoke-BuildPiGenDocker -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    $built = $true
+  }
+
+  $imgPath = Join-Path $OutputDir ("{0}.img" -f $ImageName)
+  if (Test-Path $imgPath) {
+    Write-Host ("[sugarkube] Image built: {0}" -f $imgPath)
+    Write-Host "[sugarkube] Compressing with xz..."
+    $xzPath = Compress-XZ -ImagePath $imgPath
+    Write-Host ("[sugarkube] Writing SHA256 for {0}..." -f (Split-Path -Leaf $xzPath))
+    $shaPath = Write-SHA256File -FilePath $xzPath
+    Write-Host "[sugarkube] Build complete. Outputs:"
+    Write-Host ("  - {0}" -f $xzPath)
+    Write-Host ("  - {0}" -f $shaPath)
+  } else {
+    Write-Warning ("[sugarkube] Expected image not found at {0}" -f $imgPath)
+    exit 1
+  }
+} catch {
+  Write-Error ("[sugarkube] Fatal error: {0}" -f $_.Exception.Message)
+  exit 1
 }
