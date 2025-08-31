@@ -334,7 +334,6 @@ fi
 if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 chmod +x ./build.sh
 set +e
 timeout __TIMEOUT__ ./build.sh
@@ -413,8 +412,8 @@ function Invoke-BuildPiGenOfficial {
   $dockerArgs = @(
     'run','--rm','--privileged',
     '--network','sugarkube-build',
+    '-e',"APT_OPTS=--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0",
     '-e',"IMG_NAME=$ImageName", '-e','ENABLE_SSH=1', '-e',"ARM64=$Arm64", '-e','USE_QCOW2=1',
-    '-e','APT_OPTS=--fix-missing -o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0',
     '-e',"APT_MIRROR=$debMirror", '-e',"DEBIAN_MIRROR=$debMirror",
     '-e',"SECURITY_MIRROR=$securityMirror",
     '-e',"RASPBIAN_MIRROR=$raspbianMirror", '-e',"APT_MIRROR_RASPBERRYPI=$archiveMirror",
