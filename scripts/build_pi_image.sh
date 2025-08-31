@@ -115,6 +115,13 @@ git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
 
 USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then
+  if [ ! -f "${TUNNEL_TOKEN_FILE}" ]; then
+    echo "TUNNEL_TOKEN_FILE not found: ${TUNNEL_TOKEN_FILE}" >&2
+    exit 1
+  fi
+  TUNNEL_TOKEN="$(tr -d '\n' < "${TUNNEL_TOKEN_FILE}")"
+fi
 if [ -n "${TUNNEL_TOKEN:-}" ]; then
   echo "Embedding Cloudflare token into cloud-init"
   sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"

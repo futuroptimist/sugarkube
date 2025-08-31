@@ -20,7 +20,7 @@ packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) 
 the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
-Set `TUNNEL_TOKEN` to bake a Cloudflare token into
+Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
 Ensure `curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`,
 `timeout`, and `xz` are installed before running it; `stdbuf` and `timeout`
@@ -46,7 +46,7 @@ for onboarding steps.
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, and enables the
    Docker service; verify both files and the service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
-   provided via `TUNNEL_TOKEN` during the build.
+   provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build.
 6. Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.
 7. Confirm the tunnel is running: `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps` should show `cloudflared` as `Up`.
 8. View the tunnel logs to confirm a connection:
