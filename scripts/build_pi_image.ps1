@@ -508,3 +508,61 @@ function Start-AptCacheProxy {
       --restart unless-stopped sameersbn/apt-cacher-ng:latest | Out-Null
   }
 }
+
+# --- Main execution ---
+try {
+  Write-Host "[sugarkube] Starting Raspberry Pi image build..."
+
+  # Basic dependency checks
+  Test-CommandAvailable -Name 'docker'
+  Test-CommandAvailable -Name 'git'
+  Invoke-Docker-Info
+
+  # Establish shared docker network and apt cache proxy
+  Write-Host "[sugarkube] Ensuring docker network and apt cache proxy..."
+  Start-AptCacheProxy
+
+  # Proxies for containers on the shared network
+  $script:HostProxy = 'http://sugarkube-apt-cache:3142'
+  $script:AptProxy  = 'http://sugarkube-apt-cache:3142'
+
+  $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+
+  # Attempt official pi-gen image first; fall back if unavailable
+  $built = $false
+  try {
+    Write-Host "[sugarkube] Attempting build with official pi-gen image..."
+    Invoke-BuildPiGenOfficial -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    $built = $true
+  } catch {
+    if ($_.Exception.Message -eq 'skip-official') {
+      Write-Host "[sugarkube] Official pi-gen image unavailable; falling back to Debian-based builder..."
+    } else {
+      Write-Warning ("[sugarkube] Official build failed: {0}" -f $_.Exception.Message)
+      Write-Host "[sugarkube] Falling back to Debian-based builder..."
+    }
+  }
+
+  if (-not $built) {
+    Invoke-BuildPiGenDocker -RepoRoot $repoRoot -OutputDir $OutputDir -PiGenBranch $PiGenBranch -ImageName $ImageName -Arm64 $Arm64 -TimeoutSec $TimeoutSec
+    $built = $true
+  }
+
+  $imgPath = Join-Path $OutputDir ("{0}.img" -f $ImageName)
+  if (Test-Path $imgPath) {
+    Write-Host ("[sugarkube] Image built: {0}" -f $imgPath)
+    Write-Host "[sugarkube] Compressing with xz..."
+    $xzPath = Compress-XZ -ImagePath $imgPath
+    Write-Host ("[sugarkube] Writing SHA256 for {0}..." -f (Split-Path -Leaf $xzPath))
+    $shaPath = Write-SHA256File -FilePath $xzPath
+    Write-Host "[sugarkube] Build complete. Outputs:"
+    Write-Host ("  - {0}" -f $xzPath)
+    Write-Host ("  - {0}" -f $shaPath)
+  } else {
+    Write-Warning ("[sugarkube] Expected image not found at {0}" -f $imgPath)
+    exit 1
+  }
+} catch {
+  Write-Error ("[sugarkube] Fatal error: {0}" -f $_.Exception.Message)
+  exit 1
+}
