@@ -91,6 +91,8 @@ else
 fi
 
 # Write checksum next to artifact
+# Remove any existing checksum file so read-only artifacts don't block new writes
+rm -f "${OUTPUT_PATH}.sha256"
 sha256sum "${OUTPUT_PATH}" | awk '{print $1}' > "${OUTPUT_PATH}.sha256"
 
 echo "==> Wrote:"
