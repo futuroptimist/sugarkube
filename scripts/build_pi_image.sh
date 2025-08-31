@@ -117,9 +117,22 @@ git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
 
 USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+
+# If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file
+if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then
+  if [ ! -f "${TUNNEL_TOKEN_FILE}" ]; then
+    echo "TUNNEL_TOKEN_FILE not found: ${TUNNEL_TOKEN_FILE}" >&2
+    exit 1
+  fi
+  TUNNEL_TOKEN="$(tr -d '\n' < "${TUNNEL_TOKEN_FILE}")"
+fi
+
+# For 32-bit builds, adjust Cloudflare apt source architecture to armhf
 if [ "$ARM64" -ne 1 ]; then
   sed -i 's/arch=arm64/arch=armhf/' "${USER_DATA}"
 fi
+
+# Embed Cloudflare token if available
 if [ -n "${TUNNEL_TOKEN:-}" ]; then
   echo "Embedding Cloudflare token into cloud-init"
   sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"

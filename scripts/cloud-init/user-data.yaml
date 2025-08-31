@@ -16,7 +16,7 @@ write_files:
   - path: /opt/sugarkube/.cloudflared.env
     permissions: '0600'
     content: |
-      # Inject with TUNNEL_TOKEN env var or edit after boot
+      # Inject with TUNNEL_TOKEN or TUNNEL_TOKEN_FILE env var or edit after boot
       TUNNEL_TOKEN=""
   - path: /etc/systemd/system/cloudflared-compose.service
     permissions: '0644'
