@@ -14,8 +14,8 @@ into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. To
-reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
-passes `APT_OPTS` so apt retries on transient timeouts. Override the Raspberry Pi
+reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
+passes `APT_OPTS` so apt retries on transient timeouts. Override the Raspberry Pi
 packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) and
 the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
@@ -23,12 +23,13 @@ cloud-init configuration instead of the default `scripts/cloud-init/user-data.ya
 Set `TUNNEL_TOKEN` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
 installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
-once the token is present. Ensure `curl`, `docker` (with its daemon running),
+once the token is present. The script curls the Debian, Raspberry Pi, and pi-gen
+repositories with a 10 second timeout before building; override this via the
+`URL_CHECK_TIMEOUT` environment variable. Ensure `curl`, `docker` (with its daemon running),
 `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are installed before running
 it; `stdbuf` and `timeout` come from GNU coreutils. The script checks that both
-the temporary and output directories have at least 10 GB free before starting.
-Use the prepared image to deploy
-containerized apps. The companion guide
+the temporary and output directories have at least 10 GB free before starting.
+Use the prepared image to deploy containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
 projects such as token.place and dspace. Use the resulting image to bootstrap a
 three-node k3s cluster; see [raspi_cluster_setup.md](raspi_cluster_setup.md)
