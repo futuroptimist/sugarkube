@@ -96,9 +96,13 @@ Follow the steps above for each node so every Pi boots from its own SSD.
 ## 7. Expose with Cloudflare Tunnel
 1. Copy `docker-compose.cloudflared.yml` to `/opt/sugarkube/` on each node
 2. Store the tunnel token in `/opt/sugarkube/.cloudflared.env`
-3. Start the tunnel:
+3. Start the tunnel service:
    ```bash
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
+   sudo systemctl enable --now cloudflared-compose
+   ```
+4. Confirm the service is active:
+   ```bash
+   systemctl status cloudflared-compose --no-pager
    ```
 
 ## 8. Create environments

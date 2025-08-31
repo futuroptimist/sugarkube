@@ -8,7 +8,7 @@
 
 ## Inputs / Outputs
 - Inputs:
-- `scripts/cloud-init/user-data.yaml` (cloud-init seed)
+- `scripts/cloud-init/user-data.yaml` (cloud-init seed with cloudflared systemd unit)
 - `scripts/cloud-init/docker-compose.cloudflared.yml` (Cloudflare Tunnel compose file)
   - Environment variables:
     `PI_GEN_BRANCH` (default `bookworm`),
