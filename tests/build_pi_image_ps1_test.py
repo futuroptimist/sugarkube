@@ -2,8 +2,10 @@ import subprocess
 
 
 def test_ps1_has_entrypoint_banner():
-    # Prevent regressions where the PS1 script only defines functions
-    # and exits silently
+    """Ensure the PS1 script prints its startup banner.
+
+    Prevent regressions where the PS1 script only defines functions and exits silently.
+    """
     result = subprocess.run(
         [
             "/usr/bin/env",
