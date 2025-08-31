@@ -213,7 +213,6 @@ function Invoke-BuildPiGenDocker {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 APT_OPTS="--fix-missing -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
-export http_proxy="__HOST_PROXY__" https_proxy="__HOST_PROXY__" HTTP_PROXY="__HOST_PROXY__" HTTPS_PROXY="__HOST_PROXY__"
 for i in 1 2 3 4 5; do
   if apt-get $APT_OPTS update; then break; fi; sleep 5;
 done
@@ -321,7 +320,7 @@ APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire
 for m in "${try_mirrors[@]}"; do
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
     if [ -f "$f" ]; then
-      sed -i "s#https\?://\(raspbian\.raspberrypi\.(com\|org)\|mirror\.fcix\.net\|mirrors\.ocf\.berkeley\.edu\)/raspbian#${m}#g" "$f" || true
+      sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
     fi
   done
   if apt-get $APT_OPTS_DEFAULT update; then
