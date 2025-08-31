@@ -20,6 +20,9 @@ packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) 
 the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+`REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
+The script rewrites the Cloudflare apt source architecture to `armhf` when
+`ARM64=0` so 32-bit builds install the correct packages.
 Set `TUNNEL_TOKEN` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
 installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
