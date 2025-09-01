@@ -1,0 +1,10 @@
+{
+  "id": "pre-commit-missing-20250831",
+  "date": "2025-08-31",
+  "component": "pre-commit",
+  "rootCause": "`pre-commit` was not installed in the environment, so checks failed initially.",
+  "resolution": "Install pre-commit with pip before running repository hooks.",
+  "references": [
+    "pre-commit run --all-files"
+  ]
+}
