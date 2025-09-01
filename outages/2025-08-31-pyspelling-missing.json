@@ -1,0 +1,10 @@
+{
+  "id": "pyspelling-missing-20250831",
+  "date": "2025-08-31",
+  "component": "pyspelling",
+  "rootCause": "`pyspelling` was not installed in the environment, preventing spell checks.",
+  "resolution": "Install pyspelling via pip to enable documentation spell checking.",
+  "references": [
+    "pyspelling -c .spellcheck.yaml"
+  ]
+}
