@@ -340,6 +340,11 @@ def _run_build_script(tmp_path, env):
     collect.write_text(collect_src.read_text())
     collect.chmod(0o755)
 
+    verifier_src = repo_root / "scripts" / "pi_node_verifier.sh"
+    verifier = script_dir / "pi_node_verifier.sh"
+    verifier.write_text(verifier_src.read_text())
+    verifier.chmod(0o755)
+
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
     user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"

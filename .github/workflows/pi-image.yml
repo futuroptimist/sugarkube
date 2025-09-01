@@ -3,6 +3,19 @@ name: pi-image
 on:
   # Keep manual builds for the heavy job
   workflow_dispatch:
+    inputs:
+      clone_sugarkube:
+        description: "Clone sugarkube repo into image"
+        type: boolean
+        default: false
+      clone_token_place:
+        description: "Clone token.place repo into image"
+        type: boolean
+        default: false
+      clone_dspace:
+        description: "Clone democratizedspace/dspace v3 repo into image"
+        type: boolean
+        default: false
   # Also run the lightweight unit tests automatically when relevant bits change
   pull_request:
     paths:
@@ -38,6 +51,9 @@ jobs:
       ARM64: 1
       DEBIAN_FRONTEND: noninteractive
       BUILD_TIMEOUT: 7200
+      CLONE_SUGARKUBE: ${{ github.event.inputs.clone_sugarkube }}
+      CLONE_TOKEN_PLACE: ${{ github.event.inputs.clone_token_place }}
+      CLONE_DSPACE: ${{ github.event.inputs.clone_dspace }}
     steps:
       - uses: actions/checkout@v4
         with:

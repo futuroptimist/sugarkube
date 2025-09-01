@@ -45,7 +45,11 @@ the docs you will see the term used in both contexts.
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`
     and clean up temporary work directories
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
-    preloaded; needs a valid `user-data.yaml` and ~10 GB free disk space
+    preloaded; embeds `pi_node_verifier.sh` and can optionally clone
+    `sugarkube`, `token.place`, and `democratizedspace/dspace` (branch `v3`)
+    when selected in the workflow dispatch; needs a valid `user-data.yaml`
+    and ~10 GB free disk space
+  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
