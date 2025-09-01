@@ -9,7 +9,8 @@ check_space() {
   avail_kb=$(df -Pk "$dir" | awk 'NR==2 {print $4}')
   required_kb=$((REQUIRED_SPACE_GB * 1024 * 1024))
   if [ "$avail_kb" -lt "$required_kb" ]; then
-    echo "Need at least ${REQUIRED_SPACE_GB}GB free in $dir" >&2
+    local avail_gb=$((avail_kb / 1024 / 1024))
+    echo "Need at least ${REQUIRED_SPACE_GB}GB free in $dir (only ${avail_gb}GB available)" >&2
     exit 1
   fi
 }
@@ -79,8 +80,9 @@ check_space "$(dirname "${WORK_DIR}")"
 PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
+URL_CHECK_TIMEOUT="${URL_CHECK_TIMEOUT:-10}"
 for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
-  if ! curl -fsI "$url" >/dev/null; then
+  if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" "$url" >/dev/null; then
     echo "Cannot reach $url" >&2
     exit 1
   fi
@@ -115,6 +117,22 @@ git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
 
 USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+
+# If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file
+if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then
+  if [ ! -f "${TUNNEL_TOKEN_FILE}" ]; then
+    echo "TUNNEL_TOKEN_FILE not found: ${TUNNEL_TOKEN_FILE}" >&2
+    exit 1
+  fi
+  TUNNEL_TOKEN="$(tr -d '\n' < "${TUNNEL_TOKEN_FILE}")"
+fi
+
+# For 32-bit builds, adjust Cloudflare apt source architecture to armhf
+if [ "$ARM64" -ne 1 ]; then
+  sed -i 's/arch=arm64/arch=armhf/' "${USER_DATA}"
+fi
+
+# Embed Cloudflare token if available
 if [ -n "${TUNNEL_TOKEN:-}" ]; then
   echo "Embedding Cloudflare token into cloud-init"
   sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"
@@ -158,6 +176,17 @@ echo "Starting pi-gen build..."
 # Stream output line-by-line so GitHub Actions shows progress and doesn't appear to hang
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
+
+# Ensure the pi-gen Docker image is tagged for caching
+if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
+  img_id=$(docker images --format '{{.Repository}} {{.ID}}' | awk '$1=="pi-gen"{print $2; exit}')
+  if [ -n "${img_id}" ]; then
+    docker image tag "${img_id}" pi-gen:latest
+  else
+    echo "pi-gen Docker image not found" >&2
+    exit 1
+  fi
+fi
 
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
