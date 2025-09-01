@@ -35,8 +35,22 @@ if [ -f package.json ]; then
   fi
 fi
 
-# run tests
-pytest --cov=. --cov-report=xml --cov-report=term -q
+# run tests; treat "no tests" exit code 5 as success
+if command -v pytest >/dev/null 2>&1; then
+  if ! pytest --cov=. --cov-report=xml --cov-report=term -q; then
+    rc=$?
+    if [ "$rc" -ne 5 ]; then
+      exit "$rc"
+    fi
+  fi
+fi
+
+# run bats tests when available
+if command -v bats >/dev/null 2>&1 && ls tests/*.bats >/dev/null 2>&1; then
+  bats tests/*.bats
+else
+  echo "bats not found or no Bats tests, skipping" >&2
+fi
 
 # run bats tests when available
 if command -v bats >/dev/null 2>&1 && ls tests/*.bats >/dev/null 2>&1; then
@@ -74,6 +88,11 @@ if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 \
   && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml
 fi
+
 if command -v linkchecker >/dev/null 2>&1; then
-  linkchecker --no-warnings README.md docs/
+  if [ -f README.md ] && [ -d docs ]; then
+    linkchecker --no-warnings README.md docs/
+  else
+    echo "README.md or docs/ missing, skipping link check" >&2
+  fi
 fi

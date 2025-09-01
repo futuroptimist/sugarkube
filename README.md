@@ -28,7 +28,10 @@ the docs you will see the term used in both contexts.
   panel bracket with an `edge_radius` parameter (default 3 mm) to round its outer edges,
   and [cad/solar_cube/frame.scad](cad/solar_cube/frame.scad) for a parametric 2020 cube frame.
 - `elex/` — KiCad and Fritzing electronics schematics including the `power_ring`
-  board (see [elex/power_ring/specs.md](elex/power_ring/specs.md))
+  board (see [elex/power_ring/specs.md](elex/power_ring/specs.md) and
+  [docs/electronics_schematics.md](docs/electronics_schematics.md))
+- `hardware/` — accessories like the Mac mini keyboard station cap (see
+  [docs/mac_mini_station.md](docs/mac_mini_station.md))
 - `docs/` — build instructions, safety notes, and learning resources
 - [docs/solar_basics.md](docs/solar_basics.md) — introduction to how solar panels generate
   power
@@ -50,6 +53,8 @@ the docs you will see the term used in both contexts.
     when selected in the workflow dispatch; needs a valid `user-data.yaml`
     and ~10 GB free disk space
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output
+- `outages/` — structured outage records (see
+  [docs/outage_catalog.md](docs/outage_catalog.md))
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
