@@ -63,7 +63,9 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${REPO_ROOT}/scripts/cloud-init/user-data.yaml}"
+CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
+CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
+CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
   exit 1
@@ -74,6 +76,14 @@ if [ ! -s "${CLOUD_INIT_PATH}" ]; then
 fi
 if ! head -n1 "${CLOUD_INIT_PATH}" | grep -q '^#cloud-config'; then
   echo "Cloud-init file missing #cloud-config header: ${CLOUD_INIT_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${CLOUDFLARED_COMPOSE_PATH}" ]; then
+  echo "Cloudflared compose file not found: ${CLOUDFLARED_COMPOSE_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${CLOUDFLARED_COMPOSE_PATH}" ]; then
+  echo "Cloudflared compose file is empty: ${CLOUDFLARED_COMPOSE_PATH}" >&2
   exit 1
 fi
 WORK_DIR=$(mktemp -d)
@@ -142,7 +152,7 @@ if [ -n "${TUNNEL_TOKEN:-}" ]; then
   sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"
 fi
 
-install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
+install -Dm644 "${CLOUDFLARED_COMPOSE_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
 
 # Bundle pi_node_verifier and pre-clone repos into the image

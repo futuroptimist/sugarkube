@@ -17,13 +17,14 @@ where artifacts are written; the script creates the directory if needed. To
 reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors,
 adds `APT_OPTS` (retries, timeouts, `--fix-missing`), and installs a persistent
 apt/dpkg Pre-Invoke hook that rewrites any raspbian host to a stable HTTPS
-mirror before each apt action. Override the Raspberry Pi packages mirror with
-`RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) and the Debian mirror
-with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to adjust the maximum
-build duration and `CLOUD_INIT_PATH` to load a custom cloud-init configuration
-instead of the default `scripts/cloud-init/user-data.yaml`. Set `SKIP_BINFMT=1`
-to skip installing binfmt handlers when they're already present or when the
-build environment disallows privileged containers.
+mirror, and bypasses proxies for `archive.raspberrypi.com`. Override the Raspberry
+Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`)
+and the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`)
+to adjust the maximum build duration. Customize the cloud-init configuration with
+`CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` and `CLOUDFLARED_COMPOSE_PATH` at
+alternate files; the defaults read from `scripts/cloud-init/`. Set `SKIP_BINFMT=1`
+to skip installing binfmt handlers when they're already present or when the build
+environment disallows privileged containers.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
@@ -58,8 +59,9 @@ image to bootstrap a three-node k3s cluster; see
 2. Flash the image with Raspberry Pi Imager. Open the tool, choose **Use custom**,
    browse for the downloaded file, and write it to your SD card.
 3. Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
-4. The build script copies `docker-compose.cloudflared.yml` into
-   `/opt/sugarkube/`. Cloud-init adds the Cloudflare apt repo, pre-creates
+4. The build script copies `docker-compose.cloudflared.yml` (override with
+   `CLOUDFLARED_COMPOSE_PATH`) into `/opt/sugarkube/`. Cloud-init adds the
+   Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
    `cloudflared-compose` systemd unit (wired to `network-online.target`), and
    enables Docker; verify the files and service.

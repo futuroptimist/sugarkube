@@ -464,6 +464,14 @@ def test_requires_cloud_init_file(tmp_path):
     assert "Cloud-init file not found" in result.stderr
 
 
+def test_requires_cloudflared_compose_file(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["CLOUDFLARED_COMPOSE_PATH"] = str(tmp_path / "missing.yml")
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Cloudflared compose file not found" in result.stderr
+
+
 def test_requires_stage_list(tmp_path):
     env = _setup_build_env(tmp_path)
     env["PI_GEN_STAGES"] = "   "
