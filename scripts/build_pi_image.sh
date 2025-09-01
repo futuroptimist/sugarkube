@@ -34,16 +34,21 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
-if ! docker run --privileged --rm tonistiigi/binfmt --install arm64,arm >/dev/null 2>&1; then
-  # Some hosts require installing handlers separately
-  if ! docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null 2>&1; then
-    echo "Failed to install arm64 binfmt handler on host" >&2
-    exit 1
+SKIP_BINFMT="${SKIP_BINFMT:-0}"
+if [ "$SKIP_BINFMT" -ne 1 ]; then
+  if ! docker run --privileged --rm tonistiigi/binfmt --install arm64,arm >/dev/null 2>&1; then
+    # Some hosts require installing handlers separately
+    if ! docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null 2>&1; then
+      echo "Failed to install arm64 binfmt handler on host" >&2
+      exit 1
+    fi
+    if ! docker run --privileged --rm tonistiigi/binfmt --install arm >/dev/null 2>&1; then
+      echo "Failed to install arm binfmt handler on host" >&2
+      exit 1
+    fi
   fi
-  if ! docker run --privileged --rm tonistiigi/binfmt --install arm >/dev/null 2>&1; then
-    echo "Failed to install arm binfmt handler on host" >&2
-    exit 1
-  fi
+else
+  echo "Skipping binfmt handler installation"
 fi
 
 # Use sudo only when not running as root. Some CI containers omit sudo.
