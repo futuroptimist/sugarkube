@@ -1,9 +1,13 @@
+"""Tests for the PowerShell image builder script."""
+
 import subprocess
 
 
 def test_ps1_has_entrypoint_banner():
-    # Prevent regressions where the PS1 script only defines functions and
-    # exits silently
+    """Ensure the PS1 script prints its startup banner.
+
+    Prevent regressions where the PS1 script only defines functions and exits silently.
+    """
     result = subprocess.run(
         [
             "/usr/bin/env",
@@ -16,5 +20,6 @@ def test_ps1_has_entrypoint_banner():
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr

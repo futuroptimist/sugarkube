@@ -56,7 +56,7 @@ def regex_scan(lines: Iterable[str]) -> bool:
     file_path = None
     for line in lines:
         if line.startswith("+++"):
-            file_path = line[4:]
+            file_path = line[4:].strip()
             continue
         if not line.startswith("+") or file_path == SCAN_SCRIPT_PATH:
             continue

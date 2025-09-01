@@ -7,7 +7,7 @@ slug: 'prompts-codex-pi-image'
 
 Use this prompt to evolve the Raspberry Pi OS image and Cloudflare tunnel setup.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
@@ -18,16 +18,21 @@ CONTEXT:
 - Cloud-init config lives under [`scripts/cloud-init/`](../scripts/cloud-init/).
 - [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh) builds an image locally or in CI.
 - [`pi_image_cloudflare.md`](./pi_image_cloudflare.md) is the user guide.
-- Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+- Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`
+  (requires `aspell` and `aspell-en`), and
   `linkchecker --no-warnings README.md docs/`.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent build issues in [`outages/`](../outages/) per
   [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Refine the image build script or cloud-init files.
 2. Update relevant documentation.
-3. Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-   `linkchecker --no-warnings README.md docs/`, confirming success.
+3. Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`
+   (requires `aspell` and `aspell-en`),
+   `linkchecker --no-warnings README.md docs/`, and
+   `git diff --cached | ./scripts/scan-secrets.py`, confirming success.
 
 OUTPUT:
 A pull request with passing checks and a concise summary.
@@ -42,8 +47,10 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-`linkchecker --no-warnings README.md docs/` before committing.
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`
+(requires `aspell` and `aspell-en`),
+`linkchecker --no-warnings README.md docs/`, and
+`git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
