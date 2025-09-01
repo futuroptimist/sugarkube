@@ -27,3 +27,6 @@ fp-info-cache/
 coverage.xml
 .coverage
 stl/
+
+# pigen build artifacts
+.pigen-build*.sh
