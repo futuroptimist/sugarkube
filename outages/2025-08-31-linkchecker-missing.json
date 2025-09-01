@@ -1,0 +1,10 @@
+{
+  "id": "linkchecker-missing-20250831",
+  "date": "2025-08-31",
+  "component": "linkchecker",
+  "rootCause": "`linkchecker` was not installed, so documentation links could not be validated at first.",
+  "resolution": "Install linkchecker with pip before running link validation.",
+  "references": [
+    "linkchecker --no-warnings README.md docs/"
+  ]
+}

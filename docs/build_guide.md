@@ -5,9 +5,10 @@ The battery, charge controller, and electronics mount inside a marine battery bo
 junction box.
 
 1. Print the triple Pi carrier from `cad/pi_cluster` if building a Pi cluster.
-   Download pre-rendered STLs from the repository's **Actions** tab: open the
-   latest [scad-to-stl workflow run][stl-workflow] and grab the `pi_cluster`
-   artifact. To render meshes locally instead, run
+   Download pre-rendered STLs from the repository's **Actions** tab. Sign in to
+   GitHub, open the latest [scad-to-stl workflow run][stl-workflow], and grab the
+   `pi_cluster` artifact. Artifacts expire after 90 days; if none are available,
+   render meshes locally instead with
    `bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad`.
 2. Assemble the extrusion cube using M5 hardware, squaring each corner.
 3. Mount the solar panels using the printed brackets. Each has a gusset that

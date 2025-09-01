@@ -320,11 +320,8 @@ mirrors=(
 target="${mirrors[0]}"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
-  sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
-  sed -i -E "s#http://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
-  sed -i -E "s#https?://mirror\\.as43289\\.net/raspbian/raspbian#${target}#g" "$f" || true
-  sed -i -E "s#http://mirror\\.as43289\\.net/raspbian/raspbian#${target}#g" "$f" || true
-fi
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+done
 EOSH
 chmod +x /work/pi-gen/stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
 cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
