@@ -52,6 +52,13 @@ else
   echo "bats not found or no Bats tests, skipping" >&2
 fi
 
+# run bats tests when available
+if command -v bats >/dev/null 2>&1 && ls tests/*.bats >/dev/null 2>&1; then
+  bats tests/*.bats
+else
+  echo "bats not found or no Bats tests, skipping" >&2
+fi
+
 # docs checks
 if ! command -v aspell >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
