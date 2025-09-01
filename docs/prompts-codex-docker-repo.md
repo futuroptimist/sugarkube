@@ -16,9 +16,15 @@ Write step-by-step instructions for running a GitHub repo that includes a
 Dockerfile or docker-compose file on the prepared Raspberry Pi image.
 
 CONTEXT:
-- The base image and tunnel setup live in `docs/pi_image_cloudflare.md`.
-- New walkthroughs belong in `docs/docker_repo_walkthrough.md`.
-- Run `pre-commit run --all-files`; ensure `pyspelling` and `linkchecker` pass.
+- The base image and tunnel setup live in
+  [`pi_image_cloudflare.md`](./pi_image_cloudflare.md).
+- New walkthroughs belong in
+  [`docker_repo_walkthrough.md`](./docker_repo_walkthrough.md).
+- Run `pre-commit run --all-files`.
+- Ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
+  `linkchecker --no-warnings README.md docs/` succeed.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - File recurring deployment failures in `outages/` per `outages/schema.json`.
 
 REQUEST:
