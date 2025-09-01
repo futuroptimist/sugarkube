@@ -293,6 +293,7 @@ fi
         "#!/bin/bash\n"
         f"{compose_check}"
         "mkdir -p deploy\n"
+        'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
@@ -369,11 +370,11 @@ def test_uses_default_pi_gen_branch(tmp_path):
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
-def test_arm64_build_uses_arm64_branch(tmp_path):
+def test_arm64_build_uses_release_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     result, git_args = _run_build_script(tmp_path, env)
     assert result.returncode == 0
-    assert "--branch arm64" in git_args
+    assert "--branch bookworm" in git_args
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
@@ -398,6 +399,25 @@ def test_copies_cloudflared_compose(tmp_path):
     env = _setup_build_env(tmp_path, check_compose=True)
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
+
+
+def test_arm64_disables_armhf(tmp_path):
+    env = _setup_build_env(tmp_path)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    config = (tmp_path / "config.env").read_text()
+    assert "ARM64=1" in config
+    assert "ARMHF=0" in config
+
+
+def test_armhf_enabled_for_32_bit(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "0"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    config = (tmp_path / "config.env").read_text()
+    assert "ARM64=0" in config
+    assert "ARMHF=1" in config
 
 
 def test_build_without_timeout_binary(tmp_path):

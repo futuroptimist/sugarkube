@@ -89,18 +89,17 @@ for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
 done
 
 ARM64="${ARM64:-1}"
-# Clone the arm64 branch when building 64-bit images to avoid generating
-# both architectures and exhausting disk space.
-if [ -z "${PI_GEN_BRANCH:-}" ]; then
-  if [ "$ARM64" -eq 1 ]; then
-    PI_GEN_BRANCH="arm64"
-  else
-    PI_GEN_BRANCH="bookworm"
-  fi
+if [ "$ARM64" -eq 1 ]; then
+  ARMHF=0
+else
+  ARMHF=1
 fi
+# Default to the bookworm release branch; architecture is controlled via config.
+PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
+export OUTPUT_DIR
 check_space "${OUTPUT_DIR}"
 
 # Build only the minimal lite image by default to keep CI fast
@@ -155,6 +154,7 @@ cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
 ARM64=${ARM64}
+ARMHF=${ARMHF}
 # Prefer primary mirrors to avoid flaky community mirrors and set apt timeouts
 APT_MIRROR=http://raspbian.raspberrypi.org/raspbian
 RASPBIAN_MIRROR=http://raspbian.raspberrypi.org/raspbian
