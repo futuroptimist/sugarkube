@@ -177,15 +177,14 @@ echo "Starting pi-gen build..."
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
 echo "pi-gen build finished"
 
-# Ensure the pi-gen Docker image is tagged for caching
+# Ensure a pi-gen Docker image exists and is tagged for caching
 if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
-  img_id=$(docker images --format '{{.Repository}} {{.ID}}' | awk '$1=="pi-gen"{print $2; exit}')
-  if [ -n "${img_id}" ]; then
-    docker image tag "${img_id}" pi-gen:latest
-  else
-    echo "pi-gen Docker image not found" >&2
-    exit 1
-  fi
+  ${SUDO} docker build -t pi-gen:latest .
+fi
+
+if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
+  echo "pi-gen Docker image not found" >&2
+  exit 1
 fi
 
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
