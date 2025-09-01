@@ -98,6 +98,12 @@ but the steps apply to any repository.
    docker compose down   # compose project
    docker stop myapp && docker rm myapp
    ```
+8. Run commands inside a running container (handy for tests or admin tasks):
+   ```sh
+   docker exec -it tokenplace python -m pytest   # token.place example
+   docker compose exec frontend npm test         # dspace example
+   ```
+   Swap the command and container names for your project.
 
 ### Examples
 
@@ -108,6 +114,7 @@ cd /opt/projects/token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
 docker logs -f tokenplace  # watch startup output
+docker exec -it tokenplace python -m pytest  # optional tests
 curl http://localhost:5000  # should return HTML
 ```
 
@@ -122,6 +129,7 @@ docker compose config
 docker compose up -d
 docker compose ps
 docker compose logs -f
+docker compose exec frontend npm test  # run unit tests
 curl http://localhost:3000
 ```
 
