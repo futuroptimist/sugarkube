@@ -369,11 +369,11 @@ def test_uses_default_pi_gen_branch(tmp_path):
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
-def test_arm64_build_uses_arm64_branch(tmp_path):
+def test_arm64_build_uses_release_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     result, git_args = _run_build_script(tmp_path, env)
     assert result.returncode == 0
-    assert "--branch arm64" in git_args
+    assert "--branch bookworm" in git_args
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
