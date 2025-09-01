@@ -140,6 +140,23 @@ fi
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
 
+# Bundle pi_node_verifier and pre-clone repos into the image
+install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
+  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+
+cat > "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run.sh" <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+apt-get update
+apt-get install -y git
+install -d /opt/projects
+cd /opt/projects
+git clone --depth 1 https://github.com/futuroptimist/sugarkube.git
+git clone --depth 1 https://github.com/futuroptimist/token.place.git
+git clone --depth 1 --branch v3 https://github.com/democratizedspace/dspace.git
+EOSH
+chmod +x "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run.sh"
+
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 
