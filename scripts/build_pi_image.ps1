@@ -305,6 +305,41 @@ cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exc
 Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
 EOP
+# Install a persistent pre-invoke hook to rewrite mirrors before any apt/dpkg action
+mkdir -p /work/pi-gen/stage0/00-configure-apt/files/usr/local/sbin
+cat > /work/pi-gen/stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+# Preferred mirrors in order
+mirrors=(
+  "https://mirror.fcix.net/raspbian/raspbian"
+  "https://mirrors.ocf.berkeley.edu/raspbian/raspbian"
+  "https://raspbian.raspberrypi.org/raspbian"
+)
+target="${mirrors[0]}"
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+done
+EOSH
+chmod +x /work/pi-gen/stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
+cat > /work/pi-gen/stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
+APT::Update::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
+DPkg::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
+EOC
+# Ensure mirror rewrite happens before default 00-run.sh executes
+cat > /work/pi-gen/stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i 's#http://raspbian.raspberrypi.com/raspbian#https://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+  sed -i -E 's#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#https://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+done
+EOSH
+chmod +x /work/pi-gen/stage0/00-configure-apt/00-run-00-pre.sh
 # Ensure any lists written by pi-gen use FCIX mirror and run a safe dist-upgrade
 cat > /work/pi-gen/stage0/00-configure-apt/01-run.sh <<'EOSH'
 #!/bin/bash
@@ -360,6 +395,42 @@ for m in "${try_mirrors[@]}"; do
 done
 EOSH
 chmod +x /work/pi-gen/stage2/00-configure-apt/01-run.sh
+cat > /work/pi-gen/stage2/00-configure-apt/00-run-00-pre.sh <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i 's#http://raspbian.raspberrypi.com/raspbian#https://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+  sed -i -E 's#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#https://mirror.fcix.net/raspbian/raspbian#g' "$f" || true
+done
+EOSH
+chmod +x /work/pi-gen/stage2/00-configure-apt/00-run-00-pre.sh
+
+# Ensure export-image stage sources are also rewritten after pi-gen sets them
+mkdir -p /work/pi-gen/export-image/02-set-sources
+cat > /work/pi-gen/export-image/02-set-sources/02-run.sh <<'EOSH'
+#!/bin/bash
+set -euo pipefail
+shopt -s nullglob
+try_mirrors=(
+  "https://mirror.fcix.net/raspbian/raspbian"
+  "https://mirrors.ocf.berkeley.edu/raspbian/raspbian"
+  "https://raspbian.raspberrypi.org/raspbian"
+)
+for m in "${try_mirrors[@]}"; do
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    [ -f "$f" ] || continue
+    sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+    sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
+    sed -i -E "s#http://mirror\\.as43289\\.net/raspbian/raspbian#${m}#g" "$f" || true
+  done
+  if apt-get -o Acquire::Retries=10 update; then
+    break
+  fi
+done
+EOSH
+chmod +x /work/pi-gen/export-image/02-set-sources/02-run.sh
 if [ ! -d /proc/sys/fs/binfmt_misc ]; then
   mkdir -p /proc/sys/fs/binfmt_misc || true
 fi
@@ -382,8 +453,22 @@ elif [ "$code" -ne 0 ]; then
     exit "$code"
   fi
 fi
-artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1)
-cp "$artifact" /out/__IMG_NAME__.img
+artifact=$(find deploy -maxdepth 1 -name "*.img" | head -n1 || true)
+if [ -n "$artifact" ]; then
+  cp "$artifact" /out/__IMG_NAME__.img
+else
+  zipfile=$(find deploy -maxdepth 1 -name "*.zip" | head -n1 || true)
+  if [ -n "$zipfile" ]; then
+    imgname=$(bsdtar -tf "$zipfile" | grep -m1 '\.img$' || true)
+    if [ -n "$imgname" ]; then
+      bsdtar -xOf "$zipfile" "$imgname" > /out/__IMG_NAME__.img
+    else
+      echo "No .img found inside $zipfile" >&2; exit 1
+    fi
+  else
+    echo "No image artifact found in deploy/" >&2; exit 1
+  fi
+fi
 '@
   $bash = $bash.Replace('__PIGEN_BRANCH__', $PiGenBranch)
   $bash = $bash.Replace('__IMG_NAME__', $ImageName)
