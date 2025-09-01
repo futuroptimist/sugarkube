@@ -150,6 +150,76 @@ APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
 APT_OPTS+=' -o APT::Install-Recommends=false -o APT::Install-Suggests=false'
 
+# --- Reliability hooks: mirror rewrites and proxy exceptions ---
+# 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
+mkdir -p stage0/00-configure-apt/files/usr/local/sbin
+cat > stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+target="https://mirror.fcix.net/raspbian/raspbian"
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+done
+EOSH
+chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
+mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
+cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
+APT::Update::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
+DPkg::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
+EOC
+
+# 2) Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
+cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<'EOP'
+Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
+Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
+EOP
+
+# 3) Early rewrite before default 00-run.sh executes in stage0
+mkdir -p stage0/00-configure-apt
+cat > stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+target="https://mirror.fcix.net/raspbian/raspbian"
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+done
+EOSH
+chmod +x stage0/00-configure-apt/00-run-00-pre.sh
+
+# 4) Stage2 safeguard rewrite
+mkdir -p stage2/00-configure-apt
+cat > stage2/00-configure-apt/01-run.sh <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+target="https://mirror.fcix.net/raspbian/raspbian"
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+done
+apt-get -o Acquire::Retries=10 update || true
+EOSH
+chmod +x stage2/00-configure-apt/01-run.sh
+
+# 5) Export-image post-rewrite after 02-set-sources resets lists
+mkdir -p export-image/02-set-sources
+cat > export-image/02-set-sources/02-run.sh <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+target="https://mirror.fcix.net/raspbian/raspbian"
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+done
+apt-get -o Acquire::Retries=10 update || true
+EOSH
+chmod +x export-image/02-set-sources/02-run.sh
+
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
@@ -172,10 +242,10 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
   ${SUDO} mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
 fi
 
-echo "Starting pi-gen build..."
+echo "[sugarkube] Starting pi-gen build (bash path)..."
 # Stream output line-by-line so GitHub Actions shows progress and doesn't appear to hang
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
-echo "pi-gen build finished"
+echo "[sugarkube] pi-gen build finished"
 
 # Ensure a pi-gen Docker image exists and is tagged for caching
 if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
@@ -196,4 +266,4 @@ fi
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
 bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
-echo "Image written to ${OUT_IMG}"
+echo "[sugarkube] Image written to ${OUT_IMG}"
