@@ -16,16 +16,19 @@ Keep the documentation clear and accurate.
 
 CONTEXT:
 - Docs live in `docs/`.
-- Follow AGENTS.md for style and testing requirements.
+- Follow [AGENTS.md](../AGENTS.md) for style and testing requirements.
 - Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
   `linkchecker --no-warnings README.md docs/` (requires `aspell` and `aspell-en`).
-- Record recurring issues in `outages/` using the JSON schema.
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
+- Record recurring issues in [outages/](../outages/) using the
+  [JSON schema](../outages/schema.json).
 
 REQUEST:
 1. Choose a markdown file in `docs/` that needs clarification or an update.
 2. Improve wording, fix links, or add missing steps.
-3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-   `linkchecker --no-warnings README.md docs/` and confirm no errors.
+3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
+   `linkchecker --no-warnings README.md docs/`, and
+   `git diff --cached | ./scripts/scan-secrets.py`; confirm no errors.
 
 OUTPUT:
 A pull request with the refined documentation and passing checks.
@@ -39,9 +42,10 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-`linkchecker --no-warnings README.md docs/` before committing.
+Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
+`linkchecker --no-warnings README.md docs/`, and
+`git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
