@@ -140,6 +140,32 @@ fi
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
 
+# Bundle pi_node_verifier and optionally clone repos into the image
+install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
+  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+
+CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
+CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-false}"
+CLONE_DSPACE="${CLONE_DSPACE:-false}"
+
+run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
+{
+  echo "#!/usr/bin/env bash"
+  echo "set -euo pipefail"
+  if [[ "$CLONE_SUGARKUBE" == "true" || "$CLONE_TOKEN_PLACE" == "true" || "$CLONE_DSPACE" == "true" ]]; then
+    echo "apt-get update"
+    echo "apt-get install -y git"
+    echo "install -d /opt/projects"
+    echo "cd /opt/projects"
+    [[ "$CLONE_SUGARKUBE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/sugarkube.git"
+    [[ "$CLONE_TOKEN_PLACE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/token.place.git"
+    [[ "$CLONE_DSPACE" == "true" ]] && echo "git clone --depth 1 --branch v3 https://github.com/democratizedspace/dspace.git"
+  else
+    echo 'echo "no optional repositories selected; skipping clones"'
+  fi
+} > "$run_sh"
+chmod +x "$run_sh"
+
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 
