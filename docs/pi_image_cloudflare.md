@@ -6,8 +6,8 @@ deployment into a reusable image capable of hosting multiple projects, including
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace).
 
-It uses `cloud-init` to bake Docker, the compose plugin, the Cloudflare apt
-repository, and a
+It uses `cloud-init` to update and upgrade packages, bake Docker, the compose
+plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
