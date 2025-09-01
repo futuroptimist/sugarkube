@@ -20,9 +20,9 @@ CONTEXT:
   [`stl/`](../stl/).
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
   as artifacts. Do not commit `.stl` files.
-- Render each model in both `heatset` and `printed` modes. The script uses the model's
-  `standoff_mode` value (usually `heatset`) when `STANDOFF_MODE` isn't set and treats input
-  case-insensitively.
+- Render each model in all supported `standoff_mode` variants (for example, `heatset`
+  or `printed`). `STANDOFF_MODE` is case-insensitive and defaults to the model's
+  `standoff_mode` value (typically `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` after changes.
   For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and

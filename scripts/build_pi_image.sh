@@ -5,11 +5,11 @@ REQUIRED_SPACE_GB="${REQUIRED_SPACE_GB:-10}"
 
 check_space() {
   local dir="$1"
-  local avail_kb required_kb
+  local avail_kb required_kb avail_gb
   avail_kb=$(df -Pk "$dir" | awk 'NR==2 {print $4}')
   required_kb=$((REQUIRED_SPACE_GB * 1024 * 1024))
   if [ "$avail_kb" -lt "$required_kb" ]; then
-    local avail_gb=$((avail_kb / 1024 / 1024))
+    avail_gb=$(awk "BEGIN {printf \"%.2f\", $avail_kb/1024/1024}")
     echo "Need at least ${REQUIRED_SPACE_GB}GB free in $dir (only ${avail_gb}GB available)" >&2
     exit 1
   fi
