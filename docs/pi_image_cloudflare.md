@@ -9,8 +9,8 @@ It uses `cloud-init` to bake Docker, the compose plugin, the Cloudflare apt
 repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
-`PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
-64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
+`PI_GEN_BRANCH` (default: `bookworm`). Set `PI_GEN_URL` to use a fork or mirror
+if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. To
 reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
