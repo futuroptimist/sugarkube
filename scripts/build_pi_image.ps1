@@ -50,6 +50,7 @@ function Test-CommandAvailable {
   }
 }
 
+
 function Invoke-Docker-Info {
   try {
     & docker info | Out-Null
@@ -592,4 +593,4 @@ try {
 } catch {
   Write-Error ("[sugarkube] Fatal error: {0}" -f $_.Exception.Message)
   exit 1
-}
+ }

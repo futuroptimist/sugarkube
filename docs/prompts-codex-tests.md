@@ -16,14 +16,15 @@ Improve and maintain test coverage.
 
 CONTEXT:
 - Tests live in `tests/` and use `pytest`.
-- Run `pytest` and `pre-commit run --all-files` to lint, test, and check docs.
-- Follow AGENTS.md and README.md.
+- Run `pre-commit run --all-files` to lint, format, test, and check docs.
+- Use `pytest` for faster feedback.
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 
 REQUEST:
 1. Identify missing or flaky test cases.
 2. Write or update tests in `tests/`.
 3. Adjust implementation if a test exposes a bug.
-4. Re-run `pytest` and `pre-commit run --all-files`.
+4. Re-run `pre-commit run --all-files`; use `pytest` during development.
 
 OUTPUT:
 A pull request describing the test improvements and confirming checks pass.
@@ -38,8 +39,9 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-`linkchecker --no-warnings README.md docs/` before committing.
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
+`linkchecker --no-warnings README.md docs/`,
+and `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
