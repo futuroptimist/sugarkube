@@ -89,15 +89,8 @@ for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
 done
 
 ARM64="${ARM64:-1}"
-# Clone the arm64 branch when building 64-bit images to avoid generating
-# both architectures and exhausting disk space.
-if [ -z "${PI_GEN_BRANCH:-}" ]; then
-  if [ "$ARM64" -eq 1 ]; then
-    PI_GEN_BRANCH="arm64"
-  else
-    PI_GEN_BRANCH="bookworm"
-  fi
-fi
+# Default to the bookworm release branch; architecture is controlled via config.
+PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
