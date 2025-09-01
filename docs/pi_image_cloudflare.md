@@ -41,6 +41,10 @@ The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
 
+The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and pre-clones the
+`sugarkube`, `token.place`, and `democratizedspace/dspace` (branch `v3`)
+repositories under `/opt/projects`.
+
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
 installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
@@ -76,9 +80,8 @@ image to bootstrap a three-node k3s cluster; see
 6. Confirm the tunnel is running: `systemctl status cloudflared-compose --no-pager` should show `active`.
 7. View the tunnel logs to confirm a connection:
    `journalctl -u cloudflared-compose -f`.
-8. Clone target projects:
-   - `git clone https://github.com/futuroptimist/token.place.git`
-   - `git clone https://github.com/democratizedspace/dspace.git`
+8. Explore the pre-cloned repositories in `/opt/projects` (`sugarkube`,
+   `token.place`, and `dspace` on branch `v3`).
 9. Add more `docker-compose` files for additional services.
 
 ## GitHub Actions
