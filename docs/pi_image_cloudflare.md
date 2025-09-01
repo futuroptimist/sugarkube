@@ -25,7 +25,9 @@ Set `TUNNEL_TOKEN` to bake a Cloudflare token into
 Ensure `curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`,
 `timeout`, and `xz` are installed before running it; `stdbuf` and `timeout`
 come from GNU coreutils. The script checks that both the temporary and output
-directories have at least 10 GB free before starting. Use the prepared image to
+directories have at least 10 GB free before starting. Override the disk space
+check with `REQUIRED_SPACE_GB` if your environment needs more or less; failures
+report how much space is available. Use the prepared image to
 deploy
 containerized apps. The companion guide
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
@@ -44,7 +46,8 @@ for onboarding steps.
 4. The build script copies `docker-compose.cloudflared.yml` into
    `/opt/sugarkube/`. Cloud-init adds the Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, and enables the
-   Docker service; verify both files and the service.
+   Docker service; verify both files and the service. It also cleans the apt
+   cache after installation to reclaim space.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` during the build.
 6. Start the tunnel with `docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d`.

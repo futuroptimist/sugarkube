@@ -23,3 +23,4 @@ runcmd:
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
   - [systemctl, enable, --now, docker]
+  - [bash, -c, 'apt-get clean']
