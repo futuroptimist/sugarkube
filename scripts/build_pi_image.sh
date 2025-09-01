@@ -140,6 +140,21 @@ fi
 install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
 
+if [ -f "${REPO_ROOT}/scripts/pi_node_verifier.sh" ]; then
+  install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/usr/local/sbin/pi_node_verifier.sh"
+fi
+
+REPO_DST="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects"
+mkdir -p "$REPO_DST"
+git clone --depth 1 https://github.com/futuroptimist/sugarkube.git \
+  "$REPO_DST/sugarkube"
+git clone --depth 1 https://github.com/futuroptimist/token.place.git \
+  "$REPO_DST/token.place"
+git clone --depth 1 --branch v3 --single-branch \
+  https://github.com/democratizedspace/dspace.git \
+  "$REPO_DST/dspace"
+
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 

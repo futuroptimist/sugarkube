@@ -46,6 +46,7 @@ the docs you will see the term used in both contexts.
     and clean up temporary work directories
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
     preloaded; needs a valid `user-data.yaml` and ~10 GB free disk space
+  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.

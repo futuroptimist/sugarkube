@@ -61,9 +61,13 @@ image to bootstrap a three-node k3s cluster; see
 6. Confirm the tunnel is running: `systemctl status cloudflared-compose --no-pager` should show `active`.
 7. View the tunnel logs to confirm a connection:
    `journalctl -u cloudflared-compose -f`.
-8. Clone target projects:
-   - `git clone https://github.com/futuroptimist/token.place.git`
-   - `git clone https://github.com/democratizedspace/dspace.git`
+8. The image pre-clones the repositories under `/opt/projects` and installs
+   `pi_node_verifier.sh` in `/usr/local/sbin`:
+   - `/opt/projects/sugarkube`
+   - `/opt/projects/token.place`
+   - `/opt/projects/dspace` (branch `v3`)
+   Run `pi_node_verifier.sh` after boot to check k3s prerequisites and update
+   the repos as needed.
 9. Add more `docker-compose` files for additional services.
 
 ## GitHub Actions
