@@ -36,8 +36,9 @@ repositories under `/opt/projects`.
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
 installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
-once the token is present. The script curls the Debian, Raspberry Pi, and pi-gen
-repositories with a 10-second timeout before building; override this via the
+once the token is present and waits for `network-online.target` to ensure
+connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
+with a 10-second timeout before building; override this via the
 `URL_CHECK_TIMEOUT` environment variable. Ensure `curl`, `docker` (with its
 daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are installed
 before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
@@ -60,8 +61,8 @@ image to bootstrap a three-node k3s cluster; see
    `CLOUDFLARED_COMPOSE_PATH`) into `/opt/sugarkube/`. Cloud-init adds the
    Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
-   `cloudflared-compose` systemd unit, and enables Docker; verify the files and
-   service.
+   `cloudflared-compose` systemd unit (wired to `network-online.target`), and
+   enables Docker; verify the files and service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build. The
    tunnel starts automatically when the token exists; otherwise run:
