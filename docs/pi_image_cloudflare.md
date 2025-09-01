@@ -11,19 +11,20 @@ plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
 `PI_GEN_BRANCH` (default: `bookworm`). Set `PI_GEN_URL` to use a fork or mirror
-if the default repository is
-unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
-where artifacts are written; the script creates the directory if needed. To
-reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors and
-passes `APT_OPTS` so apt retries on transient timeouts. Override the Raspberry Pi
-packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) and
-the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
-adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
-cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
+if the default repository is unavailable. `IMG_NAME` controls the output filename
+and `OUTPUT_DIR` selects where artifacts are written; the script creates the
+directory if needed. To reduce flaky downloads it pins the official Raspberry Pi
+and Debian mirrors and passes `APT_OPTS` so apt retries on transient timeouts.
+Override the Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
+`APT_MIRROR_RASPBERRYPI`) and the Debian mirror with `DEBIAN_MIRROR`. Use
+`BUILD_TIMEOUT` (default: `4h`) to adjust the maximum build duration and
+`CLOUD_INIT_PATH` to load a custom cloud-init configuration instead of the
+default `scripts/cloud-init/user-data.yaml`.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
-`ARM64=0` so 32-bit builds install the correct packages.
+`ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
+`ARM64=1` to avoid generating both architectures.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image

@@ -13,7 +13,7 @@
   - Environment variables:
     `PI_GEN_BRANCH` (default `bookworm`),
     `IMG_NAME` (default `sugarkube`),
-    `ARM64` (default `1`),
+    `ARM64` (default `1`), automatically sets `ARMHF=0` when `1`,
     optional `OUTPUT_DIR`,
     `PI_GEN_STAGES` (default `stage0 stage1 stage2`; empty values are rejected)
 - Outputs:
