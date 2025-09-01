@@ -1,3 +1,5 @@
+"""Tests for the PowerShell image builder script."""
+
 import subprocess
 
 
@@ -19,5 +21,6 @@ def test_ps1_has_entrypoint_banner():
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr

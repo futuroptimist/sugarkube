@@ -38,8 +38,8 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # use model's default standoff_mode
-   STANDOFF_MODE=PRINTED ./scripts/openscad_render.sh path/to/model.scad
+   ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
+   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    ```
 
 4. Commit updated SCAD sources and any documentation.

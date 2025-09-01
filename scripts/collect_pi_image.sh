@@ -3,6 +3,14 @@
 # Usage: bash scripts/collect_pi_image.sh [DEPLOY_ROOT] [OUTPUT_PATH]
 set -euo pipefail
 
+tmpdirs=()
+cleanup_tmpdirs() {
+  for dir in "${tmpdirs[@]:-}"; do
+    rm -rf "$dir"
+  done
+}
+trap cleanup_tmpdirs EXIT
+
 DEPLOY_ROOT="${1:-deploy}"
 OUTPUT_PATH="${2:-sugarkube.img.xz}"
 
@@ -31,6 +39,7 @@ if [ -z "${found}" ]; then
   zipfile="$(_find_first '*.zip' || true)"
   if [ -n "${zipfile}" ]; then
     tmpdir="$(mktemp -d)"
+    tmpdirs+=("$tmpdir")
     # Use bsdtar from libarchive-tools (handles zip); avoid needing 'unzip'
     bsdtar -xf "${zipfile}" -C "${tmpdir}"
     img_in_zip="$(find "${tmpdir}" -type f -name '*.img' | head -n1 || true)"
@@ -48,6 +57,7 @@ if [ -z "${found}" ]; then
   gzfile="$(_find_first '*.img.gz' || true)"
   if [ -n "${gzfile}" ]; then
     tmpdir="$(mktemp -d)"
+    tmpdirs+=("$tmpdir")
     gunzip -c "${gzfile}" > "${tmpdir}/image.img"
     found="${tmpdir}/image.img"
   fi
