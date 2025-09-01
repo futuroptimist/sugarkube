@@ -74,6 +74,6 @@ if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 \
   && [ -f .spellcheck.yaml ]; then
   pyspelling -c .spellcheck.yaml
 fi
-if command -v linkchecker >/dev/null 2>&1; then
+if command -v linkchecker >/dev/null 2>&1 && [ -f README.md ] && [ -d docs ]; then
   linkchecker --no-warnings README.md docs/
 fi
