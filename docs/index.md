@@ -40,3 +40,4 @@ Start with the basics and progress toward a fully autonomous solar cube.
 - [prompts-codex-docker-repo.md](prompts-codex-docker-repo.md) — improve Docker repo guides
 - [prompts-codex-ci-fix.md](prompts-codex-ci-fix.md) — diagnose and fix failing checks
 - [prompts-codex-spellcheck.md](prompts-codex-spellcheck.md) — correct spelling in docs
+- [prompts-codex-observability.md](prompts-codex-observability.md) — build observability stack
