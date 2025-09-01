@@ -34,6 +34,8 @@ Start with the basics and progress toward a fully autonomous solar cube.
 - [prompts-codex-cad.md](prompts-codex-cad.md) — keep OpenSCAD models rendering cleanly
 - [prompts-codex-docs.md](prompts-codex-docs.md) — refine build guides and reference docs
 - [prompts-codex-pi-image.md](prompts-codex-pi-image.md) — maintain the Pi image tooling
+- [prompts-codex-pi-token-dspace.md](prompts-codex-pi-token-dspace.md) —
+  bootstrap token.place & dspace on Pi
 - [prompts-codex-docker-repo.md](prompts-codex-docker-repo.md) — improve Docker repo guides
 - [prompts-codex-ci-fix.md](prompts-codex-ci-fix.md) — diagnose and fix failing checks
 - [prompts-codex-spellcheck.md](prompts-codex-spellcheck.md) — correct spelling in docs
