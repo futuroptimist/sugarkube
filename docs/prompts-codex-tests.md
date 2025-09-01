@@ -15,9 +15,9 @@ PURPOSE:
 Improve and maintain test coverage.
 
 CONTEXT:
-- Tests live in [`tests/`](../tests/) and use `pytest`.
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-- Run `pre-commit run --all-files` to lint, format, and test.
+- Tests live in [`tests/`](../tests/) and use [pytest](https://docs.pytest.org/).
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
+- Run `pre-commit run --all-files` to lint, format, and test changes.
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
   `aspell` and `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
@@ -25,9 +25,10 @@ CONTEXT:
 
 REQUEST:
 1. Identify missing or flaky test cases.
-2. Write or update tests in `tests/`.
+2. Write or update tests in [`tests/`](../tests/).
 3. Adjust implementation if a test exposes a bug.
-4. Re-run `pre-commit run --all-files`.
+4. Re-run `pre-commit run --all-files`; for docs changes also run
+   `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
 5. Scan staged changes for secrets before committing.
 
 OUTPUT:
