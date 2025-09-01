@@ -10,18 +10,6 @@ It uses `cloud-init` to update and upgrade packages, bake Docker, the compose
 plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
-<<<<<<< HEAD
-`PI_GEN_BRANCH` (default: `bookworm`). Set `PI_GEN_URL` to use a fork or mirror
-if the default repository is unavailable. `IMG_NAME` controls the output filename
-and `OUTPUT_DIR` selects where artifacts are written; the script creates the
-directory if needed. To reduce flaky downloads it pins the official Raspberry Pi
-and Debian mirrors and passes `APT_OPTS` so apt retries on transient timeouts.
-Override the Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
-`APT_MIRROR_RASPBERRYPI`) and the Debian mirror with `DEBIAN_MIRROR`. Use
-`BUILD_TIMEOUT` (default: `4h`) to adjust the maximum build duration and
-`CLOUD_INIT_PATH` to load a custom cloud-init configuration instead of the
-default `scripts/cloud-init/user-data.yaml`.
-=======
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
@@ -34,16 +22,15 @@ packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`) 
 the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`) to
 adjust the maximum build duration and `CLOUD_INIT_PATH` to load a custom
 cloud-init configuration instead of the default `scripts/cloud-init/user-data.yaml`.
->>>>>>> a1a90dc (docs: document mirror rewrite hook, proxy exceptions, zip-only export handling; link builder design)
 
 `REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
 
-The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and pre-clones the
-`sugarkube`, `token.place`, and `democratizedspace/dspace` (branch `v3`)
-repositories under `/opt/projects`.
+The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and can optionally
+clone the `sugarkube`, `token.place`, and `democratizedspace/dspace` (branch
+`v3`) repositories under `/opt/projects` when selected via workflow inputs.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
@@ -80,8 +67,9 @@ image to bootstrap a three-node k3s cluster; see
 6. Confirm the tunnel is running: `systemctl status cloudflared-compose --no-pager` should show `active`.
 7. View the tunnel logs to confirm a connection:
    `journalctl -u cloudflared-compose -f`.
-8. Explore the pre-cloned repositories in `/opt/projects` (`sugarkube`,
-   `token.place`, and `dspace` on branch `v3`).
+8. If any repositories were selected during the build, explore them under
+   `/opt/projects` (e.g. `sugarkube`, `token.place`, or `dspace` on branch
+   `v3`).
 9. Add more `docker-compose` files for additional services.
 
 ## GitHub Actions
