@@ -26,11 +26,16 @@ but the steps apply to any repository.
     sudo systemctl status docker --no-pager
     docker compose version
     ```
+   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
 6. Tail the Cloudflare tunnel logs to confirm it connected:
    ```sh
    journalctl -u cloudflared-compose -n 20 --no-pager
    ```
-   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
+7. Confirm the Pi's architecture and that Docker can run containers:
+   ```sh
+   uname -m                     # expect aarch64
+   docker run --rm hello-world
+   ```
 
 ## 2. Clone a repository
 1. Choose a location for projects, e.g. `/opt/projects`.
@@ -107,6 +112,7 @@ but the steps apply to any repository.
 cd /opt/projects/token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
 docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000  # should return HTML
 ```
@@ -118,7 +124,6 @@ cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
 docker compose config
 docker compose pull
-docker compose config
 docker compose up -d
 docker compose ps
 docker compose logs -f
@@ -138,6 +143,7 @@ docker run -d --name tokenplace -p 5000:5000 tokenplace
 cd ../dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
 curl http://localhost:5000  # token.place
 curl http://localhost:3000  # dspace
 ```
