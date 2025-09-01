@@ -72,12 +72,12 @@ jobs:
       - name: Compute pi-gen cache key
         id: pigen-key
         run: |
-          branch=bookworm
+          arch=armhf
           if [ "${ARM64}" = "1" ]; then
-            branch=arm64
+            arch=arm64
           fi
-          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/${branch}" | cut -f1)
-          echo "key=pigen-${RUNNER_OS}-${branch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
+          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/bookworm" | cut -f1)
+          echo "key=pigen-${RUNNER_OS}-bookworm-${arch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
 
       - name: Restore pi-gen Docker image
         id: cache-pigen
@@ -90,8 +90,14 @@ jobs:
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
 
+      - name: Build pi-gen Docker image
+        if: steps.cache-pigen.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 --branch bookworm https://github.com/RPi-Distro/pi-gen.git ~/pi-gen
+          cd ~/pi-gen
+          docker build -t pi-gen:latest .
+
       - name: Verify pi-gen Docker image
-        if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: |
           if ! docker image inspect pi-gen:latest > /dev/null 2>&1; then
             echo "pi-gen:latest Docker image not found!"
