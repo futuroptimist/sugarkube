@@ -26,6 +26,7 @@ write_files:
       Description=Cloudflare Tunnel via docker compose
       Requires=docker.service
       After=docker.service network-online.target
+      Wants=network-online.target
 
       [Service]
       Type=oneshot
