@@ -11,11 +11,11 @@ but the steps apply to any repository.
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
 2. Confirm you can SSH to the Pi: `ssh pi@<hostname>.local`.
-3. Ensure the Cloudflare Tunnel container is running:
+3. Ensure the Cloudflare Tunnel service is running:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml ps
+   systemctl status cloudflared-compose --no-pager
    ```
-   `cloudflared` should display `Up`.
+   It should display `active`.
 4. Optionally update packages and reboot:
    ```sh
    sudo apt update && sudo apt upgrade -y
@@ -26,11 +26,16 @@ but the steps apply to any repository.
     sudo systemctl status docker --no-pager
     docker compose version
     ```
+   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
 6. Tail the Cloudflare tunnel logs to confirm it connected:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml logs -n 20
+   journalctl -u cloudflared-compose -n 20 --no-pager
    ```
-   If `docker compose version` fails, install the plugin: `sudo apt install docker-compose-plugin`
+7. Confirm the Pi's architecture and that Docker can run containers:
+   ```sh
+   uname -m                     # expect aarch64
+   docker run --rm hello-world
+   ```
 
 ## 2. Clone a repository
 1. Choose a location for projects, e.g. `/opt/projects`.
@@ -98,6 +103,12 @@ but the steps apply to any repository.
    docker compose down   # compose project
    docker stop myapp && docker rm myapp
    ```
+8. Run commands inside a running container (handy for tests or admin tasks):
+   ```sh
+   docker exec -it tokenplace python -m pytest   # token.place example
+   docker compose exec frontend npm test         # dspace example
+   ```
+   Swap the command and container names for your project.
 
 ### Examples
 
@@ -107,7 +118,9 @@ but the steps apply to any repository.
 cd /opt/projects/token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
 docker logs -f tokenplace  # watch startup output
+docker exec -it tokenplace python -m pytest  # optional tests
 curl http://localhost:5000  # should return HTML
 ```
 
@@ -118,10 +131,10 @@ cd /opt/projects/dspace/frontend
 cp .env.example .env  # if present
 docker compose config
 docker compose pull
-docker compose config
 docker compose up -d
 docker compose ps
 docker compose logs -f
+docker compose exec frontend npm test  # run unit tests
 curl http://localhost:3000
 ```
 
@@ -138,6 +151,7 @@ docker run -d --name tokenplace -p 5000:5000 tokenplace
 cd ../dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
 curl http://localhost:5000  # token.place
 curl http://localhost:3000  # dspace
 ```
@@ -181,9 +195,9 @@ already supports arm64.
        service: http://localhost:3000
      - service: http_status:404
    ```
-2. Restart the tunnel:
+2. Restart the tunnel service:
    ```sh
-   docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
+   sudo systemctl restart cloudflared-compose
    ```
 3. Visit the Cloudflare-managed URL to verify the service is reachable:
    ```sh
