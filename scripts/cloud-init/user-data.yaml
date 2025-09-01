@@ -41,6 +41,7 @@ runcmd:
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
   - [systemctl, enable, --now, docker]
+  - [bash, -c, 'apt-get clean']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
         echo 'Cloudflare token missing; not starting tunnel'
