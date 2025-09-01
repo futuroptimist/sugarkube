@@ -87,20 +87,6 @@ jobs:
         if: steps.cache-pigen.outputs.cache-hit == 'true'
         run: docker load -i ~/cache/pi-gen.tar
 
-      - name: Build pi-gen Docker image
-        if: steps.cache-pigen.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth=1 --branch bookworm https://github.com/RPi-Distro/pi-gen.git ~/pi-gen
-          cd ~/pi-gen
-          docker build -t pi-gen:latest .
-
-      - name: Verify pi-gen Docker image
-        run: |
-          if ! docker image inspect pi-gen:latest > /dev/null 2>&1; then
-            echo "pi-gen:latest Docker image not found!"
-            exit 1
-          fi
-
       - name: Build Raspberry Pi OS image
         timeout-minutes: 120
         run: |

@@ -17,9 +17,11 @@
     optional `OUTPUT_DIR`,
     `PI_GEN_STAGES` (default `stage0 stage1 stage2`; empty values are rejected)
 - Outputs:
-  - `IMG_NAME.img.xz` and `IMG_NAME.img.xz.sha256` in `OUTPUT_DIR`. pi-gen
-    exports a `*.img.zip` which this script unzips before recompressing to
-    `xz`.
+- `IMG_NAME.img.xz` and `IMG_NAME.img.xz.sha256` in `OUTPUT_DIR`. pi-gen
+  exports a `*.img.zip` which this script unzips before recompressing to
+  `xz`.
+  - The script builds and tags a reusable `pi-gen:latest` Docker image when
+    missing so CI can cache the heavy build environment.
 
 ## Build Strategies
 

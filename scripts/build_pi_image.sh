@@ -143,6 +143,12 @@ install -Dm644 "${REPO_ROOT}/scripts/cloud-init/docker-compose.cloudflared.yml" 
 cd "${WORK_DIR}/pi-gen"
 export DEBIAN_FRONTEND=noninteractive
 
+# Build the pi-gen Docker image if it's missing so later steps can cache it.
+if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
+  echo "pi-gen:latest not found; building..."
+  docker build -t pi-gen:latest .
+fi
+
 # Allow callers to override the build timeout
 BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 
@@ -179,13 +185,8 @@ echo "pi-gen build finished"
 
 # Ensure the pi-gen Docker image is tagged for caching
 if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
-  img_id=$(docker images --format '{{.Repository}} {{.ID}}' | awk '$1=="pi-gen"{print $2; exit}')
-  if [ -n "${img_id}" ]; then
-    docker image tag "${img_id}" pi-gen:latest
-  else
-    echo "pi-gen Docker image not found" >&2
-    exit 1
-  fi
+  echo "pi-gen Docker image not found" >&2
+  exit 1
 fi
 
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
