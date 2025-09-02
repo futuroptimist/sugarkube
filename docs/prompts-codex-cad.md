@@ -1,5 +1,5 @@
 ---
-title: 'Sugarkube CAD Prompt'
+title: 'Sugarkube Codex CAD Prompt'
 slug: 'prompts-codex-cad'
 ---
 
@@ -21,13 +21,13 @@ CONTEXT:
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
   as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants (for example, `heatset`
-  or `printed`). `STANDOFF_MODE` is case-insensitive and defaults to the model's
-  `standoff_mode` value (typically `heatset`).
+  or `printed`). Set the `STANDOFF_MODE` env var (case-insensitive) to override the
+  model's default, typically `heatset`.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes.
+- Run `pre-commit run --all-files` to lint, format, and test.
   For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
   `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
-- Scan staged changes for secrets with:
+- Scan staged changes for secrets with
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
@@ -39,7 +39,7 @@ REQUEST:
 
    ```bash
    ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
-   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # override default mode
    ```
 
 4. Commit updated SCAD sources and any documentation.
