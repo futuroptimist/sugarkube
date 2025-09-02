@@ -31,9 +31,10 @@ The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
 
-The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and can optionally
-clone the `sugarkube`, `token.place`, and `democratizedspace/dspace` (branch
-`v3`) repositories under `/opt/projects` when selected via workflow inputs.
+The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
+`token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
+`/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
+pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
