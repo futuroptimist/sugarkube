@@ -19,7 +19,7 @@ echo "==> Scanning '${DEPLOY_ROOT}' for image artifacts"
 if [ -d "${DEPLOY_ROOT}" ]; then
   find "${DEPLOY_ROOT}" -maxdepth 3 -type f -printf '%p\t%k KB\n' | sort || true
 else
-  echo "ERROR: '${DEPLOY_ROOT}' does not exist"
+  echo "ERROR: '${DEPLOY_ROOT}' does not exist" >&2
   exit 1
 fi
 
@@ -46,7 +46,7 @@ if [ -z "${found}" ]; then
     if [ -n "${img_in_zip}" ]; then
       found="${img_in_zip}"
     else
-      echo "ERROR: Zip contained no .img: ${zipfile}"
+      echo "ERROR: Zip contained no .img: ${zipfile}" >&2
       exit 1
     fi
   fi
@@ -72,7 +72,7 @@ if [ -z "${found}" ]; then
 fi
 
 if [ -z "${found}" ]; then
-  echo "ERROR: No image file found under '${DEPLOY_ROOT}' (looked for *.img.xz, *.zip, *.img.gz, *.img)"
+  echo "ERROR: No image file found under '${DEPLOY_ROOT}' (looked for *.img.xz, *.zip, *.img.gz, *.img)" >&2
   exit 1
 fi
 
