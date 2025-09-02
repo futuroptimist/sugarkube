@@ -7,7 +7,7 @@ slug: 'prompts-codex-tests'
 
 Use this prompt when adding or updating tests.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository focused on tests.
 
@@ -17,7 +17,7 @@ Improve and maintain test coverage.
 CONTEXT:
 - Tests live in [`tests/`](../tests/) and use [pytest](https://docs.pytest.org/).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to lint, format, and test changes.
+- Run `pre-commit run --all-files` to invoke `scripts/checks.sh` for linting, formatting, and tests.
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
   `aspell` and `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
@@ -29,7 +29,7 @@ REQUEST:
 3. Adjust implementation if a test exposes a bug.
 4. Re-run `pre-commit run --all-files`; for docs changes also run
    `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
-5. Scan staged changes for secrets before committing.
+5. Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 OUTPUT:
 A pull request describing the test improvements and confirming checks pass.

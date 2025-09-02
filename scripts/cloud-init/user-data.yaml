@@ -41,6 +41,7 @@ runcmd:
   - [bash, -c, 'usermod -aG docker pi']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'chown -R pi:pi /opt/sugarkube']
+  - [bash, -c, 'if [ -d /opt/projects ]; then chown -R pi:pi /opt/projects; fi']
   - [systemctl, enable, --now, docker]
   - [bash, -c, 'apt-get clean']
   - |
