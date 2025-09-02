@@ -5,7 +5,7 @@ slug: 'prompts-codex-cad'
 
 # Codex CAD Prompt
 
-Use this prompt when 3D models need updating or verification.
+Use this prompt when OpenSCAD models need updating or verification.
 
 ```text
 SYSTEM:
@@ -28,8 +28,8 @@ CONTEXT:
 - Run `pre-commit run --all-files` to lint, format, and test.
   For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
   `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
-- Scan staged changes for secrets with
-  `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
+  before committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
@@ -39,8 +39,8 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
-   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # override default mode
+   bash scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
+   STANDOFF_MODE=printed bash scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    ```
 
 4. Commit updated SCAD sources and any documentation.
