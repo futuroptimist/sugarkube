@@ -63,8 +63,11 @@ image to bootstrap a three-node k3s cluster; see
    `CLOUDFLARED_COMPOSE_PATH`) into `/opt/sugarkube/`. Cloud-init adds the
    Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
-   `cloudflared-compose` systemd unit (wired to `network-online.target`), and
-   enables Docker; verify the files and service.
+   `cloudflared-compose` systemd unit (wired to `network-online.target` and set
+   to restart on failure), and enables Docker. If the default `pi` user exists
+   it's added to the `docker` group and given ownership of `/opt/sugarkube`; for
+   custom usernames, adjust `user-data.yaml` accordingly. Verify the files and
+   service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build. The
    tunnel starts automatically when the token exists; otherwise run:
