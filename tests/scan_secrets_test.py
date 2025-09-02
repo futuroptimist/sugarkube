@@ -40,3 +40,48 @@ def test_main_exit_codes(monkeypatch, scan_secrets):
         io.StringIO("+++ b/file\n+pass" "word=abc\n"),
     )
     assert scan_secrets.main() == 1
+
+
+def test_run_ripsecrets_returns_none_when_missing(monkeypatch, scan_secrets):
+    monkeypatch.setattr(scan_secrets.shutil, "which", lambda _: None)
+    assert scan_secrets.run_ripsecrets("diff") is None
+
+
+def test_run_ripsecrets_detects_secret(monkeypatch, scan_secrets):
+    monkeypatch.setattr(
+        scan_secrets.shutil,
+        "which",
+        lambda _: "/bin/ripsecrets",
+    )
+
+    class Result:
+        returncode = 1
+        stdout = "found"
+        stderr = ""
+
+    monkeypatch.setattr(
+        scan_secrets.subprocess,
+        "run",
+        lambda *a, **k: Result,
+    )
+    assert scan_secrets.run_ripsecrets("diff") is True
+
+
+def test_run_ripsecrets_clean(monkeypatch, scan_secrets):
+    monkeypatch.setattr(
+        scan_secrets.shutil,
+        "which",
+        lambda _: "/bin/ripsecrets",
+    )
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(
+        scan_secrets.subprocess,
+        "run",
+        lambda *a, **k: Result,
+    )
+    assert scan_secrets.run_ripsecrets("diff") is False
