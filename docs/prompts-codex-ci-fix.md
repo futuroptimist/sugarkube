@@ -7,7 +7,7 @@ slug: 'prompts-codex-ci-fix'
 
 Use this prompt to diagnose and resolve failing checks in this repository.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
