@@ -17,7 +17,8 @@ Keep OpenSCAD sources current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export STL meshes into
-  [`stl/`](../stl/).
+  [`stl/`](../stl/). Ensure [OpenSCAD](https://openscad.org/) is installed and available in
+  `PATH`; the script exits early if it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
   as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants (for example, `heatset`
