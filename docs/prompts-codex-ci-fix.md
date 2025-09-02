@@ -15,7 +15,7 @@ PURPOSE:
 Diagnose and fix continuous integration failures so all checks pass.
 
 CONTEXT:
-- Follow AGENTS.md for workflow and testing requirements.
+- Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for workflow and testing requirements.
 - Run `pre-commit run --all-files` to reproduce failures; it executes `scripts/checks.sh`.
 - Ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
   `linkchecker --no-warnings README.md docs/` succeed.
@@ -39,7 +39,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
+Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`
 (requires `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`,
 and `git diff --cached | ./scripts/scan-secrets.py` before committing.

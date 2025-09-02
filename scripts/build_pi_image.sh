@@ -160,14 +160,15 @@ install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
-CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-false}"
-CLONE_DSPACE="${CLONE_DSPACE:-false}"
+CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
+CLONE_DSPACE="${CLONE_DSPACE:-true}"
+EXTRA_REPOS="${EXTRA_REPOS:-}"
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {
   echo "#!/usr/bin/env bash"
   echo "set -euo pipefail"
-  if [[ "$CLONE_SUGARKUBE" == "true" || "$CLONE_TOKEN_PLACE" == "true" || "$CLONE_DSPACE" == "true" ]]; then
+  if [[ "$CLONE_SUGARKUBE" == "true" || "$CLONE_TOKEN_PLACE" == "true" || "$CLONE_DSPACE" == "true" || -n "$EXTRA_REPOS" ]]; then
     echo "apt-get update"
     echo "apt-get install -y git"
     echo "install -d /opt/projects"
@@ -175,6 +176,12 @@ run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
     [[ "$CLONE_SUGARKUBE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/sugarkube.git"
     [[ "$CLONE_TOKEN_PLACE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/token.place.git"
     [[ "$CLONE_DSPACE" == "true" ]] && echo "git clone --depth 1 --branch v3 https://github.com/democratizedspace/dspace.git"
+    if [[ -n "$EXTRA_REPOS" ]]; then
+      for repo in $EXTRA_REPOS; do
+        echo "git clone --depth 1 $repo"
+      done
+    fi
+    echo "chown -R pi:pi /opt/projects"
   else
     echo 'echo "no optional repositories selected; skipping clones"'
   fi
