@@ -7,8 +7,9 @@ slug: 'prompts-codex-pi-token-dspace'
 
 Use this prompt to streamline building a Raspberry Pi 5 image that hosts
 [token.place](https://github.com/futuroptimist/token.place) and
-[dspace](https://github.com/democratizedspace/dspace), with room to add
-other [related projects](https://github.com/futuroptimist#related-projects).
+[dspace](https://github.com/democratizedspace/dspace) via Docker Compose,
+while leaving room for other
+[related projects](https://github.com/futuroptimist#related-projects).
 
 ```text
 SYSTEM:
@@ -19,18 +20,25 @@ Reduce the end-to-end steps to build and deploy a Pi image ready for
 `token.place` and `dspace`, leaving extension points for future repos.
 
 CONTEXT:
-- Image build script: [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh).
-- Cloud-init configs: [`scripts/cloud-init/`](../scripts/cloud-init/).
-- Existing Pi image prompt: [`prompts-codex-pi-image.md`](./prompts-codex-pi-image.md).
-- Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`
-  (requires `aspell` and `aspell-en`),
-  `linkchecker --no-warnings README.md docs/`, and
-  `git diff --cached | ./scripts/scan-secrets.py`.
+- Raspberry Pi OS build script:
+  [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh).
+- First-boot cloud-init configs:
+  [`scripts/cloud-init/`](../scripts/cloud-init/).
+- Upstream apps:
+  - [token.place](https://github.com/futuroptimist/token.place)
+  - [dspace](https://github.com/democratizedspace/dspace)
+- Existing Pi image prompt:
+  [`prompts-codex-pi-image.md`](./prompts-codex-pi-image.md).
+- Repository checks:
+  - `pre-commit run --all-files`
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `linkchecker --no-warnings README.md docs/`
+  - `git diff --cached | ./scripts/scan-secrets.py`
 
 REQUEST:
-1. Add or refine scripts and docs so `token.place` and `dspace` run on the Pi image.
-2. Document the setup steps under `docs/`.
-3. Keep hooks for adding other repos later.
+1. Add or refine scripts and docs so `token.place` and `dspace` run as services on the Pi image.
+2. Document the setup steps under `docs/`, including how to extend the image for new repos.
+3. Keep hooks for adding other repositories later.
 4. Run the commands above and confirm success.
 
 OUTPUT:
