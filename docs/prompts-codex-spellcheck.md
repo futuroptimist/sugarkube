@@ -7,7 +7,7 @@ slug: 'prompts-codex-spellcheck'
 
 Use this prompt to catch and correct spelling issues in Markdown docs.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
@@ -18,8 +18,9 @@ CONTEXT:
 - Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`
   (requires `aspell` and `aspell-en`).
 - Add legitimate new words to [`.wordlist.txt`](../.wordlist.txt).
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-- Run `pre-commit run --all-files` and `linkchecker --no-warnings README.md docs/`.
+- Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
+- Run `pre-commit run --all-files` and ensure
+  `linkchecker --no-warnings README.md docs/` passes.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 
 REQUEST:
@@ -40,8 +41,9 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-`linkchecker --no-warnings README.md docs/` before committing.
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
+`linkchecker --no-warnings README.md docs/`, and
+`git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
