@@ -7,7 +7,7 @@ slug: 'prompts-codex-ci-fix'
 
 Use this prompt to diagnose and resolve failing checks in this repository.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
@@ -15,9 +15,11 @@ PURPOSE:
 Diagnose and fix continuous integration failures so all checks pass.
 
 CONTEXT:
-- Follow AGENTS.md for workflow and testing requirements.
+- Follow [AGENTS.md](../AGENTS.md) for workflow and testing requirements.
 - Run `pre-commit run --all-files` to reproduce failures; it executes `scripts/checks.sh`.
-- Ensure `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/` succeed.
+- Ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
+  `linkchecker --no-warnings README.md docs/` succeed.
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 - Install missing dependencies with `pip` or `npm` as needed.
 
 REQUEST:
