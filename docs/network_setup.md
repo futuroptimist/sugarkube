@@ -24,6 +24,8 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 10. If you skipped adding a key earlier, generate one with
     `ssh-keygen -t ed25519`, then copy your public key to each Pi:
     `ssh-copy-id <user>@<hostname>.local`
+11. Test key-based login: `ssh <user>@<hostname>.local` should connect without
+    prompting for credentials.
 
 ## Switch and PoE
 
