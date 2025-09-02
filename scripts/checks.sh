@@ -11,6 +11,10 @@ if ! command -v flake8 >/dev/null 2>&1; then
     pip install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
       >/dev/null 2>&1
   fi
+  if command -v pyenv >/dev/null 2>&1; then
+    pyenv rehash >/dev/null 2>&1
+  fi
+  hash -r
 fi
 
 # python checks
