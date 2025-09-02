@@ -24,11 +24,11 @@ if [ -n "${STANDOFF_MODE:-}" ]; then
   standoff_mode="$(printf '%s' "${STANDOFF_MODE,,}" | xargs)"
   if [ -n "$standoff_mode" ]; then
     case "$standoff_mode" in
-      heatset|printed)
+      heatset|printed|nut)
         mode_suffix="_$standoff_mode"
         ;;
       *)
-        echo "Invalid STANDOFF_MODE: $STANDOFF_MODE (expected 'heatset' or 'printed')" >&2
+        echo "Invalid STANDOFF_MODE: $STANDOFF_MODE (expected 'heatset', 'printed', or 'nut')" >&2
         exit 1
         ;;
     esac

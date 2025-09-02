@@ -5,7 +5,7 @@ Its standoffs match the common 80×36 mm module with holes 3 mm from each
 edge (75 mm × 31 mm spacing).
 
 The base plate includes rounded corners set by `corner_radius` (default 5 mm)
-to make handling safer. Standoff pillars now use a 6.3 mm diameter to conserve
+to make handling safer. Standoff pillars now use a 6.5 mm diameter to conserve
 material while gripping heat‑set inserts firmly.
 
 LCD support is disabled by default. To add the display set
@@ -18,6 +18,9 @@ bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
 
 # Render a version with printed threads
 STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
+
+# Render a captive hex recess variant
+STANDOFF_MODE=nut bash scripts/openscad_render.sh cad/pi_cluster/pi_carrier.scad
 ```
 
 ## Enable I²C and Connect
@@ -33,4 +36,4 @@ After printing the mount, enable the I²C interface and wire the display:
 Rotate the LCD or tweak offsets if your board slightly differs. The extra standoffs avoid the Pi
 mounting holes so you can add the display without enlarging the plate.
 
-Valid `STANDOFF_MODE` values are `heatset` (default) and `printed`. Values are case-insensitive.
+Valid `STANDOFF_MODE` values are `heatset` (default), `printed`, and `nut`. Values are case-insensitive.

@@ -20,8 +20,7 @@ CONTEXT:
   [`stl/`](../stl/).
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
   as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants (for example, `heatset`
-  or `printed`). `STANDOFF_MODE` is case-insensitive and defaults to the model's
+- Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`, or `nut`). `STANDOFF_MODE` is case-insensitive and defaults to the model's
   `standoff_mode` value (typically `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` after changes.
@@ -40,6 +39,7 @@ REQUEST:
    ```bash
    ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ```
 
 4. Commit updated SCAD sources and any documentation.

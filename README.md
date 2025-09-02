@@ -99,11 +99,12 @@ supplied:
 ```bash
 bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
+STANDOFF_MODE=nut bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 ```
 
 By default the script uses the model's `standoff_mode` value (`heatset`).
-Set `STANDOFF_MODE=printed` to generate 3D-printed threads. Values are case-insensitive and ignore
-surrounding whitespace; `heatset` and `printed` are accepted. Supplying only
+Set `STANDOFF_MODE=printed` to generate 3D-printed threads or `STANDOFF_MODE=nut` for a captive hex recess. Values are case-insensitive and ignore
+surrounding whitespace; `heatset`, `printed`, and `nut` are accepted. Supplying only
 whitespace uses the model's default `standoff_mode`.
 
 The helper script validates that the provided `.scad` file exists and that
