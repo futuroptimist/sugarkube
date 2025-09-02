@@ -25,8 +25,8 @@ CONTEXT:
   or `printed`). `STANDOFF_MODE` is case-insensitive and defaults to the model's
   `standoff_mode` value (typically `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` after changes.
-  For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
+- Run `pre-commit run --all-files`.
+  When documentation changes, also run `pyspelling -c .spellcheck.yaml` (requires `aspell` and
   `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with:
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
@@ -57,9 +57,9 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
-`aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires `aspell` and
+`aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
