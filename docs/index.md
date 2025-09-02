@@ -22,6 +22,7 @@ Review the safety notes before working with power components.
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
+- [pi_token_dspace.md](pi_token_dspace.md) — run token.place and dspace on the Pi image
 - [pi_image_builder_design.md](pi_image_builder_design.md) — design and reliability features of the image builder
 
 ## Learn the Fundamentals
