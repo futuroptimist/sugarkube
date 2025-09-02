@@ -15,9 +15,12 @@ PURPOSE:
 Keep Markdown documentation free of spelling errors.
 
 CONTEXT:
-- Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`.
-- Add legitimate new words to `.wordlist.txt`.
-- Follow AGENTS.md and run `pre-commit run --all-files`; ensure `linkchecker --no-warnings README.md docs/` also passes.
+- Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`
+  (requires `aspell` and `aspell-en`).
+- Add legitimate new words to [`.wordlist.txt`](../.wordlist.txt).
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+- Run `pre-commit run --all-files` and `linkchecker --no-warnings README.md docs/`.
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 
 REQUEST:
 1. Run the spellcheck and review results.
