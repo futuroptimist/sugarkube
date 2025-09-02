@@ -55,8 +55,8 @@ image to bootstrap a three-node k3s cluster; see
 ## Steps
 
 1. Download the latest prebuilt Sugarkube Raspberry Pi OS image from the
-   [pi-image workflow artifacts](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
-   and verify it: `sha256sum -c sugarkube.img.xz.sha256`.
+   [pi-image workflow artifacts][pi-image workflow artifacts] and verify it:
+   `sha256sum -c sugarkube.img.xz.sha256`.
 2. Flash the image with Raspberry Pi Imager. Open the tool, choose **Use custom**,
    browse for the downloaded file, and write it to your SD card.
 3. Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
@@ -64,13 +64,17 @@ image to bootstrap a three-node k3s cluster; see
    `CLOUDFLARED_COMPOSE_PATH`) into `/opt/sugarkube/`. Cloud-init adds the
    Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
-   `cloudflared-compose` systemd unit (wired to `network-online.target`), and
-   enables Docker; verify the files and service.
+   `cloudflared-compose` systemd unit (wired to `network-online.target` and set
+   to restart on failure), and enables Docker. If the default `pi` user exists
+   it's added to the `docker` group and given ownership of `/opt/sugarkube`. When
+   the `pi` user is absent these steps are skipped without error. For custom
+   usernames, adjust `user-data.yaml` accordingly. Verify the files and service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build. The
    tunnel starts automatically when the token exists; otherwise run:
    `sudo systemctl enable --now cloudflared-compose`.
-6. Confirm the tunnel is running: `systemctl status cloudflared-compose --no-pager` should show `active`.
+6. Confirm the tunnel is running:
+   `systemctl status cloudflared-compose --no-pager` should show `active`.
 7. View the tunnel logs to confirm a connection:
    `journalctl -u cloudflared-compose -f`.
 8. If any repositories were selected during the build, explore them under
@@ -85,9 +89,12 @@ ensures the result is available as `sugarkube.img.xz` (compressing the image if
 pi-gen produces an uncompressed `.img`), searches recursively in pi-gen's
 `deploy/` directory for the image, and exits with an error if none is found.
 It then uploads the artifact. Download it
-from the [workflow artifacts](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
-or run the script locally if you need customizations. The workflow rotates its
+   from the [workflow artifacts][pi-image workflow artifacts] or run the script
+   locally if you need customizations. The workflow rotates its
 cached pi-gen Docker image monthly by hashing the upstream branch, ensuring each
 build pulls in the latest security updates.
 The build script streams output line-by-line so GitHub Actions logs show
 progress during the long-running image creation process.
+
+[pi-image workflow artifacts]:
+  https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml
