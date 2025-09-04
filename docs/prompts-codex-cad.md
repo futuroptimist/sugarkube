@@ -3,7 +3,7 @@ title: 'Sugarkube Codex CAD Prompt'
 slug: 'prompts-codex-cad'
 ---
 
-# Codex CAD Prompt
+# Sugarkube Codex CAD Prompt
 
 Use this prompt when OpenSCAD models need updating or verification.
 
@@ -12,7 +12,7 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository focused on 3D assets.
 
 PURPOSE:
-Keep OpenSCAD sources current and ensure they render cleanly.
+Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
