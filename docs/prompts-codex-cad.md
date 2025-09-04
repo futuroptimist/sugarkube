@@ -21,9 +21,9 @@ CONTEXT:
   exits early if it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these models
   as artifacts. Do not commit `.stl` files.
-- Render each model for every supported standoff mode (for example, `heatset`, `printed`, or
-  `nut`). The `STANDOFF_MODE` environment variable is case-insensitive and defaults to the mode
-  defined in the model (typically `heatset`).
+- Render each model in all supported standoff modes (for example, `heatset`, `printed`, or `nut`).
+  The `STANDOFF_MODE` environment variable is case-insensitive and defaults to the model’s
+  `standoff_mode` value (typically `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test.
 - For documentation updates, also run:
@@ -40,7 +40,7 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # defaults to heatset
+   ./scripts/openscad_render.sh path/to/model.scad  # uses model's default standoff_mode
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ```
