@@ -18,6 +18,7 @@ reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors,
 adds `APT_OPTS` (retries, timeouts, `--fix-missing`), and installs a persistent
 apt/dpkg Pre-Invoke hook that rewrites any raspbian host to a stable HTTPS
 mirror, and bypasses proxies for `archive.raspberrypi.com`. Override the Raspberry
+Use `APT_RETRIES` and `APT_TIMEOUT` to tune the retry count and per-request timeout.
 Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's `APT_MIRROR_RASPBERRYPI`)
 and the Debian mirror with `DEBIAN_MIRROR`. Use `BUILD_TIMEOUT` (default: `4h`)
 to adjust the maximum build duration. Customize the cloud-init configuration with
