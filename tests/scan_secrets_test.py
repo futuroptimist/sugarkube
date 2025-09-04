@@ -42,6 +42,21 @@ def test_main_exit_codes(monkeypatch, scan_secrets):
     assert scan_secrets.main() == 1
 
 
+def test_main_respects_ripsecrets(monkeypatch, scan_secrets):
+    def _run_true(_):
+        return True
+
+    def _run_false(_):
+        return False
+
+    monkeypatch.setattr(scan_secrets, "run_ripsecrets", _run_true)
+    monkeypatch.setattr(scan_secrets.sys, "stdin", io.StringIO("diff"))
+    assert scan_secrets.main() == 1
+    monkeypatch.setattr(scan_secrets, "run_ripsecrets", _run_false)
+    monkeypatch.setattr(scan_secrets.sys, "stdin", io.StringIO("diff"))
+    assert scan_secrets.main() == 0
+
+
 def test_run_ripsecrets_returns_none_when_missing(monkeypatch, scan_secrets):
     monkeypatch.setattr(scan_secrets.shutil, "which", lambda _: None)
     assert scan_secrets.run_ripsecrets("diff") is None
