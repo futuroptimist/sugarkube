@@ -85,3 +85,9 @@ def test_run_ripsecrets_clean(monkeypatch, scan_secrets):
         lambda *a, **k: Result,
     )
     assert scan_secrets.run_ripsecrets("diff") is False
+
+
+def test_main_skips_when_no_diff(monkeypatch, scan_secrets, capsys):
+    monkeypatch.setattr(scan_secrets.sys, "stdin", io.StringIO(""))
+    assert scan_secrets.main() == 0
+    assert "No diff provided" in capsys.readouterr().err
