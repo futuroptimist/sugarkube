@@ -27,3 +27,6 @@ fp-info-cache/
 coverage.xml
 .coverage
 stl/
+
+# Temporary scripts from build_pi_image.ps1
+.pigen-build*.sh

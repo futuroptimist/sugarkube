@@ -221,109 +221,120 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
-def _setup_build_env(
-    tmp_path, check_compose: bool = False, precompressed: bool = False
-):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    git_log = tmp_path / "git_args.log"
+#cloud-config
+package_update: true
+package_upgrade: true
+apt:
+  sources:
+    cloudflare:
+      source: "deb [arch=arm64] https://pkg.cloudflare.com/ bookworm main"
+      keyid: FBA8C0EE63617C5EED695C43254B391D8CACCBF8
+      keyserver: https://keyserver.ubuntu.com
+packages:
+  - docker.io
+  - docker-compose-plugin
+  - curl
+  - git
+  - cloudflared
+write_files:
+  - path: /opt/sugarkube/.cloudflared.env
+    permissions: '0600'
+    content: |
+      # Inject with TUNNEL_TOKEN or TUNNEL_TOKEN_FILE env var or edit after boot
+      TUNNEL_TOKEN=""
+  - path: /etc/systemd/system/cloudflared-compose.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Cloudflare Tunnel via docker compose
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
 
-    (fake_bin / "docker").write_text("#!/bin/sh\nexit 0\n")
-    (fake_bin / "docker").chmod(0o755)
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/sugarkube
+      ExecStart=/usr/bin/docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml up -d
+      ExecStop=/usr/bin/docker compose -f /opt/sugarkube/docker-compose.cloudflared.yml down
+      RemainAfterExit=yes
+      Restart=on-failure
+      RestartSec=5s
 
-    xz = fake_bin / "xz"
-    xz.write_text(
-        """#!/bin/sh
-while [ "${1#-}" != "$1" ]; do shift; done
-cat "$1"
-"""
-    )
-    xz.chmod(0o755)
-    sha = fake_bin / "sha256sum"
-    sha.write_text('#!/bin/sh\necho 0  "$1"\n')
-    sha.chmod(0o755)
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/apt/apt.conf.d/80-retries
+    permissions: '0644'
+    content: |
+      Acquire::Retries "5";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+  - path: /opt/projects/token.place/docker-compose.tokenplace.yml
+    permissions: '0644'
+    content: |
+      version: '3'
+      services:
+        tokenplace:
+          build:
+            context: /opt/projects/token.place
+            dockerfile: docker/Dockerfile.server
+          ports:
+            - "5000:5000"
+  - path: /etc/systemd/system/tokenplace.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=token.place server via docker compose
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
 
-    bsdtar = fake_bin / "bsdtar"
-    bsdtar.write_text(
-        """#!/bin/sh
-if [ "$1" = "-xf" ]; then
-  zipfile=$2; shift 2
-  if [ "$1" = "-C" ]; then
-    dir=$2
-    python3 - "$zipfile" "$dir" <<'PY'
-import sys, zipfile
-zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
-PY
-  fi
-fi
-"""
-    )
-    bsdtar.chmod(0o755)
-    mount = fake_bin / "mount"
-    mount.write_text("#!/bin/sh\nexit 0\n")
-    mount.chmod(0o755)
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/projects/token.place
+      ExecStart=/usr/bin/docker compose -f docker-compose.tokenplace.yml up -d
+      ExecStop=/usr/bin/docker compose -f docker-compose.tokenplace.yml down
+      RemainAfterExit=yes
+      Restart=on-failure
+      RestartSec=5s
 
-    compose_check = (
-        "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
-        "docker-compose.cloudflared.yml ]] || exit 1\n"
-        if check_compose
-        else ""
-    )
-    image_cmd = (
-        "python3 - <<'PY'\n"
-        "import zipfile\n"
-        "with zipfile.ZipFile('deploy/sugarkube.img.zip', 'w') as zf:\n"
-        "    zf.writestr('sugarkube.img', 'pi')\n"
-        "PY\n"
-    )
-    if precompressed:
-        image_cmd = (
-            "python3 - <<'PY'\n"
-            "import lzma, pathlib\n"
-            "pathlib.Path('deploy/sugarkube.img.xz').write_bytes("
-            "lzma.compress(b'pi'))\n"
-            "PY\n"
-        )
-    git_stub = (
-        f"#!/bin/bash\n"
-        f'echo "$@" >> "{git_log}"\n'
-        "target=${!#}\n"
-        'mkdir -p "$target/stage2/01-sys-tweaks"\n'
-        f"cat <<'EOF' > \"$target/build.sh\"\n"
-        "#!/bin/bash\n"
-        f"{compose_check}"
-        "mkdir -p deploy\n"
-        'cp config "$OUTPUT_DIR/config.env"\n'
-        f"{image_cmd}"
-        "EOF\n"
-        'chmod +x "$target/build.sh"\n'
-    )
-    git = fake_bin / "git"
-    git.write_text(git_stub)
-    git.chmod(0o755)
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/dspace.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=dspace frontend via docker compose
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
 
-    for name in ["curl", "timeout", "stdbuf"]:
-        path = fake_bin / name
-        if name == "timeout":
-            path.write_text(
-                '#!/bin/sh\nfirst="$1"\nshift\n'
-                'if [ -n "$TIMEOUT_LOG" ]; then\n'
-                '  echo $first > "$TIMEOUT_LOG"\n'
-                'fi\nexec "$@"\n'
-            )
-        elif name == "stdbuf":
-            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
-        else:
-            path.write_text("#!/bin/sh\nexit 0\n")
-        path.chmod(0o755)
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/projects/dspace/frontend
+      ExecStartPre=-/usr/bin/cp -n .env.example .env
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose down
+      RemainAfterExit=yes
+      Restart=on-failure
+      RestartSec=5s
 
-    (fake_bin / "id").write_text("#!/bin/sh\necho 0\n")
-    (fake_bin / "id").chmod(0o755)
-
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["GIT_LOG"] = str(git_log)
-    return env
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
+  - [bash, -c, 'mkdir -p /opt/sugarkube']
+  - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
+  - [systemctl, daemon-reexec]   # reload systemd units
+  - [systemctl, enable, --now, docker]
+  - [systemctl, enable, --now, tokenplace.service]
+  - [systemctl, enable, --now, dspace.service]
+  - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
+  - |
+      if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
+        echo 'Cloudflare token missing; not starting tunnel'
+      else
+        systemctl enable --now cloudflared-compose.service
+      fi
 
 
 def _run_build_script(tmp_path, env):
