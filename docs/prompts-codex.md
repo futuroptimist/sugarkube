@@ -5,8 +5,8 @@ slug: 'prompts-codex'
 
 # Codex Automation Prompt
 
-Use this prompt to guide OpenAI Codex or similar agents when contributing to
-this repository.
+Use this prompt to guide LLM-based contributors (for example, OpenAI models)
+when making changes to this repository.
 
 ```text
 SYSTEM:
@@ -17,13 +17,12 @@ Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-- Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
-  linting, tests and doc validation.
-- On documentation changes ensure `pyspelling -c [.spellcheck.yaml](../.spellcheck.yaml)`
-  (requires `aspell` and `aspell-en`) and `linkchecker --no-warnings README.md docs/`
-  succeed.
-- Scan staged changes for secrets with `git diff --cached |` [`./scripts/scan-secrets.py`](../scripts/scan-secrets.py)
-  before committing.
+- Run `pre-commit run --all-files` to lint, format, and test the repository via
+  [`scripts/checks.sh`](../scripts/checks.sh).
+- On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and
+  `aspell-en`) and `linkchecker --no-warnings README.md docs/` succeed.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent failures in [`outages/`](../outages/) as JSON per
   [`outages/schema.json`](../outages/schema.json).
 
@@ -42,19 +41,22 @@ Type: evergreen
 
 Use this prompt to refine sugarkube's own prompt documentation.
 
-```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c` [`.spellcheck.yaml`](../.spellcheck.yaml)
 (requires `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached |` [`./scripts/scan-secrets.py`](../scripts/scan-secrets.py) before committing.
+Fix any issues reported by these tools.
 
 USER:
-1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
-2. Fix outdated instructions, links, or formatting.
-3. Run the commands above.
+1. Choose a `docs/prompts-*.md` file to update (for example,
+   `prompts-codex-cad.md`).
+2. Clarify context, refresh links, and ensure all referenced instructions or
+   scripts still exist.
+3. Run the commands above and address any failures.
 
 OUTPUT:
-A pull request with the improved prompt doc and passing checks.
+A pull request that updates the selected prompt doc with current references
+and passing checks.
 ```
