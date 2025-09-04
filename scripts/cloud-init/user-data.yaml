@@ -39,11 +39,65 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /opt/projects/token.place/docker-compose.tokenplace.yml
+    permissions: '0644'
+    content: |
+      version: '3'
+      services:
+        tokenplace:
+          build:
+            context: /opt/projects/token.place
+            dockerfile: docker/Dockerfile.server
+          ports:
+            - "5000:5000"
+  - path: /etc/systemd/system/tokenplace.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=token.place server via docker compose
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/projects/token.place
+      ExecStart=/usr/bin/docker compose -f docker-compose.tokenplace.yml up -d
+      ExecStop=/usr/bin/docker compose -f docker-compose.tokenplace.yml down
+      RemainAfterExit=yes
+      Restart=on-failure
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/dspace.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=dspace frontend via docker compose
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/projects/dspace/frontend
+      ExecStartPre=-/usr/bin/cp -n .env.example .env
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose down
+      RemainAfterExit=yes
+      Restart=on-failure
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
 runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
   - [systemctl, enable, --now, docker]
+  - [systemctl, enable, --now, tokenplace.service]
+  - [systemctl, enable, --now, dspace.service]
   - [bash, -c, 'apt-get clean']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
