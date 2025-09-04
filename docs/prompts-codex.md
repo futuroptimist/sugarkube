@@ -6,7 +6,8 @@ slug: 'prompts-codex'
 # Codex Automation Prompt
 
 Use this prompt to guide OpenAI Codex or similar agents when contributing to
-this repository.
+this repository. Sugarkube is an off-grid, solar-powered Raspberry Pi k3s
+cluster with accompanying CAD, electronics, and build docs.
 
 ```text
 SYSTEM:
@@ -17,18 +18,27 @@ Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-- Run `pre-commit run --all-files` to lint, test and validate docs.
-- On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-  `aspell-en`) and `linkchecker --no-warnings README.md docs/` succeed.
+- Refer to [`llms.txt`](../llms.txt) for a high-level project overview.
+- Run `pre-commit run --all-files` (uses [`scripts/checks.sh`](../scripts/checks.sh)) to lint,
+  format, test, and validate docs.
+- On documentation changes, run:
+
+  ```bash
+  pyspelling -c .spellcheck.yaml  # requires aspell and aspell-en
+  linkchecker --no-warnings README.md docs/
+  ```
+
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
   committing.
-- Log persistent failures in `outages/` as JSON per `outages/schema.json`.
+- Record recurring tool failures in [`outages/`](../outages/) using
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Identify a small bug fix or documentation clarification.
 2. Implement the change following the project's existing style.
 3. Update relevant documentation when needed.
-4. Run `pre-commit run --all-files` after changes.
+4. Run the commands in the CONTEXT section to verify formatting, tests, spelling,
+   links, and secrets.
 
 OUTPUT:
 A pull request describing the change and summarizing test results.
