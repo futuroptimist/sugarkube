@@ -19,8 +19,8 @@ CONTEXT:
   (requires `aspell` and `aspell-en`).
 - Add legitimate new words to [`.wordlist.txt`](../.wordlist.txt).
 - Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
-- Run `pre-commit run --all-files` and ensure
-  `linkchecker --no-warnings README.md docs/` passes.
+- Run `pre-commit run --all-files`.
+- Verify links with `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 
 REQUEST:
@@ -40,7 +40,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
 `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
