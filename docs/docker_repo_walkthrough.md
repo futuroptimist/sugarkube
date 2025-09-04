@@ -226,6 +226,23 @@ already supports arm64.
 
 Repeat these steps for each repository you want to deploy.
 
+### token.place
+
+```sh
+cd /opt/projects/token.place
+git pull
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+docker restart tokenplace
+```
+
+### dspace
+
+```sh
+cd /opt/projects/dspace/frontend
+git pull
+docker compose up -d --build
+```
+
 ## 7. Troubleshooting and outages
 - Check logs for errors:
   ```sh
