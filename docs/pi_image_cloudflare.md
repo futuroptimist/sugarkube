@@ -47,7 +47,8 @@ with a 10-second timeout before building; override this via the
 daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are installed
 before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
 checks that both the temporary and output directories have at least 10 GB free
-before starting. Use the prepared image to deploy containerized apps. The
+before starting and verifies the resulting image exists and is non-empty before
+reporting success. Use the prepared image to deploy containerized apps. The
 companion guide [docker_repo_walkthrough.md](docker_repo_walkthrough.md)
 explains how to run projects such as token.place and dspace. Use the resulting
 image to bootstrap a three-node k3s cluster; see
