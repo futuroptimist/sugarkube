@@ -20,7 +20,9 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    `sudo apt update && sudo apt full-upgrade -y`
 8. Reboot to ensure kernel updates apply before moving on: `sudo reboot`.
 9. Reserve each Pi's MAC address in your router's DHCP table so its IP stays
-   consistent even if mDNS stops working.
+   consistent even if mDNS stops working. On each board run
+   `ip link show eth0` (or `ip link show wlan0` for WiFi) and note the
+   `link/ether` value.
 10. If you skipped adding a key earlier, generate one with
     `ssh-keygen -t ed25519`, then copy your public key to each Pi:
     `ssh-copy-id <user>@<hostname>.local`
@@ -44,7 +46,7 @@ sudo apt update && sudo apt full-upgrade -y
 sudo swapoff -a
 sudo sed -i '/ swap / s/^/#/' /etc/fstab
 
-curl -sfL https://get.k3s.io | sh -
+curl -sfL https://get.k3s.io | sudo sh -
 
 # Ensure the service is running
 sudo systemctl status k3s --no-pager
@@ -67,7 +69,7 @@ Boot the remaining Pis once they can reach the control-plane node. Replace
 above, then run the installer as root:
 
 ```sh
-curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<node-token> sh -
+curl -sfL https://get.k3s.io | sudo K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<node-token> sh -
 ```
 
 After the script finishes, confirm the agent service started on the worker:
