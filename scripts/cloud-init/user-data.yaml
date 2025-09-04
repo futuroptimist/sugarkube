@@ -98,7 +98,7 @@ runcmd:
   - [systemctl, enable, --now, docker]
   - [systemctl, enable, --now, tokenplace.service]
   - [systemctl, enable, --now, dspace.service]
-  - [bash, -c, 'apt-get clean']
+  - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
         echo 'Cloudflare token missing; not starting tunnel'

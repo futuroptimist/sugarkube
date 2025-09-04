@@ -65,10 +65,11 @@ image to bootstrap a three-node k3s cluster; see
    Cloudflare apt repo, pre-creates
    `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
    `cloudflared-compose` systemd unit (wired to `network-online.target` and set
-   to restart on failure), and enables Docker. If the default `pi` user exists
-   it's added to the `docker` group and given ownership of `/opt/sugarkube`. When
-   the `pi` user is absent these steps are skipped without error. For custom
-   usernames, adjust `user-data.yaml` accordingly. Verify the files and service.
+   to restart on failure), enables Docker, and removes the apt cache and package
+   lists to shrink the image. If the default `pi` user exists it's added to the
+   `docker` group and given ownership of `/opt/sugarkube`. When the `pi` user is
+   absent these steps are skipped without error. For custom usernames, adjust
+   `user-data.yaml` accordingly. Verify the files and service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build. The
    tunnel starts automatically when the token exists; otherwise run:
