@@ -39,15 +39,37 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/apps-compose.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=token.place and dspace via docker compose
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/sugarkube
+      ExecStart=/usr/bin/docker compose -f /opt/sugarkube/docker-compose.apps.yml up -d --build
+      ExecStop=/usr/bin/docker compose -f /opt/sugarkube/docker-compose.apps.yml down
+      RemainAfterExit=yes
+      Restart=on-failure
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
 runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
   - [systemctl, enable, --now, docker]
   - [bash, -c, 'apt-get clean']
+  - [bash, -c, 'cp /opt/projects/dspace/frontend/.env.example /opt/projects/dspace/frontend/.env || true']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
         echo 'Cloudflare token missing; not starting tunnel'
       else
         systemctl enable --now cloudflared-compose.service
       fi
+  - [systemctl, enable, --now, apps-compose.service]
