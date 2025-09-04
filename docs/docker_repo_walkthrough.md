@@ -156,6 +156,35 @@ curl http://localhost:5000  # token.place
 curl http://localhost:3000  # dspace
 ```
 
+#### token.place and dspace via one `docker-compose.yml`
+
+Manage both apps in a single file to simplify startup and shutdown.
+
+```yaml
+# /opt/projects/docker-compose.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3000:3000"
+```
+
+```sh
+cd /opt/projects
+docker compose up -d
+docker compose ps
+curl http://localhost:5000  # token.place
+curl http://localhost:3000  # dspace
+docker compose down
+```
+
 ### Build for ARM with Docker `buildx`
 
 Some repositories only ship x86_64 images. Use Docker `buildx` to compile an arm64
