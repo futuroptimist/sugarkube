@@ -7,6 +7,9 @@ This guide shows how to run any GitHub project that ships a `Dockerfile` or
 [dspace](https://github.com/democratizedspace/dspace) as real-world examples,
 but the steps apply to any repository.
 
+For a prebuilt image that already clones both projects, see
+[pi_token_dspace.md](pi_token_dspace.md).
+
 ## 1. Prepare the Pi
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
@@ -54,6 +57,14 @@ but the steps apply to any repository.
    ```
 3. Review the project's README for architecture-specific notes and required
    environment variables.
+   - `token.place` documents settings like `API_RATE_LIMIT` and `TOKEN_PLACE_ENV`
+     in its README. Create a `.env` file to override them:
+     ```sh
+     cd token.place
+     printf 'TOKEN_PLACE_ENV=production\n' >> .env
+     ```
+   - `dspace` lists any necessary environment variables in
+     `frontend/README.md`.
 4. Inspect the repo to confirm it includes Docker assets:
    ```sh
    ls token.place/docker            # token.place Dockerfile lives here
