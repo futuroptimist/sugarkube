@@ -7,8 +7,8 @@ slug: 'prompts-codex-pi-token-dspace'
 
 Use this prompt to streamline building a Raspberry Pi 5 image that hosts
 [token.place](https://github.com/futuroptimist/token.place) and
-[dspace](https://github.com/democratizedspace/dspace) via Docker Compose,
-while leaving room for other
+[dspace](https://github.com/democratizedspace/dspace) using Docker Compose while
+leaving room for other
 [related projects](https://github.com/futuroptimist#related-projects).
 
 ```text
@@ -22,7 +22,7 @@ Reduce the end-to-end steps to build and deploy a Pi image ready for
 CONTEXT:
 - Raspberry Pi OS build script:
   [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh).
-- First-boot cloud-init configs:
+- First boot cloud-init configs:
   [`scripts/cloud-init/`](../scripts/cloud-init/).
 - Upstream apps:
   - [token.place](https://github.com/futuroptimist/token.place)
