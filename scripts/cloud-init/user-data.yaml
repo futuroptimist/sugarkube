@@ -44,6 +44,16 @@ runcmd:
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
   - [systemctl, enable, --now, docker]
+  - ["/usr/local/sbin/install_repo_service.sh",
+     "tokenplace",
+     "/opt/projects/token.place",
+     "bash /usr/local/sbin/start_tokenplace.sh",
+     "docker rm -f tokenplace"]
+  - ["/usr/local/sbin/install_repo_service.sh",
+     "dspace",
+     "/opt/projects/dspace/frontend",
+     "bash /usr/local/sbin/start_dspace.sh",
+     "docker compose down"]
   - [bash, -c, 'apt-get clean']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then

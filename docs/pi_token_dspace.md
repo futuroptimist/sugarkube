@@ -23,20 +23,14 @@ EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
 The script clones each repo into `/opt/projects` and assigns ownership to the
 `pi` user.
 
-## Run the apps
+## Services on first boot
 
-After flashing the image and booting the Pi, start the services:
+On first boot the Pi builds and starts systemd services for both projects.
+Check their status with:
 
 ```sh
-# token.place
-cd /opt/projects/token.place
-docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
-docker run -d --name tokenplace -p 5000:5000 tokenplace
-
-# dspace frontend
-cd /opt/projects/dspace/frontend
-cp .env.example .env  # if the file exists
-docker compose up -d
+sudo systemctl status tokenplace.service
+sudo systemctl status dspace.service
 ```
 
 Visit `http://<pi-host>:5000` for token.place and `http://<pi-host>:3000` for
@@ -44,6 +38,16 @@ dspace. To expose them through a Cloudflare Tunnel, update
 `/opt/sugarkube/docker-compose.cloudflared.yml` as shown in
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
 
-Use `EXTRA_REPOS` to experiment with other projects and extend the image over
-time.
+## Extend with additional repositories
 
+Use `EXTRA_REPOS` to clone extra projects during image build. After boot,
+register them as services using `install_repo_service.sh`:
+
+```sh
+sudo /usr/local/sbin/install_repo_service.sh myapp /opt/projects/myapp \
+  "bash /usr/local/sbin/start_myapp.sh" "docker compose down"
+```
+
+Write a `start_myapp.sh` script that builds and launches your app, then copy it
+into `/usr/local/sbin` before rerunning the image build. This keeps hooks open
+for future repositories.
