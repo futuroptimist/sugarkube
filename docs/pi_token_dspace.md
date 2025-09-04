@@ -42,6 +42,8 @@ dspace. To expose them through a Cloudflare Tunnel, update
 `/opt/sugarkube/docker-compose.cloudflared.yml` as shown in
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
 
+Use `EXTRA_REPOS` to experiment with other projects and extend the image over
+time.
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
