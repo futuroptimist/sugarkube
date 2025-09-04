@@ -9,6 +9,7 @@
                 (comment 2 "Keep high-current traces short")
                 (comment 3 "Label polarity and voltage on connectors")
                 (comment 4 "Verify KiBot exports before fabrication")
+                (comment 5 "Note output connector orientation")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
