@@ -194,9 +194,11 @@ export DEBIAN_FRONTEND=noninteractive
 # Allow callers to override the build timeout
 BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 
-APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
--o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
-APT_OPTS+=' -o APT::Install-Recommends=false -o APT::Install-Suggests=false'
+APT_RETRIES="${APT_RETRIES:-5}"
+APT_TIMEOUT="${APT_TIMEOUT:-30}"
+APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIMEOUT} \
+-o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true"
+APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
 # --- Reliability hooks: mirror rewrites and proxy exceptions ---
 # 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
