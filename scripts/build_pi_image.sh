@@ -314,4 +314,8 @@ fi
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
 bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
+if [ ! -s "${OUT_IMG}" ]; then
+  echo "Image file not created: ${OUT_IMG}" >&2
+  exit 1
+fi
 echo "[sugarkube] Image written to ${OUT_IMG}"

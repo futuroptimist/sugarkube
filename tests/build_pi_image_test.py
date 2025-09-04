@@ -273,7 +273,7 @@ fi
         "python3 - <<'PY'\n"
         "import zipfile\n"
         "with zipfile.ZipFile('deploy/sugarkube.img.zip', 'w') as zf:\n"
-        "    zf.writestr('sugarkube.img', '')\n"
+        "    zf.writestr('sugarkube.img', 'pi')\n"
         "PY\n"
     )
     if precompressed:
@@ -281,7 +281,7 @@ fi
             "python3 - <<'PY'\n"
             "import lzma, pathlib\n"
             "pathlib.Path('deploy/sugarkube.img.xz').write_bytes("
-            "lzma.compress(b''))\n"
+            "lzma.compress(b'pi'))\n"
             "PY\n"
         )
     git_stub = (

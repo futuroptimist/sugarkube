@@ -9,7 +9,9 @@ deployment into a reusable image capable of hosting multiple projects, including
 It uses `cloud-init` to update and upgrade packages, bake Docker, the compose
 plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
+into the OS image. Cloud-init also drops an apt config with five retries and
+30-second timeouts to smooth over flaky networks.
+The `build_pi_image.sh` script clones `pi-gen` using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
@@ -46,11 +48,13 @@ with a 10-second timeout before building; override this via the
 daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are installed
 before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
 checks that both the temporary and output directories have at least 10 GB free
-before starting. Use the prepared image to deploy containerized apps. The
-companion guide [docker_repo_walkthrough.md](docker_repo_walkthrough.md)
-explains how to run projects such as token.place and dspace. Use the resulting
-image to bootstrap a three-node k3s cluster; see
-[raspi_cluster_setup.md](raspi_cluster_setup.md) for onboarding steps.
+before starting. After collecting the artifact it verifies the image file exists
+and is non-empty before reporting success. Use the prepared image to deploy
+containerized apps. The companion guide
+[docker_repo_walkthrough.md](docker_repo_walkthrough.md) explains how to run
+projects such as token.place and dspace. Use the resulting image to bootstrap a
+three-node k3s cluster; see [raspi_cluster_setup.md](raspi_cluster_setup.md)
+for onboarding steps.
 
 ## Steps
 
@@ -62,13 +66,14 @@ image to bootstrap a three-node k3s cluster; see
 3. Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
 4. The build script copies `docker-compose.cloudflared.yml` (override with
    `CLOUDFLARED_COMPOSE_PATH`) into `/opt/sugarkube/`. Cloud-init adds the
-   Cloudflare apt repo, pre-creates
-   `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
-   `cloudflared-compose` systemd unit (wired to `network-online.target` and set
-   to restart on failure), and enables Docker. If the default `pi` user exists
-   it's added to the `docker` group and given ownership of `/opt/sugarkube`. When
-   the `pi` user is absent these steps are skipped without error. For custom
-   usernames, adjust `user-data.yaml` accordingly. Verify the files and service.
+   Cloudflare apt repo, writes an apt config for five retries and 30-second
+   timeouts, pre-creates `/opt/sugarkube/.cloudflared.env` with `0600`
+   permissions, installs the `cloudflared-compose` systemd unit (wired to
+   `network-online.target` and set to restart on failure), and enables Docker.
+   If the default `pi` user exists
+    it's added to the `docker` group and given ownership of `/opt/sugarkube`. When
+    the `pi` user is absent these steps are skipped without error. For custom
+    usernames, adjust `user-data.yaml` accordingly. Verify the files and service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build. The
    tunnel starts automatically when the token exists; otherwise run:
