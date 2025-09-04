@@ -60,6 +60,9 @@ but the steps apply to any repository.
    ls dspace/frontend/docker-compose.yml
    ```
    Adjust paths for your repository.
+5. Set required environment variables. token.place reads values like `TOKEN_PLACE_ENV`
+   and `API_RATE_LIMIT`; dspace's `frontend/docker-compose.yml` sets `NODE_ENV`, `PORT`
+   and `HOST`. Create or edit an `.env` file if the project provides one.
 
 ## 3. Build or start containers
 1. Change into the repo directory.
