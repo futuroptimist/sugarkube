@@ -35,4 +35,5 @@ To expose them through a Cloudflare Tunnel, update
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
 
 To add more apps, clone additional repositories with `EXTRA_REPOS` and extend
-`docker-compose.apps.yml` with new service entries.
+`docker-compose.apps.yml` with new service entries. You can also use `EXTRA_REPOS`
+to experiment with other projects and extend the image over time.
