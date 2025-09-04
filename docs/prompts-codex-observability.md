@@ -8,13 +8,13 @@ slug: 'prompts-codex-observability'
 Use this prompt to scaffold a minimal observability stack and dashboard for the
 sugarkube platform.
 
-```
-SYSTEM
+```text
+SYSTEM:
 You are building the “Sugarkube Dashboard” capability for a k3s-based platform.
-Produce production-grade code, manifests, Helm values, and docs. Optimize for
-simplicity, reproducibility, and security by default.
+Produce production-grade code, manifests, Helm values, and docs.
+Optimize for simplicity, reproducibility, and security by default.
 
-GOAL
+GOAL:
 Create a complete, minimal, and extensible observability + kiosk solution:
 - Observability runs in k3s.
 - A Raspberry Pi acts only as a kiosk.
@@ -22,7 +22,7 @@ Create a complete, minimal, and extensible observability + kiosk solution:
 - Dashboards show health of k8s, Cloudflare tunnels, HTTP uptime/TLS, and
   GitHub repo signals for the `futuroptimist` org/user.
 
-INPUTS (parameterize; do not hard-code)
+INPUTS (parameterize; do not hard-code):
 - K8S context name: {{K8S_CONTEXT}}
 - Domain: {{BASE_DOMAIN}}
 - Grafana subdomain: {{GRAFANA_SUBDOMAIN}}
@@ -32,7 +32,7 @@ INPUTS (parameterize; do not hard-code)
 - List of project repos (owner/name): {{REPOS_JSON}}
 - Optional: enable_anonymous_grafana_view: {{BOOL}}
 
-DELIVERABLES (file tree)
+DELIVERABLES (file tree):
 - `platform/observability/README.md` – how to deploy, upgrade, and troubleshoot.
 - `platform/observability/helmfile.yaml` – declares charts and versions.
 - `platform/observability/values/kube-prometheus-stack.yaml`
@@ -60,7 +60,7 @@ DELIVERABLES (file tree)
   `apply-dashboards`, `kiosk-install`, `kiosk-update`.
 - `Taskfile.yml` – same tasks for users who prefer `task`.
 
-TECHNICAL REQUIREMENTS
+TECHNICAL REQUIREMENTS:
 1) **kube-prometheus-stack**
    - Namespace: `observability`.
    - Reasonable defaults: 30s scrape, 15d retention, resource requests/limits.
@@ -121,7 +121,7 @@ TECHNICAL REQUIREMENTS
      PV issues, incorrect Service names), and a section on adding a new project
      to the dashboard (edit `REPOS_JSON`, add blackbox target, redeploy).
 
-ACCEPTANCE CRITERIA
+ACCEPTANCE CRITERIA:
 - `make bootstrap-obs` completes without errors on a vanilla k3s cluster.
 - `kubectl -n observability get pods` shows Prometheus, Grafana, Alertmanager,
   Loki, Promtail, Blackbox, and GitHub exporter all `READY=1/1` (or appropriate).
@@ -135,12 +135,12 @@ ACCEPTANCE CRITERIA
 - The kiosk Pi boots to a full-screen Grafana dashboard with no dialogs, no
   mouse cursor, and restarts Chromium if the network flaps.
 
-NON-GOALS
+NON-GOALS:
 - Long-term object storage for logs/traces.
 - Multi-cluster federation. (Note: design for future federation but do not
   implement it now.)
 
-OUTPUT
+OUTPUT:
 - A ready-to-commit repo subtree under `platform/` with all files, plus a
   concise `README.md` walkthrough.
 - No placeholders beyond the declared inputs; use templates with `{{...}}`.

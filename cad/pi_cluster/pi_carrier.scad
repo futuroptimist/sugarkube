@@ -20,12 +20,12 @@ standoff_diam = 6.5;   // match Pi5 carrier standoffs for extra strength
 
 insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert
-insert_pocket_depth = insert_length + 0.7; // keeps 0.7 mm extra for chamfer
+lead_chamfer      = 0.5;         // chamfer depth to guide the insert
+insert_pocket_depth = insert_length + lead_chamfer; // pocket allows for chamfer
 insert_clearance  = 0.2;         // designed undersize for interference fit
 hole_diam         = insert_od - insert_clearance;
 assert(standoff_diam >= insert_od + 2,
        "standoff_diam must be ≥ insert_od + 2");
-lead_chamfer = 0.5;
 screw_clearance_diam = 3.0; // through-hole clearance
 
 countersink_diam = 5.0;
