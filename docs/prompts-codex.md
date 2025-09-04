@@ -17,12 +17,14 @@ Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-- Run `pre-commit run --all-files` to lint, format, and test the repository.
+- Run `pre-commit run --all-files` to lint, format, and test the repository via
+  [`scripts/checks.sh`](../scripts/checks.sh).
 - On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and
   `aspell-en`) and `linkchecker --no-warnings README.md docs/` succeed.
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
-  committing.
-- Log persistent failures in `outages/` as JSON per `outages/schema.json`.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Log persistent failures in [`outages/`](../outages/) as JSON per
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Identify a small bug fix or documentation clarification.
@@ -39,14 +41,13 @@ Type: evergreen
 
 Use this prompt to refine sugarkube's own prompt documentation.
 
-```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
-`aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
-`git diff --cached | ./scripts/scan-secrets.py` before committing. Fix any
-issues reported by these tools.
+Run `pre-commit run --all-files`, `pyspelling -c` [`.spellcheck.yaml`](../.spellcheck.yaml)
+(requires `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
+`git diff --cached |` [`./scripts/scan-secrets.py`](../scripts/scan-secrets.py) before committing.
+Fix any issues reported by these tools.
 
 USER:
 1. Choose a `docs/prompts-*.md` file to update (for example,
