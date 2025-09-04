@@ -5,10 +5,10 @@ slug: 'prompts-codex-pi-token-dspace'
 
 # Codex Pi token.place & dspace Prompt
 
-Use this prompt to streamline building a Raspberry Pi 5 image that hosts
+Use this prompt to streamline building a Raspberry Pi 5 image that hosts
 [token.place](https://github.com/futuroptimist/token.place) and
-[dspace](https://github.com/democratizedspace/dspace) via Docker Compose,
-while leaving room for other
+[dspace](https://github.com/democratizedspace/dspace) via
+[Docker Compose](https://docs.docker.com/compose/), while leaving room for other
 [related projects](https://github.com/futuroptimist#related-projects).
 
 ```text
@@ -20,20 +20,19 @@ Reduce the end-to-end steps to build and deploy a Pi image ready for
 `token.place` and `dspace`, leaving extension points for future repos.
 
 CONTEXT:
-- Raspberry Pi OS build script:
-  [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh).
-- First-boot cloud-init configs:
-  [`scripts/cloud-init/`](../scripts/cloud-init/).
+- Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for workflow guidelines.
+- Raspberry Pi OS build script: [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh).
+- First-boot cloud-init configs: [`scripts/cloud-init/`](../scripts/cloud-init/).
 - Upstream apps:
   - [token.place](https://github.com/futuroptimist/token.place)
   - [dspace](https://github.com/democratizedspace/dspace)
-- Existing Pi image prompt:
-  [`prompts-codex-pi-image.md`](./prompts-codex-pi-image.md).
+- Existing Pi image prompt: [`prompts-codex-pi-image.md`](./prompts-codex-pi-image.md).
 - Repository checks:
-  - `pre-commit run --all-files`
+  - `pre-commit run --all-files` (executes [`scripts/checks.sh`](../scripts/checks.sh))
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
   - `git diff --cached | ./scripts/scan-secrets.py`
+- Review [CI workflows](../.github/workflows/) to anticipate automated checks.
 
 REQUEST:
 1. Add or refine scripts and docs so `token.place` and `dspace` run as services on the Pi image.
@@ -54,7 +53,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
+Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
 `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
