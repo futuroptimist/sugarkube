@@ -1,4 +1,5 @@
 import gzip
+import lzma
 import os
 import subprocess
 import zipfile
@@ -32,6 +33,25 @@ def test_handles_img_gz(tmp_path):
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
     assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+
+
+def test_prefers_shallow_lexicographic_matches(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+
+    # deeper path should be ignored in favor of a shallower match
+    nested = deploy / "nested"
+    nested.mkdir()
+    (nested / "c.img.xz").write_bytes(lzma.compress(b"deep", preset=0))
+
+    # choose lexicographically first among shallow matches
+    (deploy / "b.img.xz").write_bytes(lzma.compress(b"later", preset=0))
+    (deploy / "a.img.xz").write_bytes(lzma.compress(b"chosen", preset=0))
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert lzma.open(out_img, "rb").read() == b"chosen"
 
 
 def test_errors_on_zip_without_img(tmp_path):
