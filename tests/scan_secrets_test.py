@@ -42,6 +42,30 @@ def test_main_exit_codes(monkeypatch, scan_secrets):
     assert scan_secrets.main() == 1
 
 
+def test_main_ripsecrets_detects_secret(monkeypatch, scan_secrets):
+    monkeypatch.setattr(scan_secrets, "run_ripsecrets", lambda diff_text: True)
+    monkeypatch.setattr(
+        scan_secrets.sys,
+        "stdin",
+        io.StringIO("+++ b/file\n+safe=1\n"),
+    )
+    assert scan_secrets.main() == 1
+
+
+def test_main_ripsecrets_clean(monkeypatch, scan_secrets):
+    monkeypatch.setattr(
+        scan_secrets,
+        "run_ripsecrets",
+        lambda diff_text: False,
+    )
+    monkeypatch.setattr(
+        scan_secrets.sys,
+        "stdin",
+        io.StringIO("+++ b/file\n+safe=1\n"),
+    )
+    assert scan_secrets.main() == 0
+
+
 def test_run_ripsecrets_returns_none_when_missing(monkeypatch, scan_secrets):
     monkeypatch.setattr(scan_secrets.shutil, "which", lambda _: None)
     assert scan_secrets.run_ripsecrets("diff") is None
@@ -85,3 +109,9 @@ def test_run_ripsecrets_clean(monkeypatch, scan_secrets):
         lambda *a, **k: Result,
     )
     assert scan_secrets.run_ripsecrets("diff") is False
+
+
+def test_main_skips_when_no_diff(monkeypatch, scan_secrets, capsys):
+    monkeypatch.setattr(scan_secrets.sys, "stdin", io.StringIO(""))
+    assert scan_secrets.main() == 0
+    assert "No diff provided" in capsys.readouterr().err
