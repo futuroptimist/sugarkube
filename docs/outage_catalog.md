@@ -1,6 +1,6 @@
 # Outage Catalog
 
-Structured archive of past outages. Each outage is stored as a JSON file using the schema in `schema.json`.
+Structured archive of past outages. Each outage is stored as a JSON file using the schema in [`outages/schema.json`](../outages/schema.json).
 
 File naming: `YYYY-MM-DD-<slug>.json`.
 
