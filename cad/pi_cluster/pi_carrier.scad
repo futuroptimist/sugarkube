@@ -31,7 +31,8 @@ screw_clearance_diam = 3.0; // through-hole clearance
 countersink_diam = 5.0;
 countersink_depth = 1.6;
 
-nut_flat = 5.0;   // across flats for M2.5 nut
+nut_clearance = 0.2; // extra room for easier nut insertion
+nut_flat = 5.0 + nut_clearance; // across flats for M2.5 nut
 nut_thick = 2.0;
 
 board_angle = 0;
