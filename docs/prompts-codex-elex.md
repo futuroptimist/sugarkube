@@ -16,13 +16,13 @@ Maintain KiCad and Fritzing sources for the hardware.
 
 CONTEXT:
 - Electronics files live under [`elex/`](../elex/).
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - The `power_ring` project uses KiCad 9+ and KiBot ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
-- Run `pre-commit run --all-files` to lint, format, and test. For documentation updates, also run
-  `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
-  `linkchecker --no-warnings README.md docs/`.
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
-  committing.
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
+- Run `pre-commit run --all-files` to lint, format, and test.  
+  For documentation updates, also run:
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `linkchecker --no-warnings README.md docs/`
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent tool failures in [`outages/`](../outages/) per
   [`outages/schema.json`](../outages/schema.json).
 
@@ -31,7 +31,9 @@ REQUEST:
 2. Export artifacts locally with:
    kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml
 3. Update any related documentation.
-4. Run `pre-commit run --all-files`.
+4. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
+   `linkchecker --no-warnings README.md docs/`; scan staged changes with
+   `git diff --cached | ./scripts/scan-secrets.py`.
 
 OUTPUT:
 A pull request summarizing electronics updates and confirming KiBot export.
