@@ -15,10 +15,16 @@ PURPOSE:
 Maintain KiCad and Fritzing sources for the hardware.
 
 CONTEXT:
-- Electronics files live under `elex/`.
-- The `power_ring` project uses KiCad 9+ and KiBot (`.kibot/power_ring.yaml`).
-- Run `pre-commit run --all-files` after changes.
-- Log persistent tool failures in `outages/` per `outages/schema.json`.
+- Electronics files live under [`elex/`](../elex/).
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
+- The `power_ring` project uses KiCad 9+ and KiBot ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
+- Run `pre-commit run --all-files` to lint, format, and test. For documentation updates, also run
+  `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
+  `linkchecker --no-warnings README.md docs/`.
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
+  committing.
+- Log persistent tool failures in [`outages/`](../outages/) per
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Modify schematics or PCB layouts in `elex/power_ring`.
@@ -39,9 +45,10 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
-`linkchecker --no-warnings README.md docs/` before committing.
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
+`aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
+`git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
