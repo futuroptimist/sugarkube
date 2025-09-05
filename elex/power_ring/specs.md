@@ -1,6 +1,7 @@
 # Power Ring Board Specifications
 
-This document outlines the intended features for the Sugarkube power distribution board.  The design may evolve as the project grows.
+This document outlines the intended features for the Sugarkube power distribution board.
+The design may evolve as the project grows.
 
 ## Connectors
 
@@ -17,6 +18,8 @@ This document outlines the intended features for the Sugarkube power distributio
 
 - Test points for measuring battery voltage
 - Silkscreen labels for polarity and connector numbers
-- Title block comments record decoupling guidelines, high-current trace layout, connector labeling and export checks
+- Title block comments record decoupling guidelines, high-current trace layout, connector
+  labeling, export checks, and BOM validation
 
-These requirements are a starting point – modify the KiCad project as needed and update this file when the schematic changes.
+These requirements are a starting point – modify the KiCad project as needed and
+update this file when the schematic changes.
