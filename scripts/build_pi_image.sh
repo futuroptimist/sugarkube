@@ -194,9 +194,11 @@ export DEBIAN_FRONTEND=noninteractive
 # Allow callers to override the build timeout
 BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 
-APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
--o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true'
-APT_OPTS+=' -o APT::Install-Recommends=false -o APT::Install-Suggests=false'
+APT_RETRIES="${APT_RETRIES:-5}"
+APT_TIMEOUT="${APT_TIMEOUT:-30}"
+APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIMEOUT} \
+-o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true"
+APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
 # --- Reliability hooks: mirror rewrites and proxy exceptions ---
 # 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
@@ -315,7 +317,7 @@ OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
 bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
 if [ ! -s "${OUT_IMG}" ]; then
-  echo "Image file not created: ${OUT_IMG}" >&2
+  echo "Output image not found or empty: ${OUT_IMG}" >&2
   exit 1
 fi
 echo "[sugarkube] Image written to ${OUT_IMG}"

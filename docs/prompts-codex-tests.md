@@ -15,7 +15,7 @@ PURPOSE:
 Improve and maintain test coverage.
 
 CONTEXT:
-- Tests live in [`tests/`](../tests/) and use [pytest](https://docs.pytest.org/).
+- Tests live in [`tests/`](../tests/) and use [pytest](https://docs.pytest.org/en/stable/).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to invoke `scripts/checks.sh` for linting, formatting, and tests.
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
@@ -43,7 +43,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
 `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
