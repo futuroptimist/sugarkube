@@ -25,18 +25,16 @@ The script clones each repo into `/opt/projects` and assigns ownership to the
 
 ## Run the apps
 
-After flashing the image and booting the Pi, start the services:
+On first boot the Pi builds the containers and enables systemd services for both
+apps. They start automatically and can be managed with `systemctl`:
 
 ```sh
-# token.place
-cd /opt/projects/token.place
-docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
-docker run -d --name tokenplace -p 5000:5000 tokenplace
+# check service status
+sudo systemctl status tokenplace.service
+sudo systemctl status dspace.service
 
-# dspace frontend
-cd /opt/projects/dspace/frontend
-cp .env.example .env  # if the file exists
-docker compose up -d
+# restart a service
+sudo systemctl restart tokenplace.service
 ```
 
 Visit `http://<pi-host>:5000` for token.place and `http://<pi-host>:3000` for
@@ -44,5 +42,16 @@ dspace. To expose them through a Cloudflare Tunnel, update
 `/opt/sugarkube/docker-compose.cloudflared.yml` as shown in
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
 
-Use `EXTRA_REPOS` to experiment with other projects and extend the image over
-time.
+## Extend with new repositories
+
+Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
+`/opt/projects`. Create a systemd unit that mirrors `tokenplace.service` or
+`dspace.service` to run them on boot:
+
+```sh
+sudo cp /etc/systemd/system/tokenplace.service /etc/systemd/system/newapp.service
+# edit WorkingDirectory and docker compose paths as needed
+sudo systemctl enable --now newapp.service
+```
+
+Use these hooks to experiment with other projects and grow the image over time.

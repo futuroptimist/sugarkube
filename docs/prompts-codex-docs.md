@@ -15,16 +15,16 @@ PURPOSE:
 Keep the documentation clear and accurate.
 
 CONTEXT:
-- Docs live in `docs/`.
-- Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for style and testing
-  requirements.
+- Docs live in [`docs/`](../docs/).
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for style, testing, and repository conventions.
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
-  linting, formatting, and tests. Documentation changes also require `pyspelling -c
-  .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/` (requires `aspell` and
-  `aspell-en`).
+  linting, formatting, and tests.  
+  For documentation changes, also run:
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `linkchecker --no-warnings README.md docs/`
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
-- Record recurring issues in [outages/](../outages/) using the
-  [JSON schema](../outages/schema.json).
+- Record recurring issues in [`outages/`](../outages/) using the
+  [`schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Choose a markdown file in `docs/` that needs clarification or an update.
