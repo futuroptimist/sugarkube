@@ -307,7 +307,6 @@ if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
     exit 1
   fi
 fi
-
 if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
   echo "pi-gen Docker image not found" >&2
   exit 1
