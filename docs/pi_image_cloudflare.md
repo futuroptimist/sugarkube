@@ -9,7 +9,9 @@ deployment into a reusable image capable of hosting multiple projects, including
 It uses `cloud-init` to update and upgrade packages, bake Docker, the compose
 plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-into the OS image. The `build_pi_image.sh` script clones `pi-gen` using
+into the OS image. Cloud-init also drops an apt config with five retries and
+30-second timeouts to smooth over flaky networks.
+The `build_pi_image.sh` script clones `pi-gen` using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
@@ -64,14 +66,15 @@ image to bootstrap a three-node k3s cluster; see
 3. Boot the Pi and run `sudo rpi-clone sda -f` to copy the OS to an SSD.
 4. The build script copies `docker-compose.cloudflared.yml` (override with
    `CLOUDFLARED_COMPOSE_PATH`) into `/opt/sugarkube/`. Cloud-init adds the
-   Cloudflare apt repo, pre-creates
-   `/opt/sugarkube/.cloudflared.env` with `0600` permissions, installs the
-   `cloudflared-compose` systemd unit (wired to `network-online.target` and set
-   to restart on failure), enables Docker, and removes the apt cache and package
-   lists to shrink the image. If the default `pi` user exists it's added to the
-   `docker` group and given ownership of `/opt/sugarkube`. When the `pi` user is
-   absent these steps are skipped without error. For custom usernames, adjust
-   `user-data.yaml` accordingly. Verify the files and service.
+   Cloudflare apt repo, writes an apt config for five retries and 30-second
+   timeouts, pre-creates `/opt/sugarkube/.cloudflared.env` with `0600`
+   permissions, installs the `cloudflared-compose` systemd unit (wired to
+   `network-online.target` and set to restart on failure), enables Docker, and
+   removes the apt cache and package lists to shrink the image. If the default
+   `pi` user exists it's added to the `docker` group and given ownership of
+   `/opt/sugarkube`. When the `pi` user is absent these steps are skipped without
+   error. For custom usernames, adjust `user-data.yaml` accordingly. Verify the
+   files and service.
 5. Add your Cloudflare token to `/opt/sugarkube/.cloudflared.env` if it wasn't
    provided via `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` during the build. The
    tunnel starts automatically when the token exists; otherwise run:
@@ -92,8 +95,8 @@ ensures the result is available as `sugarkube.img.xz` (compressing the image if
 pi-gen produces an uncompressed `.img`), searches recursively in pi-gen's
 `deploy/` directory for the image, and exits with an error if none is found.
 It then uploads the artifact. Download it
-   from the [workflow artifacts][pi-image workflow artifacts] or run the script
-   locally if you need customizations. The workflow rotates its
+from the [workflow artifacts][pi-image workflow artifacts] or run the script
+locally if you need customizations. The workflow rotates its
 cached pi-gen Docker image monthly by hashing the upstream branch, ensuring each
 build pulls in the latest security updates.
 The build script streams output line-by-line so GitHub Actions logs show
