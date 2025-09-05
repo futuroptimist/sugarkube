@@ -39,6 +39,12 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/apt/apt.conf.d/80-retries
+    permissions: '0644'
+    content: |
+      Acquire::Retries "5";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
 runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
