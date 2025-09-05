@@ -7,7 +7,7 @@ slug: 'prompts-codex-docs'
 
 Use this prompt to refine build guides and reference material.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
@@ -15,13 +15,13 @@ PURPOSE:
 Keep the documentation clear and accurate.
 
 CONTEXT:
-- Docs live in `docs/`.
-- Follow [AGENTS.md](../AGENTS.md) for style and testing requirements.
+- Docs live in [`docs/`](../docs/).
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for style, testing, and repository conventions.
 - Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
   `linkchecker --no-warnings README.md docs/` (requires `aspell` and `aspell-en`).
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
-- Record recurring issues in [outages/](../outages/) using the
-  [JSON schema](../outages/schema.json).
+- Record recurring issues in [`outages/`](../outages/) using the
+  [`schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Choose a markdown file in `docs/` that needs clarification or an update.
