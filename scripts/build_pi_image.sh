@@ -114,6 +114,12 @@ PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
+OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+# Abort to avoid clobbering existing images unless FORCE_OVERWRITE=1
+if [ -e "${OUT_IMG}" ] && [ "${FORCE_OVERWRITE:-0}" -ne 1 ]; then
+  echo "Output image already exists: ${OUT_IMG} (set FORCE_OVERWRITE=1 to overwrite)" >&2
+  exit 1
+fi
 export OUTPUT_DIR
 check_space "${OUTPUT_DIR}"
 
@@ -312,8 +318,6 @@ if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
   echo "pi-gen Docker image not found" >&2
   exit 1
 fi
-
-OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
 bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
 if [ ! -s "${OUT_IMG}" ]; then

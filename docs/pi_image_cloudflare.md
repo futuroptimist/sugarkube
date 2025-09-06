@@ -15,8 +15,11 @@ The `build_pi_image.sh` script clones `pi-gen` using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
-where artifacts are written; the script creates the directory if needed. To
-reduce flaky downloads it pins the official Raspberry Pi and Debian mirrors,
+where artifacts are written; the script creates the directory if needed. To avoid
+accidental overwrites it aborts when the image already exists unless `FORCE_OVERWRITE=1`
+is set. Set `FORCE_OVERWRITE=1` when rerunning builds to replace an existing
+image. To reduce flaky downloads it pins the official Raspberry Pi and Debian
+mirrors,
 adds `APT_OPTS` (retries, timeouts, `--fix-missing`), and installs a persistent
 apt/dpkg Pre-Invoke hook that rewrites any raspbian host to a stable HTTPS
 mirror, and bypasses proxies for `archive.raspberrypi.com`. Override the Raspberry
