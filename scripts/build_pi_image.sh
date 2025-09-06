@@ -158,6 +158,10 @@ install -Dm644 "${CLOUDFLARED_COMPOSE_PATH}" \
 # Bundle pi_node_verifier and optionally clone repos into the image
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+install -Dm644 "${REPO_ROOT}/scripts/cloud-init/tokenplace.service" \
+  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/etc/systemd/system/tokenplace.service"
+install -Dm644 "${REPO_ROOT}/scripts/cloud-init/dspace.service" \
+  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/etc/systemd/system/dspace.service"
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"

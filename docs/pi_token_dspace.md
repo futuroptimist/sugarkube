@@ -23,7 +23,8 @@ EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
 ```
 
 The script clones each repo into `/opt/projects` and assigns ownership to the
-`pi` user.
+`pi` user. Service units for both apps live under
+`scripts/cloud-init/` and are baked into `/etc/systemd/system/` on the Pi.
 
 ## Run the apps
 
@@ -53,8 +54,14 @@ Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
 services and editing the paths:
 
 ```sh
-sudo cp /etc/systemd/system/tokenplace.service /etc/systemd/system/newapp.service
+cp scripts/cloud-init/tokenplace.service scripts/cloud-init/newapp.service
 # edit WorkingDirectory and docker compose paths as needed
+EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
+```
+
+After boot:
+
+```sh
 sudo systemctl enable --now newapp.service
 ```
 
