@@ -1,17 +1,15 @@
 # Raspberry Pi Image with Cloudflare Tunnel
 
-This guide expands the
-[token.place](https://github.com/futuroptimist/token.place) Raspberry Pi
-deployment into a reusable image capable of hosting multiple projects, including
-[token.place](https://github.com/futuroptimist/token.place) and
-[dspace](https://github.com/democratizedspace/dspace).
+This guide expands the [token.place](https://github.com/futuroptimist/token.place)
+Raspberry Pi deployment into a reusable image capable of hosting multiple projects,
+including [dspace](https://github.com/democratizedspace/dspace).
 
 It uses `cloud-init` to update and upgrade packages, bake Docker, the compose
 plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. Cloud-init also drops an apt config with five retries and
 30-second timeouts to smooth over flaky networks.
-The `build_pi_image.sh` script clones `pi-gen` using
+The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
@@ -32,4 +30,31 @@ the cloud-init configuration with `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` an
 `CLOUDFLARED_COMPOSE_PATH` at alternate files; the defaults read from
 `scripts/cloud-init/`. Set `SKIP_BINFMT=1` to skip installing binfmt handlers when
 they're already present or when the build environment disallows privileged
-containers.
+containers. Set `DEBUG=1` to trace script execution for troubleshooting.
+
+`REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
+The script rewrites the Cloudflare apt source architecture to `armhf` when
+`ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
+`ARM64=1` to avoid generating both architectures.
+
+The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
+`token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
+`/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
+pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
+
+Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
+`/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
+installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
+once the token is present and waits for `network-online.target` to ensure
+connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
+with a 10-second timeout before building; override this via the
+`URL_CHECK_TIMEOUT` environment variable. Ensure `curl`, `docker` (with its
+daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are installed
+before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
+checks that both the temporary and output directories have at least 10 GB free
+before starting and verifies the resulting image exists and is non-empty before
+reporting success. Use the prepared image to deploy containerized apps. The
+companion guide [docker_repo_walkthrough.md](docker_repo_walkthrough.md)
+explains how to run projects such as token.place and dspace. Use the resulting
+image to bootstrap a three-node k3s cluster; see
+[raspi_cluster_setup.md](raspi_cluster_setup.md) for onboarding steps.
