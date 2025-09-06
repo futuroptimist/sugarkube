@@ -42,10 +42,11 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
 
-   ```bash
-    ./scripts/openscad_render.sh path/to/model.scad  # uses model's default standoff_mode
+   ~~~bash
+   ./scripts/openscad_render.sh path/to/model.scad  # uses model’s default standoff_mode (often heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
-   ```
+   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+   ~~~
 
 4. Commit updated SCAD sources and any documentation.
 
