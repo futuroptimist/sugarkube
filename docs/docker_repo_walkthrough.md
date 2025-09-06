@@ -151,6 +151,22 @@ docker exec -it tokenplace python -m pytest  # optional tests
 curl http://localhost:5000  # should return HTML
 ```
 
+#### token.place (docker-compose)
+
+The Pi image includes a minimal compose file so token.place can start with a
+single command. The same approach works for repos like dspace that provide
+their own `docker-compose.yml`.
+
+```sh
+cd /opt/projects/token.place
+docker compose -f docker-compose.tokenplace.yml up -d
+docker compose -f docker-compose.tokenplace.yml ps
+docker compose -f docker-compose.tokenplace.yml logs -f
+curl http://localhost:5000
+```
+Use `docker compose -f docker-compose.tokenplace.yml logs -f` to watch
+token.place start up and confirm it binds to port 5000.
+
 #### dspace (docker-compose)
 
 ```sh
