@@ -164,6 +164,16 @@ CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
 CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
 
+# Remove token.place or dspace systemd units if their repos are not cloned
+if [[ "$CLONE_TOKEN_PLACE" != "true" ]]; then
+  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${USER_DATA}"
+  sed -i '/# tokenplace-runcmd/,+1d' "${USER_DATA}"
+fi
+if [[ "$CLONE_DSPACE" != "true" ]]; then
+  sed -i '/# dspace-start/,/# dspace-end/d' "${USER_DATA}"
+  sed -i '/# dspace-runcmd/,+1d' "${USER_DATA}"
+fi
+
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {
   echo "#!/usr/bin/env bash"

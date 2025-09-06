@@ -13,8 +13,10 @@ hooks for additional repositories.
 ./scripts/build_pi_image.sh
 ```
 
-`build_pi_image.sh` clones `token.place` and `dspace` by default. To add more
-projects, pass their Git URLs via `EXTRA_REPOS`:
+`build_pi_image.sh` clones `token.place` and `dspace` and installs matching
+systemd units. To skip either repo, set `CLONE_TOKEN_PLACE=false` or
+`CLONE_DSPACE=false`. Add more projects by passing their Git URLs via
+`EXTRA_REPOS`:
 
 ```sh
 EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
@@ -45,8 +47,10 @@ dspace. To expose them through a Cloudflare Tunnel, update
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. Create a systemd unit that mirrors `tokenplace.service` or
-`dspace.service` to run them on boot:
+`/opt/projects`. The image builder strips the `token.place` or `dspace` service
+definitions when the corresponding `CLONE_*` flag is `false`, so you can build a
+minimal image and add services later. Use an existing unit as a template for new
+repos:
 
 ```sh
 sudo cp /etc/systemd/system/tokenplace.service /etc/systemd/system/newapp.service
