@@ -10,6 +10,35 @@ but the steps apply to any repository.
 For a prebuilt image that already clones both projects, see
 [pi_token_dspace.md](pi_token_dspace.md).
 
+## Quick start
+
+Try one of these example projects to confirm the image works:
+
+### token.place
+
+```sh
+ssh pi@<hostname>.local
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place
+cd token.place
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+curl http://localhost:5000
+```
+
+### dspace
+
+```sh
+cd /opt/projects
+git clone https://github.com/democratizedspace/dspace
+cd dspace/frontend
+cp .env.example .env  # if present
+docker compose up -d
+curl http://localhost:3000
+```
+
+Proceed with the detailed steps below to adapt the process for other repositories.
+
 ## 1. Prepare the Pi
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
