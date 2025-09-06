@@ -10,6 +10,35 @@ but the steps apply to any repository.
 For a prebuilt image that already clones both projects, see
 [pi_token_dspace.md](pi_token_dspace.md).
 
+## Quick start
+
+Try one of these example projects to confirm the image works:
+
+### token.place
+
+```sh
+ssh pi@<hostname>.local
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place
+cd token.place
+docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
+docker run -d --name tokenplace -p 5000:5000 tokenplace
+curl http://localhost:5000
+```
+
+### dspace
+
+```sh
+cd /opt/projects
+git clone https://github.com/democratizedspace/dspace
+cd dspace/frontend
+cp .env.example .env  # if present
+docker compose up -d
+curl http://localhost:3000
+```
+
+Proceed with the detailed steps below to adapt the process for other repositories.
+
 ## 1. Prepare the Pi
 1. Follow [pi_image_cloudflare.md](pi_image_cloudflare.md) to flash the SD card and
    start the Cloudflare Tunnel.
@@ -63,8 +92,12 @@ For a prebuilt image that already clones both projects, see
      cd token.place
      printf 'TOKEN_PLACE_ENV=production\n' >> .env
      ```
-   - `dspace` lists any necessary environment variables in
-     `frontend/README.md`.
+   - `dspace` lists variables like `NODE_ENV`, `PORT`, and `HOST` in
+     `frontend/docker-compose.yml`. Override them with an `.env` file if needed:
+     ```sh
+     cd dspace/frontend
+     printf 'NODE_ENV=production\nPORT=3000\nHOST=0.0.0.0\n' >> .env
+     ```
 4. Inspect the repo to confirm it includes Docker assets:
    ```sh
    ls token.place/docker            # token.place Dockerfile lives here
@@ -73,7 +106,20 @@ For a prebuilt image that already clones both projects, see
    Adjust paths for your repository.
 5. Set required environment variables. token.place reads values like `TOKEN_PLACE_ENV`
    and `API_RATE_LIMIT`; dspace's `frontend/docker-compose.yml` sets `NODE_ENV`, `PORT`
-   and `HOST`. Create or edit an `.env` file if the project provides one.
+   and `HOST`. Create or edit an `.env` file if the project provides one. Example files:
+
+   - `token.place/.env`:
+     ```env
+     TOKEN_PLACE_ENV=production
+     API_RATE_LIMIT=5
+     ```
+   - `dspace/frontend/.env`:
+     ```env
+     NODE_ENV=production
+     PORT=3000
+     HOST=0.0.0.0
+     ```
+   Adjust values to match your deployment.
 
 ## 3. Build or start containers
 1. Change into the repo directory.
@@ -137,6 +183,22 @@ docker logs -f tokenplace  # watch startup output
 docker exec -it tokenplace python -m pytest  # optional tests
 curl http://localhost:5000  # should return HTML
 ```
+
+#### token.place (docker-compose)
+
+The Pi image includes a minimal compose file so token.place can start with a
+single command. The same approach works for repos like dspace that provide
+their own `docker-compose.yml`.
+
+```sh
+cd /opt/projects/token.place
+docker compose -f docker-compose.tokenplace.yml up -d
+docker compose -f docker-compose.tokenplace.yml ps
+docker compose -f docker-compose.tokenplace.yml logs -f
+curl http://localhost:5000
+```
+Use `docker compose -f docker-compose.tokenplace.yml logs -f` to watch
+token.place start up and confirm it binds to port 5000.
 
 #### dspace (docker-compose)
 
