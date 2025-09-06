@@ -18,7 +18,7 @@ CONTEXT:
 - Docs live in [`docs/`](../docs/).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for style, testing, and repository conventions.
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
-  linting, formatting, and tests.  
+  linting, formatting, and tests.
   For documentation changes, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
