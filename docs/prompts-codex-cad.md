@@ -25,12 +25,15 @@ CONTEXT:
   or `nut`). `STANDOFF_MODE` is optional, case-insensitive, and defaults to the model’s
   `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to lint, format, and test.
+- Run `pre-commit run --all-files` to lint, format, and test via
+  [`scripts/checks.sh`](../scripts/checks.sh).
   For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
-  - `linkchecker --no-warnings README.md docs/`
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
-  committing.
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`;
+    see [`.spellcheck.yaml`](../.spellcheck.yaml))
+  - `linkchecker --no-warnings README.md docs/` to verify links in
+    [`README.md`](../README.md) and [`docs/`](../docs/)
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
+  before committing (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
@@ -40,7 +43,7 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (often heatset)
+    ./scripts/openscad_render.sh path/to/model.scad  # uses model's default standoff_mode
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    ```
 
