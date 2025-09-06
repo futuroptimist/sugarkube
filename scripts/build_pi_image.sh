@@ -200,10 +200,13 @@ APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIM
 -o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true"
 APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
-# --- Reliability hooks: mirror rewrites and proxy exceptions ---
-# 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
-mkdir -p stage0/00-configure-apt/files/usr/local/sbin
-cat > stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
+SKIP_MIRROR_REWRITE="${SKIP_MIRROR_REWRITE:-0}"
+
+if [ "$SKIP_MIRROR_REWRITE" -ne 1 ]; then
+  # --- Reliability hooks: mirror rewrites and proxy exceptions ---
+  # 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
+  mkdir -p stage0/00-configure-apt/files/usr/local/sbin
+  cat > stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -213,22 +216,22 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 EOSH
-chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
-mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
-cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
+  chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
+  mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
+  cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
 APT::Update::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
 DPkg::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
 EOC
 
-# 2) Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
-cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<'EOP'
+  # 2) Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
+  cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<'EOP'
 Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
 EOP
 
-# 3) Early rewrite before default 00-run.sh executes in stage0
-mkdir -p stage0/00-configure-apt
-cat > stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
+  # 3) Early rewrite before default 00-run.sh executes in stage0
+  mkdir -p stage0/00-configure-apt
+  cat > stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -238,11 +241,11 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 EOSH
-chmod +x stage0/00-configure-apt/00-run-00-pre.sh
+  chmod +x stage0/00-configure-apt/00-run-00-pre.sh
 
-# 4) Stage2 safeguard rewrite
-mkdir -p stage2/00-configure-apt
-cat > stage2/00-configure-apt/01-run.sh <<'EOSH'
+  # 4) Stage2 safeguard rewrite
+  mkdir -p stage2/00-configure-apt
+  cat > stage2/00-configure-apt/01-run.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -253,11 +256,11 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
 done
 apt-get -o Acquire::Retries=10 update || true
 EOSH
-chmod +x stage2/00-configure-apt/01-run.sh
+  chmod +x stage2/00-configure-apt/01-run.sh
 
-# 5) Export-image post-rewrite after 02-set-sources resets lists
-mkdir -p export-image/02-set-sources
-cat > export-image/02-set-sources/02-run.sh <<'EOSH'
+  # 5) Export-image post-rewrite after 02-set-sources resets lists
+  mkdir -p export-image/02-set-sources
+  cat > export-image/02-set-sources/02-run.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -268,7 +271,10 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
 done
 apt-get -o Acquire::Retries=10 update || true
 EOSH
-chmod +x export-image/02-set-sources/02-run.sh
+  chmod +x export-image/02-set-sources/02-run.sh
+else
+  echo "Skipping apt mirror rewrites"
+fi
 
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
