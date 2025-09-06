@@ -21,7 +21,8 @@ EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
 ```
 
 The script clones each repo into `/opt/projects` and assigns ownership to the
-`pi` user.
+`pi` user. Service units for both apps live under
+`scripts/cloud-init/` and are baked into `/etc/systemd/system/` on the Pi.
 
 ## Run the apps
 
@@ -45,12 +46,19 @@ dspace. To expose them through a Cloudflare Tunnel, update
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. Create a systemd unit that mirrors `tokenplace.service` or
-`dspace.service` to run them on boot:
+`/opt/projects`. Create a systemd unit that mirrors
+`scripts/cloud-init/tokenplace.service` or `scripts/cloud-init/dspace.service`
+and the app will start on boot:
 
 ```sh
-sudo cp /etc/systemd/system/tokenplace.service /etc/systemd/system/newapp.service
+cp scripts/cloud-init/tokenplace.service scripts/cloud-init/newapp.service
 # edit WorkingDirectory and docker compose paths as needed
+EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
+```
+
+After boot:
+
+```sh
 sudo systemctl enable --now newapp.service
 ```
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=token.place server via docker compose
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/projects/token.place
+ExecStart=/usr/bin/docker compose -f docker-compose.tokenplace.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.tokenplace.yml down
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
