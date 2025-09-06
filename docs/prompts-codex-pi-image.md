@@ -18,9 +18,10 @@ CONTEXT:
 - Cloud-init config lives under [`scripts/cloud-init/`](../scripts/cloud-init/).
 - [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh) builds an image locally or in CI.
 - [`pi_image_cloudflare.md`](./pi_image_cloudflare.md) is the user guide.
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to invoke
-  [`scripts/checks.sh`](../scripts/checks.sh) for linting, formatting, and tests. For
-  documentation changes, also run:
+  [`scripts/checks.sh`](../scripts/checks.sh) for linting, formatting, and tests.
+  For documentation changes, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
 - Scan staged changes for secrets with
