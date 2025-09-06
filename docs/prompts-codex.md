@@ -37,13 +37,14 @@ Type: evergreen
 
 Use this prompt to refine sugarkube's own prompt documentation.
 
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the [AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 Run `pre-commit run --all-files` (invokes [`scripts/checks.sh`](../scripts/checks.sh)),
-`pyspelling -c` [`.spellcheck.yaml`](../.spellcheck.yaml) (requires `aspell` and `aspell-en`),
-`linkchecker --no-warnings README.md docs/`, and `git diff --cached |`
-[`./scripts/scan-secrets.py`](../scripts/scan-secrets.py) before committing.
+`pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`),
+`linkchecker --no-warnings README.md docs/`, and
+`git diff --cached | ./scripts/scan-secrets.py` before committing.
 Fix any issues reported by these tools.
 
 USER:
