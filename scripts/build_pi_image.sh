@@ -114,6 +114,12 @@ PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
+OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+# Abort to avoid clobbering existing images unless FORCE_OVERWRITE=1
+if [ -e "${OUT_IMG}" ] && [ "${FORCE_OVERWRITE:-0}" -ne 1 ]; then
+  echo "Output image already exists: ${OUT_IMG} (set FORCE_OVERWRITE=1 to overwrite)" >&2
+  exit 1
+fi
 export OUTPUT_DIR
 check_space "${OUTPUT_DIR}"
 
@@ -163,6 +169,16 @@ CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
 CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
+
+# Remove token.place or dspace systemd units if their repos are not cloned
+if [[ "$CLONE_TOKEN_PLACE" != "true" ]]; then
+  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${USER_DATA}"
+  sed -i '/# tokenplace-runcmd/,+1d' "${USER_DATA}"
+fi
+if [[ "$CLONE_DSPACE" != "true" ]]; then
+  sed -i '/# dspace-start/,/# dspace-end/d' "${USER_DATA}"
+  sed -i '/# dspace-runcmd/,+1d' "${USER_DATA}"
+fi
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {
@@ -312,8 +328,6 @@ if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
   echo "pi-gen Docker image not found" >&2
   exit 1
 fi
-
-OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
 bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
 if [ ! -s "${OUT_IMG}" ]; then
