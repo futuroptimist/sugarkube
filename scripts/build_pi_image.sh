@@ -114,6 +114,12 @@ PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
+OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+# Abort to avoid clobbering existing images unless FORCE_OVERWRITE=1
+if [ -e "${OUT_IMG}" ] && [ "${FORCE_OVERWRITE:-0}" -ne 1 ]; then
+  echo "Output image already exists: ${OUT_IMG} (set FORCE_OVERWRITE=1 to overwrite)" >&2
+  exit 1
+fi
 export OUTPUT_DIR
 check_space "${OUTPUT_DIR}"
 
@@ -164,6 +170,16 @@ CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
 CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
 
+# Remove token.place or dspace systemd units if their repos are not cloned
+if [[ "$CLONE_TOKEN_PLACE" != "true" ]]; then
+  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${USER_DATA}"
+  sed -i '/# tokenplace-runcmd/,+1d' "${USER_DATA}"
+fi
+if [[ "$CLONE_DSPACE" != "true" ]]; then
+  sed -i '/# dspace-start/,/# dspace-end/d' "${USER_DATA}"
+  sed -i '/# dspace-runcmd/,+1d' "${USER_DATA}"
+fi
+
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {
   echo "#!/usr/bin/env bash"
@@ -200,10 +216,13 @@ APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIM
 -o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true"
 APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
-# --- Reliability hooks: mirror rewrites and proxy exceptions ---
-# 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
-mkdir -p stage0/00-configure-apt/files/usr/local/sbin
-cat > stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
+SKIP_MIRROR_REWRITE="${SKIP_MIRROR_REWRITE:-0}"
+
+if [ "$SKIP_MIRROR_REWRITE" -ne 1 ]; then
+  # --- Reliability hooks: mirror rewrites and proxy exceptions ---
+  # 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
+  mkdir -p stage0/00-configure-apt/files/usr/local/sbin
+  cat > stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -213,22 +232,22 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 EOSH
-chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
-mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
-cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
+  chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
+  mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
+  cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
 APT::Update::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
 DPkg::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
 EOC
 
-# 2) Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
-cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<'EOP'
+  # 2) Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
+  cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<'EOP'
 Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
 EOP
 
-# 3) Early rewrite before default 00-run.sh executes in stage0
-mkdir -p stage0/00-configure-apt
-cat > stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
+  # 3) Early rewrite before default 00-run.sh executes in stage0
+  mkdir -p stage0/00-configure-apt
+  cat > stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -238,11 +257,11 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 EOSH
-chmod +x stage0/00-configure-apt/00-run-00-pre.sh
+  chmod +x stage0/00-configure-apt/00-run-00-pre.sh
 
-# 4) Stage2 safeguard rewrite
-mkdir -p stage2/00-configure-apt
-cat > stage2/00-configure-apt/01-run.sh <<'EOSH'
+  # 4) Stage2 safeguard rewrite
+  mkdir -p stage2/00-configure-apt
+  cat > stage2/00-configure-apt/01-run.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -253,11 +272,11 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
 done
 apt-get -o Acquire::Retries=10 update || true
 EOSH
-chmod +x stage2/00-configure-apt/01-run.sh
+  chmod +x stage2/00-configure-apt/01-run.sh
 
-# 5) Export-image post-rewrite after 02-set-sources resets lists
-mkdir -p export-image/02-set-sources
-cat > export-image/02-set-sources/02-run.sh <<'EOSH'
+  # 5) Export-image post-rewrite after 02-set-sources resets lists
+  mkdir -p export-image/02-set-sources
+  cat > export-image/02-set-sources/02-run.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
@@ -268,7 +287,10 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.l
 done
 apt-get -o Acquire::Retries=10 update || true
 EOSH
-chmod +x export-image/02-set-sources/02-run.sh
+  chmod +x export-image/02-set-sources/02-run.sh
+else
+  echo "Skipping apt mirror rewrites"
+fi
 
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
@@ -312,8 +334,6 @@ if ! docker image inspect pi-gen:latest >/dev/null 2>&1; then
   echo "pi-gen Docker image not found" >&2
   exit 1
 fi
-
-OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
 
 bash "${REPO_ROOT}/scripts/collect_pi_image.sh" "deploy" "${OUT_IMG}"
 if [ ! -s "${OUT_IMG}" ]; then
