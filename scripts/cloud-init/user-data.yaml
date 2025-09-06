@@ -45,6 +45,7 @@ write_files:
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
+# tokenplace-start
   - path: /opt/projects/token.place/docker-compose.tokenplace.yml
     permissions: '0644'
     content: |
@@ -76,6 +77,8 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+# tokenplace-end
+# dspace-start
   - path: /etc/systemd/system/dspace.service
     permissions: '0644'
     content: |
@@ -97,6 +100,7 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+# dspace-end
 runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
