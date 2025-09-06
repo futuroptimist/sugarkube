@@ -34,6 +34,14 @@ def test_handles_img_gz(tmp_path):
     assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
 
 
+def test_errors_when_deploy_missing(tmp_path):
+    deploy = tmp_path / "missing"
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode != 0
+    assert f"'{deploy}' does not exist" in result.stderr
+
+
 def test_errors_on_zip_without_img(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
