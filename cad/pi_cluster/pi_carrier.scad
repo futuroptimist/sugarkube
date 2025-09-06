@@ -22,11 +22,13 @@ insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert
 lead_chamfer      = 0.5;         // chamfer depth to guide the insert
 insert_pocket_depth = insert_length + lead_chamfer; // pocket allows for chamfer
+assert(insert_pocket_depth <= standoff_height,
+       "insert_pocket_depth must be ≤ standoff_height");
 insert_clearance  = 0.2;         // designed undersize for interference fit
 hole_diam         = insert_od - insert_clearance;
 assert(standoff_diam >= insert_od + 2,
        "standoff_diam must be ≥ insert_od + 2");
-screw_clearance_diam = 3.0; // through-hole clearance
+screw_clearance_diam = 3.2; // through-hole clearance, slightly oversize
 
 countersink_diam = 5.0;
 countersink_depth = 1.6;

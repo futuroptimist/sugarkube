@@ -28,6 +28,11 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
     `ssh-copy-id <user>@<hostname>.local`
 11. Test key-based login: `ssh <user>@<hostname>.local` should connect without
     prompting for credentials.
+12. Harden SSH by disabling password authentication once key-based logins work:
+    ```sh
+    sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+    sudo systemctl reload ssh
+    ```
 
 ## Switch and PoE
 
