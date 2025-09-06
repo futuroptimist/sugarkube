@@ -17,7 +17,8 @@ junction box.
 4. Attach the battery leads to the MPPT charge controller before any solar
    wiring. Powering the controller first lets it regulate incoming solar; connecting
    panels with no battery attached can damage it. Refer to the controller's manual
-   for the recommended connection order and connect the load output last. The KiCad
+   for the recommended connection order, connect the load output last, and set the
+   controller's battery type to **LiFePO4** before connecting the array. The KiCad
    schematic and board specs live under [elex/power_ring](../elex/power_ring/).
 5. Before connecting the array, verify each panel's open-circuit voltage and
    polarity with a multimeter. Join panels with MC4 connectors and 12 AWG wire,
