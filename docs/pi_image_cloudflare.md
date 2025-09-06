@@ -19,7 +19,7 @@ accidental overwrites it aborts when the image already exists unless
 replace an existing image. To reduce flaky downloads it pins the official
 Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `--fix-missing`), and installs a persistent apt/dpkg Pre-Invoke hook that rewrites
-any raspbian host to a stable HTTPS mirror, and bypasses proxies for
+any raspbian host to a stable HTTPS mirror and bypasses proxies for
 `archive.raspberrypi.com`. Set `SKIP_MIRROR_REWRITE=1` to disable these rewrites
 when your network already uses a reliable mirror. Use `APT_RETRIES` and
 `APT_TIMEOUT` to tune the retry count and per-request timeout. Override the
@@ -30,7 +30,7 @@ the cloud-init configuration with `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` an
 `CLOUDFLARED_COMPOSE_PATH` at alternate files; the defaults read from
 `scripts/cloud-init/`. Set `SKIP_BINFMT=1` to skip installing binfmt handlers when
 they're already present or when the build environment disallows privileged
-containers.
+containers. Set `DEBUG=1` to trace script execution for troubleshooting.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
 The script rewrites the Cloudflare apt source architecture to `armhf` when

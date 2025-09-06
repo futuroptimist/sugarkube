@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${DEBUG:-0}" == "1" ]]; then
+  set -x
+fi
+
 REQUIRED_SPACE_GB="${REQUIRED_SPACE_GB:-10}"
 
 check_space() {
