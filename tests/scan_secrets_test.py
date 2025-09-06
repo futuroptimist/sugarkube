@@ -26,6 +26,11 @@ def test_regex_scan_ignores_self(scan_secrets):
     assert not scan_secrets.regex_scan(diff)
 
 
+def test_regex_scan_ignores_removed_lines(scan_secrets):
+    diff = ["+++ b/file.txt", "-pass" "word=abc"]
+    assert not scan_secrets.regex_scan(diff)
+
+
 def test_main_exit_codes(monkeypatch, scan_secrets):
     monkeypatch.setattr(scan_secrets, "run_ripsecrets", lambda diff_text: None)
     monkeypatch.setattr(
@@ -89,6 +94,27 @@ def test_run_ripsecrets_detects_secret(monkeypatch, scan_secrets):
         lambda *a, **k: Result,
     )
     assert scan_secrets.run_ripsecrets("diff") is True
+
+
+def test_run_ripsecrets_logs_to_stderr(monkeypatch, scan_secrets, capsys):
+    monkeypatch.setattr(
+        scan_secrets.shutil,
+        "which",
+        lambda _: "/bin/ripsecrets",
+    )
+
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "leak"
+
+    monkeypatch.setattr(
+        scan_secrets.subprocess,
+        "run",
+        lambda *a, **k: Result,
+    )
+    assert scan_secrets.run_ripsecrets("diff") is True
+    assert "leak" in capsys.readouterr().err
 
 
 def test_run_ripsecrets_clean(monkeypatch, scan_secrets):
