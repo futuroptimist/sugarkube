@@ -27,7 +27,8 @@ to adjust the maximum build duration. Customize the cloud-init configuration wit
 `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` and `CLOUDFLARED_COMPOSE_PATH` at
 alternate files; the defaults read from `scripts/cloud-init/`. Set `SKIP_BINFMT=1`
 to skip installing binfmt handlers when they're already present or when the build
-environment disallows privileged containers.
+environment disallows privileged containers. Set `DEBUG=1` to trace script
+execution for troubleshooting.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
