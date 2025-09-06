@@ -9,9 +9,9 @@
 */
 
 size          = 40;           // leg length (mm)
-thickness     = 6;            // plate thickness (mm)
+thickness     = 8;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
-edge_radius   = 3;            // default 3 mm outer-edge rounding
+edge_radius   = 4;            // default 4 mm outer-edge rounding
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
 gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
