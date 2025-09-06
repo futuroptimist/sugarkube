@@ -15,9 +15,16 @@ PURPOSE:
 Improve and maintain test coverage.
 
 CONTEXT:
-- Tests live in [`tests/`](../tests/) and use [pytest](https://docs.pytest.org/en/stable/).
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to invoke `scripts/checks.sh` for linting, formatting, and tests.
+- Tests live in [`tests/`](../tests/) and include Python suites run with
+  [pytest](https://docs.pytest.org/en/stable/) and shell tests written in
+  [Bats](https://bats-core.readthedocs.io/).
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository
+  conventions.
+- Run `pre-commit run --all-files`; it invokes
+  [`scripts/checks.sh`](../scripts/checks.sh) for linting, formatting, and executing both
+  test frameworks.
+- The CI workflow [`tests.yml`](../.github/workflows/tests.yml) runs the test suite on
+  each push.
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
   `aspell` and `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
