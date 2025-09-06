@@ -52,7 +52,7 @@ the docs you will see the term used in both contexts.
     `democratizedspace/dspace` (branch `v3`) by default. Set
     `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git
     URLs via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
-    and ~10 GB free disk space
+    and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output
 - `outages/` — structured outage records (see
   [docs/outage_catalog.md](docs/outage_catalog.md))

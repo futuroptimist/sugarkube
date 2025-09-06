@@ -4,7 +4,7 @@ Press-fit saddle cap extension for the Mac mini M4 keyboard station. The cap sli
 
 ## Usage
 
-1. Pick keyboard width preset in `scad/mac_mini_station.scad`.
+1. Pick a keyboard width preset in `hardware/mac-mini-station/scad/mac_mini_station.scad`.
 2. Run `scripts/build.sh` to export STL files.
 3. Print the cap upside down without supports.
 4. Start with `press_fit_clearance_mm = 0.35` and adjust after a test fit.

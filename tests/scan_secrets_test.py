@@ -16,13 +16,23 @@ def scan_secrets():
     return module
 
 
-def test_regex_scan_detects_pattern(scan_secrets):
-    diff = ["+++ b/file.txt", "+api" "_key=123"]
+# Ensure regex scan catches common secret patterns.
+@pytest.mark.parametrize(
+    "line",
+    ["+api" "_key=123", "+token" ": abc", "+aws_secret" "_key=xyz"],
+)
+def test_regex_scan_detects_patterns(scan_secrets, line):
+    diff = ["+++ b/file.txt", line]
     assert scan_secrets.regex_scan(diff)
 
 
 def test_regex_scan_ignores_self(scan_secrets):
     diff = ["+++ b/scripts/scan-secrets.py", "+api" "_key=123"]
+    assert not scan_secrets.regex_scan(diff)
+
+
+def test_regex_scan_ignores_removed_lines(scan_secrets):
+    diff = ["+++ b/file.txt", "-pass" "word=abc"]
     assert not scan_secrets.regex_scan(diff)
 
 
@@ -89,6 +99,27 @@ def test_run_ripsecrets_detects_secret(monkeypatch, scan_secrets):
         lambda *a, **k: Result,
     )
     assert scan_secrets.run_ripsecrets("diff") is True
+
+
+def test_run_ripsecrets_logs_to_stderr(monkeypatch, scan_secrets, capsys):
+    monkeypatch.setattr(
+        scan_secrets.shutil,
+        "which",
+        lambda _: "/bin/ripsecrets",
+    )
+
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "leak"
+
+    monkeypatch.setattr(
+        scan_secrets.subprocess,
+        "run",
+        lambda *a, **k: Result,
+    )
+    assert scan_secrets.run_ripsecrets("diff") is True
+    assert "leak" in capsys.readouterr().err
 
 
 def test_run_ripsecrets_clean(monkeypatch, scan_secrets):
