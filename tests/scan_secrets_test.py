@@ -16,8 +16,13 @@ def scan_secrets():
     return module
 
 
-def test_regex_scan_detects_pattern(scan_secrets):
-    diff = ["+++ b/file.txt", "+api" "_key=123"]
+# Ensure regex scan catches common secret patterns.
+@pytest.mark.parametrize(
+    "line",
+    ["+api" "_key=123", "+token" ": abc", "+aws_secret" "_key=xyz"],
+)
+def test_regex_scan_detects_patterns(scan_secrets, line):
+    diff = ["+++ b/file.txt", line]
     assert scan_secrets.regex_scan(diff)
 
 
