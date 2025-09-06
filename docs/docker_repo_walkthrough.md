@@ -63,8 +63,12 @@ For a prebuilt image that already clones both projects, see
      cd token.place
      printf 'TOKEN_PLACE_ENV=production\n' >> .env
      ```
-   - `dspace` lists any necessary environment variables in
-     `frontend/README.md`.
+   - `dspace` lists variables like `NODE_ENV`, `PORT`, and `HOST` in
+     `frontend/docker-compose.yml`. Override them with an `.env` file if needed:
+     ```sh
+     cd dspace/frontend
+     printf 'NODE_ENV=production\nPORT=3000\nHOST=0.0.0.0\n' >> .env
+     ```
 4. Inspect the repo to confirm it includes Docker assets:
    ```sh
    ls token.place/docker            # token.place Dockerfile lives here
