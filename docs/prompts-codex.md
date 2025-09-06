@@ -18,15 +18,14 @@ Keep the project healthy by making small, well-tested improvements.
 CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 - Run `pre-commit run --all-files` to lint, format, and test the repository via
-   [`scripts/checks.sh`](../scripts/checks.sh).
+  [`scripts/checks.sh`](../scripts/checks.sh).
 - If documentation files (`README.md` or [`docs/`](../docs/)) change, also run:
-   - `pyspelling -c` [`.spellcheck.yaml`](../.spellcheck.yaml) (requires `aspell` and `aspell-en`)
-   - `linkchecker --no-warnings README.md docs/`
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `linkchecker --no-warnings README.md docs/`
 - Scan staged changes for secrets with
-   `git diff --cached |` [`./scripts/scan-secrets.py`](../scripts/scan-secrets.py) before
-   committing.
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent failures in [`outages/`](../outages/) as JSON per
-   [`outages/schema.json`](../outages/schema.json).
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Identify a small bug fix or documentation clarification.
@@ -43,6 +42,7 @@ Type: evergreen
 
 Use this prompt to refine sugarkube's own prompt documentation.
 
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
