@@ -51,13 +51,10 @@ Run `pre-commit run --all-files` (invokes [`scripts/checks.sh`](../scripts/check
 Fix any issues reported by these tools.
 
 USER:
-1. Choose a `docs/prompts-*.md` file to update (for example,
-   `prompts-codex-cad.md`).
-2. Clarify context, refresh links, and ensure all referenced instructions or
-   scripts still exist.
+1. Choose a `docs/prompts-*.md` file to update (for example, `prompts-codex-cad.md`).
+2. Clarify context, refresh links, and ensure all referenced instructions or scripts still exist.
 3. Run the commands above and address any failures.
 
 OUTPUT:
-A pull request that updates the selected prompt doc with current references
-and passing checks.
+A pull request that updates the selected prompt doc with current references and passing checks.
 ```
