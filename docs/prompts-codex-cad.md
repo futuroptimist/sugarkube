@@ -16,15 +16,17 @@ Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
-- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export STL meshes into
-  [`stl/`](../stl/). Ensure [OpenSCAD](https://openscad.org) is installed and available in
-  `PATH`; the script exits early if it cannot find the binary.
+- Use [`./scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL
+  meshes to [`stl/`](../stl/). Ensure [OpenSCAD](https://openscad.org) is installed and available
+  in `PATH`; the script exits early if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`, or `nut`).  
-  `STANDOFF_MODE` is case-insensitive and defaults to the model’s `standoff_mode` value (often `heatset`).
+- Render each model for every supported `standoff_mode` variant. Examples: `heatset`, `printed`,
+  and `nut`.
+- `STANDOFF_MODE` is optional, case-insensitive, and defaults to the model’s `standoff_mode` value
+  (usually `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to lint, format, and test.  
+- Run `pre-commit run --all-files` to lint, format, and test.
   For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
@@ -39,7 +41,7 @@ REQUEST:
 3. Render the model via:
 
    ```bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses model’s default standoff_mode (often heatset)
+   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (often heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ```
