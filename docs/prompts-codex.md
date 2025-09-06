@@ -19,8 +19,8 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 - Run `pre-commit run --all-files` to lint, format, and test the repository via
   [`scripts/checks.sh`](../scripts/checks.sh).
-- On documentation changes ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-  `aspell-en`) and `linkchecker --no-warnings README.md docs/` succeed.
+- On documentation changes ensure `pyspelling -c [.spellcheck.yaml](../.spellcheck.yaml)`
+  (requires `aspell` and `aspell-en`) and `linkchecker --no-warnings README.md docs/` succeed.
 - Scan staged changes for secrets with
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent failures in [`outages/`](../outages/) as JSON per
