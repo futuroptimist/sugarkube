@@ -16,18 +16,27 @@ Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
-- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure [OpenSCAD](https://openscad.org/) 2021.01
-  or newer is installed and in `PATH`; the script exits early if the `openscad` binary is missing.
+- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL
+  meshes into the git-ignored [`stl/`](../stl/) directory. Ensure
+// MANUAL DECISION REQUIRED
+  [OpenSCAD](https://openscad.org/) 2024.03 or newer is installed and available in
+  `PATH`; the script exits if the binary is missing.  ← feature branch
+//  [OpenSCAD 2021.01](https://github.com/openscad/openscad/releases/tag/openscad-2021.01) or newer
+//  is installed and available in `PATH`; the script exits early if it cannot find the binary.  ← main
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
-  `nut`. The `STANDOFF_MODE` env var is optional, case-insensitive, trims surrounding whitespace,
-  and defaults to the model’s `standoff_mode` value (often `heatset`).
+  `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
+  surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
-  [`scripts/checks.sh`](../scripts/checks.sh).
-  When a `package.json` is present, also run `npm run lint && npm run test:ci` to match CI.
+// MANUAL DECISION REQUIRED
+  [`scripts/checks.sh`](../scripts/checks.sh), which installs required tooling automatically.  ← feature branch
+//  [`scripts/checks.sh`](../scripts/checks.sh).
+//  If `package.json` defines them, also run:
+//  - `npm run lint`
+//  - `npm run format:check`
+//  - `npm test -- --coverage`  ← main
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`;
     see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -43,11 +52,17 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
 
-   ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses model’s default standoff_mode (often heatset)
-   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
-   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
-   ~~~
+// MANUAL DECISION REQUIRED
+    ~~~bash
+    ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (often heatset)
+    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+    ~~~  ← feature branch
+//   ~~~bash
+//   ./scripts/openscad_render.sh path/to/model.scad
+//   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad
+//   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+//   ~~~  ← main
 
 4. Commit updated SCAD sources and any documentation.
 
@@ -67,6 +82,10 @@ Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires `aspell` and
 `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
+If `package.json` defines them, also run:
+- `npm run lint`
+- `npm run format:check`
+- `npm test -- --coverage`
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
