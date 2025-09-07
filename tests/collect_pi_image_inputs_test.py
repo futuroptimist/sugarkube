@@ -1,4 +1,5 @@
 import gzip
+import lzma
 import os
 import subprocess
 import zipfile
@@ -72,3 +73,32 @@ def test_errors_on_zip_without_img(tmp_path):
     )
     assert result.returncode != 0
     assert "Zip contained no .img" in result.stderr
+
+
+def test_handles_raw_img(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    img = deploy / "foo.img"
+    img.write_text("data")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert out_img.exists()
+    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    with lzma.open(out_img, "rb") as f:
+        assert f.read() == b"data"
+
+
+def test_handles_img_xz(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    img_xz = deploy / "foo.img.xz"
+    img_xz.write_text("original")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert out_img.exists()
+    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    assert out_img.read_text() == "original"

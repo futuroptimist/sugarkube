@@ -160,6 +160,7 @@ onboarding
 openscad
 overcurrent
 pio
+pigen
 pipx
 powershell
 pre
