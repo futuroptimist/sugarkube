@@ -58,6 +58,36 @@ docker compose up -d
 curl http://localhost:3000
 ```
 
+### token.place and dspace together
+
+Spin up both projects with a single `docker-compose.yml` to verify the Pi can
+run multiple apps:
+
+```sh
+ssh pi@<hostname>.local
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place
+git clone https://github.com/democratizedspace/dspace
+cat <<'EOF' > docker-compose.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3000:3000"
+EOF
+docker compose up -d
+curl http://localhost:5000
+curl http://localhost:3000
+docker compose down
+```
+
 Proceed with the detailed steps below to adapt the process for other repositories.
 
 ## 1. Prepare the Pi
