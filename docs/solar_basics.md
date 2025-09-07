@@ -23,7 +23,8 @@ Silicon cells generate a voltage when exposed to light. Cells are wired in serie
 ### Charge Controllers
 Never connect panels directly to a battery. Route them through a charge controller
 which regulates voltage and prevents overcharging. Attach the controller to the battery first,
-then connect the panel leads so the controller powers up safely.
+then connect the panel leads so the controller powers up safely. Add appropriately sized
+fuses or DC breakers on the panel and battery leads to protect wiring from shorts.
 
 ## Example Budget
 Four 100 W panels wired in parallel can deliver roughly 20 A at 18 V to the charge controller.
