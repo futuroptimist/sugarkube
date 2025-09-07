@@ -10,6 +10,7 @@
                 (comment 3 "Label polarity and voltage on connectors")
                 (comment 4 "Verify KiBot exports and BOM before fabrication")
                 (comment 5 "Check ground pour continuity around mounting holes")
+                (comment 6 "Confirm board outline fits enclosure")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"

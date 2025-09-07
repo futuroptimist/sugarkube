@@ -9,6 +9,7 @@
         (paper "A4")
         (title_block
                 (comment 1 "Keep high-current traces short")
+                (comment 2 "Confirm board outline fits enclosure")
         )
         (layers
                 (0 "F.Cu" signal)
