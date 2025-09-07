@@ -9,7 +9,6 @@
 ## Inputs / Outputs
 - Inputs:
 - `scripts/cloud-init/user-data.yaml` (cloud-init seed with cloudflared systemd unit)
-- `scripts/cloud-init/docker-compose.cloudflared.yml` (Cloudflare Tunnel compose file)
   - Environment variables:
     `PI_GEN_BRANCH` (default `bookworm`),
     `IMG_NAME` (default `sugarkube`),
@@ -35,7 +34,6 @@
   - `/pi-gen/work` → persistent Docker volume `pigen-work-cache`
   - `/var/cache/apt` → persistent Docker volume `pigen-apt-cache`
   - `stage2/01-sys-tweaks/user-data` → host `scripts/cloud-init/user-data.yaml`
-  - `stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml` → host compose file
 - Env:
   - `IMG_NAME`, `ENABLE_SSH=1`, `ARM64`, `USE_QCOW2=1`
   - Mirrors: `APT_MIRROR`, `RASPBIAN_MIRROR`, `APT_MIRROR_RASPBIAN`, `APT_MIRROR_RASPBERRYPI`, `DEBIAN_MIRROR`
@@ -92,7 +90,7 @@
 - Record repeated failures as `outages/*.json` using `outages/schema.json`
 
 ## Security
-- Read-only mounts for cloud-init and compose files into container
+Read-only mount for cloud-init file into container
 - No secrets embedded; Cloudflare token remains empty by default
 
 ## Future Enhancements

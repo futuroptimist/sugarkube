@@ -44,8 +44,10 @@ The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
-`/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot. The image
-installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
+`/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
+Cloud-init writes `docker-compose.cloudflared.yml` to `/opt/sugarkube`.
+This avoids downloading the file at boot.
+The image installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
 once the token is present and waits for `network-online.target` to ensure
 connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
 with a 10-second timeout before building; override this via the
