@@ -3,6 +3,7 @@
 The basic Pi carrier can host a 1602 I²C LCD in the free quadrant.
 Its standoffs match the common 80×36 mm module with holes 3 mm from each
 edge (75 mm × 31 mm spacing).
+The base plate spaces each Raspberry Pi 10 mm apart for cable clearance while keeping the footprint compact.
 
 The base plate includes rounded corners set by `corner_radius` (default 5 mm)
 to make handling safer. Standoff pillars now use a 6.5 mm diameter to conserve

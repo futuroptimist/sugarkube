@@ -11,6 +11,7 @@
                 (comment 4 "Verify KiBot exports and BOM before fabrication")
                 (comment 5 "Check ground pour continuity around mounting holes")
                 (comment 6 "Document schematic updates in specs.md")
+                (comment 7 "Use star topology for power distribution")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
