@@ -21,8 +21,8 @@ CONTEXT:
 // MANUAL DECISION REQUIRED
   [OpenSCAD](https://openscad.org/) 2024.03 or newer is installed and available in
   `PATH`; the script exits if the binary is missing.  ← feature branch
-//  [OpenSCAD 2021.01](https://github.com/openscad/openscad/releases/tag/openscad-2021.01) or newer
-//  is installed and available in `PATH`; the script exits early if it cannot find the binary.  ← main
+//  [OpenSCAD](https://openscad.org/) 2021.01 or newer is on `PATH`; the script exits early
+//  if the binary is missing.  ← main
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -53,11 +53,11 @@ REQUEST:
 3. Render the model via:
 
 // MANUAL DECISION REQUIRED
-    ~~~bash
-    ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (often heatset)
-    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
-    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
-    ~~~  ← feature branch
+   ~~~bash
+   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (often heatset)
+   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+   ~~~  ← feature branch
 //   ~~~bash
 //   ./scripts/openscad_render.sh path/to/model.scad
 //   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad
