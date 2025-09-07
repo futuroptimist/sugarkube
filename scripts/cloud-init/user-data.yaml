@@ -19,6 +19,25 @@ write_files:
     content: |
       # Inject with TUNNEL_TOKEN or TUNNEL_TOKEN_FILE env var or edit after boot
       TUNNEL_TOKEN=""
+  - path: /opt/projects/init-env.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      for f in /opt/projects/token.place/.env /opt/projects/dspace/frontend/.env; do
+        if [ ! -f "$f" ] && [ -f "${f}.example" ]; then
+          cp "${f}.example" "$f"
+        fi
+      done
+  - path: /opt/projects/start-projects.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      if [ -f /opt/projects/docker-compose.yml ]; then
+        systemctl enable --now projects-compose.service
+      else
+        echo "compose file missing; skipping service"
+      fi
   - path: /etc/systemd/system/cloudflared-compose.service
     permissions: '0644'
     content: |
@@ -45,70 +64,36 @@ write_files:
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
-# tokenplace-start
-  - path: /opt/projects/token.place/docker-compose.tokenplace.yml
-    permissions: '0644'
-    content: |
-      version: '3'
-      services:
-        tokenplace:
-          build:
-            context: /opt/projects/token.place
-            dockerfile: docker/Dockerfile.server
-          ports:
-            - "5000:5000"
-  - path: /etc/systemd/system/tokenplace.service
+# projects-start
+  - path: /etc/systemd/system/projects-compose.service
     permissions: '0644'
     content: |
       [Unit]
-      Description=token.place server via docker compose
+      Description=token.place and dspace via docker compose
       Requires=docker.service
       After=docker.service network-online.target
       Wants=network-online.target
 
       [Service]
       Type=oneshot
-      WorkingDirectory=/opt/projects/token.place
-      ExecStart=/usr/bin/docker compose -f docker-compose.tokenplace.yml up -d
-      ExecStop=/usr/bin/docker compose -f docker-compose.tokenplace.yml down
+      WorkingDirectory=/opt/projects
+      ExecStartPre=/opt/projects/init-env.sh
+      ExecStart=/usr/bin/docker compose -f docker-compose.yml up -d
+      ExecStop=/usr/bin/docker compose -f docker-compose.yml down
       RemainAfterExit=yes
       Restart=on-failure
       RestartSec=5s
 
       [Install]
       WantedBy=multi-user.target
-# tokenplace-end
-# dspace-start
-  - path: /etc/systemd/system/dspace.service
-    permissions: '0644'
-    content: |
-      [Unit]
-      Description=dspace frontend via docker compose
-      Requires=docker.service
-      After=docker.service network-online.target
-      Wants=network-online.target
-
-      [Service]
-      Type=oneshot
-      WorkingDirectory=/opt/projects/dspace/frontend
-      ExecStartPre=-/usr/bin/cp -n .env.example .env
-      ExecStart=/usr/bin/docker compose up -d
-      ExecStop=/usr/bin/docker compose down
-      RemainAfterExit=yes
-      Restart=on-failure
-      RestartSec=5s
-
-      [Install]
-      WantedBy=multi-user.target
-# dspace-end
+# projects-end
 runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
-  - [bash, -c, '[ -d /opt/projects/token.place ] && systemctl enable --now tokenplace.service || echo "token.place repo missing; skipping service"']
-  - [bash, -c, '[ -d /opt/projects/dspace ] && systemctl enable --now dspace.service || echo "dspace repo missing; skipping service"']
+  - [/opt/projects/start-projects.sh]  # projects-runcmd
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
