@@ -55,6 +55,29 @@ if command -v pytest >/dev/null 2>&1; then
 fi
 
 # run bats tests when available
+if ! command -v bats >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    if [ "$(id -u)" -eq 0 ]; then
+      if apt-get update >/dev/null 2>&1 && \
+        apt-get install -y bats >/dev/null 2>&1; then
+        :
+      else
+        echo "bats install failed; skipping" >&2
+      fi
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+      if sudo -n apt-get update >/dev/null 2>&1 && \
+        sudo -n apt-get install -y bats >/dev/null 2>&1; then
+        :
+      else
+        echo "bats install failed; skipping" >&2
+      fi
+    else
+      echo "bats not installed and no privilege to install; skipping" >&2
+    fi
+  elif command -v brew >/dev/null 2>&1; then
+    brew install bats >/dev/null 2>&1 || true
+  fi
+fi
 if command -v bats >/dev/null 2>&1 && ls tests/*.bats >/dev/null 2>&1; then
   bats tests/*.bats
 else
