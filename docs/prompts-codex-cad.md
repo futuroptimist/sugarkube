@@ -30,7 +30,8 @@ CONTEXT:
   [`scripts/checks.sh`](../scripts/checks.sh).
   If `package.json` defines them, also run:
   - `npm run lint`
-  - `npm run test:ci`
+  - `npm run format:check`
+  - `npm test -- --coverage`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`;
     see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -70,6 +71,10 @@ Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires `aspell` and
 `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
+If `package.json` defines them, also run:
+- `npm run lint`
+- `npm run format:check`
+- `npm test -- --coverage`
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
