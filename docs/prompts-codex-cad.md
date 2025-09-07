@@ -29,8 +29,8 @@ CONTEXT:
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
 - For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`;
-    see [`.spellcheck.yaml`](../.spellcheck.yaml))
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
+    `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
     [`README.md`](../README.md) and [`docs/`](../docs/)
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
@@ -44,7 +44,7 @@ REQUEST:
 3. Render the model via:
 
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
+   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatse
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
@@ -64,8 +64,9 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-`aspell-en`), `linkchecker --no-warnings README.md docs/`, and
+Run `pre-commit run --all-files`,
+`pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`),
+`linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
 If `package.json` defines them, also run:
 - `npm run lint`
