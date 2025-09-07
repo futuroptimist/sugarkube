@@ -16,12 +16,13 @@ Write step-by-step instructions for running a GitHub repo that includes a
 Dockerfile or docker-compose file on the prepared Raspberry Pi image.
 
 CONTEXT:
-- The base image and tunnel setup live in `docs/pi_image_cloudflare.md`.
-- New walkthroughs belong in `docs/docker_repo_walkthrough.md`.
+- The base image and tunnel setup live in [`pi_image_cloudflare.md`](./pi_image_cloudflare.md).
+- New walkthroughs belong in [`docker_repo_walkthrough.md`](./docker_repo_walkthrough.md).
 - Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
   `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- File recurring deployment failures in `outages/` per `outages/schema.json`.
+- File recurring deployment failures in [`outages/`](../outages/) per
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Expand the walkthrough or add examples.
@@ -40,7 +41,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow `AGENTS.md` and `README.md`.
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
 `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.

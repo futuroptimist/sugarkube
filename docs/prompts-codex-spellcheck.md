@@ -3,7 +3,7 @@ title: 'Sugarkube Codex Spellcheck Prompt'
 slug: 'prompts-codex-spellcheck'
 ---
 
-# Codex Spellcheck Prompt
+# Sugarkube Codex Spellcheck Prompt
 
 Use this prompt to catch and correct spelling issues in Markdown docs.
 
@@ -18,8 +18,9 @@ CONTEXT:
 - Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`
   (requires `aspell` and `aspell-en`).
 - Add legitimate new words to [`.wordlist.txt`](../.wordlist.txt).
-- Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
-- Run `pre-commit run --all-files`.
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+- Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
+  linting, formatting, and tests.
 - Verify links with `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 
