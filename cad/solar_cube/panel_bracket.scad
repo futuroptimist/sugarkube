@@ -23,8 +23,16 @@ insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
 screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
 screw_clearance   = screw_nominal + 0.2; // through-hole Ø with clearance (mm)
-chamfer           = 1.0;      // lead-in chamfer (mm)
-nut_flat          = 8.0;      // across flats for M5 nut (mm)
+
+// MANUAL DECISION REQUIRED
+chamfer           = 0.8;      // lead-in chamfer (mm)  ← feature branch
+// chamfer           = 1.0;      // lead-in chamfer (mm)  ← main
+
+nut_clearance     = 0.2;      // extra room for easier nut insertion (mm)
+// MANUAL DECISION REQUIRED
+nut_flat          = 8.0 + nut_clearance; // across flats for M5 nut (mm) ← feature branch
+// nut_flat          = 8.0;      // across flats for M5 nut (mm) ← main
+
 nut_thick         = 4.0;      // nut thickness (mm)
 
 assert(insert_length < thickness,
