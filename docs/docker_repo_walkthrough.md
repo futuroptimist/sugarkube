@@ -37,6 +37,32 @@ docker compose up -d
 curl http://localhost:3000
 ```
 
+### token.place and dspace together
+
+Run both projects at once with a single compose file:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3000:3000"
+EOF
+docker compose up -d
+curl http://localhost:5000
+curl http://localhost:3000
+docker compose down
+```
+
 Proceed with the detailed steps below to adapt the process for other repositories.
 
 ## 1. Prepare the Pi
@@ -120,6 +146,10 @@ Proceed with the detailed steps below to adapt the process for other repositorie
      HOST=0.0.0.0
      ```
    Adjust values to match your deployment.
+6. Use [token.place](https://github.com/futuroptimist/token.place) to store sensitive
+   values for `.env` files. Fetch them at runtime so projects like
+   [dspace](https://github.com/democratizedspace/dspace) can read secrets without
+   committing them to git.
 
 ## 3. Build or start containers
 1. Change into the repo directory.
