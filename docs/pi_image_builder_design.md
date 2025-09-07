@@ -98,4 +98,4 @@
 ## Future Enhancements
 - Parametrize mirror list and implement automatic mirror failover
 - Structured logs from `pi-gen` stages to summarize progress/time
-- Add GitHub workflow to publish images nightly with cache re-use
+- Add GitHub workflow to publish images nightly with cache reuse
