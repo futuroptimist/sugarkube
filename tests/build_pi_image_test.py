@@ -15,6 +15,7 @@ def test_requires_curl(tmp_path):
         "timeout",
         "xz",
         "bsdtar",
+        "df",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -40,9 +41,24 @@ def test_requires_curl(tmp_path):
 def test_requires_docker(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    curl = fake_bin / "curl"
-    curl.write_text("#!/bin/sh\nexit 0\n")
-    curl.chmod(0o755)
+    for name in [
+        "curl",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+        "bsdtar",
+        "df",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = str(fake_bin)
     result = subprocess.run(
@@ -66,6 +82,7 @@ def test_requires_xz(tmp_path):
         "stdbuf",
         "timeout",
         "bsdtar",
+        "df",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -98,6 +115,7 @@ def test_requires_bsdtar(tmp_path):
         "stdbuf",
         "timeout",
         "xz",
+        "df",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -119,13 +137,51 @@ def test_requires_bsdtar(tmp_path):
     assert "bsdtar is required" in result.stderr
 
 
+def test_requires_df(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+        "bsdtar",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "df is required" in result.stderr
+
+
 def test_requires_git(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     for name, content in {
         "curl": "#!/bin/sh\nexit 0\n",
         "docker": "#!/bin/sh\nexit 0\n",
+        "sha256sum": "#!/bin/sh\nexit 0\n",
+        "stdbuf": '#!/bin/sh\nshift\nshift\nexec "$@"\n',
+        "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
         "xz": "#!/bin/sh\nexit 0\n",
+        "bsdtar": "#!/bin/sh\nexit 0\n",
+        "df": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -145,9 +201,23 @@ def test_requires_git(tmp_path):
 def test_requires_sha256sum(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    for name in ["curl", "docker", "xz", "git"]:
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "stdbuf",
+        "timeout",
+        "xz",
+        "bsdtar",
+        "df",
+    ]:
         path = fake_bin / name
-        path.write_text("#!/bin/sh\nexit 0\n")
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = str(fake_bin)
@@ -167,7 +237,7 @@ def test_docker_daemon_must_be_running(tmp_path):
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum", "bsdtar"]:
+    for name in ["xz", "git", "sha256sum", "bsdtar", "df"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -205,6 +275,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
         "stdbuf": "#!/bin/sh\nexit 0\n",
         "bsdtar": "#!/bin/sh\nexit 0\n",
+        "df": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -257,6 +328,9 @@ fi
 """
     )
     bsdtar.chmod(0o755)
+    df = fake_bin / "df"
+    df.write_text("#!/bin/sh\nexit 0\n")
+    df.chmod(0o755)
     mount = fake_bin / "mount"
     mount.write_text("#!/bin/sh\nexit 0\n")
     mount.chmod(0o755)

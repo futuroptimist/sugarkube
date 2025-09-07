@@ -20,11 +20,11 @@ check_space() {
 }
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
-# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, bsdtar and roughly
+# Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, bsdtar, df and roughly
 # 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
 # repository.
 
-for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar; do
+for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1

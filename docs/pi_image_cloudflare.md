@@ -53,8 +53,8 @@ connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
 with a 10-second timeout before building; override this via the
 `URL_CHECK_TIMEOUT` environment variable or set `SKIP_URL_CHECK=1` to bypass
 these probes when using local mirrors or working offline. Ensure `curl`, `docker`
-(with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are
-installed before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
+(with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, `xz`, `bsdtar`, and `df`
+are installed before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
 checks that both the temporary and output directories have at least 10 GB free
 before starting and verifies the resulting image exists and is non-empty before
 reporting success. Use the prepared image to deploy containerized apps. The
