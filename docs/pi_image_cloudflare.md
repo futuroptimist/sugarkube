@@ -32,7 +32,8 @@ the cloud-init configuration with `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` an
 they're already present or when the build environment disallows privileged
 containers. Set `DEBUG=1` to trace script execution for troubleshooting.
 
-`REQUIRED_SPACE_GB` (default: `10`) controls the free disk space check.
+`REQUIRED_SPACE_GB` (default: `10`) controls free disk space checks on the
+temporary work directory and the output location.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
@@ -48,9 +49,10 @@ installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
 once the token is present and waits for `network-online.target` to ensure
 connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
 with a 10-second timeout before building; override this via the
-`URL_CHECK_TIMEOUT` environment variable. Ensure `curl`, `docker` (with its
-daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are installed
-before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
+`URL_CHECK_TIMEOUT` environment variable or set `SKIP_URL_CHECK=1` to bypass
+these probes when using local mirrors or working offline. Ensure `curl`, `docker`
+(with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, and `xz` are
+installed before running it; `stdbuf` and `timeout` come from GNU coreutils. The script
 checks that both the temporary and output directories have at least 10 GB free
 before starting and verifies the resulting image exists and is non-empty before
 reporting success. Use the prepared image to deploy containerized apps. The
