@@ -1,0 +1,25 @@
+version: '3'
+services:
+  # tokenplace-start
+  tokenplace:
+    build:
+      context: /opt/projects/token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    env_file:
+      - /opt/projects/token.place/.env
+  # tokenplace-end
+  # dspace-start
+  dspace:
+    build:
+      context: /opt/projects/dspace/frontend
+    working_dir: /opt/projects/dspace/frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - /opt/projects/dspace/frontend/.env
+  # dspace-end
+  # extra-start
+  # Add additional services below
+  # extra-end

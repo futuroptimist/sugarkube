@@ -70,6 +70,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
 CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
 CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
+PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.projects.yml}"
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
   exit 1
@@ -88,6 +89,14 @@ if [ ! -f "${CLOUDFLARED_COMPOSE_PATH}" ]; then
 fi
 if [ ! -s "${CLOUDFLARED_COMPOSE_PATH}" ]; then
   echo "Cloudflared compose file is empty: ${CLOUDFLARED_COMPOSE_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${PROJECTS_COMPOSE_PATH}" ]; then
+  echo "Projects compose file not found: ${PROJECTS_COMPOSE_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${PROJECTS_COMPOSE_PATH}" ]; then
+  echo "Projects compose file is empty: ${PROJECTS_COMPOSE_PATH}" >&2
   exit 1
 fi
 WORK_DIR=$(mktemp -d)
@@ -174,14 +183,21 @@ CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
 CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
 
-# Remove token.place or dspace systemd units if their repos are not cloned
+# Prepare compose file for token.place and dspace; drop services when skipped
+PROJECTS_COMPOSE_TEMP="${WORK_DIR}/docker-compose.projects.yml"
+cp "${PROJECTS_COMPOSE_PATH}" "${PROJECTS_COMPOSE_TEMP}"
 if [[ "$CLONE_TOKEN_PLACE" != "true" ]]; then
-  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${USER_DATA}"
-  sed -i '/# tokenplace-runcmd/,+1d' "${USER_DATA}"
+  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${PROJECTS_COMPOSE_TEMP}"
 fi
 if [[ "$CLONE_DSPACE" != "true" ]]; then
-  sed -i '/# dspace-start/,/# dspace-end/d' "${USER_DATA}"
-  sed -i '/# dspace-runcmd/,+1d' "${USER_DATA}"
+  sed -i '/# dspace-start/,/# dspace-end/d' "${PROJECTS_COMPOSE_TEMP}"
+fi
+if [[ "$CLONE_TOKEN_PLACE" != "true" && "$CLONE_DSPACE" != "true" && -z "$EXTRA_REPOS" ]]; then
+  sed -i '/# projects-start/,/# projects-end/d' "${USER_DATA}"
+  sed -i '/# projects-runcmd/d' "${USER_DATA}"
+else
+  install -Dm644 "${PROJECTS_COMPOSE_TEMP}" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/docker-compose.yml"
 fi
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"

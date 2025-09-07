@@ -3,8 +3,9 @@
 Build a Raspberry Pi 5 image that includes the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) repositories so you can run
-both apps out of the box. The image builder clones these projects, installs
-`tokenplace.service` and `dspace.service`, and leaves hooks for additional
+both apps out of the box. The image builder clones these projects, drops a
+`docker-compose.yml` under `/opt/projects` and installs a single
+`projects-compose.service` to manage them. Hooks remain for additional
 repositories.
 
 ## Build the image
@@ -22,22 +23,22 @@ passing their Git URLs via `EXTRA_REPOS`:
 EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
 ```
 
-The script clones each repo into `/opt/projects` and assigns ownership to the
-`pi` user.
+The script clones each repo into `/opt/projects` and assigns ownership to the `pi`
+user.
 
 ## Run the apps
 
-On first boot the Pi builds the containers and enables systemd services for both
-apps (only if the corresponding repo exists under `/opt/projects`). The services
-start automatically and can be managed with `systemctl`:
+On first boot the Pi builds the containers defined in
+`/opt/projects/docker-compose.yml`. The `projects-compose.service` unit starts the
+stack automatically when the compose file exists. Manage the services with
+`systemctl`:
 
 ```sh
 # check service status
-sudo systemctl status tokenplace.service
-sudo systemctl status dspace.service
+sudo systemctl status projects-compose.service
 
-# restart a service
-sudo systemctl restart tokenplace.service
+# restart the stack
+sudo systemctl restart projects-compose.service
 ```
 
 Visit `http://<pi-host>:5000` for token.place and `http://<pi-host>:3000` for
@@ -45,19 +46,23 @@ dspace. To expose them through a Cloudflare Tunnel, update
 `/opt/sugarkube/docker-compose.cloudflared.yml` as shown in
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
 
+### Environment variables
+
+Each project reads an `.env` file in its directory:
+
+- `/opt/projects/token.place/.env` (e.g. `TOKEN_PLACE_ENV=production`)
+- `/opt/projects/dspace/frontend/.env` (e.g.
+  `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co` and
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY=abc123`)
+
+Update these files before starting the services.
+
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. The image builder strips the `token.place` or `dspace` service
-definitions when the corresponding `CLONE_*` flag is `false`, so you can build a
-minimal image and add services later. Create a systemd unit that mirrors
-`tokenplace.service` or `dspace.service` to run them on boot. Start by copying
-one of the existing services and editing the paths:
-
-```sh
-sudo cp /etc/systemd/system/tokenplace.service /etc/systemd/system/newapp.service
-# edit WorkingDirectory and docker compose paths as needed
-sudo systemctl enable --now newapp.service
-```
+`/opt/projects`. Add services to `/opt/projects/docker-compose.yml` following the
+token.place and dspace examples. The image builder drops the token.place or
+dspace definitions when the corresponding `CLONE_*` flag is `false`, letting you
+build a minimal image and expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.
