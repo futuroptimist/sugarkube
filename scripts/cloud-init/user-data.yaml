@@ -45,6 +45,7 @@ write_files:
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
+      APT::Get::Fix-Missing "true";
 # tokenplace-start
   - path: /opt/projects/token.place/docker-compose.tokenplace.yml
     permissions: '0644'

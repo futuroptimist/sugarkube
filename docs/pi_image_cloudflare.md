@@ -7,8 +7,8 @@ including [dspace](https://github.com/democratizedspace/dspace).
 It uses `cloud-init` to update and upgrade packages, bake Docker, the compose
 plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-into the OS image. Cloud-init also drops an apt config with five retries and
-30-second timeouts to smooth over flaky networks.
+into the OS image. Cloud-init also drops an apt config with five retries,
+30-second timeouts, and `APT::Get::Fix-Missing` enabled to smooth over flaky networks.
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
@@ -18,7 +18,7 @@ accidental overwrites it aborts when the image already exists unless
 `FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning builds to
 replace an existing image. To reduce flaky downloads it pins the official
 Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
-`--fix-missing`), and installs a persistent apt/dpkg Pre-Invoke hook that rewrites
+`-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook that rewrites
 any raspbian host to a stable HTTPS mirror and bypasses proxies for
 `archive.raspberrypi.com`. Set `SKIP_MIRROR_REWRITE=1` to disable these rewrites
 when your network already uses a reliable mirror. Use `APT_RETRIES` and
