@@ -79,8 +79,8 @@ runs these checks and fails if spelling or links are broken:
 
 ```bash
 pip install pyspelling linkchecker
-sudo apt-get install aspell aspell-en  # Debian/Ubuntu
-brew install aspell                    # macOS
+sudo apt-get install aspell aspell-en bats  # Debian/Ubuntu
+brew install aspell bats                    # macOS
 pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
 ```

@@ -76,6 +76,27 @@ if ! command -v aspell >/dev/null 2>&1; then
     exit 1
   fi
 fi
+
+if ! command -v bats >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    SUDO=""
+    if [ "$(id -u)" -ne 0 ]; then
+      if command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+      else
+        echo "Run as root or install sudo" >&2
+        exit 1
+      fi
+    fi
+    $SUDO apt-get update && $SUDO apt-get install -y bats
+  elif command -v brew >/dev/null 2>&1; then
+    brew install bats
+  else
+    echo "bats not found" >&2
+    exit 1
+  fi
+fi
+
 # Only run the spell checker when both `pyspelling` and its `aspell` backend
 # are available. Some environments (like minimal CI containers) do not include
 # the `aspell` binary by default which would cause `pyspelling` to error.  In
