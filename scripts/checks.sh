@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure required Python tooling is available
-if ! command -v flake8 >/dev/null 2>&1; then
+# Ensure required Python tooling is available.  Some environments may have
+# `flake8` pre-installed but lack other dependencies like `pyspelling` or
+# `linkchecker`, which are needed later in this script.  Install the full set
+# whenever any of these tools are missing.
+if ! command -v flake8 >/dev/null 2>&1 || \
+   ! command -v pyspelling >/dev/null 2>&1 || \
+   ! command -v linkchecker >/dev/null 2>&1; then
   if command -v uv >/dev/null 2>&1; then
     uv pip install --system \
       flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \

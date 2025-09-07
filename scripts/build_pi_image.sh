@@ -71,6 +71,7 @@ CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
 CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
 CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
 PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.projects.yml}"
+
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
   exit 1
@@ -83,6 +84,7 @@ if ! head -n1 "${CLOUD_INIT_PATH}" | grep -q '^#cloud-config'; then
   echo "Cloud-init file missing #cloud-config header: ${CLOUD_INIT_PATH}" >&2
   exit 1
 fi
+
 if [ ! -f "${CLOUDFLARED_COMPOSE_PATH}" ]; then
   echo "Cloudflared compose file not found: ${CLOUDFLARED_COMPOSE_PATH}" >&2
   exit 1
@@ -99,6 +101,7 @@ if [ ! -s "${PROJECTS_COMPOSE_PATH}" ]; then
   echo "Projects compose file is empty: ${PROJECTS_COMPOSE_PATH}" >&2
   exit 1
 fi
+
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -109,12 +112,17 @@ PI_GEN_URL="${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
 URL_CHECK_TIMEOUT="${URL_CHECK_TIMEOUT:-10}"
-for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
-  if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" "$url" >/dev/null; then
-    echo "Cannot reach $url" >&2
-    exit 1
-  fi
-done
+SKIP_URL_CHECK="${SKIP_URL_CHECK:-0}"
+if [ "$SKIP_URL_CHECK" -ne 1 ]; then
+  for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
+    if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" "$url" >/dev/null; then
+      echo "Cannot reach $url" >&2
+      exit 1
+    fi
+  done
+else
+  echo "Skipping URL reachability checks"
+fi
 
 ARM64="${ARM64:-1}"
 if [ "$ARM64" -eq 1 ]; then
@@ -171,8 +179,6 @@ if [ -n "${TUNNEL_TOKEN:-}" ]; then
   sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"
 fi
 
-install -Dm644 "${CLOUDFLARED_COMPOSE_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml"
 
 # Bundle pi_node_verifier and optionally clone repos into the image
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
@@ -233,7 +239,8 @@ BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 APT_RETRIES="${APT_RETRIES:-5}"
 APT_TIMEOUT="${APT_TIMEOUT:-30}"
 APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIMEOUT} \
--o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true"
+-o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true \
+-o APT::Get::Fix-Missing=true"
 APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
 SKIP_MIRROR_REWRITE="${SKIP_MIRROR_REWRITE:-0}"

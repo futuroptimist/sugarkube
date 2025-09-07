@@ -10,6 +10,27 @@ but the steps apply to any repository.
 For a prebuilt image that already clones both projects, see
 [pi_token_dspace.md](pi_token_dspace.md).
 
+## Step-by-step overview
+
+1. Flash the SD card and boot the Pi using
+   [pi_image_cloudflare.md](pi_image_cloudflare.md).
+2. SSH in and verify Docker and the Cloudflare Tunnel are active:
+   `ssh pi@<hostname>.local` then `systemctl status docker cloudflared-compose`.
+3. Clone a repository under `/opt/projects` such as
+   [`token.place`](https://github.com/futuroptimist/token.place) or
+   [`dspace`](https://github.com/democratizedspace/dspace).
+4. Build or start containers:
+   - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
+     then `docker run -d --name myapp -p 8080:8080 myapp`.
+   - `docker-compose.yml`: `docker compose up -d`.
+5. Confirm the service responds locally, e.g.
+   `curl http://localhost:5000` for token.place or
+   `curl http://localhost:3000` for dspace.
+6. Optionally expose ports through the Cloudflare Tunnel by editing
+   `/opt/sugarkube/docker-compose.cloudflared.yml`.
+7. Log recurring deployment failures in `outages/` using
+   [`schema.json`](../outages/schema.json).
+
 ## Quick start
 
 Try one of these example projects to confirm the image works:
@@ -35,6 +56,36 @@ cd dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
 curl http://localhost:3000
+```
+
+### token.place and dspace together
+
+Spin up both projects with a single `docker-compose.yml` to verify the Pi can
+run multiple apps:
+
+```sh
+ssh pi@<hostname>.local
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place
+git clone https://github.com/democratizedspace/dspace
+cat <<'EOF' > docker-compose.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3000:3000"
+EOF
+docker compose up -d
+curl http://localhost:5000
+curl http://localhost:3000
+docker compose down
 ```
 
 Proceed with the detailed steps below to adapt the process for other repositories.
@@ -177,12 +228,18 @@ Proceed with the detailed steps below to adapt the process for other repositorie
 ```sh
 cd /opt/projects/token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
-docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker run -d --name tokenplace -p 5000:5000 \
+  -e TOKEN_PLACE_ENV=production \
+  -e API_RATE_LIMIT=5 \
+  tokenplace
 docker ps --format 'table {{.Names}}\t{{.Ports}}'
 docker logs -f tokenplace  # watch startup output
 docker exec -it tokenplace python -m pytest  # optional tests
 curl http://localhost:5000  # should return HTML
 ```
+
+Environment variables like `TOKEN_PLACE_ENV` and `API_RATE_LIMIT` can be
+passed with `-e` flags during `docker run`.
 
 #### token.place (docker-compose)
 

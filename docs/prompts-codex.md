@@ -16,14 +16,21 @@ PURPOSE:
 Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the [AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
+  [AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 - Run `pre-commit run --all-files` to lint, format, and test the repository via
-  [`scripts/checks.sh`](../scripts/checks.sh), which installs required tooling and runs code and docs checks.
+  [`scripts/checks.sh`](../scripts/checks.sh), which installs required tooling
+  and runs code and docs checks.
+- If `package.json` defines them, also run:
+  - `npm run lint`
+  - `npm run test:ci`
 - If documentation files (`README.md` or [`docs/`](../docs/)) change, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Log persistent failures in [`outages/`](../outages/) as JSON per [`outages/schema.json`](../outages/schema.json).
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Log persistent failures in [`outages/`](../outages/) as JSON per
+  [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Identify a small bug fix or documentation clarification.
@@ -43,11 +50,17 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the [AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
-Run `pre-commit run --all-files` (invokes [`scripts/checks.sh`](../scripts/checks.sh)),
-`pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`),
-`linkchecker --no-warnings README.md docs/`, and
-`git diff --cached | ./scripts/scan-secrets.py` before committing.
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
+[AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
+Run `pre-commit run --all-files` (invokes
+[`scripts/checks.sh`](../scripts/checks.sh)). If `package.json` defines them,
+also run:
+- `npm run lint`
+- `npm run test:ci`
+Then run:
+- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+- `linkchecker --no-warnings README.md docs/`
+- `git diff --cached | ./scripts/scan-secrets.py`
 Fix any issues reported by these tools.
 
 USER:

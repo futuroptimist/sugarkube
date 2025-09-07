@@ -26,4 +26,4 @@ jobs:
           python-version: '3.x'
       - run: |
           uv pip install --system linkchecker
-          linkchecker README.md docs/ || true
+          linkchecker --no-warnings README.md docs/

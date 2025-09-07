@@ -19,25 +19,16 @@ write_files:
     content: |
       # Inject with TUNNEL_TOKEN or TUNNEL_TOKEN_FILE env var or edit after boot
       TUNNEL_TOKEN=""
-  - path: /opt/projects/init-env.sh
-    permissions: '0755'
+  - path: /opt/sugarkube/docker-compose.cloudflared.yml
+    permissions: '0644'
     content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      for f in /opt/projects/token.place/.env /opt/projects/dspace/frontend/.env; do
-        if [ ! -f "$f" ] && [ -f "${f}.example" ]; then
-          cp "${f}.example" "$f"
-        fi
-      done
-  - path: /opt/projects/start-projects.sh
-    permissions: '0755'
-    content: |
-      #!/usr/bin/env bash
-      if [ -f /opt/projects/docker-compose.yml ]; then
-        systemctl enable --now projects-compose.service
-      else
-        echo "compose file missing; skipping service"
-      fi
+      services:
+        tunnel:
+          image: cloudflare/cloudflared:latest
+          restart: unless-stopped
+          command: tunnel run
+          env_file:
+            - /opt/sugarkube/.cloudflared.env
   - path: /etc/systemd/system/cloudflared-compose.service
     permissions: '0644'
     content: |
@@ -64,7 +55,7 @@ write_files:
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
-# projects-start
+      APT::Get::Fix-Missing "true";
   - path: /etc/systemd/system/projects-compose.service
     permissions: '0644'
     content: |
@@ -86,7 +77,6 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
-# projects-end
 runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
