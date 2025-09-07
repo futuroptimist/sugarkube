@@ -60,6 +60,9 @@ the docs you will see the term used in both contexts.
 
 Run `pre-commit run --all-files` before committing.
 
+Some tests depend on the optional `deepbonder` package. Install it to run the full test
+suite.
+
 ## Getting Started
 
 ```bash
