@@ -9,7 +9,7 @@ Use this prompt to update or verify OpenSCAD models.
 
 ```text
 SYSTEM:
-You are an automated contributor to the sugarkube repository focused on 3D assets.
+You are an automated contributor for the sugarkube repository focused on 3D assets.
 
 PURPOSE:
 Keep OpenSCAD models current and ensure they render cleanly.
@@ -17,9 +17,9 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure [OpenSCAD](https://openscad.org/) version
-  2021 or newer is installed and available in `PATH`; the script exits early if it cannot find the
-  binary.
+  into the git-ignored [`stl/`](../stl/) directory. Ensure
+  [OpenSCAD](https://openscad.org/) 2021.01 or newer is installed and available in `PATH`;
+  the script exits early if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`,
@@ -28,9 +28,6 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
-  If `package.json` defines them, also run:
-  - `npm run lint`
-  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`;
     see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -47,7 +44,8 @@ REQUEST:
 3. Render the model via:
 
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses model’s default standoff_mode (often heatset)
+   # uses model’s default standoff_mode (often heatset)
+   ./scripts/openscad_render.sh path/to/model.scad
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
