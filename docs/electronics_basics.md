@@ -16,6 +16,7 @@ Beginners can start here to learn the fundamentals needed to assemble the power 
 ### Soldering Tips
 - Keep the iron around 350 °C for most lead-free solder.
 - Tin both surfaces before joining wires.
+- Wipe the tip on a damp sponge or brass wool to keep it clean.
 - Work in a ventilated area and wear eye protection.
 
 ### Common Components

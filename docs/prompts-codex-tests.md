@@ -16,8 +16,8 @@ Improve and maintain test coverage.
 
 CONTEXT:
 - Tests live in [`tests/`](../tests/) and include Python suites run with
-  [pytest](https://docs.pytest.org/en/stable/) and shell tests written in
-  [Bats](https://bats-core.readthedocs.io/).
+  [pytest](https://docs.pytest.org/en/latest/) and shell tests written in
+  [Bats](https://bats-core.readthedocs.io/en/latest/).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository
   conventions.
 - Run `pre-commit run --all-files`; it invokes
