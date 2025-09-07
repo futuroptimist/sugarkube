@@ -18,13 +18,17 @@ CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL
   meshes into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD 2021.01](https://github.com/openscad/openscad/releases/tag/openscad-2021.01) or newer
-  is installed and available in `PATH`; the script exits early if it cannot find the binary.
+// MANUAL DECISION REQUIRED
+  [OpenSCAD](https://openscad.org/) 2024.03 or newer is installed and available in
+  `PATH`; the script exits if the binary is missing.  ← feature branch
+//  [OpenSCAD 2021.01](https://github.com/openscad/openscad/releases/tag/openscad-2021.01) or newer
+//  is installed and available in `PATH`; the script exits early if it cannot find the binary.  ← main
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`,
-  or `nut`). `STANDOFF_MODE` is optional, case-insensitive, trims surrounding whitespace, and
-  defaults to the model’s `standoff_mode` value (often `heatset`).
+- Render each model in all supported `standoff_mode` variants such as `heatset`, `printed`,
+  or `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
+  surrounding whitespace, and defaults to the model’s `standoff_mode` value (often
+  `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
 // MANUAL DECISION REQUIRED
@@ -49,11 +53,17 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
 
-   ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad
-   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad
-   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
-   ~~~
+// MANUAL DECISION REQUIRED
+    ~~~bash
+    ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (often heatset)
+    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+    ~~~  ← feature branch
+//   ~~~bash
+//   ./scripts/openscad_render.sh path/to/model.scad
+//   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad
+//   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+//   ~~~  ← main
 
 4. Commit updated SCAD sources and any documentation.
 
