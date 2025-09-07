@@ -211,7 +211,8 @@ BUILD_TIMEOUT="${BUILD_TIMEOUT:-4h}"
 APT_RETRIES="${APT_RETRIES:-5}"
 APT_TIMEOUT="${APT_TIMEOUT:-30}"
 APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIMEOUT} \
--o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true"
+-o Acquire::https::Timeout=${APT_TIMEOUT} -o Acquire::http::NoCache=true \
+-o APT::Get::Fix-Missing=true"
 APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
 SKIP_MIRROR_REWRITE="${SKIP_MIRROR_REWRITE:-0}"
