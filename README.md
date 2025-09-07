@@ -53,7 +53,8 @@ the docs you will see the term used in both contexts.
     `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git
     URLs via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
-  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output
+  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
+    `--help` for usage
 - `outages/` — structured outage records (see
   [docs/outage_catalog.md](docs/outage_catalog.md))
 - `tests/` — quick checks for helper scripts and documentation
@@ -94,8 +95,8 @@ checks.
 
 STL files are produced automatically by CI for each OpenSCAD model and can be
 downloaded from the workflow run. Provide a single `.scad` file path to render a
-variant locally. The script exits with a usage message if extra arguments are
-supplied:
+variant locally. The script accepts only one argument and prints a usage
+message if others are supplied:
 
 ```bash
 bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad

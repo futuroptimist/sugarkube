@@ -69,12 +69,14 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 The token is stored at `/var/lib/rancher/k3s/server/node-token`; copy it for
 later. Treat this token like a password and keep it private.
 
-Boot the remaining Pis once they can reach the control-plane node. Replace
-`<server-ip>` with the control-plane's IP and `<node-token>` with the value
-above. Run the installer with sudo and pass the server URL and token as
-arguments:
+Boot the remaining Pis once they can reach the control-plane node. On each
+worker, disable swap, then install the agent. Replace `<server-ip>` with the
+control-plane's IP and `<node-token>` with the value above:
 
 ```sh
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
 curl -sfL https://get.k3s.io | sudo sh -s - agent \
   --server https://<server-ip>:6443 \
   --token <node-token>
