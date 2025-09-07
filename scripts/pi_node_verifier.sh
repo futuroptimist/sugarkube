@@ -5,7 +5,15 @@ JSON=false
 for arg in "$@"; do
   case "$arg" in
     --json) JSON=true ;;
-    --help) echo "Usage: $0 [--json]"; exit 0 ;;
+    --help)
+      echo "Usage: $0 [--json]"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Usage: $0 [--json]" >&2
+      exit 1
+      ;;
   esac
 done
 

@@ -33,12 +33,12 @@ screw_clearance_diam = 3.2; // through-hole clearance, slightly oversize
 countersink_diam = 5.0;
 countersink_depth = 1.6;
 
-nut_clearance = 0.2; // extra room for easier nut insertion
+nut_clearance = 0.3; // extra room for easier nut insertion (was 0.2)
 nut_flat = 5.0 + nut_clearance; // across flats for M2.5 nut
 nut_thick = 2.0;
 
 board_angle = 0;
-gap_between_boards = 45;
+gap_between_boards = 10;
 edge_margin = 5;
 port_clearance = 6;
 
