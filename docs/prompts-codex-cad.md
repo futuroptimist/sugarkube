@@ -22,9 +22,9 @@ CONTEXT:
   script exits early if it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`,
-  or `nut`). `STANDOFF_MODE` is optional, case-insensitive, trims surrounding whitespace, and
-  defaults to the model’s `standoff_mode` value (often `heatset`).
+- Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
+  `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
+  surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
@@ -67,6 +67,10 @@ Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires `aspell` and
 `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
+If `package.json` defines them, also run:
+- `npm run lint`
+- `npm run format:check`
+- `npm test -- --coverage`
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
