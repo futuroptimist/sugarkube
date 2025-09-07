@@ -228,12 +228,18 @@ Proceed with the detailed steps below to adapt the process for other repositorie
 ```sh
 cd /opt/projects/token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
-docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker run -d --name tokenplace -p 5000:5000 \
+  -e TOKEN_PLACE_ENV=production \
+  -e API_RATE_LIMIT=5 \
+  tokenplace
 docker ps --format 'table {{.Names}}\t{{.Ports}}'
 docker logs -f tokenplace  # watch startup output
 docker exec -it tokenplace python -m pytest  # optional tests
 curl http://localhost:5000  # should return HTML
 ```
+
+Environment variables like `TOKEN_PLACE_ENV` and `API_RATE_LIMIT` can be
+passed with `-e` flags during `docker run`.
 
 #### token.place (docker-compose)
 
