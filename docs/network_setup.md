@@ -31,8 +31,11 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 12. Harden SSH by disabling password authentication once key-based logins work:
     ```sh
     sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+    sudo sshd -t  # validate configuration before reloading
     sudo systemctl reload ssh
     ```
+    Keep the current session open and test a new connection to ensure the change didn't
+    lock you out.
 
 ## Switch and PoE
 
