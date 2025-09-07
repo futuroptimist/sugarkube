@@ -17,14 +17,13 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure [OpenSCAD](https://openscad.org/) version
-  2021 or newer is installed and available in `PATH`; the script exits early if it cannot find the
-  binary.
+  to the git-ignored [`stl/`](../stl/) directory. Ensure [OpenSCAD](https://openscad.org/)
+  2021.01 or newer is in `PATH`; the script exits if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`,
-  or `nut`). `STANDOFF_MODE` is optional, case-insensitive, trims surrounding whitespace, and
-  defaults to the model’s `standoff_mode` value (often `heatset`).
+- Render each model in every supported `standoff_mode` variant (e.g., `heatset`, `printed`, or
+  `nut`). The `STANDOFF_MODE` env var is optional, case-insensitive, trimmed, and defaults to the
+  model’s `standoff_mode` value (usually `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
@@ -47,7 +46,7 @@ REQUEST:
 3. Render the model via:
 
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses model’s default standoff_mode (often heatset)
+   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (often heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
