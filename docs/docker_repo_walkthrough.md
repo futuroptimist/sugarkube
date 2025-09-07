@@ -10,6 +10,27 @@ but the steps apply to any repository.
 For a prebuilt image that already clones both projects, see
 [pi_token_dspace.md](pi_token_dspace.md).
 
+## Step-by-step overview
+
+1. Flash the SD card and boot the Pi using
+   [pi_image_cloudflare.md](pi_image_cloudflare.md).
+2. SSH in and verify Docker and the Cloudflare Tunnel are active:
+   `ssh pi@<hostname>.local` then `systemctl status docker cloudflared-compose`.
+3. Clone a repository under `/opt/projects` such as
+   [`token.place`](https://github.com/futuroptimist/token.place) or
+   [`dspace`](https://github.com/democratizedspace/dspace).
+4. Build or start containers:
+   - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
+     then `docker run -d --name myapp -p 8080:8080 myapp`.
+   - `docker-compose.yml`: `docker compose up -d`.
+5. Confirm the service responds locally, e.g.
+   `curl http://localhost:5000` for token.place or
+   `curl http://localhost:3000` for dspace.
+6. Optionally expose ports through the Cloudflare Tunnel by editing
+   `/opt/sugarkube/docker-compose.cloudflared.yml`.
+7. Log recurring deployment failures in `outages/` using
+   [`schema.json`](../outages/schema.json).
+
 ## Quick start
 
 Try one of these example projects to confirm the image works:
