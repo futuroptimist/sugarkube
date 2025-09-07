@@ -229,6 +229,8 @@ git clone --depth 1 --branch '__PIGEN_BRANCH__' https://github.com/RPi-Distro/pi
 install -D -m 0644 /host/scripts/cloud-init/user-data.yaml /work/pi-gen/stage2/01-sys-tweaks/user-data
 install -D -m 0644 /host/scripts/cloud-init/docker-compose.cloudflared.yml \
   /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml
+install -D -m 0644 /host/scripts/cloud-init/docker-compose.apps.yml \
+  /work/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.apps.yml
 cd /work/pi-gen
 # Inject a debootstrap fallback wrapper to try multiple mirrors if fetch fails
 mkdir -p /work/pi-gen/tools
@@ -514,6 +516,7 @@ function Invoke-BuildPiGenOfficial {
   & docker volume create pigen-apt-cache | Out-Null
   $userData = Join-Path $hostRoot 'scripts\cloud-init\user-data.yaml'
   $cfCompose = Join-Path $hostRoot 'scripts\cloud-init\docker-compose.cloudflared.yml'
+  $appsCompose = Join-Path $hostRoot 'scripts\cloud-init\docker-compose.apps.yml'
 
   $raspbianMirror = 'http://raspbian.raspberrypi.org/raspbian'
   $archiveMirror = 'http://archive.raspberrypi.org/debian'
@@ -545,6 +548,7 @@ function Invoke-BuildPiGenOfficial {
     '-v','pigen-apt-cache:/var/cache/apt',
     '-v',"${userData}:/pi-gen/stage2/01-sys-tweaks/user-data:ro",
     '-v',"${cfCompose}:/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.cloudflared.yml:ro",
+    '-v',"${appsCompose}:/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.apps.yml:ro",
     'ghcr.io/raspberrypi/pigen:latest','bash','-lc','cd /pi-gen && ./build.sh'
   )
   & docker @dockerArgs

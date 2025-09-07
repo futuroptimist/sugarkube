@@ -472,6 +472,14 @@ def test_requires_cloudflared_compose_file(tmp_path):
     assert "Cloudflared compose file not found" in result.stderr
 
 
+def test_requires_apps_compose_file(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["APPS_COMPOSE_PATH"] = str(tmp_path / "missing.yml")
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Apps compose file not found" in result.stderr
+
+
 def test_requires_stage_list(tmp_path):
     env = _setup_build_env(tmp_path)
     env["PI_GEN_STAGES"] = "   "
@@ -483,3 +491,8 @@ def test_requires_stage_list(tmp_path):
 def test_powershell_script_mentions_cloudflared_compose():
     text = Path("scripts/build_pi_image.ps1").read_text()
     assert "docker-compose.cloudflared.yml" in text
+
+
+def test_powershell_script_mentions_apps_compose():
+    text = Path("scripts/build_pi_image.ps1").read_text()
+    assert "docker-compose.apps.yml" in text

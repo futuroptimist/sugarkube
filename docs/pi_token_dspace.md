@@ -3,8 +3,9 @@
 Build a Raspberry Pi 5 image that includes the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) repositories so you can run
-both apps out of the box. The image builder clones these projects, installs
-`tokenplace.service` and `dspace.service`, and leaves hooks for additional
+both apps out of the box. The image builder clones these projects, copies a
+unified `docker-compose.apps.yml`, and installs a single
+`sugarkube-apps.service` to manage them. Hooks remain for additional
 repositories.
 
 ## Build the image
@@ -16,7 +17,8 @@ repositories.
 
 `build_pi_image.sh` clones `token.place` and `dspace` by default. To skip either
 repo, set `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`. Add more projects by
-passing their Git URLs via `EXTRA_REPOS`:
+passing their Git URLs via `EXTRA_REPOS`. Supply an alternate compose file via
+`APPS_COMPOSE_PATH` if you maintain your own service definitions:
 
 ```sh
 EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
@@ -27,20 +29,19 @@ The script clones each repo into `/opt/projects` and assigns ownership to the
 
 ## Run the apps
 
-On first boot the Pi builds the containers and enables systemd services for both
-apps (only if the corresponding repo exists under `/opt/projects`). The services
-start automatically and can be managed with `systemctl`:
+On first boot the Pi builds the containers and enables `sugarkube-apps.service`
+when either repo exists under `/opt/projects`. Manage all app containers through
+this unit:
 
 ```sh
 # check service status
-sudo systemctl status tokenplace.service
-sudo systemctl status dspace.service
+sudo systemctl status sugarkube-apps.service
 
-# restart a service
-sudo systemctl restart tokenplace.service
+# restart both apps
+sudo systemctl restart sugarkube-apps.service
 ```
 
-Visit `http://<pi-host>:5000` for token.place and `http://<pi-host>:3000` for
+Visit `http://<pi-host>:5000` for token.place and `http://<pi-host>:3002` for
 dspace. To expose them through a Cloudflare Tunnel, update
 `/opt/sugarkube/docker-compose.cloudflared.yml` as shown in
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
@@ -48,16 +49,11 @@ dspace. To expose them through a Cloudflare Tunnel, update
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. The image builder strips the `token.place` or `dspace` service
-definitions when the corresponding `CLONE_*` flag is `false`, so you can build a
-minimal image and add services later. Create a systemd unit that mirrors
-`tokenplace.service` or `dspace.service` to run them on boot. Start by copying
-one of the existing services and editing the paths:
+`/opt/projects`. Edit `/opt/sugarkube/docker-compose.apps.yml` to define new
+services and run:
 
 ```sh
-sudo cp /etc/systemd/system/tokenplace.service /etc/systemd/system/newapp.service
-# edit WorkingDirectory and docker compose paths as needed
-sudo systemctl enable --now newapp.service
+sudo systemctl restart sugarkube-apps.service
 ```
 
 Use these hooks to experiment with other projects and grow the image over time.

@@ -1,0 +1,21 @@
+version: '3'
+services:
+  # tokenplace-start
+  tokenplace:
+    build:
+      context: /opt/projects/token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+  # tokenplace-end
+
+  # dspace-start
+  dspace:
+    build:
+      context: /opt/projects/dspace/frontend
+    working_dir: /opt/projects/dspace/frontend
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+  # dspace-end

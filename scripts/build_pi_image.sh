@@ -70,6 +70,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
 CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
 CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
+APPS_COMPOSE_PATH="${APPS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.apps.yml}"
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
   exit 1
@@ -88,6 +89,14 @@ if [ ! -f "${CLOUDFLARED_COMPOSE_PATH}" ]; then
 fi
 if [ ! -s "${CLOUDFLARED_COMPOSE_PATH}" ]; then
   echo "Cloudflared compose file is empty: ${CLOUDFLARED_COMPOSE_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${APPS_COMPOSE_PATH}" ]; then
+  echo "Apps compose file not found: ${APPS_COMPOSE_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${APPS_COMPOSE_PATH}" ]; then
+  echo "Apps compose file is empty: ${APPS_COMPOSE_PATH}" >&2
   exit 1
 fi
 WORK_DIR=$(mktemp -d)
@@ -174,15 +183,16 @@ CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
 CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
 
-# Remove token.place or dspace systemd units if their repos are not cloned
+apps_compose="${WORK_DIR}/apps-compose.yml"
+cp "${APPS_COMPOSE_PATH}" "$apps_compose"
 if [[ "$CLONE_TOKEN_PLACE" != "true" ]]; then
-  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${USER_DATA}"
-  sed -i '/# tokenplace-runcmd/,+1d' "${USER_DATA}"
+  sed -i '/# tokenplace-start/,/# tokenplace-end/d' "$apps_compose"
 fi
 if [[ "$CLONE_DSPACE" != "true" ]]; then
-  sed -i '/# dspace-start/,/# dspace-end/d' "${USER_DATA}"
-  sed -i '/# dspace-runcmd/,+1d' "${USER_DATA}"
+  sed -i '/# dspace-start/,/# dspace-end/d' "$apps_compose"
 fi
+install -Dm644 "$apps_compose" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/docker-compose.apps.yml"
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {
