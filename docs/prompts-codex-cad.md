@@ -17,14 +17,15 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure [OpenSCAD](https://openscad.org/) version
-  2021 or newer is installed and available in `PATH`; the script exits early if it cannot find the
-  binary.
+  into the git-ignored [`stl/`](../stl/) directory. Ensure
+  [OpenSCAD](https://openscad.org/) 2021.01 or newer is installed and on
+  `PATH`; the script exits early if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants (for example, `heatset`, `printed`,
-  or `nut`). `STANDOFF_MODE` is optional, case-insensitive, trims surrounding whitespace, and
-  defaults to the model’s `standoff_mode` value (often `heatset`).
+- Render each model in all supported `standoff_mode` variants (for example,
+  `heatset`, `printed`, or `nut`). `STANDOFF_MODE` is optional,
+  case-insensitive, trims surrounding whitespace, and defaults to the
+  model’s `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
@@ -32,8 +33,8 @@ CONTEXT:
   - `npm run lint`
   - `npm run test:ci`
 - For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`;
-    see [`.spellcheck.yaml`](../.spellcheck.yaml))
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
+    `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
     [`README.md`](../README.md) and [`docs/`](../docs/)
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
@@ -46,11 +47,11 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
 
-   ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses model’s default standoff_mode (often heatset)
+   ```bash
+   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
-   ~~~
+   ```
 
 4. Commit updated SCAD sources and any documentation.
 
@@ -67,8 +68,9 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-`aspell-en`), `linkchecker --no-warnings README.md docs/`, and
+Run `pre-commit run --all-files`,
+`pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`),
+`linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
