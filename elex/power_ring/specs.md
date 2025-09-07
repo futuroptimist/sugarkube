@@ -18,6 +18,7 @@ The design may evolve as the project grows.
 
 - Test points for measuring battery voltage
 - Silkscreen labels for polarity and connector numbers
+- KiCad title block notes remind labeling connector polarity and voltage
 - Title block comments record decoupling guidelines, high-current trace layout, connector
   labeling, export checks, ground pour continuity around mounting holes, and BOM validation
 
