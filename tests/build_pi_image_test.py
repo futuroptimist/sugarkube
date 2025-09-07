@@ -292,9 +292,7 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
-def _setup_build_env(
-    tmp_path, check_compose: bool = False, precompressed: bool = False
-):
+def _setup_build_env(tmp_path, precompressed: bool = False):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git_args.log"
@@ -337,12 +335,6 @@ fi
     mount.write_text("#!/bin/sh\nexit 0\n")
     mount.chmod(0o755)
 
-    compose_check = (
-        "[[ -f stage2/01-sys-tweaks/files/opt/sugarkube/"
-        "docker-compose.cloudflared.yml ]] || exit 1\n"
-        if check_compose
-        else ""
-    )
     image_cmd = (
         "python3 - <<'PY'\n"
         "import zipfile\n"
@@ -365,7 +357,6 @@ fi
         'mkdir -p "$target/stage2/01-sys-tweaks"\n'
         f"cat <<'EOF' > \"$target/build.sh\"\n"
         "#!/bin/bash\n"
-        f"{compose_check}"
         "mkdir -p deploy\n"
         'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
@@ -423,10 +414,6 @@ def _run_build_script(tmp_path, env):
     ci_dir.mkdir(parents=True)
     user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
-    compose_src = (
-        repo_root / "scripts" / "cloud-init" / "docker-compose.cloudflared.yml"
-    )
-    shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -472,12 +459,6 @@ def test_handles_precompressed_pi_gen_output(tmp_path):
     assert result.returncode == 0
     assert (tmp_path / "sugarkube.img.xz").exists()
     assert not (tmp_path / "sugarkube.img.xz.xz").exists()
-
-
-def test_copies_cloudflared_compose(tmp_path):
-    env = _setup_build_env(tmp_path, check_compose=True)
-    result, _ = _run_build_script(tmp_path, env)
-    assert result.returncode == 0
 
 
 def test_arm64_disables_armhf(tmp_path):
@@ -536,14 +517,6 @@ def test_requires_cloud_init_file(tmp_path):
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode != 0
     assert "Cloud-init file not found" in result.stderr
-
-
-def test_requires_cloudflared_compose_file(tmp_path):
-    env = _setup_build_env(tmp_path)
-    env["CLOUDFLARED_COMPOSE_PATH"] = str(tmp_path / "missing.yml")
-    result, _ = _run_build_script(tmp_path, env)
-    assert result.returncode != 0
-    assert "Cloudflared compose file not found" in result.stderr
 
 
 def test_requires_stage_list(tmp_path):
