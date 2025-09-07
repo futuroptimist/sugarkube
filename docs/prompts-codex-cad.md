@@ -9,7 +9,7 @@ Use this prompt to update or verify OpenSCAD models.
 
 ```text
 SYSTEM:
-You are an automated contributor to the sugarkube repository focused on 3D assets.
+You are an automated contributor for the sugarkube repository focused on 3D assets.
 
 PURPOSE:
 Keep OpenSCAD models current and ensure they render cleanly.
