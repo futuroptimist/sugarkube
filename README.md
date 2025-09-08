@@ -45,8 +45,9 @@ the docs you will see the term used in both contexts.
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
     to be installed and authenticated. Uses POSIX `-ef` instead of `realpath` for better
     macOS compatibility
-  - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`
-    and clean up temporary work directories
+  - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
+    clean up temporary work directories, and use POSIX `-ef` to compare paths
+    without `realpath`
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
     preloaded; embeds `pi_node_verifier.sh` and clones `token.place` and
     `democratizedspace/dspace` (branch `v3`) by default. Set
