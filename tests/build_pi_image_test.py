@@ -434,17 +434,6 @@ def _run_build_script(tmp_path, env):
     git_args = git_log_path.read_text() if git_log_path.exists() else ""
     return result, git_args
 
-    result = subprocess.run(
-        ["/bin/bash", str(script)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    git_log_path = Path(env["GIT_LOG"])
-    git_args = git_log_path.read_text() if git_log_path.exists() else ""
-    return result, git_args
-
 
 def test_uses_default_pi_gen_branch(tmp_path):
     env = _setup_build_env(tmp_path)

@@ -26,6 +26,13 @@ def test_regex_scan_detects_patterns(scan_secrets, line):
     assert scan_secrets.regex_scan(diff)
 
 
+def test_regex_scan_prints_warning(scan_secrets, capsys):
+    diff = ["+++ b/file.txt", "+token" ": abc"]
+    assert scan_secrets.regex_scan(diff)
+    captured = capsys.readouterr()
+    assert "Possible secret: +tok" "en: abc" in captured.out
+
+
 def test_regex_scan_ignores_self(scan_secrets):
     diff = ["+++ b/scripts/scan-secrets.py", "+api" "_key=123"]
     assert not scan_secrets.regex_scan(diff)
