@@ -136,7 +136,11 @@ def test_succeeds_when_realpath_missing(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_realpath = fake_bin / "realpath"
-    fake_realpath.write_text("#!/bin/sh\n" "echo realpath should not be invoked >&2\n" "exit 1\n")
+    fake_realpath.write_text(
+        "#!/bin/sh\n"
+        "echo realpath should not be invoked >&2\n"
+        "exit 1\n"
+    )
     fake_realpath.chmod(0o755)
 
     result = _run_script(
