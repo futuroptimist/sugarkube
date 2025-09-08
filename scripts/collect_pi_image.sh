@@ -81,8 +81,9 @@ echo "==> Found image source: ${found}"
 # Normalize to .xz (keep original artifact in place for forensics)
 mkdir -p "$(dirname "${OUTPUT_PATH}")"
 
+# Use -ef to compare paths without relying on non-POSIX realpath
 if [[ "${found}" == *.img.xz ]]; then
-  if [ -e "${OUTPUT_PATH}" ] && [ "$(realpath "${found}")" = "$(realpath "${OUTPUT_PATH}")" ]; then
+  if [ -e "${OUTPUT_PATH}" ] && [ "${found}" -ef "${OUTPUT_PATH}" ]; then
     echo "==> Source already at ${OUTPUT_PATH}, skipping copy"
   else
     cp -f "${found}" "${OUTPUT_PATH}"
