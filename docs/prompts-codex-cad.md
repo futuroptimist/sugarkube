@@ -23,11 +23,14 @@ CONTEXT:
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
-  `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
-  surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
+  `nut`. `STANDOFF_MODE` is optional; the script normalizes the value (case-insensitive, trims
+  whitespace) and defaults to the model’s `standoff_mode` value (often `heatset`). Invalid values
+  cause the render script to exit with an error.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- If a Node toolchain is present (`package.json` exists), also run `npm ci`, `npm run lint`, and
+  `npm run test:ci`.
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -64,8 +67,10 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Run `pre-commit run --all-files`.
-If `package.json` defines them, also run:
+Run `pre-commit run --all-files` (invokes
+[`scripts/checks.sh`](../scripts/checks.sh)).
+If a Node toolchain is present (`package.json` exists), also run:
+- `npm ci`
 - `npm run lint`
 - `npm run test:ci`
 Then run:
