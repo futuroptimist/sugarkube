@@ -412,12 +412,13 @@ def _run_build_script(tmp_path, env):
 
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
-    user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"
+    src_ci_dir = repo_root / "scripts" / "cloud-init"
+    user_src = src_ci_dir / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
 
-    compose_src = repo_root / "scripts" / "cloud-init" / "docker-compose.cloudflared.yml"
+    compose_src = src_ci_dir / "docker-compose.cloudflared.yml"
     shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
-    projects_src = repo_root / "scripts" / "cloud-init" / "docker-compose.projects.yml"
+    projects_src = src_ci_dir / "docker-compose.projects.yml"
     shutil.copy(projects_src, ci_dir / "docker-compose.projects.yml")
 
     result = subprocess.run(
