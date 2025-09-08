@@ -23,9 +23,9 @@ if ! command -v flake8 >/dev/null 2>&1 || \
 fi
 
 # python checks
-flake8 . --exclude=.venv
+flake8 . --exclude=.venv --max-line-length=100
 isort --check-only . --skip .venv
-black --check . --exclude ".venv/"
+black --check . --line-length=100 --exclude ".venv/"
 
 # js checks
 if [ -f package.json ]; then
