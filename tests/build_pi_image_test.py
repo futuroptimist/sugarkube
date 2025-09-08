@@ -412,20 +412,16 @@ def _run_build_script(tmp_path, env):
 
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
-    user_src = repo_root / "scripts" / "cloud-init" / "user-data.yaml"
+
+    cloud_init_src = repo_root / "scripts" / "cloud-init"
+    user_src = cloud_init_src / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
 
-    ci_cloud_init = repo_root / "scripts" / "cloud-init"
-    compose_src = ci_cloud_init / "docker-compose.cloudflared.yml"
-    shutil.copy(
-        compose_src,
-        ci_dir / "docker-compose.cloudflared.yml",
-    )
-    projects_src = ci_cloud_init / "docker-compose.projects.yml"
-    shutil.copy(
-        projects_src,
-        ci_dir / "docker-compose.projects.yml",
-    )
+    compose_src = cloud_init_src / "docker-compose.cloudflared.yml"
+    shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
+
+    projects_src = cloud_init_src / "docker-compose.projects.yml"
+    shutil.copy(projects_src, ci_dir / "docker-compose.projects.yml")
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -437,7 +433,7 @@ def _run_build_script(tmp_path, env):
     git_log_path = Path(env["GIT_LOG"])
     git_args = git_log_path.read_text() if git_log_path.exists() else ""
     return result, git_args
-
+  
 
 def test_uses_default_pi_gen_branch(tmp_path):
     env = _setup_build_env(tmp_path)
