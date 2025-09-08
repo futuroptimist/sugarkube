@@ -75,6 +75,17 @@ def test_errors_on_zip_without_img(tmp_path):
     assert "Zip contained no .img" in result.stderr
 
 
+def test_errors_when_no_image_found(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    (deploy / "foo.txt").write_text("data")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode != 0
+    assert "No image file found" in result.stderr
+
+
 def test_handles_raw_img(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
