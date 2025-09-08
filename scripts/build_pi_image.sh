@@ -71,6 +71,8 @@ CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
 CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
 CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
 PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.projects.yml}"
+START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
+INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
@@ -99,6 +101,14 @@ if [ ! -f "${PROJECTS_COMPOSE_PATH}" ]; then
 fi
 if [ ! -s "${PROJECTS_COMPOSE_PATH}" ]; then
   echo "Projects compose file is empty: ${PROJECTS_COMPOSE_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${START_PROJECTS_PATH}" ]; then
+  echo "Start projects script not found: ${START_PROJECTS_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${INIT_ENV_PATH}" ]; then
+  echo "Init env script not found: ${INIT_ENV_PATH}" >&2
   exit 1
 fi
 
@@ -204,6 +214,10 @@ if [[ "$CLONE_TOKEN_PLACE" != "true" && "$CLONE_DSPACE" != "true" && -z "$EXTRA_
 else
   install -Dm644 "${PROJECTS_COMPOSE_TEMP}" \
     "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/docker-compose.yml"
+  install -Dm755 "${START_PROJECTS_PATH}" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/start-projects.sh"
+  install -Dm755 "${INIT_ENV_PATH}" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/init-env.sh"
 fi
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"

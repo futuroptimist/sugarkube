@@ -423,6 +423,16 @@ def _run_build_script(tmp_path, env):
     projects_src = cloud_init_src / "docker-compose.projects.yml"
     shutil.copy(projects_src, ci_dir / "docker-compose.projects.yml")
 
+    start_projects_src = cloud_init_src / "start-projects.sh"
+    start_projects_dest = ci_dir / "start-projects.sh"
+    shutil.copy(start_projects_src, start_projects_dest)
+    start_projects_dest.chmod(0o755)
+
+    init_env_src = cloud_init_src / "init-env.sh"
+    init_env_dest = ci_dir / "init-env.sh"
+    shutil.copy(init_env_src, init_env_dest)
+    init_env_dest.chmod(0o755)
+
     result = subprocess.run(
         ["/bin/bash", str(script)],
         env=env,
