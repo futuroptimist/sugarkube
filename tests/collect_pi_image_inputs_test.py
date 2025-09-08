@@ -102,3 +102,28 @@ def test_handles_img_xz(tmp_path):
     assert out_img.exists()
     assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
     assert out_img.read_text() == "original"
+
+
+def test_succeeds_when_realpath_missing(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    img_xz = deploy / "foo.img.xz"
+    img_xz.write_text("original")
+
+    out_img = tmp_path / "out.img.xz"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_realpath = fake_bin / "realpath"
+    fake_realpath.write_text(
+        "#!/bin/sh\n" "echo realpath should not be invoked >&2\n" "exit 1\n"
+    )
+    fake_realpath.chmod(0o755)
+
+    result = _run_script(
+        tmp_path,
+        deploy,
+        out_img,
+        extra_env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert out_img.exists()
