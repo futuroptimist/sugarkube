@@ -13,6 +13,8 @@
                 (comment 6 "Confirm board outline fits enclosure")
                 (comment 7 "Document schematic updates in specs.md")
                 (comment 8 "Use star topology for power distribution to minimize voltage drop")
+                (comment 9 "Use star topology for power distribution")
+                (comment 10 "Maintain 3 mm clearance between high-voltage nets")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
