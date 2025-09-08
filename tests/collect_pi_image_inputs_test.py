@@ -102,3 +102,14 @@ def test_handles_img_xz(tmp_path):
     assert out_img.exists()
     assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
     assert out_img.read_text() == "original"
+
+
+def test_errors_when_no_image_found(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    (deploy / "note.txt").write_text("no artifact")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode != 0
+    assert "No image file found" in result.stderr
