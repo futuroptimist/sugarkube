@@ -23,19 +23,22 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Confirm the service responds locally, e.g.
+5. Inspect container logs to confirm the service started:  
+   - Single container: `docker logs -f myapp`  
+   - Compose project: `docker compose logs`
+6. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
    `curl http://localhost:3000` for dspace.
-6. Optionally expose ports through the Cloudflare Tunnel by editing
+7. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
-7. Log recurring deployment failures in `outages/` using
+8. Log recurring deployment failures in `outages/` using
    [`schema.json`](../outages/schema.json).
 
 ## Quick start
 
 Try one of these example projects to confirm the image works:
 
-### token.place
+### token.place (Dockerfile)
 
 ```sh
 ssh pi@<hostname>.local
@@ -44,7 +47,20 @@ git clone https://github.com/futuroptimist/token.place
 cd token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
+docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000
+```
+
+### token.place (docker-compose)
+
+```sh
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place
+cd token.place
+docker compose up -d
+docker compose ps
+curl http://localhost:5000  # relay
+curl http://localhost:3000  # server
 ```
 
 ### dspace
@@ -55,6 +71,7 @@ git clone https://github.com/democratizedspace/dspace
 cd dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
+docker compose logs -f  # watch build and runtime logs
 curl http://localhost:3000
 ```
 
@@ -83,6 +100,7 @@ services:
       - "3000:3000"
 EOF
 docker compose up -d
+docker compose logs -f tokenplace dspace
 curl http://localhost:5000
 curl http://localhost:3000
 docker compose down
