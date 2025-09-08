@@ -31,6 +31,11 @@ def test_regex_scan_ignores_self(scan_secrets):
     assert not scan_secrets.regex_scan(diff)
 
 
+def test_regex_scan_ignores_self_without_prefix(scan_secrets):
+    diff = ["+++ scripts/scan-secrets.py", "+token" ": abc"]
+    assert not scan_secrets.regex_scan(diff)
+
+
 def test_regex_scan_ignores_removed_lines(scan_secrets):
     diff = ["+++ b/file.txt", "-pass" "word=abc"]
     assert not scan_secrets.regex_scan(diff)
