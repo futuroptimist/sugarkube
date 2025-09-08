@@ -8,6 +8,13 @@ solar-powered Raspberry Pi cluster.
 The word *sugarkube* is used both for the solar cube itself and for helper
 scripts that provide "syntactic sugar" for Kubernetes.
 
+## Getting started
+- Begin with the [README](README.md) for an overview.
+- Contribution workflow: see [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+- Before committing, run `pre-commit run --all-files`,
+  `pyspelling -c .spellcheck.yaml`, and
+  `linkchecker --no-warnings README.md docs/`.
+
 ## Docs
 - [Build guide](docs/build_guide.md)
 - [Solar basics](docs/solar_basics.md)
@@ -17,6 +24,7 @@ scripts that provide "syntactic sugar" for Kubernetes.
 - [Network setup](docs/network_setup.md)
 - [Pi image with Cloudflare tunnel](docs/pi_image_cloudflare.md)
 - [Docker repo deployment walkthrough](docs/docker_repo_walkthrough.md)
+- Full index: [docs/index.md](docs/index.md)
 
 ## CAD
 - [OpenSCAD models](cad/)

@@ -18,8 +18,8 @@ CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
   into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD](https://openscad.org/) 2024.03 or newer is installed and available in `PATH`; the
-  script exits early if it cannot find the binary.
+  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early
+  if it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -41,8 +41,8 @@ CONTEXT:
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
 2. Modify geometry or parameters as required.
-3. Render the model via:
-
+3. Render the model via (use `~~~` fences inside this prompt to avoid breaking the outer
+   code block):
    ~~~bash
    ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
@@ -64,13 +64,15 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Run `pre-commit run --all-files`,
-`pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`),
-`linkchecker --no-warnings README.md docs/`, and
-`git diff --cached | ./scripts/scan-secrets.py` before committing.
+Run `pre-commit run --all-files`.
 If `package.json` defines them, also run:
 - `npm run lint`
 - `npm run test:ci`
+Then run:
+- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+  [`.spellcheck.yaml`](../.spellcheck.yaml))
+- `linkchecker --no-warnings README.md docs/`
+- `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
