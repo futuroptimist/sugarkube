@@ -412,8 +412,8 @@ def _run_build_script(tmp_path, env):
 
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
-    cloud_init_src = repo_root / "scripts" / "cloud-init"
 
+    cloud_init_src = repo_root / "scripts" / "cloud-init"
     user_src = cloud_init_src / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
 
