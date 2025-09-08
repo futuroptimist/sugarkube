@@ -23,8 +23,11 @@ Heat‑set inserts are knurled brass cylinders that melt into a printed hole. On
 You can skip inserts by printing internal threads. The provided OpenSCAD model supports a `standoff_mode` of `"printed"` which generates an M2.5 thread using a simple helix.
 
 ```bash
-openscad -D standoff_mode="printed" -o triple_printed.stl cad/pi_cluster/pi5_triple_carrier_rot45.scad
+STANDOFF_MODE=printed bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad
 ```
+
+The helper script validates `STANDOFF_MODE` and writes the STL to
+`stl/pi5_triple_carrier_rot45_printed.stl`.
 
 Printed threads work best with a fine nozzle (0.4 mm or smaller) and four or more perimeters around each standoff. Thread the screw gently the first time to clear any leftover plastic.
 
