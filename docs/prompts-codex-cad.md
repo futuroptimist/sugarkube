@@ -16,10 +16,11 @@ Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
-- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early
-  if it cannot find the binary.
+- [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
+  `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
+  in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
+  [OpenSCAD](https://openscad.org/) is installed and on `PATH`; the script exits early if the
+  binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -29,7 +30,7 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
-- If a Node toolchain is present (`package.json` exists), also run `npm ci`, `npm run lint`, and
+- If `package.json` exists, also run `npm ci`, `npm run lint`, and
   `npm run test:ci`.
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
@@ -67,9 +68,8 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Run `pre-commit run --all-files` (invokes
-[`scripts/checks.sh`](../scripts/checks.sh)).
-If a Node toolchain is present (`package.json` exists), also run:
+Run `pre-commit run --all-files`.
+If `package.json` defines them, also run:
 - `npm ci`
 - `npm run lint`
 - `npm run test:ci`
