@@ -24,9 +24,12 @@ CONTEXT:
   guidelines.
 - Raspberry Pi OS build script: [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh)
   (targets Raspberry Pi OS Bookworm 64‑bit).
-- Docker Engine setup: follow [Docker's Debian install guide](https://docs.docker.com/engine/install/debian/)
-  for ARM devices.
-- First-boot cloud-init configs: [`scripts/cloud-init/`](../scripts/cloud-init/).
+- Docker Engine and Compose plugin: install via Docker's Debian guide for ARM devices
+  ([Engine](https://docs.docker.com/engine/install/debian/) and
+  [Compose](https://docs.docker.com/compose/install/linux/)).
+- First-boot cloud-init configs and Compose manifests:
+  [`scripts/cloud-init/`](../scripts/cloud-init/) (for example,
+  [`docker-compose.projects.yml`](../scripts/cloud-init/docker-compose.projects.yml)).
 - Upstream apps:
   - [token.place](https://github.com/futuroptimist/token.place) — see its
     [README](https://github.com/futuroptimist/token.place#readme) for service details.
@@ -42,7 +45,7 @@ CONTEXT:
 
 REQUEST:
 1. Add or refine scripts and docs so `token.place` and `dspace` run as services on the Pi
-   image via `docker-compose.yml`.
+   image via `docker compose` and a shared `docker-compose.yml`.
 2. Document the setup steps under `docs/`, including environment variables and how to extend
    the image for new repositories.
 3. Keep hooks for adding other repositories later.
