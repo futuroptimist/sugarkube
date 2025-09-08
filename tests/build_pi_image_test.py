@@ -417,10 +417,18 @@ def _run_build_script(tmp_path, env):
     user_src = cloud_init_src / "user-data.yaml"
     shutil.copy(user_src, ci_dir / "user-data.yaml")
 
+    # MANUAL DECISION REQUIRED: Two slightly different but valid approaches
+    # Option 1 (uses an extra local variable `cloud_init_dir`):
+    # cloud_init_dir = repo_root / "scripts" / "cloud-init"
+    # compose_src = cloud_init_dir / "docker-compose.cloudflared.yml"
+    # shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
+    # projects_src = cloud_init_dir / "docker-compose.projects.yml"
+
+    # Option 2 (directly reuses `cloud_init_src` like the preceding lines):
     compose_src = cloud_init_src / "docker-compose.cloudflared.yml"
     shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
-
     projects_src = cloud_init_src / "docker-compose.projects.yml"
+
     shutil.copy(projects_src, ci_dir / "docker-compose.projects.yml")
 
     result = subprocess.run(

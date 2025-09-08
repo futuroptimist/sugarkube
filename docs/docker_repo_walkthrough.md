@@ -23,9 +23,9 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Check container status:
-   - Compose project: `docker compose ps`
-   - Single container: `docker ps`
+5. Inspect container logs to confirm the service started:  
+   - Single container: `docker logs -f myapp`  
+   - Compose project: `docker compose logs`
 6. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
    `curl http://localhost:3000` for dspace.
@@ -47,7 +47,7 @@ git clone https://github.com/futuroptimist/token.place
 cd token.place
 docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenplace . --load
 docker run -d --name tokenplace -p 5000:5000 tokenplace
-docker ps
+docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000
 ```
 
@@ -71,7 +71,7 @@ git clone https://github.com/democratizedspace/dspace
 cd dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
-docker compose ps
+docker compose logs -f  # watch build and runtime logs
 curl http://localhost:3000
 ```
 
@@ -100,7 +100,7 @@ services:
       - "3000:3000"
 EOF
 docker compose up -d
-docker compose ps
+docker compose logs -f tokenplace dspace
 curl http://localhost:5000
 curl http://localhost:3000
 docker compose down
