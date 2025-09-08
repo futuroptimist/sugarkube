@@ -88,6 +88,35 @@ curl http://localhost:3000
 docker compose down
 ```
 
+### Auto-start token.place and dspace on boot
+
+Keep the stack running after reboots by wrapping the compose file with a systemd
+unit:
+
+```sh
+sudo tee /etc/systemd/system/tokenplace-dspace.service <<'EOF'
+[Unit]
+Description=token.place and dspace
+Requires=docker.service
+After=network-online.target docker.service
+
+[Service]
+WorkingDirectory=/opt/projects
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl enable --now tokenplace-dspace.service
+sudo systemctl status tokenplace-dspace.service --no-pager
+```
+
+This example assumes the combined `docker-compose.yml` above lives in
+`/opt/projects`.
+
 Proceed with the detailed steps below to adapt the process for other repositories.
 
 ## 1. Prepare the Pi
