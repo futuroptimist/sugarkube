@@ -44,7 +44,7 @@ REQUEST:
 3. Render the model via:
 
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatse
+   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
@@ -71,7 +71,7 @@ Run `pre-commit run --all-files`,
 If `package.json` defines them, also run:
 - `npm run lint`
 - `npm run format:check`
-- `npm test -- --coverage`
+- `npm run test:ci`
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
