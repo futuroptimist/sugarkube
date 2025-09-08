@@ -1,0 +1,8 @@
+{
+  "id": "2025-09-08-kicad-export-kicad9-missing",
+  "date": "2025-09-08",
+  "component": "kicad-export",
+  "rootCause": "KiBot could not import pcbnew because KiCad 9 is not installed; kicad-cli 7 cannot open the project's PCB file",
+  "resolution": "Provide a KiCad 9 environment (v2_k9) before running the KiBot export",
+  "references": []
+}
