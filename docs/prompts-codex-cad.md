@@ -18,8 +18,8 @@ CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
   into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD](https://openscad.org/) 2024.03 or newer is installed and available in `PATH`; the
-  script exits early if it cannot find the binary.
+  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early
+  if it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -43,11 +43,11 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via:
 
-   ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatse
-   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
-   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
-   ~~~
+    ~~~bash
+    ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
+    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+    ~~~
 
 4. Commit updated SCAD sources and any documentation.
 
