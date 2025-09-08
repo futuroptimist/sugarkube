@@ -43,10 +43,10 @@ the docs you will see the term used in both contexts.
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
-    to be installed and authenticated. Uses POSIX `-ef` instead of `realpath` for better
+    to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
     macOS compatibility
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
-    clean up temporary work directories, and use POSIX `-ef` to compare paths
+    clean up temporary work directories, and use POSIX `test -ef` to compare paths
     without `realpath`
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
     preloaded; embeds `pi_node_verifier.sh` and clones `token.place` and
