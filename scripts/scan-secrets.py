@@ -15,7 +15,7 @@ import sys
 import tempfile
 from typing import Iterable
 
-SCAN_SCRIPT_PATH = "b/scripts/scan-secrets.py"
+SCAN_SCRIPT_PATH = "scripts/scan-secrets.py"
 
 PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"aws(.{0,20})?(?:secret|access)_key", re.IGNORECASE),
@@ -58,7 +58,9 @@ def regex_scan(lines: Iterable[str]) -> bool:
         if line.startswith("+++"):
             file_path = line[4:].strip()
             continue
-        if not line.startswith("+") or file_path == SCAN_SCRIPT_PATH:
+        if not line.startswith("+"):
+            continue
+        if file_path and file_path.endswith(SCAN_SCRIPT_PATH):
             continue
         for pattern in PATTERNS:
             if pattern.search(line):

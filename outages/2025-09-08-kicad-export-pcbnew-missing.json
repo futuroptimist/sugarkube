@@ -1,0 +1,10 @@
+{
+  "id": "kicad-export-pcbnew-missing",
+  "date": "2025-09-08",
+  "component": "kicad-export",
+  "rootCause": "KiCad not installed; pcbnew Python module not found",
+  "resolution": "Install KiCad 9 and ensure pcbnew is available via PYTHONPATH",
+  "references": [
+    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml"
+  ]
+}
