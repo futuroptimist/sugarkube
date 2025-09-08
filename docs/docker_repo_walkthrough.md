@@ -16,9 +16,15 @@ For a prebuilt image that already clones both projects, see
    [pi_image_cloudflare.md](pi_image_cloudflare.md).
 2. SSH in and verify Docker and the Cloudflare Tunnel are active:
    `ssh pi@<hostname>.local` then `systemctl status docker cloudflared-compose`.
-3. Clone a repository under `/opt/projects` such as
+3. Create `/opt/projects` and clone a repo such as
    [`token.place`](https://github.com/futuroptimist/token.place) or
-   [`dspace`](https://github.com/democratizedspace/dspace).
+   [`dspace`](https://github.com/democratizedspace/dspace):
+   ```sh
+   sudo mkdir -p /opt/projects && sudo chown pi:pi /opt/projects
+   cd /opt/projects
+   git clone https://github.com/futuroptimist/token.place
+   git clone https://github.com/democratizedspace/dspace
+   ```
 4. Build or start containers:
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
@@ -34,6 +40,20 @@ For a prebuilt image that already clones both projects, see
 ## Quick start
 
 Try one of these example projects to confirm the image works:
+
+### hello-world
+
+```sh
+ssh pi@<hostname>.local
+cd /opt/projects
+git clone https://github.com/docker-library/hello-world
+cd hello-world
+docker buildx build --platform linux/arm64 -t hello . --load
+docker run --rm hello
+```
+
+Once the container prints the "Hello from Docker!" message, move on to
+token.place or dspace.
 
 ### token.place
 
