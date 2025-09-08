@@ -23,8 +23,9 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Inspect container logs to confirm the service started: `docker logs tokenplace`
-   or `docker compose logs` for dspace.
+5. Inspect container logs to confirm the service started:  
+   - Single container: `docker logs -f myapp`  
+   - Compose project: `docker compose logs`
 6. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
    `curl http://localhost:3000` for dspace.
@@ -37,7 +38,7 @@ For a prebuilt image that already clones both projects, see
 
 Try one of these example projects to confirm the image works:
 
-### token.place
+### token.place (Dockerfile)
 
 ```sh
 ssh pi@<hostname>.local
@@ -48,6 +49,18 @@ docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenp
 docker run -d --name tokenplace -p 5000:5000 tokenplace
 docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000
+```
+
+### token.place (docker-compose)
+
+```sh
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place
+cd token.place
+docker compose up -d
+docker compose ps
+curl http://localhost:5000  # relay
+curl http://localhost:3000  # server
 ```
 
 ### dspace
