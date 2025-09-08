@@ -47,7 +47,22 @@ bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out3.img.xz"
 test -s "${tmp}/out3.img.xz"
 test -s "${tmp}/out3.img.xz.sha256"
 
-# Case 4: already-normalized artifact at output path
+# Reset deploy between cases
+rm -rf "${tmp}/deploy"
+
+# Case 4: gz-compressed .img
+mkdir -p "${tmp}/deploy/gzcase"
+echo "hi-from-gz" > "${tmp}/deploy/gzcase/qux.img"
+gzip -c "${tmp}/deploy/gzcase/qux.img" > "${tmp}/deploy/gzcase/qux.img.gz"
+rm -f "${tmp}/deploy/gzcase/qux.img"
+bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out4.img.xz"
+test -s "${tmp}/out4.img.xz"
+test -s "${tmp}/out4.img.xz.sha256"
+
+# Reset deploy between cases
+rm -rf "${tmp}/deploy"
+
+# Case 5: already-normalized artifact at output path
 echo "pre-existing" > "${tmp}/foo.img"
 xz -c ${XZ_OPT} "${tmp}/foo.img" > "${tmp}/foo.img.xz"
 rm -f "${tmp}/foo.img"
