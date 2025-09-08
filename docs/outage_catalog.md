@@ -4,12 +4,18 @@ Structured archive of past outages. Each outage is stored as a JSON file using t
 
 File naming: `YYYY-MM-DD-<slug>.json`.
 
-Required fields:
+Populate each file with these fields:
 - `id`: unique identifier
 - `date`: ISO date
 - `component`: affected subsystem
 - `rootCause`: brief description of failure cause
 - `resolution`: how it was fixed
 - `references`: array of related links (PRs, issues, docs)
+
+Validate new entries against the schema before committing:
+
+```sh
+python -m jsonschema -i outages/<file>.json outages/schema.json
+```
 
 Agents can parse these files to learn from previous incidents.

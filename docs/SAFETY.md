@@ -12,5 +12,7 @@ This setup uses a 12 V LiFePO4 battery and outdoor wiring. Follow these precau
 - Disconnect the battery before working on wiring and remove metal jewelry to avoid shorts.
 - Add a DC-rated disconnect switch on the battery positive lead so you can kill power quickly and isolate it during maintenance.
 - Route cables so water cannot drip onto connectors; use cable glands and strain relief.
+- Use tinned copper lugs and UV-resistant wiring for outdoor runs.
+- Refer to [Power System Design](power_system_design.md) for wire and fuse sizing guidelines.
 - Wear eye protection while crimping and avoid short circuits when working on the battery.
 - Wear insulated gloves along with eye protection when handling the battery or live circuits.
