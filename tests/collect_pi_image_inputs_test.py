@@ -75,7 +75,7 @@ def test_errors_on_zip_without_img(tmp_path):
     assert "Zip contained no .img" in result.stderr
 
 
-def test_errors_when_no_image_found(tmp_path):
+def test_errors_when_no_image_found_no_artifact(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
     (deploy / "foo.txt").write_text("data")
