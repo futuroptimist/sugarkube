@@ -41,13 +41,13 @@ CONTEXT:
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
 2. Modify geometry or parameters as required.
-3. Render the model via:
-
-~~~bash
-./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
-STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
-STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
-~~~
+3. Render the model via (use `~~~` fences inside this prompt to avoid breaking the outer
+   code block):
+   ~~~bash
+   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
+   STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
+   STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
+   ~~~
 
 4. Commit updated SCAD sources and any documentation.
 
