@@ -20,7 +20,7 @@ The design may evolve as the project grows.
 - Silkscreen labels for polarity and connector numbers
 - Title block comments record decoupling guidelines, high-current trace layout, connector
   labeling, export checks, ground pour continuity around mounting holes, board outline fit,
-  BOM validation, and clearance rules for high-voltage nets
+  BOM validation, clearance rules for high-voltage nets, and star topology to minimize voltage drop
 
 These requirements are a starting point – modify the KiCad project as needed and
 update this file when the schematic changes.
