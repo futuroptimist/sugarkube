@@ -34,7 +34,7 @@ For a prebuilt image that already clones both projects, see
    - Compose project: `docker compose logs`
 6. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
-   `curl http://localhost:3000` for dspace.
+   `curl http://localhost:3002` for dspace.
 7. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
 8. Log recurring deployment failures in `outages/` using
@@ -92,7 +92,7 @@ cd dspace/frontend
 cp .env.example .env  # if present
 docker compose up -d
 docker compose logs -f  # watch build and runtime logs
-curl http://localhost:3000
+curl http://localhost:3002
 ```
 
 ### token.place and dspace together
@@ -117,12 +117,12 @@ services:
     build:
       context: ./dspace/frontend
     ports:
-      - "3000:3000"
+      - "3002:3002"
 EOF
 docker compose up -d
 docker compose logs -f tokenplace dspace
 curl http://localhost:5000
-curl http://localhost:3000
+curl http://localhost:3002
 docker compose down
 ```
 
@@ -236,7 +236,7 @@ Proceed with the detailed steps below to adapt the process for other repositorie
      `frontend/docker-compose.yml`. Override them with an `.env` file if needed:
      ```sh
      cd dspace/frontend
-     printf 'NODE_ENV=production\nPORT=3000\nHOST=0.0.0.0\n' >> .env
+     printf 'NODE_ENV=production\nPORT=3002\nHOST=0.0.0.0\n' >> .env
      ```
 4. Inspect the repo to confirm it includes Docker assets:
    ```sh
@@ -256,7 +256,7 @@ Proceed with the detailed steps below to adapt the process for other repositorie
    - `dspace/frontend/.env`:
      ```env
      NODE_ENV=production
-     PORT=3000
+     PORT=3002
      HOST=0.0.0.0
      ```
    Adjust values to match your deployment.
@@ -291,7 +291,7 @@ Proceed with the detailed steps below to adapt the process for other repositorie
    curl http://localhost:8080
    ```
    Substitute the correct port for your project (5000 for token.place,
-   3000 for dspace).
+   3002 for dspace).
 6. View logs if startup fails:
    ```sh
    docker logs myapp
@@ -346,6 +346,18 @@ curl http://localhost:5000
 Use `docker compose -f docker-compose.tokenplace.yml logs -f` to watch
 token.place start up and confirm it binds to port 5000.
 
+#### dspace (single Dockerfile)
+
+```sh
+cd /opt/projects
+git clone https://github.com/democratizedspace/dspace
+cd dspace/frontend
+docker buildx build --platform linux/arm64 -t dspace-frontend . --load
+docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend
+docker logs -f dspace-frontend  # watch startup output
+curl http://localhost:3002
+```
+
 #### dspace (docker-compose)
 
 ```sh
@@ -357,7 +369,7 @@ docker compose up -d
 docker compose ps
 docker compose logs -f
 docker compose exec frontend npm test  # run unit tests
-curl http://localhost:3000
+curl http://localhost:3002
 ```
 
 #### token.place and dspace together
@@ -375,7 +387,7 @@ cp .env.example .env  # if present
 docker compose up -d
 docker ps --format 'table {{.Names}}\t{{.Ports}}'
 curl http://localhost:5000  # token.place
-curl http://localhost:3000  # dspace
+curl http://localhost:3002  # dspace
 ```
 
 #### token.place and dspace via one `docker-compose.yml`
@@ -395,7 +407,7 @@ services:
     build:
       context: ./dspace/frontend
     ports:
-      - "3000:3000"
+      - "3002:3002"
 ```
 
 ```sh
@@ -403,7 +415,7 @@ cd /opt/projects
 docker compose up -d
 docker compose ps
 curl http://localhost:5000  # token.place
-curl http://localhost:3000  # dspace
+curl http://localhost:3002  # dspace
 docker compose down
 ```
 
@@ -440,11 +452,11 @@ already supports arm64.
    `ingress` rule mapping a subdomain to the container's port. Example:
    ```yaml
    ingress:
-     - hostname: tokenplace.example.com
-       service: http://localhost:5000
-     - hostname: dspace.example.com
-       service: http://localhost:3000
-     - service: http_status:404
+    - hostname: tokenplace.example.com
+      service: http://localhost:5000
+    - hostname: dspace.example.com
+      service: http://localhost:3002
+    - service: http_status:404
    ```
 2. Restart the tunnel service:
    ```sh
