@@ -84,6 +84,7 @@ runcmd:
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
   - [/opt/projects/start-projects.sh]  # projects-runcmd
+  - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
