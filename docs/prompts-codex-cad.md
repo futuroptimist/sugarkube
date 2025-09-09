@@ -36,12 +36,12 @@ CONTEXT:
   - `npm run lint`
   - `npm run test:ci`
 - For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-    `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+    [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
     [`README.md`](../README.md) and [`docs/`](../docs/)
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
-  before committing (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
+  committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
