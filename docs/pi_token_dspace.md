@@ -29,9 +29,10 @@ user.
 ## Run the apps
 
 On first boot the Pi builds the containers defined in
-`/opt/projects/docker-compose.yml`. The `start-projects.sh` helper enables the
-`projects-compose.service` unit which starts the stack automatically. Manage the
-services with `systemctl`:
+`/opt/projects/docker-compose.yml`. Each service uses `restart: unless-stopped`
+so it relaunches after reboots or crashes. The `start-projects.sh` helper enables
+the `projects-compose.service` unit which starts the stack automatically. Manage
+the services with `systemctl`:
 
 ```sh
 # check service status
@@ -48,22 +49,26 @@ dspace. To expose them through a Cloudflare Tunnel, update
 
 ### Environment variables
 
-Each project reads an `.env` file in its directory. The `init-env.sh` script runs
-before the compose stack and copies `*.env.example` to `.env` when present so the
-containers start with defaults:
+Each project reads an `.env` file in its directory. `init-env.sh` scans
+`/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
+letting containers start with sane defaults:
 
 - `/opt/projects/token.place/.env`
 - `/opt/projects/dspace/frontend/.env`
+- any additional repo that ships an `.env.example`
 
 Edit these files with real values and restart the service.
+
+See each repository's README for the full list of configuration options.
 
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. Add services to `/opt/projects/docker-compose.yml` and extend
-`init-env.sh` with any new `.env` files, following the token.place and dspace
-examples. The image builder drops the token.place or dspace definitions when the
-corresponding `CLONE_*` flag is `false`, letting you build a minimal image and
-expand it later.
+`/opt/projects`. Add services beneath the `# extra-start` marker in
+`/opt/projects/docker-compose.yml`, reusing the `restart: unless-stopped`
+pattern. Supply an `.env.example` in the repo so `init-env.sh` seeds its config
+automatically. The image builder drops the token.place or dspace definitions
+when the corresponding `CLONE_*` flag is `false`, letting you build a minimal
+image and expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.
