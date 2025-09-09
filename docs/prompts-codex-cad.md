@@ -27,7 +27,10 @@ CONTEXT:
   surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
-  [`scripts/checks.sh`](../scripts/checks.sh).
+  [`scripts/checks.sh`](../scripts/checks.sh). If `package.json` exists, also run:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
