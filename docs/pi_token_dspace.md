@@ -5,8 +5,8 @@ Build a Raspberry Pi 5 image that includes the
 [dspace](https://github.com/democratizedspace/dspace) repositories so you can run
 both apps out of the box. The image builder clones these projects, drops a
 `docker-compose.yml` under `/opt/projects` and installs a single
-`projects-compose.service` to manage them. Hooks remain for additional
-repositories.
+`projects-compose.service` to manage them. Each service uses `restart: unless-stopped`
+so the containers stay up across reboots. Hooks remain for additional repositories.
 
 ## Build the image
 
@@ -64,11 +64,10 @@ See each repository's README for the full list of configuration options.
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. Add services beneath the `# extra-start` marker in
-`/opt/projects/docker-compose.yml`, reusing the `restart: unless-stopped`
-pattern. Supply an `.env.example` in the repo so `init-env.sh` seeds its config
-automatically. The image builder drops the token.place or dspace definitions
-when the corresponding `CLONE_*` flag is `false`, letting you build a minimal
-image and expand it later.
+`/opt/projects`. Add services to `/opt/projects/docker-compose.yml` (use the
+`# extra-start` marker) and extend `init-env.sh` with any new `.env` files,
+following the token.place and dspace examples. The image builder drops the
+token.place or dspace definitions when the corresponding `CLONE_*` flag is
+`false`, letting you build a minimal image and expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.
