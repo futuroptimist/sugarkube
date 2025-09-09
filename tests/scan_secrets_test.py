@@ -154,6 +154,25 @@ def test_run_ripsecrets_clean(monkeypatch, scan_secrets):
     assert scan_secrets.run_ripsecrets("diff") is False
 
 
+def test_run_ripsecrets_handles_oserror(monkeypatch, scan_secrets, capsys):
+    monkeypatch.setattr(
+        scan_secrets.shutil,
+        "which",
+        lambda _: "/bin/ripsecrets",
+    )
+
+    def boom(*a, **k):  # pragma: no cover - simulated subprocess failure
+        raise OSError("boom")
+
+    monkeypatch.setattr(
+        scan_secrets.subprocess,
+        "run",
+        boom,
+    )
+    assert scan_secrets.run_ripsecrets("diff") is None
+    assert "boom" in capsys.readouterr().err
+
+
 def test_main_skips_when_no_diff(monkeypatch, scan_secrets, capsys):
     monkeypatch.setattr(scan_secrets.sys, "stdin", io.StringIO(""))
     assert scan_secrets.main() == 0
