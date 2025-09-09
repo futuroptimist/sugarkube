@@ -16,10 +16,10 @@ Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
-- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early
-  if it cannot find the binary.
+- Run [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) from the repository root to
+  export binary STL meshes into the git-ignored [`stl/`](../stl/) directory. Ensure
+  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early if
+  it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -66,6 +66,7 @@ You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
 If `package.json` defines them, also run:
+- `npm ci`
 - `npm run lint`
 - `npm run test:ci`
 Then run:
