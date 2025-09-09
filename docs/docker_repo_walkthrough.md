@@ -25,19 +25,24 @@ For a prebuilt image that already clones both projects, see
    git clone https://github.com/futuroptimist/token.place
    git clone https://github.com/democratizedspace/dspace
    ```
-4. Build or start containers:
+4. Read the repository's README for environment variables and build paths.
+   `token.place` keeps its server `Dockerfile` in `docker/Dockerfile.server` and
+   exposes settings like `TOKEN_PLACE_ENV`; dspace's compose file lives in
+   `frontend/` and uses vars such as `NODE_ENV` and `PORT`. Copy `.env.example`
+   to `.env` when provided.
+5. Build or start containers:
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Inspect container logs to confirm the service started:  
-   - Single container: `docker logs -f myapp`  
+6. Inspect container logs to confirm the service started:
+   - Single container: `docker logs -f myapp`
    - Compose project: `docker compose logs`
-6. Confirm the service responds locally, e.g.
+7. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
    `curl http://localhost:3000` for dspace.
-7. Optionally expose ports through the Cloudflare Tunnel by editing
+8. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
-8. Log recurring deployment failures in `outages/` using
+9. Log recurring deployment failures in `outages/` using
    [`schema.json`](../outages/schema.json).
 
 ## Quick start
@@ -77,6 +82,7 @@ curl http://localhost:5000
 cd /opt/projects
 git clone https://github.com/futuroptimist/token.place
 cd token.place
+cp .env.example .env  # load defaults
 docker compose up -d
 docker compose ps
 curl http://localhost:5000  # relay
@@ -316,6 +322,7 @@ their own `docker-compose.yml`.
 
 ```sh
 cd /opt/projects/token.place
+cp .env.example .env  # load defaults
 docker compose -f docker-compose.tokenplace.yml up -d
 docker compose -f docker-compose.tokenplace.yml ps
 docker compose -f docker-compose.tokenplace.yml logs -f
