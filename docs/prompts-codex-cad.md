@@ -17,24 +17,23 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early
-  if it cannot find the binary.
-- The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
-  models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
-  `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
-  surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
+  to the git-ignored [`stl/`](../stl/) directory. Ensure the `openscad` binary is installed and
+  on `PATH`; the script exits early if it cannot find it.
+- The GitHub workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates the
+  meshes as artifacts. Never commit `.stl` files.
+- Render each model for all supported `standoff_mode` values (for example, `heatset`, `printed`,
+  or `nut`). `STANDOFF_MODE` is optional, case-insensitive, trims surrounding whitespace, and
+  defaults to the model’s `standoff_mode` value (usually `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to lint, format, and test via
-  [`scripts/checks.sh`](../scripts/checks.sh).
+- Run `pre-commit run --all-files` to invoke
+  [`scripts/checks.sh`](../scripts/checks.sh) for linting, formatting, and tests.
 - For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-    `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+    [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
     [`README.md`](../README.md) and [`docs/`](../docs/)
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
-  before committing (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before
+  committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
 
