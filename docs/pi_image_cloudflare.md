@@ -10,7 +10,9 @@ plugin, the Cloudflare apt repository, and a
 into the OS image. Cloud-init also drops an apt config with five retries,
 30-second timeouts, and `APT::Get::Fix-Missing` enabled to smooth over flaky networks.
 It also configures the systemd journal for persistent storage (capped at roughly 200 MB)
-so logs survive reboots.
+so logs survive reboots. After installation, it removes unused packages with
+`apt-get autoremove -y` and cleans the apt cache to keep the image small.
+
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
