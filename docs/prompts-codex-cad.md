@@ -26,8 +26,10 @@ CONTEXT:
   `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
   surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
+- Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- If `package.json` defines them, also run `npm run lint` and `npm run test:ci`.
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
