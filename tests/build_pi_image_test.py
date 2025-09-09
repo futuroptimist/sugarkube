@@ -292,6 +292,41 @@ def test_requires_sudo_when_non_root(tmp_path):
     assert "Run as root or install sudo" in result.stderr
 
 
+def test_fails_with_insufficient_disk_space(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name, content in {
+        "curl": "#!/bin/sh\nexit 0\n",
+        "docker": "#!/bin/sh\nexit 0\n",
+        "git": "#!/bin/sh\nexit 0\n",
+        "sha256sum": "#!/bin/sh\nexit 0\n",
+        "stdbuf": '#!/bin/sh\nshift\nshift\nexec "$@"\n',
+        "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+        "xz": "#!/bin/sh\nexit 0\n",
+        "bsdtar": "#!/bin/sh\nexit 0\n",
+        "df": (
+            "#!/bin/sh\n"
+            "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+            "echo '/dev/sda1 100 50 0 50% /'\n"
+        ),
+    }.items():
+        path = fake_bin / name
+        path.write_text(content)
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["SKIP_BINFMT"] = "1"
+    env["SKIP_URL_CHECK"] = "1"
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Need at least" in result.stderr
+
+
 def _setup_build_env(tmp_path, precompressed: bool = False):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
