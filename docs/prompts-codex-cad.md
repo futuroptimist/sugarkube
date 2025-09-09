@@ -28,6 +28,9 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- If a Node toolchain is present (`package.json` exists), also run:
+  - `npm run lint`
+  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -41,8 +44,7 @@ CONTEXT:
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
 2. Modify geometry or parameters as required.
-3. Render the model via (use `~~~` fences inside this prompt to avoid breaking the outer
-   code block):
+3. Render the model via (use `~~~` fences in this prompt to avoid breaking the outer block):
    ~~~bash
    ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
