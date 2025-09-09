@@ -29,8 +29,8 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Inspect container logs to confirm the service started:  
-   - Single container: `docker logs -f myapp`  
+5. Inspect container logs to confirm the service started:
+   - Single container: `docker logs -f myapp`
    - Compose project: `docker compose logs`
 6. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
@@ -154,6 +154,28 @@ sudo systemctl status tokenplace-dspace.service --no-pager
 
 This example assumes the combined `docker-compose.yml` above lives in
 `/opt/projects`.
+
+### Customize ports with `docker-compose.override.yml`
+
+Override the default ports if token.place or dspace conflict with other
+services on the Pi:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.override.yml
+services:
+  tokenplace:
+    ports:
+      - "5050:5000"
+  dspace:
+    ports:
+      - "3100:3000"
+EOF
+docker compose up -d
+docker compose ps
+curl http://localhost:5050  # token.place
+curl http://localhost:3100  # dspace
+```
 
 Proceed with the detailed steps below to adapt the process for other repositories.
 
