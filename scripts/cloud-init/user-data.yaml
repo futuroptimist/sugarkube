@@ -56,6 +56,12 @@ write_files:
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
       APT::Get::Fix-Missing "true";
+  - path: /etc/systemd/journald.conf.d/persistent.conf
+    permissions: '0644'
+    content: |
+      [Journal]
+      Storage=persistent
+      SystemMaxUse=200M
   - path: /etc/systemd/system/projects-compose.service
     permissions: '0644'
     content: |
@@ -81,9 +87,11 @@ runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
+  - [bash, -c, 'mkdir -p /var/log/journal && systemctl restart systemd-journald']
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
   - [/opt/projects/start-projects.sh]  # projects-runcmd
+  - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |
       if grep -q 'TUNNEL_TOKEN=""' /opt/sugarkube/.cloudflared.env; then
