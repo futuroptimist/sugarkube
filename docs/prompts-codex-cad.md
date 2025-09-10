@@ -50,7 +50,7 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via (use `~~~` fences in this prompt to avoid breaking the outer block):
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # uses default standoff_mode (heatset)
+   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
