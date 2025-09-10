@@ -83,7 +83,18 @@ curl http://localhost:5000  # relay
 curl http://localhost:3000  # server
 ```
 
-### dspace
+### dspace (Dockerfile)
+
+```sh
+cd /opt/projects
+git clone https://github.com/democratizedspace/dspace
+cd dspace/frontend
+docker buildx build --platform linux/arm64 -t dspace-frontend . --load
+docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend
+curl http://localhost:3002
+```
+
+### dspace (docker-compose)
 
 ```sh
 cd /opt/projects
@@ -176,6 +187,40 @@ docker compose ps
 curl http://localhost:5050  # token.place
 curl http://localhost:3100  # dspace
 ```
+
+### Persist data with Docker volumes
+
+Keep token.place and dspace data across container restarts:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.volumes.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    volumes:
+      - tokenplace-data:/app/data
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3002:3002"
+    volumes:
+      - dspace-data:/usr/src/app/data
+volumes:
+  tokenplace-data:
+  dspace-data:
+EOF
+docker compose -f docker-compose.volumes.yml up -d
+docker volume ls | grep tokenplace-data
+docker volume ls | grep dspace-data
+```
+
+Adjust container paths to match each project's documentation.
 
 Proceed with the detailed steps below to adapt the process for other repositories.
 
@@ -473,6 +518,7 @@ already supports arm64.
 - Stop a container: `docker stop tokenplace`.
 - Stop a compose stack: `docker compose down`.
 - View logs: `docker compose logs -f`.
+- Monitor CPU and memory: `docker stats tokenplace dspace`.
 - Remove a container: `docker rm tokenplace`.
 - Shut down a compose project: `docker compose down`.
 - Delete old images and networks: `docker system prune`.
@@ -510,6 +556,15 @@ docker compose up -d --build
 - Check logs for errors:
   ```sh
   docker compose logs --tail=50
+  ```
+- For build failures, rerun with verbose output:
+  ```sh
+  cd /opt/projects/token.place
+  docker buildx build --platform linux/arm64 \
+    -f docker/Dockerfile.server -t tokenplace . \
+    --load --progress=plain
+  cd /opt/projects/dspace/frontend
+  docker compose build --progress=plain
   ```
 - If a deployment fails repeatedly, record it under
   [`outages/`](../outages/README.md) using
