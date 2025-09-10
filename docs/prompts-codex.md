@@ -5,8 +5,8 @@ slug: 'prompts-codex'
 
 # Codex Automation Prompt
 
-Use this prompt to guide LLM-based contributors (for example, OpenAI models)
-when making changes to this repository.
+Use this prompt to guide LLM-based contributors—such as OpenAI models—when
+making changes to this repository.
 
 ```text
 SYSTEM:
@@ -17,7 +17,7 @@ Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
-  instruction semantics see the [AGENTS.md spec](https://agentsmd.net/).
+  instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 - Run `pre-commit run --all-files`, which executes
   [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
   linters, tests, and documentation checks.
@@ -53,7 +53,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
-instruction semantics see the [AGENTS.md spec](https://agentsmd.net/).
+instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 Run `pre-commit run --all-files` (invokes
 [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run linters
 and tests). If a Node toolchain is present (`package.json` exists), also run:

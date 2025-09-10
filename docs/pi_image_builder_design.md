@@ -68,7 +68,7 @@
   - Detects WSL (`wsl.exe`) and Git Bash (`bash.exe`); prefers Git Bash for
     Docker Desktop, falls back to WSL
   - Converts Windows paths to MSYS (`/c/...`) and WSL (`/mnt/c/...`) accurately
-  - If local shell fails, tries official `pigen` container, then Debian fallback
+  - If local shell fails, tries official `pi-gen` container, then Debian fallback
   - Sets up a dedicated Docker network and optional apt-cacher; archives site is forced DIRECT
   - Compresses with native `xz`, `7z`, WSL `xz`, or Docker `xz` as needed
   - Streams progress with clear start banner and stage logging
