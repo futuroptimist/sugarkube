@@ -17,7 +17,7 @@ The design may evolve as the project grows.
 ## Extras
 
 - Test points for measuring battery voltage
-- Silkscreen labels for polarity and connector numbers
+- Silkscreen labels for polarity, connector numbers, and LED orientation
 - Title block comments record decoupling guidelines, high-current trace layout, connector
   labeling, export checks, ground pour continuity around mounting holes, board outline fit,
   BOM validation, clearance rules for high-voltage nets, and star topology to minimize voltage drop

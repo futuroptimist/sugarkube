@@ -19,6 +19,7 @@ Design notes embedded in the KiCad title block highlight best practices:
 - Place decoupling capacitors near power pins.
 - Keep high-current traces short for better performance.
 - Label polarity and voltage on connectors to avoid wiring mistakes.
+- Verify LED orientation during assembly.
 - Verify KiBot exports before fabrication.
 - Check ground-pour continuity around mounting holes.
 
