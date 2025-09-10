@@ -8,6 +8,9 @@ both apps out of the box. The image builder clones these projects, drops a
 `projects-compose.service` to manage them. Each service uses `restart: unless-stopped`
 so the containers stay up across reboots. Hooks remain for additional repositories.
 
+The cloud-init config installs Docker Engine and the Compose plugin from Docker's
+official Debian repository to ensure up-to-date packages on the Pi.
+
 ## Build the image
 
 ```sh
@@ -57,7 +60,9 @@ letting containers start with sane defaults:
 - `/opt/projects/dspace/frontend/.env`
 - any additional repo that ships an `.env.example`
 
-Edit these files with real values and restart the service.
+Edit these files with real values and restart the service. Generate strong secrets such as
+`JWT_SECRET` for token.place and `NEXTAUTH_SECRET` for dspace before exposing the
+services to the internet.
 
 See each repository's README for the full list of configuration options.
 
