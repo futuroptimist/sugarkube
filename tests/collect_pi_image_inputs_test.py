@@ -75,6 +75,41 @@ def test_errors_on_zip_without_img(tmp_path):
     assert "Zip contained no .img" in result.stderr
 
 
+def test_handles_zip_with_img(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    zip_path = deploy / "foo.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("foo.img", b"data")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    bsdtar = fake_bin / "bsdtar"
+    bsdtar.write_text(
+        "#!/bin/bash\n"
+        'python - <<\'PY\' "$2" "$4"\n'
+        "import sys, zipfile\n"
+        "zip_path, dest = sys.argv[1:3]\n"
+        "with zipfile.ZipFile(zip_path) as zf:\n"
+        "    zf.extractall(dest)\n"
+        "PY\n"
+    )
+    bsdtar.chmod(0o755)
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(
+        tmp_path,
+        deploy,
+        out_img,
+        extra_env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert out_img.exists()
+    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    with lzma.open(out_img, "rb") as f:
+        assert f.read() == b"data"
+
+
 def test_errors_when_no_image_found(tmp_path):  # noqa: F811
     deploy = tmp_path / "deploy"
     deploy.mkdir()
