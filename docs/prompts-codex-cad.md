@@ -28,6 +28,9 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- If `package.json` defines them, also run:
+  - `npm run lint`
+  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -36,7 +39,7 @@ CONTEXT:
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
   before committing (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
 - Log tool failures in [`outages/`](../outages/) using
-  [`outages/schema.json`](../outages/schema.json).
+  [`schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
