@@ -7,8 +7,15 @@ apt:
       source: "deb [arch=arm64] https://pkg.cloudflare.com/ bookworm main"
       keyid: FBA8C0EE63617C5EED695C43254B391D8CACCBF8
       keyserver: https://keyserver.ubuntu.com
+    docker:
+      source: "deb [arch=arm64] https://download.docker.com/linux/debian bookworm stable"
+      keyid: 0EBFCD88
+      keyserver: https://download.docker.com/linux/debian/gpg
 packages:
-  - docker.io
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
   - docker-compose-plugin
   - curl
   - git

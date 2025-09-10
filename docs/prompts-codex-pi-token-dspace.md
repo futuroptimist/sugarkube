@@ -29,7 +29,7 @@ CONTEXT:
   [Compose](https://docs.docker.com/compose/install/linux/)).
 - First-boot cloud-init configs and Compose manifests:
   [`scripts/cloud-init/`](../scripts/cloud-init/) (for example,
-  [`docker-compose.projects.yml`](../scripts/cloud-init/docker-compose.projects.yml)).
+  [`docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)).
 - Upstream apps:
   - [token.place](https://github.com/futuroptimist/token.place) — see its
     [README](https://github.com/futuroptimist/token.place#readme) for service details.
