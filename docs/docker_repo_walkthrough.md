@@ -177,6 +177,40 @@ curl http://localhost:5050  # token.place
 curl http://localhost:3100  # dspace
 ```
 
+### Persist data with Docker volumes
+
+Keep token.place and dspace data across container restarts:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.volumes.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    volumes:
+      - tokenplace-data:/app/data
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3002:3002"
+    volumes:
+      - dspace-data:/usr/src/app/data
+volumes:
+  tokenplace-data:
+  dspace-data:
+EOF
+docker compose -f docker-compose.volumes.yml up -d
+docker volume ls | grep tokenplace-data
+docker volume ls | grep dspace-data
+```
+
+Adjust container paths to match each project's documentation.
+
 Proceed with the detailed steps below to adapt the process for other repositories.
 
 ## 1. Prepare the Pi
