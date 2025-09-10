@@ -7,7 +7,7 @@ slug: 'prompts-codex-elex'
 
 Use this prompt for electronics design changes.
 
-```
+```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository focused on electronics.
 
@@ -18,8 +18,8 @@ CONTEXT:
 - Electronics files live under [`elex/`](../elex/).
 - The `power_ring` project uses KiCad 9+ and KiBot ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to lint, format, and test.
-  For documentation updates, also run:
+- Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh)
+  for linting, formatting, and tests. For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
@@ -29,7 +29,9 @@ CONTEXT:
 REQUEST:
 1. Modify schematics or PCB layouts in `elex/power_ring`.
 2. Export artifacts locally with:
+   ```bash
    kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml
+   ```
 3. Update any related documentation.
 4. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
    `linkchecker --no-warnings README.md docs/`; scan staged changes with
