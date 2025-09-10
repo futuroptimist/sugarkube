@@ -48,6 +48,9 @@ The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 `token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
 `/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
 pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
+`start-projects.sh` enables the optional `projects-compose` systemd unit on
+first boot and now checks for `systemctl`, skipping quietly when systemd isn't
+present.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
