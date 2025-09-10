@@ -71,14 +71,19 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
+
 If `package.json` defines them, also run:
+
 - `npm ci`
 - `npm run lint`
 - `npm run test:ci`
+
 Then run:
+
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
   [`.spellcheck.yaml`](../.spellcheck.yaml))
-- `linkchecker --no-warnings README.md docs/`
+- `linkchecker --no-warnings README.md docs/` (install via
+  `pip install linkchecker`)
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
