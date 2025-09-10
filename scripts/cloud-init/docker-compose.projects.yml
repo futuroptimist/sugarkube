@@ -9,6 +9,7 @@ services:
       - "5000:5000"
     env_file:
       - /opt/projects/token.place/.env
+    restart: unless-stopped
   # tokenplace-end
   # dspace-start
   dspace:
@@ -19,6 +20,7 @@ services:
       - "3000:3000"
     env_file:
       - /opt/projects/dspace/frontend/.env
+    restart: unless-stopped
   # dspace-end
   # extra-start
   # Add additional services below

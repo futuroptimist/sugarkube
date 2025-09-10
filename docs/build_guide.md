@@ -8,7 +8,7 @@ junction box.
    Download pre-rendered STLs from the repository's **Actions** tab. Sign in to
    GitHub, open the latest [scad-to-stl workflow run][stl-workflow], and grab the
    `pi_cluster` artifact. Artifacts expire after 90 days; if none are available,
-   render meshes locally instead with
+   install [OpenSCAD](https://openscad.org/) and render meshes locally:
    `bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carrier_rot45.scad`.
 2. Assemble the extrusion cube using M5 hardware, squaring each corner. Apply
    a drop of thread locker on each bolt so the frame stays tight outdoors.
