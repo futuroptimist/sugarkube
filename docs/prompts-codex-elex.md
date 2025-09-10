@@ -16,7 +16,8 @@ Maintain KiCad and Fritzing sources for the hardware.
 
 CONTEXT:
 - Electronics files live under [`elex/`](../elex/).
-- The `power_ring` project uses KiCad 9+ and KiBot ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
+- The `power_ring` project uses KiCad 9+ and [KiBot](https://github.com/INTI-CMNB/kibot)
+  ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh)
   for linting, formatting, and tests. For documentation updates, also run:
@@ -29,9 +30,9 @@ CONTEXT:
 REQUEST:
 1. Modify schematics or PCB layouts in `elex/power_ring`.
 2. Export artifacts locally with:
-   ```bash
+   ~~~bash
    kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml
-   ```
+   ~~~
 3. Update any related documentation.
 4. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
    `linkchecker --no-warnings README.md docs/`; scan staged changes with
