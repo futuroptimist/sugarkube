@@ -83,7 +83,18 @@ curl http://localhost:5000  # relay
 curl http://localhost:3000  # server
 ```
 
-### dspace
+### dspace (Dockerfile)
+
+```sh
+cd /opt/projects
+git clone https://github.com/democratizedspace/dspace
+cd dspace/frontend
+docker buildx build --platform linux/arm64 -t dspace-frontend . --load
+docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend
+curl http://localhost:3002
+```
+
+### dspace (docker-compose)
 
 ```sh
 cd /opt/projects
