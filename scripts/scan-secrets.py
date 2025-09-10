@@ -42,8 +42,13 @@ def run_ripsecrets(diff_text: str) -> bool | None:
             text=True,
             check=False,
         )
-    finally:
+    except OSError as exc:  # pragma: no cover - subprocess execution failure
+        print(f"Failed to run ripsecrets: {exc}", file=sys.stderr)
         os.unlink(tmp_path)
+        return None
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
     if result.returncode != 0:
         # ripsecrets prints findings to stdout; non-zero means potential secret
         print(result.stdout or result.stderr, file=sys.stderr)

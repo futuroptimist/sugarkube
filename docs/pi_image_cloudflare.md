@@ -9,6 +9,10 @@ plugin, the Cloudflare apt repository, and a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 into the OS image. Cloud-init also drops an apt config with five retries,
 30-second timeouts, and `APT::Get::Fix-Missing` enabled to smooth over flaky networks.
+It also configures the systemd journal for persistent storage (capped at roughly 200 MB)
+so logs survive reboots. After installation, it removes unused packages with
+`apt-get autoremove -y` and cleans the apt cache to keep the image small.
+
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
@@ -31,6 +35,8 @@ the cloud-init configuration with `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` an
 `scripts/cloud-init/`. Set `SKIP_BINFMT=1` to skip installing binfmt handlers when
 they're already present or when the build environment disallows privileged
 containers. Set `DEBUG=1` to trace script execution for troubleshooting.
+Set `KEEP_WORK_DIR=1` to retain the temporary pi-gen work directory instead of
+deleting it, which aids debugging failed builds.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls free disk space checks on the
 temporary work directory and the output location.
