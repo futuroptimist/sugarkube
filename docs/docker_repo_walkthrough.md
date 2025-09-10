@@ -473,6 +473,7 @@ already supports arm64.
 - Stop a container: `docker stop tokenplace`.
 - Stop a compose stack: `docker compose down`.
 - View logs: `docker compose logs -f`.
+- Monitor CPU and memory: `docker stats tokenplace dspace`.
 - Remove a container: `docker rm tokenplace`.
 - Shut down a compose project: `docker compose down`.
 - Delete old images and networks: `docker system prune`.
