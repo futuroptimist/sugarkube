@@ -28,6 +28,9 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- If `package.json` defines them, also run:
+  - `npm run lint`
+  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
