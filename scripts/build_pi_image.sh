@@ -70,7 +70,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
 CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
 CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
-PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.projects.yml}"
+PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.yml}"
 START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
 INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
 
@@ -208,7 +208,7 @@ CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
 
 # Prepare compose file for token.place and dspace; drop services when skipped
-PROJECTS_COMPOSE_TEMP="${WORK_DIR}/docker-compose.projects.yml"
+PROJECTS_COMPOSE_TEMP="${WORK_DIR}/docker-compose.yml"
 cp "${PROJECTS_COMPOSE_PATH}" "${PROJECTS_COMPOSE_TEMP}"
 if [[ "$CLONE_TOKEN_PLACE" != "true" ]]; then
   sed -i '/# tokenplace-start/,/# tokenplace-end/d' "${PROJECTS_COMPOSE_TEMP}"
