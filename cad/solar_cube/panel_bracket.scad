@@ -12,6 +12,7 @@ size          = 40;           // leg length (mm)
 thickness     = 8;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
 edge_radius   = 4;            // default 4 mm outer-edge rounding
+corner_segments = 32;         // sphere resolution for rounded edges
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
 gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
@@ -52,7 +53,7 @@ module rounded_cube(dims, r)
   else
     minkowski() {
       cube([dims[0]-2*r, dims[1]-2*r, dims[2]-2*r]);
-      sphere(r);
+      sphere(r, $fn=corner_segments);
     }
 }
 
