@@ -266,6 +266,7 @@ APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIM
 APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
 SKIP_MIRROR_REWRITE="${SKIP_MIRROR_REWRITE:-0}"
+APT_REWRITE_MIRROR="${APT_REWRITE_MIRROR:-https://mirror.fcix.net/raspbian/raspbian}"
 
 if [ "$SKIP_MIRROR_REWRITE" -ne 1 ]; then
   # --- Reliability hooks: mirror rewrites and proxy exceptions ---
@@ -275,12 +276,14 @@ if [ "$SKIP_MIRROR_REWRITE" -ne 1 ]; then
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="https://mirror.fcix.net/raspbian/raspbian"
+target="__APT_REWRITE_MIRROR__"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 EOSH
+  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
+    stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
   chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
   mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
   cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
@@ -300,12 +303,14 @@ EOP
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="https://mirror.fcix.net/raspbian/raspbian"
+target="__APT_REWRITE_MIRROR__"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 EOSH
+  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
+    stage0/00-configure-apt/00-run-00-pre.sh
   chmod +x stage0/00-configure-apt/00-run-00-pre.sh
 
   # 4) Stage2 safeguard rewrite
@@ -314,13 +319,15 @@ EOSH
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="https://mirror.fcix.net/raspbian/raspbian"
+target="__APT_REWRITE_MIRROR__"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 apt-get -o Acquire::Retries=10 update || true
 EOSH
+  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
+    stage2/00-configure-apt/01-run.sh
   chmod +x stage2/00-configure-apt/01-run.sh
 
   # 5) Export-image post-rewrite after 02-set-sources resets lists
@@ -329,13 +336,15 @@ EOSH
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="https://mirror.fcix.net/raspbian/raspbian"
+target="__APT_REWRITE_MIRROR__"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
 done
 apt-get -o Acquire::Retries=10 update || true
 EOSH
+  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
+    export-image/02-set-sources/02-run.sh
   chmod +x export-image/02-set-sources/02-run.sh
 else
   echo "Skipping apt mirror rewrites"

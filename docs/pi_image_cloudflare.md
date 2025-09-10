@@ -24,8 +24,9 @@ replace an existing image. To reduce flaky downloads it pins the official
 Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook that rewrites
 any raspbian host to a stable HTTPS mirror and bypasses proxies for
-`archive.raspberrypi.com`. Set `SKIP_MIRROR_REWRITE=1` to disable these rewrites
-when your network already uses a reliable mirror. Use `APT_RETRIES` and
+`archive.raspberrypi.com`. Use `APT_REWRITE_MIRROR` to change the rewrite target
+(default: `https://mirror.fcix.net/raspbian/raspbian`). Set `SKIP_MIRROR_REWRITE=1`
+to disable these rewrites when your network already uses a reliable mirror. Use `APT_RETRIES` and
 `APT_TIMEOUT` to tune the retry count and per-request timeout. Override the
 Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
 `APT_MIRROR_RASPBERRYPI`) and the Debian mirror with `DEBIAN_MIRROR`. Use
