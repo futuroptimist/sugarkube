@@ -19,12 +19,11 @@ CONTEXT:
 - The `power_ring` project uses KiCad 9+ and [KiBot](https://github.com/INTI-CMNB/kibot)
   ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to lint, format, and test.
-  For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`).
-  - `linkchecker --no-warnings README.md docs/` to verify links.
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
-  before committing.
+- Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh)
+  for linting, formatting, and tests. For documentation updates, also run:
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `linkchecker --no-warnings README.md docs/`
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent tool failures in [`outages/`](../outages/) per
   [`outages/schema.json`](../outages/schema.json).
 
