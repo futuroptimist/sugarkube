@@ -18,7 +18,8 @@ CONTEXT:
 - Tests live in [`tests/`](../tests/). Python suites run with
   [pytest](https://docs.pytest.org/en/stable/) and shell checks use
   [Bats](https://bats-core.readthedocs.io/en/stable/).
-- For quick iteration, invoke `pytest tests/` or `bats tests/*.bats` directly.
+- For quick iteration, invoke `pytest tests/` or run an individual Bats file such as
+  `bats tests/pi_node_verifier_output_test.bats` directly.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository
   conventions.
 - Run `pre-commit run --all-files`; it invokes
@@ -29,7 +30,9 @@ CONTEXT:
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
   `aspell` and `aspell-en`) and `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
-  before committing.
+  before committing (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
+- Record persistent test issues in [`outages/`](../outages/) using
+  [`schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Identify missing or flaky test cases.
