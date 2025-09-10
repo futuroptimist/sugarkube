@@ -9,6 +9,7 @@
                 (comment 2 "Keep high-current traces short")
                 (comment 3 "Label polarity and voltage on connectors")
                 (comment 4 "Use star topology for power distribution to minimize voltage drop")
+                (comment 5 "Use thick traces for high-current paths")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
