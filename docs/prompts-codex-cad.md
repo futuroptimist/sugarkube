@@ -16,21 +16,26 @@ Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
-- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL meshes
-  into the git-ignored [`stl/`](../stl/) directory. Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script exits early
-  if it cannot find the binary.
+- Use [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) to export binary STL
+  meshes into the git-ignored [`stl/`](../stl/) directory. Ensure
+  [OpenSCAD](https://openscad.org/) is installed and available in `PATH`; the script
+  exits early if it cannot find the binary.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
-  models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
-  `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
+  models as artifacts.
+- Do not commit `.stl` files.
+- Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`,
+  or `nut`. The `STANDOFF_MODE` environment variable is optional, case-insensitive, trims
   surrounding whitespace, and defaults to the model’s `standoff_mode` value (often `heatset`).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- If `package.json` is present, also run:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run test:ci`
 - For documentation updates, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
-    `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+    [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
     [`README.md`](../README.md) and [`docs/`](../docs/)
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
