@@ -511,6 +511,15 @@ docker compose up -d --build
   ```sh
   docker compose logs --tail=50
   ```
+- For build failures, rerun with verbose output:
+  ```sh
+  cd /opt/projects/token.place
+  docker buildx build --platform linux/arm64 \
+    -f docker/Dockerfile.server -t tokenplace . \
+    --load --progress=plain
+  cd /opt/projects/dspace/frontend
+  docker compose build --progress=plain
+  ```
 - If a deployment fails repeatedly, record it under
   [`outages/`](../outages/README.md) using
   [`outages/schema.json`](../outages/schema.json). Example:
