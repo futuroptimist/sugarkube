@@ -41,6 +41,7 @@ standoff_diam   = 6.5;           // increased for added strength (mm)
 /* Choose one of:
  *  "printed"   → generate printable ISO metric threads (M2.5)
  *  "heatset"   → leave a blind hole sized for a brass M2 insert
+ *  "nut"       → through-hole with captive hex recess
  */
 standoff_mode   = "heatset";
 
@@ -52,9 +53,13 @@ insert_hole_diam  = insert_od - insert_clearance; // about 2.8 mm
 insert_chamfer    = 0.5;         // chamfer to guide the soldering tip
 
 /* ---- screw / printed thread geometry (unchanged) ---- */
-screw_major   = 2.50;   // M2.5
-screw_pitch   = 0.45;   // ISO coarse
-thread_facets = 32;     // helix resolution
+screw_major     = 2.50;   // M2.5
+screw_pitch     = 0.45;   // ISO coarse
+thread_facets   = 32;     // helix resolution
+screw_clearance = 3.2;    // through-hole clearance, slightly oversize
+nut_clearance   = 0.3;    // extra room for easier nut insertion
+nut_flat        = 5.0 + nut_clearance; // across flats for M2.5 nut
+nut_thick       = 2.0;    // nut thickness
 
 /* ---------- DERIVED DIMENSIONS ---------- */
 /* footprint of a single PCB after rotation */
@@ -112,6 +117,13 @@ module standoff(pos=[0,0])
                 cylinder(h=insert_chamfer,
                          r1=insert_hole_diam/2 + insert_chamfer,
                          r2=insert_hole_diam/2, $fn=32);
+        }
+        else if (standoff_mode == "nut") {
+            /* through-hole with captive hex recess */
+            translate([0,0,-0.01])
+                cylinder(h=standoff_height + 0.02, r=screw_clearance/2, $fn=32);
+            translate([0,0,-nut_thick])
+                cylinder(h=nut_thick, r=nut_flat/(2*cos(30)), $fn=6);
         }
     }
 }
