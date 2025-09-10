@@ -64,10 +64,27 @@ See each repository's README for the full list of configuration options.
 ## Extend with new repositories
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. Add services to `/opt/projects/docker-compose.yml` (use the
-`# extra-start` marker) and extend `init-env.sh` with any new `.env` files,
-following the token.place and dspace examples. The image builder drops the
-token.place or dspace definitions when the corresponding `CLONE_*` flag is
-`false`, letting you build a minimal image and expand it later.
+`/opt/projects`. Add services to `/opt/projects/docker-compose.yml` beneath the
+`# extra-start` marker:
+
+```yaml
+services:
+  # existing services ...
+  # extra-start
+  myapp:
+    image: ghcr.io/example/myapp:latest
+    env_file:
+      - /opt/projects/myapp/.env
+    restart: unless-stopped
+  # extra-end
+```
+
+If the new repository includes an `.env.example`, `init-env.sh` copies it to
+`.env` on first boot so the container starts with sensible defaults. Extend the
+script when custom setup is required.
+
+The image builder drops the token.place or dspace definitions when the
+corresponding `CLONE_*` flag is `false`, letting you build a minimal image and
+expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.
