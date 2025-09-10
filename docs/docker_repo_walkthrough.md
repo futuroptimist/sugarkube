@@ -29,8 +29,8 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Inspect container logs to confirm the service started:  
-   - Single container: `docker logs -f myapp`  
+5. Inspect container logs to confirm the service started:
+   - Single container: `docker logs -f myapp`
    - Compose project: `docker compose logs`
 6. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
