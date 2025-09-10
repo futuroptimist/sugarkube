@@ -44,7 +44,7 @@ CONTEXT:
   committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
-  
+
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
 2. Modify geometry or parameters as required.
