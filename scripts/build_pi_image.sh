@@ -112,8 +112,16 @@ if [ ! -f "${INIT_ENV_PATH}" ]; then
   exit 1
 fi
 
+KEEP_WORK_DIR="${KEEP_WORK_DIR:-0}"
 WORK_DIR=$(mktemp -d)
-trap 'rm -rf "${WORK_DIR}"' EXIT
+cleanup() {
+  if [[ "${KEEP_WORK_DIR}" != "1" ]]; then
+    rm -rf "${WORK_DIR}"
+  else
+    echo "[sugarkube] KEEP_WORK_DIR=1; leaving work dir: ${WORK_DIR}"
+  fi
+}
+trap cleanup EXIT
 
 # Ensure temporary and output locations have enough space
 check_space "$(dirname "${WORK_DIR}")"
