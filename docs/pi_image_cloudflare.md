@@ -49,6 +49,9 @@ The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 `/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
 pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
 
+On first boot `init-env.sh` copies each project's `.env.example` to `.env` and
+sets its mode to `0600` so secrets stay private.
+
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
 Cloud-init writes `docker-compose.cloudflared.yml` to `/opt/sugarkube`.
