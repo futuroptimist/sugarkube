@@ -10,6 +10,11 @@ for example in **/.env.example; do
   fi
 done
 
+# Ensure token.place and dspace have .env files even without examples
+for env_path in token.place/.env dspace/frontend/.env; do
+  [ -f "$env_path" ] || touch "$env_path"
+done
+
 # extra-start
 # Add additional environment setup steps below
 # extra-end
