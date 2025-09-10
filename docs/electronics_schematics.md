@@ -20,7 +20,7 @@ Design notes embedded in the KiCad title block highlight best practices:
 - Keep high-current traces short for better performance.
 - Label polarity and voltage on connectors to avoid wiring mistakes.
 - Verify KiBot exports before fabrication.
-- Check ground-pour continuity around mounting holes.
+- Verify ground-pour clearance around mounting holes.
 
 Open the project in **KiCad 9** or newer and modify the schematic to suit your power distribution needs (for example, add screw terminals, fuses and test points). Use [KiBot](https://github.com/INTI-CMNB/KiBot) with `.kibot/power_ring.yaml` or run the GitHub workflow to produce Gerber files, a PDF schematic and a BOM in `build/power_ring/`.
 
