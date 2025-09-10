@@ -28,6 +28,8 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
+- Inspect [`.github/workflows/`](../.github/workflows/) to understand which checks run in CI.
+  If `package.json` is present, verify `npm run lint` and `npm run test:ci` succeed.
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and
     `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -65,6 +67,7 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
+Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
 If `package.json` defines them, also run:
 - `npm run lint`
 - `npm run test:ci`
