@@ -5,7 +5,7 @@ slug: 'prompts-codex-cad'
 
 # Sugarkube Codex CAD Prompt
 
-Use this prompt to update or verify OpenSCAD models.
+Use this prompt to update or verify [OpenSCAD](https://openscad.org/) models.
 
 ```text
 SYSTEM:
@@ -44,7 +44,7 @@ CONTEXT:
   committing.
 - Log tool failures in [`outages/`](../outages/) using
   [`outages/schema.json`](../outages/schema.json).
-
+  
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
 2. Modify geometry or parameters as required.
