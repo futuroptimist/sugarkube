@@ -44,7 +44,8 @@ The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
 
-The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
+The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` by default.
+Set `INSTALL_PI_NODE_VERIFIER=false` to omit the script. It also clones the
 `token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
 `/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
 pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.

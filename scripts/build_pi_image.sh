@@ -198,9 +198,12 @@ if [ -n "${TUNNEL_TOKEN:-}" ]; then
 fi
 
 
-# Bundle pi_node_verifier and optionally clone repos into the image
-install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
-  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+# Optionally bundle pi_node_verifier and optionally clone repos into the image
+INSTALL_PI_NODE_VERIFIER="${INSTALL_PI_NODE_VERIFIER:-true}"
+if [[ "$INSTALL_PI_NODE_VERIFIER" == "true" ]]; then
+  install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
+    "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+fi
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
