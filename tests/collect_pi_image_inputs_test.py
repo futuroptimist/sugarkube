@@ -151,4 +151,5 @@ def test_succeeds_when_realpath_missing(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
+
     
