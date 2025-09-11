@@ -37,7 +37,10 @@ For a prebuilt image that already clones both projects, see
    `curl http://localhost:3002` for dspace.
 7. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
-8. Log recurring deployment failures in `outages/` using
+8. Visit the Cloudflare URL to verify remote access, for example
+   `curl https://tokenplace.example.com` or
+   `curl https://dspace.example.com` once the tunnel restarts.
+9. Log recurring deployment failures in `outages/` using
    [`schema.json`](../outages/schema.json).
 
 ## Quick start
@@ -69,6 +72,7 @@ docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenp
 docker run -d --name tokenplace -p 5000:5000 tokenplace
 docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000
+curl https://tokenplace.example.com  # via Cloudflare
 ```
 
 ### token.place (docker-compose)
@@ -81,6 +85,7 @@ docker compose up -d
 docker compose ps
 curl http://localhost:5000  # relay
 curl http://localhost:3000  # server
+curl https://tokenplace.example.com  # via Cloudflare
 ```
 
 ### dspace (Dockerfile)
@@ -92,6 +97,7 @@ cd dspace/frontend
 docker buildx build --platform linux/arm64 -t dspace-frontend . --load
 docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend
 curl http://localhost:3002
+curl https://dspace.example.com  # via Cloudflare
 ```
 
 ### dspace (docker-compose)
@@ -104,6 +110,7 @@ cp .env.example .env  # if present
 docker compose up -d
 docker compose logs -f  # watch build and runtime logs
 curl http://localhost:3002
+curl https://dspace.example.com  # via Cloudflare
 ```
 
 ### token.place and dspace together
