@@ -40,7 +40,8 @@ CONTEXT:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
-    [`README.md`](../README.md) and [`docs/`](../docs/)
+    [`README.md`](../README.md) and [`docs/`](../docs/) (install with
+    `pipx install linkchecker` if missing)
 - Scan staged changes for secrets before committing using
   `git diff --cached | ./scripts/scan-secrets.py`.
 - Log tool failures in [`outages/`](../outages/) using
@@ -83,8 +84,8 @@ Then run:
 
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
   [`.spellcheck.yaml`](../.spellcheck.yaml))
-- `linkchecker --no-warnings README.md docs/` (install via
-  `pip install linkchecker`)
+- `linkchecker --no-warnings README.md docs/` (install with
+  `pipx install linkchecker` if missing)
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
