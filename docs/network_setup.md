@@ -16,7 +16,8 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
    `ping <hostname>.local` and then `ssh <user>@<hostname>.local` to change the
    default login credential with `passwd`. If `.local` lookups fail, install an mDNS
    service such as `avahi-daemon` (`sudo apt install avahi-daemon`) or use the
-   IP shown on your router's client list.
+   IP shown on your router's client list. If the router doesn't list it,
+   discover the Pi's address with `nmap -sn 192.168.1.0/24`.
 7. After logging in, update packages so each Pi starts with the latest fixes:
    `sudo apt update && sudo apt full-upgrade -y`
 8. Reboot to ensure kernel updates apply before moving on: `sudo reboot`.
