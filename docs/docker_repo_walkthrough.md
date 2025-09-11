@@ -222,6 +222,36 @@ docker volume ls | grep dspace-data
 
 Adjust container paths to match each project's documentation.
 
+### Toggle services with Docker Compose profiles
+
+Enable just token.place or dspace without editing the compose file:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.profiles.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    profiles: ["tokenplace"]
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3002:3002"
+    profiles: ["dspace"]
+EOF
+docker compose -f docker-compose.profiles.yml --profile tokenplace up -d
+docker compose -f docker-compose.profiles.yml --profile dspace up -d
+docker compose ps
+curl http://localhost:5000  # token.place
+curl http://localhost:3002  # dspace
+docker compose -f docker-compose.profiles.yml down
+```
+
 Proceed with the detailed steps below to adapt the process for other repositories.
 
 ## 1. Prepare the Pi
