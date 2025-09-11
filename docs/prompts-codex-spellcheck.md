@@ -16,7 +16,7 @@ Keep Markdown documentation free of spelling errors.
 
 CONTEXT:
 - Run `pyspelling -c .spellcheck.yaml` to scan `README.md` and `docs/`
-  (requires `aspell` and `aspell-en`).
+  (requires the `aspell` and `aspell-en` packages).
 - Add legitimate new words to [`.wordlist.txt`](../.wordlist.txt).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
@@ -44,6 +44,7 @@ You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
 If `package.json` defines them, also run:
+- `npm ci`
 - `npm run lint`
 - `npm run test:ci`
 Then run:
