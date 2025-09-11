@@ -31,10 +31,6 @@ CONTEXT:
 - Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
-- If a Node toolchain is present (`package.json` exists), also run:
-  - `npm ci`
-  - `npm run lint`
-  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -71,10 +67,6 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
-If `package.json` defines them, also run:
-- `npm ci`
-- `npm run lint`
-- `npm run test:ci`
 Then run:
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
   [`.spellcheck.yaml`](../.spellcheck.yaml))
