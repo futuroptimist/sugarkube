@@ -4,7 +4,10 @@ set -euo pipefail
 shopt -s globstar nullglob
 for example in **/.env.example; do
   target="${example%.example}"
-  [ -f "$target" ] || cp "$example" "$target"
+  if [ ! -f "$target" ]; then
+    cp "$example" "$target"
+    chmod 600 "$target"
+  fi
 done
 
 # Ensure token.place and dspace have .env files even without examples
