@@ -1,6 +1,9 @@
 # 🤖 AGENTS
 
-This repository uses lightweight LLM helpers inspired by the [flywheel](https://github.com/futuroptimist/flywheel) project. It follows the [AGENTS.md spec](https://gist.github.com/dpaluy/cc42d59243b0999c1b3f9cf60dfd3be6) and [agentsmd.net](https://agentsmd.net/AGENTS.md).
+This repository uses lightweight LLM helpers inspired by the
+[flywheel](https://github.com/futuroptimist/flywheel) project. It follows the
+[AGENTS.md specification](https://agentsmd.net/AGENTS.md), mirroring
+[the original gist](https://gist.github.com/dpaluy/cc42d59243b0999c1b3f9cf60dfd3be6).
 
 The name **sugarkube** has two meanings:
 
@@ -12,12 +15,13 @@ The name **sugarkube** has two meanings:
 
 ## Code Linter Agent
 - **When:** every PR
-- **Does:** run `scripts/checks.sh` via pre-commit to lint, format and test.
+- **Does:** run `pre-commit run --all-files` (invokes `scripts/checks.sh`) to lint, format and test.
 
 ## Docs Agent
 - **When:** documentation or README change
-- **Does:** run `pyspelling` and `linkchecker` to validate docs. This covers
-  guides such as `docs/network_setup.md`.
+- **Does:** run `pyspelling -c .spellcheck.yaml` and
+  `linkchecker --no-warnings README.md docs/` to validate docs. This covers guides
+  such as `docs/network_setup.md`.
 
 ## CAD Agent
 - **When:** `.scad` files change
@@ -28,7 +32,8 @@ The name **sugarkube** has two meanings:
 
 ## KiCad Agent
 - **When:** KiCad schematic or PCB files change and on a weekly schedule
-- **Does:** run the [KiBot action](https://github.com/INTI-CMNB/kibot) with `.kibot/power_ring.yaml` to export Gerbers, PDF schematics and BOM. The project
+- **Does:** run the [KiBot action](https://github.com/INTI-CMNB/kibot) with
+  `.kibot/power_ring.yaml` to export Gerbers, PDF schematics and BOM. The project
   requires **KiCad 9** so we use the `v2_k9` container tag.
 - **Logs:** workflow logs are uploaded as artifacts so non-admins can download failure details.
 
@@ -38,7 +43,15 @@ The name **sugarkube** has two meanings:
   root cause and resolution.
 
 ### STL generation
-STL meshes are not stored in the repository. The `scad-to-stl.yml` workflow renders them after each commit and exposes the files as downloadable artifacts.
+STL meshes are not stored in the repository. The `scad-to-stl.yml` workflow renders
+them after each commit and exposes the files as downloadable artifacts.
 
 ### Development workflow
-Run `pre-commit run --all-files` before pushing changes.
+Run the following before committing:
+
+```bash
+pre-commit run --all-files
+pyspelling -c .spellcheck.yaml
+linkchecker --no-warnings README.md docs/
+git diff --cached | ./scripts/scan-secrets.py
+```

@@ -455,8 +455,8 @@ def _run_build_script(tmp_path, env):
     compose_src = cloud_init_src / "docker-compose.cloudflared.yml"
     shutil.copy(compose_src, ci_dir / "docker-compose.cloudflared.yml")
 
-    projects_src = cloud_init_src / "docker-compose.projects.yml"
-    shutil.copy(projects_src, ci_dir / "docker-compose.projects.yml")
+    projects_src = cloud_init_src / "docker-compose.yml"
+    shutil.copy(projects_src, ci_dir / "docker-compose.yml")
 
     start_projects_src = cloud_init_src / "start-projects.sh"
     start_projects_dest = ci_dir / "start-projects.sh"
