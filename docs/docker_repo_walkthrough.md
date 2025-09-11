@@ -221,6 +221,33 @@ docker volume ls | grep dspace-data
 ```
 
 Adjust container paths to match each project's documentation.
+### Develop with bind mounts
+
+Mount the source tree into a container to test changes without rebuilding images.
+
+- token.place:
+
+```sh
+cd /opt/projects/token.place
+docker run -d --name tokenplace-dev -p 5000:5000 -v "$(pwd)":/app tokenplace
+docker exec -it tokenplace-dev python -m pytest
+```
+
+- dspace frontend:
+
+```sh
+cd /opt/projects/dspace/frontend
+docker compose run --service-ports -v "$(pwd)":/app frontend npm test -- --watch
+```
+
+Stop the containers when finished:
+
+```sh
+docker stop tokenplace-dev
+docker compose down
+```
+
+
 
 ### Toggle services with Docker Compose profiles
 
