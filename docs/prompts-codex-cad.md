@@ -51,7 +51,7 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via (use `~~~` fences in this prompt to avoid breaking the outer block):
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (heatset)
+   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (model-defined, often heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
@@ -84,11 +84,11 @@ If `package.json` exists, also run:
 
  Then run:
 
- - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
-    [`.spellcheck.yaml`](../.spellcheck.yaml))
- - `linkchecker --no-warnings README.md docs/` (installed by
-    [`scripts/checks.sh`](../scripts/checks.sh))
- - `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+  [`.spellcheck.yaml`](../.spellcheck.yaml))
+- `linkchecker --no-warnings README.md docs/` (installed by
+  [`scripts/checks.sh`](../scripts/checks.sh))
+- `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
