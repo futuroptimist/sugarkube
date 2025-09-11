@@ -55,7 +55,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
+Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
 If a Node toolchain exists, also run:
 - `npm ci`
