@@ -18,7 +18,7 @@ CONTEXT:
 - Docs live in [`docs/`](./).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for style,
   testing, and repository conventions.
-- Review the [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
+- Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
   linting, formatting, and tests. If `package.json` exists, the script automatically
   runs `npm ci`, `npm run lint`, and `npm run test:ci`.
