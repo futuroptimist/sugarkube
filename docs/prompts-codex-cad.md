@@ -5,7 +5,7 @@ slug: 'prompts-codex-cad'
 
 # Sugarkube Codex CAD Prompt
 
-Use this prompt to update or verify [OpenSCAD](https://openscad.org/) models.
+Use this prompt to update or verify [OpenSCAD](https://openscad.org) models.
 
 ```text
 SYSTEM:
@@ -17,10 +17,10 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
-  `openscad -o stl/... --export-format binstl`. Run it from the repository root so
-  meshes land in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)).
-  Ensure [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script
-  fails fast if the binary is missing.
+  `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
+  in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
+  [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script fails fast
+  if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`,
@@ -56,6 +56,7 @@ REQUEST:
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
+   ````
 
 4. Run `pre-commit run --all-files`; for docs changes also run
    `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
