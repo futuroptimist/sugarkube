@@ -37,7 +37,10 @@ REQUEST:
 3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
    `linkchecker --no-warnings README.md docs/`, and
    `git diff --cached | ./scripts/scan-secrets.py`.
-   If `package.json` exists, also run `npm ci`, `npm run lint`, and `npm run test:ci`.
+   If `package.json` exists, also run:
+   - `npm ci`
+   - `npm run lint`
+   - `npm run test:ci`
    Confirm all checks pass.
 
 OUTPUT:
