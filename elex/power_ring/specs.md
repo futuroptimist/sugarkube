@@ -18,6 +18,7 @@ The design may evolve as the project grows.
 
 - Test points for measuring battery voltage
 - Silkscreen labels for polarity and connector numbers
+- Fiducial markers to indicate board orientation for easier assembly
 - Title block comments record decoupling guidelines, high-current trace layout, thick traces
   for high-current paths, connector labeling, export checks, ground pour continuity around
   mounting holes, board outline fit, BOM validation, clearance rules for high-voltage nets,
