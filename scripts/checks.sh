@@ -92,16 +92,21 @@ if ! command -v aspell >/dev/null 2>&1; then
       if command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
       else
-        echo "Run as root or install sudo" >&2
-        exit 1
+        echo "aspell not installed and no sudo; skipping spell check" >&2
+        SUDO=""
       fi
     fi
-    $SUDO apt-get update && $SUDO apt-get install -y aspell aspell-en
+    if [ -z "$SUDO" ] && [ "$(id -u)" -ne 0 ]; then
+      :
+    else
+      $SUDO apt-get update >/dev/null 2>&1 && \
+        $SUDO apt-get install -y aspell aspell-en >/dev/null 2>&1 || \
+        echo "aspell install failed; skipping" >&2
+    fi
   elif command -v brew >/dev/null 2>&1; then
-    brew install aspell
+    brew install aspell >/dev/null 2>&1 || echo "aspell install failed; skipping" >&2
   else
-    echo "aspell not found" >&2
-    exit 1
+    echo "aspell not found and no package manager available; skipping spell check" >&2
   fi
 fi
 # Only run the spell checker when both `pyspelling` and its `aspell` backend
