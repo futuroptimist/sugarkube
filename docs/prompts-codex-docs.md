@@ -61,8 +61,8 @@ If a Node toolchain exists, also run:
 - `npm ci`
 - `npm run lint`
 - `npm run test:ci`
-Then run `pyspelling -c .spellcheck.yaml`,
-`linkchecker --no-warnings README.md docs/`, and
+Then run `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+[`.spellcheck.yaml`](../.spellcheck.yaml)), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
