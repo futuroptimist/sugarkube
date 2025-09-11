@@ -15,13 +15,13 @@ PURPOSE:
 Keep the documentation clear and accurate.
 
 CONTEXT:
-- Docs live in [`docs/`](../docs/).
+- Docs live in [`docs/`](./).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for style,
   testing, and repository conventions.
 - Review the [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
-  linting, formatting, and tests. If a Node toolchain is present (`package.json` exists),
-  the script automatically runs `npm ci`, `npm run lint`, and `npm run test:ci`.
+  linting, formatting, and tests. If `package.json` exists, the script automatically
+  runs `npm ci`, `npm run lint`, and `npm run test:ci`.
 - For documentation changes, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -35,7 +35,11 @@ REQUEST:
 2. Improve wording, fix links, or add missing steps.
 3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
    `linkchecker --no-warnings README.md docs/`, and
-   `git diff --cached | ./scripts/scan-secrets.py`.
+   `git diff --cached | ./scripts/scan-secrets.py`. Confirm all checks pass.
+   If `package.json` exists, also run:
+   - `npm ci`
+   - `npm run lint`
+   - `npm run test:ci`
    Confirm all checks pass.
 
 OUTPUT:
@@ -51,11 +55,11 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
-Review the [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
-Run `pre-commit run --all-files`. If a Node toolchain exists (`package.json` is present),
-`scripts/checks.sh` automatically runs `npm ci`, `npm run lint`, and `npm run test:ci`.
-Then run `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
-[`.spellcheck.yaml`](../.spellcheck.yaml)), `linkchecker --no-warnings README.md docs/`, and
+Run `pre-commit run --all-files` (invokes [`scripts/checks.sh`](../scripts/checks.sh) for
+linting, formatting, and tests; it automatically runs `npm ci`, `npm run lint`, and
+`npm run test:ci` when `package.json` exists). Then run `pyspelling -c .spellcheck.yaml`
+(requires `aspell` and `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml)),
+`linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
