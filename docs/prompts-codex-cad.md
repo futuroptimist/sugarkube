@@ -17,21 +17,21 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
-  `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
-  in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script fails fast
-  if the binary is missing.
+  `openscad -o stl/... --export-format binstl`.
+  Run it from the repository root so meshes land in the git-ignored
+  [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
+  [OpenSCAD](https://openscad.org/) is installed and available on `PATH`;
+  the script fails fast if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
-  `nut`. `STANDOFF_MODE` is optional; the script normalizes the value (case-insensitive, trims
-  whitespace) and defaults to the model’s `standoff_mode` value (often `heatset`). Invalid values
-  cause the render script to exit with an error.
+- Render each model in all supported `standoff_mode` variants—`heatset`, `printed`, or `nut`.
+  Set `STANDOFF_MODE` to override; the script normalizes the value and defaults to the model’s
+  `standoff_mode` (often `heatset`). Invalid values exit with an error.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
   [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 - Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
-- Run `pre-commit run --all-files` from the repository root to lint, format, and test via
-  [`scripts/checks.sh`](../scripts/checks.sh).
+- Run `pre-commit run --all-files` from the repository root to lint, format, and test
+  via [`scripts/checks.sh`](../scripts/checks.sh).
 - If a Node toolchain is present (`package.json` exists), first run `npm ci` to install
   dependencies, then run:
   - `npm run lint`
