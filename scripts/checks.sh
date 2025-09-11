@@ -85,28 +85,35 @@ else
 fi
 
 # docs checks
-# Spell checking requires `aspell`.  Attempt to install it when possible but
+# Spell checking requires `aspell`. Attempt to install it when possible but
 # continue gracefully if installation is not possible.
 if ! command -v aspell >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     SUDO=""
-    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-      SUDO="sudo"
+    if [ "$(id -u)" -ne 0 ]; then
+      if command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+      else
+        echo "aspell not installed and no sudo; skipping spell check" >&2
+        SUDO=""
+      fi
     fi
-    if ! $SUDO apt-get update >/dev/null 2>&1 || \
-       ! $SUDO apt-get install -y aspell aspell-en >/dev/null 2>&1; then
-      echo "aspell not installed; skipping spell check" >&2
+    if [ -z "$SUDO" ] && [ "$(id -u)" -ne 0 ]; then
+      :
+    else
+      $SUDO apt-get update >/dev/null 2>&1 && \
+        $SUDO apt-get install -y aspell aspell-en >/dev/null 2>&1 || \
+        echo "aspell install failed; skipping" >&2
     fi
   elif command -v brew >/dev/null 2>&1; then
-    brew install aspell >/dev/null 2>&1 || \
-      echo "aspell not installed; skipping spell check" >&2
+    brew install aspell >/dev/null 2>&1 || echo "aspell install failed; skipping" >&2
   else
-    echo "aspell not found; skipping spell check" >&2
+    echo "aspell not found and no package manager available; skipping spell check" >&2
   fi
 fi
 # Only run the spell checker when both `pyspelling` and its `aspell` backend
 # are available. Some environments (like minimal CI containers) do not include
-# the `aspell` binary by default which would cause `pyspelling` to error.  In
+# the `aspell` binary by default which would cause `pyspelling` to error. In
 # those cases we silently skip the spelling check instead of failing the whole
 # pre-commit run.
 if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 \

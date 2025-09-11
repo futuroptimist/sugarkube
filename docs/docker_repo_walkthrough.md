@@ -37,7 +37,10 @@ For a prebuilt image that already clones both projects, see
    `curl http://localhost:3002` for dspace.
 7. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
-8. Log recurring deployment failures in `outages/` using
+8. Visit the Cloudflare URL to verify remote access, for example
+   `curl https://tokenplace.example.com` or
+   `curl https://dspace.example.com` once the tunnel restarts.
+9. Log recurring deployment failures in `outages/` using
    [`schema.json`](../outages/schema.json).
 
 ## Quick start
@@ -69,6 +72,7 @@ docker buildx build --platform linux/arm64 -f docker/Dockerfile.server -t tokenp
 docker run -d --name tokenplace -p 5000:5000 tokenplace
 docker logs -f tokenplace  # watch startup output
 curl http://localhost:5000
+curl https://tokenplace.example.com  # via Cloudflare
 ```
 
 ### token.place (docker-compose)
@@ -81,6 +85,7 @@ docker compose up -d
 docker compose ps
 curl http://localhost:5000  # relay
 curl http://localhost:3000  # server
+curl https://tokenplace.example.com  # via Cloudflare
 ```
 
 ### dspace (Dockerfile)
@@ -92,6 +97,7 @@ cd dspace/frontend
 docker buildx build --platform linux/arm64 -t dspace-frontend . --load
 docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend
 curl http://localhost:3002
+curl https://dspace.example.com  # via Cloudflare
 ```
 
 ### dspace (docker-compose)
@@ -104,6 +110,7 @@ cp .env.example .env  # if present
 docker compose up -d
 docker compose logs -f  # watch build and runtime logs
 curl http://localhost:3002
+curl https://dspace.example.com  # via Cloudflare
 ```
 
 ### token.place and dspace together
@@ -166,10 +173,10 @@ sudo systemctl status tokenplace-dspace.service --no-pager
 This example assumes the combined `docker-compose.yml` above lives in
 `/opt/projects`.
 
-### Customize ports with `docker-compose.override.yml`
+### Customize ports and env vars with `docker-compose.override.yml`
 
-Override the default ports if token.place or dspace conflict with other
-services on the Pi:
+Override ports or environment variables if token.place or dspace conflict with
+other services on the Pi:
 
 ```sh
 cd /opt/projects
@@ -178,9 +185,13 @@ services:
   tokenplace:
     ports:
       - "5050:5000"
+    environment:
+      - TOKEN_PLACE_ENV=production
   dspace:
     ports:
-      - "3100:3000"
+      - "3100:3002"
+    environment:
+      - NODE_ENV=production
 EOF
 docker compose up -d
 docker compose ps
@@ -221,6 +232,63 @@ docker volume ls | grep dspace-data
 ```
 
 Adjust container paths to match each project's documentation.
+### Develop with bind mounts
+
+Mount the source tree into a container to test changes without rebuilding images.
+
+- token.place:
+
+```sh
+cd /opt/projects/token.place
+docker run -d --name tokenplace-dev -p 5000:5000 -v "$(pwd)":/app tokenplace
+docker exec -it tokenplace-dev python -m pytest
+```
+
+- dspace frontend:
+
+```sh
+cd /opt/projects/dspace/frontend
+docker compose run --service-ports -v "$(pwd)":/app frontend npm test -- --watch
+```
+
+Stop the containers when finished:
+
+```sh
+docker stop tokenplace-dev
+docker compose down
+```
+
+
+
+### Toggle services with Docker Compose profiles
+
+Enable just token.place or dspace without editing the compose file:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.profiles.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    profiles: ["tokenplace"]
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3002:3002"
+    profiles: ["dspace"]
+EOF
+docker compose -f docker-compose.profiles.yml --profile tokenplace up -d
+docker compose -f docker-compose.profiles.yml --profile dspace up -d
+docker compose ps
+curl http://localhost:5000  # token.place
+curl http://localhost:3002  # dspace
+docker compose -f docker-compose.profiles.yml down
+```
 
 Proceed with the detailed steps below to adapt the process for other repositories.
 
