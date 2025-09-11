@@ -166,10 +166,10 @@ sudo systemctl status tokenplace-dspace.service --no-pager
 This example assumes the combined `docker-compose.yml` above lives in
 `/opt/projects`.
 
-### Customize ports with `docker-compose.override.yml`
+### Customize ports and env vars with `docker-compose.override.yml`
 
-Override the default ports if token.place or dspace conflict with other
-services on the Pi:
+Override ports or environment variables if token.place or dspace conflict with
+other services on the Pi:
 
 ```sh
 cd /opt/projects
@@ -178,9 +178,13 @@ services:
   tokenplace:
     ports:
       - "5050:5000"
+    environment:
+      - TOKEN_PLACE_ENV=production
   dspace:
     ports:
-      - "3100:3000"
+      - "3100:3002"
+    environment:
+      - NODE_ENV=production
 EOF
 docker compose up -d
 docker compose ps
