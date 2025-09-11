@@ -1,6 +1,9 @@
 # Raspberry Pi Cluster Setup
 
-This expanded guide walks through building a three-node Raspberry Pi 5 cluster and installing k3s so you can run [token.place](https://github.com/futuroptimist/token.place) and [dspace](https://github.com/democratizedspace/dspace). It assumes basic familiarity with the Linux command line.
+This expanded guide walks through building a three-node Raspberry Pi 5 cluster and installing k3s
+so you can run [token.place](https://github.com/futuroptimist/token.place) and
+[dspace](https://github.com/democratizedspace/dspace). It assumes basic familiarity with the
+Linux command line.
 
 ## Bill of Materials
 - 3 × Raspberry Pi 5 (8 GB recommended)
@@ -18,7 +21,7 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
 
 ## 1. Prepare the OS image
 1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
-   [pi-image workflow run](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml),
+   [pi-image workflow run][pi-image],
    or download it manually from the Actions tab.
 
    Alternatively, build locally:
@@ -45,16 +48,19 @@ This expanded guide walks through building a three-node Raspberry Pi 5 cluster a
      - Expect 45–120 minutes on Windows; ensure ≥30 GB free disk
 2. Verify the checksum: `sha256sum -c sugarkube.img.xz.sha256`
 3. Flash the image to a microSD card using Raspberry Pi Imager
-   - Set a unique hostname (e.g., `sugar-01`, `sugar-02`, `sugar-03`), enable SSH, and create a user with a strong password
-   - Use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to enter advanced options and configure WiFi SSID, password, and locale
-   - The same image can be reused for all nodes
+   - Set a unique hostname (e.g., `sugar-01`, `sugar-02`, `sugar-03`), enable SSH, and create a user
+     with a strong password.
+   - Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open advanced options and configure the
+     WiFi SSID, password, and locale.
+   - The same image can be reused for all nodes.
 
 ## 2. Boot and clone to SSD
 1. Insert the card into a Pi on the carrier and power on with monitor or KVM attached
 2. Verify the NVMe drive shows up: `lsblk`
 3. Install rpi-clone if missing: `sudo apt install -y rpi-clone`
-4. Clone the SD card to the SSD: `sudo rpi-clone sda -f`
-5. Shut down the Pi, remove the SD card, and power back on to confirm the SSD boots
+4. Clone the SD card to the SSD: `sudo rpi-clone sda -f`.
+   Replace `sda` with your NVMe device as shown by `lsblk`.
+5. Shut down the Pi, remove the SD card, and power back on to confirm the SSD boots.
 
 ## 3. Enable SSD boot (if needed)
 1. Run `sudo raspi-config` → Advanced Options → Boot Order → `NVMe/USB`
@@ -106,10 +112,15 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```
 
 ## 8. Create environments
-Use k3s namespaces `dev`, `int`, and `prod` to separate deployments. CI can promote images between namespaces after validation.
+Use k3s namespaces `dev`, `int`, and `prod` to separate deployments.
+CI can promote images between namespaces after validation.
 
 ## 9. Promote to production
-Tag a release in the integration namespace as golden and deploy that tag to `prod`. Roll back by redeploying the previous known-good tag if needed.
+Tag a release in the integration namespace as golden and deploy that tag to `prod`.
+Roll back by redeploying the previous known-good tag if needed.
 
 ## Next steps
-Explore [network_setup.md](network_setup.md) for networking tips and [pi_image_cloudflare.md](pi_image_cloudflare.md) for details on exposing services securely.
+Explore [network_setup.md](network_setup.md) for networking tips and
+[pi_image_cloudflare.md](pi_image_cloudflare.md) for details on exposing services securely.
+
+[pi-image]: https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml
