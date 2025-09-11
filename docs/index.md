@@ -3,7 +3,7 @@
 Welcome to **sugarkube**, a solar-powered off-grid platform for Raspberry Pis and aquarium aeration.
 This repo tracks CAD models, electronics schematics, and documentation
 so anyone can replicate the setup.
-Greenery is encouraged around the cube. Vines can climb the extrusion while
+Greenery is encouraged around the cube. Vines can climb the extrusions while
 herbs and shade-loving plants enjoy the cover of the solar panels.
 
 ![solar cube](images/solar_cube.jpg)
