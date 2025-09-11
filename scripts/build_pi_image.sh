@@ -37,8 +37,23 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-# Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging
-SKIP_BINFMT="${SKIP_BINFMT:-0}"
+# Install qemu binfmt handlers so pi-gen can emulate ARM binaries without hanging.
+# On native ARM hosts emulation isn't required, so skip installation unless explicitly
+# overridden via SKIP_BINFMT=0.
+SKIP_BINFMT_SET=0
+if [ -n "${SKIP_BINFMT:-}" ]; then
+  SKIP_BINFMT_SET=1
+fi
+HOST_ARCH="$(uname -m)"
+SKIP_BINFMT="${SKIP_BINFMT:-}"
+if [ "$SKIP_BINFMT_SET" -eq 0 ]; then
+  if [[ "$HOST_ARCH" == "aarch64" || "$HOST_ARCH" == arm* ]]; then
+    SKIP_BINFMT=1
+  else
+    SKIP_BINFMT=0
+  fi
+fi
+
 if [ "$SKIP_BINFMT" -ne 1 ]; then
   if ! docker run --privileged --rm tonistiigi/binfmt --install arm64,arm >/dev/null 2>&1; then
     # Some hosts require installing handlers separately
@@ -52,7 +67,11 @@ if [ "$SKIP_BINFMT" -ne 1 ]; then
     fi
   fi
 else
-  echo "Skipping binfmt handler installation"
+  if [ "$SKIP_BINFMT_SET" -eq 0 ] && [[ "$HOST_ARCH" == "aarch64" || "$HOST_ARCH" == arm* ]]; then
+    echo "Native ARM host detected; skipping binfmt handler installation"
+  else
+    echo "Skipping binfmt handler installation"
+  fi
 fi
 
 # Use sudo only when not running as root. Some CI containers omit sudo.
