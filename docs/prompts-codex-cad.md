@@ -83,13 +83,13 @@ If `package.json` defines them, also run:
 - `npm run lint`
 - `npm run test:ci`
 
-Then run:
+ Then run:
 
-- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
-  [`.spellcheck.yaml`](../.spellcheck.yaml))
-- `linkchecker --no-warnings README.md docs/` (install via
-  `pip install linkchecker`)
-- `git diff --cached | ./scripts/scan-secrets.py` before committing.
+ - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+    [`.spellcheck.yaml`](../.spellcheck.yaml))
+ - `linkchecker --no-warnings README.md docs/` (installed by
+    [`scripts/checks.sh`](../scripts/checks.sh))
+ - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
