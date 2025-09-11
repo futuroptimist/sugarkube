@@ -57,6 +57,38 @@ def test_downloads_artifact(tmp_path):
     assert (tmp_path / "out.img.xz").exists()
 
 
+def test_errors_when_download_fails(tmp_path):
+    """The script should fail if the artifact download step errors."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  echo 42\n"
+        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
+        "  exit 1\n"
+        "else\n"
+        "  exit 1\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script), "out.img.xz"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert not (tmp_path / "out.img.xz").exists()
+
+
 def test_errors_when_no_run_found(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
