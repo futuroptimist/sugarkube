@@ -31,10 +31,7 @@ CONTEXT:
 - Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
-- If a Node toolchain is present (`package.json` exists), also run:
-  - `npm ci`
-  - `npm run lint`
-  - `npm run test:ci`
+- This repository has no Node toolchain, so no `npm` commands are required.
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
