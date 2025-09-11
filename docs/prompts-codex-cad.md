@@ -41,7 +41,8 @@ CONTEXT:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
-    [`README.md`](../README.md) and [`docs/`](../docs/) (install via `pip install linkchecker`)
+    [`README.md`](../README.md) and [`docs/`](../docs/) (installed by
+    [`scripts/checks.sh`](../scripts/checks.sh))
 - Scan staged changes for secrets before committing using
   `git diff --cached | ./scripts/scan-secrets.py`.
 - Log tool failures in [`outages/`](../outages/) using
