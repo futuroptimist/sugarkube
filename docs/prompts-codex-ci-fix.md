@@ -16,7 +16,11 @@ Diagnose and fix continuous integration failures so all checks pass.
 
 CONTEXT:
 - Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for workflow and testing requirements.
-- Run `pre-commit run --all-files` to reproduce failures; it executes `scripts/checks.sh`.
+- Run `pre-commit run --all-files` from the repository root; it executes `scripts/checks.sh`.
+- If a Node toolchain is present (`package.json` exists), run:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run test:ci`
 - Ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
   `linkchecker --no-warnings README.md docs/` succeed.
 - Install missing dependencies with `pip` or `npm` as needed.

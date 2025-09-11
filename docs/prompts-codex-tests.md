@@ -15,16 +15,18 @@ PURPOSE:
 Improve and maintain test coverage.
 
 CONTEXT:
-- Tests live in [`tests/`](../tests/). Python suites run with
+- Tests live in [`tests/`](../tests/). Python modules end with `*_test.py`
+  while shell suites use `*_test.bats`. Python tests run with
   [pytest](https://docs.pytest.org/en/stable/) and shell checks use
-  [Bats](https://bats-core.readthedocs.io/en/stable/).
+  [Bats](https://bats-core.readthedocs.io/).
 - For quick iteration, invoke `pytest tests/` or run an individual Bats file such as
   `bats tests/pi_node_verifier_output_test.bats` directly.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository
   conventions.
 - Run `pre-commit run --all-files`; it invokes
   [`scripts/checks.sh`](../scripts/checks.sh) for linting, formatting, and executing both
-  test frameworks.
+  test frameworks. The script installs missing tools—including `bats`—so tests run
+  consistently.
 - The CI workflow [`tests.yml`](../.github/workflows/tests.yml) runs the test suite on
   each push.
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
