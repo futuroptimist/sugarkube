@@ -13,10 +13,12 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
 6. Boot each Pi once to confirm it connects. From another machine run
-   `ping <hostname>.local` and then `ssh <user>@<hostname>.local` to change the
-   default login credential with `passwd`. If `.local` lookups fail, install an mDNS
-   service such as `avahi-daemon` (`sudo apt install avahi-daemon`) or use the
-   IP shown on your router's client list.
+   `ping <hostname>.local` and then `ssh <user>@<hostname>.local`. Log in with the
+   credentials you set in the imager (or `pi`/`raspberry` if you kept the
+   defaults) and run `passwd` to change it.
+   If `.local` lookups fail, install an mDNS service such as
+   `avahi-daemon` (`sudo apt install avahi-daemon`) or use the IP shown on your
+   router's client list.
 7. After logging in, update packages so each Pi starts with the latest fixes:
    `sudo apt update && sudo apt full-upgrade -y`
 8. Reboot to ensure kernel updates apply before moving on: `sudo reboot`.
