@@ -16,30 +16,34 @@ PURPOSE:
 Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
+- Sugarkube automates a Pi-based k3s cluster; see [`README.md`](../README.md).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
   instruction semantics, see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 - Run `pre-commit run --all-files`, which executes
   [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
-  linters, tests, and documentation checks. When a Node toolchain is present
-  (`package.json` exists), `scripts/checks.sh` automatically runs `npm ci`,
-  `npm run lint`, and `npm run test:ci`.
+  linters, tests, and documentation checks. Pre-commit is configured via
+  [`.pre-commit-config.yaml`](../.pre-commit-config.yaml).
+- If a Node toolchain is present (`package.json` exists), also run:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run test:ci`
 - When documentation files (`README.md` or anything under
   [`docs/`](../docs/)) change, additionally run:
-  - `pyspelling -c .spellcheck.yaml` (requires
-    `aspell` and `aspell-en`)
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; config in
+    [`.spellcheck.yaml`](../.spellcheck.yaml)). Add new words to
+    [`.wordlist.txt`](../.wordlist.txt).
   - `linkchecker --no-warnings README.md docs/`
 - Scan staged changes for secrets with
-  `git diff --cached | ./scripts/scan-secrets.py`
-  (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)) to avoid
-  committing credentials.
-- Log persistent failures under [`outages/`](../outages/) as JSON following
+  [`scripts/scan-secrets.py`](../scripts/scan-secrets.py) via
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Log persistent failures in [`outages/`](../outages/) as JSON per
   [`outages/schema.json`](../outages/schema.json).
 
 REQUEST:
 1. Identify a small bug fix or documentation clarification.
 2. Implement the change following the project's existing style.
 3. Update relevant documentation when needed.
-4. Run `pre-commit run --all-files` and fix any issues.
+4. Run all checks above and ensure they pass.
 
 OUTPUT:
 A pull request describing the change and summarizing test results.
