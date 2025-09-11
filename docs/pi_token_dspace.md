@@ -57,8 +57,8 @@ letting containers start with sane defaults. Edit these files to set variables l
 `PORT`, API URLs or secrets:
 
 - copies any `*.env.example` to `.env`
- - ensures blank files exist for token.place and dspace when the repos are
-   cloned, even if they omit examples
+- ensures blank files exist for token.place and dspace even if the repos omit
+  examples
 - handles any additional repo dropped into `/opt/projects`
 
 Update the placeholders with real values and restart the service:
