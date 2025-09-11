@@ -27,7 +27,8 @@ CONTEXT:
   `nut`. `STANDOFF_MODE` is optional; the script normalizes the value (case-insensitive, trims
   whitespace) and defaults to the model’s `standoff_mode` value (often `heatset`). Invalid values
   cause the render script to exit with an error.
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
+- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
+  [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 - Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` from the repository root to lint, format, and test via
   [`scripts/checks.sh`](../scripts/checks.sh).
