@@ -35,7 +35,8 @@ CONTEXT:
 - If a Node toolchain is present (`package.json` exists), first run `npm ci` to install
   dependencies, then run:
   - `npm run lint`
-  - `npm run test:ci`
+  - `npm run format:check`
+  - `npm test -- --coverage`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -77,7 +78,8 @@ If `package.json` defines them, also run:
 
 - `npm ci`
 - `npm run lint`
-- `npm run test:ci`
+- `npm run format:check`
+- `npm test -- --coverage`
 
 Then run:
 
