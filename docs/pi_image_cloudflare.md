@@ -24,8 +24,9 @@ replace an existing image. To reduce flaky downloads it pins the official
 Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook that rewrites
 any raspbian host to a stable HTTPS mirror and bypasses proxies for
-`archive.raspberrypi.com`. Set `SKIP_MIRROR_REWRITE=1` to disable these rewrites
-when your network already uses a reliable mirror. Use `APT_RETRIES` and
+`archive.raspberrypi.com`. Use `APT_REWRITE_MIRROR` to change the rewrite target
+(default: `https://mirror.fcix.net/raspbian/raspbian`). Set `SKIP_MIRROR_REWRITE=1`
+to disable these rewrites when your network already uses a reliable mirror. Use `APT_RETRIES` and
 `APT_TIMEOUT` to tune the retry count and per-request timeout. Override the
 Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
 `APT_MIRROR_RASPBERRYPI`) and the Debian mirror with `DEBIAN_MIRROR`. Use
@@ -48,6 +49,12 @@ The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 `token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
 `/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
 pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
+`start-projects.sh` enables the optional `projects-compose` systemd unit on
+first boot and now checks for `systemctl`, skipping quietly when systemd isn't
+present.
+
+On first boot `init-env.sh` copies each project's `.env.example` to `.env` and
+sets its mode to `0600` so secrets stay private.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
