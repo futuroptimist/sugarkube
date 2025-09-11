@@ -47,3 +47,10 @@ EOF
   [[ "$output" == Usage:* ]]
   [[ "$output" == *"--json"* ]]
 }
+
+@test "pi_node_verifier rejects unknown options" {
+  run "$BATS_TEST_DIRNAME/../scripts/pi_node_verifier.sh" --bad-flag
+  [ "$status" -eq 1 ]
+  echo "$output" | grep "Unknown option: --bad-flag"
+  echo "$output" | grep "Usage:"
+}
