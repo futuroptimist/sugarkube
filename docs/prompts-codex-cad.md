@@ -40,7 +40,7 @@ CONTEXT:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
-    [`README.md`](../README.md) and [`docs/`](../docs/)
+    [`README.md`](../README.md) and [`docs/`](../docs/) (install via `pip install linkchecker`)
 - Scan staged changes for secrets before committing using
   `git diff --cached | ./scripts/scan-secrets.py`.
 - Log tool failures in [`outages/`](../outages/) using
@@ -51,7 +51,7 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via (use `~~~` fences in this prompt to avoid breaking the outer block):
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (heatset)
+   ./scripts/openscad_render.sh model.scad  # model default standoff_mode (often heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
