@@ -268,3 +268,48 @@ def test_fails_when_flake8_fails(tmp_path):
         text=True,
     )
     assert result.returncode == 1
+
+
+def test_installs_python_tools_when_missing(tmp_path):
+    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
+    script = tmp_path / "checks.sh"
+    script.write_text(script_src.read_text())
+    script.chmod(0o755)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    pip_log = tmp_path / "pip.log"
+
+    pip = fake_bin / "pip"
+    pip.write_text(
+        f"""#!/bin/bash
+echo "$@" >> {pip_log}
+for tool in flake8 isort black pytest pyspelling linkchecker; do
+  cat <<'EOF' > {fake_bin}/$tool
+#!/bin/bash
+exit 0
+EOF
+  chmod +x {fake_bin}/$tool
+done
+exit 0
+"""
+    )
+    pip.chmod(0o755)
+
+    for cmd in ["aspell", "bats"]:
+        f = fake_bin / cmd
+        f.write_text("#!/bin/bash\nexit 0\n")
+        f.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:/bin"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "flake8" in pip_log.read_text()
