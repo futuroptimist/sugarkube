@@ -7,6 +7,7 @@ both apps out of the box. The image builder clones these projects, drops a share
 `docker-compose.yml` under `/opt/projects` and installs a single
 `projects-compose.service` to manage them. Each service uses `restart: unless-stopped`
 so the containers stay up across reboots. Hooks remain for additional repositories.
+Docker Engine and the Compose plugin come from Docker's Debian repository for up-to-date ARM builds.
 
 ## Build the image
 
@@ -14,6 +15,14 @@ so the containers stay up across reboots. Hooks remain for additional repositori
 # inside the sugarkube repo
 ./scripts/build_pi_image.sh
 ```
+
+### Build-time flags
+
+The build script accepts environment variables to trim or extend the stack:
+
+- `CLONE_TOKEN_PLACE` (default `true`) — clone the `token.place` repository.
+- `CLONE_DSPACE` (default `true`) — clone the `dspace` repository.
+- `EXTRA_REPOS` — space-separated Git URLs for additional projects.
 
 `build_pi_image.sh` clones `token.place` and `dspace` by default. Adjust the stack before
 building by editing [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
