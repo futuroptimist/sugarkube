@@ -5,7 +5,7 @@ slug: 'prompts-codex-cad'
 
 # Sugarkube Codex CAD Prompt
 
-Use this prompt to update or verify [OpenSCAD](https://openscad.org/) models.
+Use this prompt to update or verify [OpenSCAD](https://www.openscad.org/) models.
 
 ```text
 SYSTEM:
@@ -19,7 +19,7 @@ CONTEXT:
 - [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
   `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
   in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script fails fast
+  [OpenSCAD](https://www.openscad.org/) is installed and available on `PATH`; the script fails fast
   if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
