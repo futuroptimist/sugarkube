@@ -57,7 +57,8 @@ On first boot `init-env.sh` copies each project's `.env.example` to `.env` and
 sets its mode to `0600` so secrets stay private.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
-`/opt/sugarkube/.cloudflared.env`; otherwise edit the file after boot.
+`/opt/sugarkube/.cloudflared.env`; tokens containing `/` or `&` are escaped
+automatically. Otherwise edit the file after boot.
 Cloud-init writes `docker-compose.cloudflared.yml` to `/opt/sugarkube`.
 This avoids downloading the file at boot.
 The image installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
