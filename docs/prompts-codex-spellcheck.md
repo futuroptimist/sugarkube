@@ -21,6 +21,10 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
   linting, formatting, and tests.
+- If a Node toolchain is present (`package.json` exists), also run:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run test:ci`
 - Verify links with `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 
@@ -44,6 +48,7 @@ You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
 Run `pre-commit run --all-files`.
 If `package.json` defines them, also run:
+- `npm ci`
 - `npm run lint`
 - `npm run test:ci`
 Then run:
