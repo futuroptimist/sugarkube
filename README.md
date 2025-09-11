@@ -78,7 +78,7 @@ pre-commit run --all-files
 
 If you update documentation, install spell-check tools and verify spelling and links.
 `pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). The
-`scripts/checks.sh` helper tries to install them via `apt-get` when missing. pre-commit
+`scripts/checks.sh` helper tries to install them via `apt-get` when missing. Pre-commit
 runs these checks and fails if spelling or links are broken:
 
 ```bash
