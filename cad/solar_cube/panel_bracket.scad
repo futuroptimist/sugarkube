@@ -41,6 +41,10 @@ assert(edge_radius*2 <= min([beam_width, size, thickness]),
        "edge_radius too large for given dimensions");
 assert(nut_thick <= thickness,
        "nut_thick must be ≤ thickness");
+assert(abs(hole_offset[0]) <= beam_width/2 - screw_clearance/2 - edge_radius,
+       "hole_offset[0] exceeds base width");
+assert(abs(hole_offset[1]) <= size/2 - screw_clearance/2 - edge_radius,
+       "hole_offset[1] exceeds leg length");
 
 // read from CLI (-D standoff_mode="printed"/"heatset"/"nut")
 standoff_mode = "heatset";
