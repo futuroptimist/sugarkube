@@ -240,3 +240,31 @@ def test_skips_js_checks_when_npm_missing(tmp_path):
     assert result.returncode == 0
     assert "npm not found" in result.stderr
     assert not marker.exists()
+
+
+def test_fails_when_flake8_fails(tmp_path):
+    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
+    script = tmp_path / "checks.sh"
+    script.write_text(script_src.read_text())
+    script.chmod(0o755)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "flake8").write_text("#!/bin/bash\nexit 1\n")
+    for cmd in ["isort", "black", "pytest", "pyspelling", "linkchecker"]:
+        f = fake_bin / cmd
+        f.write_text("#!/bin/bash\nexit 0\n")
+        f.chmod(0o755)
+    (fake_bin / "flake8").chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:/bin"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
