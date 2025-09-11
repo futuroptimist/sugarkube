@@ -16,12 +16,13 @@ PURPOSE:
 Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
-- Sugarkube automates a Pi-based k3s cluster; see [`README.md`](../README.md).
+- Sugarkube combines hardware and helper scripts for a solar-powered
+  k3s cluster; see [`docs/index.md`](../docs/index.md) for an overview.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
   instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 - Run `pre-commit run --all-files`, which executes
   [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
-  linters, tests, and documentation checks. Pre-commit is configured via
+  formatters, linters, tests, and documentation checks. Pre-commit is configured via
   [`.pre-commit-config.yaml`](../.pre-commit-config.yaml).
 - If a Node toolchain is present (`package.json` exists), also run:
   - `npm ci`
