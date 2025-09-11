@@ -4,23 +4,23 @@ services:
   # tokenplace-start
   tokenplace:
     build:
-      context: /opt/projects/token.place
+      context: ./token.place
       dockerfile: docker/Dockerfile.server
     ports:
       - "5000:5000"
     env_file:
-      - /opt/projects/token.place/.env
+      - token.place/.env
     restart: unless-stopped
   # tokenplace-end
   # dspace-start
   dspace:
     build:
-      context: /opt/projects/dspace/frontend
+      context: ./dspace/frontend
     working_dir: /opt/projects/dspace/frontend
     ports:
       - "3000:3000"
     env_file:
-      - /opt/projects/dspace/frontend/.env
+      - dspace/frontend/.env
     restart: unless-stopped
   # dspace-end
   # extra-start
