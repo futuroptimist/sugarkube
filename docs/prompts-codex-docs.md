@@ -36,6 +36,11 @@ REQUEST:
 3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
    `linkchecker --no-warnings README.md docs/`, and
    `git diff --cached | ./scripts/scan-secrets.py`. Confirm all checks pass.
+   If `package.json` exists, also run:
+   - `npm ci`
+   - `npm run lint`
+   - `npm run test:ci`
+   Confirm all checks pass.
 
 OUTPUT:
 A pull request with the refined documentation and passing checks.
