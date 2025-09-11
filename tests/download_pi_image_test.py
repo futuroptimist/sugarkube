@@ -215,3 +215,54 @@ def test_downloads_without_realpath(tmp_path):
     assert result.returncode == 0
     assert (tmp_path / "out.img.xz").exists()
     assert (tmp_path / "out.img.xz.sha256").exists()
+
+
+def test_overwrites_existing_output_and_checksum(tmp_path):
+    """Existing files should be replaced when downloading a new image."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    src = tmp_path / "src.img.xz"
+    src.write_text("fresh")
+    sha = tmp_path / "src.img.xz.sha256"
+    sha.write_text("newsha  sugarkube.img.xz\n")
+
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  echo 42\n"
+        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
+        "  shift 2\n"
+        '  while [ "$1" != --dir ]; do shift; done\n'
+        "  dir=$2\n"
+        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
+        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
+        "else\n"
+        "  exit 1\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    out = tmp_path / "out.img.xz"
+    out.write_text("stale")
+    out_sha = tmp_path / "out.img.xz.sha256"
+    out_sha.write_text("oldsha  out.img.xz\n")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["GH_SRC"] = str(src)
+    env["GH_SHA"] = str(sha)
+
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script), str(out)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert out.read_text() == "fresh"
+    assert out_sha.read_text() == "newsha  sugarkube.img.xz\n"
