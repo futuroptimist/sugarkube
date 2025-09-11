@@ -13,14 +13,21 @@ You are an automated contributor for the sugarkube repository.
 
 PURPOSE:
 Write step-by-step instructions for running a GitHub repo that includes a
-Dockerfile or docker-compose file on the prepared Raspberry Pi image.
+Dockerfile or Docker Compose file (`docker-compose.yml` or `compose.yaml`) on the
+prepared Raspberry Pi image.
 
 CONTEXT:
 - The base image and tunnel setup live in [`pi_image_cloudflare.md`](./pi_image_cloudflare.md).
 - New walkthroughs belong in [`docker_repo_walkthrough.md`](./docker_repo_walkthrough.md).
-- Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
-  `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
-  `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Run `pre-commit run --all-files` to lint, format, and test.
+- If `package.json` exists, also run:
+  - `npm ci`
+  - `npm run lint`
+  - `npm run test:ci`
+- For documentation updates, run:
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `linkchecker --no-warnings README.md docs/`
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 - File recurring deployment failures in [`outages/`](../outages/) per
   [`outages/schema.json`](../outages/schema.json).
 
