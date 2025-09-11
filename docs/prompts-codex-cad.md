@@ -17,10 +17,10 @@ Keep OpenSCAD models current and ensure they render cleanly.
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
 - [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
-  `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
-  in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script fails fast
-  if the binary is missing.
+  `openscad -o stl/... --export-format binstl`. Run it from the repo root so meshes land in the
+  git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
+  [OpenSCAD](https://openscad.org/) is installed and on `PATH`; the script exits fast if it's
+  missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -40,7 +40,8 @@ CONTEXT:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
-    [`README.md`](../README.md) and [`docs/`](../docs/)
+    [`README.md`](../README.md) and [`docs/`](../docs/) (install via
+    [`linkchecker`](https://linkchecker.github.io/linkchecker/) if needed)
 - Scan staged changes for secrets before committing using
   `git diff --cached | ./scripts/scan-secrets.py`.
 - Log tool failures in [`outages/`](../outages/) using
@@ -83,8 +84,9 @@ Then run:
 
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
   [`.spellcheck.yaml`](../.spellcheck.yaml))
-- `linkchecker --no-warnings README.md docs/` (install via
-  `pip install linkchecker`)
+- `linkchecker --no-warnings README.md docs/` (install with
+  `pipx install linkchecker` or see
+  [linkchecker docs](https://linkchecker.github.io/linkchecker/))
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
