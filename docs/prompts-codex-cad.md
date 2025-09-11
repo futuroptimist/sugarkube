@@ -83,8 +83,8 @@ Then run:
 
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
   [`.spellcheck.yaml`](../.spellcheck.yaml))
-- `linkchecker --no-warnings README.md docs/` (install via
-  `pip install linkchecker`)
+- `linkchecker --no-warnings README.md docs/` (requires `linkchecker`; install with
+  `pipx install linkchecker` if needed)
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
