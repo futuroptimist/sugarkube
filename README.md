@@ -71,7 +71,7 @@ git clone https://github.com/futuroptimist/sugarkube.git
 # or with SSH:
 # git clone git@github.com:futuroptimist/sugarkube.git
 cd sugarkube
-pip install pre-commit
+pip install pre-commit pyspelling linkchecker
 pre-commit install
 pre-commit run --all-files
 ```
