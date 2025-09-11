@@ -1,9 +1,9 @@
 # token.place and dspace Quickstart
 
-Build a Raspberry Pi 5 image that includes the
+Build a Raspberry Pi 5 image that includes the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) repositories so you can run
-both apps out of the box. The image builder clones these projects, drops a
+both apps out of the box. The image builder clones these projects, drops a shared
 `docker-compose.yml` under `/opt/projects` and installs a single
 `projects-compose.service` to manage them. Each service uses `restart: unless-stopped`
 so the containers stay up across reboots. Hooks remain for additional repositories.
@@ -15,9 +15,11 @@ so the containers stay up across reboots. Hooks remain for additional repositori
 ./scripts/build_pi_image.sh
 ```
 
-`build_pi_image.sh` clones `token.place` and `dspace` by default. To skip either
-repo, set `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`. Add more projects by
-passing their Git URLs via `EXTRA_REPOS`:
+`build_pi_image.sh` clones `token.place` and `dspace` by default. Adjust the stack before
+building by editing [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
+and dropping new services under the `# extra-start` marker. To skip cloning either
+repo, set `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`. Add more projects by passing
+their Git URLs via `EXTRA_REPOS`:
 
 ```sh
 EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
@@ -51,23 +53,24 @@ dspace. To expose them through a Cloudflare Tunnel, update
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
 `/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
-letting containers start with sane defaults:
+letting containers start with sane defaults. Edit these files to set variables like
+`PORT`, API URLs or secrets:
 
 - `/opt/projects/token.place/.env`
 - `/opt/projects/dspace/frontend/.env`
 - any additional repo that ships an `.env.example`
 
-Edit these files with real values and restart the service.
+Update the placeholders with real values and restart the service:
 
 See each repository's README for the full list of configuration options.
 
 ## Extend with new repositories
 
-Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. Add services to `/opt/projects/docker-compose.yml` (use the
-`# extra-start` marker) and extend `init-env.sh` with any new `.env` files,
-following the token.place and dspace examples. The image builder drops the
-token.place or dspace definitions when the corresponding `CLONE_*` flag is
-`false`, letting you build a minimal image and expand it later.
+Pass Git URLs via `EXTRA_REPOS` to clone additional projects into `/opt/projects`.
+Add services to `/opt/projects/docker-compose.yml` between `# extra-start` and
+`# extra-end`, and extend `init-env.sh` with any new `.env` files, following the
+token.place and dspace examples. The image builder drops the token.place or dspace
+definitions when the corresponding `CLONE_*` flag is `false`, letting you build a
+minimal image and expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.
