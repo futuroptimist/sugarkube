@@ -16,11 +16,10 @@ Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
 - CAD files reside in [`cad/`](../cad/).
-- [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
-  `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
-  in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
-  [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script fails fast
-  if the binary is missing.
+- [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) invokes
+  [OpenSCAD](https://openscad.org/) and writes binary `.stl` meshes to the git-ignored
+  [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Run it from the repository
+  root. The script fails fast if `openscad` is missing from `PATH`.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`, or
@@ -40,7 +39,7 @@ CONTEXT:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
-    [`README.md`](../README.md) and [`docs/`](../docs/)
+    [`README.md`](../README.md) and [`docs/`](../docs/) (install via `pip install linkchecker`)
 - Scan staged changes for secrets before committing using
   `git diff --cached | ./scripts/scan-secrets.py`.
 - Log tool failures in [`outages/`](../outages/) using
