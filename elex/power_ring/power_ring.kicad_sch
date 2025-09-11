@@ -10,6 +10,7 @@
                 (comment 3 "Label polarity and voltage on connectors")
                 (comment 4 "Use star topology for power distribution to minimize voltage drop")
                 (comment 5 "Use thick traces for high-current paths")
+                (comment 6 "Add fiducial markers for board orientation")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
