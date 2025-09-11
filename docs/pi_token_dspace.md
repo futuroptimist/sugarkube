@@ -6,7 +6,9 @@ Build a Raspberry Pi 5 image that includes the
 both apps out of the box. The image builder clones these projects, drops a shared
 `docker-compose.yml` under `/opt/projects` and installs a single
 `projects-compose.service` to manage them. Each service uses `restart: unless-stopped`
-so the containers stay up across reboots. Hooks remain for additional repositories.
+so the containers stay up across reboots. The first boot uses Docker's Debian
+repository to install the Engine and Compose plugin. Hooks remain for additional
+repositories.
 
 ## Build the image
 
@@ -16,10 +18,18 @@ so the containers stay up across reboots. Hooks remain for additional repositori
 ```
 
 `build_pi_image.sh` clones `token.place` and `dspace` by default. Adjust the stack before
-building by editing [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
-and dropping new services under the `# extra-start` marker. To skip cloning either
-repo, set `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`. Add more projects by passing
-their Git URLs via `EXTRA_REPOS`:
+building by editing
+[`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
+and dropping new services under the `# extra-start` marker.
+
+### Build-time variables
+
+Configure the image builder with environment variables:
+
+- `CLONE_TOKEN_PLACE=false` — skip cloning token.place
+- `CLONE_DSPACE=false` — skip cloning dspace
+- `CLONE_SUGARKUBE=true` — include this repo in the image
+- `EXTRA_REPOS="https://github.com/example/repo.git"` — clone additional projects
 
 ```sh
 EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
@@ -49,7 +59,7 @@ dspace. To expose them through a Cloudflare Tunnel, update
 `/opt/sugarkube/docker-compose.cloudflared.yml` as shown in
 [docker_repo_walkthrough.md](docker_repo_walkthrough.md).
 
-### Environment variables
+### Runtime environment variables
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
 `/opt/projects` for `*.env.example` files and copies them to `.env` when missing,

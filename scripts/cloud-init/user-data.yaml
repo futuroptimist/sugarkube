@@ -8,9 +8,9 @@ apt:
       keyid: FBA8C0EE63617C5EED695C43254B391D8CACCBF8
       keyserver: https://keyserver.ubuntu.com
 packages:
-  - docker.io
-  - docker-compose-plugin
+  - ca-certificates
   - curl
+  - gnupg
   - git
   - cloudflared
 write_files:
@@ -86,6 +86,18 @@ write_files:
       WantedBy=multi-user.target
   # projects-end
 runcmd:
+  - |
+      bash -c '
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/debian/gpg | \
+          gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        repo=https://download.docker.com/linux/debian
+        echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] ${repo} bookworm stable" \
+          > /etc/apt/sources.list.d/docker.list
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io \
+          docker-buildx-plugin docker-compose-plugin
+      '
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
