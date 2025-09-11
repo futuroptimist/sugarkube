@@ -12,10 +12,9 @@ done
 
 # Ensure token.place and dspace have .env files even without examples
 for env_path in token.place/.env dspace/frontend/.env; do
-  dir=${env_path%/*}
-  if [ -d "$dir" ] && [ ! -f "$env_path" ]; then
-    touch "$env_path"
-  fi
+  dir="$(dirname "$env_path")"
+  [ -d "$dir" ] || continue
+  [ -f "$env_path" ] || touch "$env_path"
 done
 
 # Ensure token.place and dspace have .env files even without examples
