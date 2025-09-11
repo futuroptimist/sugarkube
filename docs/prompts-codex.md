@@ -16,11 +16,13 @@ PURPOSE:
 Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
+- Sugarkube combines hardware and helper scripts for a solar-powered
+  k3s cluster; see [`docs/index.md`](../docs/index.md) for an overview.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
   instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
-- Run `pre-commit run --all-files`, which executes
-  [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
-  linters, tests, and documentation checks.
+- Run `pre-commit run --all-files` to invoke
+  [`scripts/checks.sh`](../scripts/checks.sh), which installs tooling and
+  runs formatters, linters, tests, and documentation checks.
 - If a Node toolchain is present (`package.json` exists), also run:
   - `npm ci`
   - `npm run lint`
@@ -29,8 +31,8 @@ CONTEXT:
   [`docs/`](../docs/)) change, additionally run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
-- Scan staged changes for secrets with
-  `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Before committing, scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py`.
 - Log persistent failures in [`outages/`](../outages/) as JSON per
   [`outages/schema.json`](../outages/schema.json).
 
@@ -38,7 +40,7 @@ REQUEST:
 1. Identify a small bug fix or documentation clarification.
 2. Implement the change following the project's existing style.
 3. Update relevant documentation when needed.
-4. Run `pre-commit run --all-files` after changes.
+4. Run the commands above and fix any issues until all checks pass.
 
 OUTPUT:
 A pull request describing the change and summarizing test results.
