@@ -25,7 +25,8 @@ CONTEXT:
   - `npm run lint`
   - `npm run test:ci`
 - For documentation changes, also run:
-  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+  - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+    [`.spellcheck.yaml`](../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/`
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
 - Record recurring issues in [`outages/`](../outages/) using the
