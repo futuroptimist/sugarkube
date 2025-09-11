@@ -9,6 +9,7 @@ heat‑set, printed-thread, and captive-nut variants are produced by GitHub Acti
 published as artifacts whenever the SCAD file changes. You can edit the `pi_positions`
 array near the top of the file to tweak the arrangement if your printer allows a larger
 build area.
+Captive-nut pockets include 0.4 mm of extra clearance to make nut insertion easier.
 For an overview of insert installation and printed threads see [insert_basics.md](insert_basics.md).
 
 
