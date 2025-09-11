@@ -16,6 +16,7 @@ Diagnose and fix continuous integration failures so all checks pass.
 
 CONTEXT:
 - Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for workflow and testing requirements.
+- Inspect [`.github/workflows/`](../.github/workflows/) to understand the checks run in continuous integration.
 - Run `pre-commit run --all-files` from the repository root; it executes `scripts/checks.sh`.
 - If a Node toolchain is present (`package.json` exists), run:
   - `npm ci`
@@ -24,7 +25,8 @@ CONTEXT:
 - Ensure `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`) and
   `linkchecker --no-warnings README.md docs/` succeed.
 - Install missing dependencies with `pip` or `npm` as needed.
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
+  before committing.
 
 REQUEST:
 1. Re-run the failing check locally.
@@ -44,9 +46,15 @@ Use this prompt to refine sugarkube's own prompt documentation.
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
-Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`
-(requires `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`,
-and `git diff --cached | ./scripts/scan-secrets.py` before committing.
+Run `pre-commit run --all-files`.
+If a Node toolchain exists (`package.json` is present), also run:
+- `npm ci`
+- `npm run lint`
+- `npm run test:ci`
+Then run:
+- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+- `linkchecker --no-warnings README.md docs/`
+- `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
