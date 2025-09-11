@@ -19,7 +19,7 @@ CONTEXT:
 - Sugarkube combines hardware and helper scripts for a solar-powered
   k3s cluster; see [`docs/index.md`](../docs/index.md) for an overview.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
-  instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
+  instruction semantics, see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 - Run `pre-commit run --all-files`, which executes
   [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
   formatters, linters, tests, and documentation checks. Pre-commit is configured via
@@ -53,7 +53,7 @@ A pull request describing the change and summarizing test results.
 ## Upgrade Prompt
 Type: evergreen
 
-Use this prompt to refine sugarkube's own prompt documentation.
+Use this prompt to refine Sugarkube's own prompt documentation.
 
 ```text
 SYSTEM:
@@ -62,14 +62,14 @@ Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
 instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 Run `pre-commit run --all-files` (invokes
 [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run linters
-and tests). If a Node toolchain is present (`package.json` exists), also run:
-- `npm ci`
-- `npm run lint`
-- `npm run test:ci`
-Then run:
-- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
+and tests). If `package.json` is present, `scripts/checks.sh` automatically runs
+`npm ci`, `npm run lint`, and `npm run test:ci`. Then run:
+- `pyspelling -c .spellcheck.yaml` (requires `aspell`
+  and `aspell-en`)
 - `linkchecker --no-warnings README.md docs/`
 - `git diff --cached | ./scripts/scan-secrets.py`
+  (script: [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)) to avoid
+  committing credentials
 Fix any issues reported by these tools.
 
 USER:
