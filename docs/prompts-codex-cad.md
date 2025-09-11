@@ -30,8 +30,8 @@ CONTEXT:
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
   [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 - Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
-- Run `pre-commit run --all-files` from the repository root to lint, format, and test via
-  [`scripts/checks.sh`](../scripts/checks.sh).
+- Run `pre-commit run --all-files` from the repository root to install tooling and run
+  linting, formatting, and tests via [`scripts/checks.sh`](../scripts/checks.sh).
 - If a Node toolchain is present (`package.json` exists), first run `npm ci` to install
   dependencies, then run:
   - `npm run lint`
@@ -79,13 +79,13 @@ If `package.json` defines them, also run:
 - `npm run lint`
 - `npm run test:ci`
 
-Then run:
+ Then run:
 
-- `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
-  [`.spellcheck.yaml`](../.spellcheck.yaml))
-- `linkchecker --no-warnings README.md docs/` (install via
-  `pip install linkchecker`)
-- `git diff --cached | ./scripts/scan-secrets.py` before committing.
+ - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
+    [`.spellcheck.yaml`](../.spellcheck.yaml))
+ - `linkchecker --no-warnings README.md docs/` (installed by
+    [`scripts/checks.sh`](../scripts/checks.sh))
+ - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
