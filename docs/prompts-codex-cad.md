@@ -24,16 +24,17 @@ CONTEXT:
   the script fails fast if the binary is missing.
 - The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
-- Render each model in all supported `standoff_mode` variants—`heatset`, `printed`, or `nut`.
-  Set `STANDOFF_MODE` to override; the script normalizes the value and defaults to the model’s
-  `standoff_mode` (often `heatset`). Invalid values exit with an error.
+- Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`,
+  or `nut`. `STANDOFF_MODE` is optional; the script normalizes the value
+  (case-insensitive, trims whitespace) and defaults to the model’s `standoff_mode`
+  value (often `heatset`). Invalid values cause the render script to exit with an error.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
   [AGENTS.md spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
 - Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
-- Run `pre-commit run --all-files` from the repository root to lint, format, and test
-  via [`scripts/checks.sh`](../scripts/checks.sh).
-- If a Node toolchain is present (`package.json` exists), first run `npm ci` to install
-  dependencies, then run:
+- Run `pre-commit run --all-files` from the repository root to lint, format, and test via
+  [`scripts/checks.sh`](../scripts/checks.sh).
+- If `package.json` defines them, run:
+  - `npm ci`
   - `npm run lint`
   - `npm run test:ci`
 - For documentation updates, also run:

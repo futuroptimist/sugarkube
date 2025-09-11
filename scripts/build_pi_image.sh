@@ -194,7 +194,8 @@ fi
 # Embed Cloudflare token if available
 if [ -n "${TUNNEL_TOKEN:-}" ]; then
   echo "Embedding Cloudflare token into cloud-init"
-  sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${TUNNEL_TOKEN}\"|" "${USER_DATA}"
+  escaped_token=$(printf '%s\n' "${TUNNEL_TOKEN}" | sed -e 's/[\/&]/\\&/g')
+  sed -i "s|TUNNEL_TOKEN=\"\"|TUNNEL_TOKEN=\"${escaped_token}\"|" "${USER_DATA}"
 fi
 
 
