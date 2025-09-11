@@ -116,7 +116,8 @@ The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
 It separates options from the file path with `--` and handles filenames
 that begin with a dash, whether absolute or relative.
-The `.scad` extension is matched case-insensitively, so `MODEL.SCAD` works too.
+The `.scad` extension is matched case-insensitively without Bash 4 features, so
+`MODEL.SCAD` works even on macOS default Bash 3.2.
 
 ## Community
 
