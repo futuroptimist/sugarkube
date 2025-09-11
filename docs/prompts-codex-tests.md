@@ -16,8 +16,8 @@ Improve and maintain test coverage.
 
 CONTEXT:
 - Tests live in [`tests/`](../tests/). Python suites run with
-  [pytest](https://docs.pytest.org/en/stable/) and shell checks use
-  [Bats](https://bats-core.readthedocs.io/en/stable/).
+  [pytest](https://docs.pytest.org/) and shell checks use
+  [Bats](https://bats-core.readthedocs.io/).
 - For quick iteration, invoke `pytest tests/` or run an individual Bats file such as
   `bats tests/pi_node_verifier_output_test.bats` directly.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository
