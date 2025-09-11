@@ -71,18 +71,17 @@ git clone https://github.com/futuroptimist/sugarkube.git
 # or with SSH:
 # git clone git@github.com:futuroptimist/sugarkube.git
 cd sugarkube
-pip install pre-commit
+pip install pre-commit pyspelling linkchecker
 pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, install spell-check tools and verify spelling and links.
+If you update documentation, install `aspell` and verify spelling and links.
 `pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). The
 `scripts/checks.sh` helper tries to install them via `apt-get` when missing. pre-commit
 runs these checks and fails if spelling or links are broken:
 
 ```bash
-pip install pyspelling linkchecker
 sudo apt-get install aspell aspell-en  # Debian/Ubuntu
 brew install aspell                    # macOS
 pyspelling -c .spellcheck.yaml
