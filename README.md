@@ -71,14 +71,14 @@ git clone https://github.com/futuroptimist/sugarkube.git
 # or with SSH:
 # git clone git@github.com:futuroptimist/sugarkube.git
 cd sugarkube
-pip install pre-commit
+pip install pre-commit pyspelling linkchecker
 pre-commit install
 pre-commit run --all-files
 ```
 
 If you update documentation, install spell-check tools and verify spelling and links.
 `pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). The
-`scripts/checks.sh` helper tries to install them via `apt-get` when missing. pre-commit
+`scripts/checks.sh` helper tries to install them via `apt-get` when missing. Pre-commit
 runs these checks and fails if spelling or links are broken:
 
 ```bash
@@ -116,7 +116,8 @@ The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
 It separates options from the file path with `--` and handles filenames
 that begin with a dash, whether absolute or relative.
-The `.scad` extension is matched case-insensitively, so `MODEL.SCAD` works too.
+The `.scad` extension is matched case-insensitively without Bash 4 features, so
+`MODEL.SCAD` works even on macOS default Bash 3.2.
 
 ## Community
 

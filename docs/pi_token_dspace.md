@@ -26,7 +26,9 @@ EXTRA_REPOS="https://github.com/example/repo.git" ./scripts/build_pi_image.sh
 ```
 
 The script clones each repo into `/opt/projects` and assigns ownership to the `pi`
-user.
+user. Cloud-init adds Docker's apt repository and installs `docker-ce`,
+`docker-ce-cli`, `containerd.io`, `docker-buildx-plugin` and `docker-compose-plugin`
+so the services run with the upstream Engine and Compose plugin.
 
 ## Run the apps
 
@@ -62,6 +64,11 @@ letting containers start with sane defaults. Edit these files to set variables l
 - handles any additional repo dropped into `/opt/projects`
 
 Update the placeholders with real values and restart the service:
+
+```ini
+# /opt/projects/token.place/.env
+PORT=5000
+```
 
 See each repository's README for the full list of configuration options.
 
