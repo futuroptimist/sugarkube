@@ -56,9 +56,10 @@ Each project reads an `.env` file in its directory. `init-env.sh` scans
 letting containers start with sane defaults. Edit these files to set variables like
 `PORT`, API URLs or secrets:
 
-- `/opt/projects/token.place/.env`
-- `/opt/projects/dspace/frontend/.env`
-- any additional repo that ships an `.env.example`
+- copies any `*.env.example` to `.env`
+- ensures blank files exist for token.place and dspace even if the repos omit
+  examples
+- handles any additional repo dropped into `/opt/projects`
 
 Update the placeholders with real values and restart the service:
 
