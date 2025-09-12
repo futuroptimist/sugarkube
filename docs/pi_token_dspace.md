@@ -1,6 +1,6 @@
 # token.place and dspace Quickstart
 
-Build a Raspberry Pi 5 image that includes the
+Build a Raspberry Pi 5 image that includes the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) repositories so you can run
 both apps out of the box. The image builder clones these projects, drops a shared
@@ -16,6 +16,14 @@ repositories.
 # inside the sugarkube repo
 ./scripts/build_pi_image.sh
 ```
+
+### Build-time flags
+
+The build script accepts environment variables to trim or extend the stack:
+
+- `CLONE_TOKEN_PLACE` (default `true`) — clone the `token.place` repository.
+- `CLONE_DSPACE` (default `true`) — clone the `dspace` repository.
+- `EXTRA_REPOS` — space-separated Git URLs for additional projects.
 
 `build_pi_image.sh` clones `token.place` and `dspace` by default. Adjust the stack before
 building by editing
