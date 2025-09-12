@@ -148,8 +148,15 @@ if [ "$ARM64" -eq 1 ]; then
 else
   ARMHF=1
 fi
-# Default to the bookworm release branch; architecture is controlled via config.
-PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
+
+# Select the pi-gen branch automatically unless PI_GEN_BRANCH is provided
+if [ -z "${PI_GEN_BRANCH:-}" ]; then
+  if [ "$ARM64" -eq 1 ]; then
+    PI_GEN_BRANCH="arm64"
+  else
+    PI_GEN_BRANCH="bookworm"
+  fi
+fi
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
