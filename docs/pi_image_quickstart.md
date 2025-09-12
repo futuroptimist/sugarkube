@@ -5,12 +5,13 @@ Build a Raspberry Pi OS image that boots with k3s and the
 [dspace](https://github.com/democratizedspace/dspace) services.
 
 ## 1. Build or download the image
+
 1. In GitHub, open **Actions → pi-image → Run workflow**.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
 2. Download the artifact locally:
    ```bash
-   scripts/download_pi_image.sh
+   ./scripts/download_pi_image.sh
    ```
    or grab it manually from the workflow run.
 3. Alternatively, build on your machine:
