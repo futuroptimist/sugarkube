@@ -24,7 +24,7 @@ check_space() {
 # 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
 # repository.
 
-for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df; do
+for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -85,6 +85,21 @@ fi
 if ! head -n1 "${CLOUD_INIT_PATH}" | grep -q '^#cloud-config'; then
   echo "Cloud-init file missing #cloud-config header: ${CLOUD_INIT_PATH}" >&2
   exit 1
+fi
+
+# Validate cloud-init YAML syntax when PyYAML is available
+if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+  if ! python3 - "${CLOUD_INIT_PATH}" <<'PY' >/dev/null 2>&1; then
+    echo "Cloud-init file contains invalid YAML: ${CLOUD_INIT_PATH}" >&2
+    exit 1
+  fi
+PY
+import sys, yaml
+with open(sys.argv[1]) as f:
+    yaml.safe_load(f)
+PY
+else
+  echo "PyYAML not installed; skipping cloud-init YAML validation" >&2
 fi
 
 if [ ! -f "${CLOUDFLARED_COMPOSE_PATH}" ]; then
