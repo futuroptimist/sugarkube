@@ -73,22 +73,24 @@ dspace. To expose them through a Cloudflare Tunnel, update
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
 `/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
-letting containers start with sane defaults. Edit these files to set variables like
-`PORT`, API URLs or secrets:
+letting containers start with sane defaults. If a repo omits an example file the
+script seeds a minimal one with a `PORT` that matches the compose file so the
+container listens on the expected interface. Edit these files to set variables
+like API URLs or secrets:
 
 - copies any `*.env.example` to `.env`
-- ensures blank files exist for token.place and dspace even if the repos omit
-  examples
+- seeds token.place with `PORT=5000` and dspace with `PORT=3000`
 - handles any additional repo dropped into `/opt/projects`
 
 Update the placeholders with real values and restart the service:
 
 ```ini
-# /opt/projects/token.place/.env
+# token.place listens on :5000
 PORT=5000
 ```
 
-See each repository's README for the full list of configuration options.
+If you change the port, update the mapping in `docker-compose.yml` to match. See
+each repository's README for the full list of configuration options.
 
 ## Extend with new repositories
 
