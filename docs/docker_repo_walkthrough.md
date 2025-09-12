@@ -190,6 +190,32 @@ sudo systemctl status tokenplace-dspace.service --no-pager
 This example assumes the combined `docker-compose.yml` above lives in
 `/opt/projects`.
 
+### Auto-restart with Docker policies
+
+Use Docker's built-in restart policies if you prefer not to manage a systemd
+unit:
+
+```sh
+docker run -d --name tokenplace --restart unless-stopped -p 5000:5000 tokenplace
+```
+
+Add a policy to each service in a compose file so token.place and dspace
+restart automatically:
+
+```yaml
+services:
+  tokenplace:
+    restart: unless-stopped
+  dspace:
+    restart: unless-stopped
+```
+
+Apply the updated compose file:
+
+```sh
+docker compose up -d
+```
+
 ### Customize ports and env vars with `docker-compose.override.yml`
 
 Override ports or environment variables if token.place or dspace conflict with
