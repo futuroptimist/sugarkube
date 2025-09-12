@@ -146,8 +146,25 @@ docker compose down
 
 ### Auto-start token.place and dspace on boot
 
-Keep the stack running after reboots by wrapping the compose file with a systemd
-unit:
+The Cloudflare-ready Pi image ships a `projects-compose` service that calls
+`docker compose` in `/opt/projects`. After cloning token.place and dspace and
+adding the combined `docker-compose.yml`, enable it so the apps restart on boot:
+
+```sh
+sudo systemctl enable --now projects-compose
+# or run the helper script installed with the image
+sudo /opt/sugarkube/start-projects.sh
+sudo reboot
+```
+
+Reconnect and verify both services:
+
+```sh
+curl http://localhost:5000
+curl http://localhost:3002
+```
+
+For custom setups, wrap the compose file with a dedicated systemd unit:
 
 ```sh
 sudo tee /etc/systemd/system/tokenplace-dspace.service <<'EOF'
