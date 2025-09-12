@@ -20,9 +20,14 @@ Linux command line.
 - Internet connection to download images and packages
 
 ## 1. Prepare the OS image
-1. Run `scripts/download_pi_image.sh` to fetch `sugarkube.img.xz` from the latest
-   [pi-image workflow run][pi-image],
-   or download it manually from the Actions tab.
+1. Trigger the build in GitHub:
+   - Open [Actions → pi-image → Run workflow][pi-image].
+   - Enable **token.place** and **dspace** if you want those repos baked in.
+   - After the run succeeds, download `sugarkube.img.xz`:
+     ```bash
+     scripts/download_pi_image.sh
+     ```
+     or grab it from the workflow run.
 
    Alternatively, build locally:
    - Linux/macOS: `./scripts/build_pi_image.sh`
