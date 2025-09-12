@@ -5,6 +5,26 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
   set -x
 fi
 
+usage() {
+  cat <<'EOF'
+Usage: build_pi_image.sh [--help]
+
+Build a Raspberry Pi OS image preloaded with cloud-init.
+
+Environment variables:
+  CLOUD_INIT_PATH   Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
+  OUTPUT_DIR        Directory to write the image (default repo root)
+  IMG_NAME          Name for the output image (default sugarkube)
+
+See docs/pi_image_cloudflare.md for details.
+EOF
+}
+
+if [[ "${1:-}" =~ ^(-h|--help)$ ]]; then
+  usage
+  exit 0
+fi
+
 REQUIRED_SPACE_GB="${REQUIRED_SPACE_GB:-10}"
 
 check_space() {

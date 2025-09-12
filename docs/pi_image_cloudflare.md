@@ -17,18 +17,19 @@ The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
-where artifacts are written; the script creates the directory if needed. To avoid
-accidental overwrites it aborts when the image already exists unless
-`FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning builds to
-replace an existing image. To reduce flaky downloads it pins the official
-Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
-`-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook that rewrites
-any raspbian host to a stable HTTPS mirror and bypasses proxies for
+where artifacts are written; the script creates the directory if needed. Run
+`scripts/build_pi_image.sh --help` for a summary of configurable environment
+variables. To avoid accidental overwrites it aborts when the image already
+exists unless `FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning
+builds to replace an existing image. To reduce flaky downloads it pins the
+official Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
+`-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook
+that rewrites any raspbian host to a stable HTTPS mirror and bypasses proxies for
 `archive.raspberrypi.com`. Use `APT_REWRITE_MIRROR` to change the rewrite target
 (default: `https://mirror.fcix.net/raspbian/raspbian`). Set `SKIP_MIRROR_REWRITE=1`
-to disable these rewrites when your network already uses a reliable mirror. Use `APT_RETRIES` and
-`APT_TIMEOUT` to tune the retry count and per-request timeout. Override the
-Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
+to disable these rewrites when your network already uses a reliable mirror. Use
+`APT_RETRIES` and `APT_TIMEOUT` to tune the retry count and per-request timeout.
+Override the Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
 `APT_MIRROR_RASPBERRYPI`) and the Debian mirror with `DEBIAN_MIRROR`. Use
 `BUILD_TIMEOUT` (default: `4h`) to adjust the maximum build duration. Customize
 the cloud-init configuration with `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` and
