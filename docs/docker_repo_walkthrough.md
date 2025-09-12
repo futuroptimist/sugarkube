@@ -232,6 +232,36 @@ docker volume ls | grep dspace-data
 ```
 
 Adjust container paths to match each project's documentation.
+### Auto-restart containers with Docker restart policies
+
+Keep token.place and dspace running after crashes or reboots by adding
+`restart: unless-stopped` to each service:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-compose.restart.yml
+services:
+  tokenplace:
+    build:
+      context: ./token.place
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+  dspace:
+    build:
+      context: ./dspace/frontend
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+EOF
+docker compose -f docker-compose.restart.yml up -d
+docker ps --format '{{.Names}}\t{{.Status}}' | grep tokenplace
+docker ps --format '{{.Names}}\t{{.Status}}' | grep dspace
+```
+
+The `restart` policy ensures containers recover automatically when the Pi
+reboots.
 ### Develop with bind mounts
 
 Mount the source tree into a container to test changes without rebuilding images.
