@@ -24,5 +24,7 @@ ensure_env token.place/.env
 ensure_env dspace/frontend/.env
 
 # extra-start
+# Add additional environment setup steps below. Example:
 # ensure_env other_repo/.env
+# echo "FOO=bar" >> myapp/.env
 # extra-end
