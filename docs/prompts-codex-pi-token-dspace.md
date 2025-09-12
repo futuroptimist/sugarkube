@@ -10,6 +10,8 @@ Use this prompt to streamline building a Raspberry Pi 5 image that hosts
 [dspace](https://github.com/democratizedspace/dspace) via
 [Docker Compose](https://docs.docker.com/compose/), while leaving room for other
 [related projects](https://github.com/futuroptimist#related-projects).
+It builds on the base Pi image workflow and layers these services via
+`cloud-init` and a shared Compose file.
 
 ```text
 SYSTEM:
@@ -26,10 +28,12 @@ CONTEXT:
   (targets Raspberry Pi OS Bookworm 64‑bit).
 - Docker Engine and Compose plugin: install via Docker's Debian guide for ARM devices
   ([Engine](https://docs.docker.com/engine/install/debian/) and
-  [Compose](https://docs.docker.com/compose/install/linux/)).
+  [Compose plugin](https://docs.docker.com/compose/install/linux/#install-using-the-repository)).
+  Confirm with `docker --version` and `docker compose version`.
 - First-boot cloud-init configs and Compose manifests:
-  [`scripts/cloud-init/`](../scripts/cloud-init/) (for example,
-  [`docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)).
+  [`scripts/cloud-init/`](../scripts/cloud-init/), which seeds
+  [`docker-compose.yml`](../scripts/cloud-init/docker-compose.yml) for `token.place`
+  and `dspace`.
 - Upstream apps:
   - [token.place](https://github.com/futuroptimist/token.place) — see its
     [README](https://github.com/futuroptimist/token.place#readme) for service details.
@@ -46,8 +50,8 @@ CONTEXT:
 REQUEST:
 1. Add or refine scripts and docs so `token.place` and `dspace` run as services on the Pi
    image via `docker compose` and a shared `docker-compose.yml`.
-2. Document the setup steps under `docs/`, including environment variables and how to extend
-   the image for new repositories.
+2. Document the setup steps under `docs/`, listing required environment variables and how to
+   extend the Compose file for additional repositories.
 3. Keep hooks for adding other repositories later.
 4. Run the commands above and confirm success.
 
