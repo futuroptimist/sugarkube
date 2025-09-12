@@ -20,6 +20,8 @@ CONTEXT:
   k3s cluster; see [`docs/index.md`](../docs/index.md) for an overview.
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
   instruction semantics, see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
+- Inspect [`.github/workflows/`](../.github/workflows/) to understand CI checks and
+  run them locally.
 - Run `pre-commit run --all-files`, which executes
   [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
   formatters, linters, tests, and documentation checks. Pre-commit is configured via
@@ -28,6 +30,7 @@ CONTEXT:
   - `npm ci`
   - `npm run lint`
   - `npm run test:ci`
+  to mirror workflow checks.
 - When documentation files (`README.md` or anything under
   [`docs/`](../docs/)) change, additionally run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; config in
@@ -62,7 +65,8 @@ Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
 instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 Run `pre-commit run --all-files` (invokes
 [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run linters
-and tests). If `package.json` is present, `scripts/checks.sh` automatically runs
+and tests). Review [`.github/workflows/`](../.github/workflows/) to mirror CI
+checks. If `package.json` is present, `scripts/checks.sh` automatically runs
 `npm ci`, `npm run lint`, and `npm run test:ci`. Then run:
 - `pyspelling -c .spellcheck.yaml` (requires `aspell`
   and `aspell-en`)
