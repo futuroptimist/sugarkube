@@ -8,7 +8,7 @@ services:
       dockerfile: docker/Dockerfile.server
     container_name: tokenplace
     ports:
-      - "5000:5000"
+      - "5000:5000"  # host:container; sync with PORT in .env if changed
     env_file:
       - /opt/projects/token.place/.env
     restart: unless-stopped
@@ -20,7 +20,7 @@ services:
     working_dir: /opt/projects/dspace/frontend
     container_name: dspace
     ports:
-      - "3000:3000"
+      - "3000:3000"  # host:container; sync with PORT in .env if changed
     env_file:
       - /opt/projects/dspace/frontend/.env
     restart: unless-stopped
