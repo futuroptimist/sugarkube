@@ -16,6 +16,7 @@ def test_requires_curl(tmp_path):
         "xz",
         "bsdtar",
         "df",
+        "python3",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -50,6 +51,7 @@ def test_requires_docker(tmp_path):
         "xz",
         "bsdtar",
         "df",
+        "python3",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -83,6 +85,7 @@ def test_requires_xz(tmp_path):
         "timeout",
         "bsdtar",
         "df",
+        "python3",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -116,6 +119,7 @@ def test_requires_bsdtar(tmp_path):
         "timeout",
         "xz",
         "df",
+        "python3",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -149,6 +153,7 @@ def test_requires_df(tmp_path):
         "timeout",
         "xz",
         "bsdtar",
+        "python3",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -182,6 +187,7 @@ def test_requires_git(tmp_path):
         "xz": "#!/bin/sh\nexit 0\n",
         "bsdtar": "#!/bin/sh\nexit 0\n",
         "df": "#!/bin/sh\nexit 0\n",
+        "python3": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -210,6 +216,7 @@ def test_requires_sha256sum(tmp_path):
         "xz",
         "bsdtar",
         "df",
+        "python3",
     ]:
         path = fake_bin / name
         if name == "timeout":
@@ -231,13 +238,47 @@ def test_requires_sha256sum(tmp_path):
     assert "sha256sum is required" in result.stderr
 
 
+def test_requires_python3(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in [
+        "curl",
+        "docker",
+        "git",
+        "sha256sum",
+        "stdbuf",
+        "timeout",
+        "xz",
+        "bsdtar",
+        "df",
+    ]:
+        path = fake_bin / name
+        if name == "timeout":
+            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+        elif name == "stdbuf":
+            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
+        else:
+            path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ["/bin/bash", "scripts/build_pi_image.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "python3 is required" in result.stderr
+
+
 def test_docker_daemon_must_be_running(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker = fake_bin / "docker"
     docker.write_text('#!/bin/sh\n[ "$1" = info ] && exit 1 || exit 0\n')
     docker.chmod(0o755)
-    for name in ["xz", "git", "sha256sum", "bsdtar", "df"]:
+    for name in ["xz", "git", "sha256sum", "bsdtar", "df", "python3"]:
         path = fake_bin / name
         path.write_text("#!/bin/sh\nexit 0\n")
         path.chmod(0o755)
@@ -276,6 +317,7 @@ def test_requires_sudo_when_non_root(tmp_path):
         "stdbuf": "#!/bin/sh\nexit 0\n",
         "bsdtar": "#!/bin/sh\nexit 0\n",
         "df": "#!/bin/sh\nexit 0\n",
+        "python3": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -309,6 +351,7 @@ def test_fails_with_insufficient_disk_space(tmp_path):
             "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
             "echo '/dev/sda1 100 50 0 50% /'\n"
         ),
+        "python3": "#!/bin/sh\nexit 0\n",
     }.items():
         path = fake_bin / name
         path.write_text(content)
@@ -537,6 +580,8 @@ def test_build_without_timeout_binary(tmp_path):
     env = _setup_build_env(tmp_path)
     fake_bin = Path(env["PATH"].split(":")[0])
     (fake_bin / "timeout").unlink()
+    (fake_bin / "python3").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "python3").chmod(0o755)
     # Remove system PATH so timeout is truly absent
     env["PATH"] = str(fake_bin)
     result, _ = _run_build_script(tmp_path, env)
@@ -548,6 +593,8 @@ def test_build_without_stdbuf_binary(tmp_path):
     env = _setup_build_env(tmp_path)
     fake_bin = Path(env["PATH"].split(":")[0])
     (fake_bin / "stdbuf").unlink()
+    (fake_bin / "python3").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "python3").chmod(0o755)
     env["PATH"] = str(fake_bin)
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode != 0
