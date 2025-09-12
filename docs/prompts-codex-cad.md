@@ -36,7 +36,7 @@ CONTEXT:
   - `npm ci`
   - `npm run lint`
   - `npm run format:check`
-  - `npm test -- --coverage`
+  - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -53,11 +53,11 @@ REQUEST:
 2. Modify geometry or parameters as required.
 3. Render the model via (use `~~~` fences in this prompt to avoid breaking the outer block):
    ~~~bash
-   ./scripts/openscad_render.sh path/to/model.scad  # default standoff_mode (model-defined, often heatset)
+   ./scripts/openscad_render.sh path/to/model.scad  # default model standoff_mode (often heatset)
    STANDOFF_MODE=printed ./scripts/openscad_render.sh path/to/model.scad  # case-insensitive
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
-   ````
+   ```
 
 4. Run `pre-commit run --all-files`; for docs changes also run
    `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
@@ -84,9 +84,9 @@ If `package.json` exists, also run:
 - `npm ci`
 - `npm run lint`
 - `npm run format:check`
-- `npm test -- --coverage`
+- `npm run test:ci`
 
- Then run:
+Then run:
 
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
   [`.spellcheck.yaml`](../.spellcheck.yaml))
