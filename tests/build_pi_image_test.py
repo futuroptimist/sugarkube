@@ -583,3 +583,8 @@ def test_requires_stage_list(tmp_path):
 def test_powershell_script_mentions_cloudflared_compose():
     text = Path("scripts/build_pi_image.ps1").read_text()
     assert "docker-compose.cloudflared.yml" in text
+
+
+def test_user_data_installs_k3s():
+    text = Path("scripts/cloud-init/user-data.yaml").read_text()
+    assert "https://get.k3s.io" in text
