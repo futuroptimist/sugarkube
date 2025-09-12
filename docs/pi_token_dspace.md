@@ -73,19 +73,21 @@ dspace. To expose them through a Cloudflare Tunnel, update
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
 `/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
-letting containers start with sane defaults. Edit these files to set variables like
-`PORT`, API URLs or secrets:
+then looks at `docker-compose.yml` to create blank `.env` files for any services
+that reference them. Edit these files to set variables like `PORT`, API URLs or
+secrets:
 
 - copies any `*.env.example` to `.env`
-- ensures blank files exist for token.place and dspace even if the repos omit
-  examples
-- handles any additional repo dropped into `/opt/projects`
+- touches `.env` files referenced by `docker-compose.yml`
 
 Update the placeholders with real values and restart the service:
 
 ```ini
 # /opt/projects/token.place/.env
 PORT=5000
+
+# /opt/projects/dspace/frontend/.env
+PORT=3000
 ```
 
 See each repository's README for the full list of configuration options.
@@ -94,9 +96,9 @@ See each repository's README for the full list of configuration options.
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into `/opt/projects`.
 Add services to `/opt/projects/docker-compose.yml` between `# extra-start` and
-`# extra-end`, and extend `init-env.sh` with any new `.env` files, following the
-token.place and dspace examples. The image builder drops the token.place or dspace
-definitions when the corresponding `CLONE_*` flag is `false`, letting you build a
-minimal image and expand it later.
+`# extra-end`; `init-env.sh` reads this compose file and creates blank `.env` files
+for any `env_file` entries, so new repos fit into the boot flow without extra edits.
+The image builder drops the token.place or dspace definitions when the corresponding
+`CLONE_*` flag is `false`, letting you build a minimal image and expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.
