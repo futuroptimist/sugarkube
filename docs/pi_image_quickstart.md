@@ -5,10 +5,11 @@ Build a Raspberry Pi OS image that boots with k3s and the
 [dspace](https://github.com/democratizedspace/dspace) services.
 
 ## 1. Build or download the image
-- Run `./scripts/download_pi_image.sh` to fetch the latest artifact from the
-  `pi-image` workflow, or build locally via `./scripts/build_pi_image.sh`.
-- The builder clones token.place and dspace by default. Set
-  `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false` to skip either project.
+- From the GitHub Actions tab, run the `pi-image` workflow. Check the boxes to
+  clone `token.place` and `dspace` so they deploy automatically on first boot.
+- After the workflow completes, fetch the `sugarkube.img.xz` artifact via
+  `./scripts/download_pi_image.sh` (uses the GitHub CLI), or build locally with
+  `./scripts/build_pi_image.sh`.
 
 ## 2. Flash with Raspberry Pi Imager
 - Write `sugarkube.img.xz` to a microSD card with Raspberry Pi Imager.
