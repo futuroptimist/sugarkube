@@ -72,23 +72,26 @@ dspace. To expose them through a Cloudflare Tunnel, update
 ### Runtime environment variables
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
-`/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
-letting containers start with sane defaults. Edit these files to set variables like
-`PORT`, API URLs or secrets:
+`/opt/projects` for `*.env.example` files and copies them to `.env` when
+missing, letting containers start with sane defaults. The script also ships an
+`ensure_env` helper that creates blank files when a project omits an example.
+Edit these files to set variables like `PORT`, API URLs or secrets:
 
-- copies any `*.env.example` to `.env`
-- ensures blank files exist for token.place and dspace even if the repos omit
-  examples
-- handles any additional repo dropped into `/opt/projects`
+- `/opt/projects/token.place/.env` — example:
 
-Update the placeholders with real values and restart the service:
+  ```ini
+  PORT=5000
+  ```
 
-```ini
-# /opt/projects/token.place/.env
-PORT=5000
-```
+- `/opt/projects/dspace/frontend/.env` — example:
 
-See each repository's README for the full list of configuration options.
+  ```ini
+  PORT=3000
+  ```
+
+Add more calls to `ensure_env` under the `# extra-start` marker in
+`init-env.sh` for additional repositories. See each project's README for the
+full list of configuration options.
 
 ## Extend with new repositories
 

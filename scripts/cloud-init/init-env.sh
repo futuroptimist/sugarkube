@@ -10,13 +10,19 @@ for example in **/.env.example; do
   fi
 done
 
-# Ensure token.place and dspace have .env files even without examples
-for env_path in token.place/.env dspace/frontend/.env; do
+ensure_env() {
+  local env_path="$1"
+  local dir
   dir="$(dirname "$env_path")"
-  [ -d "$dir" ] || continue
+  [ -d "$dir" ] || return 0
   [ -f "$env_path" ] || touch "$env_path"
-done
+  chmod 600 "$env_path"
+}
+
+# Ensure token.place and dspace have .env files even without examples
+ensure_env token.place/.env
+ensure_env dspace/frontend/.env
 
 # extra-start
-# Add additional environment setup steps below
+# ensure_env other_repo/.env
 # extra-end
