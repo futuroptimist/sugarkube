@@ -35,6 +35,7 @@ CONTEXT:
 - If `package.json` defines them, run:
   - `npm ci`
   - `npm run lint`
+  - `npm run format:check`
   - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
@@ -81,6 +82,7 @@ If `package.json` exists, also run:
 
 - `npm ci`
 - `npm run lint`
+- `npm run format:check`
 - `npm run test:ci`
 
 Then run:
