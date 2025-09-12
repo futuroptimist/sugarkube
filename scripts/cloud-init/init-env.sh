@@ -18,5 +18,6 @@ for env_path in token.place/.env dspace/frontend/.env; do
 done
 
 # extra-start
-# Add additional environment setup steps below
+# Add additional environment setup steps below. Example:
+# echo "FOO=bar" >> myapp/.env
 # extra-end
