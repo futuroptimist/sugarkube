@@ -25,7 +25,7 @@ the docs you will see the term used in both contexts.
 - `cad/` — OpenSCAD models of structural parts. See
   [docs/pi_cluster_carrier.md](docs/pi_cluster_carrier.md) for the Pi carrier plate,
   [cad/solar_cube/panel_bracket.scad](cad/solar_cube/panel_bracket.scad) for the solar
-  panel bracket with an `edge_radius` parameter (default 3 mm) to round its outer edges,
+  panel bracket with an `edge_radius` parameter (default 4 mm) to round its outer edges,
   and [cad/solar_cube/frame.scad](cad/solar_cube/frame.scad) for a parametric 2020 cube frame.
 - `elex/` — KiCad and Fritzing electronics schematics including the `power_ring`
   board (see [elex/power_ring/specs.md](elex/power_ring/specs.md) and
@@ -71,18 +71,17 @@ git clone https://github.com/futuroptimist/sugarkube.git
 # or with SSH:
 # git clone git@github.com:futuroptimist/sugarkube.git
 cd sugarkube
-pip install pre-commit
+pip install pre-commit pyspelling linkchecker
 pre-commit install
 pre-commit run --all-files
 ```
 
-If you update documentation, install spell-check tools and verify spelling and links.
+If you update documentation, install `aspell` and verify spelling and links.
 `pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). The
-`scripts/checks.sh` helper tries to install them via `apt-get` when missing. pre-commit
+`scripts/checks.sh` helper tries to install them via `apt-get` when missing. Pre-commit
 runs these checks and fails if spelling or links are broken:
 
 ```bash
-pip install pyspelling linkchecker
 sudo apt-get install aspell aspell-en  # Debian/Ubuntu
 brew install aspell                    # macOS
 pyspelling -c .spellcheck.yaml
@@ -116,7 +115,8 @@ The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
 It separates options from the file path with `--` and handles filenames
 that begin with a dash, whether absolute or relative.
-The `.scad` extension is matched case-insensitively, so `MODEL.SCAD` works too.
+The `.scad` extension is matched case-insensitively without Bash 4 features, so
+`MODEL.SCAD` works even on macOS default Bash 3.2.
 
 ## Community
 

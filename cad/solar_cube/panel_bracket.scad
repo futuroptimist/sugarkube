@@ -26,7 +26,7 @@ screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
 screw_clearance   = screw_nominal + 0.2; // through-hole Ø with clearance (mm)
 chamfer           = 1.0;      // lead-in chamfer (mm)
 
-nut_clearance     = 0.2;      // extra room for easier nut insertion (mm)
+nut_clearance     = 0.4;      // extra room for easier nut insertion (was 0.2)
 nut_flat          = 8.0 + nut_clearance; // across flats for M5 nut (mm)
 
 nut_thick         = 4.0;      // nut thickness (mm)
@@ -41,6 +41,10 @@ assert(edge_radius*2 <= min([beam_width, size, thickness]),
        "edge_radius too large for given dimensions");
 assert(nut_thick <= thickness,
        "nut_thick must be ≤ thickness");
+assert(abs(hole_offset[0]) <= beam_width/2 - screw_clearance/2 - edge_radius,
+       "hole_offset[0] exceeds base width");
+assert(abs(hole_offset[1]) <= size/2 - screw_clearance/2 - edge_radius,
+       "hole_offset[1] exceeds leg length");
 
 // read from CLI (-D standoff_mode="printed"/"heatset"/"nut")
 standoff_mode = "heatset";

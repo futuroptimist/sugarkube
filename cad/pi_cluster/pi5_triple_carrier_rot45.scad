@@ -57,7 +57,7 @@ screw_major     = 2.50;   // M2.5
 screw_pitch     = 0.45;   // ISO coarse
 thread_facets   = 32;     // helix resolution
 screw_clearance = 3.2;    // through-hole clearance, slightly oversize
-nut_clearance   = 0.3;    // extra room for easier nut insertion
+nut_clearance   = 0.4;    // extra room for easier nut insertion (was 0.3)
 nut_flat        = 5.0 + nut_clearance; // across flats for M2.5 nut
 nut_thick       = 2.0;    // nut thickness
 

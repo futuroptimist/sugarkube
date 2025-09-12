@@ -12,20 +12,34 @@ if [ ! -f "$FILE" ]; then
   exit 1
 fi
 ext="${FILE##*.}"
-if [[ "${ext,,}" != scad ]]; then
-  echo "Expected .scad file: $FILE" >&2
-  exit 1
-fi
+# Pattern match for extension to support Bash 3 without `${var,,}`
+case "$ext" in
+  [Ss][Cc][Aa][Dd]) ;;
+  *)
+    echo "Expected .scad file: $FILE" >&2
+    exit 1
+    ;;
+esac
 
 base=$(basename -- "$FILE" ".$ext")
 mode_suffix=""
 standoff_mode=""
 if [ -n "${STANDOFF_MODE:-}" ]; then
-  standoff_mode="$(printf '%s' "${STANDOFF_MODE,,}" | xargs)"
+  # Trim and normalize without Bash 4 string lowering
+  standoff_mode="$(printf '%s' "$STANDOFF_MODE" | xargs)"
   if [ -n "$standoff_mode" ]; then
     case "$standoff_mode" in
-      heatset|printed|nut)
-        mode_suffix="_$standoff_mode"
+      [Hh][Ee][Aa][Tt][Ss][Ee][Tt])
+        standoff_mode="heatset"
+        mode_suffix="_heatset"
+        ;;
+      [Pp][Rr][Ii][Nn][Tt][Ee][Dd])
+        standoff_mode="printed"
+        mode_suffix="_printed"
+        ;;
+      [Nn][Uu][Tt])
+        standoff_mode="nut"
+        mode_suffix="_nut"
         ;;
       *)
         echo "Invalid STANDOFF_MODE: $STANDOFF_MODE (expected 'heatset', 'printed', or 'nut')" >&2

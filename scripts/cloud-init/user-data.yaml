@@ -6,6 +6,10 @@ apt:
     docker:
       # Official Docker repository for Engine and Compose
       source: "deb [arch=arm64] https://download.docker.com/linux/debian bookworm stable"
+      keyid: 8D81803C0EBFCD88
+      keyserver: https://keyserver.ubuntu.com
+    cloudflare:
+      source: "deb [arch=arm64] https://pkg.cloudflare.com/ bookworm main"
       key: |
         -----BEGIN PGP PUBLIC KEY BLOCK-----
 
@@ -68,51 +72,6 @@ apt:
         jCxcpDzNmXpWQHEtHU7649OXHP7UeNST1mCUCH5qdank0V1iejF6/CfTFU4MfcrG
         YT90qFF93M3v01BbxP+EIY2/9tiIPbrd
         =0YYh
-        -----END PGP PUBLIC KEY BLOCK-----
-    cloudflare:
-      source: "deb [arch=arm64] https://pkg.cloudflare.com/ bookworm main"
-      key: |
-        -----BEGIN PGP PUBLIC KEY BLOCK-----
-        Comment: Hostname:
-        Version: Hockeypuck 2.2
-
-        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
-        8a3MmQI=
-        =fCJE
         -----END PGP PUBLIC KEY BLOCK-----
 packages:
   - ca-certificates
@@ -198,6 +157,18 @@ write_files:
       WantedBy=multi-user.target
   # projects-end
 runcmd:
+  - |
+      bash -c '
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/debian/gpg | \
+          gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        repo=https://download.docker.com/linux/debian
+        echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] ${repo} bookworm stable" \
+          > /etc/apt/sources.list.d/docker.list
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io \
+          docker-buildx-plugin docker-compose-plugin
+      '
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']

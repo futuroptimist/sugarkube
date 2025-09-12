@@ -85,6 +85,8 @@ else
 fi
 
 # docs checks
+# Spell checking requires `aspell`. Attempt to install it when possible but
+# continue gracefully if installation is not possible.
 if ! command -v aspell >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     SUDO=""
@@ -92,21 +94,26 @@ if ! command -v aspell >/dev/null 2>&1; then
       if command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
       else
-        echo "Run as root or install sudo" >&2
-        exit 1
+        echo "aspell not installed and no sudo; skipping spell check" >&2
+        SUDO=""
       fi
     fi
-    $SUDO apt-get update && $SUDO apt-get install -y aspell aspell-en
+    if [ -z "$SUDO" ] && [ "$(id -u)" -ne 0 ]; then
+      :
+    else
+      $SUDO apt-get update >/dev/null 2>&1 && \
+        $SUDO apt-get install -y aspell aspell-en >/dev/null 2>&1 || \
+        echo "aspell install failed; skipping" >&2
+    fi
   elif command -v brew >/dev/null 2>&1; then
-    brew install aspell
+    brew install aspell >/dev/null 2>&1 || echo "aspell install failed; skipping" >&2
   else
-    echo "aspell not found" >&2
-    exit 1
+    echo "aspell not found and no package manager available; skipping spell check" >&2
   fi
 fi
 # Only run the spell checker when both `pyspelling` and its `aspell` backend
 # are available. Some environments (like minimal CI containers) do not include
-# the `aspell` binary by default which would cause `pyspelling` to error.  In
+# the `aspell` binary by default which would cause `pyspelling` to error. In
 # those cases we silently skip the spelling check instead of failing the whole
 # pre-commit run.
 if command -v pyspelling >/dev/null 2>&1 && command -v aspell >/dev/null 2>&1 \
@@ -116,7 +123,9 @@ fi
 
 if command -v linkchecker >/dev/null 2>&1; then
   if [ -f README.md ] && [ -d docs ]; then
-    linkchecker --no-warnings README.md docs/
+    # LinkChecker 10 defaults to checking only internal links. Explicitly enable
+    # external link verification to catch broken URLs across the documentation.
+    linkchecker --check-extern --no-warnings README.md docs/
   else
     echo "README.md or docs/ missing, skipping link check" >&2
   fi
