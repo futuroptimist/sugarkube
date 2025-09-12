@@ -333,6 +333,34 @@ docker compose down
 
 
 
+### Add health checks
+
+Use Docker health checks so the stack reports ready only after both endpoints respond.
+
+```sh
+cd /opt/projects
+cat <<'EOF' >> docker-compose.yml
+services:
+  tokenplace:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  dspace:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+EOF
+docker compose up -d
+docker inspect --format='{{json .State.Health}}' tokenplace
+docker inspect --format='{{json .State.Health}}' dspace
+```
+
+
+
 ### Toggle services with Docker Compose profiles
 
 Enable just token.place or dspace without editing the compose file:
