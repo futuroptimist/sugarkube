@@ -17,7 +17,9 @@ Keep the project healthy by making small, well-tested improvements.
 
 CONTEXT:
 - Sugarkube combines hardware and helper scripts for a solar-powered
-  k3s cluster; see [`docs/index.md`](../docs/index.md) for an overview.
+  k3s cluster; see [`docs/index.md`](../docs/index.md) for an overview and
+  [`llms.txt`](../llms.txt) for a machine-readable summary.
+- Contribution guidelines are in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
   instruction semantics, see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
 - Inspect [`.github/workflows/`](../.github/workflows/) to understand CI checks and
@@ -25,12 +27,9 @@ CONTEXT:
 - Run `pre-commit run --all-files`, which executes
   [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run
   formatters, linters, tests, and documentation checks. Pre-commit is configured via
-  [`.pre-commit-config.yaml`](../.pre-commit-config.yaml).
-- If a Node toolchain is present (`package.json` exists), also run:
-  - `npm ci`
-  - `npm run lint`
-  - `npm run test:ci`
-  to mirror workflow checks.
+  [`.pre-commit-config.yaml`](../.pre-commit-config.yaml). `scripts/checks.sh`
+  automatically runs `npm ci`, `npm run lint`, and `npm run test:ci` when a
+  `package.json` is present.
 - When documentation files (`README.md` or anything under
   [`docs/`](../docs/)) change, additionally run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; config in
@@ -63,11 +62,12 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository.
 Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); for
 instruction semantics see the [AGENTS.md spec](https://agentsmd.net/AGENTS.md).
+Consult [`llms.txt`](../llms.txt) for a machine-readable repository summary.
 Run `pre-commit run --all-files` (invokes
 [`scripts/checks.sh`](../scripts/checks.sh) to install tooling and run linters
 and tests). Review [`.github/workflows/`](../.github/workflows/) to mirror CI
-checks. If `package.json` is present, `scripts/checks.sh` automatically runs
-`npm ci`, `npm run lint`, and `npm run test:ci`. Then run:
+checks. `scripts/checks.sh` automatically runs `npm ci`, `npm run lint`, and
+`npm run test:ci` when a `package.json` is present. Then run:
 - `pyspelling -c .spellcheck.yaml` (requires `aspell`
   and `aspell-en`)
 - `linkchecker --no-warnings README.md docs/`

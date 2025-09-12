@@ -48,11 +48,11 @@ the docs you will see the term used in both contexts.
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
     clean up temporary work directories, and use POSIX `test -ef` to compare paths
     without `realpath`
-  - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init
-    preloaded; embeds `pi_node_verifier.sh` and clones `token.place` and
+  - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init and
+    k3s preinstalled; embeds `pi_node_verifier.sh` and clones `token.place` and
     `democratizedspace/dspace` (branch `v3`) by default. Set
-    `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git
-    URLs via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
+    `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git URLs
+    via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage

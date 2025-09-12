@@ -175,6 +175,7 @@ runcmd:
   - [bash, -c, 'mkdir -p /var/log/journal && systemctl restart systemd-journald']
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
+  - [bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -']
   - [/opt/projects/start-projects.sh]  # projects-runcmd
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
