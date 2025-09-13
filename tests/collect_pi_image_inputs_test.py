@@ -182,3 +182,17 @@ def test_succeeds_when_realpath_missing(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
+
+
+def test_skips_copy_when_source_is_output(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    img_xz = deploy / "foo.img.xz"
+    img_xz.write_text("original")
+
+    result = _run_script(tmp_path, deploy, img_xz)
+    assert result.returncode == 0, result.stderr
+    assert img_xz.read_text() == "original"
+    sha = img_xz.with_suffix(img_xz.suffix + ".sha256")
+    assert sha.exists()
+    assert "skipping copy" in result.stdout
