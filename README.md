@@ -63,6 +63,8 @@ the docs you will see the term used in both contexts.
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
+This triggers `scripts/checks.sh`, which installs required tooling and runs
+linters, tests, and documentation checks.
 
 ## Getting Started
 
