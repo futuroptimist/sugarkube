@@ -11,6 +11,7 @@
                 (comment 4 "Use star topology for power distribution to minimize voltage drop")
                 (comment 5 "Use thick traces for high-current paths")
                 (comment 6 "Add fiducial markers for board orientation")
+                (comment 7 "Verify ground pour continuity around mounting holes")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
