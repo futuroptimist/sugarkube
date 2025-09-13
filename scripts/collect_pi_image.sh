@@ -40,8 +40,15 @@ if [ -z "${found}" ]; then
   if [ -n "${zipfile}" ]; then
     tmpdir="$(mktemp -d)"
     tmpdirs+=("$tmpdir")
-    # Use bsdtar from libarchive-tools (handles zip); avoid needing 'unzip'
-    bsdtar -xf "${zipfile}" -C "${tmpdir}"
+    # Prefer bsdtar (libarchive) and fallback to unzip if unavailable
+    if command -v bsdtar >/dev/null 2>&1; then
+      bsdtar -xf "${zipfile}" -C "${tmpdir}"
+    elif command -v unzip >/dev/null 2>&1; then
+      unzip -q "${zipfile}" -d "${tmpdir}"
+    else
+      echo "ERROR: neither bsdtar nor unzip available to extract ${zipfile}" >&2
+      exit 1
+    fi
     img_in_zip="$(find "${tmpdir}" -type f -name '*.img' | head -n1 || true)"
     if [ -n "${img_in_zip}" ]; then
       found="${img_in_zip}"
