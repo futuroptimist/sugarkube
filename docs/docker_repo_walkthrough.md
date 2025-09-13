@@ -25,22 +25,27 @@ For a prebuilt image that already clones both projects, see
    git clone https://github.com/futuroptimist/token.place
    git clone https://github.com/democratizedspace/dspace
    ```
-4. Build or start containers:
+4. Confirm the repository includes a `Dockerfile` or `docker-compose.yml` before building:
+   ```sh
+   ls token.place/docker/Dockerfile.server      # token.place Dockerfile
+   ls dspace/frontend/docker-compose.yml        # dspace compose file
+   ```
+5. Build or start containers:
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-5. Inspect container logs to confirm the service started:
+6. Inspect container logs to confirm the service started:
    - Single container: `docker logs -f myapp`
    - Compose project: `docker compose logs`
-6. Confirm the service responds locally, e.g.
+7. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
    `curl http://localhost:3002` for dspace.
-7. Optionally expose ports through the Cloudflare Tunnel by editing
+8. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
-8. Visit the Cloudflare URL to verify remote access, for example
+9. Visit the Cloudflare URL to verify remote access, for example
    `curl https://tokenplace.example.com` or
    `curl https://dspace.example.com` once the tunnel restarts.
-9. Log recurring deployment failures in `outages/` using
+10. Log recurring deployment failures in `outages/` using
    [`schema.json`](../outages/schema.json).
 
 ## Quick start
