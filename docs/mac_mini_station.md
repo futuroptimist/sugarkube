@@ -6,9 +6,12 @@ or TKL board will not tip off when bumped.
 
 ## Usage
 
-1. Pick a keyboard width preset in `hardware/mac-mini-station/scad/mac_mini_station.scad`.
-2. Run `hardware/mac-mini-station/scripts/build.sh` from the repository root to export STL files
-   into `hardware/mac-mini-station/stl/`.
+1. Open `hardware/mac-mini-station/scad/mac_mini_station.scad` in OpenSCAD and set
+   `keyboard_width_mm` to match your board. Uncomment the full-width preset or keep the
+   default tenkeyless value.
+2. From the repository root run `hardware/mac-mini-station/scripts/build.sh` to export STL
+   files into `hardware/mac-mini-station/stl/`. The script requires
+   [OpenSCAD](https://openscad.org/) on your `PATH`.
 3. Print the cap upside down without supports.
 4. Start with `press_fit_clearance_mm = 0.35` and adjust after a test fit.
 
