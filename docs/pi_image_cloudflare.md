@@ -47,9 +47,11 @@ The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=1` to avoid generating both architectures.
 
 The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
-`token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
-`/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
-pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
+`token.place` and `democratizedspace/dspace` repositories into
+`/opt/projects` by default. Customize branches with `TOKEN_PLACE_BRANCH`
+(default `main`) and `DSPACE_BRANCH` (default `v3`). Set `CLONE_SUGARKUBE=true`
+to include this repo and pass space-separated Git URLs in `EXTRA_REPOS` to pull
+additional projects.
 `start-projects.sh` enables the optional `projects-compose` systemd unit on
 first boot and now checks for `systemctl`, skipping quietly when systemd isn't
 present.
