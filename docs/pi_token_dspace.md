@@ -44,18 +44,15 @@ unless-stopped` so containers relaunch across reboots.
 ## 3. Boot and verify locally
 
 1. Insert the card and power on the Pi.
-2. On first boot the Pi builds the containers defined in
+2. On first boot the Pi installs Docker, builds the containers defined in
    `/opt/projects/docker-compose.yml` and enables `projects-compose.service`.
-3. Verify Docker is installed:
+3. Confirm Docker and the stack are running:
    ```sh
    docker --version
    docker compose version
-   ```
-4. Confirm the stack is running:
-   ```sh
    sudo systemctl status projects-compose.service
    ```
-5. Verify each app on the LAN:
+4. Verify each app on the LAN:
    ```sh
    curl http://<pi-host>:5000  # token.place
    curl http://<pi-host>:3000  # dspace
@@ -92,14 +89,15 @@ unless-stopped` so containers relaunch across reboots.
    curl https://tokenplace.example.com
    curl https://dspace.example.com
    ```
+   ```
 
 ## 5. Runtime environment variables
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
-`/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
-letting containers start with sane defaults. The script ships an `ensure_env`
-helper that creates blank files when a project omits an example. Edit these files
-to set variables like `PORT`, API URLs or secrets:
+`/opt/projects` for `*.env.example` files and copies them to `.env` when missing.
+When a repository omits an example file, `ensure_env` creates a blank one and the
+script seeds a default `PORT` so containers start with predictable endpoints.
+Edit these files to set variables like API URLs or secrets:
 
 | Service     | Env file                             | Required keys |
 | ----------- | ------------------------------------ | ------------- |
