@@ -42,6 +42,8 @@ deleting it, which aids debugging failed builds.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls free disk space checks on the
 temporary work directory and the output location.
+Set `SKIP_CLOUD_INIT_VALIDATION=1` to bypass cloud-init YAML validation when
+PyYAML isn't available or when speed matters.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
@@ -68,10 +70,11 @@ connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
 with a 10-second timeout before building; override this via the
 `URL_CHECK_TIMEOUT` environment variable or set `SKIP_URL_CHECK=1` to bypass
 these probes when using local mirrors or working offline. Ensure `curl`, `docker`
-(with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, `xz`, `bsdtar`, `df`,
-and `python3` are installed before running it; `stdbuf` and `timeout` come from GNU coreutils.
-The script attempts to validate the cloud-init YAML via PyYAML and skips the check when the
-module is missing. It checks that both the temporary and output directories have at least 10 GB free
+(with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, `xz`, `bsdtar`, and `df`
+are installed before running it; `stdbuf` and `timeout` come from GNU coreutils.
+The script validates the cloud-init YAML via PyYAML when available unless
+`SKIP_CLOUD_INIT_VALIDATION=1` is set; python3 with PyYAML is only required when
+validation runs. It checks that both the temporary and output directories have at least 10 GB free
 before starting and verifies the resulting image exists and is non-empty before
 reporting success. Use the prepared image to deploy containerized apps. The
 companion guide [docker_repo_walkthrough.md](docker_repo_walkthrough.md)
