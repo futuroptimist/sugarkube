@@ -46,8 +46,8 @@ the docs you will see the term used in both contexts.
     to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
     macOS compatibility
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
-    clean up temporary work directories, and use POSIX `test -ef` to compare paths
-    without `realpath`
+    clean up temporary work directories, use POSIX `test -ef` to compare paths
+    without `realpath`, and fall back to `unzip` when `bsdtar` is unavailable
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init and
     k3s preinstalled; embeds `pi_node_verifier.sh` and clones `token.place` and
     `democratizedspace/dspace` (branch `v3`) by default. Set
@@ -56,13 +56,15 @@ the docs you will see the term used in both contexts.
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
-  - `scan-secrets.py` — scan diffs for high-risk patterns with `ripsecrets` when available
-    and gracefully fall back to regex matching if `ripsecrets` fails to execute
+  - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
+    available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see
   [docs/outage_catalog.md](docs/outage_catalog.md))
 - `tests/` — quick checks for helper scripts and documentation
 
 Run `pre-commit run --all-files` before committing.
+This triggers `scripts/checks.sh`, which installs required tooling and runs
+linters, tests, and documentation checks.
 
 ## Getting Started
 

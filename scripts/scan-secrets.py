@@ -82,8 +82,6 @@ def main() -> int:
     rip = run_ripsecrets(diff)
     if rip is True:
         return 1
-    if rip is False:
-        return 0
     if regex_scan(diff.splitlines()):
         return 1
     return 0
