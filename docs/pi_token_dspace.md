@@ -89,6 +89,7 @@ unless-stopped` so containers relaunch across reboots.
    curl https://tokenplace.example.com
    curl https://dspace.example.com
    ```
+   ```
 
 ## 5. Runtime environment variables
 
