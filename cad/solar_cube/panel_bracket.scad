@@ -26,7 +26,7 @@ screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
 screw_clearance   = screw_nominal + 0.2; // through-hole Ø with clearance (mm)
 chamfer           = 1.0;      // lead-in chamfer (mm)
 
-nut_clearance     = 0.4;      // extra room for easier nut insertion (was 0.2)
+nut_clearance     = 0.5;      // extra room for easier nut insertion
 nut_flat          = 8.0 + nut_clearance; // across flats for M5 nut (mm)
 
 nut_thick         = 4.0;      // nut thickness (mm)
