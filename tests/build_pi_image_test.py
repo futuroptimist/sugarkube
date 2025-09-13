@@ -238,40 +238,6 @@ def test_requires_sha256sum(tmp_path):
     assert "sha256sum is required" in result.stderr
 
 
-def test_requires_python3(tmp_path):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    for name in [
-        "curl",
-        "docker",
-        "git",
-        "sha256sum",
-        "stdbuf",
-        "timeout",
-        "xz",
-        "bsdtar",
-        "df",
-    ]:
-        path = fake_bin / name
-        if name == "timeout":
-            path.write_text('#!/bin/sh\nshift\nexec "$@"\n')
-        elif name == "stdbuf":
-            path.write_text('#!/bin/sh\nshift\nshift\nexec "$@"\n')
-        else:
-            path.write_text("#!/bin/sh\nexit 0\n")
-        path.chmod(0o755)
-    env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
-    result = subprocess.run(
-        ["/bin/bash", "scripts/build_pi_image.sh"],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode != 0
-    assert "python3 is required" in result.stderr
-
-
 def test_docker_daemon_must_be_running(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

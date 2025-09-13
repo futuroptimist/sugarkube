@@ -43,10 +43,9 @@ check_space() {
 
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
 # Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, bsdtar, df and roughly
-# 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen
-# repository.
+# 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen repository.
 
-for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df python3; do
+for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -110,18 +109,23 @@ if ! head -n1 "${CLOUD_INIT_PATH}" | grep -q '^#cloud-config'; then
 fi
 
 # Validate cloud-init YAML syntax when PyYAML is available
-if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
-  if ! python3 - "${CLOUD_INIT_PATH}" <<'PY' >/dev/null 2>&1
+SKIP_CLOUD_INIT_VALIDATION="${SKIP_CLOUD_INIT_VALIDATION:-0}"
+if [ "${SKIP_CLOUD_INIT_VALIDATION}" -ne 1 ]; then
+  if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+    if ! python3 - "${CLOUD_INIT_PATH}" <<'PY' >/dev/null 2>&1
 import sys, yaml
 with open(sys.argv[1]) as f:
     yaml.safe_load(f)
 PY
-  then
-    echo "Cloud-init file contains invalid YAML: ${CLOUD_INIT_PATH}" >&2
-    exit 1
+    then
+      echo "Cloud-init file contains invalid YAML: ${CLOUD_INIT_PATH}" >&2
+      exit 1
+    fi
+  else
+    echo "PyYAML not installed; skipping cloud-init YAML validation" >&2
   fi
 else
-  echo "PyYAML not installed; skipping cloud-init YAML validation" >&2
+  echo "Skipping cloud-init YAML validation"
 fi
 
 if [ ! -f "${CLOUDFLARED_COMPOSE_PATH}" ]; then
