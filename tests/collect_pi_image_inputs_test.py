@@ -110,7 +110,7 @@ def test_handles_zip_with_img(tmp_path):
         assert f.read() == b"data"
 
 
-def test_errors_when_no_image_found(tmp_path):  # noqa: F811
+def test_errors_when_no_image_found(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
     (deploy / "foo.txt").write_text("data")
@@ -150,10 +150,23 @@ def test_handles_img_xz(tmp_path):
     assert out_img.read_text() == "original"
 
 
-def test_errors_when_no_image_found(tmp_path):  # noqa: F811
+def test_prefers_img_xz_over_raw(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
-    (deploy / "note.txt").write_text("no artifact")
+    img_xz = deploy / "foo.img.xz"
+    img_xz.write_text("compressed")
+    raw_img = deploy / "foo.img"
+    raw_img.write_text("raw")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert out_img.read_text() == "compressed"
+
+
+def test_errors_when_deploy_empty(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
 
     out_img = tmp_path / "out.img.xz"
     result = _run_script(tmp_path, deploy, out_img)
