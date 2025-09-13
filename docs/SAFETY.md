@@ -17,5 +17,4 @@ This setup uses a 12 V LiFePO4 battery and outdoor wiring. Follow these precau
 - Use tinned copper lugs and UV-resistant wiring for outdoor runs.
 - Keep a Class ABC fire extinguisher nearby and work in a ventilated area in case of battery fumes.
 - Refer to [Power System Design](power_system_design.md) for wire and fuse sizing guidelines.
-- Wear eye protection while crimping and avoid short circuits when working on the battery.
-- Wear insulated gloves along with eye protection when handling the battery or live circuits.
+- Wear insulated gloves and eye protection when crimping or handling the battery or live circuits.
