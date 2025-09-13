@@ -50,7 +50,8 @@ the docs you will see the term used in both contexts.
     without `realpath`
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init and
     k3s preinstalled; embeds `pi_node_verifier.sh` and clones `token.place` and
-    `democratizedspace/dspace` (branch `v3`) by default. Set
+    `democratizedspace/dspace` by default. Customize branches with
+    `TOKEN_PLACE_BRANCH` (default `main`) and `DSPACE_BRANCH` (default `v3`). Set
     `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git URLs
     via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
