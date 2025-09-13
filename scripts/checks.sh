@@ -22,6 +22,38 @@ if ! command -v flake8 >/dev/null 2>&1 || \
   hash -r
 fi
 
+# Ensure KiCad 9 is installed for KiBot exports
+if ! python - <<'PY' >/dev/null 2>&1
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec('pcbnew') else 1)
+PY
+then
+  if command -v apt-get >/dev/null 2>&1; then
+    SUDO=""
+    if [ "$(id -u)" -ne 0 ]; then
+      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        SUDO="sudo -n"
+      else
+        echo "KiCad not installed and no sudo; KiBot may fail" >&2
+        SUDO=""
+      fi
+    fi
+    if [ -z "$SUDO" ] && [ "$(id -u)" -ne 0 ]; then
+      :
+    else
+      $SUDO apt-get update >/dev/null 2>&1
+      $SUDO apt-get install -y software-properties-common >/dev/null 2>&1 || true
+      $SUDO add-apt-repository -y ppa:kicad/kicad-9.0-nightly \
+        >/dev/null 2>&1 || true
+      $SUDO apt-get update >/dev/null 2>&1
+      $SUDO apt-get install -y kicad >/dev/null 2>&1 || \
+        echo "KiCad install failed; continuing" >&2
+    fi
+  else
+    echo "apt-get not found; cannot install KiCad" >&2
+  fi
+fi
+
 # python checks
 flake8 . --exclude=.venv --max-line-length=100
 isort --check-only . --skip .venv
