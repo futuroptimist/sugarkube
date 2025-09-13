@@ -53,10 +53,12 @@ docker compose version
 ## 3. Boot and verify locally
 
 1. Insert the card and power on the Pi.
-2. On first boot the Pi builds the containers defined in
+2. On first boot the Pi installs Docker, builds the containers defined in
    `/opt/projects/docker-compose.yml` and enables `projects-compose.service`.
-3. Confirm the stack is running:
+3. Confirm Docker and the stack are running:
    ```sh
+   docker --version
+   docker compose version
    sudo systemctl status projects-compose.service
    ```
 4. Verify each app on the LAN:
@@ -102,13 +104,14 @@ docker compose version
 Each project reads an `.env` file in its directory. `init-env.sh` scans
 `/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
 letting containers start with sane defaults. The script ships an `ensure_env`
-helper that creates blank files when a project omits an example. Edit these files
-to set variables like ports, API URLs or secrets.
+helper that creates blank files when a project omits an example, and seeds a
+default `PORT` so containers start with predictable endpoints. Edit these files
+to set variables like ports, API URLs, or secrets.
 
-| Service | Path to env file | Example |
-| --- | --- | --- |
-| token.place | `/opt/projects/token.place/.env` | `PORT=5000` |
-| dspace | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
+| Service     | Path to env file                  | Example     |
+| ----------- | --------------------------------- | ----------- |
+| token.place | `/opt/projects/token.place/.env`  | `PORT=5000` |
+| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. See each project's README for the full list of
