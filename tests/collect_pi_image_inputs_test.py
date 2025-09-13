@@ -110,6 +110,21 @@ def test_handles_zip_with_img(tmp_path):
         assert f.read() == b"data"
 
 
+def test_handles_zip_with_unzip_fallback(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    zip_path = deploy / "foo.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("foo.img", b"data")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert out_img.exists()
+    with lzma.open(out_img, "rb") as f:
+        assert f.read() == b"data"
+
+
 def test_errors_when_no_image_found(tmp_path):  # noqa: F811
     deploy = tmp_path / "deploy"
     deploy.mkdir()
