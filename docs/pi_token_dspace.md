@@ -46,11 +46,16 @@ unless-stopped` so containers relaunch across reboots.
 1. Insert the card and power on the Pi.
 2. On first boot the Pi builds the containers defined in
    `/opt/projects/docker-compose.yml` and enables `projects-compose.service`.
-3. Confirm the stack is running:
+3. Verify Docker is installed:
+   ```sh
+   docker --version
+   docker compose version
+   ```
+4. Confirm the stack is running:
    ```sh
    sudo systemctl status projects-compose.service
    ```
-4. Verify each app on the LAN:
+5. Verify each app on the LAN:
    ```sh
    curl http://<pi-host>:5000  # token.place
    curl http://<pi-host>:3000  # dspace
@@ -96,14 +101,10 @@ letting containers start with sane defaults. The script ships an `ensure_env`
 helper that creates blank files when a project omits an example. Edit these files
 to set variables like `PORT`, API URLs or secrets:
 
-- `/opt/projects/token.place/.env` — example:
-  ```ini
-  PORT=5000
-  ```
-- `/opt/projects/dspace/frontend/.env` — example:
-  ```ini
-  PORT=3000
-  ```
+| Service     | Env file                             | Required keys |
+| ----------- | ------------------------------------ | ------------- |
+| token.place | `/opt/projects/token.place/.env`     | `PORT`        |
+| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT`        |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. See each project's README for the full list of
