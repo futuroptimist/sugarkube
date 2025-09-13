@@ -536,10 +536,13 @@ Proceed with the detailed steps below to adapt the process for other repositorie
    docker compose down   # compose project
    docker stop myapp && docker rm myapp
    ```
-8. Run commands inside a running container (handy for tests or admin tasks):
+8. Run commands or open a shell inside a running container (handy for tests or
+   admin tasks):
    ```sh
-   docker exec -it tokenplace python -m pytest   # token.place example
-   docker compose exec frontend npm test         # dspace example
+   docker exec -it tokenplace python -m pytest   # token.place tests
+   docker exec -it tokenplace /bin/bash          # token.place shell
+   docker compose exec frontend npm test         # dspace tests
+   docker compose exec frontend /bin/sh          # dspace shell
    ```
    Swap the command and container names for your project.
 
