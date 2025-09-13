@@ -1,6 +1,7 @@
 import gzip
 import lzma
 import os
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -73,6 +74,30 @@ def test_errors_on_zip_without_img(tmp_path):
     )
     assert result.returncode != 0
     assert "Zip contained no .img" in result.stderr
+
+
+def test_errors_when_bsdtar_missing(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    zip_path = deploy / "foo.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("foo.img", b"data")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in ["find", "sort", "cut", "head"]:
+        real = shutil.which(name)
+        (fake_bin / name).symlink_to(real)
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(
+        tmp_path,
+        deploy,
+        out_img,
+        extra_env={"PATH": str(fake_bin)},
+    )
+    assert result.returncode != 0
+    assert "bsdtar is required" in result.stderr
 
 
 def test_handles_zip_with_img(tmp_path):

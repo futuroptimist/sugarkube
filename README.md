@@ -47,7 +47,8 @@ the docs you will see the term used in both contexts.
     macOS compatibility
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
     clean up temporary work directories, and use POSIX `test -ef` to compare paths
-    without `realpath`
+    without `realpath`. Requires `bsdtar` (from `libarchive-tools`) to extract `.zip`
+    archives
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init and
     k3s preinstalled; embeds `pi_node_verifier.sh` and clones `token.place` and
     `democratizedspace/dspace` (branch `v3`) by default. Set

@@ -38,6 +38,10 @@ if [ -z "${found}" ]; then
   # Accept zip bundles containing a .img
   zipfile="$(_find_first '*.zip' || true)"
   if [ -n "${zipfile}" ]; then
+    if ! command -v bsdtar >/dev/null 2>&1; then
+      echo "ERROR: bsdtar is required to extract zip archives" >&2
+      exit 1
+    fi
     tmpdir="$(mktemp -d)"
     tmpdirs+=("$tmpdir")
     # Use bsdtar from libarchive-tools (handles zip); avoid needing 'unzip'
