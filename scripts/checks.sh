@@ -123,7 +123,9 @@ fi
 
 if command -v linkchecker >/dev/null 2>&1; then
   if [ -f README.md ] && [ -d docs ]; then
-    linkchecker --no-warnings README.md docs/
+    # Explicitly ignore external URLs so behaviour is consistent across
+    # LinkChecker versions which may default to checking remote links.
+    linkchecker --no-warnings --ignore-url '^https?://' README.md docs/
   else
     echo "README.md or docs/ missing, skipping link check" >&2
   fi
