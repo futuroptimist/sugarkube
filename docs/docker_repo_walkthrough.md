@@ -34,19 +34,22 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
-6. Inspect container logs to confirm the service started:
+6. Verify the container is running:
+   - Single container: `docker ps --format '{{.Names}}' | grep myapp`
+   - Compose project: `docker compose ps`
+7. Inspect container logs to confirm the service started:
    - Single container: `docker logs -f myapp`
    - Compose project: `docker compose logs`
-7. Confirm the service responds locally, e.g.
+8. Confirm the service responds locally, e.g.
    `curl http://localhost:5000` for token.place or
    `curl http://localhost:3002` for dspace.
-8. Optionally expose ports through the Cloudflare Tunnel by editing
+9. Optionally expose ports through the Cloudflare Tunnel by editing
    `/opt/sugarkube/docker-compose.cloudflared.yml`.
-9. Visit the Cloudflare URL to verify remote access, for example
-   `curl https://tokenplace.example.com` or
-   `curl https://dspace.example.com` once the tunnel restarts.
-10. Log recurring deployment failures in `outages/` using
-   [`schema.json`](../outages/schema.json).
+10. Visit the Cloudflare URL to verify remote access, for example
+    `curl https://tokenplace.example.com` or
+    `curl https://dspace.example.com` once the tunnel restarts.
+11. Log recurring deployment failures in `outages/` using
+    [`schema.json`](../outages/schema.json).
 
 ## Quick start
 
@@ -741,6 +744,25 @@ docker restart tokenplace
 cd /opt/projects/dspace/frontend
 git pull
 docker compose up -d --build
+```
+
+### Auto-update with Watchtower
+
+Run [Watchtower](https://github.com/containrrr/watchtower) to automatically pull and
+restart updated images:
+
+```sh
+docker run -d --name watchtower \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower tokenplace dspace-frontend
+```
+
+Watchtower checks for updates every 24 hours by default. Trigger a manual check:
+
+```sh
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower --run-once tokenplace dspace-frontend
 ```
 
 ## 7. Troubleshooting and outages
