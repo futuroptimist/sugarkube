@@ -110,7 +110,22 @@ def test_handles_zip_with_img(tmp_path):
         assert f.read() == b"data"
 
 
-def test_errors_when_no_image_found(tmp_path):  # noqa: F811
+def test_handles_zip_with_unzip_fallback(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    zip_path = deploy / "foo.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("foo.img", b"data")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert out_img.exists()
+    with lzma.open(out_img, "rb") as f:
+        assert f.read() == b"data"
+
+
+def test_errors_when_no_image_found(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
     (deploy / "foo.txt").write_text("data")
@@ -150,10 +165,23 @@ def test_handles_img_xz(tmp_path):
     assert out_img.read_text() == "original"
 
 
-def test_errors_when_no_image_found(tmp_path):  # noqa: F811
+def test_prefers_img_xz_over_raw(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
-    (deploy / "note.txt").write_text("no artifact")
+    img_xz = deploy / "foo.img.xz"
+    img_xz.write_text("compressed")
+    raw_img = deploy / "foo.img"
+    raw_img.write_text("raw")
+
+    out_img = tmp_path / "out.img.xz"
+    result = _run_script(tmp_path, deploy, out_img)
+    assert result.returncode == 0, result.stderr
+    assert out_img.read_text() == "compressed"
+
+
+def test_errors_when_deploy_empty(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
 
     out_img = tmp_path / "out.img.xz"
     result = _run_script(tmp_path, deploy, out_img)
@@ -182,3 +210,17 @@ def test_succeeds_when_realpath_missing(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
+
+
+def test_skips_copy_when_source_is_output(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    img_xz = deploy / "foo.img.xz"
+    img_xz.write_text("original")
+
+    result = _run_script(tmp_path, deploy, img_xz)
+    assert result.returncode == 0, result.stderr
+    assert img_xz.read_text() == "original"
+    sha = img_xz.with_suffix(img_xz.suffix + ".sha256")
+    assert sha.exists()
+    assert "skipping copy" in result.stdout

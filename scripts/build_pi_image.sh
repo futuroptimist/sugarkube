@@ -15,6 +15,8 @@ Environment variables:
   CLOUD_INIT_PATH   Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
   OUTPUT_DIR        Directory to write the image (default repo root)
   IMG_NAME          Name for the output image (default sugarkube)
+  TOKEN_PLACE_BRANCH Branch of token.place to clone (default main)
+  DSPACE_BRANCH     Branch of dspace to clone (default v3)
 
 See docs/pi_image_cloudflare.md for details.
 EOF
@@ -142,8 +144,16 @@ if [ ! -f "${START_PROJECTS_PATH}" ]; then
   echo "Start projects script not found: ${START_PROJECTS_PATH}" >&2
   exit 1
 fi
+if [ ! -s "${START_PROJECTS_PATH}" ]; then
+  echo "Start projects script is empty: ${START_PROJECTS_PATH}" >&2
+  exit 1
+fi
 if [ ! -f "${INIT_ENV_PATH}" ]; then
   echo "Init env script not found: ${INIT_ENV_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${INIT_ENV_PATH}" ]; then
+  echo "Init env script is empty: ${INIT_ENV_PATH}" >&2
   exit 1
 fi
 
@@ -242,6 +252,8 @@ CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
 CLONE_DSPACE="${CLONE_DSPACE:-true}"
 EXTRA_REPOS="${EXTRA_REPOS:-}"
+TOKEN_PLACE_BRANCH="${TOKEN_PLACE_BRANCH:-main}"
+DSPACE_BRANCH="${DSPACE_BRANCH:-v3}"
 
 # Prepare compose file for token.place and dspace; drop services when skipped
 PROJECTS_COMPOSE_TEMP="${WORK_DIR}/docker-compose.yml"
@@ -274,8 +286,10 @@ run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
     echo "install -d /opt/projects"
     echo "cd /opt/projects"
     [[ "$CLONE_SUGARKUBE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/sugarkube.git"
-    [[ "$CLONE_TOKEN_PLACE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/token.place.git"
-    [[ "$CLONE_DSPACE" == "true" ]] && echo "git clone --depth 1 --branch v3 https://github.com/democratizedspace/dspace.git"
+    [[ "$CLONE_TOKEN_PLACE" == "true" ]] && \
+      echo "git clone --depth 1 --branch ${TOKEN_PLACE_BRANCH} https://github.com/futuroptimist/token.place.git"
+    [[ "$CLONE_DSPACE" == "true" ]] && \
+      echo "git clone --depth 1 --branch ${DSPACE_BRANCH} https://github.com/democratizedspace/dspace.git"
     if [[ -n "$EXTRA_REPOS" ]]; then
       for repo in $EXTRA_REPOS; do
         echo "git clone --depth 1 $repo"
@@ -434,4 +448,7 @@ if [ ! -s "${OUT_IMG}" ]; then
   echo "Output image not found or empty: ${OUT_IMG}" >&2
   exit 1
 fi
+sha256_file="${OUT_IMG}.sha256"
+sha256sum "${OUT_IMG}" > "${sha256_file}"
 echo "[sugarkube] Image written to ${OUT_IMG}"
+echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"

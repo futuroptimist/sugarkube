@@ -28,11 +28,11 @@
 - Cons: requires bash and Docker daemon available
 
 2) Official container path (primary Windows fallback)
-- Image: `ghcr.io/raspberrypi/pigen`
+- Image: `ghcr.io/raspberrypi/pi-gen`
 - Bind mounts:
   - `/pi-gen/deploy` → host `OUTPUT_DIR`
-  - `/pi-gen/work` → persistent Docker volume `pigen-work-cache`
-  - `/var/cache/apt` → persistent Docker volume `pigen-apt-cache`
+  - `/pi-gen/work` → persistent Docker volume `pi-gen-work-cache`
+  - `/var/cache/apt` → persistent Docker volume `pi-gen-apt-cache`
   - `stage2/01-sys-tweaks/user-data` → host `scripts/cloud-init/user-data.yaml`
 - Env:
   - `IMG_NAME`, `ENABLE_SSH=1`, `ARM64`, `USE_QCOW2=1`
@@ -45,7 +45,7 @@
 3) Debian container path (secondary fallback)
 - Starts from `debian:bookworm`, installs `pi-gen` dependencies including `qemu-user-static`
 - Configures mirrors and `USE_QCOW2=1`, mounts `binfmt_misc` if needed
-- Pros: Works when `ghcr.io/raspberrypi/pigen` is unavailable
+- Pros: Works when `ghcr.io/raspberrypi/pi-gen` is unavailable
 - Cons: Larger bootstrap; slower first-run
 
 ## Reliability Features

@@ -21,7 +21,9 @@ where artifacts are written; the script creates the directory if needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
 variables. To avoid accidental overwrites it aborts when the image already
 exists unless `FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning
-builds to replace an existing image. To reduce flaky downloads it pins the
+builds to replace an existing image. After a successful build the script writes
+`<IMG_NAME>.img.xz.sha256` alongside the image so you can verify integrity.
+To reduce flaky downloads it pins the
 official Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook
 that rewrites any raspbian host to a stable HTTPS mirror and bypasses proxies for
@@ -47,12 +49,15 @@ The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=1` to avoid generating both architectures.
 
 The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
-`token.place` and `democratizedspace/dspace` (branch `v3`) repositories into
-`/opt/projects` by default. Set `CLONE_SUGARKUBE=true` to include this repo and
-pass space-separated Git URLs in `EXTRA_REPOS` to pull additional projects.
+`token.place` and `democratizedspace/dspace` repositories into
+`/opt/projects` by default. Customize branches with `TOKEN_PLACE_BRANCH`
+(default `main`) and `DSPACE_BRANCH` (default `v3`). Set `CLONE_SUGARKUBE=true`
+to include this repo and pass space-separated Git URLs in `EXTRA_REPOS` to pull
+additional projects.
 `start-projects.sh` enables the optional `projects-compose` systemd unit on
 first boot and now checks for `systemctl`, skipping quietly when systemd isn't
-present.
+present. The build script also verifies `start-projects.sh` and `init-env.sh`
+are non-empty to avoid embedding blank hooks.
 
 On first boot `init-env.sh` copies each project's `.env.example` to `.env` and
 sets its mode to `0600` so secrets stay private.
