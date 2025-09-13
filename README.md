@@ -56,8 +56,8 @@ the docs you will see the term used in both contexts.
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
-  - `scan-secrets.py` — scan diffs for high-risk patterns with `ripsecrets` when available
-    and gracefully fall back to regex matching if `ripsecrets` fails to execute
+  - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
+    available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see
   [docs/outage_catalog.md](docs/outage_catalog.md))
 - `tests/` — quick checks for helper scripts and documentation
