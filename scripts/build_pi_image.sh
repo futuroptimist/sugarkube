@@ -144,8 +144,16 @@ if [ ! -f "${START_PROJECTS_PATH}" ]; then
   echo "Start projects script not found: ${START_PROJECTS_PATH}" >&2
   exit 1
 fi
+if [ ! -s "${START_PROJECTS_PATH}" ]; then
+  echo "Start projects script is empty: ${START_PROJECTS_PATH}" >&2
+  exit 1
+fi
 if [ ! -f "${INIT_ENV_PATH}" ]; then
   echo "Init env script not found: ${INIT_ENV_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${INIT_ENV_PATH}" ]; then
+  echo "Init env script is empty: ${INIT_ENV_PATH}" >&2
   exit 1
 fi
 
