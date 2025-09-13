@@ -81,5 +81,16 @@ else
 fi
 
 if $JSON; then
-  printf '{"checks":[%s]}\n' "$(IFS=,; echo "${json_parts[*]}")"
+  json_output=$(printf '{"checks":[%s]}\n' "$(IFS=,; echo "${json_parts[*]}")")
+
+  if [[ "${PI_NODE_VERIFIER_CORRUPT_JSON:-}" == "1" ]]; then
+    json_output="${json_output}corrupt"
+  fi
+
+  if ! echo "$json_output" | jq -e . >/dev/null 2>&1; then
+    echo "Invalid JSON produced" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$json_output"
 fi

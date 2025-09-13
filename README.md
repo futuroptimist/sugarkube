@@ -54,8 +54,8 @@ the docs you will see the term used in both contexts.
     `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git URLs
     via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
-  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
-    `--help` for usage
+  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output
+    (fails fast on malformed JSON) or `--help` for usage
   - `scan-secrets.py` — scan diffs for high-risk patterns with `ripsecrets` when available
     and gracefully fall back to regex matching if `ripsecrets` fails to execute
 - `outages/` — structured outage records (see
