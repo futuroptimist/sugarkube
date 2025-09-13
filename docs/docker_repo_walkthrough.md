@@ -280,6 +280,20 @@ docker volume ls | grep dspace-data
 ```
 
 Adjust container paths to match each project's documentation.
+
+### Backup container data
+
+Create compressed backups of the token.place and dspace volumes:
+
+```sh
+cd /opt/projects
+docker run --rm -v tokenplace-data:/data -v "$(pwd)":/backup alpine \
+  tar czf /backup/tokenplace-data.tar.gz -C /data .
+docker run --rm -v dspace-data:/data -v "$(pwd)":/backup alpine \
+  tar czf /backup/dspace-data.tar.gz -C /data .
+ls -lh tokenplace-data.tar.gz dspace-data.tar.gz
+```
+
 ### Auto-restart containers with Docker restart policies
 
 Keep token.place and dspace running after crashes or reboots by adding
