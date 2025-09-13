@@ -142,6 +142,8 @@ kubeconfig
 kubectl
 lcd
 linkchecker
+linters
+htmlcontent
 llms
 localhost
 localhostForwarding
