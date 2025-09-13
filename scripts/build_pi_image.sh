@@ -448,4 +448,7 @@ if [ ! -s "${OUT_IMG}" ]; then
   echo "Output image not found or empty: ${OUT_IMG}" >&2
   exit 1
 fi
+sha256_file="${OUT_IMG}.sha256"
+sha256sum "${OUT_IMG}" > "${sha256_file}"
 echo "[sugarkube] Image written to ${OUT_IMG}"
+echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"

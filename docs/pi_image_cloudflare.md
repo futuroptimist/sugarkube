@@ -21,7 +21,9 @@ where artifacts are written; the script creates the directory if needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
 variables. To avoid accidental overwrites it aborts when the image already
 exists unless `FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning
-builds to replace an existing image. To reduce flaky downloads it pins the
+builds to replace an existing image. After a successful build the script writes
+`<IMG_NAME>.img.xz.sha256` alongside the image so you can verify integrity.
+To reduce flaky downloads it pins the
 official Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook
 that rewrites any raspbian host to a stable HTTPS mirror and bypasses proxies for
