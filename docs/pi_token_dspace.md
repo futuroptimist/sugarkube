@@ -109,9 +109,9 @@ helper that creates blank files when a project omits an example, and seeds a
 default `PORT` so containers start with predictable endpoints. Edit these files
 to set variables like ports, API URLs, or secrets.
 
-| Service     | Path to env file                  | Example     |
-| ----------- | --------------------------------- | ----------- |
-| token.place | `/opt/projects/token.place/.env`  | `PORT=5000` |
+| Service     | Path to env file                     | Example     |
+| ----------- | ------------------------------------ | ----------- |
+| token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
 | dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
