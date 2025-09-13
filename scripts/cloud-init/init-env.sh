@@ -7,6 +7,7 @@ for example in **/.env.example; do
   if [ ! -f "$target" ]; then
     cp "$example" "$target"
     chmod 600 "$target"
+    echo "Created $target from template"
   fi
 done
 
@@ -15,7 +16,10 @@ ensure_env() {
   local dir
   dir="$(dirname "$env_path")"
   [ -d "$dir" ] || return 0
-  [ -f "$env_path" ] || touch "$env_path"
+  if [ ! -f "$env_path" ]; then
+    touch "$env_path"
+    echo "Created $env_path"
+  fi
   chmod 600 "$env_path"
 }
 
@@ -34,6 +38,6 @@ fi
 
 # extra-start
 # Add additional environment setup steps below. Example:
-# ensure_env other_repo/.env
-# echo "FOO=bar" >> myapp/.env
+# ensure_env other_repo/.env  # create .env if missing
+# echo "FOO=bar" >> other_repo/.env
 # extra-end

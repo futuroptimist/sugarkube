@@ -8,6 +8,15 @@ Cloudflare Tunnel. The image builder clones each repository, drops a shared
 `projects-compose.service` to manage the stack. Services use `restart:
 unless-stopped` so containers relaunch across reboots.
 
+## Prerequisites
+
+Confirm Docker Engine and the Compose plugin are available:
+
+```sh
+docker --version
+docker compose version
+```
+
 ## 1. Build or download the image
 
 1. In GitHub, open **Actions → pi-image → Run workflow**.
@@ -94,15 +103,16 @@ unless-stopped` so containers relaunch across reboots.
 ## 5. Runtime environment variables
 
 Each project reads an `.env` file in its directory. `init-env.sh` scans
-`/opt/projects` for `*.env.example` files and copies them to `.env` when missing.
-When a repository omits an example file, `ensure_env` creates a blank one and the
-script seeds a default `PORT` so containers start with predictable endpoints.
-Edit these files to set variables like API URLs or secrets:
+`/opt/projects` for `*.env.example` files and copies them to `.env` when missing,
+letting containers start with sane defaults. The script ships an `ensure_env`
+helper that creates blank files when a project omits an example, and seeds a
+default `PORT` so containers start with predictable endpoints. Edit these files
+to set variables like ports, API URLs, or secrets.
 
-| Service     | Env file                             | Required keys |
-| ----------- | ------------------------------------ | ------------- |
-| token.place | `/opt/projects/token.place/.env`     | `PORT`        |
-| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT`        |
+| Service     | Path to env file                     | Example     |
+| ----------- | ------------------------------------ | ----------- |
+| token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
+| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. See each project's README for the full list of

@@ -26,10 +26,14 @@ services:
     restart: unless-stopped
   # dspace-end
   # extra-start
-  # Add additional services below. Example:
+  # Add additional services below and ensure matching .env entries in init-env.sh.
+  # Example:
   # myapp:
   #   build:
   #     context: /opt/projects/myapp
+  #   container_name: myapp
+  #   ports:
+  #     - "1234:1234"
   #   env_file:
   #     - /opt/projects/myapp/.env
   #   restart: unless-stopped
