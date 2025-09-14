@@ -16,6 +16,11 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 docker compose version || true
 
+# Seed .env files before the service starts so defaults exist
+if [ -x /opt/projects/init-env.sh ]; then
+  /opt/projects/init-env.sh || true
+fi
+
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "systemctl not found; skipping ${svc}" >&2
   exit 0
