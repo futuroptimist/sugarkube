@@ -114,6 +114,22 @@ to set variables like ports, API URLs, or secrets.
 | token.place | `/opt/projects/token.place/.env`     | `TOKEN_PLACE_ENV`, `SUPABASE_URL`, `SUPABASE_KEY`, `PORT` |
 | dspace      | `/opt/projects/dspace/frontend/.env` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `PORT` |
 
+### token.place variables
+
+| Variable          | Default       | Description                                             |
+| ----------------- | ------------- | ------------------------------------------------------- |
+| `API_RATE_LIMIT`  | `60/hour`     | Per-IP rate limit for API requests                      |
+| `API_DAILY_QUOTA` | `1000/day`    | Per-IP daily request quota                              |
+| `USE_MOCK_LLM`    | `0`           | Use mock LLM instead of downloading a model (`1` = yes) |
+| `TOKEN_PLACE_ENV` | `development` | Deployment environment                                  |
+| `PROD_API_HOST`   | `127.0.0.1`   | IP address for production API host                      |
+
+### dspace variables
+
+| Variable        | Default   | Description                                                  |
+| --------------- | --------- | ------------------------------------------------------------ |
+| `METRICS_TOKEN` | _(unset)_ | Require `Authorization: Bearer` for the `/metrics` endpoint |
+
 Populate these files with values from each project's README. Add more calls to
 `ensure_env` under the `# extra-start` marker in `init-env.sh` for additional
 repositories.
