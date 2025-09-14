@@ -23,39 +23,15 @@ if ! command -v flake8 >/dev/null 2>&1 || \
 fi
 
 # Ensure KiCad 9 is installed for KiBot exports
+# KiCad is a large dependency that's unnecessary for most checks.  Rather than
+# attempting to install it on-the-fly (which can be slow or fail on systems
+# without package manager access), simply warn when it's missing and continue.
 if ! python - <<'PY' >/dev/null 2>&1
 import importlib.util, sys
 sys.exit(0 if importlib.util.find_spec('pcbnew') else 1)
 PY
 then
-  if command -v apt-get >/dev/null 2>&1; then
-    SUDO=""
-    if [ "$(id -u)" -ne 0 ]; then
-      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-        SUDO="sudo -n"
-      else
-        echo "KiCad not installed and no sudo; KiBot may fail" >&2
-        SUDO=""
-      fi
-    fi
-    if [ -z "$SUDO" ] && [ "$(id -u)" -ne 0 ]; then
-      :
-    else
-      if ! (
-        set +e
-        $SUDO apt-get update >/dev/null 2>&1 && \
-        $SUDO apt-get install -y software-properties-common >/dev/null 2>&1 && \
-        $SUDO add-apt-repository -y ppa:kicad/kicad-9.0-nightly \
-          >/dev/null 2>&1 && \
-        $SUDO apt-get update >/dev/null 2>&1 && \
-        $SUDO apt-get install -y kicad >/dev/null 2>&1
-      ); then
-        echo "KiCad install failed; continuing" >&2
-      fi
-    fi
-  else
-    echo "apt-get not found; cannot install KiCad" >&2
-  fi
+  echo "KiCad not installed; skipping KiBot checks" >&2
 fi
 
 # python checks

@@ -49,3 +49,4 @@ EOF
   echo "$output" | jq -e '.checks[] | select(.name=="iptables_backend") | .status=="skip"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="k3s_check_config") | .status=="skip"' > /dev/null
 }
+

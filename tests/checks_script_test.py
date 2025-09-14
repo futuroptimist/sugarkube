@@ -1,14 +1,24 @@
 import os
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 
-def test_skips_js_checks_when_package_lock_missing(tmp_path):
+
+@pytest.fixture
+def script(tmp_path: Path) -> Path:
+    """Copy checks script and stub pcbnew to avoid KiCad install."""
     script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
     script = tmp_path / "checks.sh"
     script.write_text(script_src.read_text())
     script.chmod(0o755)
+    # create dummy pcbnew module so checks.sh skips KiCad install
+    (tmp_path / "pcbnew.py").write_text("")
+    return script
 
+
+def test_skips_js_checks_when_package_lock_missing(tmp_path: Path, script: Path) -> None:
     # simulate project with package.json but no package-lock.json
     (tmp_path / "package.json").write_text("{}")
 
@@ -25,10 +35,13 @@ def test_skips_js_checks_when_package_lock_missing(tmp_path):
         "aspell",
         "npm",
         "npx",
+        "python",
     ]:
         f = fake_bin / cmd
         if cmd == "npm":
             f.write_text(f"#!/bin/bash\necho called > {marker}\nexit 0\n")
+        elif cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
         else:
             f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
@@ -48,12 +61,7 @@ def test_skips_js_checks_when_package_lock_missing(tmp_path):
     assert not marker.exists()
 
 
-def test_runs_js_checks_when_package_lock_present(tmp_path):
-    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
-    script = tmp_path / "checks.sh"
-    script.write_text(script_src.read_text())
-    script.chmod(0o755)
-
+def test_runs_js_checks_when_package_lock_present(tmp_path: Path, script: Path) -> None:
     # project with package.json and package-lock.json
     (tmp_path / "package.json").write_text("{}")
     (tmp_path / "package-lock.json").write_text("{}")
@@ -72,12 +80,15 @@ def test_runs_js_checks_when_package_lock_present(tmp_path):
         "aspell",
         "npm",
         "npx",
+        "python",
     ]:
         f = fake_bin / cmd
         if cmd == "npm":
             f.write_text(f'#!/bin/bash\necho "$@" >> {npm_log}\nexit 0\n')
         elif cmd == "npx":
             f.write_text(f'#!/bin/bash\necho "$@" >> {npx_log}\nexit 0\n')
+        elif cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
         else:
             f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
@@ -102,12 +113,7 @@ def test_runs_js_checks_when_package_lock_present(tmp_path):
     assert any("playwright install --with-deps" in line for line in npx_lines)
 
 
-def test_installs_aspell_as_root_without_sudo(tmp_path):
-    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
-    script = tmp_path / "checks.sh"
-    script.write_text(script_src.read_text())
-    script.chmod(0o755)
-
+def test_installs_aspell_as_root_without_sudo(tmp_path: Path, script: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     apt_log = tmp_path / "apt.log"
@@ -120,12 +126,15 @@ def test_installs_aspell_as_root_without_sudo(tmp_path):
         "linkchecker",
         "apt-get",
         "id",
+        "python",
     ]:
         f = fake_bin / cmd
         if cmd == "apt-get":
             f.write_text(f'#!/bin/bash\necho "$@" >> {apt_log}\nexit 0\n')
         elif cmd == "id":
             f.write_text("#!/bin/bash\necho 0\n")
+        elif cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
         else:
             f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
@@ -147,12 +156,7 @@ def test_installs_aspell_as_root_without_sudo(tmp_path):
     assert any("install" in line for line in log)
 
 
-def test_installs_aspell_with_sudo_when_non_root(tmp_path):
-    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
-    script = tmp_path / "checks.sh"
-    script.write_text(script_src.read_text())
-    script.chmod(0o755)
-
+def test_installs_aspell_with_sudo_when_non_root(tmp_path: Path, script: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     sudo_log = tmp_path / "sudo.log"
@@ -166,6 +170,7 @@ def test_installs_aspell_with_sudo_when_non_root(tmp_path):
         "apt-get",
         "sudo",
         "id",
+        "python",
     ]:
         f = fake_bin / cmd
         if cmd == "sudo":
@@ -177,6 +182,8 @@ echo "$@" >> {sudo_log}
             )
         elif cmd == "id":
             f.write_text("#!/bin/bash\necho 1000\n")
+        elif cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
         else:
             f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
@@ -198,12 +205,7 @@ echo "$@" >> {sudo_log}
     assert any("apt-get install" in line for line in lines)
 
 
-def test_skips_js_checks_when_npm_missing(tmp_path):
-    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
-    script = tmp_path / "checks.sh"
-    script.write_text(script_src.read_text())
-    script.chmod(0o755)
-
+def test_skips_js_checks_when_npm_missing(tmp_path: Path, script: Path) -> None:
     # simulate project with package.json but no npm installed
     (tmp_path / "package.json").write_text("{}")
 
@@ -219,16 +221,19 @@ def test_skips_js_checks_when_npm_missing(tmp_path):
         "linkchecker",
         "aspell",
         "npx",
+        "python",
     ]:
         f = fake_bin / cmd
         if cmd == "npx":
             f.write_text(f"#!/bin/bash\necho called > {marker}\nexit 0\n")
+        elif cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
         else:
             f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
 
     env = os.environ.copy()
-    env["PATH"] = f"/bin:{fake_bin}"
+    env["PATH"] = f"{fake_bin}:/bin"
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -242,18 +247,16 @@ def test_skips_js_checks_when_npm_missing(tmp_path):
     assert not marker.exists()
 
 
-def test_fails_when_flake8_fails(tmp_path):
-    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
-    script = tmp_path / "checks.sh"
-    script.write_text(script_src.read_text())
-    script.chmod(0o755)
-
+def test_fails_when_flake8_fails(tmp_path: Path, script: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     (fake_bin / "flake8").write_text("#!/bin/bash\nexit 1\n")
-    for cmd in ["isort", "black", "pytest", "pyspelling", "linkchecker"]:
+    for cmd in ["isort", "black", "pytest", "pyspelling", "linkchecker", "python"]:
         f = fake_bin / cmd
-        f.write_text("#!/bin/bash\nexit 0\n")
+        if cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+        else:
+            f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
     (fake_bin / "flake8").chmod(0o755)
 
@@ -270,12 +273,7 @@ def test_fails_when_flake8_fails(tmp_path):
     assert result.returncode == 1
 
 
-def test_installs_python_tools_when_missing(tmp_path):
-    script_src = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
-    script = tmp_path / "checks.sh"
-    script.write_text(script_src.read_text())
-    script.chmod(0o755)
-
+def test_installs_python_tools_when_missing(tmp_path: Path, script: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     pip_log = tmp_path / "pip.log"
@@ -296,9 +294,12 @@ exit 0
     )
     pip.chmod(0o755)
 
-    for cmd in ["aspell", "bats"]:
+    for cmd in ["aspell", "bats", "python"]:
         f = fake_bin / cmd
-        f.write_text("#!/bin/bash\nexit 0\n")
+        if cmd == "python":
+            f.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+        else:
+            f.write_text("#!/bin/bash\nexit 0\n")
         f.chmod(0o755)
 
     env = os.environ.copy()
