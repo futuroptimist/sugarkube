@@ -41,6 +41,7 @@ EOF
   tmp="$(mktemp -d)"
   ln -s "$(command -v bash)" "$tmp/bash"
   ln -s "$(command -v grep)" "$tmp/grep"
+  ln -s "$(command -v jq)" "$tmp/jq"
   PATH="$tmp" run "$BATS_TEST_DIRNAME/../scripts/pi_node_verifier.sh" --json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.checks[] | select(.name=="cloud_init") | .status=="skip"' > /dev/null
@@ -48,3 +49,4 @@ EOF
   echo "$output" | jq -e '.checks[] | select(.name=="iptables_backend") | .status=="skip"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="k3s_check_config") | .status=="skip"' > /dev/null
 }
+
