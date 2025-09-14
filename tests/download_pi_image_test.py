@@ -298,3 +298,55 @@ def test_overwrites_existing_output_and_checksum(tmp_path):
     assert result.returncode == 0, result.stderr
     assert out.read_text() == "fresh"
     assert out_sha.read_text() == "newsha  sugarkube.img.xz\n"
+
+
+def test_skips_mv_when_output_already_exists(tmp_path):
+    """Avoid moving the file when the output path already matches the downloaded artifact."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    src = tmp_path / "src.img.xz"
+    src.write_text("data")
+
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
+        "  echo 42\n"
+        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
+        "  shift 2\n"
+        '  while [ "$1" != --dir ]; do shift; done\n'
+        "  dir=$2\n"
+        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
+        "else\n"
+        "  exit 1\n"
+        "fi\n"
+    )
+    gh.chmod(0o755)
+
+    marker = tmp_path / "mv_called"
+    mv = fake_bin / "mv"
+    mv.write_text(f"#!/bin/bash\necho called > {marker}\nexit 1\n")
+    mv.chmod(0o755)
+
+    for cmd in ["dirname", "mkdir", "ls"]:
+        target = shutil.which(cmd)
+        assert target is not None
+        (fake_bin / cmd).symlink_to(target)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["GH_SRC"] = str(src)
+
+    base = Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "download_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "sugarkube.img.xz").exists()
+    assert not marker.exists()
