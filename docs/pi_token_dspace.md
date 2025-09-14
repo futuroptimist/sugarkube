@@ -114,6 +114,22 @@ to set variables like ports, API URLs, or secrets.
 | token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
 | dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
 
+### token.place variables
+
+| Variable        | Default      | Description                                             |
+| --------------- | ------------ | ------------------------------------------------------- |
+| `API_RATE_LIMIT`  | `60/hour`    | Per-IP rate limit for API requests                      |
+| `API_DAILY_QUOTA` | `1000/day`   | Per-IP daily request quota                              |
+| `USE_MOCK_LLM`    | `0`          | Use mock LLM instead of downloading a model (`1` = yes) |
+| `TOKEN_PLACE_ENV` | `development`| Deployment environment                                   |
+| `PROD_API_HOST`   | `127.0.0.1`  | IP address for production API host                      |
+
+### dspace variables
+
+| Variable        | Default   | Description                                                  |
+| --------------- | --------- | ------------------------------------------------------------ |
+| `METRICS_TOKEN` | _(unset)_ | Require `Authorization: Bearer` for the `/metrics` endpoint |
+
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. See each project's README for the full list of
 configuration options.
@@ -122,9 +138,9 @@ configuration options.
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into `/opt/projects`.
 Add services to `/opt/projects/docker-compose.yml` between `# extra-start` and
-`# extra-end`, and extend `init-env.sh` with any new `.env` files, following the
-token.place and dspace examples. The image builder drops the token.place or
-dspace definitions when the corresponding `CLONE_*` flag is `false`, letting you
-build a minimal image and expand it later.
+`# extra-end`, extend `init-env.sh` for new `.env` files, and drop any startup
+checks into `start-projects.sh` inside its own `# extra-start` marker. The image
+builder removes the token.place or dspace definitions when the corresponding
+`CLONE_*` flag is `false`, letting you build a minimal image and expand it later.
 
 Use these hooks to experiment with other projects and grow the image over time.

@@ -21,12 +21,10 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 0
 fi
 
-if command -v docker >/dev/null 2>&1; then
-  docker --version
-  docker compose version
-else
-  echo "docker not found; skipping version checks" >&2
-fi
+# extra-start
+# Additional startup checks can be inserted here, for example database migrations
+# or health probes for new repositories.
+# extra-end
 
 if systemctl list-unit-files | grep -q "^${svc}"; then
   systemctl enable --now "${svc}"
