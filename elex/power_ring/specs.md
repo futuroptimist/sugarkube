@@ -16,13 +16,13 @@ The design may evolve as the project grows.
 
 ## Extras
 
-- Test points for measuring battery voltage
+- Test points for measuring battery voltage and key power rails
 - Silkscreen labels for polarity and connector numbers
 - Fiducial markers to indicate board orientation for easier assembly
 - Title block comments record decoupling guidelines, high-current trace layout, thick traces
   for high-current paths, connector labeling, export checks, board outline fit, BOM validation,
-  clearance rules for high-voltage nets, star topology to minimize voltage drop, and now ground
-  pour continuity around mounting holes
+  clearance rules for high-voltage nets, star topology to minimize voltage drop, ground pour
+  continuity around mounting holes, and test points on each power rail for debugging
 
 These requirements are a starting point – modify the KiCad project as needed and
 update this file when the schematic changes.

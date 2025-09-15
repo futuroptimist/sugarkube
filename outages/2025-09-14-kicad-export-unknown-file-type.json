@@ -1,0 +1,10 @@
+{
+  "id": "2025-09-14-kicad-export-unknown-file-type",
+  "date": "2025-09-14",
+  "component": "kicad",
+  "rootCause": "KiCad 9 not installed so KiBot cannot parse KiCad 9 project files and reports unknown file type",
+  "resolution": "Install KiCad 9 or run KiBot with the v2_k9 container to export outputs",
+  "references": [
+    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml"
+  ]
+}

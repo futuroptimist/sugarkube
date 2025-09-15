@@ -12,6 +12,7 @@
                 (comment 5 "Use thick traces for high-current paths")
                 (comment 6 "Add fiducial markers for board orientation")
                 (comment 7 "Verify ground pour continuity around mounting holes")
+                (comment 8 "Ensure test points on each power rail for debugging")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"
