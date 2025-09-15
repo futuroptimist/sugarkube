@@ -11,6 +11,7 @@
                 (comment 1 "Keep high-current traces short")
                 (comment 2 "Confirm board outline fits enclosure")
                 (comment 3 "Add fiducial markers for board orientation.")
+                (comment 4 "Check fuse orientation before routing")
         )
         (layers
                 (0 "F.Cu" signal)
