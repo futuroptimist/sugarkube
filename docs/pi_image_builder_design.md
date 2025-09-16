@@ -81,6 +81,28 @@
   packages. Override to build a full image. An empty value halts the script before
   running pi-gen.
 
+### Release automation
+- `pi-image-release.yml` rebuilds the image on every `main` push and on a nightly
+  schedule. The job reuses the cached `pi-gen` container when possible so daily runs
+  stay within GitHub's time limits.
+- `build_pi_image.sh` now writes `sugarkube.img.xz.metadata.json` with the pi-gen
+  commit, stage durations parsed from `work/<img>/build.log`, the git ref used for
+  the build, and all toggles passed to the script. The log itself is copied to
+  `sugarkube.build.log` alongside the artifacts.
+- `scripts/generate_release_manifest.py` converts the metadata into a
+  provenance manifest (`sugarkube.img.xz.manifest.json`) and Markdown release notes.
+  The manifest captures workflow run IDs, release channel (stable vs nightly), and
+  hashes for every attached artifact so downstream tooling can validate the build.
+- Artifacts are signed via GitHub OIDC + cosign. Both the signature and certificate
+  are attached to the release for offline verification.
+
+### Local GitHub Actions dry-run
+- Install [act](https://github.com/nektos/act) and run `act workflow-dispatch --workflows
+  .github/workflows/pi-image-release.yml` to exercise the release flow locally. The run
+  uses the same scripts as CI, generates metadata/manifest files under the working
+  directory, and surfaces any regressions in the release tooling without waiting for a
+  hosted runner.
+
 ## Operations & Recovery
 - If apt stalls: rerun; caches and retries reduce recurrence
 - If mirrors fail: the hook should auto-rewrite to stable mirrors. If timeouts persist,
@@ -96,4 +118,5 @@ Read-only mount for cloud-init file into container
 ## Future Enhancements
 - Parametrize mirror list and implement automatic mirror failover
 - Structured logs from `pi-gen` stages to summarize progress/time
-- Add GitHub workflow to publish images nightly with cache reuse
+- Expand the manifest to embed optional QEMU smoke-test results once the
+  virtualization harness is ready

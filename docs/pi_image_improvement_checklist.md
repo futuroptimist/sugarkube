@@ -5,9 +5,12 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## Release & Distribution Automation
-- [ ] Publish signed, versioned releases on every successful `main` merge, plus nightly rebuilds to keep dependencies fresh.
-- [ ] Attach artifacts (`.img.xz`), checksums, and changelog snippets to GitHub Releases; include an “image availability” badge in `README.md` linking to the latest download and commit SHAs.
-- [ ] Generate a machine-readable manifest (JSON/YAML) recording build inputs, git SHAs, and checksums for provenance verification. Cache pi-gen stage durations, verifier output, and commit IDs for reproducibility.
+- [x] Publish signed, versioned releases on every successful `main` merge, plus nightly rebuilds to keep dependencies fresh.
+  - Implemented in `.github/workflows/pi-image-release.yml`, which builds on main merges and a daily schedule, then signs artifacts via cosign + GitHub OIDC.
+- [x] Attach artifacts (`.img.xz`), checksums, and changelog snippets to GitHub Releases; include an “image availability” badge in `README.md` linking to the latest download and commit SHAs.
+  - Releases now attach the image, checksum, metadata, manifest, signatures, and build log. `README.md` advertises availability with a Shields badge that points to the latest download.
+- [x] Generate a machine-readable manifest (JSON/YAML) recording build inputs, git SHAs, and checksums for provenance verification. Cache pi-gen stage durations, verifier output, and commit IDs for reproducibility.
+  - `scripts/create_build_metadata.py` captures pi-gen commits, stage durations, and build options; `scripts/generate_release_manifest.py` converts that into a provenance manifest and markdown notes, ready to store verifier output when available.
 - [x] Extend `scripts/download_pi_image.sh` (or `grab_pi_image.sh`) to:
   - Resolve the latest release automatically.
   - Resume partial downloads.
@@ -83,7 +86,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.
 - [ ] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
 - [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
-- [ ] Document how to run integration tests locally via `act`.
+- [x] Document how to run integration tests locally via `act`.
+  - `docs/pi_image_builder_design.md` now includes a quick recipe for dry-running the release workflow with `act`.
 - [ ] Publish a conformance badge in the README showing last successful hardware boot.
 
 ---
@@ -116,7 +120,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ## Troubleshooting & Community
 - [ ] Ship a golden recovery console image or partition with CLI tools to reflash, fetch logs, and reinstall k3s without another machine.
 - [ ] Extend `outages/` with playbooks for scenarios like cloud-init hangs, SSD clone stalls, or projects-compose failures.
-- [ ] Add an issue template asking contributors to reference this checklist so coverage gaps are visible.
+- [x] Add an issue template asking contributors to reference this checklist so coverage gaps are visible.
+  - Added `.github/ISSUE_TEMPLATE/pi-image.md` with prompts to link manifest data and tick the checklist sections touched.
 
 ---
 
