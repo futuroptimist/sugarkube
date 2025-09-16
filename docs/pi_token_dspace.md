@@ -109,33 +109,46 @@ helper that creates blank files when a project omits an example, and seeds a
 default `PORT` so containers start with predictable endpoints. Edit these files
 to set variables like ports, API URLs, or secrets.
 
-| Service     | Path to env file                     | Example     |
-| ----------- | ------------------------------------ | ----------- |
-| token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
-| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
+| Service     | Path to env file                     | Key variables (examples) |
+| ----------- | ------------------------------------ | ------------------------ |
+| token.place | `/opt/projects/token.place/.env`     | `TOKEN_PLACE_ENV`, `SUPABASE_URL`, `SUPABASE_KEY`, `PORT` |
+| dspace      | `/opt/projects/dspace/frontend/.env` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `PORT` |
+
+### token.place variables
+
+| Variable          | Default       | Description                                             |
+| ----------------- | ------------- | ------------------------------------------------------- |
+| `API_RATE_LIMIT`  | `60/hour`     | Per-IP rate limit for API requests                      |
+| `API_DAILY_QUOTA` | `1000/day`    | Per-IP daily request quota                              |
+| `USE_MOCK_LLM`    | `0`           | Use mock LLM instead of downloading a model (`1` = yes) |
+| `TOKEN_PLACE_ENV` | `development` | Deployment environment                                  |
+| `PROD_API_HOST`   | `127.0.0.1`   | IP address for production API host                      |
+
+### dspace variables
+
+| Variable        | Default   | Description                                                  |
+| --------------- | --------- | ------------------------------------------------------------ |
+| `METRICS_TOKEN` | _(unset)_ | Require `Authorization: Bearer` for the `/metrics` endpoint |
 
 token.place also honours variables such as `TOKEN_PLACE_ENV` and API tokens
 documented in its README. The dspace frontend reads values like
 `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Populate these
 secrets in the respective `.env` files before exposing the services.
 
-Add more calls to `ensure_env` under the `# extra-start` marker in
-`init-env.sh` for additional repositories. See each project's README for the
-full list of configuration options.
+Populate these files with values from each project's README. Add more calls to
+`ensure_env` under the `# extra-start` marker in `init-env.sh` for additional
+repositories.
 
 ## 6. Extend with new repositories
 
-Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
-`/opt/projects`. To wire them into the stack:
+1. Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
+   `/opt/projects`.
+2. Add services to `/opt/projects/docker-compose.yml` between `# extra-start`
+   and `# extra-end`.
+3. Extend `init-env.sh` with `ensure_env` calls for new `.env` files.
+4. Reboot or run `sudo systemctl restart projects-compose` to apply changes.
 
-1. Add a service block to `/opt/projects/docker-compose.yml` between
-   `# extra-start` and `# extra-end`.
-2. Extend `init-env.sh` with an `ensure_env` call for the new repository so its
-   `.env` file exists on first boot.
-3. Reboot or run `sudo systemctl restart projects-compose` to apply the
-   changes.
-
-The image builder drops the token.place or dspace sections when the
+The image builder drops the token.place or dspace definitions when the
 corresponding `CLONE_*` flag is `false`, letting you build a minimal image and
 expand it later. Use these hooks to experiment with other projects and grow the
 image over time.
