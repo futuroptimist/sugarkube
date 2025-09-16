@@ -115,8 +115,12 @@ to set variables like ports, API URLs, or secrets.
 | dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
-for additional repositories. See each project's README for the full list of
-configuration options.
+for additional repositories. Common variables include:
+
+- **token.place:** `PORT`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`
+- **dspace:** `PORT`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+See each project's README for the full list of configuration options.
 
 ## 6. Extend with new repositories
 

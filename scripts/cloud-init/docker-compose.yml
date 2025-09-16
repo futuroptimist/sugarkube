@@ -10,7 +10,7 @@ services:
     ports:
       - "5000:5000"
     env_file:
-      - /opt/projects/token.place/.env
+      - /opt/projects/token.place/.env  # e.g. PORT, NEXTAUTH_SECRET
     restart: unless-stopped
   # tokenplace-end
   # dspace-start
@@ -22,7 +22,7 @@ services:
     ports:
       - "3000:3000"
     env_file:
-      - /opt/projects/dspace/frontend/.env
+      - /opt/projects/dspace/frontend/.env  # e.g. PORT, NEXT_PUBLIC_SUPABASE_URL
     restart: unless-stopped
   # dspace-end
   # extra-start
