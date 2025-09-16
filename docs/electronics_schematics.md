@@ -34,8 +34,10 @@ distribution needs (for example, add screw terminals, fuses and test points). Us
 [KiBot](https://github.com/INTI-CMNB/KiBot) with `.kibot/power_ring.yaml` or run the
 GitHub workflow to produce Gerber files, a PDF schematic and a BOM in
 `build/power_ring/`.
-The `scripts/checks.sh` helper now installs KiCad 9 automatically
-when missing to streamline exports.
+The `scripts/checks.sh` helper now installs KiCad 9 automatically when
+you modify `.kicad_*` files (or set `SUGARKUBE_FORCE_KICAD_INSTALL=1`),
+pulling the official 9.0 packages on Debian/Ubuntu or the Homebrew cask
+elsewhere so exports succeed without manual setup.
 
 The layout now includes a "SugarKube" copper label for easy identification.
 
