@@ -9,9 +9,10 @@ Build a Raspberry Pi OS image that boots with k3s and the
 1. In GitHub, open **Actions → pi-image → Run workflow**.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
-2. Download the artifact locally:
+2. Download the artifact and verify its checksum:
    ```bash
    ./scripts/download_pi_image.sh
+   sha256sum -c sugarkube.img.xz.sha256
    ```
    or grab it manually from the workflow run.
 3. Alternatively, build on your machine:
