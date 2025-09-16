@@ -23,11 +23,12 @@ Linux command line.
 1. Trigger the build in GitHub:
    - Open [Actions → pi-image → Run workflow][pi-image].
    - Enable **token.place** and **dspace** if you want those repos baked in.
-   - After the run succeeds, download `sugarkube.img.xz`:
+   - After the run succeeds, download and expand `sugarkube.img.xz`:
      ```bash
-     scripts/download_pi_image.sh
+     scripts/sugarkube_latest.sh
      ```
-     or grab it from the workflow run.
+     The wrapper saves the compressed archive, verifies the checksum, and expands `sugarkube.img`
+     under `~/sugarkube/images/`. Pass `--no-expand` to keep only the `.img.xz`.
 
    Alternatively, build locally:
    - Linux/macOS: `./scripts/build_pi_image.sh`
@@ -51,7 +52,8 @@ Linux command line.
      - Requires Docker Desktop running and Git for Windows installed
      - The script auto-falls back to a Dockerized build and sets up binfmt/qemu
      - Expect 45–120 minutes on Windows; ensure ≥30 GB free disk
-2. Verify the checksum: `sha256sum -c sugarkube.img.xz.sha256`
+2. The download script writes `sugarkube.img.xz.sha256`. Re-run `sha256sum -c` on that file if you
+   need to reconfirm the checksum before flashing.
 3. Flash the image to a microSD card using Raspberry Pi Imager
    - Set a unique hostname (e.g., `sugar-01`, `sugar-02`, `sugar-03`), enable SSH, and create a user
      with a strong password.

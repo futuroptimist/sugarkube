@@ -9,27 +9,21 @@ Build a Raspberry Pi OS image that boots with k3s and the
 1. In GitHub, open **Actions → pi-image → Run workflow**.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
-2. Download the artifact and verify its checksum:
+2. Download, verify, and expand the artifact automatically:
    ```bash
-   ./scripts/download_pi_image.sh
-   sha256sum -c sugarkube.img.xz.sha256
+   ./scripts/sugarkube_latest.sh
    ```
-   or grab it manually from the workflow run.
-3. Verify the download's checksum to ensure integrity:
-   ```bash
-   sha256sum sugarkube.img.xz
-   ```
-   Compare the output to the hash shown in the workflow run.
-4. Alternatively, build on your machine:
+   The script resolves the latest GitHub Release, resumes partial downloads, verifies the
+   SHA-256 checksum, and stores `sugarkube.img.xz` plus the expanded `sugarkube.img` under
+   `~/sugarkube/images/`. Pass `--no-expand` to keep only the compressed archive or
+   `-d <dir>` to override the destination.
+3. Alternatively, build on your machine:
    ```bash
    ./scripts/build_pi_image.sh
    ```
    Skip either project with `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`.
-4. Verify the image to ensure it isn't corrupted:
-   ```bash
-   sha256sum -c sugarkube.img.xz.sha256
-   ```
-   The command prints `sugarkube.img.xz: OK` when the checksum matches.
+4. The download script already writes `sugarkube.img.xz.sha256`. Re-run
+   `sha256sum -c sugarkube.img.xz.sha256` if you need to confirm integrity later.
 
 ## 2. Flash with Raspberry Pi Imager
 - Write `sugarkube.img.xz` to a microSD card with Raspberry Pi Imager.
