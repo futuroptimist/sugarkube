@@ -10,10 +10,11 @@ services:
     ports:
       - "5000:5000"
     env_file:
-      # Define TOKEN_PLACE_ENV, SUPABASE_URL, SUPABASE_KEY and PORT in this file
+      # Define TOKEN_PLACE_ENV, SUPABASE_URL, SUPABASE_KEY, PORT, NEXTAUTH_SECRET, NEXTAUTH_URL in this file
       - /opt/projects/token.place/.env
     restart: unless-stopped
   # tokenplace-end
+
   # dspace-start
   dspace:
     build:
@@ -23,10 +24,11 @@ services:
     ports:
       - "3000:3000"
     env_file:
-      # Define NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and PORT here
+      # Define NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, PORT in this file
       - /opt/projects/dspace/frontend/.env
     restart: unless-stopped
   # dspace-end
+
   # extra-start
   # Add additional services below and ensure matching .env entries in init-env.sh.
   # Example:

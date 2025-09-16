@@ -117,6 +117,14 @@ to set variables like ports, API URLs, or secrets.
 | token.place | `/opt/projects/token.place/.env`     | `TOKEN_PLACE_ENV`, `SUPABASE_URL`, `SUPABASE_KEY`, `PORT` |
 | dspace      | `/opt/projects/dspace/frontend/.env` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `PORT` |
 
+Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
+for additional repositories. Common variables include:
+
+- **token.place:** `PORT`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`
+- **dspace:** `PORT`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+See each project's README for the full list of configuration options.
+
 ### token.place variables
 
 | Variable          | Default       | Description                                             |
