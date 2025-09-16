@@ -36,13 +36,16 @@ docker compose version
    | Variable | Default | Description |
    | --- | --- | --- |
    | `CLONE_TOKEN_PLACE` | `true` | Clone the `token.place` repository. |
+   | `TOKEN_PLACE_BRANCH` | `main` | `token.place` branch to check out. |
    | `CLONE_DSPACE` | `true` | Clone the `dspace` repository. |
+   | `DSPACE_BRANCH` | `v3` | `dspace` branch to check out. |
    | `CLONE_SUGARKUBE` | `false` | Include this repo in the image. |
    | `EXTRA_REPOS` | _(empty)_ | Space-separated Git URLs for extra projects. |
 
-   Adjust the stack before building by editing
-   [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
-   and inserting services between the `# extra-start` and `# extra-end` markers.
+   Add services to [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
+   between the `# extra-start` and `# extra-end` markers and mirror those entries in
+   [`scripts/cloud-init/init-env.sh`](../scripts/cloud-init/init-env.sh) with matching `ensure_env`
+   calls.
 
 ## 2. Flash with Raspberry Pi Imager
 
@@ -129,6 +132,11 @@ to set variables like ports, API URLs, or secrets.
 | Variable        | Default   | Description                                                  |
 | --------------- | --------- | ------------------------------------------------------------ |
 | `METRICS_TOKEN` | _(unset)_ | Require `Authorization: Bearer` for the `/metrics` endpoint |
+
+token.place also honours variables such as `TOKEN_PLACE_ENV` and API tokens
+documented in its README. The dspace frontend reads values like
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Populate these
+secrets in the respective `.env` files before exposing the services.
 
 Populate these files with values from each project's README. Add more calls to
 `ensure_env` under the `# extra-start` marker in `init-env.sh` for additional
