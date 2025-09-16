@@ -36,13 +36,16 @@ docker compose version
    | Variable | Default | Description |
    | --- | --- | --- |
    | `CLONE_TOKEN_PLACE` | `true` | Clone the `token.place` repository. |
+   | `TOKEN_PLACE_BRANCH` | `main` | `token.place` branch to check out. |
    | `CLONE_DSPACE` | `true` | Clone the `dspace` repository. |
+   | `DSPACE_BRANCH` | `v3` | `dspace` branch to check out. |
    | `CLONE_SUGARKUBE` | `false` | Include this repo in the image. |
    | `EXTRA_REPOS` | _(empty)_ | Space-separated Git URLs for extra projects. |
 
-   Adjust the stack before building by editing
-   [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
-   and inserting services between the `# extra-start` and `# extra-end` markers.
+   Add services to [`scripts/cloud-init/docker-compose.yml`](../scripts/cloud-init/docker-compose.yml)
+   between the `# extra-start` and `# extra-end` markers and mirror those entries in
+   [`scripts/cloud-init/init-env.sh`](../scripts/cloud-init/init-env.sh) with matching `ensure_env`
+   calls.
 
 ## 2. Flash with Raspberry Pi Imager
 
@@ -109,10 +112,10 @@ helper that creates blank files when a project omits an example, and seeds a
 default `PORT` so containers start with predictable endpoints. Edit these files
 to set variables like ports, API URLs, or secrets.
 
-| Service     | Path to env file                     | Example     |
-| ----------- | ------------------------------------ | ----------- |
-| token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
-| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
+| Service     | Path to env file                     | Key variables (examples) |
+| ----------- | ------------------------------------ | ------------------------ |
+| token.place | `/opt/projects/token.place/.env`     | `TOKEN_PLACE_ENV`, `SUPABASE_URL`, `SUPABASE_KEY`, `PORT` |
+| dspace      | `/opt/projects/dspace/frontend/.env` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `PORT` |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. Common variables include:
@@ -122,13 +125,41 @@ for additional repositories. Common variables include:
 
 See each project's README for the full list of configuration options.
 
+### token.place variables
+
+| Variable          | Default       | Description                                             |
+| ----------------- | ------------- | ------------------------------------------------------- |
+| `API_RATE_LIMIT`  | `60/hour`     | Per-IP rate limit for API requests                      |
+| `API_DAILY_QUOTA` | `1000/day`    | Per-IP daily request quota                              |
+| `USE_MOCK_LLM`    | `0`           | Use mock LLM instead of downloading a model (`1` = yes) |
+| `TOKEN_PLACE_ENV` | `development` | Deployment environment                                  |
+| `PROD_API_HOST`   | `127.0.0.1`   | IP address for production API host                      |
+
+### dspace variables
+
+| Variable        | Default   | Description                                                  |
+| --------------- | --------- | ------------------------------------------------------------ |
+| `METRICS_TOKEN` | _(unset)_ | Require `Authorization: Bearer` for the `/metrics` endpoint |
+
+token.place also honours variables such as `TOKEN_PLACE_ENV` and API tokens
+documented in its README. The dspace frontend reads values like
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Populate these
+secrets in the respective `.env` files before exposing the services.
+
+Populate these files with values from each project's README. Add more calls to
+`ensure_env` under the `# extra-start` marker in `init-env.sh` for additional
+repositories.
+
 ## 6. Extend with new repositories
 
-Pass Git URLs via `EXTRA_REPOS` to clone additional projects into `/opt/projects`.
-Add services to `/opt/projects/docker-compose.yml` between `# extra-start` and
-`# extra-end`, and extend `init-env.sh` with any new `.env` files, following the
-token.place and dspace examples. The image builder drops the token.place or
-dspace definitions when the corresponding `CLONE_*` flag is `false`, letting you
-build a minimal image and expand it later.
+1. Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
+   `/opt/projects`.
+2. Add services to `/opt/projects/docker-compose.yml` between `# extra-start`
+   and `# extra-end`.
+3. Extend `init-env.sh` with `ensure_env` calls for new `.env` files.
+4. Reboot or run `sudo systemctl restart projects-compose` to apply changes.
 
-Use these hooks to experiment with other projects and grow the image over time.
+The image builder drops the token.place or dspace definitions when the
+corresponding `CLONE_*` flag is `false`, letting you build a minimal image and
+expand it later. Use these hooks to experiment with other projects and grow the
+image over time.

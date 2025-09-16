@@ -6,7 +6,10 @@ for more advanced setups.
 ## Batteries
 Several chemistries are common in small solar installations:
 - **Lead-acid** (SLA or AGM) – inexpensive but heavy and less tolerant of deep discharge.
-- **LiFePO4** – lightweight and long-lived, ideal for off-grid electronics.
+- **LiFePO4** – lightweight and long-lived, ideal for off-grid electronics. Most LiFePO4 packs ship
+  with a [battery management system (BMS)](https://batteryuniversity.com/article/bu-302)
+  that balances cells and protects against over/under-voltage. If you're building a pack from bare
+  cells, integrate a BMS to prevent damage and improve safety.
 
 Choose a capacity large enough for a day or two of autonomy. Multiply your daily watt-hour use by
 the number of backup days and divide by the battery's usable depth of discharge (0.8 for LiFePO4,
@@ -16,6 +19,7 @@ the number of backup days and divide by the battery's usable depth of discharge 
 capacity_wh = daily_wh * days / depth_of_discharge
 capacity_ah = capacity_wh / 12  # for a 12 V system
 ```
+Adjust `12` to match your system voltage if using a 24 V or 48 V bank.
 
 For example, a 300 Wh daily load with two days of backup and an 80% depth of discharge requires:
 
