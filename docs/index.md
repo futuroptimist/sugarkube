@@ -6,7 +6,10 @@ so anyone can replicate the setup.
 Greenery is encouraged around the cube. Vines can climb the extrusions while
 herbs and shade-loving plants enjoy the cover of the solar panels.
 
-![solar cube](images/solar_cube.jpg)
+![Diagram of the Sugarkube solar cube showing panels, electronics, and greenery](images/sugarkube_diagram.svg)
+
+*Figure: Power from the solar panels flows through the charge controller and batteries to the
+Pi cluster and aquarium aerator while the frame supports climbing plants.*
 
 ## Getting Started
 Review the safety notes before working with power components.
