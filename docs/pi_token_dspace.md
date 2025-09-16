@@ -130,6 +130,11 @@ to set variables like ports, API URLs, or secrets.
 | --------------- | --------- | ------------------------------------------------------------ |
 | `METRICS_TOKEN` | _(unset)_ | Require `Authorization: Bearer` for the `/metrics` endpoint |
 
+token.place also honours variables such as `TOKEN_PLACE_ENV` and API tokens
+documented in its README. The dspace frontend reads values like
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Populate these
+secrets in the respective `.env` files before exposing the services.
+
 Populate these files with values from each project's README. Add more calls to
 `ensure_env` under the `# extra-start` marker in `init-env.sh` for additional
 repositories.

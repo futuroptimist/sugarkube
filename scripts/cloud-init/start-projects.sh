@@ -9,12 +9,12 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Show engine and compose versions for diagnostics
-docker --version || true
+docker --version
 if ! docker compose version >/dev/null 2>&1; then
   echo "docker compose plugin not found; skipping ${svc}" >&2
   exit 0
 fi
-docker compose version || true
+docker compose version
 
 # Seed .env files before the service starts so defaults exist
 if [ -x /opt/projects/init-env.sh ]; then
@@ -36,3 +36,7 @@ if systemctl list-unit-files | grep -q "^${svc}"; then
 else
   echo "${svc} not found; skipping" >&2
 fi
+
+# extra-start
+# Enable additional services here for future repositories.
+# extra-end
