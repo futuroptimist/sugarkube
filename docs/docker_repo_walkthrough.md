@@ -158,6 +158,36 @@ curl https://dspace.example.com  # via Cloudflare
 docker compose down
 ```
 
+### Build both images with Buildx Bake
+
+Use [Docker Buildx Bake](https://docs.docker.com/build/bake/) to compile
+token.place and dspace images in one step:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-bake.hcl
+group "default" {
+  targets = ["tokenplace", "dspace"]
+}
+
+target "tokenplace" {
+  context    = "token.place"
+  dockerfile = "docker/Dockerfile.server"
+  platforms  = ["linux/arm64"]
+  tags       = ["tokenplace:latest"]
+}
+
+target "dspace" {
+  context   = "dspace/frontend"
+  platforms = ["linux/arm64"]
+  tags      = ["dspace-frontend:latest"]
+}
+EOF
+docker buildx bake --load
+docker run -d --name tokenplace -p 5000:5000 tokenplace:latest
+docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend:latest
+```
+
 ### Auto-start token.place and dspace on boot
 
 The Cloudflare-ready Pi image ships a `projects-compose` service that calls
