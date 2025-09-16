@@ -2,10 +2,20 @@
   "id": "kicad-export-pcbnew-missing",
   "date": "2025-08-22",
   "component": "kicad-export",
-  "rootCause": "kibot failed: cannot import pcbnew Python module, KiCad Python support missing",
-  "resolution": "Install KiCad with Python bindings and ensure pcbnew module is on PYTHONPATH or use KiCad 9+ container",
+  "dateRanges": [
+    { "start": "2025-08-22", "end": "2025-08-23" },
+    { "start": "2025-08-27", "end": "2025-08-27" },
+    { "start": "2025-08-29", "end": "2025-08-29" },
+    { "start": "2025-09-07", "end": "2025-09-08" },
+    { "start": "2025-09-11", "end": "2025-09-11" },
+    { "start": "2025-09-13", "end": "2025-09-14" }
+  ],
+  "rootCause": "Repeated KiBot runs could not import the KiCad 9 `pcbnew` module because KiCad was never provisioned on ad-hoc hosts. Whenever electronics commits touched KiCad assets, the helper script only warned about the missing dependency so exports failed across the listed windows.",
+  "resolution": "Teach scripts/checks.sh to detect KiCad or KiBot assets in flight and automatically install KiCad 9 (via the official apt repository or Homebrew). If provisioning still fails the script stops immediately, ensuring missing dependencies are fixed before rerunning KiBot.",
   "references": [
     "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml",
-    "kibot-check"
+    "kibot-check",
+    "scripts/checks.sh",
+    "~/.local/bin/kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml"
   ]
 }

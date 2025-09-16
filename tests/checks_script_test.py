@@ -273,6 +273,79 @@ def test_fails_when_flake8_fails(tmp_path: Path, script: Path) -> None:
     assert result.returncode == 1
 
 
+def test_installs_kicad_when_kicad_assets_change(tmp_path: Path, script: Path) -> None:
+    # Remove the stub pcbnew module so the script attempts installation.
+    pcbnew_stub = tmp_path / "pcbnew.py"
+    pcbnew_stub.unlink()
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "board.kicad_pcb").write_text("")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    apt_log = tmp_path / "apt.log"
+    repo_log = tmp_path / "add-repo.log"
+
+    for cmd in [
+        "flake8",
+        "isort",
+        "black",
+        "pytest",
+        "pyspelling",
+        "linkchecker",
+        "aspell",
+        "npm",
+        "npx",
+        "pip",
+    ]:
+        f = fake_bin / cmd
+        f.write_text("#!/bin/bash\nexit 0\n")
+        f.chmod(0o755)
+
+    python_cmd = fake_bin / "python"
+    python_cmd.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+    python_cmd.chmod(0o755)
+
+    apt_get = fake_bin / "apt-get"
+    apt_get.write_text(
+        f"""#!/bin/bash
+echo "$@" >> {apt_log}
+if [[ " $* " == *" install "* && " $* " == *" kicad"* ]]; then
+  cat <<'PY' > {tmp_path}/pcbnew.py
+# stub KiCad pcbnew module
+PY
+fi
+exit 0
+"""
+    )
+    apt_get.chmod(0o755)
+
+    add_repo = fake_bin / "add-apt-repository"
+    add_repo.write_text(
+        f"""#!/bin/bash
+echo "$@" >> {repo_log}
+exit 0
+"""
+    )
+    add_repo.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PYTHONPATH"] = str(tmp_path)
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "install -y kicad" in apt_log.read_text()
+    assert pcbnew_stub.exists()
+
+
 def test_installs_python_tools_when_missing(tmp_path: Path, script: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
