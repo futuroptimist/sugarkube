@@ -19,6 +19,11 @@ Build a Raspberry Pi OS image that boots with k3s and the
    ./scripts/build_pi_image.sh
    ```
    Skip either project with `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`.
+4. Verify the image to ensure it isn't corrupted:
+   ```bash
+   sha256sum -c sugarkube.img.xz.sha256
+   ```
+   The command prints `sugarkube.img.xz: OK` when the checksum matches.
 
 ## 2. Flash with Raspberry Pi Imager
 - Write `sugarkube.img.xz` to a microSD card with Raspberry Pi Imager.
