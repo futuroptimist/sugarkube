@@ -57,9 +57,10 @@ The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 to include this repo and pass space-separated Git URLs in `EXTRA_REPOS` to pull
 additional projects.
 `start-projects.sh` enables the optional `projects-compose` systemd unit on
-first boot and now checks for `systemctl`, skipping quietly when systemd isn't
-present. The build script also verifies `start-projects.sh` and `init-env.sh`
-are non-empty to avoid embedding blank hooks.
+first boot, logs Docker engine and compose plugin versions for diagnostics,
+and checks for `systemctl`, skipping quietly when systemd isn't present. The
+build script also verifies `start-projects.sh` and `init-env.sh` are non-empty
+to avoid embedding blank hooks.
 
 On first boot `init-env.sh` copies each project's `.env.example` to `.env` and
 sets its mode to `0600` so secrets stay private.
