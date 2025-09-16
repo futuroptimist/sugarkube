@@ -46,6 +46,10 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo systemctl status projects-compose.service
   ```
+- If the service fails, inspect logs to troubleshoot:
+  ```bash
+  sudo journalctl -u projects-compose.service --no-pager
+  ```
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
