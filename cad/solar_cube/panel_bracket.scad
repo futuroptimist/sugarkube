@@ -18,8 +18,8 @@ gusset        = true;         // add triangular support in inner corner
 gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
 
 // insert / screw parameters
-insert_od         = 5.0;      // brass insert outer Ø (mm)
-insert_length     = 5.0;
+insert_od         = 6.3;      // brass insert outer Ø (mm) for typical M5 insert
+insert_length     = 6.0;      // insert length (mm)
 insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
 screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
