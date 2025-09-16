@@ -21,6 +21,7 @@ Review the safety notes before working with power components.
 - [electronics_schematics.md](electronics_schematics.md) — KiCad and Fritzing designs
 - [pi_image_quickstart.md](pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
+- [pi_image_sugar_checklist.md](pi_image_sugar_checklist.md) — backlog of DX upgrades for the Pi image
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
