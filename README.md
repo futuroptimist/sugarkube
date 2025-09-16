@@ -94,6 +94,12 @@ linkchecker --no-warnings README.md docs/
 The `--no-warnings` flag prevents linkchecker from returning a non-zero exit
 code on benign Markdown parsing warnings.
 
+Scan staged changes for secrets before committing:
+
+```bash
+git diff --cached | ./scripts/scan-secrets.py
+```
+
 If the repository includes a `package.json` but `npm` or `package-lock.json`
 are missing, `scripts/checks.sh` will warn and skip JavaScript-specific
 checks.
