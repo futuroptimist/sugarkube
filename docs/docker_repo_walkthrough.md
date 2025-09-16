@@ -149,6 +149,9 @@ docker compose up -d
 docker compose logs -f tokenplace dspace
 curl http://localhost:5000
 curl http://localhost:3002
+curl https://tokenplace.example.com  # via Cloudflare
+curl https://dspace.example.com  # via Cloudflare
+# Both commands should return HTML to confirm remote access
 docker compose down
 ```
 
