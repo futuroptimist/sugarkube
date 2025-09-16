@@ -477,6 +477,14 @@ def _run_build_script(tmp_path, env):
     shutil.copy(init_env_src, init_env_dest)
     init_env_dest.chmod(0o755)
 
+    first_boot_src = cloud_init_src / "first-boot.sh"
+    first_boot_dest = ci_dir / "first-boot.sh"
+    shutil.copy(first_boot_src, first_boot_dest)
+    first_boot_dest.chmod(0o755)
+
+    first_boot_service_src = cloud_init_src / "sugarkube-first-boot.service"
+    shutil.copy(first_boot_service_src, ci_dir / "sugarkube-first-boot.service")
+
     result = subprocess.run(
         ["/bin/bash", str(script)],
         env=env,

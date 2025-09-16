@@ -1,0 +1,14 @@
+[Unit]
+Description=Sugarkube first boot verification and report
+Wants=network-online.target
+After=network-online.target docker.service k3s.service
+ConditionPathExists=!/var/lib/sugarkube/first-boot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sugarkube-first-boot.sh
+TimeoutStartSec=15min
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

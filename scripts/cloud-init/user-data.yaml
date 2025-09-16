@@ -173,9 +173,11 @@ runcmd:
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
   - [bash, -c, 'mkdir -p /var/log/journal && systemctl restart systemd-journald']
+  - [bash, -c, 'install -d -m 0755 /var/log/sugarkube /var/lib/sugarkube']
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
   - [bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -']
+  - [systemctl, enable, sugarkube-first-boot.service]
   - [/opt/projects/start-projects.sh]  # projects-runcmd
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']

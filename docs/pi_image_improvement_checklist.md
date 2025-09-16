@@ -19,7 +19,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Provide a `sugarkube-latest` convenience wrapper for downloading + verifying in one step.
   - Added `scripts/sugarkube-latest`, which defaults to release downloads while
     still accepting all downloader flags.
-- [ ] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
+- [x] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
+  - Added `scripts/install_sugarkube.sh` which bootstraps `gh`, downloads the release, verifies the checksum, and expands the raw image with optional `--dry-run` and `--output` flags.
 
 ---
 
@@ -32,17 +33,19 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
 - [ ] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
 - [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
-- [ ] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
+- [x] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
+  - Added `docs/pi_image_headless_provisioning.md` covering secrets management, `wpa_supplicant.conf` staging, and build-time token injection.
 - [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
 
 ---
 
 ## First Boot Confidence & Self-Healing
-- [ ] Install `first-boot.service` that:
+- [x] Install `first-boot.service` that:
   - Waits for network, expands filesystem.
   - Runs `pi_node_verifier.sh` automatically.
   - Publishes HTML/JSON status (cloud-init, k3s, token.place, dspace) to `/boot/first-boot-report`.
-- [ ] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
+- [x] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
+  - Added `scripts/cloud-init/first-boot.sh` and `sugarkube-first-boot.service` which expand the filesystem, wait for networking, execute `pi_node_verifier.sh --json`, and emit HTML/JSON/text bundles under `/boot/first-boot-report/`.
 - [ ] Add self-healing units that retry container pulls, rerun `cloud-init clean`, or reboot into maintenance with actionable logs.
 - [ ] Provide optional telemetry hooks to publish anonymized health data to a shared dashboard.
 
@@ -83,7 +86,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.
 - [ ] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
 - [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
-- [ ] Document how to run integration tests locally via `act`.
+- [x] Document how to run integration tests locally via `act`.
+  - Expanded `docs/pi_image_builder_design.md` with `act` usage for the `unit` and `build` jobs, including required runner images and inputs.
 - [ ] Publish a conformance badge in the README showing last successful hardware boot.
 
 ---
@@ -108,7 +112,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
 - [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
 - [ ] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
-- [ ] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
+- [x] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
+  - The first-boot service copies `/etc/rancher/k3s/k3s.yaml` (with a network-based server URL) and the node token to `/boot/` alongside the report bundle.
 - [ ] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
 
 ---
@@ -116,7 +121,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ## Troubleshooting & Community
 - [ ] Ship a golden recovery console image or partition with CLI tools to reflash, fetch logs, and reinstall k3s without another machine.
 - [ ] Extend `outages/` with playbooks for scenarios like cloud-init hangs, SSD clone stalls, or projects-compose failures.
-- [ ] Add an issue template asking contributors to reference this checklist so coverage gaps are visible.
+- [x] Add an issue template asking contributors to reference this checklist so coverage gaps are visible.
+  - Added `.github/ISSUE_TEMPLATE/pi-image.md` prompting reporters to cite the checklist and attach first-boot reports.
 
 ---
 

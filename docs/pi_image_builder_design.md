@@ -81,6 +81,37 @@
   packages. Override to build a full image. An empty value halts the script before
   running pi-gen.
 
+## Running workflows locally with `act`
+- Install [`act`](https://github.com/nektos/act) 0.2.60 or newer. The jobs expect
+  Docker with at least 4 CPUs and 12 GB of RAM available.
+- Pull the standard Ubuntu runner image once so subsequent runs start quickly:
+  ```bash
+  act --pull=false --image-default ghcr.io/catthehacker/ubuntu:act-latest
+  ```
+- Execute the lightweight unit job (runs collector tests) exactly as CI does:
+  ```bash
+  act pull_request \
+    --workflows .github/workflows/pi-image.yml \
+    --job unit \
+    --image ghcr.io/catthehacker/ubuntu:act-latest
+  ```
+- Reproduce the full image build by simulating a `workflow_dispatch` event. Pass
+  the same booleans exposed in the UI to control which repositories are baked
+  into `/opt/projects`:
+  ```bash
+  act workflow_dispatch \
+    --workflows .github/workflows/pi-image.yml \
+    --job build \
+    --input clone_sugarkube=false \
+    --input clone_token_place=true \
+    --input clone_dspace=true \
+    --image ghcr.io/catthehacker/ubuntu:act-latest \
+    --container-architecture linux/amd64
+  ```
+  The build job downloads pi-gen, installs binfmt handlers, and writes the
+  compressed image to `deploy/` in the working directory. It needs ~25 GB of
+  free disk space.
+
 ## Operations & Recovery
 - If apt stalls: rerun; caches and retries reduce recurrence
 - If mirrors fail: the hook should auto-rewrite to stable mirrors. If timeouts persist,

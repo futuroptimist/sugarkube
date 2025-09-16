@@ -94,6 +94,8 @@ CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-c
 PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.yml}"
 START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
 INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
+FIRST_BOOT_SCRIPT_PATH="${FIRST_BOOT_SCRIPT_PATH:-${CLOUD_INIT_DIR}/first-boot.sh}"
+FIRST_BOOT_SERVICE_PATH="${FIRST_BOOT_SERVICE_PATH:-${CLOUD_INIT_DIR}/sugarkube-first-boot.service}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
@@ -158,6 +160,22 @@ if [ ! -f "${INIT_ENV_PATH}" ]; then
 fi
 if [ ! -s "${INIT_ENV_PATH}" ]; then
   echo "Init env script is empty: ${INIT_ENV_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${FIRST_BOOT_SCRIPT_PATH}" ]; then
+  echo "First boot script not found: ${FIRST_BOOT_SCRIPT_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${FIRST_BOOT_SCRIPT_PATH}" ]; then
+  echo "First boot script is empty: ${FIRST_BOOT_SCRIPT_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${FIRST_BOOT_SERVICE_PATH}" ]; then
+  echo "First boot service not found: ${FIRST_BOOT_SERVICE_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${FIRST_BOOT_SERVICE_PATH}" ]; then
+  echo "First boot service is empty: ${FIRST_BOOT_SERVICE_PATH}" >&2
   exit 1
 fi
 
@@ -279,6 +297,11 @@ else
   install -Dm755 "${INIT_ENV_PATH}" \
     "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/init-env.sh"
 fi
+
+install -Dm755 "${FIRST_BOOT_SCRIPT_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/usr/local/sbin/sugarkube-first-boot.sh"
+install -Dm644 "${FIRST_BOOT_SERVICE_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/sugarkube-first-boot.service"
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {

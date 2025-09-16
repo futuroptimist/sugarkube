@@ -6,14 +6,23 @@ Build a Raspberry Pi OS image that boots with k3s and the
 
 ## 1. Build or download the image
 
-1. Fetch the latest release with checksum verification:
-   ```bash
-   ./scripts/sugarkube-latest
-   ```
-   The script resolves the newest GitHub release, resumes partially-downloaded
-   artifacts, verifies the SHA-256 checksum, and stores the image at
-   `~/sugarkube/images/sugarkube.img.xz`. Override the destination with
-   `--output /path/to/custom.img.xz` when needed.
+1. Fetch the latest release with checksum verification. Use whichever path fits
+   your workflow:
+   - **One-liner installer** – downloads, verifies, and expands the image:
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube.sh | bash
+     ```
+     Add `--dry-run` to inspect the steps or pass `--output` to change the raw
+     image location. The installer installs `gh` if it is missing, resumes
+     partial downloads, and leaves `sugarkube.img` and `.img.xz` in
+     `~/sugarkube/images/` by default.
+   - **Repository script** – only downloads + verifies the release artifact:
+     ```bash
+     ./scripts/sugarkube-latest
+     ```
+     Use this when working inside the repository or when you want to keep the
+     compressed `.img.xz` file for flashing utilities that understand it
+     directly.
 2. In GitHub, open **Actions → pi-image → Run workflow** for a fresh build.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
@@ -50,6 +59,10 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo journalctl -u projects-compose.service --no-pager
   ```
+- Review `/boot/first-boot-report/` or `/boot/first-boot-report.txt` for a
+  JSON/HTML/text status bundle created by `sugarkube-first-boot.service`. The
+  report lists filesystem expansion, networking status, verifier output, and
+  the exported kubeconfig + node token paths.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
