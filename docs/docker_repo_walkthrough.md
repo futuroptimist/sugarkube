@@ -34,6 +34,9 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
+   - `token.place`: `docker buildx build --platform linux/arm64 -f docker/Dockerfile.server \
+     -t tokenplace . --load` then `docker run -d --name tokenplace -p 5000:5000 tokenplace`.
+   - `dspace`: `cd dspace/frontend && docker compose up -d`.
 6. Verify the container is running:
    - Single container: `docker ps --format '{{.Names}}' | grep myapp`
    - Compose project: `docker compose ps`
@@ -149,7 +152,40 @@ docker compose up -d
 docker compose logs -f tokenplace dspace
 curl http://localhost:5000
 curl http://localhost:3002
+curl https://tokenplace.example.com  # via Cloudflare
+curl https://dspace.example.com  # via Cloudflare
+# Both commands should return HTML to confirm remote access
 docker compose down
+```
+
+### Build both images with Buildx Bake
+
+Use [Docker Buildx Bake](https://docs.docker.com/build/bake/) to compile
+token.place and dspace images in one step:
+
+```sh
+cd /opt/projects
+cat <<'EOF' > docker-bake.hcl
+group "default" {
+  targets = ["tokenplace", "dspace"]
+}
+
+target "tokenplace" {
+  context    = "token.place"
+  dockerfile = "docker/Dockerfile.server"
+  platforms  = ["linux/arm64"]
+  tags       = ["tokenplace:latest"]
+}
+
+target "dspace" {
+  context   = "dspace/frontend"
+  platforms = ["linux/arm64"]
+  tags      = ["dspace-frontend:latest"]
+}
+EOF
+docker buildx bake --load
+docker run -d --name tokenplace -p 5000:5000 tokenplace:latest
+docker run -d --name dspace-frontend -p 3002:3002 dspace-frontend:latest
 ```
 
 ### Auto-start token.place and dspace on boot

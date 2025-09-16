@@ -20,6 +20,7 @@ pre-commit run --all-files
 git diff --cached | ./scripts/scan-secrets.py
 ```
 `scan-secrets.py` skips scanning itself even if diff paths omit the `b/` prefix.
+Findings are printed to stderr so stdout remains clean for tooling.
 
 - If `README.md` or files under `docs/` change, also run:
 

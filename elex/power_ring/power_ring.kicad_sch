@@ -13,6 +13,7 @@
                 (comment 6 "Add fiducial markers for board orientation")
                 (comment 7 "Verify ground pour continuity around mounting holes")
                 (comment 8 "Double-check LED orientation during assembly")
+                (comment 9 "Review test point spacing for probe clearance; document fuse ratings in BOM")
         )
         (lib_symbols
 		(symbol "custom_pads_test:Antenna"

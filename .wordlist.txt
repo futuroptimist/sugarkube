@@ -5,6 +5,7 @@ Anthropic
 Avahi
 Bambu
 Bonjour
+Buildx
 CI
 CLI
 CLIs
@@ -36,7 +37,6 @@ LCD
 LLM
 LLMs
 LaTeX
-LiFePO
 LiFePO4
 MPPT
 MSYS

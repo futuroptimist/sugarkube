@@ -11,22 +11,22 @@
 size          = 40;           // leg length (mm)
 thickness     = 8;            // plate thickness (mm)
 beam_width    = 20;           // width to match 2020 extrusion (mm)
-edge_radius   = 4;            // default 4 mm outer-edge rounding
+edge_radius   = 3.5;          // default 3.5 mm radius avoids zero-thickness cores
 corner_segments = 48;         // higher sphere resolution for smoother edges
 hole_offset   = [0,0];        // XY offset of mounting hole from centre (mm)
 gusset        = true;         // add triangular support in inner corner
 gusset_size   = thickness*1.5; // leg length of gusset triangle (mm)
 
 // insert / screw parameters
-insert_od         = 5.0;      // brass insert outer Ø (mm)
-insert_length     = 5.0;
+insert_od         = 6.3;      // brass insert outer Ø (mm) for typical M5 insert
+insert_length     = 6.0;      // insert length (mm)
 insert_clearance  = 0.20;     // interference amount (mm)
 insert_hole_diam  = insert_od - insert_clearance;
 screw_nominal     = 5.0;      // nominal screw size for through-hole (mm)
 screw_clearance   = screw_nominal + 0.2; // through-hole Ø with clearance (mm)
 chamfer           = 1.0;      // lead-in chamfer (mm)
 
-nut_clearance     = 0.4;      // extra room for easier nut insertion (was 0.2)
+nut_clearance     = 0.5;      // extra room for easier nut insertion (was 0.4)
 nut_flat          = 8.0 + nut_clearance; // across flats for M5 nut (mm)
 
 nut_thick         = 4.0;      // nut thickness (mm)

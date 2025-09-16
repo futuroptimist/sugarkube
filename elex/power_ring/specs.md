@@ -19,10 +19,11 @@ The design may evolve as the project grows.
 - Test points for measuring battery voltage
 - Silkscreen labels for polarity and connector numbers
 - Fiducial markers to indicate board orientation for easier assembly
- - Title block comments record decoupling guidelines, high-current trace layout, thick traces
-   for high-current paths, connector labeling, export checks, board outline fit, BOM validation,
-   clearance rules for high-voltage nets, star topology to minimize voltage drop, ground
-   pour continuity around mounting holes, and LED orientation reminders
+- Title block comments record decoupling guidelines, high-current trace layout, thick traces
+  for high-current paths, connector labeling, export checks, board outline fit, BOM validation,
+  clearance rules for high-voltage nets, star topology to minimize voltage drop, ground pour
+  continuity around mounting holes, LED orientation reminders, test point spacing for probe
+  clearance, and fuse orientation checks
 
 These requirements are a starting point – modify the KiCad project as needed and
 update this file when the schematic changes.
