@@ -3,7 +3,8 @@
 
 The script reads a unified diff from stdin and searches for high-risk patterns
 such as API keys or tokens. If `ripsecrets` is available it will be used for a
-more thorough scan; otherwise a lightweight regex-based fallback is used.
+more thorough scan; otherwise a lightweight regex-based fallback is used. Any
+findings are printed to stderr so they don't pollute stdout.
 """
 from __future__ import annotations
 
@@ -69,7 +70,7 @@ def regex_scan(lines: Iterable[str]) -> bool:
             continue
         for pattern in PATTERNS:
             if pattern.search(line):
-                print(f"Possible secret: {line.rstrip()}")
+                print(f"Possible secret: {line.rstrip()}", file=sys.stderr)
                 return True
     return False
 

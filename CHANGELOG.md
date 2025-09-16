@@ -10,6 +10,7 @@
 * pi_carrier: set standoff diameter to 6.5 mm for added strength
 * pi_carrier: widen nut recess clearance to 0.4 mm for easier nut insertion
 * pi5_triple_carrier_rot45: widen nut recess clearance to 0.4 mm for easier nut insertion
+* panel_bracket: enlarge insert to 6.3 mm OD for common M5 heat‑set hardware
 
 ### Fixed
 * pi_carrier: standoff length increased from 20 mm to 22 mm (flush fit with PoE HAT)
