@@ -9,23 +9,16 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Show engine and compose versions for diagnostics
-docker --version || true
+docker --version
 if ! docker compose version >/dev/null 2>&1; then
   echo "docker compose plugin not found; skipping ${svc}" >&2
   exit 0
 fi
-docker compose version || true
+docker compose version
 
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "systemctl not found; skipping ${svc}" >&2
   exit 0
-fi
-
-if command -v docker >/dev/null 2>&1; then
-  docker --version
-  docker compose version
-else
-  echo "docker not found; skipping version checks" >&2
 fi
 
 if systemctl list-unit-files | grep -q "^${svc}"; then
@@ -33,3 +26,7 @@ if systemctl list-unit-files | grep -q "^${svc}"; then
 else
   echo "${svc} not found; skipping" >&2
 fi
+
+# extra-start
+# Enable additional services here for future repositories.
+# extra-end

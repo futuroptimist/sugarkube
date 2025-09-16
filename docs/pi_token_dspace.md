@@ -114,17 +114,28 @@ to set variables like ports, API URLs, or secrets.
 | token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
 | dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
 
-Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
-for additional repositories. See each project's README for the full list of
-configuration options.
+token.place also honours variables such as `TOKEN_PLACE_ENV` and API tokens
+documented in its README. The dspace frontend reads values like
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Populate these
+secrets in the respective `.env` files before exposing the services.
+
+Add more calls to `ensure_env` under the `# extra-start` marker in
+`init-env.sh` for additional repositories. See each project's README for the
+full list of configuration options.
 
 ## 6. Extend with new repositories
 
-Pass Git URLs via `EXTRA_REPOS` to clone additional projects into `/opt/projects`.
-Add services to `/opt/projects/docker-compose.yml` between `# extra-start` and
-`# extra-end`, and extend `init-env.sh` with any new `.env` files, following the
-token.place and dspace examples. The image builder drops the token.place or
-dspace definitions when the corresponding `CLONE_*` flag is `false`, letting you
-build a minimal image and expand it later.
+Pass Git URLs via `EXTRA_REPOS` to clone additional projects into
+`/opt/projects`. To wire them into the stack:
 
-Use these hooks to experiment with other projects and grow the image over time.
+1. Add a service block to `/opt/projects/docker-compose.yml` between
+   `# extra-start` and `# extra-end`.
+2. Extend `init-env.sh` with an `ensure_env` call for the new repository so its
+   `.env` file exists on first boot.
+3. Reboot or run `sudo systemctl restart projects-compose` to apply the
+   changes.
+
+The image builder drops the token.place or dspace sections when the
+corresponding `CLONE_*` flag is `false`, letting you build a minimal image and
+expand it later. Use these hooks to experiment with other projects and grow the
+image over time.
