@@ -5,6 +5,7 @@ Anthropic
 Avahi
 Bambu
 Bonjour
+Buildx
 CI
 CLI
 CLIs
