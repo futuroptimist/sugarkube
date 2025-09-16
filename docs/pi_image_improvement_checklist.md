@@ -1,74 +1,119 @@
 # Pi Image UX & Automation Improvement Checklist
 
-The `pi_carrier` cluster should feel "plug in and go." Use this list to guide
-upgrades that reduce manual work and ensure anyone can confidently boot a Pi,
-clone the SD card to SSD, and land in a healthy k3s cluster with `tokenplace`
-and `dspace` running.
+The `pi_carrier` cluster should feel "plug in and go." This checklist combines all ideas into a cohesive roadmap for reducing manual work so anyone can confidently boot a Pi, clone the SD card to SSD, and land in a healthy k3s cluster with **token.place** and **dspace** running.
 
-## Documentation polish
-- [ ] Merge `pi_image_quickstart.md`, `pi_image_builder_design.md`, and
-  `raspi_cluster_setup.md` into a single end-to-end guide with a 10-minute
-  "fast path" followed by deeper reference sections.
-- [ ] Embed an animated GIF (or short video) that shows downloading the artifact,
-  flashing with Raspberry Pi Imager, and confirming first boot so hesitant users
-  can visually follow along.
-- [ ] Add a printable one-page "field guide" (PDF) with the exact commands,
-  default credentials, and LED/status expectations for the first boot.
-- [ ] Expand troubleshooting tables that map LED patterns, `journalctl`
-  messages, and `kubectl` errors to likely fixes.
-- [ ] Document SSD cloning with both `rpi-clone` and `raspi-config`'s USB boot
-  flow, highlighting how to verify UUID updates.
-- [ ] Provide a checklist for prepping multiple Pis simultaneously (labeling
-  media, staggering boots, verifying k3s tokens).
+---
 
-## Automation & tooling
-- [ ] Publish an `imagectl` helper script that wraps
-  `scripts/download_pi_image.sh`, verifies the checksum, and launches Raspberry
-  Pi Imager in unattended mode via its CLI.
-- [ ] Add an `sd-flash` GitHub Action that writes the artifact to removable
-  media on a self-hosted runner for fleet provisioning days.
-- [ ] Ship a `first-boot.service` that waits for the network, expands the
-  filesystem, and emits a structured JSON status file to `/var/log/sugarkube/`
-  for later auditing.
-- [ ] Bundle a `post-flash` script that auto-configures Wi-Fi, SSH keys, and
-  hostname based on a YAML manifest checked into the repo.
-- [ ] Automate SSD cloning with an idempotent systemd service that:
-  1. Detects the target NVMe/SATA device.
-  2. Runs `sgdisk --replicate` and `rsync --info=progress2` to mirror the SD.
-  3. Updates `/boot/cmdline.txt` and `/etc/fstab` to the SSD UUID.
-  4. Touches `/var/log/sugarkube/ssd-clone.done` so the service runs only once.
-- [ ] Add a `k3s-ready.target` that depends on `projects-compose.service` and a
-  health-check script confirming `kubectl get nodes` returns `Ready`.
+## Release & Distribution Automation
+- [ ] Publish signed, versioned releases on every successful `main` merge, plus nightly rebuilds to keep dependencies fresh.  
+- [ ] Attach artifacts (`.img.xz`), checksums, and changelog snippets to GitHub Releases; include an “image availability” badge in `README.md` linking to the latest download and commit SHAs.  
+- [ ] Generate a machine-readable manifest (JSON/YAML) recording build inputs, git SHAs, and checksums for provenance verification. Cache pi-gen stage durations, verifier output, and commit IDs for reproducibility.  
+- [ ] Extend `scripts/download_pi_image.sh` (or `grab_pi_image.sh`) to:  
+  - Resolve the latest release automatically.  
+  - Resume partial downloads.  
+  - Verify checksums/signatures.  
+  - Emit progress bars/ETAs.  
+  - Store artifacts under `~/sugarkube/images/` by default.  
+- [ ] Provide a `sugarkube-latest` convenience wrapper for downloading + verifying in one step.  
+- [ ] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.  
 
-## Testing & verification
-- [ ] Extend the pi-image workflow to boot the artifact in QEMU, run smoke tests
-  (k3s status, `tokenplace` and `dspace` container health), and upload logs when
-  failures occur.
-- [ ] Add contract tests for `projects-compose.service` that assert required
-  ports are open and HTTP health endpoints respond within 30 seconds.
-- [ ] Build a hardware-in-the-loop test bench: USB-controlled PDU, HDMI capture,
-  and serial console that boots a physical Pi on each release and archives
-  telemetry.
-- [ ] Publish a conformance badge in the README that shows the last successful
-  hardware boot test and commit hash.
-- [ ] Capture `kubectl get events`, `helm list`, and `systemd-analyze blame`
-  outputs as artifacts for every pipeline run to accelerate triage.
+---
 
-## User experience refinements
-- [ ] Create a web UI (served from `docs/` via GitHub Pages) where users paste a
-  workflow run URL and receive direct download links plus flashing instructions
-  tailored to their OS.
-- [ ] Offer a `brew install sugarkube` tap that ships the helper scripts and a
-  `sugarkube setup` interactive wizard for macOS users.
-- [ ] Package a cross-platform desktop notifier that watches the workflow run
-  and prompts users when the artifact is ready to flash.
-- [ ] Add QR codes on the physical `pi_carrier` pointing to the quickstart and
-  troubleshooting docs.
-- [ ] Print the cluster token and default kubeconfig to `/boot/` so users can
-  grab them without SSH if something stalls during first boot.
-- [ ] Provide an optional `sugarkube-teams` webhook that posts boot/clone
-  progress to Slack or Matrix for remote monitoring.
+## Flashing & Provisioning Automation
+- [ ] Ship cross-platform flashing helpers (`flash_pi_media.sh`, PowerShell twin, or CLI in Go/Rust/Node) that:  
+  - Discover SD/USB devices.  
+  - Stream `.img.xz` directly with progress (`xzcat | dd`).  
+  - Verify written bytes with SHA-256.  
+  - Auto-eject media.  
+- [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.  
+- [ ] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.  
+- [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).  
+- [ ] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.  
+- [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.  
 
-Track progress directly in PR descriptions so contributors can tick items as
-they land. When the final checkboxes are complete the Pi experience should feel
-as sweet as the sugarkube name promises.
+---
+
+## First Boot Confidence & Self-Healing
+- [ ] Install `first-boot.service` that:  
+  - Waits for network, expands filesystem.  
+  - Runs `pi_node_verifier.sh` automatically.  
+  - Publishes HTML/JSON status (cloud-init, k3s, token.place, dspace) to `/boot/first-boot-report`.  
+- [ ] Log verifier results and migration steps to `/boot/first-boot-report.txt`.  
+- [ ] Add self-healing units that retry container pulls, rerun `cloud-init clean`, or reboot into maintenance with actionable logs.  
+- [ ] Provide optional telemetry hooks to publish anonymized health data to a shared dashboard.  
+
+---
+
+## SSD Migration & Storage Hardening
+- [ ] Automate SSD cloning via `ssd-clone.service` or `pi-clone.service`:  
+  - Detect attached SSD.  
+  - Replicate partition table (`sgdisk --replicate` or `ddrescue`).  
+  - `rsync --info=progress2` SD → SSD.  
+  - Update `/boot/cmdline.txt` and `/etc/fstab` with new UUID.  
+  - Touch `/var/log/sugarkube/ssd-clone.done`.  
+- [ ] Support dry-run + resume for cloning to reduce user hesitation.  
+- [ ] Provide post-clone validation: EEPROM boot order, fstab UUIDs, read/write stress tests.  
+- [ ] Publish a recovery guide and rollback script to fall back to SD if SSD checks fail.  
+- [ ] Offer an opt-in SSD health monitor (SMART/wear checks).  
+
+---
+
+## k3s, token.place & dspace Reliability
+- [ ] Add a `k3s-ready.target` that depends on `projects-compose.service` and only completes when `kubectl get nodes` returns `Ready`.  
+- [ ] Extend verifier to ensure:  
+  - k3s node is `Ready`.  
+  - `projects-compose.service` is active.  
+  - `token.place` and `dspace` endpoints respond on HTTPS/GraphQL.  
+- [ ] Provide post-boot hooks that apply pinned Helm/chart bundles and fail fast with logs if health checks fail.  
+- [ ] Bundle sample datasets and token.place collections for first-launch validation.  
+- [ ] Document and script multi-node join rehearsal for scaling clusters.  
+- [ ] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.  
+- [ ] Bundle lightweight exporters (Grafana Agent/Netdata/Prometheus) pre-configured for cluster observability.  
+
+---
+
+## Testing & CI Hardening
+- [ ] Extend pi-image workflow with QEMU smoke tests that boot the image, wait for cloud-init, run verifier, and upload logs.  
+- [ ] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.  
+- [ ] Integrate spellcheck/linkcheck gating (`pyspelling`, `linkchecker`) for docs.  
+- [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.  
+- [ ] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.  
+- [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.  
+- [ ] Document how to run integration tests locally via `act`.  
+- [ ] Publish a conformance badge in the README showing last successful hardware boot.  
+
+---
+
+## Documentation & Onboarding
+- [ ] Merge fragmented docs (`pi_image_quickstart.md`, `pi_image_builder_design.md`, `pi_image_cloudflare.md`, `raspi_cluster_setup.md`, etc.) into a single end-to-end “Pi Carrier Launch Playbook.”  
+- [ ] Structure guide with:  
+  - A 10-minute fast path.  
+  - Persona-based walkthroughs (solo builder, classroom, maintainer).  
+  - Deep reference sections with wiring photos.  
+- [ ] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.  
+- [ ] Embed GIFs, screencasts, or narrated clips showing download → flash → first boot → SSD clone → k3s readiness.  
+- [ ] Provide start-to-finish flowcharts mapping the journey.  
+- [ ] Expand troubleshooting tables linking LED patterns, journalctl logs, `kubectl` errors, and container health issues to fixes.  
+- [ ] Publish contributor guide mapping automation scripts to docs; enforce sync with linkchecker and spellchecker.  
+
+---
+
+## Developer Experience & User Refinements
+- [ ] Provide `make doctor` / `just verify` that chains download, checksum, flash dry-run, and linting.  
+- [ ] Offer a `brew install sugarkube` tap and `sugarkube setup` wizard for macOS.  
+- [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.  
+- [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.  
+- [ ] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.  
+- [ ] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.  
+- [ ] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.  
+
+---
+
+## Troubleshooting & Community
+- [ ] Ship a golden recovery console image or partition with CLI tools to reflash, fetch logs, and reinstall k3s without another machine.  
+- [ ] Extend `outages/` with playbooks for scenarios like cloud-init hangs, SSD clone stalls, or projects-compose failures.  
+- [ ] Add an issue template asking contributors to reference this checklist so coverage gaps are visible.  
+
+---
+
+Track progress directly in PR descriptions so contributors can tick items as they land. When the final checkboxes are complete, the Pi experience should feel as sweet as the sugarkube name promises.
