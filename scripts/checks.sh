@@ -114,6 +114,21 @@ $status_output
 EOF
   fi
 
+  # Some environments (notably GitHub Actions) occasionally suppress porcelain output when
+  # sparse checkout or unusual status config is active. Fall back to explicitly listing
+  # untracked and staged files so KiCad edits still trigger installation.
+  local ls_output
+  ls_output="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
+  if contains_kicad_path "$ls_output"; then
+    return 0
+  fi
+
+  local staged_output
+  staged_output="$(git diff --cached --name-only 2>/dev/null || true)"
+  if contains_kicad_path "$staged_output"; then
+    return 0
+  fi
+
   if [ -n "${CI:-}" ]; then
     local diff_output=""
     local diff_range=""

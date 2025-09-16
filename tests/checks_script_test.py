@@ -1,4 +1,6 @@
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -332,6 +334,102 @@ exit 0
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["PYTHONPATH"] = str(tmp_path)
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "install -y kicad" in apt_log.read_text()
+    assert pcbnew_stub.exists()
+
+
+def test_installs_kicad_when_git_status_suppressed(tmp_path: Path, script: Path) -> None:
+    pcbnew_stub = tmp_path / "pcbnew.py"
+    pcbnew_stub.unlink()
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "board.kicad_pcb").write_text("")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    apt_log = tmp_path / "apt.log"
+    repo_log = tmp_path / "add-repo.log"
+    real_git = shutil.which("git")
+    assert real_git is not None
+
+    for cmd in [
+        "flake8",
+        "isort",
+        "black",
+        "pytest",
+        "pyspelling",
+        "linkchecker",
+        "aspell",
+        "npm",
+        "npx",
+        "pip",
+    ]:
+        f = fake_bin / cmd
+        f.write_text("#!/bin/bash\nexit 0\n")
+        f.chmod(0o755)
+
+    python_cmd = fake_bin / "python"
+    python_cmd.write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+    python_cmd.chmod(0o755)
+
+    apt_get = fake_bin / "apt-get"
+    apt_get.write_text(
+        f"""#!/bin/bash
+echo "$@" >> {apt_log}
+if [[ " $* " == *" install "* && " $* " == *" kicad"* ]]; then
+  cat <<'PY' > {tmp_path}/pcbnew.py
+# stub KiCad pcbnew module
+PY
+fi
+exit 0
+"""
+    )
+    apt_get.chmod(0o755)
+
+    add_repo = fake_bin / "add-apt-repository"
+    add_repo.write_text(
+        f"""#!/bin/bash
+echo "$@" >> {repo_log}
+exit 0
+"""
+    )
+    add_repo.chmod(0o755)
+
+    git_stub = fake_bin / "git"
+    quoted_git = shlex.quote(real_git)
+    git_stub.write_text(
+        f"""#!/bin/bash
+if [ "$1" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "ls-files" ] && [ "$2" = "--others" ]; then
+  shift 2
+  echo "board.kicad_pcb"
+  exit 0
+fi
+if [ "$1" = "diff" ] && [ "$2" = "--cached" ]; then
+  shift 2
+  exit 0
+fi
+exec {quoted_git} "$@"
+"""
+    )
+    git_stub.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PYTHONPATH"] = str(tmp_path)
+    env["CI"] = "true"
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
