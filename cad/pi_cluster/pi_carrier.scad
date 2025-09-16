@@ -30,7 +30,7 @@ assert(standoff_diam >= insert_od + 2,
        "standoff_diam must be ≥ insert_od + 2");
 screw_clearance_diam = 3.2; // through-hole clearance, slightly oversize
 
-countersink_diam = 5.5; // enlarged to 5.5 mm for easier screw head clearance
+countersink_diam = 6.0; // enlarged to 6 mm for easier screw head clearance
 countersink_depth = 1.6;
 
 nut_clearance = 0.5; // extra room for easier nut insertion (was 0.4)
