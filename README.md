@@ -94,6 +94,12 @@ linkchecker --no-warnings README.md docs/
 The `--no-warnings` flag prevents linkchecker from returning a non-zero exit
 code on benign Markdown parsing warnings.
 
+Scan staged changes for secrets before committing:
+
+```bash
+git diff --cached | ./scripts/scan-secrets.py
+```
+
 If the repository includes a `package.json` but `npm` or `package-lock.json`
 are missing, `scripts/checks.sh` will warn and skip JavaScript-specific
 checks.
@@ -110,9 +116,10 @@ STANDOFF_MODE=nut bash scripts/openscad_render.sh cad/pi_cluster/pi5_triple_carr
 ```
 
 By default the script uses the model's `standoff_mode` value (`heatset`).
-Set `STANDOFF_MODE=printed` to generate 3D-printed threads or `STANDOFF_MODE=nut` for a captive hex recess. Values are case-insensitive and ignore
-surrounding whitespace; `heatset`, `printed`, and `nut` are accepted. Supplying only
-whitespace uses the model's default `standoff_mode`.
+Set `STANDOFF_MODE=printed` to generate 3D-printed threads or `STANDOFF_MODE=nut` for a
+captive hex recess. Values are case-insensitive and ignore surrounding whitespace;
+`heatset`, `printed`, and `nut` are accepted. Supplying only whitespace uses the model's
+default `standoff_mode`.
 
 The helper script validates that the provided `.scad` file exists and that
 OpenSCAD is available in `PATH`, printing a helpful error if either check fails.
