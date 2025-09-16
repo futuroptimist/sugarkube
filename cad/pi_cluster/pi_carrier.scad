@@ -16,7 +16,7 @@ hole_spacing_y = 49;
 plate_thickness = 2.0;
 corner_radius   = 5.0;  // round base corners to avoid sharp edges
 standoff_height = 6.0;
-standoff_diam = 6.5;   // match Pi5 carrier standoffs for extra strength
+standoff_diam = 7.0;   // widened to keep a ≥0.4 mm flange around the 5.8 mm countersink
 
 insert_od         = 3.5;         // outer Ø for common brass inserts
 insert_length     = 4.0;         // full length of the insert
@@ -30,7 +30,7 @@ assert(standoff_diam >= insert_od + 2,
        "standoff_diam must be ≥ insert_od + 2");
 screw_clearance_diam = 3.2; // through-hole clearance, slightly oversize
 
-countersink_diam = 6.0; // enlarged to 6 mm for easier screw head clearance
+countersink_diam = 5.8; // widened for improved screw head clearance
 countersink_depth = 1.6;
 
 nut_clearance = 0.5; // extra room for easier nut insertion (was 0.4)
