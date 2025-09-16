@@ -22,11 +22,13 @@ docker compose version
 1. In GitHub, open **Actions → pi-image → Run workflow**.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
-2. Download the artifact locally:
+2. Download, verify, and expand the artifact locally:
    ```sh
-   ./scripts/download_pi_image.sh
+   ./scripts/sugarkube_latest.sh
    ```
-   or grab it manually from the workflow run.
+   The helper stores the compressed and expanded images under `~/sugarkube/images/`, verifies
+   the SHA-256 checksum, and resumes interrupted downloads. Use `--no-expand` to skip writing
+   the raw `.img`.
 3. Alternatively, build on your machine:
    ```sh
    ./scripts/build_pi_image.sh
