@@ -31,7 +31,7 @@ assert(standoff_diam >= insert_od + 2,
 screw_clearance_diam = 3.2; // through-hole clearance, slightly oversize
 
 countersink_diam = 5.5; // enlarged to 5.5 mm for easier screw head clearance
-countersink_depth = 1.6;
+countersink_depth = 1.8; // deeper counterbore fully seats M2.5 pan-head screws
 
 nut_clearance = 0.5; // extra room for easier nut insertion (was 0.4)
 nut_flat = 5.0 + nut_clearance; // across flats for M2.5 nut

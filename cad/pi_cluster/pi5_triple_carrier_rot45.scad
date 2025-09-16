@@ -139,7 +139,7 @@ difference()
 
     /* screw-head relief */
     head_r = 2.5;  // counterbore radius (5 mm diameter)
-    head_h = 1.6;  // depth of screw head recess
+    head_h = 1.8;  // deeper counterbore fully seats M2.5 pan-head screws
 
     for (pos = pi_positions) {
         pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
