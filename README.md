@@ -42,9 +42,13 @@ the docs you will see the term used in both contexts.
 - [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - `scripts/` — helper scripts for rendering and exports
-  - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
-    to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
-    macOS compatibility
+  - `download_pi_image.sh` — resolve the latest GitHub Release artifact, resume partial
+    downloads with `curl`, verify SHA-256 checksums, and save images under
+    `~/sugarkube/images/` by default; requires authenticated `gh`, `curl`, `python3`, and
+    `sha256sum`
+  - `sugarkube_latest.sh` — convenience wrapper that calls the download script, expands the
+    `.img.xz` to `.img`, and exposes `--no-expand`, `--image-dir`, and pass-through flags for
+    advanced use
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
     clean up temporary work directories, use POSIX `test -ef` to compare paths
     without `realpath`, and fall back to `unzip` when `bsdtar` is unavailable
