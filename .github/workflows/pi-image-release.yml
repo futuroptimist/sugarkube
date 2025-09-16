@@ -1,0 +1,184 @@
+name: pi-image-release
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 6 * * *'
+
+concurrency:
+  group: pi-image-release
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      ARM64: 1
+      DEBIAN_FRONTEND: noninteractive
+      BUILD_TIMEOUT: 7200
+      RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'nightly' || 'stable' }}
+      CLONE_SUGARKUBE: false
+      CLONE_TOKEN_PLACE: true
+      CLONE_DSPACE: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Free up disk space
+        run: |
+          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/lib/node_modules \
+            /usr/local/share/boost
+          docker system prune -af || true
+          df -h
+
+      - name: Install pi-gen dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends \
+            quilt qemu-user-static debootstrap libarchive-tools arch-test xz-utils
+
+      - name: Clean up apt cache and temp files
+        run: |
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/* /tmp/*
+
+      - name: Compute pi-gen cache key
+        id: pigen-key
+        run: |
+          branch=bookworm
+          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/${branch}" | cut -f1)
+          echo "key=pigen-${RUNNER_OS}-${branch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pi-gen Docker image
+        id: cache-pigen
+        uses: actions/cache@v4
+        with:
+          path: ~/cache/pi-gen.tar
+          key: ${{ steps.pigen-key.outputs.key }}
+
+      - name: Load cached pi-gen image
+        if: steps.cache-pigen.outputs.cache-hit == 'true'
+        run: docker load -i ~/cache/pi-gen.tar
+
+      - name: Build pi-gen image
+        if: steps.cache-pigen.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 --branch bookworm https://github.com/RPi-Distro/pi-gen.git ~/pi-gen
+          cd ~/pi-gen
+          docker build -t pi-gen:latest .
+
+      - name: Verify pi-gen Docker image
+        run: |
+          if ! docker image inspect pi-gen:latest > /dev/null 2>&1; then
+            echo "pi-gen:latest Docker image not found!"
+            exit 1
+          fi
+
+      - name: Build Raspberry Pi OS image
+        timeout-minutes: 120
+        run: |
+          sudo env \
+            BUILD_TIMEOUT="${BUILD_TIMEOUT}" \
+            CLONE_SUGARKUBE="${CLONE_SUGARKUBE}" \
+            CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE}" \
+            CLONE_DSPACE="${CLONE_DSPACE}" \
+            ./scripts/build_pi_image.sh
+
+      - name: Collect deploy directory listing
+        if: always()
+        run: |
+          echo "--- deploy listing ---"
+          if [ -d deploy ]; then
+            find deploy -maxdepth 3 -type f -printf "%p\t%k KB\n" | sort
+          else
+            echo "deploy directory not found"
+          fi
+
+      - name: Save pi-gen Docker image
+        if: steps.cache-pigen.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/cache
+          docker image save pi-gen:latest -o ~/cache/pi-gen.tar
+
+      - name: Generate release manifest and notes
+        id: manifest
+        run: |
+          python3 scripts/generate_release_manifest.py \
+            --metadata "sugarkube.img.xz.metadata.json" \
+            --manifest-output "sugarkube.img.xz.manifest.json" \
+            --notes-output "RELEASE_NOTES.md" \
+            --release-channel "${RELEASE_CHANNEL}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --workflow "${GITHUB_WORKFLOW}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      - name: Sign release artifacts
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign-blob --yes \
+            --output-signature sugarkube.img.xz.sig \
+            --output-certificate sugarkube.img.xz.pem \
+            sugarkube.img.xz
+          cosign sign-blob --yes \
+            --output-signature sugarkube.img.xz.manifest.json.sig \
+            --output-certificate sugarkube.img.xz.manifest.json.pem \
+            sugarkube.img.xz.manifest.json
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sugarkube-pi-image
+          path: |
+            sugarkube.img.xz
+            sugarkube.img.xz.sha256
+            sugarkube.img.xz.metadata.json
+            sugarkube.img.xz.manifest.json
+            sugarkube.img.xz.sig
+            sugarkube.img.xz.pem
+            sugarkube.img.xz.manifest.json.sig
+            sugarkube.img.xz.manifest.json.pem
+            sugarkube.build.log
+            RELEASE_NOTES.md
+
+      - name: Publish GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.manifest.outputs.tag }}
+          name: ${{ steps.manifest.outputs.name }}
+          bodyFile: ${{ steps.manifest.outputs.notes_path }}
+          draft: false
+          prerelease: ${{ steps.manifest.outputs.prerelease == 'true' }}
+          allowUpdates: true
+          removeArtifacts: true
+          makeLatest: ${{ steps.manifest.outputs.make_latest == 'true' }}
+          artifacts: |
+            sugarkube.img.xz
+            sugarkube.img.xz.sha256
+            sugarkube.img.xz.metadata.json
+            sugarkube.img.xz.manifest.json
+            sugarkube.img.xz.sig
+            sugarkube.img.xz.pem
+            sugarkube.img.xz.manifest.json.sig
+            sugarkube.img.xz.manifest.json.pem
+            sugarkube.build.log
+            RELEASE_NOTES.md

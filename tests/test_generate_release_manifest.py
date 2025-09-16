@@ -1,0 +1,116 @@
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _make_metadata(tmp_path: Path) -> Path:
+    image_path = tmp_path / "sugarkube.img.xz"
+    image_path.write_bytes(b"release-test")
+    checksum = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    checksum_path = tmp_path / "sugarkube.img.xz.sha256"
+    checksum_path.write_text(f"{checksum}  {image_path.name}\n", encoding="utf-8")
+    build_log = tmp_path / "build.log"
+    build_log.write_text(
+        "\n".join(
+            [
+                "[00:00:00] Begin stage0",
+                "[00:00:04] End stage0",
+                "[00:00:05] Begin stage1",
+                "[00:00:35] End stage1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    metadata_path = tmp_path / "metadata.json"
+    cmd = [
+        sys.executable,
+        str(Path("scripts/create_build_metadata.py")),
+        "--output",
+        str(metadata_path),
+        "--image",
+        str(image_path),
+        "--checksum",
+        str(checksum_path),
+        "--build-log",
+        str(build_log),
+        "--pi-gen-branch",
+        "bookworm",
+        "--pi-gen-url",
+        "https://github.com/RPi-Distro/pi-gen.git",
+        "--pi-gen-commit",
+        "0123456789abcdef0123456789abcdef01234567",
+        "--pi-gen-stages",
+        "stage0 stage1",
+        "--repo-commit",
+        "89abcdef89abcdef89abcdef89abcdef89abcdef",
+        "--repo-ref",
+        "refs/heads/main",
+        "--build-start",
+        "2024-05-21T10:00:00Z",
+        "--build-end",
+        "2024-05-21T10:30:00Z",
+        "--duration-seconds",
+        "1800",
+        "--runner-os",
+        "Linux",
+        "--runner-arch",
+        "x86_64",
+        "--option",
+        "arm64=1",
+    ]
+    subprocess.run(cmd, check=True, cwd=Path(__file__).resolve().parents[1])
+    return metadata_path
+
+
+def test_release_manifest_outputs(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    notes_path = tmp_path / "NOTES.md"
+    outputs_file = tmp_path / "github_output.txt"
+    env = os.environ.copy()
+    env["SOURCE_DATE_EPOCH"] = "1700000000"
+    env["GITHUB_OUTPUT"] = str(outputs_file)
+    cmd = [
+        sys.executable,
+        str(Path("scripts/generate_release_manifest.py")),
+        "--metadata",
+        str(metadata_path),
+        "--manifest-output",
+        str(manifest_path),
+        "--notes-output",
+        str(notes_path),
+        "--release-channel",
+        "stable",
+        "--repo",
+        "futuroptimist/sugarkube",
+        "--run-id",
+        "12345",
+        "--run-attempt",
+        "1",
+        "--workflow",
+        "pi-image-release",
+    ]
+    subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert manifest["version"].startswith("v2024.05.21")
+    assert manifest["build"]["stage_durations"]["stage1"] == 30
+    assert manifest["artifacts"][0]["name"] == "sugarkube.img.xz"
+    assert manifest["artifacts"][1]["contains_sha256"] == metadata["image"]["sha256"]
+
+    notes = notes_path.read_text(encoding="utf-8")
+    assert "Stage timings" in notes
+    assert metadata["image"]["sha256"] in notes
+
+    outputs = dict(
+        line.split("=", 1)
+        for line in outputs_file.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    assert outputs["tag"].startswith("v2024.05.21")
+    assert outputs["prerelease"] == "false"

@@ -6,6 +6,7 @@
 [![stl](https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml/badge.svg?branch=main)](https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml)
 [![Coverage](https://codecov.io/gh/futuroptimist/sugarkube/branch/main/graph/badge.svg)](https://codecov.io/gh/futuroptimist/sugarkube)
 [![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
+[![Pi image availability](https://img.shields.io/github/v/release/futuroptimist/sugarkube?label=pi%20image)](https://github.com/futuroptimist/sugarkube/releases/latest)
 
 An accessible [k3s](https://k3s.io/) platform for Raspberry Pis and SBCs,
 integrated with an off-grid solar setup.
@@ -62,6 +63,16 @@ the docs you will see the term used in both contexts.
 - `outages/` — structured outage records (see
   [docs/outage_catalog.md](docs/outage_catalog.md))
 - `tests/` — quick checks for helper scripts and documentation
+
+## Pi image releases
+
+The `pi-image-release` workflow builds a fresh Raspberry Pi OS image on every
+push to `main` and once per day. Each run publishes a signed
+`sugarkube.img.xz`, its checksum, a provenance manifest, and the full
+`pi-gen` build log. Release notes summarize stage timings and link directly to
+the manifest so you can verify the build inputs and commit hashes before
+flashing. Use `./scripts/sugarkube-latest` to download the newest release with
+automatic checksum verification.
 
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs

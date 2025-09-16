@@ -45,7 +45,7 @@ check_space() {
 # Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, bsdtar, df and roughly
 # 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen repository.
 
-for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df; do
+for cmd in curl docker git sha256sum stdbuf timeout xz bsdtar df python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required" >&2
     exit 1
@@ -88,6 +88,10 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+REPO_REF="${GITHUB_REF:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || "unknown")}"
+RUNNER_OS_VALUE="${RUNNER_OS:-$(uname -s)}"
+RUNNER_ARCH_VALUE="${RUNNER_ARCH:-$(uname -m)}"
 CLOUD_INIT_DIR="${CLOUD_INIT_DIR:-${REPO_ROOT}/scripts/cloud-init}"
 CLOUD_INIT_PATH="${CLOUD_INIT_PATH:-${CLOUD_INIT_DIR}/user-data.yaml}"
 CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.cloudflared.yml}"
@@ -222,6 +226,7 @@ fi
 git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
   "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
   "${WORK_DIR}/pi-gen"
+PI_GEN_COMMIT="$(git -C "${WORK_DIR}/pi-gen" rev-parse HEAD)"
 
 USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
@@ -427,8 +432,12 @@ if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
 fi
 
 echo "[sugarkube] Starting pi-gen build (bash path)..."
+BUILD_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+SECONDS=0
 # Stream output line-by-line so GitHub Actions shows progress and doesn't appear to hang
 ${SUDO} stdbuf -oL -eL timeout "${BUILD_TIMEOUT}" ./build.sh
+BUILD_DURATION_SECONDS=${SECONDS}
+BUILD_COMPLETED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "[sugarkube] pi-gen build finished"
 
 # Ensure a pi-gen Docker image exists and is tagged for caching
@@ -456,3 +465,47 @@ sha256_file="${OUT_IMG}.sha256"
 sha256sum "${OUT_IMG}" > "${sha256_file}"
 echo "[sugarkube] Image written to ${OUT_IMG}"
 echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"
+
+BUILD_LOG_SOURCE="${WORK_DIR}/pi-gen/work/${IMG_NAME}/build.log"
+OUT_LOG=""
+if [ -f "${BUILD_LOG_SOURCE}" ]; then
+  OUT_LOG="${OUTPUT_DIR}/${IMG_NAME}.build.log"
+  cp "${BUILD_LOG_SOURCE}" "${OUT_LOG}"
+  echo "[sugarkube] Build log copied to ${OUT_LOG}"
+else
+  echo "[sugarkube] Build log not found at ${BUILD_LOG_SOURCE}" >&2
+fi
+
+METADATA_PATH="${OUT_IMG}.metadata.json"
+metadata_args=(
+  --output "${METADATA_PATH}"
+  --image "${OUT_IMG}"
+  --checksum "${sha256_file}"
+  --pi-gen-branch "${PI_GEN_BRANCH}"
+  --pi-gen-url "${PI_GEN_URL}"
+  --pi-gen-commit "${PI_GEN_COMMIT}"
+  --pi-gen-stages "${PI_GEN_STAGES}"
+  --repo-commit "${REPO_COMMIT}"
+  --repo-ref "${REPO_REF}"
+  --build-start "${BUILD_STARTED_AT}"
+  --build-end "${BUILD_COMPLETED_AT}"
+  --duration-seconds "${BUILD_DURATION_SECONDS}"
+  --runner-os "${RUNNER_OS_VALUE}"
+  --runner-arch "${RUNNER_ARCH_VALUE}"
+  --option "arm64=${ARM64}"
+  --option "armhf=${ARMHF}"
+  --option "clone_sugarkube=${CLONE_SUGARKUBE}"
+  --option "clone_token_place=${CLONE_TOKEN_PLACE}"
+  --option "clone_dspace=${CLONE_DSPACE}"
+  --option "token_place_branch=${TOKEN_PLACE_BRANCH}"
+  --option "dspace_branch=${DSPACE_BRANCH}"
+)
+if [ -n "${EXTRA_REPOS}" ]; then
+  metadata_args+=(--option "extra_repos=${EXTRA_REPOS}")
+fi
+if [ -n "${OUT_LOG}" ]; then
+  metadata_args+=(--build-log "${OUT_LOG}")
+fi
+
+python3 "${REPO_ROOT}/scripts/create_build_metadata.py" "${metadata_args[@]}"
+echo "[sugarkube] Build metadata captured at ${METADATA_PATH}"

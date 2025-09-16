@@ -449,6 +449,11 @@ def _run_build_script(tmp_path, env):
     collect.write_text(collect_src.read_text())
     collect.chmod(0o755)
 
+    metadata_src = repo_root / "scripts" / "create_build_metadata.py"
+    metadata_script = script_dir / "create_build_metadata.py"
+    metadata_script.write_text(metadata_src.read_text())
+    metadata_script.chmod(0o755)
+
     verifier_src = repo_root / "scripts" / "pi_node_verifier.sh"
     verifier = script_dir / "pi_node_verifier.sh"
     verifier.write_text(verifier_src.read_text())

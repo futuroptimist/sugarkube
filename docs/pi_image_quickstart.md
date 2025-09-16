@@ -14,6 +14,8 @@ Build a Raspberry Pi OS image that boots with k3s and the
    artifacts, verifies the SHA-256 checksum, and stores the image at
    `~/sugarkube/images/sugarkube.img.xz`. Override the destination with
    `--output /path/to/custom.img.xz` when needed.
+   Release notes link to `sugarkube.img.xz.manifest.json`, which records the
+   pi-gen commit, stage timings, and cosign signatures for every artifact.
 2. In GitHub, open **Actions → pi-image → Run workflow** for a fresh build.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
