@@ -14,7 +14,12 @@ Build a Raspberry Pi OS image that boots with k3s and the
    ./scripts/download_pi_image.sh
    ```
    or grab it manually from the workflow run.
-3. Alternatively, build on your machine:
+3. Verify the download's checksum to ensure integrity:
+   ```bash
+   sha256sum sugarkube.img.xz
+   ```
+   Compare the output to the hash shown in the workflow run.
+4. Alternatively, build on your machine:
    ```bash
    ./scripts/build_pi_image.sh
    ```
