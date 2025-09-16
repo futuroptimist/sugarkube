@@ -34,6 +34,9 @@ For a prebuilt image that already clones both projects, see
    - Single `Dockerfile`: `docker buildx build --platform linux/arm64 -t myapp . --load`
      then `docker run -d --name myapp -p 8080:8080 myapp`.
    - `docker-compose.yml`: `docker compose up -d`.
+   - `token.place`: `docker buildx build --platform linux/arm64 -f docker/Dockerfile.server \
+     -t tokenplace . --load` then `docker run -d --name tokenplace -p 5000:5000 tokenplace`.
+   - `dspace`: `cd dspace/frontend && docker compose up -d`.
 6. Verify the container is running:
    - Single container: `docker ps --format '{{.Names}}' | grep myapp`
    - Compose project: `docker compose ps`
