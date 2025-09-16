@@ -2,6 +2,7 @@
 set -euo pipefail
 
 svc="projects-compose.service"
+compose_path="/opt/projects/docker-compose.yml"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker not found; skipping ${svc}" >&2
@@ -38,5 +39,6 @@ else
 fi
 
 # extra-start
-# Enable additional services here for future repositories.
+# Additional startup hooks can be inserted here, for example enabling services
+# or running health probes for new repositories.
 # extra-end
