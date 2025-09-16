@@ -17,6 +17,8 @@ Environment variables:
   IMG_NAME          Name for the output image (default sugarkube)
   TOKEN_PLACE_BRANCH Branch of token.place to clone (default main)
   DSPACE_BRANCH     Branch of dspace to clone (default v3)
+  WORK_DIR          Directory to use for pi-gen's work files (default: temp)
+  KEEP_WORK_DIR     Leave work dir after build (default: 0)
 
 See docs/pi_image_cloudflare.md for details.
 EOF
@@ -162,12 +164,19 @@ if [ ! -s "${INIT_ENV_PATH}" ]; then
 fi
 
 KEEP_WORK_DIR="${KEEP_WORK_DIR:-0}"
-WORK_DIR=$(mktemp -d)
+CLEANUP_WORK_DIR=1
+WORK_DIR="${WORK_DIR:-}"
+if [[ -z "${WORK_DIR}" ]]; then
+  WORK_DIR=$(mktemp -d)
+else
+  mkdir -p "${WORK_DIR}"
+  CLEANUP_WORK_DIR=0
+fi
 cleanup() {
-  if [[ "${KEEP_WORK_DIR}" != "1" ]]; then
+  if [[ "${KEEP_WORK_DIR}" != "1" && "${CLEANUP_WORK_DIR}" -eq 1 ]]; then
     rm -rf "${WORK_DIR}"
   else
-    echo "[sugarkube] KEEP_WORK_DIR=1; leaving work dir: ${WORK_DIR}"
+    echo "[sugarkube] leaving work dir: ${WORK_DIR}"
   fi
 }
 trap cleanup EXIT

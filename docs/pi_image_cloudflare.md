@@ -38,9 +38,12 @@ the cloud-init configuration with `CLOUD_INIT_PATH` or point `CLOUD_INIT_DIR` an
 `CLOUDFLARED_COMPOSE_PATH` at alternate files; the defaults read from
 `scripts/cloud-init/`. Set `SKIP_BINFMT=1` to skip installing binfmt handlers when
 they're already present or when the build environment disallows privileged
-containers. Set `DEBUG=1` to trace script execution for troubleshooting.
-Set `KEEP_WORK_DIR=1` to retain the temporary pi-gen work directory instead of
-deleting it, which aids debugging failed builds.
+containers. Set `DEBUG=1` to trace script execution for troubleshooting. Set
+`WORK_DIR=/path` to reuse a specific work directory; otherwise the script creates a
+temporary one. It only deletes the directory when it created it and
+`KEEP_WORK_DIR` isn't `1`, so custom paths are always preserved. Set
+`KEEP_WORK_DIR=1` to retain the temporary pi-gen work directory, which aids
+debugging failed builds.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls free disk space checks on the
 temporary work directory and the output location.
