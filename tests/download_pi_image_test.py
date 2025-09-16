@@ -1,352 +1,226 @@
+import hashlib
+import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+
+def run_script(script_name, args=None, env=None, cwd=None):
+    cmd = ["/bin/bash", str(BASE_DIR / "scripts" / script_name)]
+    if args:
+        cmd.extend(args)
+    return subprocess.run(cmd, env=env, cwd=cwd, capture_output=True, text=True)
+
+
+def create_gh_stub(bin_dir: Path) -> None:
+    script = bin_dir / "gh"
+    script.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+cmd="${1:-}"
+if [ $# -gt 0 ]; then
+  shift
+fi
+if [ -n "${GH_DEBUG_FILE:-}" ]; then
+  {
+    printf '%s %s\n' "$cmd" "$*"
+    printf 'payload=%s\n' "${GH_RELEASE_PAYLOAD:-<unset>}"
+  } >>"$GH_DEBUG_FILE"
+fi
+case "$cmd" in
+  api)
+    if [ -n "${GH_RELEASE_PAYLOAD:-}" ]; then
+      printf '%s' "$GH_RELEASE_PAYLOAD"
+      exit 0
+    fi
+    exit 1
+    ;;
+  run)
+    sub="${1:-}"
+    if [ $# -gt 0 ]; then
+      shift
+    fi
+    case "$sub" in
+      list)
+        echo "${GH_RUN_ID:-4242}"
+        exit 0
+        ;;
+      download)
+        output_dir=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --dir)
+              output_dir="$2"
+              shift 2 || true
+              ;;
+            *)
+              shift || true
+              ;;
+          esac
+        done
+        if [ -z "$output_dir" ]; then
+          echo "missing --dir" >&2
+          exit 1
+        fi
+        if [ -n "${GH_WORKFLOW_IMAGE:-}" ]; then
+          cp "$GH_WORKFLOW_IMAGE" "$output_dir/sugarkube.img.xz"
+        fi
+        if [ -n "${GH_WORKFLOW_SHA:-}" ]; then
+          cp "$GH_WORKFLOW_SHA" "$output_dir/sugarkube.img.xz.sha256"
+        fi
+        exit 0
+        ;;
+    esac
+    ;;
+  auth)
+    sub="${1:-}"
+    if [ "$sub" = token ] && [ -n "${GH_TOKEN:-}" ]; then
+      echo "$GH_TOKEN"
+      exit 0
+    fi
+    ;;
+esac
+
+echo "unexpected gh call: $cmd $*" >&2
+exit 1
+"""
+    )
+    script.chmod(0o755)
 
 
 def test_requires_gh(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
     assert result.returncode != 0
     assert "gh is required" in result.stderr
 
 
-def test_downloads_artifact(tmp_path):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    src = tmp_path / "src.img.xz"
-    src.write_text("data")
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
-        "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
-
+def _base_env(tmp_path, fake_bin):
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["GH_SRC"] = str(src)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script), "out.img.xz"],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
+    env["GH_TOKEN"] = "dummy-token"
+    env["GITHUB_TOKEN"] = "dummy-token"
+    return env
+
+
+def _release_payload(image: Path, checksum: Path) -> str:
+    return json.dumps(
+        {
+            "tag_name": "v1.2.3",
+            "assets": [
+                {
+                    "name": "sugarkube.img.xz",
+                    "browser_download_url": f"file://{image}",
+                },
+                {
+                    "name": "sugarkube.img.xz.sha256",
+                    "browser_download_url": f"file://{checksum}",
+                },
+            ],
+        }
     )
-    assert result.returncode == 0
-    assert (tmp_path / "out.img.xz").exists()
 
 
-def test_errors_when_download_fails(tmp_path):
-    """The script should fail if the artifact download step errors."""
+def test_downloads_release_asset(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  exit 1\n"
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
+    create_gh_stub(fake_bin)
 
-    env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script), "out.img.xz"],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
+    payload = b"sugarkube"
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    release_sha = tmp_path / "release.img.xz.sha256"
+    release_sha.write_text(f"{sha}\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
+
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    dest = Path(env["HOME"]) / "sugarkube" / "images" / "sugarkube.img.xz"
+    checksum = Path(str(dest) + ".sha256")
+    assert dest.read_bytes() == payload
+    assert checksum.read_text().strip() == sha
+    assert "Checksum verified" in result.stdout
+
+
+def test_checksum_mismatch_errors(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    payload = b"ok"
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(payload)
+    wrong_sha = tmp_path / "release.img.xz.sha256"
+    wrong_sha.write_text("deadbeef\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, wrong_sha)
+
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
     assert result.returncode != 0
-    assert not (tmp_path / "out.img.xz").exists()
+    assert "Checksum mismatch" in result.stderr
 
 
-def test_errors_when_no_run_found(tmp_path):
+def test_falls_back_to_workflow_when_release_missing(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    marker = tmp_path / "download_called"
-    gh = fake_bin / "gh"
-    gh.write_text(
-        f"#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  exit 0\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        f"  echo called > {marker}\n"
-        "  exit 0\n"
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
+    create_gh_stub(fake_bin)
 
-    env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode != 0
-    assert "no pi-image workflow runs found" in result.stderr
-    assert not marker.exists()
+    payload = b"workflow"
+    workflow_img = tmp_path / "workflow.img.xz"
+    workflow_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    workflow_sha = tmp_path / "workflow.img.xz.sha256"
+    workflow_sha.write_text(f"{sha}\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_WORKFLOW_IMAGE"] = str(workflow_img)
+    env["GH_WORKFLOW_SHA"] = str(workflow_sha)
+    # No GH_RELEASE_PAYLOAD env var → triggers workflow fallback.
+
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    dest = Path(env["HOME"]) / "sugarkube" / "images" / "sugarkube.img.xz"
+    checksum = Path(str(dest) + ".sha256")
+    assert dest.read_bytes() == payload
+    assert checksum.read_text().strip() == sha
+    assert "Falling back to latest successful pi-image" in result.stdout
 
 
-def test_uses_default_output(tmp_path):
+def test_honors_output_override(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    src = tmp_path / "src.img.xz"
-    src.write_text("data")
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
-        "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
+    create_gh_stub(fake_bin)
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["GH_SRC"] = str(src)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script)],
+    payload = b"override"
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    release_sha = tmp_path / "release.img.xz.sha256"
+    release_sha.write_text(f"{sha}\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
+
+    custom_output = tmp_path / "downloads" / "custom.img.xz"
+    result = run_script(
+        "download_pi_image.sh",
+        args=["--output", str(custom_output)],
         env=env,
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert (tmp_path / "sugarkube.img.xz").exists()
-
-
-def test_creates_output_directory(tmp_path):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    src = tmp_path / "src.img.xz"
-    src.write_text("data")
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
-        "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
-
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["GH_SRC"] = str(src)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    out = tmp_path / "nested" / "out.img.xz"
-    result = subprocess.run(
-        ["/bin/bash", str(script), str(out)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert out.exists()
-    assert (tmp_path / "nested").is_dir()
-
-
-def test_downloads_without_realpath(tmp_path):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    src = tmp_path / "src.img.xz"
-    src.write_text("data")
-    sha = tmp_path / "src.img.xz.sha256"
-    sha.write_text("sum  sugarkube.img.xz\n")
-
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
-        "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
-
-    # Symlink required utilities but omit realpath
-    for cmd in ["dirname", "mkdir", "mv", "ls", "cp"]:
-        target = shutil.which(cmd)
-        assert target is not None
-        (fake_bin / cmd).symlink_to(target)
-
-    env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
-    env["GH_SRC"] = str(src)
-    env["GH_SHA"] = str(sha)
-
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script), "out.img.xz"],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert (tmp_path / "out.img.xz").exists()
-    assert (tmp_path / "out.img.xz.sha256").exists()
-
-
-def test_overwrites_existing_output_and_checksum(tmp_path):
-    """Existing files should be replaced when downloading a new image."""
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-
-    src = tmp_path / "src.img.xz"
-    src.write_text("fresh")
-    sha = tmp_path / "src.img.xz.sha256"
-    sha.write_text("newsha  sugarkube.img.xz\n")
-
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
-        "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        '  cp "$GH_SHA" "$dir/sugarkube.img.xz.sha256"\n'
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
-
-    out = tmp_path / "out.img.xz"
-    out.write_text("stale")
-    out_sha = tmp_path / "out.img.xz.sha256"
-    out_sha.write_text("oldsha  out.img.xz\n")
-
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["GH_SRC"] = str(src)
-    env["GH_SHA"] = str(sha)
-
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script), str(out)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert out.read_text() == "fresh"
-    assert out_sha.read_text() == "newsha  sugarkube.img.xz\n"
-
-
-def test_skips_mv_when_output_already_exists(tmp_path):
-    """Avoid moving the file when the output path already matches the downloaded artifact."""
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-
-    src = tmp_path / "src.img.xz"
-    src.write_text("data")
-
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = run ] && [ "$2" = list ]; then\n'
-        "  echo 42\n"
-        'elif [ "$1" = run ] && [ "$2" = download ]; then\n'
-        "  shift 2\n"
-        '  while [ "$1" != --dir ]; do shift; done\n'
-        "  dir=$2\n"
-        '  cp "$GH_SRC" "$dir/sugarkube.img.xz"\n'
-        "else\n"
-        "  exit 1\n"
-        "fi\n"
-    )
-    gh.chmod(0o755)
-
-    marker = tmp_path / "mv_called"
-    mv = fake_bin / "mv"
-    mv.write_text(f"#!/bin/bash\necho called > {marker}\nexit 1\n")
-    mv.chmod(0o755)
-
-    for cmd in ["dirname", "mkdir", "ls"]:
-        target = shutil.which(cmd)
-        assert target is not None
-        (fake_bin / cmd).symlink_to(target)
-
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["GH_SRC"] = str(src)
-
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert (tmp_path / "sugarkube.img.xz").exists()
-    assert not marker.exists()
+    assert custom_output.read_bytes() == payload
+    checksum = Path(str(custom_output) + ".sha256")
+    assert checksum.read_text().strip() == sha
