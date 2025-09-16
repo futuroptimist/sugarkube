@@ -10,7 +10,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Show engine and compose versions for diagnostics
-docker --version
+docker --version || true
 if ! docker compose version >/dev/null 2>&1; then
   echo "docker compose plugin not found; skipping ${svc}" >&2
   exit 0
