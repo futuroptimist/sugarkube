@@ -2,6 +2,7 @@
 set -euo pipefail
 
 svc="projects-compose.service"
+compose_path="/opt/projects/docker-compose.yml"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker not found; skipping ${svc}" >&2
@@ -15,6 +16,11 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 0
 fi
 docker compose version || true
+
+if [ ! -f "${compose_path}" ]; then
+  echo "${compose_path} not found; skipping ${svc}" >&2
+  exit 0
+fi
 
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "systemctl not found; skipping ${svc}" >&2
@@ -33,3 +39,7 @@ if systemctl list-unit-files | grep -q "^${svc}"; then
 else
   echo "${svc} not found; skipping" >&2
 fi
+
+# extra-start
+# Additional startup hooks can be inserted here.
+# extra-end

@@ -109,10 +109,10 @@ helper that creates blank files when a project omits an example, and seeds a
 default `PORT` so containers start with predictable endpoints. Edit these files
 to set variables like ports, API URLs, or secrets.
 
-| Service     | Path to env file                     | Example     |
-| ----------- | ------------------------------------ | ----------- |
-| token.place | `/opt/projects/token.place/.env`     | `PORT=5000` |
-| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
+| Service     | Path to env file                     | Required vars |
+| ----------- | ------------------------------------ | ------------- |
+| token.place | `/opt/projects/token.place/.env`     | `PORT` (default `5000`) |
+| dspace      | `/opt/projects/dspace/frontend/.env` | `PORT` (default `3000`) |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. See each project's README for the full list of
@@ -122,8 +122,22 @@ configuration options.
 
 Pass Git URLs via `EXTRA_REPOS` to clone additional projects into `/opt/projects`.
 Add services to `/opt/projects/docker-compose.yml` between `# extra-start` and
-`# extra-end`, and extend `init-env.sh` with any new `.env` files, following the
-token.place and dspace examples. The image builder drops the token.place or
+`# extra-end`:
+
+```yaml
+# extra-start
+myapp:
+  build:
+    context: /opt/projects/myapp
+  container_name: myapp
+  env_file:
+    - /opt/projects/myapp/.env
+  restart: unless-stopped
+# extra-end
+```
+
+Create matching `.env` files in `init-env.sh` using the same markers, following
+the token.place and dspace examples. The image builder drops the token.place or
 dspace definitions when the corresponding `CLONE_*` flag is `false`, letting you
 build a minimal image and expand it later.
 
