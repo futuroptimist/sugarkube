@@ -1,0 +1,8 @@
+{
+  "id": "2025-09-14-kicad-export-kicad9-missing",
+  "date": "2025-09-14",
+  "component": "kicad-export",
+  "rootCause": "KiBot could not load the PCB due to missing KiCad 9; installed KiCad 7 reports unknown file type",
+  "resolution": "Install KiCad 9 (v2_k9 container tag) so KiBot can process the project",
+  "references": []
+}

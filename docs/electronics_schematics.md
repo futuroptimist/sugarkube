@@ -27,6 +27,7 @@ Design notes embedded in the KiCad title block highlight best practices:
 - Label polarity and voltage on connectors to avoid wiring mistakes.
 - Verify KiBot exports before fabrication.
 - Verify ground-pour clearance around mounting holes.
+- Double-check LED orientation during assembly.
 
 Open the project in **KiCad 9** or newer and modify the schematic to suit your power
 distribution needs (for example, add screw terminals, fuses and test points). Use
