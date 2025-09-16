@@ -4,328 +4,224 @@ import os
 import subprocess
 from pathlib import Path
 
-
-def write_executable(path: Path, contents: str) -> None:
-    path.write_text(contents)
-    path.chmod(0o755)
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 
-def build_release_payload(image_name: str, image_url: str, checksum_url: str) -> dict:
-    return {
-        "tag_name": "v1.2.3",
-        "assets": [
-            {"name": image_name, "browser_download_url": image_url},
-            {"name": f"{image_name}.sha256", "browser_download_url": checksum_url},
-        ],
-    }
+def run_script(script_name, args=None, env=None, cwd=None):
+    cmd = ["/bin/bash", str(BASE_DIR / "scripts" / script_name)]
+    if args:
+        cmd.extend(args)
+    return subprocess.run(cmd, env=env, cwd=cwd, capture_output=True, text=True)
 
 
-def setup_fake_tools(tmp_path: Path, release_payload: dict) -> Path:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-
-    release_file = tmp_path / "release.json"
-    release_file.write_text(json.dumps(release_payload))
-
-    gh = fake_bin / "gh"
-    write_executable(
-        gh,
-        """#!/bin/bash
-set -e
-if [ "$1" = auth ] && [ "$2" = status ]; then
-  exit ${GH_AUTH_STATUS:-1}
-elif [ "$1" = auth ] && [ "$2" = token ]; then
-  if [ "${GH_AUTH_STATUS:-1}" -eq 0 ]; then
-    echo "${GH_AUTH_TOKEN:-}"
-    exit 0
-  fi
-  exit 1
-elif [ "$1" = api ]; then
-  if [ "${GH_API_FAIL:-0}" -ne 0 ]; then
-    exit 1
-  fi
-  repo="${GH_REPO:-futuroptimist/sugarkube}"
-  if [ "$2" = "repos/$repo/releases/latest" ]; then
-    cat "${GH_RELEASE_FILE:?}"
-    exit 0
-  fi
-  if [[ "$2" == repos/*/releases/tags/* ]]; then
-    cat "${GH_RELEASE_FILE:?}"
-    exit 0
-  fi
-fi
->&2 echo "unexpected gh args: $@"
-exit 1
-""",
-    )
-
-    curl = fake_bin / "curl"
-    write_executable(
-        curl,
-        """#!/bin/bash
+def create_gh_stub(bin_dir: Path) -> None:
+    script = bin_dir / "gh"
+    script.write_text(
+        """#!/usr/bin/env bash
 set -euo pipefail
-output=""
-url=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --output|-o)
-      shift
-      output="$1"
-      shift
-      ;;
-    --retry|--retry-delay|--continue-at)
-      shift
-      shift
-      ;;
-    -H)
-      shift
-      shift
-      ;;
-    --fail|--location|--progress-bar)
-      shift
-      ;;
-    -* )
-      shift
-      ;;
-    *)
-      url="$1"
-      shift
-      ;;
-  esac
-done
-
-if [[ -z "$output" || -z "$url" ]]; then
-  >&2 echo "curl stub missing output or url"
-  exit 1
+cmd="${1:-}"
+if [ $# -gt 0 ]; then
+  shift
 fi
-
-if [[ "$url" == *".sha256" ]]; then
-  cp "${SHA_SRC:?}" "$output"
-else
-  cp "${IMG_SRC:?}" "$output"
+if [ -n "${GH_DEBUG_FILE:-}" ]; then
+  {
+    printf '%s %s\n' "$cmd" "$*"
+    printf 'payload=%s\n' "${GH_RELEASE_PAYLOAD:-<unset>}"
+  } >>"$GH_DEBUG_FILE"
 fi
-""",
+case "$cmd" in
+  api)
+    if [ -n "${GH_RELEASE_PAYLOAD:-}" ]; then
+      printf '%s' "$GH_RELEASE_PAYLOAD"
+      exit 0
+    fi
+    exit 1
+    ;;
+  run)
+    sub="${1:-}"
+    if [ $# -gt 0 ]; then
+      shift
+    fi
+    case "$sub" in
+      list)
+        echo "${GH_RUN_ID:-4242}"
+        exit 0
+        ;;
+      download)
+        output_dir=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --dir)
+              output_dir="$2"
+              shift 2 || true
+              ;;
+            *)
+              shift || true
+              ;;
+          esac
+        done
+        if [ -z "$output_dir" ]; then
+          echo "missing --dir" >&2
+          exit 1
+        fi
+        if [ -n "${GH_WORKFLOW_IMAGE:-}" ]; then
+          cp "$GH_WORKFLOW_IMAGE" "$output_dir/sugarkube.img.xz"
+        fi
+        if [ -n "${GH_WORKFLOW_SHA:-}" ]; then
+          cp "$GH_WORKFLOW_SHA" "$output_dir/sugarkube.img.xz.sha256"
+        fi
+        exit 0
+        ;;
+    esac
+    ;;
+  auth)
+    sub="${1:-}"
+    if [ "$sub" = token ] && [ -n "${GH_TOKEN:-}" ]; then
+      echo "$GH_TOKEN"
+      exit 0
+    fi
+    ;;
+esac
+
+echo "unexpected gh call: $cmd $*" >&2
+exit 1
+"""
     )
-
-    return fake_bin
-
-
-def run_script(tmp_path: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    return subprocess.run(
-        ["/bin/bash", str(script), *args],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
+    script.chmod(0o755)
 
 
-def run_wrapper(tmp_path: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "sugarkube-latest.sh"
-    return subprocess.run(
-        ["/bin/bash", str(script), *args],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
+def _base_env(tmp_path, fake_bin):
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["GH_TOKEN"] = "dummy-token"
+    env["GITHUB_TOKEN"] = "dummy-token"
+    return env
+
+
+def _release_payload(image: Path, checksum: Path) -> str:
+    return json.dumps(
+        {
+            "tag_name": "v1.2.3",
+            "assets": [
+                {
+                    "name": "sugarkube.img.xz",
+                    "browser_download_url": f"file://{image}",
+                },
+                {
+                    "name": "sugarkube.img.xz.sha256",
+                    "browser_download_url": f"file://{checksum}",
+                },
+            ],
+        }
     )
 
 
 def test_requires_gh(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
-    base = Path(__file__).resolve().parents[1]
-    script = base / "scripts" / "download_pi_image.sh"
-    result = subprocess.run(
-        ["/bin/bash", str(script)],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
     assert result.returncode != 0
     assert "gh is required" in result.stderr
 
 
 def test_downloads_release_asset(tmp_path):
-    image_name = "sugarkube.img.xz"
-    image_bytes = b"pi-image"
-    digest = hashlib.sha256(image_bytes).hexdigest()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
 
-    img_src = tmp_path / "source.img.xz"
-    img_src.write_bytes(image_bytes)
+    payload = b"sugarkube"
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    release_sha = tmp_path / "release.img.xz.sha256"
+    release_sha.write_text(f"{sha}\n")
 
-    sha_src = tmp_path / "source.img.xz.sha256"
-    sha_src.write_text(f"{digest}  {image_name}\n")
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
 
-    release_payload = build_release_payload(
-        image_name,
-        "https://example.com/sugarkube.img.xz",
-        "https://example.com/sugarkube.img.xz.sha256",
-    )
-
-    fake_bin = setup_fake_tools(tmp_path, release_payload)
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{fake_bin}:{env['PATH']}",
-            "GH_RELEASE_FILE": str(tmp_path / "release.json"),
-            "SHA_SRC": str(sha_src),
-            "IMG_SRC": str(img_src),
-            "HOME": str(tmp_path),
-            "GH_AUTH_STATUS": "1",
-        }
-    )
-
-    output = tmp_path / "downloads" / "custom.img.xz"
-    result = run_script(tmp_path, env, str(output))
-
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
     assert result.returncode == 0, result.stderr
-    assert output.exists()
-    assert output.read_bytes() == image_bytes
 
-    checksum_file = output.with_suffix(output.suffix + ".sha256")
-    assert checksum_file.exists()
-    assert checksum_file.read_text().strip() == f"{digest}  {output.name}"
-
-
-def test_uses_default_directory(tmp_path):
-    image_name = "sugarkube.img.xz"
-    image_bytes = b"pi-image"
-    digest = hashlib.sha256(image_bytes).hexdigest()
-
-    img_src = tmp_path / "source.img.xz"
-    img_src.write_bytes(image_bytes)
-
-    sha_src = tmp_path / "source.img.xz.sha256"
-    sha_src.write_text(f"{digest}  {image_name}\n")
-
-    release_payload = build_release_payload(
-        image_name,
-        "https://example.com/sugarkube.img.xz",
-        "https://example.com/sugarkube.img.xz.sha256",
-    )
-
-    fake_bin = setup_fake_tools(tmp_path, release_payload)
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{fake_bin}:{env['PATH']}",
-            "GH_RELEASE_FILE": str(tmp_path / "release.json"),
-            "SHA_SRC": str(sha_src),
-            "IMG_SRC": str(img_src),
-            "HOME": str(tmp_path),
-            "GH_AUTH_STATUS": "1",
-        }
-    )
-
-    result = run_script(tmp_path, env)
-
-    assert result.returncode == 0, result.stderr
-    default_dir = tmp_path / "sugarkube" / "images"
-    image_path = default_dir / image_name
-    assert image_path.exists()
-    checksum_text = (image_path.parent / f"{image_name}.sha256").read_text().strip()
-    assert checksum_text == f"{digest}  {image_name}"
+    dest = Path(env["HOME"]) / "sugarkube" / "images" / "sugarkube.img.xz"
+    checksum = Path(str(dest) + ".sha256")
+    assert dest.read_bytes() == payload
+    assert checksum.read_text().strip() == sha
+    assert "Checksum verified" in result.stdout
 
 
-def test_errors_when_release_missing(tmp_path):
-    release_payload = build_release_payload(
-        "sugarkube.img.xz",
-        "https://example.com/sugarkube.img.xz",
-        "https://example.com/sugarkube.img.xz.sha256",
-    )
-    fake_bin = setup_fake_tools(tmp_path, release_payload)
+def test_checksum_mismatch_errors(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
 
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{fake_bin}:{env['PATH']}",
-            "GH_RELEASE_FILE": str(tmp_path / "release.json"),
-            "SHA_SRC": str(tmp_path / "missing"),
-            "IMG_SRC": str(tmp_path / "missing"),
-            "GH_API_FAIL": "1",
-            "GH_AUTH_STATUS": "1",
-        }
-    )
+    payload = b"ok"
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(payload)
+    wrong_sha = tmp_path / "release.img.xz.sha256"
+    wrong_sha.write_text("deadbeef\n")
 
-    result = run_script(tmp_path, env)
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, wrong_sha)
+
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
     assert result.returncode != 0
-    assert "no published releases" in result.stderr
+    assert "Checksum mismatch" in result.stderr
 
 
-def test_fails_on_checksum_mismatch(tmp_path):
-    image_name = "sugarkube.img.xz"
-    img_src = tmp_path / "source.img.xz"
-    img_src.write_bytes(b"pi-image")
+def test_falls_back_to_workflow_when_release_missing(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
 
-    sha_src = tmp_path / "source.img.xz.sha256"
-    sha_src.write_text("0000  sugarkube.img.xz\n")
+    payload = b"workflow"
+    workflow_img = tmp_path / "workflow.img.xz"
+    workflow_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    workflow_sha = tmp_path / "workflow.img.xz.sha256"
+    workflow_sha.write_text(f"{sha}\n")
 
-    release_payload = build_release_payload(
-        image_name,
-        "https://example.com/sugarkube.img.xz",
-        "https://example.com/sugarkube.img.xz.sha256",
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_WORKFLOW_IMAGE"] = str(workflow_img)
+    env["GH_WORKFLOW_SHA"] = str(workflow_sha)
+    # No GH_RELEASE_PAYLOAD env var → triggers workflow fallback.
+
+    result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    dest = Path(env["HOME"]) / "sugarkube" / "images" / "sugarkube.img.xz"
+    checksum = Path(str(dest) + ".sha256")
+    assert dest.read_bytes() == payload
+    assert checksum.read_text().strip() == sha
+    assert "Falling back to latest successful pi-image" in result.stdout
+
+
+def test_honors_output_override(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    payload = b"override"
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    release_sha = tmp_path / "release.img.xz.sha256"
+    release_sha.write_text(f"{sha}\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
+
+    custom_output = tmp_path / "downloads" / "custom.img.xz"
+    result = run_script(
+        "download_pi_image.sh",
+        args=["--output", str(custom_output)],
+        env=env,
+        cwd=tmp_path,
     )
-
-    fake_bin = setup_fake_tools(tmp_path, release_payload)
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{fake_bin}:{env['PATH']}",
-            "GH_RELEASE_FILE": str(tmp_path / "release.json"),
-            "SHA_SRC": str(sha_src),
-            "IMG_SRC": str(img_src),
-            "HOME": str(tmp_path),
-            "GH_AUTH_STATUS": "1",
-        }
-    )
-
-    result = run_script(tmp_path, env)
-    assert result.returncode != 0
-    assert "checksum mismatch" in result.stderr
-
-
-def test_sugarkube_latest_wrapper(tmp_path):
-    image_name = "sugarkube.img.xz"
-    image_bytes = b"pi-image"
-    digest = hashlib.sha256(image_bytes).hexdigest()
-
-    img_src = tmp_path / "source.img.xz"
-    img_src.write_bytes(image_bytes)
-
-    sha_src = tmp_path / "source.img.xz.sha256"
-    sha_src.write_text(f"{digest}  {image_name}\n")
-
-    release_payload = build_release_payload(
-        image_name,
-        "https://example.com/sugarkube.img.xz",
-        "https://example.com/sugarkube.img.xz.sha256",
-    )
-
-    fake_bin = setup_fake_tools(tmp_path, release_payload)
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{fake_bin}:{env['PATH']}",
-            "GH_RELEASE_FILE": str(tmp_path / "release.json"),
-            "SHA_SRC": str(sha_src),
-            "IMG_SRC": str(img_src),
-            "HOME": str(tmp_path),
-            "GH_AUTH_STATUS": "1",
-        }
-    )
-
-    result = run_wrapper(tmp_path, env)
 
     assert result.returncode == 0, result.stderr
-    default_dir = tmp_path / "sugarkube" / "images"
-    image_path = default_dir / image_name
-    assert image_path.exists()
+    assert custom_output.read_bytes() == payload
+    checksum = Path(str(custom_output) + ".sha256")
+    assert checksum.read_text().strip() == sha

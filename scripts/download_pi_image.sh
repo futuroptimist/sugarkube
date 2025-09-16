@@ -1,251 +1,210 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+log() {
+  printf '==> %s\n' "$*"
+}
+
+err() {
+  printf 'ERROR: %s\n' "$*" >&2
+}
+
+die() {
+  err "$1"
+  exit "${2:-1}"
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    if [ -n "${2:-}" ]; then
+      die "$2"
+    else
+      die "Missing required command: $1"
+    fi
+  fi
+}
+
+find_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+  elif command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+  else
+    die "python3 (or python) is required to parse release metadata"
+  fi
+}
+
 usage() {
   cat <<'USAGE'
-Download the latest published sugarkube Pi image release.
+Download the latest sugarkube Pi image release artifact and verify its checksum.
 
-Usage:
-  download_pi_image.sh [OPTIONS] [OUTPUT]
+Usage: download_pi_image.sh [options] [OUTPUT]
 
 Options:
-  --tag <tag>        Download a specific release tag instead of the latest.
-  --repo <owner/repo>
-                     Override the GitHub repository (default: futuroptimist/sugarkube).
-  --asset <name>     Override the image asset name (default: sugarkube.img.xz).
-  --checksum <name>  Override the checksum asset name (default: <asset>.sha256).
-  -h, --help         Show this message.
+  -o, --output PATH     Write the image to PATH (default:
+                        ~/sugarkube/images/sugarkube.img.xz)
+      --dir DIR         Store downloads in DIR (default: $HOME/sugarkube/images)
+      --release TAG     Download a specific release tag instead of the latest
+      --asset NAME      Override the image asset name (default: sugarkube.img.xz)
+      --checksum NAME   Override the checksum asset name (default: asset + .sha256)
+      --mode MODE       Force download mode: release, workflow, or auto (default)
+  -h, --help            Show this message
 
-When OUTPUT is omitted, the image is saved to
-  ${SUGARKUBE_IMAGE_DIR:-$HOME/sugarkube/images}/sugarkube.img.xz
+Environment:
+  SUGARKUBE_OWNER           Override GitHub owner (default: futuroptimist)
+  SUGARKUBE_REPO            Override repository (default: sugarkube)
+  SUGARKUBE_IMAGE_DIR       Override default destination directory
+  SUGARKUBE_IMAGE_ASSET     Override default asset name
+  SUGARKUBE_CHECKSUM_ASSET  Override default checksum asset name
+  SUGARKUBE_DOWNLOAD_MODE   Default mode when --mode is not provided
 USAGE
 }
 
-if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
-  usage
-  exit 0
-fi
+OWNER="${SUGARKUBE_OWNER:-futuroptimist}"
+REPO="${SUGARKUBE_REPO:-sugarkube}"
+DEFAULT_ASSET="${SUGARKUBE_IMAGE_ASSET:-sugarkube.img.xz}"
+DEFAULT_CHECKSUM="${SUGARKUBE_CHECKSUM_ASSET:-${DEFAULT_ASSET}.sha256}"
+DEFAULT_DIR="${SUGARKUBE_IMAGE_DIR:-$HOME/sugarkube/images}"
+MODE="${SUGARKUBE_DOWNLOAD_MODE:-auto}"
+RELEASE_TAG=""
+DEST_ARG=""
+DEST_DIR_OVERRIDE=""
+ASSET_NAME="$DEFAULT_ASSET"
+CHECKSUM_NAME="$DEFAULT_CHECKSUM"
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "gh is required" >&2
-  exit 1
-fi
-
-if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is required" >&2
-  exit 1
-fi
-
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required" >&2
-  exit 1
-fi
-
-if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
-  echo "sha256sum or shasum is required" >&2
-  exit 1
-fi
-
-REPO_DEFAULT="futuroptimist/sugarkube"
-TAG="latest"
-REPO="${SUGARKUBE_REPO:-$REPO_DEFAULT}"
-ASSET_NAME="${SUGARKUBE_IMAGE_ASSET:-sugarkube.img.xz}"
-CHECKSUM_NAME=""
-OUTPUT=""
-
-while [[ $# -gt 0 ]]; do
+while [ "$#" -gt 0 ]; do
   case "$1" in
-    --tag)
-      if [[ $# -lt 2 ]]; then
-        echo "--tag requires an argument" >&2
-        exit 1
-      fi
-      TAG="$2"
-      shift 2
-      ;;
-    --repo)
-      if [[ $# -lt 2 ]]; then
-        echo "--repo requires an argument" >&2
-        exit 1
-      fi
-      REPO="$2"
-      shift 2
-      ;;
-    --asset)
-      if [[ $# -lt 2 ]]; then
-        echo "--asset requires an argument" >&2
-        exit 1
-      fi
-      ASSET_NAME="$2"
-      shift 2
-      ;;
-    --checksum)
-      if [[ $# -lt 2 ]]; then
-        echo "--checksum requires an argument" >&2
-        exit 1
-      fi
-      CHECKSUM_NAME="$2"
-      shift 2
-      ;;
-    --)
-      shift
-      break
-      ;;
-    -* )
-      echo "unknown option: $1" >&2
+    -h|--help)
       usage
-      exit 1
+      exit 0
       ;;
+    -o|--output)
+      DEST_ARG="$2"; shift 2 ;;
+    --dir)
+      DEST_DIR_OVERRIDE="$2"; shift 2 ;;
+    --release)
+      RELEASE_TAG="$2"; shift 2 ;;
+    --asset)
+      ASSET_NAME="$2"; shift 2 ;;
+    --checksum)
+      CHECKSUM_NAME="$2"; shift 2 ;;
+    --mode)
+      MODE="$2"; shift 2 ;;
+    --)
+      shift; break ;;
+    -*)
+      die "Unknown option: $1" ;;
     *)
-      if [[ -n "$OUTPUT" ]]; then
-        echo "unexpected argument: $1" >&2
-        usage
-        exit 1
+      if [ -n "$DEST_ARG" ]; then
+        die "Unexpected positional argument: $1"
       fi
-      OUTPUT="$1"
-      shift
-      ;;
+      DEST_ARG="$1"; shift ;;
   esac
 done
 
-if [[ -z "$OUTPUT" ]]; then
-  DEFAULT_DIR="${SUGARKUBE_IMAGE_DIR:-$HOME/sugarkube/images}"
-  OUTPUT="$DEFAULT_DIR/$ASSET_NAME"
+case "$MODE" in
+  auto|release|workflow) ;;
+  *) die "Unsupported mode '$MODE' (expected auto, release, or workflow)" ;;
+esac
+
+if [ -n "$RELEASE_TAG" ] && [ "$MODE" = "workflow" ]; then
+  die "--release cannot be used with --mode workflow"
 fi
 
-DEFAULT_DIRNAME=$(dirname "$OUTPUT")
-mkdir -p "$DEFAULT_DIRNAME"
+require_cmd gh "gh is required"
+require_cmd curl "curl is required to download release assets"
+require_cmd sha256sum "sha256sum is required to verify downloads"
+PYTHON_BIN="$(find_python)"
 
-if [[ -z "$CHECKSUM_NAME" ]]; then
-  CHECKSUM_NAME="$ASSET_NAME.sha256"
-fi
-
-CHECKSUM_OUTPUT="$OUTPUT.sha256"
-
-cleanup_on_error() {
-  local status=$?
-  if [[ $status -ne 0 ]]; then
-    echo "Download failed; leaving any partial files for inspection." >&2
-  fi
-  exit $status
-}
-trap cleanup_on_error EXIT
-
-API_PATH="repos/$REPO/releases/latest"
-if [[ "$TAG" != "latest" ]]; then
-  API_PATH="repos/$REPO/releases/tags/$TAG"
-fi
-
-if ! release_json=$(gh api "$API_PATH" 2>/dev/null); then
-  if [[ "$TAG" == "latest" ]]; then
-    echo "no published releases found for $REPO" >&2
-  else
-    echo "release $TAG not found for $REPO" >&2
-  fi
-  exit 1
-fi
-
-export ASSET_NAME CHECKSUM_NAME RELEASE_JSON="$release_json"
-mapfile -t parsed < <(
-  python3 <<'PY'
-import json
-import os
-import sys
-
-data = json.loads(os.environ["RELEASE_JSON"])
-asset_name = os.environ["ASSET_NAME"]
-checksum_name = os.environ["CHECKSUM_NAME"]
-
-def find(name):
-    for asset in data.get("assets", []):
-        if asset.get("name") == name:
-            return asset.get("browser_download_url", "")
-    return ""
-
-img_url = find(asset_name)
-sha_url = find(checksum_name)
-if not img_url:
-    sys.stderr.write(f"asset {asset_name} not found in release\n")
-    sys.exit(1)
-if not sha_url:
-    sys.stderr.write(f"asset {checksum_name} not found in release\n")
-    sys.exit(1)
-
-print(data.get("tag_name", ""))
-print(img_url)
-print(sha_url)
-PY
-)
-
-TAG_NAME="${parsed[0]:-}"
-IMG_URL="${parsed[1]:-}"
-SHA_URL="${parsed[2]:-}"
-
-if [[ -z "$IMG_URL" ]]; then
-  echo "image asset URL not found" >&2
-  exit 1
-fi
-if [[ -z "$SHA_URL" ]]; then
-  echo "checksum asset URL not found" >&2
-  exit 1
-fi
-
-auth_header=()
-if gh auth status >/dev/null 2>&1; then
-  if token=$(gh auth token 2>/dev/null); then
-    if [[ -n "$token" ]]; then
-      auth_header=(-H "Authorization: token $token")
-    fi
-  fi
-fi
-
-download() {
-  local url="$1"
-  local dest="$2"
-  local label="$3"
-
-  echo "➡️  Downloading $label from ${TAG_NAME:-$TAG}"
-  local args=(
-    --fail
-    --location
-    --retry 3
-    --retry-delay 2
-    --continue-at -
-    --progress-bar
-  )
-  if [[ ${#auth_header[@]} -gt 0 ]]; then
-    args+=("${auth_header[@]}")
-  fi
-  args+=(--output "$dest" "$url")
-  curl "${args[@]}"
-  # ensure a trailing newline after curl's progress bar
-  echo ""
-}
-
-download "$SHA_URL" "$CHECKSUM_OUTPUT" "$CHECKSUM_NAME"
-download "$IMG_URL" "$OUTPUT" "$ASSET_NAME"
-
-if command -v sha256sum >/dev/null 2>&1; then
-  IMAGE_SUM=$(sha256sum "$OUTPUT" | awk '{print $1}')
+if [ -n "$DEST_ARG" ]; then
+  DEST_PATH="$DEST_ARG"
+  DEST_DIRNAME="$(dirname "$DEST_PATH")"
 else
-  IMAGE_SUM=$(shasum -a 256 "$OUTPUT" | awk '{print $1}')
-fi
-EXPECTED_SUM=$(awk 'NF >= 1 {print $1; exit}' "$CHECKSUM_OUTPUT")
-
-if [[ -z "$EXPECTED_SUM" ]]; then
-  echo "checksum file $CHECKSUM_OUTPUT did not contain a digest" >&2
-  exit 1
+  DEST_DIRNAME="${DEST_DIR_OVERRIDE:-$DEFAULT_DIR}"
+  DEST_PATH="${DEST_DIRNAME%/}/$ASSET_NAME"
 fi
 
-if [[ "$IMAGE_SUM" != "$EXPECTED_SUM" ]]; then
-  echo "checksum mismatch for $OUTPUT" >&2
-  exit 1
+CHECKSUM_PATH="${DEST_PATH}.sha256"
+mkdir -p "$DEST_DIRNAME"
+
+AUTH_HEADER=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: token ${GITHUB_TOKEN}"
+elif TOKEN_VALUE=$(gh auth token 2>/dev/null); then
+  [ -n "$TOKEN_VALUE" ] && AUTH_HEADER="Authorization: token ${TOKEN_VALUE}"
 fi
 
-printf '%s  %s\n' "$EXPECTED_SUM" "$(basename "$OUTPUT")" >"$CHECKSUM_OUTPUT"
+trim_hash() {
+  awk 'NF >= 1 { gsub(/\r/, "", $1); print tolower($1); exit }' "$1"
+}
 
-trap - EXIT
+verify_checksum() {
+  local file="$1" checksum_file="$2"
+  [ ! -f "$checksum_file" ] && die "Checksum file '$checksum_file' not found"
+  local expected actual
+  expected="$(trim_hash "$checksum_file")"
+  [ -z "$expected" ] && die "Checksum file '$checksum_file' did not contain a hash"
+  actual="$(sha256sum "$file" | awk '{print tolower($1)}')"
+  [ "$actual" != "$expected" ] && die "Checksum mismatch. Expected $expected but got $actual"
+  log "Checksum verified ($actual)"
+}
 
-echo "✅ Downloaded release ${TAG_NAME:-$TAG}"
-ls -lh "$OUTPUT" "$CHECKSUM_OUTPUT"
-echo "Image saved to $OUTPUT with checksum $CHECKSUM_OUTPUT"
+download_with_curl() {
+  local url="$1" destination="$2" label="$3"
+  local partial="${destination}.partial"
+  local -a args=(--fail --location --retry 5 --retry-delay 5 --retry-connrefused -C - --progress-bar --output "$partial")
+  [ -n "$AUTH_HEADER" ] && args+=(--header "$AUTH_HEADER")
+  args+=("$url")
+  log "Downloading $label"
+  curl "${args[@]}" || die "Download failed for $label"
+  mv "$partial" "$destination"
+}
+
+parse_release_json() {
+  local asset="$1" checksum="$2"
+  "$PYTHON_BIN" -c 'import json, sys
+asset, checksum = sys.argv[1], sys.argv[2]
+data = json.load(sys.stdin)
+def find(name):
+  for a in data.get("assets", []):
+    if a.get("name") == name:
+      return a.get("browser_download_url") or a.get("url") or ""
+  return ""
+print(find(asset)); print(find(checksum)); print(data.get("tag_name") or data.get("name") or "")' "$asset" "$checksum"
+}
+
+download_from_release() {
+  local endpoint="repos/${OWNER}/${REPO}/releases/${RELEASE_TAG:+tags/}${RELEASE_TAG:-latest}"
+  release_payload=$(gh api "$endpoint" 2>/dev/null) || return 1
+  mapfile -t info < <(printf '%s' "$release_payload" | parse_release_json "$ASSET_NAME" "$CHECKSUM_NAME")
+  local asset_url="${info[0]}" checksum_url="${info[1]}" tag="${info[2]}"
+  [ -z "$asset_url" ] && return 1
+  log "Resolved release ${tag:-latest}"
+  download_with_curl "$asset_url" "$DEST_PATH" "$ASSET_NAME"
+  [ -z "$checksum_url" ] && die "Release ${tag:-latest} missing $CHECKSUM_NAME"
+  download_with_curl "$checksum_url" "$CHECKSUM_PATH" "$CHECKSUM_NAME"
+  verify_checksum "$DEST_PATH" "$CHECKSUM_PATH"
+}
+
+download_from_workflow() {
+  log "Falling back to latest successful pi-image workflow artifact"
+  run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || die "no pi-image workflow runs found"
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  gh run download "$run_id" --name sugarkube-img --dir "$tmp_dir" || die "Failed to download workflow artifact"
+  mv "$tmp_dir/sugarkube.img.xz" "$DEST_PATH"
+  mv "$tmp_dir/sugarkube.img.xz.sha256" "$CHECKSUM_PATH"
+  verify_checksum "$DEST_PATH" "$CHECKSUM_PATH"
+}
+
+success=0
+if [ "$MODE" = "release" ] || [ "$MODE" = "auto" ]; then
+  download_from_release && success=1 || [ "$MODE" = "release" ] && die "Failed to download release asset"
+fi
+if [ "$success" -eq 0 ] && { [ "$MODE" = "workflow" ] || [ "$MODE" = "auto" ]; }; then
+  download_from_workflow && success=1
+fi
+
+log "Image saved to $DEST_PATH"
+[ -f "$CHECKSUM_PATH" ] && log "Checksum saved to $CHECKSUM_PATH"
+ls -lh "$DEST_PATH" "$CHECKSUM_PATH" 2>/dev/null || true

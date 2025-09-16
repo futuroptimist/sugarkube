@@ -14,7 +14,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - [x] Verify checksums/signatures.
   - [x] Emit progress bars/ETAs.
   - [x] Store artifacts under `~/sugarkube/images/` by default.
-- [x] Provide a `sugarkube-latest` convenience wrapper for downloading + verifying in one step.
+  - Implemented with resumable `curl` downloads, checksum verification, and a configurable default directory in `scripts/download_pi_image.sh`.
+- [x] Provide a `sugarkube-latest` convenience wrapper for downloading + verifying in one step.  
+  Added `scripts/sugarkube-latest`, which defaults to release downloads while still accepting all downloader flags.
 - [ ] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
 
 ---
@@ -75,7 +77,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ## Testing & CI Hardening
 - [ ] Extend pi-image workflow with QEMU smoke tests that boot the image, wait for cloud-init, run verifier, and upload logs.
 - [ ] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
-- [ ] Integrate spellcheck/linkcheck gating (`pyspelling`, `linkchecker`) for docs.
+- [x] Integrate spellcheck/linkcheck gating (`pyspelling`, `linkchecker`) for docs.
 - [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.
 - [ ] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
 - [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
