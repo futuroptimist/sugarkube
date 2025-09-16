@@ -30,7 +30,7 @@ def test_regex_scan_prints_warning(scan_secrets, capsys):
     diff = ["+++ b/file.txt", "+token" ": abc"]
     assert scan_secrets.regex_scan(diff)
     captured = capsys.readouterr()
-    assert "Possible secret: +tok" "en: abc" in captured.out
+    assert "Possible secret: +tok" "en: abc" in captured.err
 
 
 def test_regex_scan_ignores_self(scan_secrets):
