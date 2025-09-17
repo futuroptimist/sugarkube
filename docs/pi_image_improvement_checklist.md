@@ -34,12 +34,16 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Verify written bytes with SHA-256.
   - Auto-eject media.
   - Implemented via `scripts/flash_pi_media.py` with bash and PowerShell wrappers.
-- [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
+- [x] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
+  - [`docs/pi_imager_presets/`](pi_imager_presets/) now ships Wi-Fi and Ethernet presets with placeholder credentials and verifier hooks.
 - [x] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
   - Added a root `Makefile` with `flash-pi`, `install-pi-image`, and `download-pi-image` targets that wrap the new installer and flashing helpers.
-- [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
-- [ ] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
-- [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
+- [x] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
+  - [`scripts/flash_and_report.py`](../scripts/flash_and_report.py) streams through `flash_pi_media.py`, captures SHA-256s, device metadata, and produces Markdown/HTML/JSON reports with optional cloud-init diffs.
+- [x] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
+  - [`docs/pi_headless_provisioning.md`](pi_headless_provisioning.md) walks through staging presets, secrets, and the reporting wrapper for keyboard-free boots.
+- [x] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
+  - A new [Codespaces devcontainer](../.devcontainer/devcontainer.json) installs the flashing toolchain, Python dependencies, and lint hooks automatically.
 
 ---
 
