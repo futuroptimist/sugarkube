@@ -46,6 +46,9 @@ the docs you will see the term used in both contexts.
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
     to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
     macOS compatibility
+  - `install_sugarkube.sh` — one-liner installer that ensures `gh` is present, downloads
+    the newest release, verifies the checksum, and expands the image into
+    `~/sugarkube/images/`
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
     clean up temporary work directories, use POSIX `test -ef` to compare paths
     without `realpath`, and fall back to `unzip` when `bsdtar` is unavailable
@@ -58,6 +61,11 @@ the docs you will see the term used in both contexts.
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
+  - `flash_pi_media.sh` — flash `.img` or `.img.xz` onto removable media with
+    streamed writes, checksum verification, and optional auto-eject on
+    Linux/macOS
+  - `flash_pi_media.ps1` — PowerShell equivalent that writes to
+    `\\.\PhysicalDriveN` and verifies the SHA-256 digest on Windows
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
     available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see
@@ -71,8 +79,8 @@ push to `main` and once per day. Each run publishes a signed
 `sugarkube.img.xz`, its checksum, a provenance manifest, and the full
 `pi-gen` build log. Release notes summarize stage timings and link directly to
 the manifest so you can verify the build inputs and commit hashes before
-flashing. Use `./scripts/sugarkube-latest` to download the newest release with
-automatic checksum verification.
+flashing. Use `./scripts/install_sugarkube.sh` (or `make install-pi-image`) to
+download, verify, and expand the newest release with one command.
 
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs

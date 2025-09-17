@@ -22,21 +22,37 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Provide a `sugarkube-latest` convenience wrapper for downloading + verifying in one step.
   - Added `scripts/sugarkube-latest`, which defaults to release downloads while
     still accepting all downloader flags.
-- [ ] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
+- [x] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
+  - `scripts/install_sugarkube.sh` installs GitHub CLI when needed, downloads the
+    newest release, verifies SHA-256, optionally keeps the compressed artifact,
+    and expands `sugarkube.img` in `~/sugarkube/images/`.
 
 ---
 
 ## Flashing & Provisioning Automation
-- [ ] Ship cross-platform flashing helpers (`flash_pi_media.sh`, PowerShell twin, or CLI in Go/Rust/Node) that:
+- [x] Ship cross-platform flashing helpers (`flash_pi_media.sh`, PowerShell twin, or CLI in Go/Rust/Node) that:
   - Discover SD/USB devices.
   - Stream `.img.xz` directly with progress (`xzcat | dd`).
   - Verify written bytes with SHA-256.
   - Auto-eject media.
-- [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
-- [ ] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
+- Implemented `scripts/flash_pi_media.sh` (Linux/macOS) and
+  `scripts/flash_pi_media.ps1` (Windows) with device discovery, streaming writes,
+  checksum verification, and optional auto-eject/power-off.
+- [x] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
+  - Added `docs/presets/sugarkube-imager-preset.json` with a README explaining
+    how to drop presets into Raspberry Pi Imager on Linux, macOS, and Windows.
+- [x] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
+  - Added a repository-level `Makefile` exposing `download-pi-image`,
+    `install-pi-image`, `flash-pi`, and `verify-pi-image` helpers that wrap the
+    new scripts.
 - [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
-- [ ] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
-- [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
+- [x] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
+  - Authored `docs/pi_image_headless.md`, introduced
+    `scripts/cloud-init/secrets.env.example`, and documented how to run
+    `init-env.sh` after flashing.
+- [x] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
+  - The new `Makefile` and headless guide cover Codespaces-specific steps while
+    `flash_pi_media.sh` supports dry runs for CI and remote development.
 
 ---
 

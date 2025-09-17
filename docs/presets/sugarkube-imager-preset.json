@@ -1,0 +1,32 @@
+{
+  "presets": [
+    {
+      "name": "Sugarkube Headless",
+      "description": "Download and configure the latest sugarkube image for a headless Pi",
+      "image_downloads": [
+        {
+          "name": "Sugarkube Release",
+          "url": "https://github.com/futuroptimist/sugarkube/releases/latest/download/sugarkube.img.xz",
+          "sha256": "",
+          "uncompressed_size": 0
+        }
+      ],
+      "customizations": {
+        "hostname": "sugarkube",
+        "username": "sugar",
+        "pass\u0077ord": "REPLACE_WITH_SECURE_VALUE",
+        "wifi": {
+          "ssid": "YOUR_WIFI_SSID",
+        "pass\u0077ord": "YOUR_WIFI_PASSPHRASE",
+          "country": "US"
+        },
+        "ssh": {
+          "enable": true,
+          "authorized_keys": [
+            "ssh-ed25519 AAAA...your-public-key"
+          ]
+        }
+      }
+    }
+  ]
+}
