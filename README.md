@@ -46,6 +46,9 @@ the docs you will see the term used in both contexts.
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
     to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
     macOS compatibility
+  - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
+    latest release, verify checksums, expand the `.img.xz`, and emit a new
+    `.img.sha256`; safe to run via `curl | bash`
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
     clean up temporary work directories, use POSIX `test -ef` to compare paths
     without `realpath`, and fall back to `unzip` when `bsdtar` is unavailable
@@ -56,6 +59,9 @@ the docs you will see the term used in both contexts.
     `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git URLs
     via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
     and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
+  - `flash_pi_media.sh` — stream `.img` or `.img.xz` directly to removable
+    media with SHA-256 verification and automatic eject. A PowerShell wrapper
+    (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
@@ -71,8 +77,12 @@ push to `main` and once per day. Each run publishes a signed
 `sugarkube.img.xz`, its checksum, a provenance manifest, and the full
 `pi-gen` build log. Release notes summarize stage timings and link directly to
 the manifest so you can verify the build inputs and commit hashes before
-flashing. Use `./scripts/sugarkube-latest` to download the newest release with
-automatic checksum verification.
+flashing. Run `./scripts/install_sugarkube_image.sh` (or fetch the same helper
+via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
+download, verify, and expand the latest release, or run `make flash-pi
+FLASH_DEVICE=/dev/sdX` to chain download → verification → flashing with the new
+streaming helper. `./scripts/sugarkube-latest` remains available when you only
+need the `.img.xz` artifact with checksum verification.
 
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs
