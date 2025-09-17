@@ -76,3 +76,46 @@ def test_requires_root_without_override(tmp_path):
 
     assert result.returncode != 0
     assert "Run as root or with sudo" in result.stderr
+
+
+def test_flash_report_outputs_markdown_and_html(tmp_path):
+    content = b"report" * 4096
+    _, archive = make_image(tmp_path, content)
+    device = tmp_path / "device.bin"
+    device.touch()
+
+    baseline = (BASE_DIR / "scripts" / "cloud-init" / "user-data.yaml").read_text(encoding="utf-8")
+    override = tmp_path / "user-data.override.yaml"
+    override.write_text(baseline + "\n# test override\n", encoding="utf-8")
+
+    report_dir = tmp_path / "reports"
+    env = os.environ.copy()
+    env["SUGARKUBE_FLASH_ALLOW_NONROOT"] = "1"
+    env["SUGARKUBE_REPORT_DIR"] = str(report_dir)
+
+    result = run_flash(
+        [
+            "--image",
+            str(archive),
+            "--device",
+            str(device),
+            "--assume-yes",
+            "--keep-mounted",
+            "--no-eject",
+            "--report",
+            "--cloud-init-override",
+            str(override),
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    reports = sorted(report_dir.glob("flash-*.md"))
+    assert reports, "expected markdown report"
+    md_path = reports[-1]
+    html_path = md_path.with_suffix(".html")
+    assert html_path.exists()
+    md_text = md_path.read_text(encoding="utf-8")
+    assert "Sugarkube Flash Report" in md_text
+    assert "test override" in md_text

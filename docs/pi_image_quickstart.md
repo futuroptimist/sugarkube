@@ -58,6 +58,8 @@ Build a Raspberry Pi OS image that boots with k3s and the
 - Raspberry Pi Imager remains a friendly alternative.
   Use advanced options (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>) to set the
   hostname, credentials and network when flashing `sugarkube.img.xz` manually.
+  See [Headless provisioning guide](pi_headless_provisioning.md) for generating
+  presets and managing cloud-init overrides without touching the GUI.
 
 ## 3. Boot and verify
 - Insert the card and power on the Pi.

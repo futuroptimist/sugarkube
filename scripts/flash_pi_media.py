@@ -26,7 +26,10 @@ testing and dry-runs possible without touching real hardware.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import difflib
 import hashlib
+import html
 import io
 import json
 import os
@@ -35,10 +38,13 @@ import shutil
 import stat
 import subprocess
 import sys
+import textwrap
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+BASELINE_CLOUD_INIT = Path(__file__).resolve().parent / "cloud-init" / "user-data.yaml"
 
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB to balance throughput and memory usage.
 PROGRESS_INTERVAL = 1.0  # seconds
@@ -109,6 +115,15 @@ class Device:
 
 def _run(cmd: Sequence[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=False, capture_output=True, text=True, **kwargs)
+
+
+def _safe_run(cmd: Sequence[str]) -> subprocess.CompletedProcess:
+    try:
+        return _run(cmd)
+    except OSError as exc:  # pragma: no cover - defensive guard for missing binaries
+        warn(f"Failed to execute {' '.join(cmd)}: {exc}")
+        completed = subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr=str(exc))
+        return completed
 
 
 def _list_linux_devices() -> List[Device]:
@@ -447,6 +462,191 @@ def _auto_eject(device: Device) -> None:
         warn("Unable to offline the disk automatically. Use 'Safely Remove Hardware'.")
 
 
+def _default_report_dir() -> Path:
+    candidate = os.environ.get("SUGARKUBE_REPORT_DIR")
+    if candidate:
+        return Path(candidate).expanduser()
+    return Path.home() / "sugarkube" / "reports"
+
+
+def _resolve_report_paths(report_value: Optional[str]) -> Optional[Tuple[Path, Path]]:
+    if report_value is None:
+        return None
+
+    timestamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if report_value == "auto":
+        base_dir = _default_report_dir()
+        base_dir.mkdir(parents=True, exist_ok=True)
+        base = base_dir / f"flash-{timestamp}"
+        md_path = base.with_suffix(".md")
+        html_path = base.with_suffix(".html")
+        return md_path, html_path
+
+    target = Path(report_value).expanduser().resolve()
+    if target.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        base = target / f"flash-{timestamp}"
+        return base.with_suffix(".md"), base.with_suffix(".html")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix:
+        md_path = target.with_suffix(".md")
+        html_path = target.with_suffix(".html")
+    else:
+        base = target
+        md_path = base.with_suffix(".md")
+        html_path = base.with_suffix(".html")
+    return md_path, html_path
+
+
+def _collect_device_metadata(device: Device) -> Dict[str, str]:
+    metadata: Dict[str, str] = {
+        "Device path": device.path,
+        "Description": device.description or "(unknown)",
+        "Bus": device.bus or "(unknown)",
+        "Size": device.human_size,
+        "Removable": "yes" if device.is_removable else "no",
+    }
+    if device.system_id:
+        metadata["System identifier"] = device.system_id
+
+    system = platform.system()
+    if system == "Linux":
+        proc = _safe_run(["udevadm", "info", "--query=property", "--name", device.path])
+        if proc.returncode == 0 and proc.stdout:
+            for line in proc.stdout.splitlines():
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key in {"ID_MODEL", "ID_VENDOR", "ID_SERIAL", "ID_SERIAL_SHORT"}:
+                    metadata[key.replace("ID_", "ID ")] = value
+    elif system == "Darwin":  # pragma: no cover - macOS specific
+        identifier = device.system_id or device.path
+        proc = _safe_run(["/usr/sbin/diskutil", "info", "-plist", identifier])
+        if proc.returncode == 0 and proc.stdout:
+            try:
+                import plistlib
+
+                data = plistlib.loads(proc.stdout.encode("utf-8"))
+            except Exception as exc:  # pragma: no cover - defensive
+                warn(f"Unable to parse diskutil metadata: {exc}")
+            else:
+                for key in ["DeviceModel", "DeviceVendor", "DeviceSerialNumber"]:
+                    value = data.get(key)
+                    if value:
+                        metadata[key.replace("Device", "")] = str(value)
+    elif system == "Windows":  # pragma: no cover - Windows specific
+        if device.system_id and device.system_id.isdigit():
+            command = (
+                "Get-Disk -Number "
+                f"{device.system_id} | Select-Object SerialNumber,Model,Manufacturer | "
+                "ConvertTo-Json -Compress"
+            )
+            payload = _powershell_json(command)
+            if payload:
+                if isinstance(payload, list) and payload:
+                    payload = payload[0]
+                for key in ["SerialNumber", "Model", "Manufacturer"]:
+                    value = payload.get(key) if isinstance(payload, dict) else None
+                    if value:
+                        metadata[key] = str(value)
+
+    return metadata
+
+
+def _format_metadata_table(metadata: Dict[str, str]) -> str:
+    if not metadata:
+        return "_No metadata available._"
+    lines = ["| Field | Value |", "| --- | --- |"]
+    for key, value in metadata.items():
+        escaped_value = str(value).replace("|", "\\|")
+        lines.append(f"| {key} | {escaped_value} |")
+    return "\n".join(lines)
+
+
+def _cloud_init_diff(override: Path) -> str:
+    baseline = BASELINE_CLOUD_INIT
+    if not baseline.exists():
+        return "Baseline user-data.yaml not found."
+    if not override.exists():
+        return f"Override file not found: {override}"
+    base_text = baseline.read_text(encoding="utf-8").splitlines()
+    override_text = override.read_text(encoding="utf-8").splitlines()
+    diff = difflib.unified_diff(
+        base_text,
+        override_text,
+        fromfile=str(baseline),
+        tofile=str(override),
+        lineterm="",
+    )
+    diff_text = "\n".join(diff)
+    if not diff_text:
+        return "No differences detected."
+    return diff_text
+
+
+def _generate_markdown_report(
+    *,
+    image_path: Path,
+    compressed: bool,
+    total_bytes: int,
+    expected_hash: str,
+    actual_hash: str,
+    metadata: Dict[str, str],
+    start_time: _dt.datetime,
+    duration: float,
+    cloud_init_section: Optional[str],
+) -> str:
+    host = platform.node()
+    os_name = f"{platform.system()} {platform.release()}"
+    image_desc = f"{image_path} ({'compressed' if compressed else 'raw'})"
+    metadata_table = _format_metadata_table(metadata)
+    diff_block = "No override provided."
+    if cloud_init_section:
+        diff_block = f"```diff\n{cloud_init_section}\n```"
+
+    markdown = f"""\
+# Sugarkube Flash Report
+
+- **Generated at:** {start_time.isoformat()}
+- **Host:** {host} ({os_name})
+- **Image:** {image_desc}
+- **Written bytes:** {total_bytes} ({_format_size(total_bytes)})
+- **Expected SHA-256:** `{expected_hash}`
+- **Verified SHA-256:** `{actual_hash}`
+- **Duration:** {duration:.1f} seconds
+
+## Device metadata
+
+{metadata_table}
+
+## Cloud-init diff
+
+{diff_block}
+"""
+
+    return textwrap.dedent(markdown).strip() + "\n"
+
+
+def _write_reports(md_path: Path, html_path: Path, markdown: str) -> None:
+    md_path.write_text(markdown, encoding="utf-8")
+    html_body = html.escape(markdown)
+    html_content = (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        "<title>Sugarkube Flash Report</title>\n"
+        "<style>body{font-family:system-ui, sans-serif; margin:2rem;}"
+        "pre{white-space:pre-wrap;background:#f6f8fa;padding:1rem;border-radius:8px;}"
+        "table{border-collapse:collapse;}"
+        "td,th{border:1px solid #d0d7de;padding:0.5rem;text-align:left;}"
+        "</style>\n</head>\n<body>\n"
+        "<h1>Sugarkube Flash Report</h1>\n"
+        f"<pre>{html_body}</pre>\n"
+        "</body>\n</html>\n"
+    )
+    html_path.write_text(html_content, encoding="utf-8")
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -482,6 +682,21 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Skip automatic eject/offline after flashing.",
     )
     parser.add_argument(
+        "--report",
+        nargs="?",
+        const="auto",
+        help=(
+            "Write Markdown and HTML flash reports. Pass an optional path prefix "
+            "or provide a custom filename."
+        ),
+    )
+    parser.add_argument(
+        "--cloud-init-override",
+        help=(
+            "Path to a cloud-init user-data file to diff against scripts/cloud-init/user-data.yaml."
+        ),
+    )
+    parser.add_argument(
         "--bytes",
         type=int,
         default=0,
@@ -504,6 +719,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     devices = discover_devices()
     candidates = filter_candidates(devices)
+    start_wall = _dt.datetime.now(_dt.timezone.utc)
+    start_monotonic = time.monotonic()
 
     if args.list:
         summarize_devices(candidates)
@@ -600,6 +817,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not args.no_eject:
         _auto_eject(target_device)
+
+    duration = time.monotonic() - start_monotonic
+
+    if args.report is not None:
+        md_path, html_path = _resolve_report_paths(args.report)
+        metadata = _collect_device_metadata(target_device)
+        cloud_diff: Optional[str] = None
+        if args.cloud_init_override:
+            cloud_diff = _cloud_init_diff(Path(args.cloud_init_override).expanduser())
+        markdown = _generate_markdown_report(
+            image_path=image_path,
+            compressed=compressed,
+            total_bytes=total_bytes,
+            expected_hash=expected_hash,
+            actual_hash=actual_hash,
+            metadata=metadata,
+            start_time=start_wall,
+            duration=duration,
+            cloud_init_section=cloud_diff,
+        )
+        _write_reports(md_path, html_path, markdown)
+        info(f"Wrote flash report: {md_path}")
+        info(f"Wrote flash report: {html_path}")
 
     info("Flash complete")
     return 0

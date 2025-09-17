@@ -1,0 +1,35 @@
+{
+  "config": {
+    "disable_default_user": true,
+    "hostname": "sugarkube-pi",
+    "keyboard": "us",
+    "locale": "en_US",
+    "password": "$6$PLACEHOLDER$examplehashvalue",
+    "persist_settings": true,
+    "skip_first_run": true,
+    "ssh": {
+      "authorized_keys": [
+        "ssh-ed25519 AAAAEXAMPLEPLACEHOLDER user@example"
+      ],
+      "enabled": true
+    },
+    "timezone": "UTC",
+    "username": "sugarkube",
+    "wifi": {
+      "country": "US",
+      "hidden": false,
+      "password": "example-passphrase",
+      "ssid": "ExampleNetwork"
+    },
+    "wlan": {
+      "country": "US",
+      "hidden": false,
+      "password": "example-passphrase",
+      "ssid": "ExampleNetwork"
+    }
+  },
+  "os": {
+    "name": "Raspberry Pi OS Lite (64-bit)"
+  },
+  "version": 2
+}

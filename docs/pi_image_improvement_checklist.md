@@ -34,11 +34,19 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Verify written bytes with SHA-256.
   - Auto-eject media.
   - Implemented via `scripts/flash_pi_media.py` with bash and PowerShell wrappers.
-- [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
+- [x] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH
+      keys for load-and-go flashing.
+  - `scripts/create_pi_imager_preset.py` generates presets on demand; an example lives in
+    `presets/sugarkube-preset.example.json`.
 - [x] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
   - Added a root `Makefile` with `flash-pi`, `install-pi-image`, and `download-pi-image` targets that wrap the new installer and flashing helpers.
-- [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
-- [ ] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
+- [x] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports
+      results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
+  - `scripts/flash_pi_media.py --report` now emits Markdown/HTML summaries with device
+    metadata and optional cloud-init diffs.
+- [x] Document a headless provisioning path using `user-data` or `secrets.env` for injecting
+      Wi-Fi/Cloudflare tokens without editing repo files.
+  - See `docs/pi_headless_provisioning.md` for presets, overrides, and validation steps.
 - [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
 
 ---
@@ -110,7 +118,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## Developer Experience & User Refinements
-- [ ] Provide `make doctor` / `just verify` that chains download, checksum, flash dry-run, and linting.
+- [x] Provide `make doctor` / `just verify` that chains download, checksum, flash dry-run,
+      and linting.
+  - `make doctor` runs `scripts/sugarkube_doctor.sh` to dry-run downloads, flash to a
+    loopback file, generate reports, and execute `pre-commit`.
 - [ ] Offer a `brew install sugarkube` tap and `sugarkube setup` wizard for macOS.
 - [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
 - [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.

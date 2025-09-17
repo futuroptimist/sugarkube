@@ -71,6 +71,7 @@ DEST_ARG=""
 DEST_DIR_OVERRIDE=""
 ASSET_NAME="$DEFAULT_ASSET"
 CHECKSUM_NAME="$DEFAULT_CHECKSUM"
+DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -119,6 +120,10 @@ while [ "$#" -gt 0 ]; do
       fi
       MODE="$2"
       shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
       ;;
     --)
       shift
@@ -270,6 +275,13 @@ download_from_release() {
     return 1
   fi
   log "Resolved release ${tag_name:-latest}"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: would download $asset_url"
+    if [ -n "$checksum_url" ]; then
+      log "Dry-run: would verify using $checksum_url"
+    fi
+    return 0
+  fi
   if ! download_with_curl "$asset_url" "$DEST_PATH" "$ASSET_NAME"; then
     return 1
   fi
@@ -284,6 +296,10 @@ download_from_release() {
 
 download_from_workflow() {
   log "Falling back to latest successful pi-image workflow artifact"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: skipping workflow artifact download"
+    return 0
+  fi
   local run_id
   run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
   if [ -z "$run_id" ]; then
@@ -327,8 +343,12 @@ if [ "$success" -eq 0 ]; then
   fi
 fi
 
-log "Image saved to $DEST_PATH"
-if [ -f "$CHECKSUM_PATH" ]; then
-  log "Checksum saved to $CHECKSUM_PATH"
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "Dry-run completed; no files downloaded"
+else
+  log "Image saved to $DEST_PATH"
+  if [ -f "$CHECKSUM_PATH" ]; then
+    log "Checksum saved to $CHECKSUM_PATH"
+  fi
+  ls -lh "$DEST_PATH" "$CHECKSUM_PATH" 2>/dev/null || true
 fi
-ls -lh "$DEST_PATH" "$CHECKSUM_PATH" 2>/dev/null || true

@@ -151,6 +151,34 @@ def test_downloads_release_asset(tmp_path):
     assert "Checksum verified" in result.stdout
 
 
+def test_dry_run_skips_download(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    release_img = tmp_path / "release.img.xz"
+    release_img.write_bytes(b"payload")
+    release_sha = tmp_path / "release.img.xz.sha256"
+    release_sha.write_text("deadbeef\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
+
+    downloads = tmp_path / "downloads"
+    result = run_script(
+        "download_pi_image.sh",
+        args=["--dir", str(downloads), "--dry-run"],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Dry-run" in result.stdout
+    dest = downloads / "sugarkube.img.xz"
+    assert not dest.exists()
+
+
 def test_checksum_mismatch_errors(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
