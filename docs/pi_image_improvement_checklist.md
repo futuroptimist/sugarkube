@@ -22,18 +22,21 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Provide a `sugarkube-latest` convenience wrapper for downloading + verifying in one step.
   - Added `scripts/sugarkube-latest`, which defaults to release downloads while
     still accepting all downloader flags.
-- [ ] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
+- [x] Package a one-liner installer (`curl | bash`) that installs `gh` when missing, pulls the latest release, verifies checksums, and expands the image.
+  - `scripts/install_sugarkube_image.sh` is safe to run via `curl | bash`; it bootstraps `gh`, downloads the release, verifies checksums, expands to `.img`, and writes a new `.img.sha256`.
 
 ---
 
 ## Flashing & Provisioning Automation
-- [ ] Ship cross-platform flashing helpers (`flash_pi_media.sh`, PowerShell twin, or CLI in Go/Rust/Node) that:
+- [x] Ship cross-platform flashing helpers (`flash_pi_media.sh`, PowerShell twin, or CLI in Go/Rust/Node) that:
   - Discover SD/USB devices.
   - Stream `.img.xz` directly with progress (`xzcat | dd`).
   - Verify written bytes with SHA-256.
   - Auto-eject media.
+  - Implemented via `scripts/flash_pi_media.py` with bash and PowerShell wrappers.
 - [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
-- [ ] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
+- [x] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
+  - Added a root `Makefile` with `flash-pi`, `install-pi-image`, and `download-pi-image` targets that wrap the new installer and flashing helpers.
 - [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
 - [ ] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
 - [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.

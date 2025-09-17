@@ -75,11 +75,12 @@ case "$cmd" in
     esac
     ;;
   auth)
-    sub="${1:-}"
-    if [ "$sub" = token ] && [ -n "${GH_TOKEN:-}" ]; then
-      echo "$GH_TOKEN"
-      exit 0
-    fi
+    case "${1:-}" in
+      token)
+        echo "stub-gh-token"
+        exit 0
+        ;;
+    esac
     ;;
 esac
 
