@@ -42,10 +42,14 @@ the docs you will see the term used in both contexts.
 - [docs/insert_basics.md](docs/insert_basics.md) — guide for heat-set inserts and printed threads
 - [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
+- [docs/pi_headless_provisioning.md](docs/pi_headless_provisioning.md) — headless boot playbook covering
+  `secrets.env` usage
+- [docs/templates/cloud-init/user-data.example](docs/templates/cloud-init/user-data.example) — cloud-init
+  template for SSH keys and `Wi-Fi` credentials
 - `scripts/` — helper scripts for rendering and exports
-  - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
-    to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
-    macOS compatibility
+  - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; supports `--dry-run`
+    metadata checks and uses POSIX `test -ef` instead of `realpath` for better macOS
+    compatibility
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
     `.img.sha256`; safe to run via `curl | bash`
