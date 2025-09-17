@@ -2,9 +2,13 @@
   "id": "kicad-export-pcbnew-python-mismatch",
   "date": "2025-09-14",
   "component": "kicad-export",
-  "rootCause": "KiCad 9 installed but pcbnew Python module built for Python 3.11; environment uses Python 3.12",
-  "resolution": "Run KiBot with Python 3.11 or install matching pcbnew module",
+  "dateRanges": [
+    { "start": "2025-09-14", "end": "2025-09-14" }
+  ],
+  "rootCause": "KiCad 9 shipped pcbnew for Python 3.11 while CI used Python 3.12, blocking imports",
+  "resolution": "`scripts/checks.sh` tries python3 so KiCad's pcbnew loads with newer Pyenv builds",
   "references": [
-    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml"
+    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml",
+    "scripts/checks.sh"
   ]
 }
