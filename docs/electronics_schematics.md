@@ -34,8 +34,13 @@ distribution needs (for example, add screw terminals, fuses and test points). Us
 [KiBot](https://github.com/INTI-CMNB/KiBot) with `.kibot/power_ring.yaml` or run the
 GitHub workflow to produce Gerber files, a PDF schematic and a BOM in
 `build/power_ring/`.
-The `scripts/checks.sh` helper now installs KiCad 9 automatically
-when missing to streamline exports.
+The `scripts/checks.sh` helper inspects your working tree and CI diff for `.kicad_*` or
+`.kibot/` edits (or honors `SUGARKUBE_FORCE_KICAD_INSTALL=1`) before provisioning KiCad 9.
+It deepens shallow clones, fetches the base branch, and installs KiCad only when electronics
+files change so day-to-day CI stays fast while KiBot exports remain reliable. After
+installing, it probes `python`, `python3`, and the common `python3.x` shims so it can reuse
+whichever interpreter exposes KiCad's `pcbnew` module—even when `actions/setup-python`
+provides a newer Pyenv build that lacks the package.
 
 The layout now includes a "SugarKube" copper label for easy identification.
 

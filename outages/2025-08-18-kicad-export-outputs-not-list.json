@@ -1,7 +1,10 @@
 {
   "id": "kicad-export-outputs-not-list",
   "date": "2025-08-18",
-  "component": "kicad-export workflow",
+  "component": "kicad-export",
+  "dateRanges": [
+    { "start": "2025-08-18", "end": "2025-08-18" }
+  ],
   "rootCause": "KiBot config defined outputs as a map rather than a list, causing parsing error.",
   "resolution": "Converted outputs to a list of named entries in .kibot/power_ring.yaml.",
   "references": [

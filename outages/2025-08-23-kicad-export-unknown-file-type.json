@@ -2,6 +2,9 @@
   "id": "kicad-export-unknown-file-type",
   "date": "2025-08-23",
   "component": "kicad-export",
+  "dateRanges": [
+    { "start": "2025-08-23", "end": "2025-08-23" }
+  ],
   "rootCause": "KiBot 1.8.4 cannot parse KiCad 9 project files",
   "resolution": "Use a KiBot release compatible with KiCad 9 or export via KiCad CLI",
   "references": [

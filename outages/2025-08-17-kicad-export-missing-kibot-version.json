@@ -1,7 +1,10 @@
 {
   "id": "kicad-export-missing-kibot-version",
   "date": "2025-08-17",
-  "component": "kicad-export workflow",
+  "component": "kicad-export",
+  "dateRanges": [
+    { "start": "2025-08-17", "end": "2025-08-17" }
+  ],
   "rootCause": "KiBot config lacked required kibot.version field, causing export to abort.",
   "resolution": "Added 'kibot.version: 1' to .kibot/power_ring.yaml so KiBot recognizes the configuration.",
   "references": [

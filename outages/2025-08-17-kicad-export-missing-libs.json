@@ -1,7 +1,10 @@
 {
   "id": "kicad-export-missing-libs",
   "date": "2025-08-17",
-  "component": "kicad-export workflow",
+  "component": "kicad-export",
+  "dateRanges": [
+    { "start": "2025-08-17", "end": "2025-08-17" }
+  ],
   "rootCause": "KiBot failed to export because sym-lib-table and fp-lib-table pointed to non-existent custom_pads_test libraries.",
   "resolution": "Updated library tables to use local power_ring libraries so KiBot can find symbols and footprints.",
   "references": [
