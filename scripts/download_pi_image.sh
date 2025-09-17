@@ -62,6 +62,7 @@ USAGE
 
 OWNER="${SUGARKUBE_OWNER:-futuroptimist}"
 REPO="${SUGARKUBE_REPO:-sugarkube}"
+REPO_SLUG="${OWNER}/${REPO}"
 DEFAULT_ASSET="${SUGARKUBE_IMAGE_ASSET:-sugarkube.img.xz}"
 DEFAULT_CHECKSUM="${SUGARKUBE_CHECKSUM_ASSET:-${DEFAULT_ASSET}.sha256}"
 DEFAULT_DIR="${SUGARKUBE_IMAGE_DIR:-$HOME/sugarkube/images}"
@@ -210,7 +211,8 @@ download_with_curl() {
   local label="$3"
   local partial="${destination}.partial"
   local -a args
-  args=(--fail --location --retry 5 --retry-delay 5 --retry-connrefused -C - --progress-bar --output "$partial")
+  args=(--fail --location --retry 5 --retry-delay 5 --retry-connrefused -C -)
+  args+=(--progress-bar --output "$partial")
   if [ -n "$AUTH_HEADER" ] && [[ "$url" != file://* ]]; then
     args+=(--header "$AUTH_HEADER")
   fi
@@ -260,7 +262,8 @@ download_from_release() {
   if ! release_payload=$(gh api "$endpoint" 2>/dev/null); then
     return 1
   fi
-  if ! mapfile -t release_info < <(printf '%s' "$release_payload" | parse_release_json "$ASSET_NAME" "$CHECKSUM_NAME"); then
+  if ! mapfile -t release_info < <(printf '%s' "$release_payload" |
+    parse_release_json "$ASSET_NAME" "$CHECKSUM_NAME"); then
     return 1
   fi
   local asset_url="${release_info[0]:-}"
@@ -285,14 +288,15 @@ download_from_release() {
 download_from_workflow() {
   log "Falling back to latest successful pi-image workflow artifact"
   local run_id
-  run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
+  run_id=$(gh run list --repo "$REPO_SLUG" --workflow pi-image.yml --branch main --json databaseId \
+    -q '.[0].databaseId') || run_id=""
   if [ -z "$run_id" ]; then
     die "no pi-image workflow runs found"
   fi
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "${tmp_dir}"' RETURN
-  if ! gh run download "$run_id" --name sugarkube-img --dir "$tmp_dir"; then
+  if ! gh run download --repo "$REPO_SLUG" "$run_id" --name sugarkube-img --dir "$tmp_dir"; then
     die "Failed to download workflow artifact"
   fi
   local artifact_img="$tmp_dir/sugarkube.img.xz"
