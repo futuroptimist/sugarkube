@@ -48,6 +48,7 @@ Options:
       --asset NAME      Override the image asset name (default: sugarkube.img.xz)
       --checksum NAME   Override the checksum asset name (default: asset + .sha256)
       --mode MODE       Force download mode: release, workflow, or auto (default)
+      --dry-run         Resolve metadata without downloading artifacts
   -h, --help            Show this message
 
 Environment:
@@ -71,6 +72,7 @@ DEST_ARG=""
 DEST_DIR_OVERRIDE=""
 ASSET_NAME="$DEFAULT_ASSET"
 CHECKSUM_NAME="$DEFAULT_CHECKSUM"
+DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -119,6 +121,10 @@ while [ "$#" -gt 0 ]; do
       fi
       MODE="$2"
       shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
       ;;
     --)
       shift
@@ -209,6 +215,10 @@ download_with_curl() {
   local destination="$2"
   local label="$3"
   local partial="${destination}.partial"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: would download $label from $url"
+    return 0
+  fi
   local -a args
   args=(--fail --location --retry 5 --retry-delay 5 --retry-connrefused -C - --progress-bar --output "$partial")
   if [ -n "$AUTH_HEADER" ] && [[ "$url" != file://* ]]; then
@@ -270,6 +280,12 @@ download_from_release() {
     return 1
   fi
   log "Resolved release ${tag_name:-latest}"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: resolved ${ASSET_NAME} and ${CHECKSUM_NAME} for ${tag_name:-latest}"
+    printf '%s\n' "$asset_url" >"${DEST_PATH}.url"
+    printf '%s\n' "$checksum_url" >"${CHECKSUM_PATH}.url"
+    return 0
+  fi
   if ! download_with_curl "$asset_url" "$DEST_PATH" "$ASSET_NAME"; then
     return 1
   fi
@@ -288,6 +304,11 @@ download_from_workflow() {
   run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
   if [ -z "$run_id" ]; then
     die "no pi-image workflow runs found"
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: would download artifact sugarkube-img from run ${run_id}"
+    printf '%s\n' "$run_id" >"${DEST_PATH}.run"
+    return 0
   fi
   local tmp_dir
   tmp_dir="$(mktemp -d)"
@@ -327,8 +348,12 @@ if [ "$success" -eq 0 ]; then
   fi
 fi
 
-log "Image saved to $DEST_PATH"
-if [ -f "$CHECKSUM_PATH" ]; then
-  log "Checksum saved to $CHECKSUM_PATH"
+if [ "$DRY_RUN" -eq 0 ]; then
+  log "Image saved to $DEST_PATH"
+  if [ -f "$CHECKSUM_PATH" ]; then
+    log "Checksum saved to $CHECKSUM_PATH"
+  fi
+  ls -lh "$DEST_PATH" "$CHECKSUM_PATH" 2>/dev/null || true
+else
+  log "Dry-run complete; no artifacts downloaded"
 fi
-ls -lh "$DEST_PATH" "$CHECKSUM_PATH" 2>/dev/null || true

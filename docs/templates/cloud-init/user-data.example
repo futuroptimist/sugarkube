@@ -1,0 +1,40 @@
+#cloud-config
+hostname: sugarkube-node01
+manage_etc_hosts: true
+users:
+  - default
+  - name: sugaradmin
+    gecos: Sugarkube Admin
+    groups: [sudo, docker]
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA...replace-with-your-key
+write_files:
+  - path: /boot/sugarkube/bootstrap-token.txt
+    owner: root:root
+    permissions: '0640'
+    content: |
+      TOKEN_PLACE_BOOTSTRAP=replace-me
+  - path: /boot/sugarkube/kubeconfig
+    owner: root:root
+    permissions: '0600'
+    content: |
+      # Upload the sanitized kubeconfig here after first boot.
+      # The provisioning scripts will replace this placeholder when the
+      # cluster is healthy.
+package_update: true
+runcmd:
+  - [ bash, -c, "if [ -f /boot/secrets.env ]; then set -a; source /boot/secrets.env; set +a; fi" ]
+  - [ bash, -c, "install -d -m 0750 /var/log/sugarkube" ]
+  - [ bash, /usr/local/bin/pi_node_verifier.sh, --once ]
+  - [ bash, -c, "rm -f /boot/secrets.env" ]
+wifis:
+  wlan0:
+    optional: true
+    access-points:
+      "ExampleSSID":
+        # Add Wi-Fi passphrase "<wifi-passphrase>" before booting.
+    dhcp4: true
+    dhcp6: false

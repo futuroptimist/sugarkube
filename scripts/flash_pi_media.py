@@ -482,6 +482,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Skip automatic eject/offline after flashing.",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate inputs and read the image without writing to the device.",
+    )
+    parser.add_argument(
         "--bytes",
         type=int,
         default=0,
@@ -552,19 +557,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 is_removable=True,
             )
 
-    if not _device_exists(target_device.path):
+    if not args.dry_run and not _device_exists(target_device.path):
         die(f"Device not found: {target_device.path}")
 
-    _check_not_root_device(target_device.path)
+    if not args.dry_run:
+        _check_not_root_device(target_device.path)
 
-    if target_device.mountpoints and not args.keep_mounted:
+    if target_device.mountpoints and not args.keep_mounted and not args.dry_run:
         mounts = ", ".join(target_device.mountpoints)
         die(
             f"{target_device.path} has mounted partitions ({mounts}). Unmount them before flashing "
             "or pass --keep-mounted to override."
         )
 
-    allow_nonroot = os.environ.get("SUGARKUBE_FLASH_ALLOW_NONROOT") == "1"
+    allow_nonroot = args.dry_run or os.environ.get("SUGARKUBE_FLASH_ALLOW_NONROOT") == "1"
     if hasattr(os, "geteuid"):
         if not allow_nonroot and os.geteuid() != 0:
             die("Run as root or with sudo")
@@ -573,6 +579,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "Cannot determine effective user ID on this platform; "
             "ensure you have permissions to write the device."
         )
+
+    if args.dry_run:
+        src, compressed = _open_image(image_path)
+        info(f"Opening {'compressed ' if compressed else ''}image {image_path}")
+        with src:
+            sample = src.read(min(CHUNK_SIZE, 8 * 1024 * 1024))
+        if not sample:
+            die("Image appears to be empty; aborting dry-run")
+        info(
+            "Dry-run complete. Read %s from image without writing to %s"
+            % (_format_size(len(sample)), target_device.path)
+        )
+        return 0
 
     if not _confirm(
         f"About to erase and flash {target_device.path} with {image_path.name}. Continue?",
