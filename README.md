@@ -42,6 +42,10 @@ the docs you will see the term used in both contexts.
 - [docs/insert_basics.md](docs/insert_basics.md) — guide for heat-set inserts and printed threads
 - [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
+- [docs/pi_imager_presets.md](docs/pi_imager_presets.md) — Raspberry Pi Imager templates with
+  pre-filled hostnames, Wi-Fi, and SSH keys
+- [docs/pi_headless_provisioning.md](docs/pi_headless_provisioning.md) — step-by-step headless
+  provisioning flow using presets, cloud-init, and the new doctor helper
 - `scripts/` — helper scripts for rendering and exports
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; requires `gh`
     to be installed and authenticated. Uses POSIX `test -ef` instead of `realpath` for better
@@ -62,6 +66,11 @@ the docs you will see the term used in both contexts.
   - `flash_pi_media.sh` — stream `.img` or `.img.xz` directly to removable
     media with SHA-256 verification and automatic eject. A PowerShell wrapper
     (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
+    Pass `--report` to emit Markdown or HTML summaries capturing hashes,
+    device metadata, and optional cloud-init diffs for each flash attempt.
+  - `doctor.sh` — chains a release dry-run, flash dry-run (with report
+    generation), and `scripts/checks.sh` to keep development environments
+    green.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
@@ -83,6 +92,11 @@ download, verify, and expand the latest release, or run `make flash-pi
 FLASH_DEVICE=/dev/sdX` to chain download → verification → flashing with the new
 streaming helper. `./scripts/sugarkube-latest` remains available when you only
 need the `.img.xz` artifact with checksum verification.
+
+For a quick confidence check without hardware, run `make doctor`. It confirms
+GitHub release availability, performs a flash dry-run that emits a detailed
+report, and (unless skipped) executes `scripts/checks.sh` to lint and test the
+repository.
 
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs

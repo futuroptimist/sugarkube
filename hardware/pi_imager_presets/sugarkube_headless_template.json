@@ -1,0 +1,31 @@
+{
+  "name": "Sugarkube Pi Carrier (Headless)",
+  "description": "Sugarkube image with ssh keys, hostname, and Wi-Fi for unattended booting.",
+  "image": {
+    "source": "https://github.com/futuroptimist/sugarkube/releases/latest/download/sugarkube.img.xz",
+    "checksum": "",
+    "notes": "Replace checksum with the value from the matching GitHub release for reproducibility."
+  },
+  "os_config": {
+    "hostname": "sugarkube-node",
+    "username": "sugarkube",
+    "password": "ChangeMe!",
+    "force_password_change": true,
+    "wifi_country": "US",
+    "wifi_ssid": "YOUR_WIFI_SSID",
+    "wifi_password": "YOUR_WIFI_PASSWORD",
+    "wifi_hidden": false,
+    "ssh": {
+      "enable": true,
+      "password_auth": false,
+      "authorized_keys": [
+        "ssh-ed25519 AAAA... replace-with-your-key"
+      ]
+    },
+    "locale": {
+      "timezone": "UTC",
+      "keyboard": "us",
+      "language": "en_US"
+    }
+  }
+}

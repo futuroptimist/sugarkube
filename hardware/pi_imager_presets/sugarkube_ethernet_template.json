@@ -1,0 +1,26 @@
+{
+  "name": "Sugarkube Pi Carrier (Ethernet Only)",
+  "description": "Headless sugarkube preset without Wi-Fi credentials.",
+  "image": {
+    "source": "https://github.com/futuroptimist/sugarkube/releases/latest/download/sugarkube.img.xz",
+    "checksum": ""
+  },
+  "os_config": {
+    "hostname": "sugarkube-node",
+    "username": "sugarkube",
+    "password": "ChangeMe!",
+    "force_password_change": true,
+    "ssh": {
+      "enable": true,
+      "password_auth": false,
+      "authorized_keys": [
+        "ssh-ed25519 AAAA... replace-with-your-key"
+      ]
+    },
+    "locale": {
+      "timezone": "UTC",
+      "keyboard": "us",
+      "language": "en_US"
+    }
+  }
+}

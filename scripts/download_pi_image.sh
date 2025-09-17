@@ -66,6 +66,7 @@ DEFAULT_ASSET="${SUGARKUBE_IMAGE_ASSET:-sugarkube.img.xz}"
 DEFAULT_CHECKSUM="${SUGARKUBE_CHECKSUM_ASSET:-${DEFAULT_ASSET}.sha256}"
 DEFAULT_DIR="${SUGARKUBE_IMAGE_DIR:-$HOME/sugarkube/images}"
 MODE="${SUGARKUBE_DOWNLOAD_MODE:-auto}"
+DRY_RUN=0
 RELEASE_TAG=""
 DEST_ARG=""
 DEST_DIR_OVERRIDE=""
@@ -120,6 +121,10 @@ while [ "$#" -gt 0 ]; do
       MODE="$2"
       shift 2
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --)
       shift
       break
@@ -167,7 +172,9 @@ else
 fi
 
 CHECKSUM_PATH="${DEST_PATH}.sha256"
-mkdir -p "$DEST_DIRNAME"
+if [ "$DRY_RUN" -eq 0 ]; then
+  mkdir -p "$DEST_DIRNAME"
+fi
 
 AUTH_HEADER=""
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -270,6 +277,14 @@ download_from_release() {
     return 1
   fi
   log "Resolved release ${tag_name:-latest}"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ -z "$checksum_url" ]; then
+      die "Release ${tag_name:-latest} did not include ${CHECKSUM_NAME}"
+    fi
+    log "Dry run: would download $ASSET_NAME to $DEST_PATH"
+    log "Dry run: would download $CHECKSUM_NAME to $CHECKSUM_PATH"
+    return 0
+  fi
   if ! download_with_curl "$asset_url" "$DEST_PATH" "$ASSET_NAME"; then
     return 1
   fi
@@ -288,6 +303,10 @@ download_from_workflow() {
   run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
   if [ -z "$run_id" ]; then
     die "no pi-image workflow runs found"
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry run: workflow run $run_id provides sugarkube.img.xz"
+    return 0
   fi
   local tmp_dir
   tmp_dir="$(mktemp -d)"
@@ -325,6 +344,11 @@ if [ "$success" -eq 0 ]; then
     download_from_workflow || die "Failed to download workflow artifact"
     success=1
   fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "Dry run complete. No files were downloaded."
+  exit 0
 fi
 
 log "Image saved to $DEST_PATH"

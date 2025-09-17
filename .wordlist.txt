@@ -220,3 +220,7 @@ yaml
 yml
 yourorg
 checksums
+Fi
+Wi
+hostnames
+imager
