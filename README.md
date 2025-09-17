@@ -62,6 +62,9 @@ the docs you will see the term used in both contexts.
   - `flash_pi_media.sh` — stream `.img` or `.img.xz` directly to removable
     media with SHA-256 verification and automatic eject. A PowerShell wrapper
     (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
+  - `flash_and_report.py` — wrap flashing with automatic decompression,
+    checksum verification, hardware introspection, and Markdown/HTML/JSON
+    reports. Pair with the headless provisioning guide for unattended boots.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
@@ -87,6 +90,12 @@ need the `.img.xz` artifact with checksum verification.
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs
 linters, tests, and documentation checks.
+
+New to sugarkube? Start with [`docs/pi_imager_presets/`](docs/pi_imager_presets/)
+for Raspberry Pi Imager presets and
+[`docs/pi_headless_provisioning.md`](docs/pi_headless_provisioning.md) for a
+secret-friendly, headless provisioning walkthrough backed by the flashing
+report generator.
 
 ## Getting Started
 

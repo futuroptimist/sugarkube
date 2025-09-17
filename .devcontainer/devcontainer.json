@@ -1,0 +1,27 @@
+{
+  "name": "Sugarkube Pi Carrier",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": "false",
+      "username": "vscode",
+      "upgradePackages": "true"
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    },
+    "ghcr.io/devcontainers/features/just:1": {}
+  },
+  "updateContentCommand": "pip install --upgrade pip && pip install -U pre-commit pytest pytest-cov pyspelling linkchecker responses",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y bats xz-utils cloud-guest-utils && pre-commit install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml"
+      ]
+    }
+  },
+  "remoteUser": "vscode"
+}

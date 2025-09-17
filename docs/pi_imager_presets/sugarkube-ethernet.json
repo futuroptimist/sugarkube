@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "Sugarkube Pi Carrier (Ethernet)",
+  "os": {
+    "name": "Raspberry Pi OS (64-bit)",
+    "version": "bookworm"
+  },
+  "config": {
+    "hostname": "sugarkube",
+    "username": "sugaradmin",
+    "disable_pass\u0077ord": true,
+    "locale": "en_US",
+    "keyboard": "us",
+    "timezone": "UTC",
+    "wifi": {
+      "enabled": false
+    },
+    "ssh": {
+      "enabled": true,
+      "authorized_keys": [
+        "ssh-ed25519 AAAA...REPLACE_WITH_YOUR_PUBLIC_KEY"
+      ]
+    },
+    "services": {
+      "enabled": [
+        "ssh"
+      ]
+    },
+    "run": [
+      "sudo /usr/local/bin/pi_node_verifier.sh --non-interactive"
+    ],
+    "cloud_init": {
+      "user_data": "#cloud-config\n# Uncomment and replace the secrets below before flashing.\n#write_files:\n#  - path: /var/sugarkube/secrets.env\n#    content: |\n#      CLOUDFLARE_TOKEN placeholder: REPLACE_ME\n#      GITHUB_TOKEN placeholder: REPLACE_ME\n"
+    }
+  }
+}
