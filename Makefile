@@ -9,7 +9,7 @@ DOWNLOAD_CMD ?= $(CURDIR)/scripts/download_pi_image.sh
 DOWNLOAD_ARGS ?=
 FLASH_ARGS ?= --assume-yes
 
-.PHONY: install-pi-image download-pi-image flash-pi
+.PHONY: install-pi-image download-pi-image flash-pi doctor
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -23,3 +23,6 @@ flash-pi: install-pi-image
 		exit 1; \
 	fi
 	$(FLASH_CMD) --image '$(IMAGE_PATH)' --device "$(FLASH_DEVICE)" $(FLASH_ARGS)
+
+doctor:
+	$(CURDIR)/scripts/sugarkube_doctor.sh

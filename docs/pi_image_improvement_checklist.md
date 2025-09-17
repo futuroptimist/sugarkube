@@ -114,7 +114,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## Developer Experience & User Refinements
-- [ ] Provide `make doctor` / `just verify` that chains download, checksum, flash dry-run, and linting.
+- [x] Provide `make doctor` / `just verify` that chains download, checksum, flash dry-run, and linting.
+  - New `scripts/sugarkube_doctor.sh` chains dry-run downloads, flash validation, and optional lint
+    plus link checks via `make doctor`.
 - [ ] Offer a `brew install sugarkube` tap and `sugarkube setup` wizard for macOS.
 - [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
 - [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
@@ -126,7 +128,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 
 ## Troubleshooting & Community
 - [ ] Ship a golden recovery console image or partition with CLI tools to reflash, fetch logs, and reinstall k3s without another machine.
-- [ ] Extend `outages/` with playbooks for scenarios like cloud-init hangs, SSD clone stalls, or projects-compose failures.
+- [x] Extend `outages/` with playbooks for scenarios like cloud-init hangs, SSD clone stalls, or projects-compose failures.
+  - Added outage records for cloud-init stalls, SSD clone resumes, and projects-compose triage that
+    point to the headless provisioning playbook.
 - [x] Add an issue template asking contributors to reference this checklist so coverage gaps are visible.
   - Added `.github/ISSUE_TEMPLATE/pi-image.md` with prompts to link manifest data and tick the checklist sections touched.
 
