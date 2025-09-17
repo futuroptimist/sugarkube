@@ -285,14 +285,14 @@ download_from_release() {
 download_from_workflow() {
   log "Falling back to latest successful pi-image workflow artifact"
   local run_id
-  run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
+  run_id=$(gh run list --repo "${OWNER}/${REPO}" --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
   if [ -z "$run_id" ]; then
     die "no pi-image workflow runs found"
   fi
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "${tmp_dir}"' RETURN
-  if ! gh run download "$run_id" --name sugarkube-img --dir "$tmp_dir"; then
+  if ! gh run download --repo "${OWNER}/${REPO}" "$run_id" --name sugarkube-img --dir "$tmp_dir"; then
     die "Failed to download workflow artifact"
   fi
   local artifact_img="$tmp_dir/sugarkube.img.xz"
