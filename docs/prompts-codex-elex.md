@@ -20,10 +20,19 @@ CONTEXT:
   ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
 - Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh)
-  for linting, formatting, and tests. For documentation updates, also run:
+  for linting, formatting, and tests. The script auto-installs KiCad 9 whenever
+  `.kicad_*` or `.kibot/` assets change (or when you set
+  `SUGARKUBE_FORCE_KICAD_INSTALL=1`), so KiBot exports succeed without manual
+  provisioning. After provisioning it probes `python`, `python3`, and
+  the usual `python3.x` shims so KiCad's `pcbnew` module stays
+  importable even when Pyenv-selected interpreters differ from the
+  system build. It deepens shallow clones and fetches the base branch
+  during CI so electronics edits are detected even when only the newest
+  commit is available. For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
-- Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Scan staged changes for secrets with
+  `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent tool failures in [`outages/`](../outages/) per
   [`outages/schema.json`](../outages/schema.json).
 
