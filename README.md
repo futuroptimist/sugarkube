@@ -81,12 +81,15 @@ push to `main` and once per day. Each run publishes a signed
 `sugarkube.img.xz`, its checksum, a provenance manifest, and the full
 `pi-gen` build log. Release notes summarize stage timings and link directly to
 the manifest so you can verify the build inputs and commit hashes before
-flashing. Run `./scripts/install_sugarkube_image.sh` (or fetch the same helper
-via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
-download, verify, and expand the latest release, or run `make flash-pi
-FLASH_DEVICE=/dev/sdX` to chain download → verification → flashing with the new
-streaming helper. `./scripts/sugarkube-latest` remains available when you only
-need the `.img.xz` artifact with checksum verification.
+ flashing. Run `./scripts/install_sugarkube_image.sh` (or fetch the same helper
+ via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
+ download, verify, and expand the latest release. When you prefer a task runner,
+ use either `make flash-pi FLASH_DEVICE=/dev/sdX` or `just flash-pi FLASH_DEVICE=/dev/sdX` to
+ chain download → verification → flashing with the streaming helper. `just` recipes also provide
+ `download-pi-image`, `install-pi-image`, `doctor`, and `codespaces-bootstrap` shortcuts so GitHub
+ Codespaces users can install prerequisites and flash media without additional shell glue.
+ `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
+ checksum verification.
 
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs

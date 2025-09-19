@@ -44,7 +44,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
   - Added `docs/pi_headless_provisioning.md` plus `docs/templates/cloud-init/user-data.example` for
     reusable `secrets.env` workflows and verifier integration.
-- [ ] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
+- [x] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
+  - Added a root `justfile` mirroring the Makefile helpers plus a `codespaces-bootstrap` target so
+    Codespaces environments can install prerequisites and flash media using the same scripts.
 
 ---
 
