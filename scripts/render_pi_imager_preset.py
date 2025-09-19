@@ -20,6 +20,19 @@ except ImportError:  # pragma: no cover - crypt is present on Linux images we sh
     crypt = None  # type: ignore[assignment]
 
 
+def _strip_inline_comment(value: str) -> str:
+    in_single = False
+    in_double = False
+    for index, char in enumerate(value):
+        if char == "'" and not in_double:
+            in_single = not in_single
+        elif char == '"' and not in_single:
+            in_double = not in_double
+        elif char == "#" and not in_single and not in_double:
+            return value[:index]
+    return value
+
+
 def parse_key_value_file(path: Path) -> Dict[str, str]:
     data: Dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -30,7 +43,7 @@ def parse_key_value_file(path: Path) -> Dict[str, str]:
             raise ValueError(f"Invalid line in {path}: {raw_line!r}")
         key, value = line.split("=", 1)
         key = key.strip()
-        value = value.strip()
+        value = _strip_inline_comment(value).strip()
         if (value.startswith('"') and value.endswith('"')) or (
             value.startswith("'") and value.endswith("'")
         ):
