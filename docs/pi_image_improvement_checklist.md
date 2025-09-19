@@ -40,7 +40,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     Imager configuration snippets.
 - [x] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
   - Added a root `Makefile` with `flash-pi`, `install-pi-image`, and `download-pi-image` targets that wrap the new installer and flashing helpers.
-- [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
+- [x] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
+  - Added `scripts/flash_pi_media_report.py` plus `make flash-pi-report`/`just flash-pi-report`
+    helpers that expand `.img.xz` releases, flash via the existing Python helper,
+    capture checksum output, and emit Markdown/HTML reports with optional
+    cloud-init diffs under `~/sugarkube/reports/`.
 - [x] Document a headless provisioning path using `user-data` or `secrets.env` for injecting Wi-Fi/Cloudflare tokens without editing repo files.
   - Added `docs/pi_headless_provisioning.md` plus `docs/templates/cloud-init/user-data.example` for
     reusable `secrets.env` workflows and verifier integration.
@@ -55,7 +59,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Waits for network, expands filesystem.
   - Runs `pi_node_verifier.sh` automatically.
   - Publishes HTML/JSON status (cloud-init, k3s, token.place, dspace) to `/boot/first-boot-report`.
-- [ ] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
+- [x] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
+  - `pi_node_verifier.sh` now writes Markdown summaries (hardware, cloud-init,
+    checksum checks) to `/boot/first-boot-report.txt` and ingests migration
+    events recorded by `scripts/cloud-init/start-projects.sh`.
 - [ ] Add self-healing units that retry container pulls, rerun `cloud-init clean`, or reboot into maintenance with actionable logs.
 - [ ] Provide optional telemetry hooks to publish anonymized health data to a shared dashboard.
 

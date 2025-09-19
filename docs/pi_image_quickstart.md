@@ -39,6 +39,23 @@ Build a Raspberry Pi OS image that boots with k3s and the
    The command prints `OK` when the checksum matches the downloaded image.
 
 ## 2. Flash the image
+- Generate a self-contained report that expands `.img.xz`, flashes, verifies, and
+  records the results:
+  ```bash
+  sudo ./scripts/flash_pi_media_report.py \
+    --image ~/sugarkube/images/sugarkube.img.xz \
+    --device /dev/sdX \
+    --assume-yes \
+    --cloud-init ~/sugarkube/cloud-init/user-data.yaml
+  ```
+  The wrapper stores Markdown/HTML/JSON logs under
+  `~/sugarkube/reports/flash-*/flash-report.*`, capturing hardware IDs, checksum
+  verification, and optional cloud-init diffs. Use
+  ```bash
+  sudo FLASH_DEVICE=/dev/sdX FLASH_REPORT_ARGS="--cloud-init ~/override.yaml" make flash-pi-report
+  ```
+  or the equivalent `just flash-pi-report` recipe to combine install → flash →
+  report in one go.
 - Stream the expanded image (or the `.img.xz`) directly to removable media:
   ```bash
   sudo ./scripts/flash_pi_media.sh --image ~/sugarkube/images/sugarkube.img --device /dev/sdX --assume-yes
@@ -90,6 +107,14 @@ Build a Raspberry Pi OS image that boots with k3s and the
 - If the service fails, inspect logs to troubleshoot:
   ```bash
   sudo journalctl -u projects-compose.service --no-pager
+  ```
+- Every verifier run now appends a Markdown summary to `/boot/first-boot-report.txt`.
+  The report captures hardware details, `cloud-init` status, the results from
+  `pi_node_verifier.sh`, and any provisioning or migration steps recorded by
+  `/opt/projects/start-projects.sh`. Inspect the file locally after ejecting the
+  boot media or on the Pi itself:
+  ```bash
+  sudo cat /boot/first-boot-report.txt
   ```
 
 The image is now ready for additional repositories or joining a multi-node
