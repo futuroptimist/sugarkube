@@ -58,6 +58,16 @@ Build a Raspberry Pi OS image that boots with k3s and the
 - Raspberry Pi Imager remains a friendly alternative.
   Use advanced options (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>) to set the
   hostname, credentials and network when flashing `sugarkube.img.xz` manually.
+  The repository now ships presets under `docs/templates/pi-imager/` plus a
+  renderer script:
+  ```bash
+  python3 scripts/render_pi_imager_preset.py \
+    --preset docs/templates/pi-imager/sugarkube-controller.preset.json \
+    --secrets ~/sugarkube/secrets.env \
+    --apply
+  ```
+  The command writes your secrets into Raspberry Pi Imager's configuration so
+  the advanced options open pre-populated for the next flash.
 
 ## 3. Boot and verify
 - Insert the card and power on the Pi.

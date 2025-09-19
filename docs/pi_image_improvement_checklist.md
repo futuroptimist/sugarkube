@@ -34,7 +34,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Verify written bytes with SHA-256.
   - Auto-eject media.
   - Implemented via `scripts/flash_pi_media.py` with bash and PowerShell wrappers.
-- [ ] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
+- [x] Ship Raspberry Pi Imager preset JSONs pre-filled with hostname, user, Wi-Fi, and SSH keys for load-and-go flashing.
+  - Added `docs/templates/pi-imager/` presets plus
+    `scripts/render_pi_imager_preset.py` to merge secrets and write Raspberry Pi
+    Imager configuration snippets.
 - [x] Provide `just`/`make` targets (e.g., `make flash-pi`) chaining download → verify → flash.
   - Added a root `Makefile` with `flash-pi`, `install-pi-image`, and `download-pi-image` targets that wrap the new installer and flashing helpers.
 - [ ] Bundle a wrapper script that auto-decompresses, flashes, verifies, and reports results in HTML/Markdown (hardware IDs, checksum results, cloud-init diff).
