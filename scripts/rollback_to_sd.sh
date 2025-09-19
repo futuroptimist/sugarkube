@@ -129,6 +129,19 @@ PYCODE
   mv "$tmp" "$source"
 }
 
+backup_file() {
+  local source="$1"
+  local destination="$2"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] Would copy $source to $destination"
+    return
+  fi
+
+  mkdir -p "$(dirname "$destination")"
+  cp -- "$source" "$destination"
+}
+
 write_report() {
   local path="$1"
   local content="$2"
