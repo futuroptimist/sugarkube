@@ -55,7 +55,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Waits for network, expands filesystem.
   - Runs `pi_node_verifier.sh` automatically.
   - Publishes HTML/JSON status (cloud-init, k3s, token.place, dspace) to `/boot/first-boot-report`.
-- [ ] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
+- [x] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
+  - `pi_node_verifier.sh` now writes Markdown summaries (hardware, cloud-init,
+    checksum checks) to `/boot/first-boot-report.txt` and ingests migration
+    events recorded by `scripts/cloud-init/start-projects.sh`.
 - [ ] Add self-healing units that retry container pulls, rerun `cloud-init clean`, or reboot into maintenance with actionable logs.
 - [ ] Provide optional telemetry hooks to publish anonymized health data to a shared dashboard.
 

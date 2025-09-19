@@ -91,6 +91,14 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo journalctl -u projects-compose.service --no-pager
   ```
+- Every verifier run now appends a Markdown summary to `/boot/first-boot-report.txt`.
+  The report captures hardware details, `cloud-init` status, the results from
+  `pi_node_verifier.sh`, and any provisioning or migration steps recorded by
+  `/opt/projects/start-projects.sh`. Inspect the file locally after ejecting the
+  boot media or on the Pi itself:
+  ```bash
+  sudo cat /boot/first-boot-report.txt
+  ```
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
