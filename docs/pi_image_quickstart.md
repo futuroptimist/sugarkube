@@ -120,6 +120,21 @@ Build a Raspberry Pi OS image that boots with k3s and the
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
 
+### Recover from SSD issues
+
+If an SSD migration fails or you need to boot from the original SD card again,
+run the rollback helper to restore `/boot/cmdline.txt` and `/etc/fstab` to the
+SD defaults:
+
+```bash
+sudo ./scripts/rollback_to_sd.sh --dry-run
+```
+
+Review the planned changes, drop `--dry-run` when ready, then reboot. The script
+stores backups and writes a Markdown report to `/boot/sugarkube-rollback-report.md`.
+See [SSD Recovery and Rollback](./ssd_recovery.md) for the full walkthrough and
+Makefile/justfile shortcuts.
+
 ## Codespaces-friendly automation
 
 - Launch a new GitHub Codespace on this repository using the default Ubuntu image.
