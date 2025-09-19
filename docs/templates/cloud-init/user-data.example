@@ -17,13 +17,13 @@ write_files:
     permissions: '0640'
     content: |
       TOKEN_PLACE_BOOTSTRAP=replace-me
-  - path: /boot/sugarkube/kubeconfig
+  - path: /boot/sugarkube-kubeconfig
     owner: root:root
     permissions: '0600'
     content: |
-      # Upload the sanitized kubeconfig here after first boot.
-      # The provisioning scripts will replace this placeholder when the
-      # cluster is healthy.
+      # This placeholder is replaced automatically on first boot when
+      # sugarkube-export-kubeconfig.service copies a sanitized kubeconfig
+      # from /etc/rancher/k3s/k3s.yaml.
 package_update: true
 runcmd:
   - [ bash, -c, "if [ -f /boot/secrets.env ]; then set -a; source /boot/secrets.env; set +a; fi" ]

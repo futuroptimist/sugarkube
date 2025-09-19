@@ -91,6 +91,7 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo journalctl -u projects-compose.service --no-pager
   ```
+- Retrieve the sanitized kubeconfig without SSH by mounting the boot volume and copying `/boot/sugarkube-kubeconfig`.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.

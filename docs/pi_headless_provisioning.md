@@ -35,7 +35,8 @@ Recommended options:
 - Configure Wi-Fi credentials using `wifis`.
 - Inject optional environment variables for services like Cloudflare Tunnels or token.place secrets.
 
-The default template writes a kubeconfig and cluster bootstrap token to `/boot/sugarkube/` so operators can join the cluster without SSH.
+The default template writes a bootstrap token to `/boot/sugarkube/`.
+First boot now drops a sanitized kubeconfig at `/boot/sugarkube-kubeconfig` so operators can join the cluster without SSH.
 
 ## Inject secrets safely
 
