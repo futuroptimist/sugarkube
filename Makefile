@@ -6,10 +6,12 @@ IMAGE_PATH := $(IMAGE_DIR)/$(IMAGE_NAME)
 INSTALL_CMD ?= $(CURDIR)/scripts/install_sugarkube_image.sh
 FLASH_CMD ?= $(CURDIR)/scripts/flash_pi_media.sh
 DOWNLOAD_CMD ?= $(CURDIR)/scripts/download_pi_image.sh
+ROLLBACK_CMD ?= $(CURDIR)/scripts/rollback_to_sd.sh
 DOWNLOAD_ARGS ?=
 FLASH_ARGS ?= --assume-yes
+ROLLBACK_ARGS ?=
 
-.PHONY: install-pi-image download-pi-image flash-pi doctor
+.PHONY: install-pi-image download-pi-image flash-pi doctor rollback-to-sd
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -26,3 +28,6 @@ flash-pi: install-pi-image
 
 doctor:
 	$(CURDIR)/scripts/sugarkube_doctor.sh
+
+rollback-to-sd:
+	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)

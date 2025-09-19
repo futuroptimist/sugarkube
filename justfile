@@ -9,6 +9,8 @@ download_cmd := env_var_or_default("DOWNLOAD_CMD", justfile_directory() + "/scri
 download_args := env_var_or_default("DOWNLOAD_ARGS", "")
 flash_args := env_var_or_default("FLASH_ARGS", "--assume-yes")
 flash_device := env_var_or_default("FLASH_DEVICE", "")
+rollback_cmd := env_var_or_default("ROLLBACK_CMD", justfile_directory() + "/scripts/rollback_to_sd.sh")
+rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
 
 _default:
     @just --list
@@ -39,6 +41,11 @@ flash-pi: install-pi-image
 # Usage: just doctor
 doctor:
     "{{justfile_directory()}}/scripts/sugarkube_doctor.sh"
+
+# Revert cmdline.txt and fstab entries back to the SD card defaults
+# Usage: sudo just rollback-to-sd
+rollback-to-sd:
+    "{{rollback_cmd}}" {{rollback_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
