@@ -53,8 +53,16 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo make flash-pi FLASH_DEVICE=/dev/sdX
   ```
-  `flash-pi` calls `install_sugarkube_image.sh` to keep the local cache fresh
-  before writing the media with `flash_pi_media.sh`.
+  or use the new [`just`](https://github.com/casey/just) recipes when you prefer a
+  minimal runner without GNU Make:
+  ```bash
+  sudo FLASH_DEVICE=/dev/sdX just flash-pi
+  ```
+  Both invocations call `install_sugarkube_image.sh` to keep the local cache fresh before
+  writing the media with `flash_pi_media.sh`. The `just` recipe reads `FLASH_DEVICE` (and optional
+  `DOWNLOAD_ARGS`) from the environment, so prefix variables as shown when chaining commands.
+  Set `DOWNLOAD_ARGS="--release vX.Y.Z"` (or any other flags) in the environment to forward
+  custom options into the installer when using `just`.
 - Raspberry Pi Imager remains a friendly alternative.
   Use advanced options (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>) to set the
   hostname, credentials and network when flashing `sugarkube.img.xz` manually.
@@ -86,3 +94,14 @@ Build a Raspberry Pi OS image that boots with k3s and the
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
+
+## Codespaces-friendly automation
+
+- Launch a new GitHub Codespace on this repository using the default Ubuntu image.
+- Run `just codespaces-bootstrap` once to install `gh`, `pv`, and other helpers that the
+  download + flash scripts expect.
+- Use `just install-pi-image` or `just download-pi-image` to populate `~/sugarkube/images` with
+  the latest release, or trigger `sudo FLASH_DEVICE=/dev/sdX just flash-pi` when you attach a USB
+  flasher to the Codespace via the browser or VS Code desktop.
+- `just doctor` remains available to validate tooling from within the Codespace without juggling
+  Makefiles or bespoke shell aliases.

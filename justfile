@@ -1,0 +1,47 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
+image_name := env_var_or_default("IMAGE_NAME", "sugarkube.img")
+image_path := image_dir + "/" + image_name
+install_cmd := env_var_or_default("INSTALL_CMD", justfile_directory() + "/scripts/install_sugarkube_image.sh")
+flash_cmd := env_var_or_default("FLASH_CMD", justfile_directory() + "/scripts/flash_pi_media.sh")
+download_cmd := env_var_or_default("DOWNLOAD_CMD", justfile_directory() + "/scripts/download_pi_image.sh")
+download_args := env_var_or_default("DOWNLOAD_ARGS", "")
+flash_args := env_var_or_default("FLASH_ARGS", "--assume-yes")
+flash_device := env_var_or_default("FLASH_DEVICE", "")
+
+_default:
+    @just --list
+
+help:
+    @just --list
+
+# Download the latest release or a specific asset into IMAGE_DIR
+# Usage: just download-pi-image DOWNLOAD_ARGS="--release v1.2.3"
+download-pi-image:
+    "{{download_cmd}}" --dir "{{image_dir}}" {{download_args}}
+
+# Expand an image into IMAGE_PATH, downloading releases when missing
+# Usage: just install-pi-image DOWNLOAD_ARGS="--release v1.2.3"
+install-pi-image:
+    "{{install_cmd}}" --dir "{{image_dir}}" --image "{{image_path}}" {{download_args}}
+
+# Download (via install-pi-image) and flash to FLASH_DEVICE. Run with sudo.
+# Usage: sudo just flash-pi FLASH_DEVICE=/dev/sdX
+flash-pi: install-pi-image
+    if [ -z "{{flash_device}}" ]; then
+        echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2
+        exit 1
+    fi
+    "{{flash_cmd}}" --image "{{image_path}}" --device "{{flash_device}}" {{flash_args}}
+
+# Run the end-to-end readiness checks
+# Usage: just doctor
+doctor:
+    "{{justfile_directory()}}/scripts/sugarkube_doctor.sh"
+
+# Install CLI dependencies inside GitHub Codespaces or fresh containers
+# Usage: just codespaces-bootstrap
+codespaces-bootstrap:
+    sudo apt-get update
+    sudo apt-get install -y curl gh jq pv unzip xz-utils

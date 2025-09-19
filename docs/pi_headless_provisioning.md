@@ -14,7 +14,7 @@ This guide explains how to provision a fresh sugarkube Pi image without attachin
 
 ```bash
 make download-pi-image
-make flash-pi FLASH_DEVICE=/dev/sdX
+sudo make flash-pi FLASH_DEVICE=/dev/sdX
 ```
 
 Alternatively, run `make doctor` first to confirm tooling is installed and dry-run safe.
