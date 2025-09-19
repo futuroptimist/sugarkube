@@ -9,7 +9,10 @@ It assumes you are using Raspberry Pi 5 boards in a small k3s setup.
 2. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open **advanced options**.
 3. Enter your WiFi **SSID** and **password**, enable **SSH**, and set a unique
    hostname and user for each Pi. Optionally paste your SSH public key into the
-   *authorized keys* field to allow key-based logins on first boot.
+   *authorized keys* field to allow key-based logins on first boot. To skip
+   manual typing, render one of the JSON presets in
+   `docs/templates/pi-imager/` with `scripts/render_pi_imager_preset.py` so
+   Raspberry Pi Imager opens with your answers pre-filled.
 4. Set the wireless LAN **country** to match your location so WiFi channels are enabled correctly.
 5. Write the image to an SD card or M.2 drive and repeat for the other boards.
 6. Boot each Pi once to confirm it connects. From another machine run
