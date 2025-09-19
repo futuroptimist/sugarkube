@@ -5,9 +5,11 @@ image_name := env_var_or_default("IMAGE_NAME", "sugarkube.img")
 image_path := image_dir + "/" + image_name
 install_cmd := env_var_or_default("INSTALL_CMD", justfile_directory() + "/scripts/install_sugarkube_image.sh")
 flash_cmd := env_var_or_default("FLASH_CMD", justfile_directory() + "/scripts/flash_pi_media.sh")
+flash_report_cmd := env_var_or_default("FLASH_REPORT_CMD", justfile_directory() + "/scripts/flash_pi_media_report.py")
 download_cmd := env_var_or_default("DOWNLOAD_CMD", justfile_directory() + "/scripts/download_pi_image.sh")
 download_args := env_var_or_default("DOWNLOAD_ARGS", "")
 flash_args := env_var_or_default("FLASH_ARGS", "--assume-yes")
+flash_report_args := env_var_or_default("FLASH_REPORT_ARGS", "")
 flash_device := env_var_or_default("FLASH_DEVICE", "")
 
 _default:
@@ -34,6 +36,15 @@ flash-pi: install-pi-image
         exit 1
     fi
     "{{flash_cmd}}" --image "{{image_path}}" --device "{{flash_device}}" {{flash_args}}
+
+# Download (via install-pi-image) and flash while generating Markdown/HTML reports.
+# Usage: sudo just flash-pi-report FLASH_DEVICE=/dev/sdX FLASH_REPORT_ARGS="--cloud-init ~/user-data"
+flash-pi-report: install-pi-image
+    if [ -z "{{flash_device}}" ]; then
+        echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2
+        exit 1
+    fi
+    "{{flash_report_cmd}}" --image "{{image_path}}" --device "{{flash_device}}" {{flash_args}} {{flash_report_args}}
 
 # Run the end-to-end readiness checks
 # Usage: just doctor
