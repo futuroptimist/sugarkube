@@ -347,9 +347,9 @@ else
 fi
 
 # python checks
-flake8 . --exclude=.venv --max-line-length=100
-isort --check-only . --skip .venv
-black --check . --line-length=100 --exclude ".venv/"
+flake8 . --exclude=.venv,scripts/qrcodegen.py --max-line-length=100
+isort --check-only . --skip .venv --skip scripts/qrcodegen.py
+black --check . --line-length=100 --exclude "(.venv/|scripts/qrcodegen\\.py)"
 
 # js checks
 if [ -f package.json ]; then

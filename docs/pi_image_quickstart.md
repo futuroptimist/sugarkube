@@ -12,6 +12,10 @@ Maintainers updating scripts or docs should cross-reference the
 [Pi Image Contributor Guide](./pi_image_contributor_guide.md) to keep automation helpers and
 guidance aligned.
 
+Need a hands-on reminder next to the hardware? Print the
+[Pi carrier QR labels](./pi_carrier_qr_labels.md) and stick them to the enclosure so anyone can
+scan straight to this quickstart or the troubleshooting matrix while standing at the workbench.
+
 ## 1. Build or download the image
 
 1. Use the one-line installer to bootstrap everything in one step:

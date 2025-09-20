@@ -150,7 +150,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Offer a `brew install sugarkube` tap and `sugarkube setup` wizard for macOS.
 - [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
 - [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
-- [ ] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
+- [x] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
+  - `scripts/generate_qr_codes.py` now exports SVG stickers plus a manifest, and
+    `make qr-codes`/`just qr-codes` regenerate them. `docs/pi_carrier_qr_labels.md`
+    covers printing and placement so every enclosure ships with quickstart and
+    troubleshooting links.
 - [ ] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
 - [ ] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
 

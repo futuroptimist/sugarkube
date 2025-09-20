@@ -14,9 +14,11 @@ FLASH_REPORT_ARGS ?=
 ROLLBACK_ARGS ?=
 VALIDATE_CMD ?= $(CURDIR)/scripts/ssd_post_clone_validate.py
 VALIDATE_ARGS ?=
+QR_CMD ?= $(CURDIR)/scripts/generate_qr_codes.py
+QR_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-	docs-verify
+        docs-verify qr-codes
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -47,3 +49,6 @@ rollback-to-sd:
 docs-verify:
 	pyspelling -c .spellcheck.yaml
 	linkchecker --no-warnings README.md docs/
+
+qr-codes:
+	$(QR_CMD) $(QR_ARGS)
