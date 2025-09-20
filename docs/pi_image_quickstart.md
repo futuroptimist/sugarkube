@@ -132,6 +132,10 @@ before diving into the commands below.
   endpoints and certificate authorities. Copy it from another machine after
   ejecting the media, then merge real credentials using `sudo k3s kubectl
   config view --raw` when ready to manage the cluster remotely.
+- `/boot/sugarkube-node-token` captures the k3s join token once the server
+  finishes provisioning. Use the token to recover a stuck node or add agents by
+  running `sudo cat /boot/sugarkube-node-token` on the Pi or mounting the boot
+  volume elsewhere. Rotate the secret with `sudo k3s token rotate` after use.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
