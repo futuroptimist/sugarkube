@@ -21,9 +21,10 @@ write_files:
     owner: root:root
     permissions: '0600'
     content: |
-      # Upload the sanitized kubeconfig here after first boot.
-      # The provisioning scripts will replace this placeholder when the
-      # cluster is healthy.
+      # Optional: copy /boot/sugarkube-kubeconfig here after first boot if you
+      # want a dedicated directory for operator handoffs. The image now writes
+      # the sanitized kubeconfig to the root of the boot partition
+      # automatically once k3s is healthy.
 package_update: true
 runcmd:
   - [ bash, -c, "if [ -f /boot/secrets.env ]; then set -a; source /boot/secrets.env; set +a; fi" ]

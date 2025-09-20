@@ -194,6 +194,7 @@ runcmd:
   - [systemctl, enable, --now, first-boot.service]
   - [bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -']
   - [/opt/projects/start-projects.sh]  # projects-runcmd
+  - [/opt/sugarkube/export-kubeconfig.sh]
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |
