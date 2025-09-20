@@ -21,9 +21,10 @@ write_files:
     owner: root:root
     permissions: '0600'
     content: |
-      # Upload the sanitized kubeconfig here after first boot.
-      # The provisioning scripts will replace this placeholder when the
-      # cluster is healthy.
+      # Placeholder file updated automatically by
+      # /usr/local/sbin/sugarkube-export-kubeconfig.sh.
+      # The script writes a sanitized kubeconfig to this location and to
+      # /boot/sugarkube-kubeconfig once k3s is running.
 package_update: true
 runcmd:
   - [ bash, -c, "if [ -f /boot/secrets.env ]; then set -a; source /boot/secrets.env; set +a; fi" ]

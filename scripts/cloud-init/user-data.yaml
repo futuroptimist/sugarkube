@@ -155,6 +155,35 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-export-kubeconfig.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Export sanitized kubeconfig to /boot
+      RequiresMountsFor=/boot
+      After=k3s.service
+      Wants=k3s.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/sugarkube-export-kubeconfig.sh
+      Restart=on-failure
+      RestartSec=15s
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-export-kubeconfig.path
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Monitor k3s kubeconfig for export
+
+      [Path]
+      PathExists=/etc/rancher/k3s/k3s.yaml
+      PathChanged=/etc/rancher/k3s/k3s.yaml
+
+      [Install]
+      WantedBy=multi-user.target
   # projects-end
 runcmd:
   - |
@@ -176,6 +205,7 @@ runcmd:
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
   - [bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -']
+  - [systemctl, enable, --now, sugarkube-export-kubeconfig.path]
   - [/opt/projects/start-projects.sh]  # projects-runcmd
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
