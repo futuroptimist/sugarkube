@@ -126,7 +126,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
 - [ ] Embed GIFs, screencasts, or narrated clips showing download → flash → first boot → SSD clone → k3s readiness.
 - [x] Provide start-to-finish flowcharts mapping the journey.
-- [ ] Expand troubleshooting tables linking LED patterns, journalctl logs, `kubectl` errors, and container health issues to fixes.
+- [x] Expand troubleshooting tables linking LED patterns, journalctl logs, `kubectl` errors, and container health issues to fixes.
+  - Added `docs/pi_boot_troubleshooting.md` plus quickstart references covering
+    LED cues, critical commands, and recovery steps.
 - [ ] Publish contributor guide mapping automation scripts to docs; enforce sync with linkchecker and spellchecker.
 
 ---
