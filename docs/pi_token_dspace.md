@@ -71,6 +71,33 @@ docker compose version
    curl http://<pi-host>:3000  # dspace
    ```
 
+### Automate health verification
+
+- Run the bundled verifier after first boot to capture compose and HTTP health in
+  `/boot/first-boot-report.txt`:
+  ```sh
+  sudo TOKEN_PLACE_HEALTH_URL="http://127.0.0.1:5000/" \
+       DSPACE_HEALTH_URL="http://127.0.0.1:3000/" \
+       /opt/sugarkube/pi_node_verifier.sh --log /boot/first-boot-report.txt
+  ```
+- The script now evaluates:
+  - `k3s_node_ready`: confirms `kubectl get nodes` reports a `Ready` status.
+  - `projects_compose_active`: ensures `projects-compose.service` is `active`.
+  - `token_place_http` and `dspace_http`: fetch the configured URLs and fail if the
+    endpoints refuse connections or return non-success responses. GraphQL APIs served
+    over HTTP/HTTPS are covered automatically.
+- Override health URLs or relax TLS checks with environment variables:
+  | Variable | Default | Description |
+  | --- | --- | --- |
+  | `TOKEN_PLACE_HEALTH_URL` | `http://127.0.0.1:5000/` | URL the verifier curls for token.place. Set to `skip` to disable. |
+  | `TOKEN_PLACE_HEALTH_INSECURE` | `false` | Set to `true` to ignore TLS verification errors. |
+  | `DSPACE_HEALTH_URL` | `http://127.0.0.1:3000/` | URL the verifier curls for dspace. Set to `skip` to disable. |
+  | `DSPACE_HEALTH_INSECURE` | `false` | Set to `true` to ignore TLS verification errors. |
+  | `HEALTH_TIMEOUT` | `5` | Timeout (seconds) for each HTTP probe. |
+- When the environment variables are unset the defaults above keep probing the
+  LAN services. Populate them in `/etc/environment` or before invoking the
+  verifier on remote hosts.
+
 ## 4. Expose through Cloudflare Tunnel
 
 1. Add your tunnel token to `/opt/sugarkube/.cloudflared.env`.
