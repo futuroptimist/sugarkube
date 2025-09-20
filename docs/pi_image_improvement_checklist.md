@@ -76,7 +76,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Update `/boot/cmdline.txt` and `/etc/fstab` with new UUID.
   - Touch `/var/log/sugarkube/ssd-clone.done`.
 - [ ] Support dry-run + resume for cloning to reduce user hesitation.
-- [ ] Provide post-clone validation: EEPROM boot order, fstab UUIDs, read/write stress tests.
+- [x] Provide post-clone validation: EEPROM boot order, fstab UUIDs, read/write stress tests.
+  - Added `scripts/ssd_post_clone_validate.py` plus Makefile/just wrappers. The helper compares live
+    mounts with `/etc/fstab`, `/boot/cmdline.txt`, and EEPROM boot order, then runs a configurable
+    SSD stress test with Markdown/JSON reports under `~/sugarkube/reports/ssd-validation/`.
 - [x] Publish a recovery guide and rollback script to fall back to SD if SSD checks fail.
   - Added `scripts/rollback_to_sd.sh` plus Makefile/just wrappers, and documented the
     workflow in `docs/ssd_recovery.md` with dry-run guidance and report expectations.

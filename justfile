@@ -13,6 +13,8 @@ flash_report_args := env_var_or_default("FLASH_REPORT_ARGS", "")
 flash_device := env_var_or_default("FLASH_DEVICE", "")
 rollback_cmd := env_var_or_default("ROLLBACK_CMD", justfile_directory() + "/scripts/rollback_to_sd.sh")
 rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
+validate_cmd := env_var_or_default("VALIDATE_CMD", justfile_directory() + "/scripts/ssd_post_clone_validate.py")
+validate_args := env_var_or_default("VALIDATE_ARGS", "")
 
 _default:
     @just --list
@@ -57,6 +59,11 @@ doctor:
 # Usage: sudo just rollback-to-sd
 rollback-to-sd:
     "{{rollback_cmd}}" {{rollback_args}}
+
+# Run post-clone validation against the active root filesystem
+# Usage: sudo just validate-ssd-clone VALIDATE_ARGS="--stress-mb 256"
+validate-ssd-clone:
+    "{{validate_cmd}}" {{validate_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
