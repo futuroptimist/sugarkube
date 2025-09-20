@@ -99,6 +99,7 @@ PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose
 START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
 INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
 FIRST_BOOT_PATH="${FIRST_BOOT_PATH:-${CLOUD_INIT_DIR}/first-boot.py}"
+EXPORT_KUBECONFIG_PATH="${EXPORT_KUBECONFIG_PATH:-${CLOUD_INIT_DIR}/export-kubeconfig.sh}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
@@ -171,6 +172,14 @@ if [ ! -f "${FIRST_BOOT_PATH}" ]; then
 fi
 if [ ! -s "${FIRST_BOOT_PATH}" ]; then
   echo "First boot reporter is empty: ${FIRST_BOOT_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${EXPORT_KUBECONFIG_PATH}" ]; then
+  echo "Export kubeconfig script not found: ${EXPORT_KUBECONFIG_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${EXPORT_KUBECONFIG_PATH}" ]; then
+  echo "Export kubeconfig script is empty: ${EXPORT_KUBECONFIG_PATH}" >&2
   exit 1
 fi
 
@@ -267,6 +276,9 @@ install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/bin/pi_node_verifier.sh"
 install -Dm755 "${FIRST_BOOT_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/bin/sugarkube-first-boot.py"
+
+install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"

@@ -35,7 +35,10 @@ Recommended options:
 - Configure Wi-Fi credentials using `wifis`.
 - Inject optional environment variables for services like Cloudflare Tunnels or token.place secrets.
 
-The default template writes a kubeconfig and cluster bootstrap token to `/boot/sugarkube/` so operators can join the cluster without SSH.
+The base image now writes a sanitized kubeconfig to `/boot/sugarkube-kubeconfig` once k3s is
+online, so you can collect cluster endpoints without SSH. The default template still seeds
+`/boot/sugarkube/` with placeholders for bootstrap tokens or additional secrets you may want to
+mirror on first boot.
 
 ## Inject secrets safely
 
@@ -83,6 +86,10 @@ ssh sugaradmin@sugarkube-node01.local
 ```bash
 sudo /usr/local/bin/pi_node_verifier.sh --full
 ```
+
+5. (Optional) Copy `/boot/sugarkube-kubeconfig` from another machine to share cluster endpoints
+   with teammates. The export redacts client keys and tokens—regenerate a full admin config later
+   using `sudo k3s kubectl config view --raw` before authenticating from a workstation.
 
 Successful runs leave `/boot/first-boot-report/status.json`,
 `/boot/first-boot-report/verifier.json`, and `/var/log/sugarkube/first-boot.ok`
