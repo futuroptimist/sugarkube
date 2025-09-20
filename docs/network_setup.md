@@ -127,7 +127,9 @@ cluster.
 
 > Tip: You can also grab `/boot/sugarkube-kubeconfig` from the boot volume without SSH.
 > The export redacts client keys while preserving cluster endpoints, making it safe to share
-> connection details with operators who only need the cluster address and CA bundle.
+> connection details with operators who only need the cluster address and CA bundle. When you need
+> to add agents, mount the boot volume and read `/boot/sugarkube-node-token`, then rotate it with
+> `sudo k3s token rotate` after use.
 
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed

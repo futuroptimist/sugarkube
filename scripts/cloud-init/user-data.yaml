@@ -209,6 +209,7 @@ runcmd:
   - [systemctl, enable, k3s-ready.target]
   - [systemctl, start, k3s-ready.target]
   - [/opt/sugarkube/export-kubeconfig.sh]
+  - [/opt/sugarkube/export-node-token.sh]
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |

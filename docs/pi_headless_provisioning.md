@@ -36,9 +36,10 @@ Recommended options:
 - Inject optional environment variables for services like Cloudflare Tunnels or token.place secrets.
 
 The base image now writes a sanitized kubeconfig to `/boot/sugarkube-kubeconfig` once k3s is
-online, so you can collect cluster endpoints without SSH. The default template still seeds
-`/boot/sugarkube/` with placeholders for bootstrap tokens or additional secrets you may want to
-mirror on first boot.
+online, so you can collect cluster endpoints without SSH. It also copies the join token to
+`/boot/sugarkube-node-token` after provisioning completes, giving you a physical backup when SSH
+is unavailable. The default template still seeds `/boot/sugarkube/` with placeholders for
+bootstrap tokens or additional secrets you may want to mirror on first boot.
 
 ## Inject secrets safely
 
@@ -85,7 +86,9 @@ sudo /usr/local/bin/pi_node_verifier.sh --full
 
 5. (Optional) Copy `/boot/sugarkube-kubeconfig` from another machine to share cluster endpoints
    with teammates. The export redacts client keys and tokens—regenerate a full admin config later
-   using `sudo k3s kubectl config view --raw` before authenticating from a workstation.
+   using `sudo k3s kubectl config view --raw` before authenticating from a workstation. Grab the
+   join secret from `/boot/sugarkube-node-token` when you need to add or recover agents, then rotate
+   it with `sudo k3s token rotate`.
 
 Successful runs leave `/boot/first-boot-report.json` and `/var/log/sugarkube/first-boot.ok` for later auditing.
 

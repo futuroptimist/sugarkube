@@ -68,6 +68,8 @@ the docs you will see the term used in both contexts.
     (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
+  - `scripts/cloud-init/export-node-token.sh` — copy the k3s join token to
+    `/boot/sugarkube-node-token` for offline recovery; runs automatically on first boot
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
     available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see
