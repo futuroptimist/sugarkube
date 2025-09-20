@@ -141,6 +141,7 @@ kube
 kubeconfig
 kubectl
 lcd
+linkcheck
 linkchecker
 linters
 htmlcontent
@@ -169,6 +170,7 @@ preconfigure
 preloaded
 prettierrc
 pyspelling
+quickstart
 qcow
 qcow2
 raspi

@@ -8,6 +8,10 @@ Need a visual overview first? Start with the
 [Pi Image Flowcharts](./pi_image_flowcharts.md) to map the journey from download to first boot
 before diving into the commands below.
 
+Maintainers updating scripts or docs should cross-reference the
+[Pi Image Contributor Guide](./pi_image_contributor_guide.md) to keep automation helpers and
+guidance aligned.
+
 ## 1. Build or download the image
 
 1. Use the one-line installer to bootstrap everything in one step:
