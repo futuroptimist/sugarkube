@@ -8,6 +8,10 @@ Need a visual overview first? Start with the
 [Pi Image Flowcharts](./pi_image_flowcharts.md) to map the journey from download to first boot
 before diving into the commands below.
 
+Looking for the source of a helper script mentioned in this guide? Check the
+[Sugarkube Automation Script Map](./contributor_script_map.md) for direct links
+between each automation helper and its primary documentation.
+
 ## 1. Build or download the image
 
 1. Use the one-line installer to bootstrap everything in one step:

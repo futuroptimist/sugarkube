@@ -46,7 +46,9 @@ the docs you will see the term used in both contexts.
   `secrets.env` usage
 - [docs/templates/cloud-init/user-data.example](docs/templates/cloud-init/user-data.example) — cloud-init
   template for SSH keys and `Wi-Fi` credentials
-- `scripts/` — helper scripts for rendering and exports
+- `scripts/` — helper scripts for rendering and exports. See
+  [docs/contributor_script_map.md](docs/contributor_script_map.md) for a
+  contributor-facing map that ties each helper to the guide that explains it.
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; supports `--dry-run`
     metadata checks and uses POSIX `test -ef` instead of `realpath` for better macOS
     compatibility
