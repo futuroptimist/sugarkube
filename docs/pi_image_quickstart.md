@@ -143,6 +143,22 @@ before diving into the commands below.
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
 
+### Validate SSD clones
+
+After migrating the root filesystem to an SSD, run the new validation helper to confirm every layer
+references the fresh drive and to sanity-check storage throughput:
+
+```bash
+sudo ./scripts/ssd_post_clone_validate.py
+```
+
+The script compares `/etc/fstab`, `/boot/cmdline.txt`, and the EEPROM boot order against the live
+mounts, then performs a configurable read/write stress test. Reports are stored under
+`~/sugarkube/reports/ssd-validation/<timestamp>/`. Prefer the wrappers? Run
+`sudo make validate-ssd-clone` or `sudo just validate-ssd-clone` to call the same helper and respect
+`VALIDATE_ARGS`. See [`SSD Post-Clone Validation`](./ssd_post_clone_validation.md) for flag details
+and sample outputs.
+
 ### Recover from SSD issues
 
 If an SSD migration fails or you need to boot from the original SD card again,
