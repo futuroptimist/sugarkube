@@ -98,6 +98,7 @@ CLOUDFLARED_COMPOSE_PATH="${CLOUDFLARED_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-c
 PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose.yml}"
 START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
 INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
+EXPORT_KUBECONFIG_PATH="${EXPORT_KUBECONFIG_PATH:-${CLOUD_INIT_DIR}/export-kubeconfig.sh}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
@@ -162,6 +163,14 @@ if [ ! -f "${INIT_ENV_PATH}" ]; then
 fi
 if [ ! -s "${INIT_ENV_PATH}" ]; then
   echo "Init env script is empty: ${INIT_ENV_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${EXPORT_KUBECONFIG_PATH}" ]; then
+  echo "Export kubeconfig script not found: ${EXPORT_KUBECONFIG_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${EXPORT_KUBECONFIG_PATH}" ]; then
+  echo "Export kubeconfig script is empty: ${EXPORT_KUBECONFIG_PATH}" >&2
   exit 1
 fi
 
@@ -256,6 +265,9 @@ fi
 # Bundle pi_node_verifier and optionally clone repos into the image
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+
+install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"

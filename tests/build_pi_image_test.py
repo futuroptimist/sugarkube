@@ -482,6 +482,11 @@ def _run_build_script(tmp_path, env):
     shutil.copy(init_env_src, init_env_dest)
     init_env_dest.chmod(0o755)
 
+    export_kubeconfig_src = cloud_init_src / "export-kubeconfig.sh"
+    export_kubeconfig_dest = ci_dir / "export-kubeconfig.sh"
+    shutil.copy(export_kubeconfig_src, export_kubeconfig_dest)
+    export_kubeconfig_dest.chmod(0o755)
+
     result = subprocess.run(
         ["/bin/bash", str(script)],
         env=env,
