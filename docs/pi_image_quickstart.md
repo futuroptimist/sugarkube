@@ -4,6 +4,10 @@ Build a Raspberry Pi OS image that boots with k3s and the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) services.
 
+Need a visual overview first? Start with the
+[Pi Image Flowcharts](./pi_image_flowcharts.md) to map the journey from download to first boot
+before diving into the commands below.
+
 ## 1. Build or download the image
 
 1. Use the one-line installer to bootstrap everything in one step:
