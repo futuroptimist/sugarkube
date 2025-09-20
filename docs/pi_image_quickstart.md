@@ -118,6 +118,9 @@ before diving into the commands below.
   ```bash
   sudo journalctl -u projects-compose.service --no-pager
   ```
+- When symptoms fall outside the happy path, use the
+  [Pi Boot & Cluster Troubleshooting Matrix](./pi_boot_troubleshooting.md) to map
+  LED patterns, log locations, and fixes.
 - Every verifier run now appends a Markdown summary to `/boot/first-boot-report.txt`.
   The report captures hardware details, `cloud-init` status, the results from
   `pi_node_verifier.sh`, and any provisioning or migration steps recorded by
