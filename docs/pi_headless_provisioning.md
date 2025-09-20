@@ -35,7 +35,12 @@ Recommended options:
 - Configure Wi-Fi credentials using `wifis`.
 - Inject optional environment variables for services like Cloudflare Tunnels or token.place secrets.
 
-The default template writes a kubeconfig and cluster bootstrap token to `/boot/sugarkube/` so operators can join the cluster without SSH.
+The default template writes a kubeconfig and cluster bootstrap token to `/boot/sugarkube/`
+so operators can join the cluster without SSH. On first boot,
+`sugarkube-export-kubeconfig.service` rewrites the kubeconfig with the Pi's mDNS
+hostname (or a custom endpoint) and stores the sanitized copy at
+`/boot/sugarkube-kubeconfig`, mirroring it back into `/boot/sugarkube/kubeconfig`
+for compatibility.
 
 ## Inject secrets safely
 

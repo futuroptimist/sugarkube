@@ -116,6 +116,17 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo cat /boot/first-boot-report.txt
   ```
+- A sanitized kubeconfig is written to `/boot/sugarkube-kubeconfig` and mirrored
+  to `/boot/sugarkube/kubeconfig` when the legacy directory exists. Mount the
+  boot volume on another machine and copy the file to your workstation:
+  ```bash
+  sudo mount /dev/sdX1 /mnt/pi-boot
+  sudo cp /mnt/pi-boot/sugarkube-kubeconfig ~/.kube/config
+  sudo umount /mnt/pi-boot
+  ```
+  Override the endpoint by setting `SUGARKUBE_API_HOST`, `SUGARKUBE_API_PORT`, or
+  `SUGARKUBE_API_ENDPOINT` before first boot when custom DNS entries or
+  load-balancer addresses are required.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
