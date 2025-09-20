@@ -15,6 +15,8 @@ rollback_cmd := env_var_or_default("ROLLBACK_CMD", justfile_directory() + "/scri
 rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
 validate_cmd := env_var_or_default("VALIDATE_CMD", justfile_directory() + "/scripts/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
+qr_cmd := env_var_or_default("QR_CMD", justfile_directory() + "/scripts/generate_qr_codes.py")
+qr_args := env_var_or_default("QR_ARGS", "")
 
 _default:
     @just --list
@@ -77,3 +79,8 @@ docs-verify:
     pyspelling -c "{{justfile_directory()}}/.spellcheck.yaml"
     linkchecker --no-warnings "{{justfile_directory()}}/README.md" \
         "{{justfile_directory()}}/docs/"
+
+# Generate printable QR codes that link to the quickstart and troubleshooting docs
+# Usage: just qr-codes QR_ARGS="--output-dir ~/qr"
+qr-codes:
+    "{{qr_cmd}}" {{qr_args}}
