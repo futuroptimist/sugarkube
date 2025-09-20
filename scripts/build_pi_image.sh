@@ -256,6 +256,10 @@ fi
 # Bundle pi_node_verifier and optionally clone repos into the image
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+install -Dm755 "${REPO_ROOT}/scripts/export_sanitized_kubeconfig.sh" \
+  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/sugarkube-export-kubeconfig.sh"
+install -Dm644 "${REPO_ROOT}/scripts/systemd/sugarkube-export-kubeconfig.service" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/sugarkube-export-kubeconfig.service"
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"

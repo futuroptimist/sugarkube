@@ -116,6 +116,15 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo cat /boot/first-boot-report.txt
   ```
+- Retrieve the sanitized kubeconfig without SSH. Once k3s starts, the
+  `sugarkube-export-kubeconfig` service copies a flattened kubeconfig to
+  `/boot/sugarkube/kubeconfig` and `/boot/sugarkube-kubeconfig`. Treat the file as
+  sensitive—it authenticates as the default admin client. From a workstation,
+  mount the boot volume and copy it into your kubeconfig directory:
+  ```bash
+  sudo cp /Volumes/boot/sugarkube/kubeconfig ~/.kube/configs/sugarkube.yaml
+  ```
+  Update the server endpoint or merge it with your existing kubeconfig as needed.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
