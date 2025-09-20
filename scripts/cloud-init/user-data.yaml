@@ -78,6 +78,7 @@ packages:
   - curl
   - gnupg
   - git
+  - cloud-guest-utils
   - cloudflared
   - docker-ce
   - docker-ce-cli
@@ -117,6 +118,21 @@ write_files:
       RemainAfterExit=yes
       Restart=on-failure
       RestartSec=5s
+
+  - path: /etc/systemd/system/first-boot.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Sugarkube first boot health reporter
+      Wants=network-online.target k3s.service projects-compose.service
+      After=network-online.target docker.service k3s.service projects-compose.service
+      ConditionPathExists=!/var/log/sugarkube/first-boot.ok
+
+      [Service]
+      Type=oneshot
+      Environment=PYTHONUNBUFFERED=1
+      ExecStart=/usr/local/bin/sugarkube-first-boot.py
+      Restart=no
 
       [Install]
       WantedBy=multi-user.target
@@ -175,8 +191,10 @@ runcmd:
   - [bash, -c, 'mkdir -p /var/log/journal && systemctl restart systemd-journald']
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
+  - [systemctl, enable, first-boot.service]
   - [bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -']
   - [/opt/projects/start-projects.sh]  # projects-runcmd
+  - [systemctl, start, first-boot.service]
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |

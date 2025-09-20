@@ -55,10 +55,13 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## First Boot Confidence & Self-Healing
-- [ ] Install `first-boot.service` that:
+- [x] Install `first-boot.service` that:
   - Waits for network, expands filesystem.
   - Runs `pi_node_verifier.sh` automatically.
   - Publishes HTML/JSON status (cloud-init, k3s, token.place, dspace) to `/boot/first-boot-report`.
+  - Added `scripts/cloud-init/first-boot.py` plus a `first-boot.service` unit that expands the
+    root filesystem, runs the verifier, and writes Markdown/HTML/JSON reports with k3s and
+    projects-compose health snapshots.
 - [x] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
   - `pi_node_verifier.sh` now writes Markdown summaries (hardware, cloud-init,
     checksum checks) to `/boot/first-boot-report.txt` and ingests migration
@@ -93,7 +96,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Provide post-boot hooks that apply pinned Helm/chart bundles and fail fast with logs if health checks fail.
 - [ ] Bundle sample datasets and token.place collections for first-launch validation.
 - [ ] Document and script multi-node join rehearsal for scaling clusters.
-- [ ] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
+- [x] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
+  - Added `scripts/cloud-init/export-kubeconfig.sh`, staged by the build script
+    and invoked from `sugarkube-first-boot.py` to copy a redacted kubeconfig to
+    `/boot/` with recovery instructions.
 - [ ] Bundle lightweight exporters (Grafana Agent/Netdata/Prometheus) pre-configured for cluster observability.
 
 ---
