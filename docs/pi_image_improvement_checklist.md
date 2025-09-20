@@ -83,7 +83,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Publish a recovery guide and rollback script to fall back to SD if SSD checks fail.
   - Added `scripts/rollback_to_sd.sh` plus Makefile/just wrappers, and documented the
     workflow in `docs/ssd_recovery.md` with dry-run guidance and report expectations.
-- [ ] Offer an opt-in SSD health monitor (SMART/wear checks).
+- [x] Offer an opt-in SSD health monitor (SMART/wear checks).
+  - Added `scripts/ssd_health_monitor.py`, Makefile/just wrappers, and docs for scheduling SMART
+    telemetry collection with Markdown/JSON reports and thresholded warnings.
 
 ---
 
