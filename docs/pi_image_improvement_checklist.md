@@ -93,7 +93,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Provide post-boot hooks that apply pinned Helm/chart bundles and fail fast with logs if health checks fail.
 - [ ] Bundle sample datasets and token.place collections for first-launch validation.
 - [ ] Document and script multi-node join rehearsal for scaling clusters.
-- [ ] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
+- [x] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
+  - Added `sugarkube-export-kubeconfig.service` and companion script to flatten the admin
+    kubeconfig and copy it to `/boot/sugarkube/kubeconfig` and `/boot/sugarkube-kubeconfig` after
+    k3s starts, making it easy to grab from the boot volume.
 - [ ] Bundle lightweight exporters (Grafana Agent/Netdata/Prometheus) pre-configured for cluster observability.
 
 ---
