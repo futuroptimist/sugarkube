@@ -79,7 +79,8 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```bash
    curl -sfL https://get.k3s.io | sh -
    ```
-2. Note the node token in `/var/lib/rancher/k3s/server/node-token` and its IP address
+2. Note the node token in `/var/lib/rancher/k3s/server/node-token` (it is also copied
+   to `/boot/sugarkube-node-token`) and the Pi's IP address
 3. On each additional Pi, join the cluster:
    ```bash
    curl -sfL https://get.k3s.io | \
@@ -89,7 +90,7 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```bash
    sudo kubectl get nodes
    ```
-5. (Optional) Copy `/etc/rancher/k3s/k3s.yaml` to your workstation for remote
+5. (Optional) Copy `/boot/sugarkube-kubeconfig-full` to your workstation for remote
    `kubectl` access.
 
 ## 6. Deploy applications

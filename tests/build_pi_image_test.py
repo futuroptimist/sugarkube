@@ -487,6 +487,11 @@ def _run_build_script(tmp_path, env):
     shutil.copy(export_kubeconfig_src, export_kubeconfig_dest)
     export_kubeconfig_dest.chmod(0o755)
 
+    export_node_token_src = cloud_init_src / "export-node-token.sh"
+    export_node_token_dest = ci_dir / "export-node-token.sh"
+    shutil.copy(export_node_token_src, export_node_token_dest)
+    export_node_token_dest.chmod(0o755)
+
     k3s_ready_src = cloud_init_src / "k3s-ready.sh"
     k3s_ready_dest = ci_dir / "k3s-ready.sh"
     shutil.copy(k3s_ready_src, k3s_ready_dest)

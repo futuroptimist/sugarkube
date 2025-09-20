@@ -99,6 +99,7 @@ PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose
 START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
 INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
 EXPORT_KUBECONFIG_PATH="${EXPORT_KUBECONFIG_PATH:-${CLOUD_INIT_DIR}/export-kubeconfig.sh}"
+EXPORT_NODE_TOKEN_PATH="${EXPORT_NODE_TOKEN_PATH:-${CLOUD_INIT_DIR}/export-node-token.sh}"
 K3S_READY_PATH="${K3S_READY_PATH:-${CLOUD_INIT_DIR}/k3s-ready.sh}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
@@ -277,6 +278,9 @@ install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
 
 install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
+
+install -Dm755 "${EXPORT_NODE_TOKEN_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-node-token.sh"
 
 install -Dm755 "${K3S_READY_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-ready.sh"
