@@ -50,8 +50,9 @@ The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
 `ARM64=1` to avoid generating both architectures.
 
-The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
-`token.place` and `democratizedspace/dspace` repositories into
+The image embeds `pi_node_verifier.sh` in `/usr/local/bin` alongside
+`sugarkube-first-boot.py`, which powers the automated first-boot report.
+It clones the `token.place` and `democratizedspace/dspace` repositories into
 `/opt/projects` by default. Customize branches with `TOKEN_PLACE_BRANCH`
 (default `main`) and `DSPACE_BRANCH` (default `v3`). Set `CLONE_SUGARKUBE=true`
 to include this repo and pass space-separated Git URLs in `EXTRA_REPOS` to pull
@@ -59,8 +60,8 @@ additional projects.
 `start-projects.sh` enables the optional `projects-compose` systemd unit on
 first boot, logs the Docker engine and compose plugin versions for diagnostics,
 and checks for `systemctl`, skipping quietly when systemd isn't present. The
-build script also verifies `start-projects.sh` and `init-env.sh` are non-empty
-to avoid embedding blank hooks.
+build script verifies `start-projects.sh`, `init-env.sh`, and `first-boot.py`
+are non-empty to avoid embedding blank hooks.
 
 On first boot `init-env.sh` copies each project's `.env.example` to `.env` and
 sets its mode to `0600` so secrets stay private.

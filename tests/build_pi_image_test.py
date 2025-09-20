@@ -482,6 +482,11 @@ def _run_build_script(tmp_path, env):
     shutil.copy(init_env_src, init_env_dest)
     init_env_dest.chmod(0o755)
 
+    first_boot_src = cloud_init_src / "first-boot.py"
+    first_boot_dest = ci_dir / "first-boot.py"
+    shutil.copy(first_boot_src, first_boot_dest)
+    first_boot_dest.chmod(0o755)
+
     result = subprocess.run(
         ["/bin/bash", str(script)],
         env=env,
