@@ -22,7 +22,17 @@ git diff --cached | ./scripts/scan-secrets.py
 `scan-secrets.py` skips scanning itself even if diff paths omit the `b/` prefix.
 Findings are printed to stderr so stdout remains clean for tooling.
 
-- If `README.md` or files under `docs/` change, also run:
+- If `README.md` or files under `docs/` change, run the combined helper so spellcheck and link checks
+  stay in sync:
+
+```bash
+make docs-verify
+# or
+just docs-verify
+```
+
+- When `pyspelling` or `linkchecker` are missing locally, install prerequisites and rerun the
+  individual commands:
 
 ```bash
 pyspelling -c .spellcheck.yaml

@@ -134,9 +134,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Added `docs/pi_boot_troubleshooting.md` plus quickstart references covering
     LED cues, critical commands, and recovery steps.
 - [x] Publish contributor guide mapping automation scripts to docs; enforce sync with linkchecker and spellchecker.
-  - Added [docs/contributor_script_map.md](./contributor_script_map.md) linking each helper script to its
-    primary guide plus reminders to rerun `pyspelling` and `linkchecker` after updates. `README.md`
-    and the quickstart now reference the new map so contributors discover it while editing docs.
+  - Added [Pi Image Contributor Guide](./pi_image_contributor_guide.md) mapping automation helpers to their
+    documentation and introduced `make docs-verify`/`just docs-verify` wrappers to run spellcheck and
+    link-check together.
 
 ---
 
