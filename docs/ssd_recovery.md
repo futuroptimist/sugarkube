@@ -109,5 +109,10 @@ sudo ROLLBACK_ARGS='--dry-run --sd-root-device /dev/mmcblk1p2' make rollback-to-
   the drive to another system.
 - If you reattempt cloning later, keep the rollback backups around so you can
   compare the new configuration.
+- After the next clone, run `sudo ./scripts/ssd_post_clone_validate.py` (or the
+  `make`/`just` wrappers) to confirm `/etc/fstab`, `/boot/cmdline.txt`, and the
+  EEPROM boot order all reference the SSD before pulling the SD card. The helper
+  also records Markdown/JSON reports under `~/sugarkube/reports/ssd-validation/`
+  for future incident reviews.
 - Update your troubleshooting notes with the Markdown report stored on `/boot`
   so future incidents are easier to triage.

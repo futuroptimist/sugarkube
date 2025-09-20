@@ -12,6 +12,8 @@ DOWNLOAD_ARGS ?=
 FLASH_ARGS ?= --assume-yes
 FLASH_REPORT_ARGS ?=
 ROLLBACK_ARGS ?=
+VALIDATE_CMD ?= $(CURDIR)/scripts/ssd_post_clone_validate.py
+VALIDATE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
 	docs-verify
