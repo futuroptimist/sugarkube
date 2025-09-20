@@ -23,6 +23,8 @@ Review the safety notes before working with power components.
 - [mac_mini_station.md](mac_mini_station.md) — press-fit cap for the Mac mini keyboard station
 - [electronics_schematics.md](electronics_schematics.md) — KiCad and Fritzing designs
 - [pi_image_quickstart.md](pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
+- [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs
+  they inform
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
 - [pi_image_improvement_checklist.md](pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration

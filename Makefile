@@ -16,7 +16,7 @@ VALIDATE_CMD ?= $(CURDIR)/scripts/ssd_post_clone_validate.py
 VALIDATE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-validate-ssd-clone
+	docs-verify
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -44,5 +44,6 @@ doctor:
 rollback-to-sd:
 	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
 
-validate-ssd-clone:
-	$(VALIDATE_CMD) $(VALIDATE_ARGS)
+docs-verify:
+	pyspelling -c .spellcheck.yaml
+	linkchecker --no-warnings README.md docs/

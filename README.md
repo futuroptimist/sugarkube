@@ -44,9 +44,14 @@ the docs you will see the term used in both contexts.
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - [docs/pi_headless_provisioning.md](docs/pi_headless_provisioning.md) — headless boot playbook covering
   `secrets.env` usage
+- [docs/pi_image_quickstart.md](docs/pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
+- [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md) — map automation helpers to
+  the docs that describe them
 - [docs/templates/cloud-init/user-data.example](docs/templates/cloud-init/user-data.example) — cloud-init
   template for SSH keys and `Wi-Fi` credentials
-- `scripts/` — helper scripts for rendering and exports
+- `scripts/` — helper scripts for rendering and exports. See
+  [docs/contributor_script_map.md](docs/contributor_script_map.md) for a
+  contributor-facing map that ties each helper to the guide that explains it.
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; supports `--dry-run`
     metadata checks and uses POSIX `test -ef` instead of `realpath` for better macOS
     compatibility
@@ -110,9 +115,20 @@ pre-commit run --all-files
 ```
 
 If you update documentation, install `aspell` and verify spelling and links.
-`pyspelling` relies on `aspell` and an English dictionary (`aspell-en`). The
-`scripts/checks.sh` helper tries to install them via `apt-get` when missing. Pre-commit
-runs these checks and fails if spelling or links are broken:
+Run the combined helper after editing Markdown so spellcheck and link checks stay aligned with the
+automation mapping surfaced in [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md):
+
+```bash
+make docs-verify
+# or
+just docs-verify
+```
+
+Both commands execute `pyspelling -c .spellcheck.yaml` and
+`linkchecker --no-warnings README.md docs/`. `pyspelling` relies on `aspell` and the English
+dictionary (`aspell-en`); install them manually when the helper cannot. The `scripts/checks.sh`
+helper attempts to install the dependencies via `apt-get` when missing. When you need to run the
+commands directly:
 
 ```bash
 sudo apt-get install aspell aspell-en  # Debian/Ubuntu
@@ -121,8 +137,8 @@ pyspelling -c .spellcheck.yaml
 linkchecker --no-warnings README.md docs/
 ```
 
-The `--no-warnings` flag prevents linkchecker from returning a non-zero exit
-code on benign Markdown parsing warnings.
+The `--no-warnings` flag prevents linkchecker from returning a non-zero exit code on benign Markdown
+parsing warnings.
 
 Scan staged changes for secrets before committing:
 

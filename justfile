@@ -70,3 +70,10 @@ validate-ssd-clone:
 codespaces-bootstrap:
     sudo apt-get update
     sudo apt-get install -y curl gh jq pv unzip xz-utils
+
+# Run spellcheck and linkcheck to keep docs automation aligned
+# Usage: just docs-verify
+docs-verify:
+    pyspelling -c "{{justfile_directory()}}/.spellcheck.yaml"
+    linkchecker --no-warnings "{{justfile_directory()}}/README.md" \
+        "{{justfile_directory()}}/docs/"
