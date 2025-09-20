@@ -151,7 +151,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
 - [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
 - [ ] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
-- [ ] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
+- [x] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
+  - Added node token + kubeconfig export helpers and refreshed docs to explain the new hand-offs.
 - [ ] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
 
 ---

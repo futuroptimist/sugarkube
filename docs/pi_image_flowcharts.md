@@ -22,7 +22,7 @@ flowchart TD
     J --> L[Verify: systemctl status projects-compose]
     K --> M[Capture /boot/first-boot-report.txt]
     L --> M
-    M --> N[Hand off sanitized kubeconfig from /boot/sugarkube-kubeconfig]
+    M --> N[Hand off kubeconfigs + node token from /boot/]
 ```
 
 ## Detailed provisioning path
@@ -46,7 +46,7 @@ flowchart TD
         B2 --> B3[k3s + projects-compose install]
         B3 --> B4[pi_node_verifier.sh runs]
         B4 --> B5[/boot/first-boot-report.txt updated]
-        B5 --> B6[/boot/sugarkube-kubeconfig exported]
+        B5 --> B6[/boot kubeconfigs + node token exported]
     end
 
     subgraph PostBoot

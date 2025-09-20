@@ -66,14 +66,15 @@ sudo systemctl status k3s --no-pager
 sudo kubectl get nodes
 ```
 
-Display the worker join token:
+Display the worker join token (it is also exported to `/boot/sugarkube-node-token` on
+the boot volume for offline recovery):
 
 ```sh
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
-The token is stored at `/var/lib/rancher/k3s/server/node-token`; copy it for
-later. Treat this token like a password and keep it private.
+The token is stored at `/var/lib/rancher/k3s/server/node-token` and mirrored to the
+boot partition. Copy either location for later and guard the value like any other secret.
 
 Boot the remaining Pis once they can reach the control-plane node. On each
 worker, disable swap, then install the agent. Replace `<server-ip>` with the
@@ -106,13 +107,18 @@ Press <kbd>Ctrl</kbd>+<kbd>C</kbd> once all nodes show `Ready` to exit the watch
 
 To run `kubectl` from your laptop, ensure the
 [kubectl client is installed](https://kubernetes.io/docs/tasks/tools/#kubectl).
-Copy the kubeconfig generated on the control-plane node (it's owned by
-`root`, so fetch it using the `root` account), update its server
-address, and verify access:
+Copy the kubeconfig generated on the control-plane node. The image now writes two
+variants to the boot volume:
+
+- `/boot/sugarkube-kubeconfig` (sanitized; secrets redacted).
+- `/boot/sugarkube-kubeconfig-full` (full admin credentials).
+
+Pull one of these files over SSH (they are owned by `root`) or eject the boot
+media and copy the file locally, then update its server address and verify access:
 
 ```sh
 mkdir -p ~/.kube
-scp root@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
+scp root@<server-ip>:/boot/sugarkube-kubeconfig-full ~/.kube/config
 sed -i "s/127.0.0.1/<server-ip>/g" ~/.kube/config
 chmod 600 ~/.kube/config
 echo "export KUBECONFIG=$HOME/.kube/config" >> ~/.bashrc

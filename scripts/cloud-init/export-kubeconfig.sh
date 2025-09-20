@@ -3,6 +3,7 @@ set -euo pipefail
 
 SRC="/etc/rancher/k3s/k3s.yaml"
 DEST="/boot/sugarkube-kubeconfig"
+DEST_FULL="/boot/sugarkube-kubeconfig-full"
 LOG_DIR="/var/log/sugarkube"
 LOG_FILE="${LOG_DIR}/kubeconfig-export.log"
 WAIT_SECONDS=${WAIT_SECONDS:-120}
@@ -42,6 +43,12 @@ if [ ! -s "$SRC" ]; then
     printf '# Generated: %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
     printf '# k3s has not yet created %s. Run this script again later.\n' "$SRC"
   } >"$DEST" 2>/dev/null || true
+  {
+    printf '# Sugarkube kubeconfig export (pending)\n'
+    printf '# Generated: %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
+    printf '# A full kubeconfig will be written once %s is present.\n' "$SRC"
+  } >"$DEST_FULL" 2>/dev/null || true
+  chmod 600 "$DEST" "$DEST_FULL" 2>/dev/null || true
   exit 0
 fi
 
@@ -74,12 +81,26 @@ sed -E \
   cat "$tmp_clean"
 } >"$DEST"
 
+{
+  printf '# Sugarkube kubeconfig export (full)\n'
+  printf '# Generated: %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
+  printf '# Contains full admin credentials. Protect this file.\n'
+  printf '# Retrieve a fresh copy anytime with:\n'
+  printf '#   sudo k3s kubectl config view --raw > /boot/sugarkube-kubeconfig-full\n\n'
+  cat "$tmp_raw"
+} >"$DEST_FULL"
+
 if ! sync "$DEST" 2>/dev/null; then
   sync
 fi
 
-if ! chmod 600 "$DEST" 2>/dev/null; then
+if ! sync "$DEST_FULL" 2>/dev/null; then
+  sync
+fi
+
+if ! chmod 600 "$DEST" "$DEST_FULL" 2>/dev/null; then
   :
 fi
 
 log "Wrote sanitized kubeconfig to $DEST"
+log "Wrote full kubeconfig to $DEST_FULL"

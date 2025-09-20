@@ -137,12 +137,19 @@ guidance aligned.
   is `active`, and curls the token.place and dspace endpoints. Override the HTTP
   probes by exporting `TOKEN_PLACE_HEALTH_URL`, `DSPACE_HEALTH_URL`, and related
   `*_INSECURE` flags before invoking `/opt/sugarkube/pi_node_verifier.sh`.
-- The boot partition now includes `/boot/sugarkube-kubeconfig`, a sanitized
-  kubeconfig export generated after k3s finishes installing. Secrets are
-  redacted, making the file safe to hand off to operators who only need cluster
-  endpoints and certificate authorities. Copy it from another machine after
-  ejecting the media, then merge real credentials using `sudo k3s kubectl
-  config view --raw` when ready to manage the cluster remotely.
+- The boot partition now includes recovery hand-offs generated once k3s
+  finishes installing:
+  - `/boot/sugarkube-kubeconfig` is a sanitized kubeconfig whose secrets are
+    redacted. Share it with operators who only need cluster endpoints and
+    certificate authorities.
+  - `/boot/sugarkube-kubeconfig-full` is the raw admin kubeconfig from the Pi.
+    Store it securely after ejecting the media or copy it into your own
+    workstation to bootstrap kubectl access immediately.
+  - `/boot/sugarkube-node-token` contains the k3s cluster join token. Use it to
+    recover stalled boots, enroll new agents, or reseed the control plane.
+  Copy any of these files from another machine after ejecting the boot media.
+  Regenerate fresh copies later with `sudo k3s kubectl config view --raw` or
+  `sudo cat /var/lib/rancher/k3s/server/node-token` if you need to rotate them.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
