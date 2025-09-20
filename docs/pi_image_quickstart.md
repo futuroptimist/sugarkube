@@ -126,6 +126,10 @@ before diving into the commands below.
   ```bash
   sudo cat /boot/first-boot-report.txt
   ```
+- The verifier also checks for a `Ready` k3s node, confirms `projects-compose.service`
+  is `active`, and curls the token.place and dspace endpoints. Override the HTTP
+  probes by exporting `TOKEN_PLACE_HEALTH_URL`, `DSPACE_HEALTH_URL`, and related
+  `*_INSECURE` flags before invoking `/opt/sugarkube/pi_node_verifier.sh`.
 - The boot partition now includes `/boot/sugarkube-kubeconfig`, a sanitized
   kubeconfig export generated after k3s finishes installing. Secrets are
   redacted, making the file safe to hand off to operators who only need cluster

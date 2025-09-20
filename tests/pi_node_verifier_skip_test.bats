@@ -10,4 +10,8 @@
   echo "$output" | grep "time_sync: skip"
   echo "$output" | grep "iptables_backend: skip"
   echo "$output" | grep "k3s_check_config: skip"
+  echo "$output" | grep "k3s_node_ready: skip"
+  echo "$output" | grep "projects_compose_active: skip"
+  echo "$output" | grep "token_place_http: skip"
+  echo "$output" | grep "dspace_http: skip"
 }

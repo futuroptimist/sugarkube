@@ -10,6 +10,11 @@ REPORT_PATH=""
 ENABLE_LOG=true
 DEFAULT_REPORT="/boot/first-boot-report.txt"
 MIGRATION_LOG=${MIGRATION_LOG:-/var/log/sugarkube/migrations.log}
+TOKEN_PLACE_HEALTH_URL=${TOKEN_PLACE_HEALTH_URL:-http://127.0.0.1:5000/}
+TOKEN_PLACE_HEALTH_INSECURE=${TOKEN_PLACE_HEALTH_INSECURE:-false}
+DSPACE_HEALTH_URL=${DSPACE_HEALTH_URL:-http://127.0.0.1:3000/}
+DSPACE_HEALTH_INSECURE=${DSPACE_HEALTH_INSECURE:-false}
+HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-5}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -156,6 +161,139 @@ append_report() {
   rm -f "$tmp"
 }
 
+find_kubeconfig() {
+  local candidates=()
+  if [[ -n ${KUBECONFIG:-} ]]; then
+    local cfg
+    IFS=':' read -ra candidates <<<"$KUBECONFIG"
+    for cfg in "${candidates[@]}"; do
+      if [[ -r "$cfg" ]]; then
+        printf '%s' "$cfg"
+        return 0
+      fi
+    done
+  fi
+
+  candidates=(
+    /etc/rancher/k3s/k3s.yaml
+    /root/.kube/config
+    /home/pi/.kube/config
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -r "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_kubectl() {
+  local kubeconfig="$1"
+  shift
+  if command -v kubectl >/dev/null 2>&1; then
+    kubectl --kubeconfig "$kubeconfig" "$@"
+  elif command -v k3s >/dev/null 2>&1; then
+    k3s kubectl --kubeconfig "$kubeconfig" "$@"
+  else
+    return 127
+  fi
+}
+
+http_health_check() {
+  local name="$1"
+  local url="$2"
+  local insecure="$3"
+  local timeout="$4"
+
+  local cmd=("curl" "--silent" "--show-error" "--max-time" "$timeout" "--fail")
+  local alt_cmd=("wget" "-qO-" "--timeout=$timeout")
+
+  if command -v curl >/dev/null 2>&1; then
+    if [[ "$insecure" == "true" ]]; then
+      cmd+=('-k')
+    fi
+    if "${cmd[@]}" "$url" >/dev/null 2>&1; then
+      print_result "$name" "pass"
+    else
+      print_result "$name" "fail"
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if [[ "$insecure" == "true" ]]; then
+      alt_cmd+=("--no-check-certificate")
+    fi
+    if "${alt_cmd[@]}" "$url" >/dev/null 2>&1; then
+      print_result "$name" "pass"
+    else
+      print_result "$name" "fail"
+    fi
+  else
+    print_result "$name" "skip"
+  fi
+}
+
+check_k3s_node_ready() {
+  local kubeconfig
+  if ! kubeconfig=$(find_kubeconfig); then
+    print_result "k3s_node_ready" "skip"
+    return
+  fi
+
+  local output
+  if ! output=$(run_kubectl "$kubeconfig" get nodes --no-headers 2>/dev/null); then
+    local status=$?
+    if [[ $status -eq 127 ]]; then
+      print_result "k3s_node_ready" "skip"
+    else
+      print_result "k3s_node_ready" "fail"
+    fi
+    return
+  fi
+
+  local ready=1
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local -a fields
+    read -r -a fields <<<"$line"
+    local status="${fields[1]:-}"
+    if [[ -n "$status" && "$status" == Ready* ]]; then
+      ready=0
+      break
+    fi
+  done <<<"$output"
+
+  if [[ $ready -eq 0 ]]; then
+    print_result "k3s_node_ready" "pass"
+  else
+    print_result "k3s_node_ready" "fail"
+  fi
+}
+
+check_projects_compose_active() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    print_result "projects_compose_active" "skip"
+    return
+  fi
+
+  local output
+  if output=$(systemctl is-active projects-compose.service 2>&1); then
+    print_result "projects_compose_active" "pass"
+    return
+  fi
+
+  local status=$?
+  if [[ $status -eq 3 || $status -eq 4 ]]; then
+    print_result "projects_compose_active" "fail"
+  elif [[ "$output" == *"System has not been booted"* ]] || \
+       [[ "$output" == *"Failed to connect to bus"* ]]; then
+    print_result "projects_compose_active" "skip"
+  else
+    print_result "projects_compose_active" "fail"
+  fi
+}
+
 # cgroup memory
 if [[ -f /sys/fs/cgroup/cgroup.controllers ]] && \
    grep -qw 'cgroup_memory=1' /proc/cmdline && \
@@ -207,6 +345,23 @@ if command -v k3s >/dev/null 2>&1; then
   fi
 else
   print_result "k3s_check_config" "skip"
+fi
+
+check_k3s_node_ready
+check_projects_compose_active
+
+if [[ -n "$TOKEN_PLACE_HEALTH_URL" && "$TOKEN_PLACE_HEALTH_URL" != "skip" ]]; then
+  http_health_check "token_place_http" "$TOKEN_PLACE_HEALTH_URL" \
+    "$TOKEN_PLACE_HEALTH_INSECURE" "$HEALTH_TIMEOUT"
+else
+  print_result "token_place_http" "skip"
+fi
+
+if [[ -n "$DSPACE_HEALTH_URL" && "$DSPACE_HEALTH_URL" != "skip" ]]; then
+  http_health_check "dspace_http" "$DSPACE_HEALTH_URL" \
+    "$DSPACE_HEALTH_INSECURE" "$HEALTH_TIMEOUT"
+else
+  print_result "dspace_http" "skip"
 fi
 
 if $ENABLE_LOG && [[ -n "$REPORT_PATH" ]]; then
