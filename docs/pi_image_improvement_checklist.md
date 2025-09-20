@@ -85,7 +85,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## k3s, token.place & dspace Reliability
-- [ ] Add a `k3s-ready.target` that depends on `projects-compose.service` and only completes when `kubectl get nodes` returns `Ready`.
+- [x] Add a `k3s-ready.target` that depends on `projects-compose.service`.
+  - The target only completes once `kubectl get nodes` reports `Ready`.
+  - Added `k3s-ready.target`/`k3s-ready.service` plus a readiness script that runs `kubectl wait` before
+    marking the target reached, with cloud-init wiring and docs for chaining workloads.
 - [ ] Extend verifier to ensure:
   - k3s node is `Ready`.
   - `projects-compose.service` is active.

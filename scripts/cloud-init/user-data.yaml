@@ -155,6 +155,35 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/k3s-ready.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Wait for k3s node readiness
+      Requires=k3s.service
+      Wants=network-online.target projects-compose.service
+      After=k3s.service network-online.target projects-compose.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/sugarkube/k3s-ready.sh
+      TimeoutStartSec=900
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=k3s-ready.target
+  - path: /etc/systemd/system/k3s-ready.target
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Projects compose and k3s readiness target
+      Requires=projects-compose.service k3s-ready.service
+      Wants=projects-compose.service k3s-ready.service
+      After=projects-compose.service k3s-ready.service
+      AllowIsolate=yes
+
+      [Install]
+      WantedBy=multi-user.target
   # projects-end
 runcmd:
   - |
@@ -177,6 +206,8 @@ runcmd:
   - [systemctl, enable, --now, docker]
   - [bash, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -']
   - [/opt/projects/start-projects.sh]  # projects-runcmd
+  - [systemctl, enable, k3s-ready.target]
+  - [systemctl, start, k3s-ready.target]
   - [/opt/sugarkube/export-kubeconfig.sh]
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']

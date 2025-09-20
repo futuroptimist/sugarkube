@@ -104,6 +104,12 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo systemctl status projects-compose.service
   ```
+- systemd now ships a `k3s-ready.target` that depends on the compose service and waits for
+  `kubectl get nodes` to report `Ready`. Inspect the target to confirm the cluster finished
+  bootstrapping:
+  ```bash
+  sudo systemctl status k3s-ready.target
+  ```
 - If the service fails, inspect logs to troubleshoot:
   ```bash
   sudo journalctl -u projects-compose.service --no-pager

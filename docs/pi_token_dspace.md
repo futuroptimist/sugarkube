@@ -63,6 +63,7 @@ docker compose version
    docker --version
    docker compose version
    sudo systemctl status projects-compose.service
+   sudo systemctl status k3s-ready.target
    ```
 4. Verify each app on the LAN:
    ```sh
