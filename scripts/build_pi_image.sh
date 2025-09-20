@@ -99,6 +99,7 @@ PROJECTS_COMPOSE_PATH="${PROJECTS_COMPOSE_PATH:-${CLOUD_INIT_DIR}/docker-compose
 START_PROJECTS_PATH="${START_PROJECTS_PATH:-${CLOUD_INIT_DIR}/start-projects.sh}"
 INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
 EXPORT_KUBECONFIG_PATH="${EXPORT_KUBECONFIG_PATH:-${CLOUD_INIT_DIR}/export-kubeconfig.sh}"
+K3S_READY_PATH="${K3S_READY_PATH:-${CLOUD_INIT_DIR}/k3s-ready.sh}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
@@ -163,6 +164,14 @@ if [ ! -f "${INIT_ENV_PATH}" ]; then
 fi
 if [ ! -s "${INIT_ENV_PATH}" ]; then
   echo "Init env script is empty: ${INIT_ENV_PATH}" >&2
+  exit 1
+fi
+if [ ! -f "${K3S_READY_PATH}" ]; then
+  echo "k3s readiness script not found: ${K3S_READY_PATH}" >&2
+  exit 1
+fi
+if [ ! -s "${K3S_READY_PATH}" ]; then
+  echo "k3s readiness script is empty: ${K3S_READY_PATH}" >&2
   exit 1
 fi
 if [ ! -f "${EXPORT_KUBECONFIG_PATH}" ]; then
@@ -268,6 +277,9 @@ install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
 
 install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
+
+install -Dm755 "${K3S_READY_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-ready.sh"
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"

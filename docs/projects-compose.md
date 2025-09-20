@@ -6,6 +6,21 @@ and starts [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) from the shared
 `/opt/projects/docker-compose.yml` file.
 
+## Wait for k3s before chaining workloads
+
+Downstream services can now depend on `k3s-ready.target`, a systemd target that
+requires both `projects-compose.service` and a successful `kubectl wait` for the
+cluster's nodes. The `k3s-ready.service` helper polls until `kubectl get nodes`
+returns `Ready`, then marks the target `active (reached)`. Hook additional
+units into the boot flow by declaring `After=k3s-ready.target` or `Requires=` to
+ensure workloads start only after the cluster and compose stack stabilize.
+
+Inspect the current state with:
+
+```sh
+sudo systemctl status k3s-ready.target
+```
+
 ## Environment files
 
 Each project reads an `.env` file from its directory. `init-env.sh` seeds these
