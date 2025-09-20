@@ -1,0 +1,16 @@
+[
+  {
+    "slug": "pi-image-quickstart",
+    "title": "Pi Image Quickstart",
+    "url": "https://github.com/sugarkube/sugarkube/blob/main/docs/pi_image_quickstart.md",
+    "note": "Scan to open the Pi image quickstart guide",
+    "file": "pi-image-quickstart.svg"
+  },
+  {
+    "slug": "pi-boot-troubleshooting",
+    "title": "Pi Boot Troubleshooting",
+    "url": "https://github.com/sugarkube/sugarkube/blob/main/docs/pi_boot_troubleshooting.md",
+    "note": "Scan if the node fails to reach k3s or token.place",
+    "file": "pi-boot-troubleshooting.svg"
+  }
+]

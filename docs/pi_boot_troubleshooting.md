@@ -4,6 +4,10 @@ This quick-reference collects the symptoms we see most often after flashing a
 sugarkube image. Each row links LED behaviors, log locations, and recovery
 steps so you can jump straight to the relevant command.
 
+Keep the matrix close at hand by printing the [Pi carrier QR labels](./pi_carrier_qr_labels.md).
+Stick the troubleshooting label on the carrier so operators can scan it and jump straight to this
+guide the moment a boot hiccup appears.
+
 > **Tip:** Run everything in a terminal with `watch -n 5` when waiting for
 > services to converge. Watching the same command update in place makes it
 > obvious when a subsystem recovers.
