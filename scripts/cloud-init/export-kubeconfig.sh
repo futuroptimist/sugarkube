@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SRC="/etc/rancher/k3s/k3s.yaml"
+DEST="/boot/sugarkube-kubeconfig"
+LOG_DIR="/var/log/sugarkube"
+LOG_FILE="${LOG_DIR}/kubeconfig-export.log"
+WAIT_SECONDS=${WAIT_SECONDS:-120}
+SLEEP_INTERVAL=${SLEEP_INTERVAL:-3}
+CLIENT_CERT_PATTERN='client-certificate-data[[:space:]]*:'
+CLIENT_KEY_PATTERN='client-key-data[[:space:]]*:'
+TOKEN_PATTERN='token[[:space:]]*:'
+
+mkdir -p "$LOG_DIR" >/dev/null 2>&1 || true
+log() {
+  local ts
+  ts=$(date --iso-8601=seconds 2>/dev/null || date)
+  printf '%s %s\n' "$ts" "$1" >>"$LOG_FILE" 2>/dev/null || true
+}
+
+if [ ! -d /boot ]; then
+  log "/boot not mounted; skipping kubeconfig export"
+  exit 0
+fi
+
+attempts=$(( WAIT_SECONDS / SLEEP_INTERVAL ))
+if [ $attempts -lt 1 ]; then
+  attempts=1
+fi
+
+for ((i=0; i<attempts; i++)); do
+  if [ -s "$SRC" ]; then
+    break
+  fi
+  sleep "$SLEEP_INTERVAL"
+done
+
+if [ ! -s "$SRC" ]; then
+  log "k3s kubeconfig missing after ${WAIT_SECONDS}s; wrote placeholder"
+  {
+    printf '# Sugarkube kubeconfig export (pending)\n'
+    printf '# Generated: %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
+    printf '# k3s has not yet created %s. Run this script again later.\n' "$SRC"
+  } >"$DEST" 2>/dev/null || true
+  exit 0
+fi
+
+tmp_raw=$(mktemp)
+tmp_clean=$(mktemp)
+trap 'rm -f "$tmp_raw" "$tmp_clean"' EXIT
+
+if command -v k3s >/dev/null 2>&1; then
+  if ! k3s kubectl config view --raw >"$tmp_raw" 2>/dev/null; then
+    cp "$SRC" "$tmp_raw"
+  fi
+else
+  cp "$SRC" "$tmp_raw"
+fi
+
+# Strip sensitive credentials but keep cluster metadata intact.
+sed -E \
+  -e "s/(${CLIENT_CERT_PATTERN}).*/\\1 REDACTED/" \
+  -e "s/(${CLIENT_KEY_PATTERN}).*/\\1 REDACTED/" \
+  -e "s/(${TOKEN_PATTERN}).*/\\1 REDACTED/" \
+  "$tmp_raw" >"$tmp_clean"
+
+{
+  printf '# Sugarkube kubeconfig export (sanitized)\n'
+  printf '# Generated: %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
+  printf '# Secrets such as client certificates, keys, and tokens are redacted.\n'
+  printf '# Retrieve a full admin config with:\n'
+  printf '#   sudo k3s kubectl config view --raw > ~/sugarkube-kubeconfig-full\n'
+  printf '# Merge your own credentials before using this file with kubectl.\n\n'
+  cat "$tmp_clean"
+} >"$DEST"
+
+if ! sync "$DEST" 2>/dev/null; then
+  sync
+fi
+
+if ! chmod 600 "$DEST" 2>/dev/null; then
+  :
+fi
+
+log "Wrote sanitized kubeconfig to $DEST"

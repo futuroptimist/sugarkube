@@ -125,6 +125,10 @@ IP. Appending the `KUBECONFIG` line to your shell profile makes the setting
 persistent, and `kubectl get nodes` confirms your workstation can reach the
 cluster.
 
+> Tip: You can also grab `/boot/sugarkube-kubeconfig` from the boot volume without SSH.
+> The export redacts client keys while preserving cluster endpoints, making it safe to share
+> connection details with operators who only need the cluster address and CA bundle.
+
 See the deployment guide at
 [token.place](https://github.com/futuroptimist/token.place) for a detailed
 walkthrough. For more options consult the

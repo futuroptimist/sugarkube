@@ -116,6 +116,12 @@ Build a Raspberry Pi OS image that boots with k3s and the
   ```bash
   sudo cat /boot/first-boot-report.txt
   ```
+- The boot partition now includes `/boot/sugarkube-kubeconfig`, a sanitized
+  kubeconfig export generated after k3s finishes installing. Secrets are
+  redacted, making the file safe to hand off to operators who only need cluster
+  endpoints and certificate authorities. Copy it from another machine after
+  ejecting the media, then merge real credentials using `sudo k3s kubectl
+  config view --raw` when ready to manage the cluster remotely.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
