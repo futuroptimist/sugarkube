@@ -165,7 +165,8 @@ find_kubeconfig() {
   local candidates=()
   if [[ -n ${KUBECONFIG:-} ]]; then
     local cfg
-    IFS=':' read -ra candidates <<<"$KUBECONFIG"
+    local IFS=':'
+    read -ra candidates <<<"$KUBECONFIG"
     for cfg in "${candidates[@]}"; do
       if [[ -r "$cfg" ]]; then
         printf '%s' "$cfg"
