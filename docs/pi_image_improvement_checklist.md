@@ -133,7 +133,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Expand troubleshooting tables linking LED patterns, journalctl logs, `kubectl` errors, and container health issues to fixes.
   - Added `docs/pi_boot_troubleshooting.md` plus quickstart references covering
     LED cues, critical commands, and recovery steps.
-- [ ] Publish contributor guide mapping automation scripts to docs; enforce sync with linkchecker and spellchecker.
+- [x] Publish contributor guide mapping automation scripts to docs; enforce sync with linkchecker and spellchecker.
+  - Added [Pi Image Contributor Guide](./pi_image_contributor_guide.md) mapping automation helpers to their
+    documentation and introduced `make docs-verify`/`just docs-verify` wrappers to run spellcheck and
+    link-check together.
 
 ---
 

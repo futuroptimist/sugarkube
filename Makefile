@@ -13,7 +13,8 @@ FLASH_ARGS ?= --assume-yes
 FLASH_REPORT_ARGS ?=
 ROLLBACK_ARGS ?=
 
-.PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd
+.PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
+	docs-verify
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -40,3 +41,7 @@ doctor:
 
 rollback-to-sd:
 	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
+
+docs-verify:
+	pyspelling -c .spellcheck.yaml
+	linkchecker --no-warnings README.md docs/
