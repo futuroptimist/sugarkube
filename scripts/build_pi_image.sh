@@ -276,6 +276,9 @@ fi
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
 
+install -Dm755 "${REPO_ROOT}/scripts/publish_telemetry.py" \
+  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/bin/sugarkube-publish-telemetry"
+
 install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
 
