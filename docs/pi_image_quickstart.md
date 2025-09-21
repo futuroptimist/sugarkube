@@ -144,6 +144,11 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   is `active`, and curls the token.place and dspace endpoints. Override the HTTP
   probes by exporting `TOKEN_PLACE_HEALTH_URL`, `DSPACE_HEALTH_URL`, and related
   `*_INSECURE` flags before invoking `/opt/sugarkube/pi_node_verifier.sh`.
+- When `cloud-init` or `projects-compose.service` fail, `sugarkube-self-heal@.service`
+  retries Docker Compose pulls, runs `cloud-init clean --logs`, and restarts the units.
+  After three unsuccessful attempts it stores escalation summaries under
+  `/boot/first-boot-report/self-heal/` and isolates the system in `rescue.target` so you
+  can review logs with a console attached.
 - The boot partition now includes recovery hand-offs generated once k3s
   finishes installing:
   - `/boot/sugarkube-kubeconfig` is a sanitized kubeconfig whose secrets are

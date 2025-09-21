@@ -51,3 +51,12 @@ Grow the compose stack with additional repositories:
 
 These hooks keep the Pi image ready for new services without editing existing
 entries.
+
+## Self-healing retries
+
+`projects-compose.service` now declares an `OnFailure` hook that starts
+`sugarkube-self-heal@projects-compose.service`. The helper reruns `docker compose`
+pulls, restarts the unit, and captures logs in `/boot/first-boot-report/self-heal/`.
+After three failed attempts the Pi isolates into `rescue.target` so you can
+review the Markdown summary and fix credentials or network issues before trying
+again.
