@@ -183,6 +183,20 @@ write_files:
 
       [Install]
       WantedBy=timers.target
+  - path: /etc/systemd/system/sugarkube-self-heal@.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Self-heal automation for %I failures
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      Environment=PYTHONUNBUFFERED=1
+      ExecStart=/opt/sugarkube/self_heal_service.py --unit %I --reason "%I failure"
+      StandardOutput=journal
+      StandardError=journal
+      SyslogIdentifier=sugarkube-self-heal
   # projects-start
   - path: /etc/systemd/system/projects-compose.service
     permissions: '0644'
@@ -192,6 +206,8 @@ write_files:
       Requires=docker.service
       After=docker.service network-online.target
       Wants=network-online.target
+      OnFailure=sugarkube-self-heal@%n.service
+      OnFailureJobMode=replace-irreversibly
 
       [Service]
       Type=oneshot
@@ -205,6 +221,24 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/cloud-init.service.d/99-sugarkube-self-heal.conf
+    permissions: '0644'
+    content: |
+      [Unit]
+      OnFailure=sugarkube-self-heal@%n.service
+      OnFailureJobMode=replace-irreversibly
+  - path: /etc/systemd/system/cloud-config.service.d/99-sugarkube-self-heal.conf
+    permissions: '0644'
+    content: |
+      [Unit]
+      OnFailure=sugarkube-self-heal@%n.service
+      OnFailureJobMode=replace-irreversibly
+  - path: /etc/systemd/system/cloud-final.service.d/99-sugarkube-self-heal.conf
+    permissions: '0644'
+    content: |
+      [Unit]
+      OnFailure=sugarkube-self-heal@%n.service
+      OnFailureJobMode=replace-irreversibly
   - path: /etc/systemd/system/k3s-ready.service
     permissions: '0644'
     content: |
