@@ -29,6 +29,7 @@ confirm the quickstart stays accurate.
 | Script | Purpose | Primary docs | Supporting automation |
 | --- | --- | --- | --- |
 | `scripts/pi_node_verifier.sh` | Validate k3s readiness, token.place/dspace health, and record results in `/boot/first-boot-report.txt`. | [Pi Image Quickstart](./pi_image_quickstart.md) §3, [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md) | Invoked during image builds and via `make doctor`/`just doctor`. |
+| `scripts/pi_smoke_test.py` | Run `pi_node_verifier.sh` over SSH, optionally rebooting nodes to confirm convergence. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Run remote smoke tests", [Pi Image Smoke Test Harness](./pi_smoke_test.md) | `make smoke-test-pi`, `just smoke-test-pi` |
 | `scripts/cloud-init/export-kubeconfig.sh` | Export sanitized and full kubeconfigs to `/boot/sugarkube-kubeconfig*`. | [Pi Image Quickstart](./pi_image_quickstart.md) §3 | Runs from cloud-init during first boot. |
 | `scripts/cloud-init/export-node-token.sh` | Mirror the k3s node token to `/boot/sugarkube-node-token` for recovery joins. | [Pi Image Quickstart](./pi_image_quickstart.md) §3 | Runs from cloud-init during first boot. |
 | `scripts/cloud-init/start-projects.sh` | Launch bundled projects and log migration events for the verifier. | [Pi Image Quickstart](./pi_image_quickstart.md) §3 | Triggered by cloud-init service units. |
