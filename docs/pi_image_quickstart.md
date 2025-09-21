@@ -174,6 +174,21 @@ mounts, then performs a configurable read/write stress test. Reports are stored 
 `VALIDATE_ARGS`. See [`SSD Post-Clone Validation`](./ssd_post_clone_validation.md) for flag details
 and sample outputs.
 
+### Monitor SSD health (optional)
+
+Run the SMART monitor whenever you want to record wear levels or temperatures:
+
+```bash
+sudo ./scripts/ssd_health_monitor.py --tag post-clone
+```
+
+The helper auto-detects the active root device (or accepts `--device /dev/sdX` overrides), captures
+`smartctl` output, and stores Markdown/JSON reports under
+`~/sugarkube/reports/ssd-health/<timestamp>/`. Prefer wrappers? Use
+`sudo make monitor-ssd-health HEALTH_ARGS="--tag weekly"` or the matching `just monitor-ssd-health`
+recipe. See the [SSD Health Monitor](./ssd_health_monitor.md) guide for threshold tuning and the
+systemd timer example when you want recurring snapshots.
+
 ### Recover from SSD issues
 
 If an SSD migration fails or you need to boot from the original SD card again,

@@ -16,9 +16,11 @@ VALIDATE_CMD ?= $(CURDIR)/scripts/ssd_post_clone_validate.py
 VALIDATE_ARGS ?=
 QR_CMD ?= $(CURDIR)/scripts/generate_qr_codes.py
 QR_ARGS ?=
+HEALTH_CMD ?= $(CURDIR)/scripts/ssd_health_monitor.py
+HEALTH_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        docs-verify qr-codes
+        docs-verify qr-codes monitor-ssd-health
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -51,4 +53,7 @@ docs-verify:
 	linkchecker --no-warnings README.md docs/
 
 qr-codes:
-	$(QR_CMD) $(QR_ARGS)
+        $(QR_CMD) $(QR_ARGS)
+
+monitor-ssd-health:
+        $(HEALTH_CMD) $(HEALTH_ARGS)
