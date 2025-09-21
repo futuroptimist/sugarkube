@@ -26,7 +26,7 @@ jobs:
       CLONE_TOKEN_PLACE: true
       CLONE_DSPACE: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
@@ -160,25 +160,51 @@ jobs:
             RELEASE_NOTES.md
 
       - name: Publish GitHub release
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ steps.manifest.outputs.tag }}
-          name: ${{ steps.manifest.outputs.name }}
-          bodyFile: ${{ steps.manifest.outputs.notes_path }}
-          draft: false
-          prerelease: ${{ steps.manifest.outputs.prerelease == 'true' }}
-          allowUpdates: true
-          removeArtifacts: true
-          makeLatest: ${{ steps.manifest.outputs.make_latest == 'true' }}
-          artifacts: |
-            sugarkube.img.xz
-            sugarkube.img.xz.sha256
-            sugarkube.img.xz.metadata.json
-            sugarkube.img.xz.manifest.json
-            sugarkube.img.xz.sig
-            sugarkube.img.xz.pem
-            sugarkube.img.xz.manifest.json.sig
-            sugarkube.img.xz.manifest.json.pem
-            sugarkube.build.log
-            RELEASE_NOTES.md
+        run: |
+          set -euo pipefail
+          tag="${{ steps.manifest.outputs.tag }}"
+          name="${{ steps.manifest.outputs.name }}"
+          notes="${{ steps.manifest.outputs.notes_path }}"
+          prerelease="${{ steps.manifest.outputs.prerelease }}"
+          make_latest="${{ steps.manifest.outputs.make_latest }}"
+          assets=(
+            "sugarkube.img.xz"
+            "sugarkube.img.xz.sha256"
+            "sugarkube.img.xz.metadata.json"
+            "sugarkube.img.xz.manifest.json"
+            "sugarkube.img.xz.sig"
+            "sugarkube.img.xz.pem"
+            "sugarkube.img.xz.manifest.json.sig"
+            "sugarkube.img.xz.manifest.json.pem"
+            "sugarkube.build.log"
+            "RELEASE_NOTES.md"
+          )
+
+          if [ "$prerelease" = "true" ]; then
+            prerelease_args=(--prerelease)
+          else
+            prerelease_args=(--prerelease=false)
+          fi
+
+          if [ "$make_latest" = "true" ]; then
+            latest_args=(--latest)
+          else
+            latest_args=(--latest=false)
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "$name" \
+              --notes-file "$notes" \
+              --draft=false \
+              "${prerelease_args[@]}" \
+              "${latest_args[@]}"
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --title "$name" \
+              --notes-file "$notes" \
+              --draft=false \
+              "${prerelease_args[@]}" \
+              "${latest_args[@]}"
+          fi

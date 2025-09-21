@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     # KiBot action pulls its own container image with KiCad 9
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Fabricate board with KiBot
         # Use the KiBot action pinned to the k9 container tag
