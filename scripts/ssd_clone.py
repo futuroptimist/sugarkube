@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -266,7 +267,20 @@ def replicate_partition_table(ctx: CloneContext) -> None:
     ctx.log(f"Replicating partition table from {source_disk} to {ctx.target_disk}")
     run_command(ctx, ["sgdisk", "--zap-all", ctx.target_disk])
     run_command(ctx, ["sfdisk", ctx.target_disk], input_text=dump.stdout)
+    randomize_disk_identifiers(ctx)
     run_command(ctx, ["partprobe", ctx.target_disk])
+
+
+def randomize_disk_identifiers(ctx: CloneContext) -> None:
+    """Ensure the target disk has unique GUIDs/IDs."""
+
+    try:
+        run_command(ctx, ["sgdisk", "-G", ctx.target_disk])
+        return
+    except CommandError:
+        ctx.log("sgdisk -G failed; falling back to updating the DOS disk identifier.")
+    disk_id = f"0x{secrets.randbits(32):08x}"
+    run_command(ctx, ["sfdisk", "--disk-id", ctx.target_disk, disk_id])
 
 
 def format_partitions(ctx: CloneContext) -> None:
