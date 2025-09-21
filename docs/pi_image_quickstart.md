@@ -172,6 +172,39 @@ Add `--reboot` to confirm the cluster converges after a restart or use the task-
 See [Pi Image Smoke Test Harness](./pi_smoke_test.md) for detailed usage, including how to
 override token.place/dspace health URLs or disable individual checks.
 
+### Clone the SD card to SSD with confidence
+
+Run the new clone helper to replicate the active SD card onto an attached SSD.
+Always start with a dry-run so you can review the planned steps before any
+blocks are written:
+
+```bash
+sudo ./scripts/ssd_clone.py --target /dev/sda --dry-run
+```
+
+Drop `--dry-run` once you are ready for the clone. The helper replicates the
+partition table, formats the target partitions, rsyncs `/boot` and `/`, updates
+`cmdline.txt`/`fstab` with the fresh PARTUUIDs, and records progress under
+`/var/log/sugarkube/ssd-clone.state.json`. If the process is interrupted, rerun
+with `--resume` to continue from the last completed step without repeating
+earlier work:
+
+```bash
+sudo ./scripts/ssd_clone.py --target /dev/sda --resume
+```
+
+Prefer wrappers? Run the equivalent Makefile or justfile recipes, passing the
+target device via `CLONE_TARGET` and additional flags through `CLONE_ARGS`:
+
+```bash
+sudo CLONE_TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"
+sudo CLONE_TARGET=/dev/sda just clone-ssd CLONE_ARGS="--resume"
+```
+
+Check `/var/log/sugarkube/ssd-clone.state.json` for step-level progress and
+`/var/log/sugarkube/ssd-clone.done` once the run completes. Continue with
+validation before rebooting into the SSD.
+
 ### Validate SSD clones
 
 After migrating the root filesystem to an SSD, run the new validation helper to confirm every layer

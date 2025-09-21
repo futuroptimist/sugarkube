@@ -62,9 +62,11 @@ Linux command line.
 ## 2. Boot and clone to SSD
 1. Insert the card into a Pi on the carrier and power on with monitor or KVM attached
 2. Verify the NVMe drive shows up: `lsblk`
-3. Install rpi-clone if missing: `sudo apt install -y rpi-clone`
-4. Clone the SD card to the SSD: `sudo rpi-clone sda -f`.
-   Replace `sda` with your NVMe device as shown by `lsblk`.
+3. Preview the clone plan: `sudo ./scripts/ssd_clone.py --target /dev/sda --dry-run`
+   (replace `/dev/sda` with your NVMe target).
+4. Execute the clone once you're comfortable with the plan: `sudo ./scripts/ssd_clone.py --target /dev/sda`
+   - If power hiccups or cables disconnect mid-transfer, rerun with `--resume` to continue
+     from the last completed step without restarting the whole clone.
 5. Shut down the Pi, remove the SD card, and power back on to confirm the SSD boots.
 
 ## 3. Enable SSD boot (if needed)

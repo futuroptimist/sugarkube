@@ -75,7 +75,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - `rsync --info=progress2` SD → SSD.
   - Update `/boot/cmdline.txt` and `/etc/fstab` with new UUID.
   - Touch `/var/log/sugarkube/ssd-clone.done`.
-- [ ] Support dry-run + resume for cloning to reduce user hesitation.
+- [x] Support dry-run + resume for cloning to reduce user hesitation.
+  - Added `scripts/ssd_clone.py` plus Makefile/justfile wrappers that replicate partitions,
+    support `--dry-run` previews, persist state, and resume clones via `--resume`.
 - [x] Provide post-clone validation: EEPROM boot order, fstab UUIDs, read/write stress tests.
   - Added `scripts/ssd_post_clone_validate.py` plus Makefile/just wrappers. The helper compares live
     mounts with `/etc/fstab`, `/boot/cmdline.txt`, and EEPROM boot order, then runs a configurable
