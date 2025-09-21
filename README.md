@@ -73,6 +73,8 @@ the docs you will see the term used in both contexts.
     (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
   - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
     `--help` for usage
+  - `pi_smoke_test.py` — SSH wrapper that runs the verifier remotely, supports reboot checks,
+    and emits JSON summaries for CI harnesses
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
     available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see
