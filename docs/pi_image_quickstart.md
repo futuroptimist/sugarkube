@@ -129,12 +129,15 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
 - When symptoms fall outside the happy path, use the
   [Pi Boot & Cluster Troubleshooting Matrix](./pi_boot_troubleshooting.md) to map
   LED patterns, log locations, and fixes.
-- Every verifier run now appends a Markdown summary to `/boot/first-boot-report.txt`.
-  The report captures hardware details, `cloud-init` status, the results from
-  `pi_node_verifier.sh`, and any provisioning or migration steps recorded by
-  `/opt/projects/start-projects.sh`. Inspect the file locally after ejecting the
-  boot media or on the Pi itself:
+- A new `first-boot.service` waits for `cloud-init` to finish, expands the root
+  filesystem when needed, then runs `pi_node_verifier.sh` (with retries) and
+  writes Markdown, HTML, and JSON snapshots under `/boot/first-boot-report/`.
+  The directory also collects `cloud-init` logs and keeps the legacy
+  `/boot/first-boot-report.txt` in sync for historical runs. Inspect the files
+  locally after ejecting the boot media or on the Pi itself:
   ```bash
+  sudo ls /boot/first-boot-report
+  sudo cat /boot/first-boot-report/summary.md
   sudo cat /boot/first-boot-report.txt
   ```
 - The verifier also checks for a `Ready` k3s node, confirms `projects-compose.service`

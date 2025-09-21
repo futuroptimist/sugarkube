@@ -73,8 +73,9 @@ docker compose version
 
 ### Automate health verification
 
-- Run the bundled verifier after first boot to capture compose and HTTP health in
-  `/boot/first-boot-report.txt`:
+- The `first-boot.service` already captures compose and HTTP health in
+  `/boot/first-boot-report/summary.*`. Re-run the bundled verifier anytime you need
+  a refreshed log in `/boot/first-boot-report.txt`:
   ```sh
   sudo TOKEN_PLACE_HEALTH_URL="http://127.0.0.1:5000/" \
        DSPACE_HEALTH_URL="http://127.0.0.1:3000/" \
