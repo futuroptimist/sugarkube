@@ -449,6 +449,11 @@ def _run_build_script(tmp_path, env):
     collect.write_text(collect_src.read_text())
     collect.chmod(0o755)
 
+    telemetry_src = repo_root / "scripts" / "publish_telemetry.py"
+    telemetry_script = script_dir / "publish_telemetry.py"
+    telemetry_script.write_text(telemetry_src.read_text())
+    telemetry_script.chmod(0o755)
+
     metadata_src = repo_root / "scripts" / "create_build_metadata.py"
     metadata_script = script_dir / "create_build_metadata.py"
     metadata_script.write_text(metadata_src.read_text())
