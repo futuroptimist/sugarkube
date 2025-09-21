@@ -81,6 +81,13 @@ sync.
     [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md).
   - Related tooling: referenced by the planned `first-boot.service`, included in `/boot/first-boot-
     report.txt`, and validated by the Bats tests in `tests/pi_node_verifier_*.bats`.
+- `scripts/pi_smoke_test.py`
+  - Purpose: orchestrate remote verifier runs over SSH, optionally rebooting hosts to confirm
+    convergence and emitting JSON for CI harnesses.
+  - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
+    [Pi Image Smoke Test Harness](./pi_smoke_test.md).
+  - Related tooling: wrapped by `make smoke-test-pi` and `just smoke-test-pi` so operators can pass
+    flags through `SMOKE_ARGS` without remembering the Python entry point.
 - `scripts/sugarkube_doctor.sh`
   - Purpose: dry-run downloads, flash media in a synthetic environment, and optionally run
     repository linters.
