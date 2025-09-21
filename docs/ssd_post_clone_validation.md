@@ -22,7 +22,8 @@ Each run emits a concise console summary plus Markdown and JSON reports under
 
 ## Quick start
 
-Run the helper after completing your SSD clone and before unplugging the SD card:
+Run the helper after completing your SSD clone (for example via
+`scripts/ssd_clone.py`) and before unplugging the SD card:
 
 ```bash
 sudo ./scripts/ssd_post_clone_validate.py
