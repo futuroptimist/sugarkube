@@ -276,8 +276,15 @@ fi
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
   "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
 
-install -Dm755 "${REPO_ROOT}/scripts/publish_telemetry.py" \
-  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/bin/sugarkube-publish-telemetry"
+install -Dm755 "${REPO_ROOT}/scripts/first_boot_service.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/first_boot_service.py"
+
+install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
+
+install -d "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
+ln -sf ../first-boot.service \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
 
 install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"

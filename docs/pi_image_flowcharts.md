@@ -20,7 +20,7 @@ flowchart TD
     I --> J[k3s + token.place + dspace bootstrap]
     J --> K[Verify: kubectl get nodes]
     J --> L[Verify: systemctl status projects-compose]
-    K --> M[Capture /boot/first-boot-report.txt]
+    K --> M[Capture /boot/first-boot-report/summary.*]
     L --> M
     M --> N[Hand off kubeconfigs + node token from /boot/]
 ```
@@ -44,8 +44,8 @@ flowchart TD
     subgraph FirstBoot
         B1[Boot Pi with flashed media] --> B2[cloud-init config applies]
         B2 --> B3[k3s + projects-compose install]
-        B3 --> B4[pi_node_verifier.sh runs]
-        B4 --> B5[/boot/first-boot-report.txt updated]
+        B3 --> B4[first_boot_service.py runs verifier]
+        B4 --> B5[/boot/first-boot-report/summary.* exported]
         B5 --> B6[/boot kubeconfigs + node token exported]
     end
 
