@@ -158,6 +158,20 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
 
+### Run remote smoke tests
+
+Validate a freshly booted node from another machine with the smoke test harness:
+
+```bash
+./scripts/pi_smoke_test.py --json pi-a.local
+```
+
+The script SSHes into each host, runs `pi_node_verifier.sh`, and prints a PASS/FAIL summary.
+Add `--reboot` to confirm the cluster converges after a restart or use the task-runner wrappers
+(`make smoke-test-pi` or `just smoke-test-pi`) when you prefer `SMOKE_ARGS` for flag injection.
+See [Pi Image Smoke Test Harness](./pi_smoke_test.md) for detailed usage, including how to
+override token.place/dspace health URLs or disable individual checks.
+
 ### Validate SSD clones
 
 After migrating the root filesystem to an SSD, run the new validation helper to confirm every layer
