@@ -154,6 +154,12 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   Copy any of these files from another machine after ejecting the boot media.
   Regenerate fresh copies later with `sudo k3s kubectl config view --raw` or
   `sudo cat /var/lib/rancher/k3s/server/node-token` if you need to rotate them.
+- Optional: publish anonymized health telemetry for fleet dashboards:
+  1. Edit `/etc/sugarkube/telemetry.env`, set `SUGARKUBE_TELEMETRY_ENABLE="true"`, and populate
+     `SUGARKUBE_TELEMETRY_ENDPOINT` (plus optional token, salt, and tags).
+  2. Enable the hourly timer: `sudo systemctl enable --now sugarkube-telemetry.timer`.
+  3. Inspect uploads with `journalctl -u sugarkube-telemetry.service --no-pager`.
+  Review [Pi Image Telemetry Hooks](./pi_image_telemetry.md) for detailed payload and privacy notes.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
