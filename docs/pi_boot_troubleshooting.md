@@ -25,7 +25,7 @@ guide the moment a boot hiccup appears.
 | token.place down | Normal LEDs | `curl -fkL https://token.place/healthz`, `sudo docker compose ps` | Compose service unhealthy or TLS misconfigured | Restart compose stack, check `docker compose logs token.place`, trust anchors under `/etc/ssl`. |
 | dspace API unreachable | Normal LEDs | `curl -f http://127.0.0.1:8000/graphql`, `sudo docker compose ps` | Background migrations or Postgres init failed | Tail `docker compose logs dspace`, confirm `postgres` container ready, rerun migrations. |
 | SSD clone stalls | Normal LEDs | `sudo lsblk`, `iotop`, `sudo cat /var/log/sugarkube/ssd-clone.state.json` | USB bridge resets or disk full | Re-seat USB/SATA cable, ensure target larger than source, rerun `scripts/ssd_clone.py --resume`. |
-| First boot report missing | Normal LEDs | `ls /boot`, `journalctl -u pi-node-verifier` | Verifier failed before report export | Manually run `sudo /usr/local/bin/pi_node_verifier.sh --report /boot/first-boot-report.txt`. |
+| First boot report missing | Normal LEDs | `ls /boot/first-boot-report`, `sudo systemctl status first-boot.service`, `journalctl -u first-boot.service` | First-boot automation aborted before exporting reports | Re-run `sudo systemctl start first-boot.service` or `sudo /usr/local/bin/pi_node_verifier.sh --log /boot/first-boot-report.txt`. |
 
 ## Command & log reference
 
@@ -50,4 +50,4 @@ sudo ./scripts/collect_support_bundle.sh --output ~/sugarkube/support-$(date +%Y
 ```
 
 The archive gathers `journalctl`, compose logs, `kubectl get all -A`, and the
-latest `/boot/first-boot-report.txt`, making it easier to spot regressions.
+latest `/boot/first-boot-report/summary.json`, making it easier to spot regressions.

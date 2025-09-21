@@ -70,14 +70,17 @@ For SSD installs, repeat with the target device (e.g., `/dev/sdY1`).
 ## First boot verification
 
 1. Power on the Pi.
-2. Wait for the `first-boot` LEDs to settle (steady green).
-3. Check `/boot/first-boot-report/summary.md` for status. When ready, SSH in:
+2. Wait for the `first-boot` LEDs to settle (steady green). The
+   `first-boot.service` waits for cloud-init to complete, expands the rootfs, and
+   runs `pi_node_verifier.sh` up to three times before writing reports.
+3. Review `/boot/first-boot-report/summary.md` (or `.html`/`.json`) for status.
+   When ready, SSH in:
 
 ```bash
 ssh sugaradmin@sugarkube-node01.local
 ```
 
-4. Run the verifier:
+4. (Optional) Re-run the verifier if you need a fresh report:
 
 ```bash
 sudo /usr/local/bin/pi_node_verifier.sh --full
@@ -89,7 +92,8 @@ sudo /usr/local/bin/pi_node_verifier.sh --full
    admin credentials, and mirror `/boot/sugarkube-node-token` if you expect to join additional
    agents.
 
-Successful runs leave `/boot/first-boot-report.json` and `/var/log/sugarkube/first-boot.ok` for later auditing.
+Successful first-boot runs leave `/boot/first-boot-report/summary.json` and
+`/var/log/sugarkube/first-boot.ok` for later auditing.
 
 ## Recovering or rerunning provisioning
 

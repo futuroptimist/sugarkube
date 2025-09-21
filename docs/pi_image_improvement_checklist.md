@@ -55,10 +55,13 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## First Boot Confidence & Self-Healing
-- [ ] Install `first-boot.service` that:
+- [x] Install `first-boot.service` that:
   - Waits for network, expands filesystem.
   - Runs `pi_node_verifier.sh` automatically.
   - Publishes HTML/JSON status (cloud-init, k3s, token.place, dspace) to `/boot/first-boot-report`.
+  - Implemented via `first_boot_service.py` and `first-boot.service` which expand the
+    rootfs when needed, capture cloud-init status, retry the verifier, and publish
+    Markdown/HTML/JSON summaries plus success markers under `/boot/first-boot-report/`.
 - [x] Log verifier results and migration steps to `/boot/first-boot-report.txt`.
   - `pi_node_verifier.sh` now writes Markdown summaries (hardware, cloud-init,
     checksum checks) to `/boot/first-boot-report.txt` and ingests migration

@@ -79,15 +79,16 @@ sync.
     boot.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md).
-  - Related tooling: referenced by the planned `first-boot.service`, included in `/boot/first-boot-
-    report.txt`, and validated by the Bats tests in `tests/pi_node_verifier_*.bats`.
-- `scripts/publish_telemetry.py`
-  - Purpose: run `pi_node_verifier`, hash device fingerprints, and publish anonymized telemetry to a
-    configurable endpoint.
+  - Related tooling: invoked by `first_boot_service.py`, included in `/boot/first-boot-
+    report/summary.*`, and validated by the Bats tests in `tests/pi_node_verifier_*.bats`.
+- `scripts/first_boot_service.py` + `scripts/systemd/first-boot.service`
+  - Purpose: expand the rootfs, wait for cloud-init, run `pi_node_verifier.sh` with retries, and
+    publish Markdown/HTML/JSON reports plus success markers under `/boot/first-boot-report/`.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
-    [Pi Image Telemetry Hooks](./pi_image_telemetry.md).
-  - Related tooling: exposed via `make publish-telemetry`, `just publish-telemetry`, and the
-    `sugarkube-telemetry.timer` service defined in cloud-init.
+    [Pi Headless Provisioning](./pi_headless_provisioning.md),
+    [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md).
+  - Related tooling: bundled by `build_pi_image.sh`, enabled via systemd, and covered by
+    `tests/first_boot_service_test.py`.
 - `scripts/pi_smoke_test.py`
   - Purpose: orchestrate remote verifier runs over SSH, optionally rebooting hosts to confirm
     convergence and emitting JSON for CI harnesses.
