@@ -17,6 +17,8 @@ validate_cmd := env_var_or_default("VALIDATE_CMD", justfile_directory() + "/scri
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 qr_cmd := env_var_or_default("QR_CMD", justfile_directory() + "/scripts/generate_qr_codes.py")
 qr_args := env_var_or_default("QR_ARGS", "")
+health_cmd := env_var_or_default("HEALTH_CMD", justfile_directory() + "/scripts/ssd_health_monitor.py")
+health_args := env_var_or_default("HEALTH_ARGS", "")
 
 _default:
     @just --list
@@ -66,6 +68,11 @@ rollback-to-sd:
 # Usage: sudo just validate-ssd-clone VALIDATE_ARGS="--stress-mb 256"
 validate-ssd-clone:
     "{{validate_cmd}}" {{validate_args}}
+
+# Collect SMART metrics and wear indicators for the active SSD
+# Usage: sudo just monitor-ssd-health HEALTH_ARGS="--tag weekly"
+monitor-ssd-health:
+    "{{health_cmd}}" {{health_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap

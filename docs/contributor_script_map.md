@@ -35,6 +35,13 @@ confirm the quickstart stays accurate.
 | `scripts/sugarkube_doctor.sh` | Chain download dry-runs, flash validation, and linting checks. | [README](../README.md) `make doctor` section | Wrapped by `make doctor` / `just doctor`. |
 | `scripts/rollback_to_sd.sh` | Restore `/boot/cmdline.txt` and `/etc/fstab` after SSD issues, emitting Markdown reports. | [SSD Recovery and Rollback](./ssd_recovery.md) | Referenced by Makefile/justfile shortcuts. |
 
+## SSD validation and monitoring
+
+| Script | Purpose | Primary docs | Supporting automation |
+| --- | --- | --- | --- |
+| `scripts/ssd_post_clone_validate.py` | Validate cloned SSDs, compare boot config, and run stress tests. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Validate SSD clones", [SSD Post-Clone Validation](./ssd_post_clone_validation.md) | `make validate-ssd-clone`, `just validate-ssd-clone` |
+| `scripts/ssd_health_monitor.py` | Collect SMART metrics, temperatures, and wear indicators with optional reporting. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Monitor SSD health", [SSD Health Monitor](./ssd_health_monitor.md) | `make monitor-ssd-health`, `just monitor-ssd-health` |
+
 ## Keeping docs and automation in sync
 
 - Update both the script *and* its corresponding guide when behaviour changes.
