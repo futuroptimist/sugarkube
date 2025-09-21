@@ -17,6 +17,8 @@ Diagnose and fix continuous integration failures so all checks pass.
 CONTEXT:
 - Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for workflow and testing requirements.
 - Inspect [`.github/workflows/`](../.github/workflows/) to understand the checks run in continuous integration.
+- JavaScript-based actions run with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` so CI surfaces
+  incompatibilities before GitHub switches runners to Node24 by default.
 - Run `pre-commit run --all-files` from the repository root; it executes `scripts/checks.sh`.
 - If a Node toolchain is present (`package.json` exists), run:
   - `npm ci`
