@@ -19,9 +19,9 @@ guide the moment a boot hiccup appears.
 | Power on but no video | Steady red, no green | `vcgencmd get_throttled`, reseat SD | Insufficient power or SD card not seated | Swap power supply, reinsert SD/SSD, confirm `lsblk` shows the boot media. |
 | Stuck on rainbow splash | Green LED blinking in 4-4 pattern | Inspect `/boot/firmware/config.txt`, `dmesg` | GPU firmware mismatch or corrupt boot files | Reflash boot partition, copy `/boot/firmware` from fresh release, rerun verifier. |
 | Boots but no network | Solid green after boot | `nmcli device status`, `journalctl -u systemd-networkd` | Missing Wi-Fi credentials or DHCP failure | Re-run `install_sugarkube_image.sh` with `--secrets`, verify router DHCP, check cable. |
-| `cloud-init` never finishes | Green LED heartbeat, login prompt available | `sudo cloud-init status --long`, `journalctl -u cloud-init` | Secret injection or package download stalled | Clear with `sudo cloud-init clean`, fix network, rerun verifier. |
+| `cloud-init` never finishes | Green LED heartbeat, login prompt available | `sudo cloud-init status --long`, `journalctl -u cloud-init` | Secret injection or package download stalled | Self-heal retries run automatically; inspect `/boot/first-boot-report/self-heal/` for journal captures, then `sudo cloud-init clean`, fix network, rerun verifier. |
 | k3s node stays `NotReady` | Normal LEDs | `sudo kubectl get nodes`, `journalctl -u k3s` | Container runtime not started or cgroup config drift | Reboot once, then inspect `/var/log/syslog` for `containerd`; run `sudo systemctl restart k3s`. |
-| `projects-compose` fails | Normal LEDs | `sudo systemctl status projects-compose`, `docker compose logs` | Image pull failures or secrets missing | Run `sudo systemctl restart projects-compose`, verify `/opt/projects/.env`, re-run `pi_node_verifier.sh`. |
+| `projects-compose` fails | Normal LEDs | `sudo systemctl status projects-compose`, `docker compose logs` | Image pull failures or secrets missing | Self-heal will retry pulls and restart the stack; review `/boot/first-boot-report/self-heal/` for captured logs, fix secrets, then run `sudo systemctl restart projects-compose`. |
 | token.place down | Normal LEDs | `curl -fkL https://token.place/healthz`, `sudo docker compose ps` | Compose service unhealthy or TLS misconfigured | Restart compose stack, check `docker compose logs token.place`, trust anchors under `/etc/ssl`. |
 | dspace API unreachable | Normal LEDs | `curl -f http://127.0.0.1:8000/graphql`, `sudo docker compose ps` | Background migrations or Postgres init failed | Tail `docker compose logs dspace`, confirm `postgres` container ready, rerun migrations. |
 | SSD clone stalls | Normal LEDs | `sudo lsblk`, `iotop`, `sudo cat /var/log/sugarkube/ssd-clone.state.json` | USB bridge resets or disk full | Re-seat USB/SATA cable, ensure target larger than source, rerun `scripts/ssd_clone.py --resume`. |
@@ -51,3 +51,9 @@ sudo ./scripts/collect_support_bundle.sh --output ~/sugarkube/support-$(date +%Y
 
 The archive gathers `journalctl`, compose logs, `kubectl get all -A`, and the
 latest `/boot/first-boot-report/summary.json`, making it easier to spot regressions.
+
+Whenever `cloud-init` or `projects-compose.service` enter a failed state, the
+`sugarkube-self-heal@.service` automation records its attempts under
+`/boot/first-boot-report/self-heal/`. If the Pi isolates itself in
+`rescue.target`, eject the boot media to read the Markdown summaries before
+re-running the verifier.

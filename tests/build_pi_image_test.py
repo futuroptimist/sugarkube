@@ -506,6 +506,10 @@ def _run_build_script(tmp_path, env):
     shutil.copy(first_boot_src, script_dir / "first_boot_service.py")
     (script_dir / "first_boot_service.py").chmod(0o755)
 
+    self_heal_src = repo_root / "scripts" / "self_heal_service.py"
+    shutil.copy(self_heal_src, script_dir / "self_heal_service.py")
+    (script_dir / "self_heal_service.py").chmod(0o755)
+
     systemd_src = repo_root / "scripts" / "systemd" / "first-boot.service"
     systemd_dir = script_dir / "systemd"
     systemd_dir.mkdir(exist_ok=True)

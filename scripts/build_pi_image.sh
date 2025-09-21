@@ -279,6 +279,9 @@ install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
 install -Dm755 "${REPO_ROOT}/scripts/first_boot_service.py" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/first_boot_service.py"
 
+install -Dm755 "${REPO_ROOT}/scripts/self_heal_service.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/self_heal_service.py"
+
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
 
