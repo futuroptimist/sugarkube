@@ -24,6 +24,11 @@ health_cmd := env_var_or_default("HEALTH_CMD", justfile_directory() + "/scripts/
 health_args := env_var_or_default("HEALTH_ARGS", "")
 smoke_cmd := env_var_or_default("SMOKE_CMD", justfile_directory() + "/scripts/pi_smoke_test.py")
 smoke_args := env_var_or_default("SMOKE_ARGS", "")
+telemetry_cmd := env_var_or_default(
+    "TELEMETRY_CMD",
+    justfile_directory() + "/scripts/publish_telemetry.py",
+)
+telemetry_args := env_var_or_default("TELEMETRY_ARGS", "")
 
 _default:
     @just --list
@@ -92,6 +97,10 @@ monitor-ssd-health:
 # Usage: just smoke-test-pi SMOKE_ARGS="pi-a.local --reboot"
 smoke-test-pi:
     "{{smoke_cmd}}" {{smoke_args}}
+
+# Publish anonymized telemetry payloads once.
+publish-telemetry:
+    "{{telemetry_cmd}}" {{telemetry_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
