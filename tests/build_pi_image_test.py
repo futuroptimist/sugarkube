@@ -459,6 +459,11 @@ def _run_build_script(tmp_path, env):
     verifier.write_text(verifier_src.read_text())
     verifier.chmod(0o755)
 
+    telemetry_src = repo_root / "scripts" / "publish_telemetry.py"
+    telemetry = script_dir / "publish_telemetry.py"
+    telemetry.write_text(telemetry_src.read_text())
+    telemetry.chmod(0o755)
+
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
 

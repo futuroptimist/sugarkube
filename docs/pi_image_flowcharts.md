@@ -53,6 +53,7 @@ flowchart TD
         PB1[Optional: run SSD clone workflow] --> PB2[Monitor /var/log/sugarkube/]
         PB2 --> PB3[Run rollback_to_sd.sh if needed]
         PB3 --> PB4[Collect verifier + flash reports for audit]
+        PB4 --> PB5[Optional: enable sugarkube-telemetry timer]
     end
 
     Prep --> Flashing --> FirstBoot --> PostBoot
