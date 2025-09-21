@@ -66,7 +66,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - `pi_node_verifier.sh` now writes Markdown summaries (hardware, cloud-init,
     checksum checks) to `/boot/first-boot-report.txt` and ingests migration
     events recorded by `scripts/cloud-init/start-projects.sh`.
-- [ ] Add self-healing units that retry container pulls, rerun `cloud-init clean`, or reboot into maintenance with actionable logs.
+- [x] Add self-healing units that retry container pulls, rerun `cloud-init clean`, or reboot into maintenance with actionable logs.
+  - Added `sugarkube-self-heal@.service` and `self_heal_service.py`, which retry Docker Compose pulls,
+    restart failed units, clean `cloud-init`, capture journals under `/boot/first-boot-report/self-heal/`,
+    and escalate to `rescue.target` after repeated failures.
 - [x] Provide optional telemetry hooks to publish anonymized health data to a shared dashboard.
   - Added `sugarkube-publish-telemetry`, cloud-init environment/service templates, Makefile/just
     wrappers, and docs covering opt-in uploads to custom collectors.
