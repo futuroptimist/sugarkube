@@ -81,6 +81,13 @@ sync.
     [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md).
   - Related tooling: referenced by the planned `first-boot.service`, included in `/boot/first-boot-
     report.txt`, and validated by the Bats tests in `tests/pi_node_verifier_*.bats`.
+- `scripts/publish_telemetry.py`
+  - Purpose: run `pi_node_verifier`, hash device fingerprints, and publish anonymized telemetry to a
+    configurable endpoint.
+  - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
+    [Pi Image Telemetry Hooks](./pi_image_telemetry.md).
+  - Related tooling: exposed via `make publish-telemetry`, `just publish-telemetry`, and the
+    `sugarkube-telemetry.timer` service defined in cloud-init.
 - `scripts/pi_smoke_test.py`
   - Purpose: orchestrate remote verifier runs over SSH, optionally rebooting hosts to confirm
     convergence and emitting JSON for CI harnesses.
