@@ -6,6 +6,9 @@ on:
 
 # No special permissions required
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-stl:
     runs-on: ubuntu-latest
