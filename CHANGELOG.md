@@ -11,6 +11,8 @@
 * pi_carrier: widen nut recess clearance to 0.4 mm for easier nut insertion
 * pi5_triple_carrier_rot45: widen nut recess clearance to 0.4 mm for easier nut insertion
 * panel_bracket: enlarge insert to 6.3 mm OD for common M5 heat‑set hardware
+* CI: upgrade GitHub-hosted actions to Node 22-compatible majors (`actions/checkout@v5`,
+  `actions/setup-python@v6`)
 
 ### Fixed
 * pi_carrier: standoff length increased from 20 mm to 22 mm (flush fit with PoE HAT)
