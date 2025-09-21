@@ -20,9 +20,11 @@ QR_CMD ?= $(CURDIR)/scripts/generate_qr_codes.py
 QR_ARGS ?=
 HEALTH_CMD ?= $(CURDIR)/scripts/ssd_health_monitor.py
 HEALTH_ARGS ?=
+SMOKE_CMD ?= $(CURDIR)/scripts/pi_smoke_test.py
+SMOKE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        clone-ssd docs-verify qr-codes monitor-ssd-health
+        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -48,21 +50,24 @@ doctor:
 	$(CURDIR)/scripts/sugarkube_doctor.sh
 
 rollback-to-sd:
-        $(ROLLBACK_CMD) $(ROLLBACK_ARGS)
+	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
 
 clone-ssd:
-        @if [ -z "$(CLONE_TARGET)" ]; then \
-                echo "Set CLONE_TARGET to the target device (e.g. /dev/sda)." >&2; \
-                exit 1; \
-        fi
-        $(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
+	@if [ -z "$(CLONE_TARGET)" ]; then \
+		echo "Set CLONE_TARGET to the target device (e.g. /dev/sda)." >&2; \
+		exit 1; \
+	fi
+	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
 
 docs-verify:
 	pyspelling -c .spellcheck.yaml
 	linkchecker --no-warnings README.md docs/
 
 qr-codes:
-        $(QR_CMD) $(QR_ARGS)
+	$(QR_CMD) $(QR_ARGS)
 
 monitor-ssd-health:
-        $(HEALTH_CMD) $(HEALTH_ARGS)
+	$(HEALTH_CMD) $(HEALTH_ARGS)
+
+smoke-test-pi:
+	$(SMOKE_CMD) $(SMOKE_ARGS)

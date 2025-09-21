@@ -121,7 +121,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
 - [x] Integrate spellcheck/linkcheck gating (`pyspelling`, `linkchecker`) for docs.
 - [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.
-- [ ] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
+- [x] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
+  - Added `scripts/pi_smoke_test.py` plus Makefile/just wrappers so operators can run
+    verifier checks over SSH, optionally rebooting hosts to confirm convergence and
+    emitting JSON summaries for CI pipelines.
 - [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
 - [x] Document how to run integration tests locally via `act`.
   - `docs/pi_image_builder_design.md` now includes a quick recipe for dry-running the release workflow with `act`.
