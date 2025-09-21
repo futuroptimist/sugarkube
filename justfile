@@ -19,6 +19,8 @@ qr_cmd := env_var_or_default("QR_CMD", justfile_directory() + "/scripts/generate
 qr_args := env_var_or_default("QR_ARGS", "")
 health_cmd := env_var_or_default("HEALTH_CMD", justfile_directory() + "/scripts/ssd_health_monitor.py")
 health_args := env_var_or_default("HEALTH_ARGS", "")
+smoke_cmd := env_var_or_default("SMOKE_CMD", justfile_directory() + "/scripts/pi_smoke_test.py")
+smoke_args := env_var_or_default("SMOKE_ARGS", "")
 
 _default:
     @just --list
@@ -73,6 +75,11 @@ validate-ssd-clone:
 # Usage: sudo just monitor-ssd-health HEALTH_ARGS="--tag weekly"
 monitor-ssd-health:
     "{{health_cmd}}" {{health_args}}
+
+# Run pi_node_verifier remotely over SSH
+# Usage: just smoke-test-pi SMOKE_ARGS="pi-a.local --reboot"
+smoke-test-pi:
+    "{{smoke_cmd}}" {{smoke_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
