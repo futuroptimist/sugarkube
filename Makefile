@@ -22,9 +22,12 @@ HEALTH_CMD ?= $(CURDIR)/scripts/ssd_health_monitor.py
 HEALTH_ARGS ?=
 SMOKE_CMD ?= $(CURDIR)/scripts/pi_smoke_test.py
 SMOKE_ARGS ?=
+TELEMETRY_CMD ?= $(CURDIR)/scripts/publish_telemetry.py
+TELEMETRY_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi
+        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
+        publish-telemetry
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -71,3 +74,6 @@ monitor-ssd-health:
 
 smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)
+
+publish-telemetry:
+	$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
