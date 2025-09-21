@@ -18,9 +18,11 @@ QR_CMD ?= $(CURDIR)/scripts/generate_qr_codes.py
 QR_ARGS ?=
 HEALTH_CMD ?= $(CURDIR)/scripts/ssd_health_monitor.py
 HEALTH_ARGS ?=
+SMOKE_CMD ?= $(CURDIR)/scripts/pi_smoke_test.py
+SMOKE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        docs-verify qr-codes monitor-ssd-health
+        docs-verify qr-codes monitor-ssd-health smoke-test-pi
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -57,3 +59,6 @@ qr-codes:
 
 monitor-ssd-health:
         $(HEALTH_CMD) $(HEALTH_ARGS)
+
+smoke-test-pi:
+        $(SMOKE_CMD) $(SMOKE_ARGS)
