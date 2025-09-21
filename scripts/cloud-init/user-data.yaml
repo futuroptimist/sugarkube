@@ -133,6 +133,56 @@ write_files:
       [Journal]
       Storage=persistent
       SystemMaxUse=200M
+  - path: /etc/sugarkube/telemetry.env
+    permissions: '0600'
+    content: |
+      # Set SUGARKUBE_TELEMETRY_ENABLE="true" to publish anonymized health telemetry.
+      SUGARKUBE_TELEMETRY_ENABLE="false"
+      # Configure the HTTPS endpoint that receives telemetry payloads.
+      SUGARKUBE_TELEMETRY_ENDPOINT=""
+      # Optional bearer token included in Authorization headers.
+      # Uncomment and set SUGARKUBE_TELEMETRY_TOKEN once you have a bearer token.
+      # Optional salt mixed into the hashed instance identifier.
+      SUGARKUBE_TELEMETRY_SALT=""
+      # Optional comma-separated labels (e.g., "lab,pi-a") for dashboards.
+      SUGARKUBE_TELEMETRY_TAGS=""
+      # HTTP timeout in seconds for uploads.
+      SUGARKUBE_TELEMETRY_TIMEOUT="10"
+      # Timeout in seconds for pi_node_verifier execution.
+      SUGARKUBE_TELEMETRY_VERIFIER_TIMEOUT="180"
+  - path: /etc/systemd/system/sugarkube-telemetry.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Publish sugarkube verifier telemetry
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=/usr/local/bin/sugarkube-publish-telemetry
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile=-/etc/sugarkube/telemetry.env
+      ExecStart=/usr/local/bin/sugarkube-publish-telemetry
+      Nice=10
+      IOSchedulingClass=best-effort
+      IOSchedulingPriority=6
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-telemetry.timer
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Run sugarkube telemetry publisher periodically
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=1h
+      AccuracySec=5min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
   # projects-start
   - path: /etc/systemd/system/projects-compose.service
     permissions: '0644'

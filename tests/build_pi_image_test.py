@@ -454,6 +454,11 @@ def _run_build_script(tmp_path, env):
     metadata_script.write_text(metadata_src.read_text())
     metadata_script.chmod(0o755)
 
+    publish_telemetry_src = repo_root / "scripts" / "publish_telemetry.py"
+    publish_telemetry_dest = script_dir / "publish_telemetry.py"
+    publish_telemetry_dest.write_text(publish_telemetry_src.read_text())
+    publish_telemetry_dest.chmod(0o755)
+
     verifier_src = repo_root / "scripts" / "pi_node_verifier.sh"
     verifier = script_dir / "pi_node_verifier.sh"
     verifier.write_text(verifier_src.read_text())
