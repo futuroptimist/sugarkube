@@ -124,11 +124,13 @@ sync.
     writing a Markdown report alongside the boot partition.
   - Primary docs: [SSD Recovery and Rollback](./ssd_recovery.md).
   - Related tooling: surfaced as `make rollback-to-sd` and `just rollback-to-sd` helpers.
-- `scripts/cloud-init/export-kubeconfig.sh`, `scripts/cloud-init/export-node-token.sh`, and friends under `scripts/cloud-init/`
-  - Purpose: capture sanitized/full kubeconfigs, mirror the k3s node token, start token.place/dspace projects, and log provisioning milestones
-    for inclusion in `/boot/first-boot-report.txt`.
+- `scripts/cloud-init/export-kubeconfig.sh`, `scripts/cloud-init/export-node-token.sh`,
+  `scripts/cloud-init/apply-helm-bundles.sh`, and friends under `scripts/cloud-init/`
+  - Purpose: capture sanitized/full kubeconfigs, mirror the k3s node token, apply
+    pinned Helm bundles, start token.place/dspace projects, and log provisioning
+    milestones for inclusion in `/boot/first-boot-report.txt`.
   - Primary docs: [Pi Headless Provisioning](./pi_headless_provisioning.md),
-    [Pi Token + dspace](./pi_token_dspace.md).
+    [Pi Token + dspace](./pi_token_dspace.md), [Sugarkube Helm Bundle Hooks](./pi_helm_bundles.md).
 
 #### Record hardware boot runs
 

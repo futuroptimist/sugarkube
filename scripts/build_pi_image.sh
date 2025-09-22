@@ -101,6 +101,7 @@ INIT_ENV_PATH="${INIT_ENV_PATH:-${CLOUD_INIT_DIR}/init-env.sh}"
 EXPORT_KUBECONFIG_PATH="${EXPORT_KUBECONFIG_PATH:-${CLOUD_INIT_DIR}/export-kubeconfig.sh}"
 EXPORT_NODE_TOKEN_PATH="${EXPORT_NODE_TOKEN_PATH:-${CLOUD_INIT_DIR}/export-node-token.sh}"
 K3S_READY_PATH="${K3S_READY_PATH:-${CLOUD_INIT_DIR}/k3s-ready.sh}"
+APPLY_HELM_BUNDLES_PATH="${APPLY_HELM_BUNDLES_PATH:-${CLOUD_INIT_DIR}/apply-helm-bundles.sh}"
 
 if [ ! -f "${CLOUD_INIT_PATH}" ]; then
   echo "Cloud-init file not found: ${CLOUD_INIT_PATH}" >&2
@@ -294,6 +295,9 @@ install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
 
 install -Dm755 "${EXPORT_NODE_TOKEN_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-node-token.sh"
+
+install -Dm755 "${APPLY_HELM_BUNDLES_PATH}" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/apply-helm-bundles.sh"
 
 install -Dm755 "${K3S_READY_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-ready.sh"

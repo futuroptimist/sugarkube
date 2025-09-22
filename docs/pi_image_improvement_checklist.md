@@ -113,7 +113,12 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     checks `projects-compose.service`, and probes token.place/dspace HTTP(S)/GraphQL
     endpoints with configurable URLs/TLS flags so reports surface regressions
     automatically.
-- [ ] Provide post-boot hooks that apply pinned Helm/chart bundles and fail fast with logs if health checks fail.
+- [x] Provide post-boot hooks that apply pinned Helm/chart bundles and fail fast with logs if health checks fail.
+  - Added `scripts/cloud-init/apply-helm-bundles.sh` plus `sugarkube-helm-bundles.service` to
+    install Helm, read `/etc/sugarkube/helm-bundles.d/*.env`, run `helm upgrade --install --atomic`,
+    and bail out through the self-heal unit when rollouts or health probes fail. Markdown reports
+    now land under `/boot/first-boot-report/helm-bundles/` for air-gapped debugging, and the
+    workflow is documented in [Sugarkube Helm Bundle Hooks](./pi_helm_bundles.md).
 - [ ] Bundle sample datasets and token.place collections for first-launch validation.
 - [ ] Document and script multi-node join rehearsal for scaling clusters.
 - [x] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
