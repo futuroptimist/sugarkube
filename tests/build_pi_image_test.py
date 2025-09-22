@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -510,10 +511,26 @@ def _run_build_script(tmp_path, env):
     shutil.copy(self_heal_src, script_dir / "self_heal_service.py")
     (script_dir / "self_heal_service.py").chmod(0o755)
 
+    ssd_clone_src = repo_root / "scripts" / "ssd_clone.py"
+    shutil.copy(ssd_clone_src, script_dir / "ssd_clone.py")
+    (script_dir / "ssd_clone.py").chmod(0o755)
+
+    ssd_clone_service_src = repo_root / "scripts" / "ssd_clone_service.py"
+    shutil.copy(ssd_clone_service_src, script_dir / "ssd_clone_service.py")
+    (script_dir / "ssd_clone_service.py").chmod(0o755)
+
     systemd_src = repo_root / "scripts" / "systemd" / "first-boot.service"
     systemd_dir = script_dir / "systemd"
     systemd_dir.mkdir(exist_ok=True)
     shutil.copy(systemd_src, systemd_dir / "first-boot.service")
+
+    ssd_clone_unit_src = repo_root / "scripts" / "systemd" / "ssd-clone.service"
+    shutil.copy(ssd_clone_unit_src, systemd_dir / "ssd-clone.service")
+
+    udev_src = repo_root / "scripts" / "udev" / "99-sugarkube-ssd-clone.rules"
+    udev_dir = script_dir / "udev"
+    udev_dir.mkdir(exist_ok=True)
+    shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -558,6 +575,28 @@ def test_handles_precompressed_pi_gen_output(tmp_path):
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert (tmp_path / "sugarkube.img.xz").exists()
+
+
+def test_installs_ssd_clone_service(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["KEEP_WORK_DIR"] = "1"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    match = re.search(r"leaving work dir: (?P<path>\S+)", result.stdout)
+    assert match, result.stdout
+    work_dir = Path(match.group("path"))
+    stage_root = work_dir / "pi-gen" / "stage2" / "01-sys-tweaks" / "files"
+    assert (stage_root / "opt" / "sugarkube" / "ssd_clone.py").exists()
+    assert (stage_root / "opt" / "sugarkube" / "ssd_clone_service.py").exists()
+    service_path = stage_root / "etc" / "systemd" / "system" / "ssd-clone.service"
+    assert service_path.exists()
+    wants_dir = (
+        stage_root / "etc" / "systemd" / "system" / "multi-user.target.wants" / "ssd-clone.service"
+    )
+    assert wants_dir.is_symlink()
+    udev_rule = stage_root / "etc" / "udev" / "rules.d" / "99-sugarkube-ssd-clone.rules"
+    assert udev_rule.exists()
+    shutil.rmtree(work_dir)
     assert not (tmp_path / "sugarkube.img.xz.xz").exists()
 
 
