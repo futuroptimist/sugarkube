@@ -184,7 +184,9 @@ write_files:
       [Service]
       Type=oneshot
       ExecStart=/opt/sugarkube/apply-helm-bundles.sh
-      TimeoutStartSec=900
+      # Allow Helm bundles to wait for rollouts and health checks without the
+      # unit timing out while the helper is still working.
+      TimeoutStartSec=infinity
       RemainAfterExit=yes
 
       [Install]
