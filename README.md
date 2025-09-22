@@ -7,6 +7,7 @@
 [![Coverage](https://codecov.io/gh/futuroptimist/sugarkube/branch/main/graph/badge.svg)](https://codecov.io/gh/futuroptimist/sugarkube)
 [![license](https://img.shields.io/github/license/futuroptimist/sugarkube)](LICENSE)
 [![Pi image availability](https://img.shields.io/github/v/release/futuroptimist/sugarkube?label=pi%20image)](https://github.com/futuroptimist/sugarkube/releases/latest)
+[![hardware boot][hardware-boot-badge]][pi-smoke-test-doc]
 
 An accessible [k3s](https://k3s.io/) platform for Raspberry Pis and SBCs,
 integrated with an off-grid solar setup.
@@ -103,6 +104,9 @@ use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs
 linters, tests, and documentation checks.
+
+[hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
+[pi-smoke-test-doc]: docs/pi_smoke_test.md
 
 ## Getting Started
 
