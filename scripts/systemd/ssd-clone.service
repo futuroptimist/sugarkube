@@ -1,0 +1,16 @@
+[Unit]
+Description=Sugarkube SSD clone automation
+After=first-boot.service systemd-udevd.service
+Wants=first-boot.service
+ConditionPathExists=/opt/sugarkube/ssd_clone.py
+ConditionPathExists=!/var/log/sugarkube/ssd-clone.done
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/udevadm settle --timeout=30
+ExecStart=/opt/sugarkube/ssd_clone_service.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
