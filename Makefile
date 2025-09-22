@@ -78,7 +78,7 @@ smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)
 
 publish-telemetry:
-        $(TELEMETRY_CMD) $(TELEMETRY_ARGS)
+	$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
 
 update-hardware-badge:
-        $(BADGE_CMD) $(BADGE_ARGS)
+	$(BADGE_CMD) $(BADGE_ARGS)
