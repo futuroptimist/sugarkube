@@ -155,6 +155,14 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
 - When symptoms fall outside the happy path, use the
   [Pi Boot & Cluster Troubleshooting Matrix](./pi_boot_troubleshooting.md) to map
   LED patterns, log locations, and fixes.
+- Need deeper diagnostics? Capture a support bundle over SSH:
+  ```bash
+  SUPPORT_BUNDLE_HOST=pi-a.local \
+  SUPPORT_BUNDLE_ARGS="--identity ~/.ssh/id_ed25519" \
+    make support-bundle
+  ```
+  Swap in `just support-bundle` when you prefer Just. The helper saves transcripts under
+  `support-bundles/` alongside `summary.json` so you can attach the archive to issues or CI logs.
 - A new `first-boot.service` waits for `cloud-init` to finish, expands the root
   filesystem when needed, then runs `pi_node_verifier.sh` (with retries) and
   writes Markdown, HTML, and JSON snapshots under `/boot/first-boot-report/`.
