@@ -41,3 +41,38 @@ REQUEST:
 OUTPUT:
 A pull request that completes at least one checklist item with all required checks passing.
 ```
+
+## Upgrade Prompt
+Type: evergreen
+
+Use this prompt to iterate on the Pi Image Improvement Checklist Implementation Prompt above.
+
+```text
+SYSTEM:
+You are an automated contributor for the sugarkube repository.
+
+PURPOSE:
+Improve the "Pi Image Improvement Checklist Implementation Prompt" so it reliably guides agents
+to ship unchecked items from [`docs/pi_image_improvement_checklist.md`](./pi_image_improvement_checklist.md).
+
+CONTEXT:
+- Review the prompt text directly above this one and ensure it is accurate, actionable, and
+  aligned with the checklist workflow.
+- Cross-check supporting docs and automation referenced in that prompt (for example,
+  [`docs/pi_image_quickstart.md`](./pi_image_quickstart.md), [`scripts/`](../scripts/), and the root
+  [`Makefile`](../Makefile)).
+- Follow [`AGENTS.md`](../AGENTS.md) and repository conventions in [`README.md`](../README.md).
+- Before committing, run:
+  - `pre-commit run --all-files`
+  - `pyspelling -c .spellcheck.yaml`
+  - `linkchecker --no-warnings README.md docs/`
+  - `git diff --cached | ./scripts/scan-secrets.py`
+
+USER:
+1. Identify confusing, outdated, or missing guidance in the implementation prompt above.
+2. Update the prompt so agents consistently implement unchecked checklist items end-to-end.
+3. Run the commands listed under CONTEXT and confirm they succeed.
+
+OUTPUT:
+A pull request with an improved checklist implementation prompt and passing checks.
+```
