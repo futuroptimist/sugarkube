@@ -26,10 +26,12 @@ TELEMETRY_CMD ?= $(CURDIR)/scripts/publish_telemetry.py
 TELEMETRY_ARGS ?=
 BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
+REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
+REHEARSAL_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
-        publish-telemetry update-hardware-badge
+        publish-telemetry update-hardware-badge rehearse-join
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -78,7 +80,10 @@ smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)
 
 publish-telemetry:
-	$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
+$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
 
 update-hardware-badge:
-	$(BADGE_CMD) $(BADGE_ARGS)
+$(BADGE_CMD) $(BADGE_ARGS)
+
+rehearse-join:
+$(REHEARSAL_CMD) $(REHEARSAL_ARGS)

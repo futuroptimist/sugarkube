@@ -34,6 +34,11 @@ badge_cmd := env_var_or_default(
     justfile_directory() + "/scripts/update_hardware_boot_badge.py",
 )
 badge_args := env_var_or_default("BADGE_ARGS", "")
+rehearsal_cmd := env_var_or_default(
+    "REHEARSAL_CMD",
+    justfile_directory() + "/scripts/pi_multi_node_join_rehearsal.py",
+)
+rehearsal_args := env_var_or_default("REHEARSAL_ARGS", "")
 
 _default:
     @just --list
@@ -111,6 +116,11 @@ publish-telemetry:
 # Usage: just update-hardware-badge BADGE_ARGS="--status warn --notes 'pi-b'"
 update-hardware-badge:
     "{{badge_cmd}}" {{badge_args}}
+
+# Run multi-node join rehearsals against control-plane and candidate agents
+# Usage: just rehearse-join REHEARSAL_ARGS="controller.local --agents pi-a.local"
+rehearse-join:
+    "{{rehearsal_cmd}}" {{rehearsal_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
