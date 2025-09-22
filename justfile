@@ -24,6 +24,12 @@ health_cmd := env_var_or_default("HEALTH_CMD", justfile_directory() + "/scripts/
 health_args := env_var_or_default("HEALTH_ARGS", "")
 smoke_cmd := env_var_or_default("SMOKE_CMD", justfile_directory() + "/scripts/pi_smoke_test.py")
 smoke_args := env_var_or_default("SMOKE_ARGS", "")
+support_bundle_cmd := env_var_or_default(
+    "SUPPORT_BUNDLE_CMD",
+    justfile_directory() + "/scripts/collect_support_bundle.py",
+)
+support_bundle_args := env_var_or_default("SUPPORT_BUNDLE_ARGS", "")
+support_bundle_host := env_var_or_default("SUPPORT_BUNDLE_HOST", "")
 telemetry_cmd := env_var_or_default(
     "TELEMETRY_CMD",
     justfile_directory() + "/scripts/publish_telemetry.py",
@@ -161,3 +167,12 @@ qr-codes:
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
     "{{token_place_sample_cmd}}" {{token_place_sample_args}}
+
+# Collect Kubernetes, systemd, and compose diagnostics from a running Pi
+# Usage: just support-bundle SUPPORT_BUNDLE_HOST=pi.local
+support-bundle:
+    if [ -z "{{support_bundle_host}}" ]; then
+        echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2
+        exit 1
+    fi
+    "{{support_bundle_cmd}}" "{{support_bundle_host}}" {{support_bundle_args}}

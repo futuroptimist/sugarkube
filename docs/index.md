@@ -26,6 +26,7 @@ Review the safety notes before working with power components.
 - [pi_smoke_test.md](pi_smoke_test.md) — run remote smoke tests against freshly provisioned Pis
 - [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs
   they inform
+- [pi_support_bundles.md](pi_support_bundles.md) — collect diagnostics into shareable archives
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
