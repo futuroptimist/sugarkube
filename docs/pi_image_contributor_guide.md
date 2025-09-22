@@ -98,6 +98,13 @@ sync.
     [projects-compose Service](./projects-compose.md).
   - Related tooling: installed by `build_pi_image.sh`, invoked via `OnFailure`, and validated by
     `tests/self_heal_service_test.py`.
+- `scripts/sugarkube_teams.py` + `/etc/sugarkube/notifications.env.example`
+  - Purpose: publish chat notifications for first-boot verification and SSD clone progress via
+    Slack-compatible webhooks or Matrix.
+  - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
+    [Sugarkube Remote Notifications](./sugarkube_notifications.md).
+  - Related tooling: loaded by `first-boot.service` and `ssd-clone.service`, exposed through
+    `make notify-teams`/`just notify-teams`, and covered by `tests/test_sugarkube_teams.py`.
 - `scripts/pi_smoke_test.py`
   - Purpose: orchestrate remote verifier runs over SSH, optionally rebooting hosts to confirm
     convergence and emitting JSON for CI harnesses.

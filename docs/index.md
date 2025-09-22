@@ -27,6 +27,8 @@ Review the safety notes before working with power components.
 - [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs
   they inform
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
+- [sugarkube_notifications.md](sugarkube_notifications.md) — chat alerts for first boot and SSD
+  cloning events
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
 - [pi_image_improvement_checklist.md](pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration

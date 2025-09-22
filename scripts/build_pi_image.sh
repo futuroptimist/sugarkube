@@ -289,11 +289,17 @@ install -Dm755 "${REPO_ROOT}/scripts/ssd_clone.py" \
 install -Dm755 "${REPO_ROOT}/scripts/ssd_clone_service.py" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone_service.py"
 
+install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/sugarkube_teams.py"
+
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
 
 install -Dm644 "${REPO_ROOT}/scripts/systemd/ssd-clone.service" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/ssd-clone.service"
+
+install -Dm644 "${REPO_ROOT}/scripts/cloud-init/notifications.env.example" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/sugarkube/notifications.env.example"
 
 install -d "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
 ln -sf ../first-boot.service \

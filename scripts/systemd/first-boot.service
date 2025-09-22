@@ -6,6 +6,7 @@ ConditionPathExists=!/var/log/sugarkube/first-boot.ok
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/etc/sugarkube/notifications.env
 ExecStart=/opt/sugarkube/first_boot_service.py
 StandardOutput=journal
 StandardError=journal

@@ -423,6 +423,14 @@ def main() -> int:
         _log("first-boot already completed successfully; exiting")
         return 0
 
+    hostname = socket.gethostname()
+    _notify(
+        "first-boot",
+        "started",
+        f"First boot checks running on {hostname}",
+        {"hostname": hostname},
+    )
+
     _expand_rootfs(expand_marker)
     cloud_init_text, cloud_init_exit = _gather_cloud_init(cloud_init_timeout)
 
@@ -445,16 +453,39 @@ def main() -> int:
     if cloud_init_text is not None:
         (report_dir / "cloud-init.log").write_text(cloud_init_text + "\n")
 
+    notify_meta = {
+        "hostname": payload.get("hostname"),
+        "overall": payload.get("overall"),
+        "attempts": payload.get("attempts"),
+        "verifier_exit_code": payload.get("verifier_exit_code"),
+        "summary": payload.get("summary"),
+    }
+    if "cloud_init_exit_code" in metadata:
+        notify_meta["cloud_init_exit_code"] = metadata["cloud_init_exit_code"]
+    notify_meta["verifier_log_exit_code"] = log_exit
+
     overall_exit = result.exit_code if result.exit_code != 0 else log_exit
     if overall_exit != 0:
         fail_marker.write_text(f"verifier exit code {result.exit_code}; log exit code {log_exit}\n")
         if ok_marker.exists():
             ok_marker.unlink()
+        _notify(
+            "first-boot",
+            "failure",
+            f"First boot checks failed on {payload.get('hostname', hostname)}",
+            notify_meta,
+        )
         return overall_exit or 1
 
     if fail_marker.exists():
         fail_marker.unlink()
     ok_marker.write_text("ok\n")
+    _notify(
+        "first-boot",
+        "success",
+        f"First boot checks passed on {payload.get('hostname', hostname)}",
+        notify_meta,
+    )
     return 0
 
 
@@ -464,3 +495,51 @@ if __name__ == "__main__":  # pragma: no cover
     except Exception as exc:  # pylint: disable=broad-except
         _warn(str(exc))
         raise
+NOTIFIER_SCRIPT = Path(__file__).resolve().parent / "sugarkube_teams.py"
+
+
+def _teams_notifications_enabled() -> bool:
+    if os.environ.get("SUGARKUBE_TEAMS_WEBHOOK_URL"):
+        return True
+    matrix_keys = (
+        "SUGARKUBE_MATRIX_HOMESERVER",
+        "SUGARKUBE_MATRIX_ROOM",
+        "SUGARKUBE_MATRIX_ACCESS_TOKEN",
+    )
+    return all(os.environ.get(key) for key in matrix_keys)
+
+
+def _notify(event: str, status: str, summary: str, metadata: Optional[dict] = None) -> bool:
+    if not NOTIFIER_SCRIPT.exists():
+        return False
+    if not _teams_notifications_enabled():
+        return False
+
+    command = [
+        sys.executable or "python3",
+        str(NOTIFIER_SCRIPT),
+        "--event",
+        event,
+        "--status",
+        status,
+        "--summary",
+        summary,
+    ]
+    if metadata:
+        command.extend(["--metadata", json.dumps(metadata, sort_keys=True, separators=(",", ":"))])
+
+    process = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ,
+    )
+    if process.returncode != 0:
+        stderr = process.stderr.strip()
+        if stderr:
+            _warn(f"notification helper failed: {stderr}")
+        else:
+            _warn(f"notification helper exited with status {process.returncode}")
+        return False
+    return True

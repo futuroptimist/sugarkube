@@ -28,10 +28,12 @@ BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
 REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
 REHEARSAL_ARGS ?=
+TEAMS_CMD ?= $(CURDIR)/scripts/sugarkube_teams.py
+TEAMS_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
-        publish-telemetry update-hardware-badge rehearse-join
+        publish-telemetry update-hardware-badge rehearse-join notify-teams
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -87,3 +89,6 @@ $(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
 $(REHEARSAL_CMD) $(REHEARSAL_ARGS)
+
+notify-teams:
+$(TEAMS_CMD) $(TEAMS_ARGS)

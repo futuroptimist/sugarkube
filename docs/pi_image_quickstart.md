@@ -197,6 +197,35 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   3. Inspect uploads with `journalctl -u sugarkube-telemetry.service --no-pager`.
   Review [Pi Image Telemetry Hooks](./pi_image_telemetry.md) for detailed payload and privacy notes.
 
+### Stream boot and clone notifications to chat
+
+Get remote status pings whenever the Pi completes first boot verification or SSD cloning:
+
+1. Copy the sample environment file into place and adjust it for your workspace:
+   ```bash
+   sudo install -m600 /etc/sugarkube/notifications.env.example \
+     /etc/sugarkube/notifications.env
+   ```
+2. Set either `SUGARKUBE_TEAMS_WEBHOOK_URL` (Slack/Microsoft Teams/Discord-compatible) or
+   the Matrix trio (`SUGARKUBE_MATRIX_HOMESERVER`, `SUGARKUBE_MATRIX_ROOM`,
+   `SUGARKUBE_MATRIX_ACCESS_TOKEN`). Add `SUGARKUBE_TEAMS_LABEL` to tag each host in multi-site
+   deployments.
+3. Reboot or restart the services to pick up the credentials:
+   ```bash
+   sudo systemctl restart first-boot.service
+   sudo systemctl restart ssd-clone.service
+   ```
+4. Send a manual test notification before waiting on the hardware:
+   ```bash
+   sudo make notify-teams TEAMS_ARGS="--event quickstart --status info --summary 'Ping from pi-a'"
+   # or
+   sudo just notify-teams TEAMS_ARGS="--event quickstart --status info --summary 'Ping from pi-a'"
+   ```
+
+The helpers only emit messages when the environment file is populated, so empty defaults remain
+silent. See [Sugarkube Remote Notifications](./sugarkube_notifications.md) for webhook payload
+examples, Matrix tips, and troubleshooting steps when a chat room stays quiet.
+
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
 

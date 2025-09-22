@@ -39,6 +39,11 @@ rehearsal_cmd := env_var_or_default(
     justfile_directory() + "/scripts/pi_multi_node_join_rehearsal.py",
 )
 rehearsal_args := env_var_or_default("REHEARSAL_ARGS", "")
+teams_cmd := env_var_or_default(
+    "TEAMS_CMD",
+    justfile_directory() + "/scripts/sugarkube_teams.py",
+)
+teams_args := env_var_or_default("TEAMS_ARGS", "")
 
 _default:
     @just --list
@@ -121,6 +126,11 @@ update-hardware-badge:
 # Usage: just rehearse-join REHEARSAL_ARGS="controller.local --agents pi-a.local"
 rehearse-join:
     "{{rehearsal_cmd}}" {{rehearsal_args}}
+
+# Send a manual notification to configured webhooks or Matrix rooms
+# Usage: just notify-teams TEAMS_ARGS="--event manual --status info --summary 'ping'"
+notify-teams:
+    "{{teams_cmd}}" {{teams_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
