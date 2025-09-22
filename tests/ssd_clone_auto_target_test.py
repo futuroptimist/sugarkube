@@ -291,3 +291,112 @@ def test_randomize_disk_identifiers_fallback(tmp_path, monkeypatch):
         (("sfdisk", "--disk-id", "/dev/sdz", "0x12345678"), None),
     ]
     assert any("falling back" in message for message in messages)
+
+
+def test_step_run_records_completion(tmp_path):
+    ctx = make_context(tmp_path)
+    step = ssd_clone.Step("demo", "Demo step")
+    invoked = []
+
+    def _action(run_ctx):
+        assert run_ctx is ctx
+        invoked.append(True)
+
+    step.run(ctx, _action)
+
+    assert invoked == [True]
+    assert ctx.state["completed"]["demo"] is True
+
+
+def test_step_run_skips_completed(tmp_path, capsys):
+    ctx = make_context(tmp_path, state={"completed": {"demo": True}})
+    step = ssd_clone.Step("demo", "Demo step")
+
+    step.run(ctx, lambda _: pytest.fail("step should have been skipped"))
+
+    captured = capsys.readouterr()
+    assert "Skipping demo (already completed)" in captured.out
+
+
+def test_run_command_handles_dry_run(tmp_path):
+    ctx = make_context(tmp_path, dry_run=True)
+
+    result = ssd_clone.run_command(ctx, ["echo", "hello"])
+
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.returncode == 0
+    assert result.args == ["echo", "hello"]
+
+
+def test_run_command_verbose_output(monkeypatch, tmp_path, capsys):
+    ctx = make_context(tmp_path, verbose=True)
+
+    def fake_run(command, check, text, capture_output, input=None):
+        assert command == ["echo", "hi"]
+        assert check is False
+        assert text is True
+        assert capture_output is True
+        return subprocess.CompletedProcess(command, 0, "stdout text", "stderr text")
+
+    monkeypatch.setattr(ssd_clone.subprocess, "run", fake_run)
+
+    result = ssd_clone.run_command(ctx, ["echo", "hi"])
+
+    assert result.returncode == 0
+    captured = capsys.readouterr()
+    assert "stdout text" in captured.out
+    assert "stderr text" in captured.err
+
+
+def test_run_command_raises_on_failure(monkeypatch, tmp_path):
+    ctx = make_context(tmp_path)
+
+    def fake_run(command, check, text, capture_output, input=None):
+        return subprocess.CompletedProcess(command, 1, "boom", "bang")
+
+    monkeypatch.setattr(ssd_clone.subprocess, "run", fake_run)
+
+    with pytest.raises(ssd_clone.CommandError) as excinfo:
+        ssd_clone.run_command(ctx, ["false"])
+
+    assert "Command failed" in str(excinfo.value)
+
+
+def test_update_configs_rewrites_files(monkeypatch, tmp_path):
+    ctx = make_context(tmp_path, mount_root=tmp_path)
+    ctx.state.update(
+        {
+            "partition_suffix_boot": "1",
+            "partition_suffix_root": "2",
+            "source_root_partuuid": "root-old",
+            "source_boot_partuuid": "boot-old",
+        }
+    )
+    ctx.target_disk = "/dev/sdz"
+
+    boot_mount = tmp_path / "boot-config"
+    root_mount = tmp_path / "root-config"
+    boot_mount.mkdir(parents=True, exist_ok=True)
+    root_etc = root_mount / "etc"
+    root_etc.mkdir(parents=True, exist_ok=True)
+
+    (boot_mount / "cmdline.txt").write_text("root=PARTUUID=root-old quiet\n", encoding="utf-8")
+    (root_etc / "fstab").write_text(
+        "PARTUUID=root-old / ext4\nPARTUUID=boot-old /boot vfat\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(ssd_clone, "mount_partition", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ssd_clone, "unmount_partition", lambda *args, **kwargs: None)
+
+    uuids = {"/dev/sdz1": "boot-new", "/dev/sdz2": "root-new"}
+    monkeypatch.setattr(ssd_clone, "get_partuuid", lambda device: uuids[device])
+
+    ssd_clone.update_configs(ctx)
+
+    cmdline = (boot_mount / "cmdline.txt").read_text(encoding="utf-8")
+    fstab = (root_etc / "fstab").read_text(encoding="utf-8")
+
+    assert "root=PARTUUID=root-new" in cmdline
+    assert "PARTUUID=root-new / ext4" in fstab
+    assert "PARTUUID=boot-new /boot" in fstab
