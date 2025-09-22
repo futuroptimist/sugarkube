@@ -126,6 +126,14 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   - `curl http://<pi-host>:9100/metrics` for the node exporter.
   - `curl http://<pi-host>:12345/metrics` for the aggregated Grafana Agent feed.
   - Visit `http://<pi-host>:19999` to load the Netdata UI and confirm charts render.
+- Contract tests live in `tests/projects_compose_contract_test.py` and prevent
+  regressions in the compose file. They assert that token.place stays on port
+  **5000**, dspace on **3000**, and that every bundled observability container
+  sticks to its pinned SHA-256 digest. Run `pytest` after editing
+  `scripts/cloud-init/docker-compose.yml` to exercise the checks locally. The
+  Bats suite (`tests/pi_node_verifier_output_test.bats`) now also spins up a
+  temporary HTTP server so the verifier's health probes must report `pass`
+  before changes merge.
 - systemd now ships a `k3s-ready.target` that depends on the compose service and waits for
   `kubectl get nodes` to report `Ready`. Inspect the target to confirm the cluster finished
   bootstrapping:

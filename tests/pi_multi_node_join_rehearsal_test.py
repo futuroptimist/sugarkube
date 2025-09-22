@@ -459,7 +459,11 @@ def test_main_success(monkeypatch, capsys, sample_nodes, tmp_path):
             nodes=sample_nodes,
         )
 
-    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str) -> rehearsal.AgentStatus:
+    def fake_collect_agent_status(
+        host: str,
+        args: argparse.Namespace,
+        api_host: str,
+    ) -> rehearsal.AgentStatus:
         return rehearsal.AgentStatus(host=host, payload={"api_reachable": True})
 
     saved: list[tuple[str, str]] = []
@@ -496,7 +500,11 @@ def test_main_returns_warning_exit(monkeypatch, capsys, sample_nodes):
             nodes=sample_nodes,
         )
 
-    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str) -> rehearsal.AgentStatus:
+    def fake_collect_agent_status(
+        host: str,
+        args: argparse.Namespace,
+        api_host: str,
+    ) -> rehearsal.AgentStatus:
         return rehearsal.AgentStatus(host=host, payload={}, error="unreachable")
 
     monkeypatch.setattr(rehearsal, "collect_server_status", fake_collect_server_status)

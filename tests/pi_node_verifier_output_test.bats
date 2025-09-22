@@ -14,6 +14,55 @@
   echo "$output" | grep "dspace_http:"
 }
 
+@test "pi_node_verifier marks HTTP checks as pass when endpoints respond" {
+  port=$(python - <<'PY'
+import socket
+sock = socket.socket()
+sock.bind(("", 0))
+print(sock.getsockname()[1])
+sock.close()
+PY
+  )
+
+  python - <<'PY' "$port" &
+import http.server
+import socketserver
+import sys
+
+PORT = int(sys.argv[1])
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args, **kwargs):  # noqa: D401,N803,N802
+        """Silence default request logging."""
+
+
+with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+PY
+  server_pid=$!
+  sleep 1
+
+  TOKEN_PLACE_HEALTH_URL="http://127.0.0.1:${port}/" \
+    DSPACE_HEALTH_URL=skip \
+    run "$BATS_TEST_DIRNAME/../scripts/pi_node_verifier.sh"
+
+  kill "$server_pid"
+  wait "$server_pid" 2>/dev/null || true
+
+  [ "$status" -eq 0 ]
+  echo "$output" | grep "token_place_http: pass"
+  echo "$output" | grep "dspace_http: skip"
+}
+
 @test "pi_node_verifier reports failing checks" {
   tmp="$(mktemp -d)"
   PATH="$tmp:$PATH"
