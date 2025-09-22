@@ -27,6 +27,8 @@ CONTEXT:
   [`scripts/checks.sh`](../scripts/checks.sh) for linting, formatting, and executing both
   test frameworks. The script installs missing tools—including `bats`—so tests run
   consistently.
+- Ensure new and updated tests drive **100% patch coverage on the first test run**; design fixes so
+  no reruns are needed.
 - The CI workflow [`tests.yml`](../.github/workflows/tests.yml) runs the test suite on
   each push.
 - For documentation updates, also run `pyspelling -c .spellcheck.yaml` (requires
@@ -41,7 +43,8 @@ REQUEST:
 2. Write or update tests in [`tests/`](../tests/).
 3. Adjust implementation if a test exposes a bug.
 4. Re-run `pre-commit run --all-files`; for docs changes also run
-   `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
+   `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`, confirming
+   100% patch coverage on the first attempt.
 5. Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py` before committing.
 
 OUTPUT:
@@ -66,11 +69,15 @@ Then run:
 - `pyspelling -c .spellcheck.yaml`
 - `linkchecker --no-warnings README.md docs/`
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Ensure the prompt explicitly requires contributors to reach **100% patch coverage on the first test
+  run** without retries.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Run the commands above.
+3. Add or reinforce guidance directing contributors to attain 100% patch coverage on the first test
+   execution.
+4. Run the commands above.
 
 OUTPUT:
 A pull request with the improved prompt doc and passing checks.
