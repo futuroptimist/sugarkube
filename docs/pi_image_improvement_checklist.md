@@ -77,12 +77,16 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## SSD Migration & Storage Hardening
-- [ ] Automate SSD cloning via `ssd-clone.service` or `pi-clone.service`:
+- [x] Automate SSD cloning via `ssd-clone.service` or `pi-clone.service`:
   - Detect attached SSD.
   - Replicate partition table (`sgdisk --replicate` or `ddrescue`).
   - `rsync --info=progress2` SD → SSD.
   - Update `/boot/cmdline.txt` and `/etc/fstab` with new UUID.
   - Touch `/var/log/sugarkube/ssd-clone.done`.
+  - Implemented via `scripts/ssd_clone_service.py`, `scripts/systemd/ssd-clone.service`, and a
+    udev rule that starts the helper whenever a USB/NVMe disk appears. The service auto-selects the
+    target disk, resumes partial runs, respects manual overrides, installs alongside
+    `ssd_clone.py` during image builds, and avoids multi-user.target so boot never stalls when no SSD is present.
 - [x] Support dry-run + resume for cloning to reduce user hesitation.
   - Added `scripts/ssd_clone.py` plus Makefile/justfile wrappers that replicate partitions,
     support `--dry-run` previews, persist state, and resume clones via `--resume`.

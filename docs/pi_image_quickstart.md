@@ -186,11 +186,31 @@ Add `--reboot` to confirm the cluster converges after a restart or use the task-
 See [Pi Image Smoke Test Harness](./pi_smoke_test.md) for detailed usage, including how to
 override token.place/dspace health URLs or disable individual checks.
 
+### Automatic SSD cloning on first boot
+
+The Pi image now ships with `ssd-clone.service`, a oneshot systemd unit that waits for a
+hot-plugged SSD, auto-selects a target disk, and calls `ssd_clone.py --resume` until the
+completion marker `/var/log/sugarkube/ssd-clone.done` appears. The service is triggered by
+the `99-sugarkube-ssd-clone.rules` udev rule whenever a USB or NVMe disk is attached and
+can be started manually with `systemctl start ssd-clone.service`. It intentionally avoids a
+boot-time dependency so multi-user.target is reached immediately when no SSD is present.
+Inspect the journal to monitor progress:
+
+```bash
+journalctl -u ssd-clone.service
+```
+
+Override detection by exporting `SUGARKUBE_SSD_CLONE_TARGET=/dev/sdX` or extend the helper
+flags (for example, `--dry-run`) with `SUGARKUBE_SSD_CLONE_EXTRA_ARGS`. Both environment
+variables are respected by the systemd unit and by manual invocations of
+`scripts/ssd_clone.py --auto-target`. Adjust the discovery window with
+`SUGARKUBE_SSD_CLONE_WAIT_SECS` (default: 900 seconds) or poll frequency with
+`SUGARKUBE_SSD_CLONE_POLL_SECS` when slower storage bridges are involved.
+
 ### Clone the SD card to SSD with confidence
 
-Run the new clone helper to replicate the active SD card onto an attached SSD.
-Always start with a dry-run so you can review the planned steps before any
-blocks are written:
+Run the clone helper directly when you want hands-on control. Always start with a dry-run so
+you can review the planned steps before any blocks are written:
 
 ```bash
 sudo ./scripts/ssd_clone.py --target /dev/sda --dry-run
@@ -205,6 +225,12 @@ earlier work:
 
 ```bash
 sudo ./scripts/ssd_clone.py --target /dev/sda --resume
+```
+
+Prefer autodetection? Skip `--target` entirely and let the helper pick the best candidate:
+
+```bash
+sudo ./scripts/ssd_clone.py --auto-target --dry-run
 ```
 
 Prefer wrappers? Run the equivalent Makefile or justfile recipes, passing the
