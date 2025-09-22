@@ -483,6 +483,11 @@ def _run_build_script(tmp_path, env):
     shutil.copy(start_projects_src, start_projects_dest)
     start_projects_dest.chmod(0o755)
 
+    observability_src = cloud_init_src / "observability"
+    observability_dest = ci_dir / "observability"
+    if observability_src.exists():
+        shutil.copytree(observability_src, observability_dest)
+
     init_env_src = cloud_init_src / "init-env.sh"
     init_env_dest = ci_dir / "init-env.sh"
     shutil.copy(init_env_src, init_env_dest)
