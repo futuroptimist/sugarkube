@@ -98,3 +98,110 @@ def test_destinations_from_env_rejects_bad_timeout(monkeypatch):
     monkeypatch.setenv("SUGARKUBE_MATRIX_TIMEOUT", "not-a-number")
     with pytest.raises(MODULE.NotificationError):
         MODULE.destinations_from_env()
+
+
+def test_send_webhook_posts_json(monkeypatch):
+    requests = []
+
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001 - urllib interface
+        headers = {key.lower(): value for key, value in request.header_items()}
+        requests.append(
+            (
+                request.full_url,
+                json.loads(request.data.decode("utf-8")),
+                headers,
+                request.get_method(),
+                timeout,
+            )
+        )
+        return DummyResponse()
+
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", fake_urlopen)
+
+    MODULE.send_webhook("https://example.com/hook", "Hello", timeout=7.5)
+
+    assert requests == [
+        (
+            "https://example.com/hook",
+            {"text": "Hello"},
+            {"content-type": "application/json"},
+            "POST",
+            7.5,
+        )
+    ]
+
+
+def test_post_json_raises_notification_error(monkeypatch):
+    def fake_urlopen(request, timeout):  # noqa: ANN001 - urllib interface
+        raise MODULE.urllib.error.URLError("boom")
+
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(MODULE.NotificationError):
+        MODULE._post_json("https://example.com/hook", {"text": "Hello"}, timeout=5.0)
+
+
+def test_send_matrix_posts_notice(monkeypatch):
+    events = {}
+
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_uuid4():
+        class DummyUUID:
+            hex = "abcdef"
+
+        return DummyUUID()
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001 - urllib interface
+        events["url"] = request.full_url
+        events["payload"] = json.loads(request.data.decode("utf-8"))
+        events["method"] = request.get_method()
+        events["headers"] = {key.lower(): value for key, value in request.header_items()}
+        events["timeout"] = timeout
+        return DummyResponse()
+
+    monkeypatch.setattr(MODULE.uuid, "uuid4", fake_uuid4)
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", fake_urlopen)
+
+    config = MODULE.MatrixConfig(
+        homeserver="https://matrix.example.com",
+        room="!room:matrix.example.com",
+        auth_key="token",
+        timeout=6.5,
+    )
+
+    MODULE.send_matrix(config, "plain message", "<p>html message</p>")
+
+    assert (
+        events["url"]
+        == "https://matrix.example.com/_matrix/client/v3/rooms/%21room%3Amatrix.example.com/send/"
+        "m.room.message/abcdef"
+    )
+    assert events["method"] == "PUT"
+    assert events["timeout"] == 6.5
+    assert events["headers"]["content-type"] == "application/json"
+    assert events["headers"]["authorization"] == "Bearer token"
+    assert events["payload"] == {
+        "msgtype": "m.notice",
+        "body": "plain message",
+        "format": "org.matrix.custom.html",
+        "formatted_body": "<p>html message</p>",
+    }
