@@ -139,7 +139,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 
 ## Testing & CI Hardening
 - [ ] Extend pi-image workflow with QEMU smoke tests that boot the image, wait for cloud-init, run verifier, and upload logs.
-- [ ] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
+- [x] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
+  - Added `tests/projects_compose_contract_test.py` to enforce token.place/dspace port exposure,
+    ensure observability images stay pinned to known SHA-256 digests, and expanded the Bats suite to
+    require passing HTTP health probes before merging.
 - [x] Integrate spellcheck/linkcheck gating (`pyspelling`, `linkchecker`) for docs.
 - [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.
 - [x] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
