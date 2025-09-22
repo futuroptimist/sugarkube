@@ -13,12 +13,13 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 STATE_DIR = Path("/var/log/sugarkube")
 STATE_FILE = STATE_DIR / "ssd-clone.state.json"
 DONE_FILE = STATE_DIR / "ssd-clone.done"
 MOUNT_ROOT = Path("/mnt/ssd-clone")
+ENV_TARGET = "SUGARKUBE_SSD_CLONE_TARGET"
 
 
 class CommandError(RuntimeError):
@@ -105,10 +106,15 @@ def parse_args() -> argparse.Namespace:
             "resume partially completed clones with --resume."
         )
     )
-    parser.add_argument(
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument(
         "--target",
-        required=True,
         help="Target block device (e.g., /dev/sda)",
+    )
+    target_group.add_argument(
+        "--auto-target",
+        action="store_true",
+        help="Automatically select a target disk (prefers hotplug USB/NVMe devices).",
     )
     parser.add_argument(
         "--dry-run",
@@ -138,6 +144,102 @@ def parse_args() -> argparse.Namespace:
         help="Show stdout/stderr from helper commands.",
     )
     return parser.parse_args()
+
+
+def lsblk_json(fields: List[str]) -> Dict[str, object]:
+    result = subprocess.run(
+        ["lsblk", "--json", "-b", "-o", ",".join(fields)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit("lsblk --json failed; cannot enumerate block devices.")
+    try:
+        return json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"Unable to parse lsblk output: {error}") from error
+
+
+def device_size_bytes(device: str) -> int:
+    result = subprocess.run(
+        ["lsblk", "-b", "-ndo", "SIZE", device],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise SystemExit(f"Unable to determine size for {device}")
+    return int(result.stdout.strip())
+
+
+def resolve_env_target() -> Optional[str]:
+    target = os.environ.get(ENV_TARGET)
+    if not target:
+        return None
+    path = Path(target)
+    if not path.exists():
+        raise SystemExit(f"{ENV_TARGET}={target} is set but the device does not exist.")
+    real = os.path.realpath(target)
+    source_disk = os.path.realpath(parent_disk(resolve_mount_device("/")))
+    if real == source_disk:
+        raise SystemExit(
+            f"{ENV_TARGET} points at the source disk ({source_disk}); choose another device."
+        )
+    return target
+
+
+def auto_select_target() -> str:
+    env_target = resolve_env_target()
+    if env_target:
+        return env_target
+    source_disk = os.path.realpath(parent_disk(resolve_mount_device("/")))
+    source_size = device_size_bytes(source_disk)
+    data = lsblk_json(["NAME", "KNAME", "TYPE", "TRAN", "HOTPLUG", "SIZE", "MODEL"])
+    blockdevices = data.get("blockdevices", [])
+    if not isinstance(blockdevices, list):
+        raise SystemExit("Unexpected lsblk JSON structure; expected a list of block devices.")
+    best: Optional[Tuple[int, int, str, Dict[str, object]]] = None
+    for entry in blockdevices:
+        if str(entry.get("type")) != "disk":
+            continue
+        name = entry.get("kname") or entry.get("name")
+        if not name:
+            continue
+        device = f"/dev/{name}"
+        real = os.path.realpath(device)
+        if real == source_disk:
+            continue
+        size = int(entry.get("size") or 0)
+        if size < source_size:
+            # Skip disks that cannot hold the source contents.
+            continue
+        hotplug = int(entry.get("hotplug") or 0)
+        tran = str(entry.get("tran") or "").lower()
+        score = 0
+        if hotplug:
+            score += 100
+        if tran in {"usb", "sata", "nvme"}:
+            score += 40
+        if "ssd" in str(entry.get("model") or "").lower():
+            score += 5
+        # Prefer larger disks to leave headroom.
+        score += min(size // (1024**3), 100)
+        candidate = (score, size, device, entry)
+        if best is None or candidate > best:
+            best = candidate
+    if not best:
+        raise SystemExit(
+            "Unable to automatically determine a target disk. "
+            "Attach an SSD and retry or set SUGARKUBE_SSD_CLONE_TARGET."
+        )
+    device = best[2]
+    print(
+        "Auto-selected clone target:",
+        device,
+        f"(model={best[3].get('model', 'unknown')}, size={best[1]} bytes)",
+    )
+    return device
 
 
 def load_state(ctx: CloneContext) -> None:
@@ -445,8 +547,12 @@ def gather_source_metadata(ctx: CloneContext) -> None:
 def main() -> None:
     ensure_root()
     args = parse_args()
+    if args.auto_target:
+        target_disk = auto_select_target()
+    else:
+        target_disk = args.target
     ctx = CloneContext(
-        target_disk=os.path.realpath(args.target),
+        target_disk=os.path.realpath(target_disk),
         dry_run=args.dry_run,
         verbose=args.verbose,
         resume=args.resume,
