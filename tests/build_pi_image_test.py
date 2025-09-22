@@ -532,6 +532,10 @@ def _run_build_script(tmp_path, env):
     shutil.copy(ssd_clone_service_src, script_dir / "ssd_clone_service.py")
     (script_dir / "ssd_clone_service.py").chmod(0o755)
 
+    token_place_replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
+    shutil.copy(token_place_replay_src, script_dir / "token_place_replay_samples.py")
+    (script_dir / "token_place_replay_samples.py").chmod(0o755)
+
     systemd_src = repo_root / "scripts" / "systemd" / "first-boot.service"
     systemd_dir = script_dir / "systemd"
     systemd_dir.mkdir(exist_ok=True)
@@ -544,6 +548,15 @@ def _run_build_script(tmp_path, env):
     udev_dir = script_dir / "udev"
     udev_dir.mkdir(exist_ok=True)
     shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
+
+    samples_dest = tmp_path / "samples"
+    samples_dest.mkdir(exist_ok=True)
+    token_place_samples_src = repo_root / "samples" / "token_place"
+    shutil.copytree(
+        token_place_samples_src,
+        samples_dest / "token_place",
+        dirs_exist_ok=True,
+    )
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
