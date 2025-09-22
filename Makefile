@@ -28,10 +28,13 @@ BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
 REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
 REHEARSAL_ARGS ?=
+TOKEN_PLACE_SAMPLE_CMD ?= $(CURDIR)/scripts/token_place_replay_samples.py
+TOKEN_PLACE_SAMPLE_ARGS ?= --samples-dir $(CURDIR)/samples/token_place
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
-        publish-telemetry update-hardware-badge rehearse-join
+        publish-telemetry update-hardware-badge rehearse-join \
+        token-place-samples
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -80,10 +83,13 @@ smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)
 
 publish-telemetry:
-$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
+	$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
 
 update-hardware-badge:
-$(BADGE_CMD) $(BADGE_ARGS)
+	$(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
-$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
+	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
+
+token-place-samples:
+	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)

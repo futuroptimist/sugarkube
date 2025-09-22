@@ -460,6 +460,12 @@ def _run_build_script(tmp_path, env):
     metadata_script.write_text(metadata_src.read_text())
     metadata_script.chmod(0o755)
 
+    replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
+    replay_script = script_dir / "token_place_replay_samples.py"
+    if replay_src.exists():
+        replay_script.write_text(replay_src.read_text())
+        replay_script.chmod(0o755)
+
     verifier_src = repo_root / "scripts" / "pi_node_verifier.sh"
     verifier = script_dir / "pi_node_verifier.sh"
     verifier.write_text(verifier_src.read_text())
@@ -544,6 +550,11 @@ def _run_build_script(tmp_path, env):
     udev_dir = script_dir / "udev"
     udev_dir.mkdir(exist_ok=True)
     shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
+
+    samples_src = repo_root / "samples"
+    samples_dest = tmp_path / "samples"
+    if samples_src.exists():
+        shutil.copytree(samples_src, samples_dest, dirs_exist_ok=True)
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
