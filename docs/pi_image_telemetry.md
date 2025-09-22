@@ -97,6 +97,9 @@ Both invocations call `scripts/publish_telemetry.py`, which automatically locate
   a database shared outside your team.
 - Use `SUGARKUBE_TELEMETRY_VERIFIER_TIMEOUT` to accommodate slow Pi clusters that need more than the
   default three minutes for a full verifier run.
+- Pair telemetry uploads with the built-in exporters by scraping
+  `http://<pi-host>:12345/metrics` (Grafana Agent), `:9100` (node), and Netdata's dashboard on
+  `:19999`.
 
 By shipping telemetry hooks as an opt-in service, operators gain shared observability across lab
 installs while keeping the default image silent until explicitly configured.

@@ -130,7 +130,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Added `scripts/cloud-init/export-kubeconfig.sh`, installed during image builds and invoked by
     cloud-init to export a redacted kubeconfig and log its status. Documentation now references
     the `/boot/sugarkube-kubeconfig` handoff path for quick operator access.
-- [ ] Bundle lightweight exporters (Grafana Agent/Netdata/Prometheus) pre-configured for cluster observability.
+- [x] Bundle lightweight exporters (Grafana Agent/Netdata/Prometheus) pre-configured for cluster observability.
 
 ---
 

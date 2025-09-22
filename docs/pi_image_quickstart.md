@@ -122,6 +122,10 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   ```bash
   sudo systemctl status projects-compose.service
   ```
+- Metrics and dashboards are available immediately:
+  - `curl http://<pi-host>:9100/metrics` for the node exporter.
+  - `curl http://<pi-host>:12345/metrics` for the aggregated Grafana Agent feed.
+  - Visit `http://<pi-host>:19999` to load the Netdata UI and confirm charts render.
 - systemd now ships a `k3s-ready.target` that depends on the compose service and waits for
   `kubectl get nodes` to report `Ready`. Inspect the target to confirm the cluster finished
   bootstrapping:

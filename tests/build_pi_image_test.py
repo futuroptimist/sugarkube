@@ -508,6 +508,16 @@ def _run_build_script(tmp_path, env):
     shutil.copy(k3s_ready_src, k3s_ready_dest)
     k3s_ready_dest.chmod(0o755)
 
+    observability_src = cloud_init_src / "observability"
+    observability_dest = ci_dir / "observability"
+    observability_dest.mkdir(exist_ok=True)
+    for filename in [
+        "grafana-agent.env.example",
+        "grafana-agent.river",
+        "netdata.env.example",
+    ]:
+        shutil.copy(observability_src / filename, observability_dest / filename)
+
     first_boot_src = repo_root / "scripts" / "first_boot_service.py"
     shutil.copy(first_boot_src, script_dir / "first_boot_service.py")
     (script_dir / "first_boot_service.py").chmod(0o755)
