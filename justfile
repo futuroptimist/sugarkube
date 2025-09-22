@@ -29,6 +29,11 @@ telemetry_cmd := env_var_or_default(
     justfile_directory() + "/scripts/publish_telemetry.py",
 )
 telemetry_args := env_var_or_default("TELEMETRY_ARGS", "")
+badge_cmd := env_var_or_default(
+    "BADGE_CMD",
+    justfile_directory() + "/scripts/update_hardware_boot_badge.py",
+)
+badge_args := env_var_or_default("BADGE_ARGS", "")
 
 _default:
     @just --list
@@ -101,6 +106,11 @@ smoke-test-pi:
 # Publish anonymized telemetry payloads once.
 publish-telemetry:
     "{{telemetry_cmd}}" {{telemetry_args}}
+
+# Update the hardware boot conformance badge JSON
+# Usage: just update-hardware-badge BADGE_ARGS="--status warn --notes 'pi-b'"
+update-hardware-badge:
+    "{{badge_cmd}}" {{badge_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap

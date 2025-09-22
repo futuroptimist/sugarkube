@@ -141,7 +141,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
 - [x] Document how to run integration tests locally via `act`.
   - `docs/pi_image_builder_design.md` now includes a quick recipe for dry-running the release workflow with `act`.
-- [ ] Publish a conformance badge in the README showing last successful hardware boot.
+- [x] Publish a conformance badge in the README showing last successful hardware boot.
 
 ---
 
