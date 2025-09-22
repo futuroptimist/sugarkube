@@ -44,7 +44,8 @@ services:
   # extra-end
 
   node-exporter:
-    image: prom/node-exporter:v1.7.0
+    # prom/node-exporter:v1.7.0
+    image: prom/node-exporter@sha256:4cb2b9019f1757be8482419002cb7afe028fdba35d47958829e4cfeaf6246d80
     container_name: node-exporter
     restart: unless-stopped
     pid: host
@@ -55,7 +56,8 @@ services:
       - '--path.rootfs=/host'
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    # gcr.io/cadvisor/cadvisor:v0.47.2
+    image: gcr.io/cadvisor/cadvisor@sha256:e6c562b5e983f13624898b5b6a902c71999580dc362022fc327c309234c485d7
     container_name: cadvisor
     restart: unless-stopped
     privileged: true
@@ -70,7 +72,8 @@ services:
       - /dev/disk/:/dev/disk:ro
 
   grafana-agent:
-    image: grafana/agent:v0.39.4
+    # grafana/agent:v0.39.2
+    image: grafana/agent@sha256:d91efdf45e278fa78169e330998eca2d1ffa1417be35f8adbe8e0d959e056991
     container_name: grafana-agent
     restart: unless-stopped
     depends_on:
@@ -92,7 +95,8 @@ services:
       - /:/host:ro,rslave
 
   netdata:
-    image: netdata/netdata:stable
+    # netdata/netdata:stable
+    image: netdata/netdata@sha256:bebe2029f610e9c24c46dffb9f49296bdb53e8d8b748634cd85787e8621aa4d2
     container_name: netdata
     hostname: ${NETDATA_HOSTNAME:-sugarkube}
     restart: unless-stopped

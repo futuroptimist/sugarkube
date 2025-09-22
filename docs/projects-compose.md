@@ -72,6 +72,11 @@ metrics and live dashboards without any manual wiring:
   node with `NETDATA_CLAIM_TOKEN`/`NETDATA_CLAIM_ROOMS` to publish to Netdata
   Cloud, or leave the values blank to run locally.
 
+All four observability services are pinned by immutable SHA-256 digests.
+`tests/test_projects_compose_contracts.py` fails fast if any digest drifts, so
+remember to update the expected values when bumping versions or switching to a
+new registry mirror.
+
 `init-env.sh` copies the `.env.example` files into `.env` so you can update
 scrape intervals, override ports, or insert credentials without editing tracked
 files. Restart the stack after changes:

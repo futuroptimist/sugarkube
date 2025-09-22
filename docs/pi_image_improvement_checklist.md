@@ -139,7 +139,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 
 ## Testing & CI Hardening
 - [ ] Extend pi-image workflow with QEMU smoke tests that boot the image, wait for cloud-init, run verifier, and upload logs.
-- [ ] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
+- [x] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
+  - Added `tests/test_projects_compose_contracts.py` to enforce port exposure and
+    digest pinning for the compose stack, plus `tests/test_pi_node_verifier_health_check.py`
+    to validate the HTTP health probe logic end-to-end. Observability images in
+    `scripts/cloud-init/docker-compose.yml` are now pinned by SHA-256 digest.
 - [x] Integrate spellcheck/linkcheck gating (`pyspelling`, `linkchecker`) for docs.
 - [ ] Build hardware-in-the-loop test bench: USB PDU, HDMI capture, serial console, boot physical Pis, archive telemetry.
 - [x] Provide smoke-test harnesses (Ansible or shell) that SSH into fresh Pis, check k3s readiness, app health, and cluster convergence after reboots.
