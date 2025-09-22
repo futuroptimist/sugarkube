@@ -94,24 +94,25 @@ def test_observability_images_are_pinned():
     lines = _read_lines()
     expected = {
         "node-exporter": (
-            "prom/node-exporter@sha256:"
-            "4cb2b9019f1757be8482419002cb7afe028fdba35d47958829e4cfeaf6246d80"
+            "prom/node-exporter@sha256:",
+            "4cb2b9019f1757be8482419002cb7afe028fdba35d47958829e4cfeaf6246d80",
         ),
         "cadvisor": (
-            "gcr.io/cadvisor/cadvisor@sha256:"
-            "e6c562b5e983f13624898b5b6a902c71999580dc362022fc327c309234c485d7"
+            "gcr.io/cadvisor/cadvisor@sha256:",
+            "e6c562b5e983f13624898b5b6a902c71999580dc362022fc327c309234c485d7",
         ),
         "grafana-agent": (
-            "grafana/agent@sha256:"
-            "4e015c830781b818dd305b3280d8f1c4aea4181b78bb88adcc3d5bc710d0ed38"
+            "grafana/agent@sha256:",
+            "4e015c830781b818dd305b3280d8f1c4aea4181b78bb88adcc3d5bc710d0ed38",
         ),
         "netdata": (
-            "netdata/netdata@sha256:"
-            "bebe2029f610e9c24c46dffb9f49296bdb53e8d8b748634cd85787e8621aa4d2"
+            "netdata/netdata@sha256:",
+            "bebe2029f610e9c24c46dffb9f49296bdb53e8d8b748634cd85787e8621aa4d2",
         ),
     }
 
-    for service, image in expected.items():
+    for service, image_parts in expected.items():
+        image = "".join(image_parts)
         block = _service_block(lines, service)
         actual = _extract_image(block)
         assert actual == image, f"{service} image should remain pinned"
