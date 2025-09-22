@@ -41,7 +41,8 @@ confirm the quickstart stays accurate.
 
 | Script | Purpose | Primary docs | Supporting automation |
 | --- | --- | --- | --- |
-| `scripts/ssd_clone.py` | Clone the active SD card to an SSD with dry-run previews and resumable steps. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Clone the SD card to SSD with confidence" | `make clone-ssd`, `just clone-ssd` |
+| `scripts/ssd_clone.py` | Clone the active SD card with dry-run previews, auto-target selection, and resumable steps. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Automatic SSD cloning" | `make clone-ssd`, `just clone-ssd` |
+| `scripts/ssd_clone_service.py` + `scripts/systemd/ssd-clone.service` | Wait for a hot-plugged SSD, invoke the clone helper, and stop once `/var/log/sugarkube/ssd-clone.done` exists. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Automatic SSD cloning" | Bundled in pi image builds; triggered exclusively by the udev helper |
 | `scripts/ssd_post_clone_validate.py` | Validate cloned SSDs, compare boot config, and run stress tests. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Validate SSD clones", [SSD Post-Clone Validation](./ssd_post_clone_validation.md) | `make validate-ssd-clone`, `just validate-ssd-clone` |
 | `scripts/ssd_health_monitor.py` | Collect SMART metrics, temperatures, and wear indicators with optional reporting. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Monitor SSD health", [SSD Health Monitor](./ssd_health_monitor.md) | `make monitor-ssd-health`, `just monitor-ssd-health` |
 
