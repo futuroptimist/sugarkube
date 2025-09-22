@@ -191,7 +191,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     covers printing and placement so every enclosure ships with quickstart and
     troubleshooting links.
 - [x] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
-- [ ] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
+- [x] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
+  - Added `scripts/sugarkube_teams.py`, systemd integrations in `first_boot_service.py` and
+    `ssd_clone_service.py`, a `/usr/local/bin/sugarkube-teams` CLI, Makefile/justfile wrappers, and
+    the [Sugarkube Team Notifications](./pi_image_team_notifications.md) guide covering Slack/Matrix
+    setup and troubleshooting.
 
 ---
 

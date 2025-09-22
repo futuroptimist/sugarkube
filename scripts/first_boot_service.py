@@ -47,6 +47,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+try:  # pragma: no cover - optional dependency during upgrades
+    from sugarkube_teams import TeamsNotificationError, TeamsNotifier
+except Exception:  # pylint: disable=broad-except
+    TeamsNotifier = None  # type: ignore[assignment]
+    TeamsNotificationError = RuntimeError  # type: ignore[assignment]
+
 
 @dataclass
 class VerifierResult:
@@ -63,6 +69,22 @@ def _log(message: str) -> None:
 
 def _warn(message: str) -> None:
     print(f"[first-boot] warning: {message}", file=sys.stderr)
+
+
+def _notify_teams(event: str, status: str, lines: list[str], fields: dict[str, str]) -> None:
+    if TeamsNotifier is None:
+        return
+    try:
+        notifier = TeamsNotifier.from_env()
+    except TeamsNotificationError as exc:  # pragma: no cover - optional path
+        _warn(f"teams webhook misconfigured: {exc}")
+        return
+    if not notifier.enabled:
+        return
+    try:
+        notifier.notify(event=event, status=status, lines=lines, fields=fields)
+    except TeamsNotificationError as exc:  # pragma: no cover - network path
+        _warn(f"teams webhook notification failed: {exc}")
 
 
 def _expand_rootfs(marker: Path) -> None:
@@ -423,6 +445,17 @@ def main() -> int:
         _log("first-boot already completed successfully; exiting")
         return 0
 
+    _notify_teams(
+        "first-boot",
+        "starting",
+        [
+            f"Hostname: {socket.gethostname()}",
+            f"Report directory: {report_dir}",
+            f"cloud-init timeout: {cloud_init_timeout}s",
+        ],
+        {},
+    )
+
     _expand_rootfs(expand_marker)
     cloud_init_text, cloud_init_exit = _gather_cloud_init(cloud_init_timeout)
 
@@ -445,7 +478,39 @@ def main() -> int:
     if cloud_init_text is not None:
         (report_dir / "cloud-init.log").write_text(cloud_init_text + "\n")
 
+    summary_fields = {
+        "Overall": payload.get("overall", "unknown").upper(),
+    }
+    summary = payload.get("summary", {})
+    label_map = {
+        "cloud_init": "cloud-init",
+        "k3s": "k3s",
+        "projects_compose": "projects-compose",
+        "token_place": "token.place",
+        "dspace": "dspace",
+    }
+    for key, label in label_map.items():
+        status = str(summary.get(key, "unknown"))
+        summary_fields[label] = status
+
+    report_lines = [
+        f"Hostname: {payload.get('hostname', '')}",
+        f"Attempts: {payload.get('attempts', '')}",
+        f"Report directory: {report_dir}",
+        f"Summary JSON: {report_dir / 'summary.json'}",
+    ]
     overall_exit = result.exit_code if result.exit_code != 0 else log_exit
+    if overall_exit != 0:
+        report_lines.append(f"Verifier exit: {result.exit_code}")
+        report_lines.append(f"Log exit: {log_exit}")
+
+    _notify_teams(
+        "first-boot",
+        "success" if overall_exit == 0 else "failed",
+        report_lines,
+        summary_fields,
+    )
+
     if overall_exit != 0:
         fail_marker.write_text(f"verifier exit code {result.exit_code}; log exit code {log_exit}\n")
         if ok_marker.exists():

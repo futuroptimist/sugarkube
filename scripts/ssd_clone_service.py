@@ -4,12 +4,19 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shlex
 import subprocess
 import time
 from pathlib import Path
 from typing import Optional
+
+try:  # pragma: no cover - optional dependency during upgrades
+    from sugarkube_teams import TeamsNotificationError, TeamsNotifier
+except Exception:  # pylint: disable=broad-except
+    TeamsNotifier = None  # type: ignore[assignment]
+    TeamsNotificationError = RuntimeError  # type: ignore[assignment]
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("ssd_clone_module", SCRIPT_ROOT / "ssd_clone.py")
@@ -30,6 +37,22 @@ LOG_PREFIX = "[ssd-clone-service]"
 
 def log(message: str) -> None:
     print(f"{LOG_PREFIX} {message}", flush=True)
+
+
+def notify(event: str, status: str, lines: list[str], fields: dict[str, str]) -> None:
+    if TeamsNotifier is None:
+        return
+    try:
+        notifier = TeamsNotifier.from_env()
+    except TeamsNotificationError as exc:  # pragma: no cover - optional path
+        log(f"teams webhook misconfigured: {exc}")
+        return
+    if not notifier.enabled:
+        return
+    try:
+        notifier.notify(event=event, status=status, lines=lines, fields=fields)
+    except TeamsNotificationError as exc:  # pragma: no cover - network path
+        log(f"teams webhook notification failed: {exc}")
 
 
 def ensure_root() -> None:
@@ -72,6 +95,17 @@ def main() -> None:
     if not CLONE_HELPER.exists():
         raise SystemExit("/opt/sugarkube/ssd_clone.py not found; aborting.")
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    notify(
+        "ssd-clone",
+        "starting",
+        [
+            f"State file: {STATE_FILE}",
+            f"Done marker: {DONE_FILE}",
+            f"Auto target env: {AUTO_TARGET or 'auto-detect'}",
+        ],
+        {},
+    )
+
     elapsed = 0
     target: Optional[str] = None
     while elapsed <= MAX_WAIT:
@@ -85,15 +119,59 @@ def main() -> None:
             "Timed out waiting for an SSD. Insert a target disk or set "
             "SUGARKUBE_SSD_CLONE_TARGET before restarting the service."
         )
+        notify(
+            "ssd-clone",
+            "failed",
+            ["No target disk detected before timeout."],
+            {"State file": str(STATE_FILE)},
+        )
         raise SystemExit(0)
+    notify(
+        "ssd-clone",
+        "info",
+        [f"Target disk: {target}", f"Resume state exists: {STATE_FILE.exists()}"],
+        {},
+    )
     returncode = run_clone(target)
-    if returncode != 0 and not STATE_FILE.exists():
-        raise SystemExit(returncode)
-    if DONE_FILE.exists():
+    state_exists = STATE_FILE.exists()
+    done_exists = DONE_FILE.exists()
+    if done_exists:
         log("Clone marker present; nothing else to do.")
+
+    fields = {
+        "Target": target,
+        "State file": str(STATE_FILE),
+        "Done marker": str(DONE_FILE),
+    }
+    if state_exists:
+        try:
+            state_data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):  # pragma: no cover - best effort
+            state_data = {}
+        completed = state_data.get("completed", {})
+        if isinstance(completed, dict):
+            steps = [name for name, done in completed.items() if done]
+            if steps:
+                fields["Completed steps"] = ", ".join(sorted(steps))
+
+    final_status = "success" if returncode == 0 and done_exists else "failed"
+    notify(
+        "ssd-clone",
+        final_status,
+        [
+            f"Target disk: {target}",
+            f"Return code: {returncode}",
+            f"State file present: {state_exists}",
+            f"Done marker present: {done_exists}",
+        ],
+        fields,
+    )
+    if returncode != 0 and not state_exists:
+        raise SystemExit(returncode)
+    if done_exists:
         return
     raise SystemExit(returncode)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

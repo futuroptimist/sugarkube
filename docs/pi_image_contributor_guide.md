@@ -89,6 +89,13 @@ sync.
     [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md).
   - Related tooling: bundled by `build_pi_image.sh`, enabled via systemd, and covered by
     `tests/first_boot_service_test.py`.
+- `scripts/sugarkube_teams.py`
+  - Purpose: publish Slack or Matrix notifications summarizing first boot verifier status and SSD
+    clone milestones.
+  - Primary docs: [Sugarkube Team Notifications](./pi_image_team_notifications.md).
+  - Related tooling: imported by `first_boot_service.py` and `ssd_clone_service.py`, installed to
+    `/opt/sugarkube/` with a `/usr/local/bin/sugarkube-teams` CLI, and surfaced through
+    `make notify-teams` / `just notify-teams` wrappers.
 - `scripts/self_heal_service.py` + `sugarkube-self-heal@.service`
   - Purpose: respond to `projects-compose` and `cloud-init` failures by retrying Docker Compose pulls,
     running `cloud-init clean --logs`, and escalating to `rescue.target` with Markdown summaries under

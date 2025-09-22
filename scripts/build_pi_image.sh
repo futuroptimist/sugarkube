@@ -289,6 +289,12 @@ install -Dm755 "${REPO_ROOT}/scripts/ssd_clone.py" \
 install -Dm755 "${REPO_ROOT}/scripts/ssd_clone_service.py" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone_service.py"
 
+install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/sugarkube_teams.py"
+
+install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/usr/local/bin/sugarkube-teams"
+
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
 
