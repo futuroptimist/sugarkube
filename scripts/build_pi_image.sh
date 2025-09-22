@@ -282,12 +282,24 @@ install -Dm755 "${REPO_ROOT}/scripts/first_boot_service.py" \
 install -Dm755 "${REPO_ROOT}/scripts/self_heal_service.py" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/self_heal_service.py"
 
+install -Dm755 "${REPO_ROOT}/scripts/ssd_clone.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone.py"
+
+install -Dm755 "${REPO_ROOT}/scripts/ssd_clone_service.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone_service.py"
+
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
+
+install -Dm644 "${REPO_ROOT}/scripts/systemd/ssd-clone.service" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/ssd-clone.service"
 
 install -d "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
 ln -sf ../first-boot.service \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
+
+install -Dm644 "${REPO_ROOT}/scripts/udev/99-sugarkube-ssd-clone.rules" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/udev/rules.d/99-sugarkube-ssd-clone.rules"
 
 install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
