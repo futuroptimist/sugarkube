@@ -1,7 +1,7 @@
 # Sugarkube Team Notifications
 
 The Pi image now ships an optional `sugarkube-teams` helper that mirrors first boot and SSD clone
-progress to Slack or Matrix. Operators who enable the webhook receive a short message when:
+progress to Slack, Discord, or Matrix. Operators who enable the webhook receive a short message when:
 
 - `first_boot_service.py` starts running and once the verifier succeeds or fails.
 - `ssd_clone_service.py` begins waiting for a target disk, finds one, and exits with success or
@@ -21,7 +21,7 @@ SUGARKUBE_TEAMS_KIND="slack"
 # SUGARKUBE_TEAMS_MATRIX_ROOM="!room:example.org"
 # Example token placeholder for SUGARKUBE_TEAMS_TOKEN (e.g. syt_example_token)
 # SUGARKUBE_TEAMS_USERNAME="sugarkube"
-# SUGARKUBE_TEAMS_ICON=":rocket:"
+# SUGARKUBE_TEAMS_ICON=":rocket:"  # Discord treats this as avatar_url when set
 SUGARKUBE_TEAMS_VERIFY_TLS="true"
 SUGARKUBE_TEAMS_TIMEOUT="10"
 ```
@@ -59,6 +59,22 @@ Summary JSON: /boot/first-boot-report/summary.json
 
 Slack attachments include structured fields for the key verifier checks so failures immediately show
 which component is unhealthy.
+
+## Discord webhook example
+
+Discord webhooks work with a server channel or thread and accept the same enable/disable flow.
+
+1. In Discord choose **Edit Channel → Integrations → Webhooks → New Webhook** and copy its URL.
+2. Configure `/etc/sugarkube/teams-webhook.env` with:
+   - `SUGARKUBE_TEAMS_ENABLE="true"`
+   - `SUGARKUBE_TEAMS_KIND="discord"`
+   - `SUGARKUBE_TEAMS_URL="https://discord.com/api/webhooks/..."`
+   - (Optional) `SUGARKUBE_TEAMS_USERNAME` to override the webhook name.
+   - (Optional) `SUGARKUBE_TEAMS_ICON` to point at an avatar image URL.
+3. Restart the relevant services or trigger a new boot/clone cycle.
+
+Notifications post the heading as a message with embeds that list additional lines and structured
+fields so team members can scan the status quickly from mobile or desktop clients.
 
 ## Matrix homeserver example
 

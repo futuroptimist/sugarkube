@@ -208,6 +208,45 @@ def _send_slack(config: TeamsConfig, message: str, fields: Mapping[str, str]) ->
         raise TeamsNotificationError(f"Slack webhook failed: {exc}") from exc
 
 
+def _send_discord(
+    config: TeamsConfig,
+    heading: str,
+    lines: Sequence[str],
+    fields: Mapping[str, str],
+) -> None:
+    if not config.url:
+        raise TeamsNotificationError("SUGARKUBE_TEAMS_URL is required for Discord notifications")
+
+    payload: Dict[str, object] = {"content": heading}
+    if config.username:
+        payload["username"] = config.username
+    if config.icon:
+        payload["avatar_url"] = config.icon
+
+    description = "\n".join(line.rstrip() for line in lines if line)
+    discord_fields = [{"name": key, "value": str(value)} for key, value in fields.items()]
+
+    if description or discord_fields:
+        embed: Dict[str, object] = {"title": heading}
+        if description:
+            embed["description"] = description
+        if discord_fields:
+            embed["fields"] = discord_fields
+        payload["embeds"] = [embed]
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        config.url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        _open_request(req, verify_tls=config.verify_tls, timeout=config.timeout)
+    except urllib.error.URLError as exc:
+        raise TeamsNotificationError(f"Discord webhook failed: {exc}") from exc
+
+
 def _send_matrix(
     config: TeamsConfig,
     heading: str,
@@ -278,6 +317,8 @@ class TeamsNotifier:
         heading = _format_heading(event, status)
         if self.config.kind == "matrix":
             _send_matrix(self.config, heading, lines, fields)
+        elif self.config.kind == "discord":
+            _send_discord(self.config, heading, lines, fields)
         else:
             message = _build_plaintext(heading, lines)
             _send_slack(self.config, message, fields)

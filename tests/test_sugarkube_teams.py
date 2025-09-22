@@ -125,3 +125,77 @@ def test_disabled_notification_skips_requests(monkeypatch, tmp_path, http_server
     notifier = MODULE.TeamsNotifier.from_env()
     notifier.notify(event="first-boot", status="success", lines=["skip"], fields={})
     assert _Recorder.records == []
+
+
+def test_discord_notification(monkeypatch, tmp_path, http_server):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                'SUGARKUBE_TEAMS_ENABLE="true"',
+                'SUGARKUBE_TEAMS_KIND="discord"',
+                f'SUGARKUBE_TEAMS_URL="http://127.0.0.1:{http_server.server_port}"',
+                'SUGARKUBE_TEAMS_USERNAME="Sugarkube"',
+                'SUGARKUBE_TEAMS_ICON="https://example.com/icon.png"',
+            ]
+        ),
+    )
+    monkeypatch.setenv("SUGARKUBE_TEAMS_ENV", str(env_path))
+    notifier = MODULE.TeamsNotifier.from_env()
+    notifier.notify(
+        event="first-boot",
+        status="info",
+        lines=["Disk resized", "Services online"],
+        fields={"Overall": "PASS", "K3s": "Ready"},
+    )
+    assert len(_Recorder.records) == 1
+    method, body, _path = _Recorder.records[0]
+    assert method == "POST"
+    payload = json.loads(body)
+    assert payload["content"].startswith("\u2139\ufe0f Sugarkube first boot")
+    assert payload["username"] == "Sugarkube"
+    assert payload["avatar_url"] == "https://example.com/icon.png"
+    embed = payload["embeds"][0]
+    assert embed["title"].startswith("\u2139\ufe0f Sugarkube first boot")
+    assert "Disk resized" in embed["description"]
+    field_names = {field["name"] for field in embed["fields"]}
+    assert field_names == {"Overall", "K3s"}
+
+
+def test_load_config_env_precedence(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                "SUGARKUBE_TEAMS_ENABLE=yes",
+                "SUGARKUBE_TEAMS_URL=https://example.invalid/webhook",
+                "SUGARKUBE_TEAMS_KIND=matrix",
+                "SUGARKUBE_TEAMS_TIMEOUT=5.5",
+                "SUGARKUBE_TEAMS_VERIFY_TLS=no",
+                "SUGARKUBE_TEAMS_USERNAME=from-file",
+                "SUGARKUBE_TEAMS_ICON=from-file",
+                "SUGARKUBE_TEAMS_MATRIX_ROOM=!room:file",
+            ]
+        ),
+    )
+    config = MODULE.load_config(
+        {
+            "SUGARKUBE_TEAMS_ENV": str(env_path),
+            "SUGARKUBE_TEAMS_USERNAME": "override",
+            "SUGARKUBE_TEAMS_TOKEN": "secret",
+        }
+    )
+    assert config.enable is True
+    assert config.url == "https://example.invalid/webhook"
+    assert config.kind == "matrix"
+    assert config.timeout == 5.5
+    assert config.verify_tls is False
+    assert config.username == "override"
+    assert config.icon == "from-file"
+    assert config.matrix_room == "!room:file"
+    assert config.auth_credential == "secret"
+
+
+def test_parse_fields_error():
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._parse_fields(["missing-value"])  # noqa: SLF001
