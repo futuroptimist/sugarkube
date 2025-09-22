@@ -78,6 +78,9 @@ the docs you will see the term used in both contexts.
     `--help` for usage
   - `pi_smoke_test.py` — SSH wrapper that runs the verifier remotely, supports reboot checks,
     and emits JSON summaries for CI harnesses
+  - `pi_support_bundle.py` — capture Kubernetes, `systemd`, and docker compose diagnostics into
+    timestamped archives; the release workflow uploads a `sugarkube-support-bundle` artifact when
+    support bundle secrets are configured. See [Pi Support Bundles](docs/pi_support_bundles.md).
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
     available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see

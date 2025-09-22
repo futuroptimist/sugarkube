@@ -30,10 +30,12 @@ REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
 REHEARSAL_ARGS ?=
 TOKEN_PLACE_SAMPLE_CMD ?= $(CURDIR)/scripts/token_place_replay_samples.py
 TOKEN_PLACE_SAMPLE_ARGS ?= --samples-dir $(CURDIR)/samples/token_place
+SUPPORT_BUNDLE_CMD ?= $(CURDIR)/scripts/pi_support_bundle.py
+SUPPORT_BUNDLE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
-        publish-telemetry update-hardware-badge rehearse-join \
+        publish-telemetry update-hardware-badge rehearse-join support-bundle \
         token-place-samples
 
 install-pi-image:
@@ -92,4 +94,7 @@ rehearse-join:
 	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
 
 token-place-samples:
-	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)
+        $(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)
+
+support-bundle:
+        $(SUPPORT_BUNDLE_CMD) $(SUPPORT_BUNDLE_ARGS)

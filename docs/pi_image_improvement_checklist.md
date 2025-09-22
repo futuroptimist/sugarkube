@@ -152,7 +152,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Added `scripts/pi_smoke_test.py` plus Makefile/just wrappers so operators can run
     verifier checks over SSH, optionally rebooting hosts to confirm convergence and
     emitting JSON summaries for CI pipelines.
-- [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
+- [x] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
+  - `scripts/pi_support_bundle.py` gathers Kubernetes, Helm, Compose, and journal data into
+    timestamped archives, `make support-bundle`/`just support-bundle` forward flags, and the
+    release workflow now uploads a `sugarkube-support-bundle` artifact whenever the
+    `SUPPORT_BUNDLE_*` secrets are present.
 - [x] Document how to run integration tests locally via `act`.
   - `docs/pi_image_builder_design.md` now includes a quick recipe for dry-running the release workflow with `act`.
 - [x] Publish a conformance badge in the README showing last successful hardware boot.

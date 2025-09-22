@@ -335,6 +335,21 @@ stores backups and writes a Markdown report to `/boot/sugarkube-rollback-report.
 See [SSD Recovery and Rollback](./ssd_recovery.md) for the full walkthrough and
 Makefile/justfile shortcuts.
 
+## Capture support bundles for debugging
+
+When a node misbehaves, collect a support bundle so Kubernetes events, Helm state, and journal logs
+travel with your bug report:
+
+```bash
+./scripts/pi_support_bundle.py pi-a.local --identity ~/.ssh/pi-support
+```
+
+The helper writes timestamped folders under `~/sugarkube/support-bundles/` and archives each run as
+`<timestamp>-<host>.tar.gz`. Prefer wrappers? Export
+`SUPPORT_BUNDLE_ARGS="pi-a.local --identity ~/.ssh/pi-support"` and run either
+`make support-bundle` or `just support-bundle`. See [Pi Support Bundles](./pi_support_bundles.md)
+for flag details and the CI integration notes.
+
 ## Codespaces-friendly automation
 
 - Launch a new GitHub Codespace on this repository using the default Ubuntu image.

@@ -57,6 +57,9 @@ jobs:
       CLONE_SUGARKUBE: ${{ github.event.inputs.clone_sugarkube }}
       CLONE_TOKEN_PLACE: ${{ github.event.inputs.clone_token_place }}
       CLONE_DSPACE: ${{ github.event.inputs.clone_dspace }}
+      SUPPORT_BUNDLE_HOSTS: ${{ secrets.SUPPORT_BUNDLE_HOSTS }}
+      SUPPORT_BUNDLE_SSH_KEY: ${{ secrets.SUPPORT_BUNDLE_SSH_KEY }}
+      SUPPORT_BUNDLE_SSH_USER: ${{ secrets.SUPPORT_BUNDLE_SSH_USER }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -164,3 +167,34 @@ jobs:
           path: |
             ./sugarkube.img.xz
             ./sugarkube.img.xz.sha256
+
+      - name: Write support bundle SSH key
+        if: env.SUPPORT_BUNDLE_HOSTS != '' && env.SUPPORT_BUNDLE_SSH_KEY != ''
+        run: |
+          printf '%s' "${SUPPORT_BUNDLE_SSH_KEY}" > support-bundle.key
+          chmod 600 support-bundle.key
+
+      - name: Capture support bundle
+        if: env.SUPPORT_BUNDLE_HOSTS != '' && env.SUPPORT_BUNDLE_SSH_KEY != ''
+        continue-on-error: true
+        run: |
+          mkdir -p support-bundles
+          python3 scripts/pi_support_bundle.py \
+            --output-dir support-bundles \
+            --identity support-bundle.key \
+            --user "${SUPPORT_BUNDLE_SSH_USER:-pi}" \
+            --ssh-option StrictHostKeyChecking=no \
+            --ssh-option UserKnownHostsFile=/dev/null \
+            ${SUPPORT_BUNDLE_HOSTS}
+
+      - name: Remove support bundle SSH key
+        if: env.SUPPORT_BUNDLE_HOSTS != '' && env.SUPPORT_BUNDLE_SSH_KEY != ''
+        run: rm -f support-bundle.key
+
+      - name: Upload support bundle artifact
+        if: env.SUPPORT_BUNDLE_HOSTS != '' && env.SUPPORT_BUNDLE_SSH_KEY != '' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sugarkube-support-bundle
+          path: support-bundles/
+          if-no-files-found: warn
