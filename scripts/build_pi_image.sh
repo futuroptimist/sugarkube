@@ -314,6 +314,16 @@ install -Dm755 "${APPLY_HELM_BUNDLES_PATH}" \
 
 install -Dm755 "${K3S_READY_PATH}" \
   "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-ready.sh"
+install -Dm755 "${REPO_ROOT}/scripts/token_place_replay_samples.py" \
+  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/token_place_replay_samples.py"
+
+TOKEN_PLACE_SAMPLES_SRC="${REPO_ROOT}/samples/token_place"
+TOKEN_PLACE_SAMPLES_DEST="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/samples/token-place"
+if [ -d "${TOKEN_PLACE_SAMPLES_SRC}" ]; then
+  rm -rf "${TOKEN_PLACE_SAMPLES_DEST}"
+  mkdir -p "${TOKEN_PLACE_SAMPLES_DEST}"
+  cp -a "${TOKEN_PLACE_SAMPLES_SRC}/." "${TOKEN_PLACE_SAMPLES_DEST}/"
+fi
 
 CLONE_SUGARKUBE="${CLONE_SUGARKUBE:-false}"
 CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE:-true}"
@@ -347,6 +357,12 @@ else
     "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.env.example"
   install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/netdata.env.example" \
     "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/netdata.env.example"
+  if [[ "$CLONE_TOKEN_PLACE" == "true" && -d "${TOKEN_PLACE_SAMPLES_SRC}" ]]; then
+    token_place_samples_project="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/token.place/samples"
+    rm -rf "${token_place_samples_project}"
+    mkdir -p "${token_place_samples_project}"
+    cp -a "${TOKEN_PLACE_SAMPLES_SRC}/." "${token_place_samples_project}/"
+  fi
 fi
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
