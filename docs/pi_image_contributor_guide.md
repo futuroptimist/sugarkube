@@ -105,6 +105,12 @@ sync.
     [Pi Image Smoke Test Harness](./pi_smoke_test.md).
   - Related tooling: wrapped by `make smoke-test-pi` and `just smoke-test-pi` so operators can pass
     flags through `SMOKE_ARGS` without remembering the Python entry point.
+- `scripts/collect_support_bundle.py`
+  - Purpose: capture kubectl, Helm, docker compose, journal, and first-boot artifacts into a
+    tarball for CI runs and manual troubleshooting.
+  - Primary docs: [Pi Support Bundle Collector](./pi_support_bundle.md).
+  - Related tooling: exposed via `make collect-support-bundle`, `just support-bundle`, and executed
+    automatically from the pi-image workflows to publish artifacts on every run.
 - `scripts/update_hardware_boot_badge.py`
   - Purpose: generate shields.io endpoint JSON so the README hardware boot badge reflects the
     latest physical verification run.

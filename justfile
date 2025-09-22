@@ -47,6 +47,11 @@ token_place_sample_args := env_var_or_default(
     "TOKEN_PLACE_SAMPLE_ARGS",
     "--samples-dir " + justfile_directory() + "/samples/token_place",
 )
+support_bundle_cmd := env_var_or_default(
+    "SUPPORT_BUNDLE_CMD",
+    justfile_directory() + "/scripts/collect_support_bundle.py",
+)
+support_bundle_args := env_var_or_default("SUPPORT_BUNDLE_ARGS", "")
 
 _default:
     @just --list
@@ -152,3 +157,8 @@ qr-codes:
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
     "{{token_place_sample_cmd}}" {{token_place_sample_args}}
+
+# Collect Kubernetes, Helm, compose, and journal diagnostics into a tarball support bundle
+# Usage: just support-bundle SUPPORT_BUNDLE_ARGS="--host pi-a.local --include-first-boot-report"
+support-bundle:
+    "{{support_bundle_cmd}}" {{support_bundle_args}}

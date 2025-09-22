@@ -152,7 +152,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Added `scripts/pi_smoke_test.py` plus Makefile/just wrappers so operators can run
     verifier checks over SSH, optionally rebooting hosts to confirm convergence and
     emitting JSON summaries for CI pipelines.
-- [ ] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
+- [x] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
+  - `scripts/collect_support_bundle.py` gathers kubectl/Helm/Compose/journal output plus optional
+    `/boot/first-boot-report` archives. `make collect-support-bundle` and `just support-bundle`
+    expose it locally, and both `pi-image` workflows now upload `support-bundle.tar.gz` artifacts on
+    every run (using remote SSH credentials when secrets are present).
 - [x] Document how to run integration tests locally via `act`.
   - `docs/pi_image_builder_design.md` now includes a quick recipe for dry-running the release workflow with `act`.
 - [x] Publish a conformance badge in the README showing last successful hardware boot.

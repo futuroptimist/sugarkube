@@ -155,6 +155,10 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
 - When symptoms fall outside the happy path, use the
   [Pi Boot & Cluster Troubleshooting Matrix](./pi_boot_troubleshooting.md) to map
   LED patterns, log locations, and fixes.
+- Need to escalate a failure? Generate a tarball snapshot with
+  [`collect_support_bundle.py`](../scripts/collect_support_bundle.py) or
+  `just support-bundle` and review the outputs documented in the
+  [Pi Support Bundle Collector](./pi_support_bundle.md) guide before filing an issue.
 - A new `first-boot.service` waits for `cloud-init` to finish, expands the root
   filesystem when needed, then runs `pi_node_verifier.sh` (with retries) and
   writes Markdown, HTML, and JSON snapshots under `/boot/first-boot-report/`.

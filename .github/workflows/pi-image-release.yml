@@ -162,6 +162,43 @@ jobs:
             sugarkube.build.log
             RELEASE_NOTES.md
 
+      - name: Collect support bundle
+        if: always()
+        env:
+          SUPPORT_BUNDLE_HOST: ${{ secrets.SUPPORT_BUNDLE_HOST }}
+          SUPPORT_BUNDLE_USER: ${{ secrets.SUPPORT_BUNDLE_USER }}
+          SUPPORT_BUNDLE_KEY: ${{ secrets.SUPPORT_BUNDLE_KEY }}
+        run: |
+          set -euo pipefail
+          args=("--output" "support-bundle.tar.gz")
+          if [[ -n "${SUPPORT_BUNDLE_HOST:-}" ]]; then
+            args+=("--host" "${SUPPORT_BUNDLE_HOST}")
+          fi
+          if [[ -n "${SUPPORT_BUNDLE_USER:-}" ]]; then
+            args+=("--user" "${SUPPORT_BUNDLE_USER}")
+          fi
+          key_path=""
+          if [[ -n "${SUPPORT_BUNDLE_KEY:-}" ]]; then
+            key_path="$(mktemp)"
+            printf '%s\n' "${SUPPORT_BUNDLE_KEY}" >"${key_path}"
+            chmod 600 "${key_path}"
+            args+=("--identity" "${key_path}")
+          fi
+          if [[ -n "${SUPPORT_BUNDLE_HOST:-}" ]]; then
+            args+=("--include-first-boot-report")
+          fi
+          python3 scripts/collect_support_bundle.py "${args[@]}"
+          if [[ -n "${key_path}" ]]; then
+            shred -u "${key_path}"
+          fi
+
+      - name: Upload support bundle artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: support-bundle
+          path: support-bundle.tar.gz
+
       - name: Publish GitHub release
         uses: ncipollo/release-action@v1
         with:
