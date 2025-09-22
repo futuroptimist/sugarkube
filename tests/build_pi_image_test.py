@@ -465,6 +465,12 @@ def _run_build_script(tmp_path, env):
     verifier.write_text(verifier_src.read_text())
     verifier.chmod(0o755)
 
+    token_place_replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
+    token_place_replay_dest = script_dir / "token_place_replay_samples.py"
+    if token_place_replay_src.exists():
+        shutil.copy(token_place_replay_src, token_place_replay_dest)
+        token_place_replay_dest.chmod(0o755)
+
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
 
@@ -545,6 +551,14 @@ def _run_build_script(tmp_path, env):
     udev_dir.mkdir(exist_ok=True)
     shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
 
+    token_place_samples_src = repo_root / "samples" / "token_place"
+    if token_place_samples_src.exists():
+        shutil.copytree(
+            token_place_samples_src,
+            tmp_path / "samples" / "token_place",
+            dirs_exist_ok=True,
+        )
+
     result = subprocess.run(
         ["/bin/bash", str(script)],
         env=env,
@@ -609,6 +623,12 @@ def test_installs_ssd_clone_service(tmp_path):
     assert not wants_link.exists()
     udev_rule = stage_root / "etc" / "udev" / "rules.d" / "99-sugarkube-ssd-clone.rules"
     assert udev_rule.exists()
+    token_place_replay = stage_root / "opt" / "sugarkube" / "token_place_replay_samples.py"
+    assert token_place_replay.exists()
+    token_place_samples = stage_root / "opt" / "sugarkube" / "samples" / "token-place"
+    assert token_place_samples.is_dir()
+    project_samples = stage_root / "opt" / "projects" / "token.place" / "samples"
+    assert project_samples.is_dir()
     shutil.rmtree(work_dir)
     assert not (tmp_path / "sugarkube.img.xz.xz").exists()
 
