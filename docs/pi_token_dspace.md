@@ -66,10 +66,14 @@ docker compose version
    sudo systemctl status k3s-ready.target
    ```
 4. Verify each app on the LAN:
-   ```sh
-   curl http://<pi-host>:5000  # token.place
-   curl http://<pi-host>:3000  # dspace
-   ```
+ ```sh
+ curl http://<pi-host>:5000  # token.place
+ curl http://<pi-host>:3000  # dspace
+ ```
+- The image now ships sample payloads under
+  `/opt/projects/token.place/samples/`. Run
+  `/opt/sugarkube/token_place_replay_samples.py` to capture JSON health/model/chat
+  reports in `~/sugarkube/reports/token-place-samples/` without leaving SSH.
 
 ### Automate health verification
 
