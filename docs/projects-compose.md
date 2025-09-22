@@ -72,6 +72,12 @@ metrics and live dashboards without any manual wiring:
   node with `NETDATA_CLAIM_TOKEN`/`NETDATA_CLAIM_ROOMS` to publish to Netdata
   Cloud, or leave the values blank to run locally.
 
+Each exporter image is pinned to an explicit SHA-256 digest and a pytest
+contract guards the compose file so upgrades fail fast if tags drift or digests
+change unexpectedly. The same contract verifies that token.place and dspace
+continue exposing ports **5000** and **3000**. Run `pytest` to confirm the
+checks pass after editing `docker-compose.yml`.
+
 `init-env.sh` copies the `.env.example` files into `.env` so you can update
 scrape intervals, override ports, or insert credentials without editing tracked
 files. Restart the stack after changes:
