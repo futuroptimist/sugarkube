@@ -508,6 +508,14 @@ def _run_build_script(tmp_path, env):
     shutil.copy(k3s_ready_src, k3s_ready_dest)
     k3s_ready_dest.chmod(0o755)
 
+    observability_src = cloud_init_src / "observability"
+    if observability_src.exists():
+        shutil.copytree(
+            observability_src,
+            ci_dir / "observability",
+            dirs_exist_ok=True,
+        )
+
     first_boot_src = repo_root / "scripts" / "first_boot_service.py"
     shutil.copy(first_boot_src, script_dir / "first_boot_service.py")
     (script_dir / "first_boot_service.py").chmod(0o755)

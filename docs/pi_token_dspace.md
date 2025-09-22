@@ -141,10 +141,12 @@ helper that creates blank files when a project omits an example, and seeds a
 default `PORT` so containers start with predictable endpoints. Edit these files
 to set variables like ports, API URLs, or secrets.
 
-| Service     | Path to env file                     | Key variables (examples) |
-| ----------- | ------------------------------------ | ------------------------ |
-| token.place | `/opt/projects/token.place/.env`     | `TOKEN_PLACE_ENV`, `SUPABASE_URL`, `SUPABASE_KEY`, `PORT` |
-| dspace      | `/opt/projects/dspace/frontend/.env` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `PORT` |
+| Service       | Path to env file                               | Key variables |
+| ------------- | ---------------------------------------------- | ------------- |
+| token.place   | `/opt/projects/token.place/.env`               | `PORT`, Supabase secrets |
+| dspace        | `/opt/projects/dspace/frontend/.env`           | `PORT`, Supabase anon key |
+| grafana-agent | `/opt/projects/observability/grafana-agent.env` | Cluster label, scrape interval |
+| netdata       | `/opt/projects/observability/netdata.env`       | Claim token, Netdata port |
 
 Add more calls to `ensure_env` under the `# extra-start` marker in `init-env.sh`
 for additional repositories. Common variables include:
@@ -152,7 +154,13 @@ for additional repositories. Common variables include:
 - **token.place:** `PORT`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`
 - **dspace:** `PORT`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-See each project's README for the full list of configuration options.
+See each project's README for the full list of configuration options. The
+observability services ship ready-to-go: scrape
+`http://<pi-host>:9100/metrics` for host stats, `http://<pi-host>:8080/metrics`
+for container insights, `http://<pi-host>:12345/metrics` for the aggregated
+Grafana Agent feed, and `http://<pi-host>:19999` for Netdata's dashboard. Edit
+the `.env` files to change scrape intervals, claim Netdata nodes, or disable
+components entirely.
 
 ### token.place variables
 

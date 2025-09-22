@@ -63,12 +63,14 @@ the docs you will see the term used in both contexts.
     clean up temporary work directories, use POSIX `test -ef` to compare paths
     without `realpath`, and fall back to `unzip` when `bsdtar` is unavailable
   - `build_pi_image.sh` — build a Raspberry Pi OS image with cloud-init and
-    k3s preinstalled; embeds `pi_node_verifier.sh` and clones `token.place` and
-    `democratizedspace/dspace` by default. Customize branches with
-    `TOKEN_PLACE_BRANCH` (default `main`) and `DSPACE_BRANCH` (default `v3`). Set
-    `CLONE_SUGARKUBE=true` to include this repo and pass space-separated Git URLs
-    via `EXTRA_REPOS` to clone additional projects; needs a valid `user-data.yaml`
-    and ~10 GB free disk space. Set `DEBUG=1` to trace script execution.
+    k3s preinstalled; embeds `pi_node_verifier.sh`, clones `token.place` and
+    `democratizedspace/dspace` by default, and now ships node exporter,
+    cAdvisor, Grafana Agent, and Netdata containers for observability. Customize
+    branches with `TOKEN_PLACE_BRANCH` (default `main`) and `DSPACE_BRANCH`
+    (default `v3`). Set `CLONE_SUGARKUBE=true` to include this repo and pass
+    space-separated Git URLs via `EXTRA_REPOS` to clone additional projects;
+    needs a valid `user-data.yaml` and ~10 GB free disk space. Set `DEBUG=1` to
+    trace script execution.
   - `flash_pi_media.sh` — stream `.img` or `.img.xz` directly to removable
     media with SHA-256 verification and automatic eject. A PowerShell wrapper
     (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
