@@ -30,6 +30,8 @@ files so containers start with sensible defaults:
 | --- | --- | --- |
 | token.place | `/opt/projects/token.place/.env` | `PORT=5000` |
 | dspace | `/opt/projects/dspace/frontend/.env` | `PORT=3000` |
+| grafana-agent | `/opt/projects/observability/grafana-agent.env` | 30-second scrape interval |
+| netdata | `/opt/projects/observability/netdata.env` | Port 19999, unclaimed |
 
 Edit the files to add variables described in each project's README, such as API
 keys or upstream URLs.
@@ -51,6 +53,32 @@ Grow the compose stack with additional repositories:
 
 These hooks keep the Pi image ready for new services without editing existing
 entries.
+
+## Built-in observability exporters
+
+The compose file now ships a small observability stack so fresh nodes expose
+metrics and live dashboards without any manual wiring:
+
+- `prom/node-exporter` on **port 9100** surfaces kernel, CPU, memory, and disk
+  metrics from the host namespace.
+- `gcr.io/cadvisor/cadvisor` on **port 8080** exports container and cgroup
+  statistics for the compose workloads.
+- `grafana/agent` listens on **port 12345** and fan-outs both exporters into a
+  single `/metrics` endpoint. Operators can point an existing Prometheus server
+  at `http://<pi-host>:12345/metrics` or extend the Flow config at
+  `/opt/projects/observability/grafana-agent.river` to add remote_write targets
+  and extra scrapes.
+- `netdata/netdata` serves a self-hosted dashboard on **port 19999**. Claim the
+  node with `NETDATA_CLAIM_TOKEN`/`NETDATA_CLAIM_ROOMS` to publish to Netdata
+  Cloud, or leave the values blank to run locally.
+
+`init-env.sh` copies the `.env.example` files into `.env` so you can update
+scrape intervals, override ports, or insert credentials without editing tracked
+files. Restart the stack after changes:
+
+```sh
+sudo systemctl restart projects-compose.service
+```
 
 ## Self-healing retries
 

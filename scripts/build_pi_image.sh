@@ -341,6 +341,12 @@ else
     "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/start-projects.sh"
   install -Dm755 "${INIT_ENV_PATH}" \
     "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/init-env.sh"
+  install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/grafana-agent.river" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.river"
+  install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/grafana-agent.env.example" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.env.example"
+  install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/netdata.env.example" \
+    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/netdata.env.example"
 fi
 
 run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
