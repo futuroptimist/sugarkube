@@ -39,6 +39,14 @@ rehearsal_cmd := env_var_or_default(
     justfile_directory() + "/scripts/pi_multi_node_join_rehearsal.py",
 )
 rehearsal_args := env_var_or_default("REHEARSAL_ARGS", "")
+token_place_sample_cmd := env_var_or_default(
+    "TOKEN_PLACE_SAMPLE_CMD",
+    justfile_directory() + "/scripts/token_place_replay_samples.py",
+)
+token_place_sample_args := env_var_or_default(
+    "TOKEN_PLACE_SAMPLE_ARGS",
+    "--samples-dir " + justfile_directory() + "/samples/token_place",
+)
 
 _default:
     @just --list
@@ -139,3 +147,8 @@ docs-verify:
 # Usage: just qr-codes QR_ARGS="--output-dir ~/qr"
 qr-codes:
     "{{qr_cmd}}" {{qr_args}}
+
+# Replay bundled token.place sample payloads and write reports
+# Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
+token-place-samples:
+    "{{token_place_sample_cmd}}" {{token_place_sample_args}}
