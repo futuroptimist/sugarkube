@@ -83,16 +83,23 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```
 2. Note the node token in `/var/lib/rancher/k3s/server/node-token` (it is also copied
    to `/boot/sugarkube-node-token`) and the Pi's IP address
-3. On each additional Pi, join the cluster:
+3. Before inviting other nodes, run a rehearsal from your workstation to confirm the token is
+   mirrored and workers can reach the API:
+   ```bash
+   make rehearse-join REHEARSAL_ARGS="sugar-control.local --agents sugar-worker.local"
+   ```
+   The helper prints the join command template and checks each worker for network reachability,
+   existing `k3s-agent` state, and leftover registration files.
+4. On each additional Pi, join the cluster:
    ```bash
    curl -sfL https://get.k3s.io | \
    K3S_URL=https://<control-ip>:6443 K3S_TOKEN=<token> sh -
    ```
-4. Check that all nodes are ready:
+5. Check that all nodes are ready:
    ```bash
    sudo kubectl get nodes
    ```
-5. (Optional) Copy `/boot/sugarkube-kubeconfig-full` to your workstation for remote
+6. (Optional) Copy `/boot/sugarkube-kubeconfig-full` to your workstation for remote
    `kubectl` access.
 
 ## 6. Deploy applications

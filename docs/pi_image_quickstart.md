@@ -150,6 +150,13 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   is `active`, and curls the token.place and dspace endpoints. Override the HTTP
   probes by exporting `TOKEN_PLACE_HEALTH_URL`, `DSPACE_HEALTH_URL`, and related
   `*_INSECURE` flags before invoking `/opt/sugarkube/pi_node_verifier.sh`.
+- Before plugging in additional hardware, rehearse the join flow from your workstation:
+  ```bash
+  make rehearse-join REHEARSAL_ARGS="sugar-control.local --agents pi-a.local pi-b.local"
+  ```
+  The helper retrieves the mirrored `/boot/sugarkube-node-token`, prints a join command template,
+  and SSHes into each candidate node to confirm `https://get.k3s.io` and the k3s API are reachable.
+  See [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) for option walkthroughs.
 - When `cloud-init` or `projects-compose.service` fail, `sugarkube-self-heal@.service`
   retries Docker Compose pulls, runs `cloud-init clean --logs`, and restarts the units.
   After three unsuccessful attempts it stores escalation summaries under

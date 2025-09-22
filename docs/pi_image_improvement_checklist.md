@@ -125,7 +125,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     now land under `/boot/first-boot-report/helm-bundles/` for air-gapped debugging, and the
     workflow is documented in [Sugarkube Helm Bundle Hooks](./pi_helm_bundles.md).
 - [ ] Bundle sample datasets and token.place collections for first-launch validation.
-- [ ] Document and script multi-node join rehearsal for scaling clusters.
+- [x] Document and script multi-node join rehearsal for scaling clusters.
+  - Added `scripts/pi_multi_node_join_rehearsal.py`, `make rehearse-join`/`just rehearse-join`
+    wrappers, and the [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) guide to
+    walk operators through join-secret retrieval and agent preflight checks.
 - [x] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
   - Added `scripts/cloud-init/export-kubeconfig.sh`, installed during image builds and invoked by
     cloud-init to export a redacted kubeconfig and log its status. Documentation now references
