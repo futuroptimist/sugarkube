@@ -532,6 +532,10 @@ def _run_build_script(tmp_path, env):
     shutil.copy(ssd_clone_service_src, script_dir / "ssd_clone_service.py")
     (script_dir / "ssd_clone_service.py").chmod(0o755)
 
+    teams_src = repo_root / "scripts" / "sugarkube_teams.py"
+    shutil.copy(teams_src, script_dir / "sugarkube_teams.py")
+    (script_dir / "sugarkube_teams.py").chmod(0o755)
+
     token_place_replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
     shutil.copy(token_place_replay_src, script_dir / "token_place_replay_samples.py")
     (script_dir / "token_place_replay_samples.py").chmod(0o755)
@@ -605,6 +609,8 @@ def test_installs_ssd_clone_service(tmp_path):
     stage_root = work_dir / "pi-gen" / "stage2" / "01-sys-tweaks" / "files"
     assert (stage_root / "opt" / "sugarkube" / "ssd_clone.py").exists()
     assert (stage_root / "opt" / "sugarkube" / "ssd_clone_service.py").exists()
+    assert (stage_root / "opt" / "sugarkube" / "sugarkube_teams.py").exists()
+    assert (stage_root / "usr" / "local" / "bin" / "sugarkube-teams").exists()
     service_path = stage_root / "etc" / "systemd" / "system" / "ssd-clone.service"
     assert service_path.exists()
     wants_link = (

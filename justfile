@@ -29,6 +29,11 @@ telemetry_cmd := env_var_or_default(
     justfile_directory() + "/scripts/publish_telemetry.py",
 )
 telemetry_args := env_var_or_default("TELEMETRY_ARGS", "")
+teams_cmd := env_var_or_default(
+    "TEAMS_CMD",
+    justfile_directory() + "/scripts/sugarkube_teams.py",
+)
+teams_args := env_var_or_default("TEAMS_ARGS", "")
 badge_cmd := env_var_or_default(
     "BADGE_CMD",
     justfile_directory() + "/scripts/update_hardware_boot_badge.py",
@@ -119,6 +124,10 @@ smoke-test-pi:
 # Publish anonymized telemetry payloads once.
 publish-telemetry:
     "{{telemetry_cmd}}" {{telemetry_args}}
+
+# Send a manual Slack/Matrix notification using sugarkube-teams
+notify-teams:
+    "{{teams_cmd}}" {{teams_args}}
 
 # Update the hardware boot conformance badge JSON
 # Usage: just update-hardware-badge BADGE_ARGS="--status warn --notes 'pi-b'"

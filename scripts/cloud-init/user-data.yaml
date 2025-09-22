@@ -151,6 +151,26 @@ write_files:
       SUGARKUBE_TELEMETRY_TIMEOUT="10"
       # Timeout in seconds for pi_node_verifier execution.
       SUGARKUBE_TELEMETRY_VERIFIER_TIMEOUT="180"
+  - path: /etc/sugarkube/teams-webhook.env
+    permissions: '0600'
+    content: |
+      # Set SUGARKUBE_TEAMS_ENABLE="true" to send Slack or Matrix updates when
+      # first boot verification and SSD cloning complete.
+      SUGARKUBE_TEAMS_ENABLE="false"
+      # Slack incoming webhook URL or Matrix homeserver base URL.
+      SUGARKUBE_TEAMS_URL=""
+      # Choose notification backend: "slack" or "matrix".
+      SUGARKUBE_TEAMS_KIND="slack"
+      # Matrix-specific settings (ignored for Slack).
+      # SUGARKUBE_TEAMS_MATRIX_ROOM="!room:example.org"
+      # Example token placeholder for SUGARKUBE_TEAMS_TOKEN (e.g. syt_example_token)
+      # Optional display tweaks for Slack-compatible webhooks.
+      # SUGARKUBE_TEAMS_USERNAME="sugarkube"
+      # SUGARKUBE_TEAMS_ICON=":rocket:"
+      # Set to "false" to skip TLS verification (not recommended).
+      SUGARKUBE_TEAMS_VERIFY_TLS="true"
+      # HTTP timeout in seconds for webhook calls.
+      SUGARKUBE_TEAMS_TIMEOUT="10"
   - path: /etc/systemd/system/sugarkube-telemetry.service
     permissions: '0644'
     content: |

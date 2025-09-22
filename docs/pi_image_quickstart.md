@@ -212,6 +212,13 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   2. Enable the hourly timer: `sudo systemctl enable --now sugarkube-telemetry.timer`.
   3. Inspect uploads with `journalctl -u sugarkube-telemetry.service --no-pager`.
   Review [Pi Image Telemetry Hooks](./pi_image_telemetry.md) for detailed payload and privacy notes.
+- Optional: send first boot and SSD clone updates to Slack or Matrix:
+  1. Edit `/etc/sugarkube/teams-webhook.env`, set `SUGARKUBE_TEAMS_ENABLE="true"`, and choose
+     `SUGARKUBE_TEAMS_KIND="slack"` or `"matrix"` with the appropriate URL and tokens.
+  2. Restart `first-boot.service` or rerun `ssd_clone_service.py` to trigger notifications, or test
+     manually with `sudo sugarkube-teams --event first-boot --status info --line "test"`.
+  3. Review [Sugarkube Team Notifications](./pi_image_team_notifications.md) for Slack/Matrix setup
+     walkthroughs and troubleshooting tips.
 
 The image is now ready for additional repositories or joining a multi-node
 k3s cluster.
