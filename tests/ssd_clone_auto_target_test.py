@@ -253,6 +253,46 @@ def test_ensure_state_ready_requires_resume(tmp_path):
         ssd_clone.ensure_state_ready(ctx)
 
 
+def test_randomize_disk_identifiers_success(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls = []
+
+    def fake_run_command(inner_ctx, command, *, input_text=None):
+        assert inner_ctx is ctx
+        calls.append((tuple(command), input_text))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(ssd_clone, "run_command", fake_run_command)
+    ssd_clone.randomize_disk_identifiers(ctx)
+    assert calls == [(("sgdisk", "-G", "/dev/sdz"), None)]
+
+
+def test_randomize_disk_identifiers_fallback(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls = []
+    messages = []
+
+    def fake_run_command(inner_ctx, command, *, input_text=None):
+        calls.append((tuple(command), input_text))
+        if command[:2] == ["sgdisk", "-G"]:
+            raise ssd_clone.CommandError("boom")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(ssd_clone, "run_command", fake_run_command)
+    monkeypatch.setattr(
+        ssd_clone,
+        "secrets",
+        type("Secrets", (), {"randbits": staticmethod(lambda bits: 0x12345678)}),
+    )
+    monkeypatch.setattr(ctx, "log", lambda message: messages.append(message))
+    ssd_clone.randomize_disk_identifiers(ctx)
+    assert calls == [
+        (("sgdisk", "-G", "/dev/sdz"), None),
+        (("sfdisk", "--disk-id", "/dev/sdz", "0x12345678"), None),
+    ]
+    assert any("falling back" in message for message in messages)
+
+
 def test_step_run_records_completion(tmp_path):
     ctx = make_context(tmp_path)
     step = ssd_clone.Step("demo", "Demo step")
@@ -320,27 +360,6 @@ def test_run_command_raises_on_failure(monkeypatch, tmp_path):
         ssd_clone.run_command(ctx, ["false"])
 
     assert "Command failed" in str(excinfo.value)
-
-
-def test_randomize_disk_identifiers_fallback(monkeypatch, tmp_path):
-    ctx = make_context(tmp_path)
-    calls = []
-
-    def fake_run(context, command, *, input_text=None):
-        calls.append(tuple(command))
-        if command[:2] == ["sgdisk", "-G"]:
-            raise ssd_clone.CommandError("failure")
-        assert command[:2] == ["sfdisk", "--disk-id"]
-        assert command[2] == ctx.target_disk
-        assert command[3] == "0x12345678"
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    monkeypatch.setattr(ssd_clone, "run_command", fake_run)
-    monkeypatch.setattr(ssd_clone.secrets, "randbits", lambda bits: 0x12345678)
-
-    ssd_clone.randomize_disk_identifiers(ctx)
-
-    assert calls[0] == ("sgdisk", "-G", ctx.target_disk)
 
 
 def test_update_configs_rewrites_files(monkeypatch, tmp_path):
