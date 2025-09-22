@@ -532,6 +532,10 @@ def _run_build_script(tmp_path, env):
     shutil.copy(ssd_clone_service_src, script_dir / "ssd_clone_service.py")
     (script_dir / "ssd_clone_service.py").chmod(0o755)
 
+    token_place_replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
+    shutil.copy(token_place_replay_src, script_dir / "token_place_replay_samples.py")
+    (script_dir / "token_place_replay_samples.py").chmod(0o755)
+
     systemd_src = repo_root / "scripts" / "systemd" / "first-boot.service"
     systemd_dir = script_dir / "systemd"
     systemd_dir.mkdir(exist_ok=True)

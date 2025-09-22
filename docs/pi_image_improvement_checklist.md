@@ -124,7 +124,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     and bail out through the self-heal unit when rollouts or health probes fail. Markdown reports
     now land under `/boot/first-boot-report/helm-bundles/` for air-gapped debugging, and the
     workflow is documented in [Sugarkube Helm Bundle Hooks](./pi_helm_bundles.md).
-- [ ] Bundle sample datasets and token.place collections for first-launch validation.
+- [x] Bundle sample datasets and token.place collections for first-launch validation.
+  - Added `samples/token_place/` plus a replay helper that the image copies into
+    `/opt/sugarkube/` and `/opt/projects/token.place/` so first boot can confirm
+    health, model listings, and chat completions with a single command.
 - [x] Document and script multi-node join rehearsal for scaling clusters.
   - Added `scripts/pi_multi_node_join_rehearsal.py`, `make rehearse-join`/`just rehearse-join`
     wrappers, and the [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) guide to

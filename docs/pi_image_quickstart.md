@@ -122,6 +122,14 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   ```bash
   sudo systemctl status projects-compose.service
   ```
+- Replay the bundled token.place sample dataset to confirm the relay answers
+  health, model, and chat requests:
+  ```bash
+  /opt/sugarkube/token_place_replay_samples.py
+  ```
+  The helper stores JSON responses under
+  `~/sugarkube/reports/token-place-samples/`. Expect the chat reply to mention
+  "Mock response" when `USE_MOCK_LLM=1` is set in `/opt/projects/token.place/.env`.
 - Metrics and dashboards are available immediately:
   - `curl http://<pi-host>:9100/metrics` for the node exporter.
   - `curl http://<pi-host>:12345/metrics` for the aggregated Grafana Agent feed.

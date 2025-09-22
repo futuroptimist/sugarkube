@@ -1,0 +1,14 @@
+{
+  "model": "llama-3-8b-instruct",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that keeps replies under 40 words."
+    },
+    {
+      "role": "user",
+      "content": "Say hello from the sugarkube Pi image sample dataset."
+    }
+  ],
+  "temperature": 0.2
+}
