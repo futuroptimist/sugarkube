@@ -497,6 +497,11 @@ def _run_build_script(tmp_path, env):
     shutil.copy(export_node_token_src, export_node_token_dest)
     export_node_token_dest.chmod(0o755)
 
+    apply_helm_src = cloud_init_src / "apply-helm-bundles.sh"
+    apply_helm_dest = ci_dir / "apply-helm-bundles.sh"
+    shutil.copy(apply_helm_src, apply_helm_dest)
+    apply_helm_dest.chmod(0o755)
+
     k3s_ready_src = cloud_init_src / "k3s-ready.sh"
     k3s_ready_dest = ci_dir / "k3s-ready.sh"
     shutil.copy(k3s_ready_src, k3s_ready_dest)

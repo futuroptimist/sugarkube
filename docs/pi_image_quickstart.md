@@ -162,6 +162,17 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
   Copy any of these files from another machine after ejecting the boot media.
   Regenerate fresh copies later with `sudo k3s kubectl config view --raw` or
   `sudo cat /var/lib/rancher/k3s/server/node-token` if you need to rotate them.
+- Want Helm workloads to come online automatically? Drop `*.env` definitions
+  under `/etc/sugarkube/helm-bundles.d/` before first boot (or via
+  configuration management). Each file declares `RELEASE`, `CHART`, optional
+  `VERSION` and `VALUES_FILES`, plus rollout checks. When `k3s-ready.target`
+  succeeds, `sugarkube-helm-bundles.service` applies every bundle with
+  `helm upgrade --install --atomic`, waits for `kubectl rollout status`, runs
+  optional health probes, and writes Markdown logs to
+  `/boot/first-boot-report/helm-bundles/`. See
+  [Sugarkube Helm Bundle Hooks](./pi_helm_bundles.md) for config keys. Failures bubble up to
+  `sugarkube-self-heal@.service` so broken charts stop the boot flow instead of
+  hiding until later.
 - Optional: publish anonymized health telemetry for fleet dashboards:
   1. Edit `/etc/sugarkube/telemetry.env`, set `SUGARKUBE_TELEMETRY_ENABLE="true"`, and populate
      `SUGARKUBE_TELEMETRY_ENDPOINT` (plus optional token, salt, and tags).

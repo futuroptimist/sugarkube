@@ -84,6 +84,7 @@ packages:
   - containerd.io
   - docker-buildx-plugin
   - docker-compose-plugin
+  - helm
 write_files:
   - path: /opt/sugarkube/.cloudflared.env
     permissions: '0600'
@@ -169,6 +170,51 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-helm-bundles.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Apply pinned Helm bundles once k3s is ready
+      Requires=k3s-ready.target
+      After=k3s-ready.target
+      ConditionPathExists=/opt/sugarkube/apply-helm-bundles.sh
+      OnFailure=sugarkube-self-heal@%n.service
+      OnFailureJobMode=replace-irreversibly
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/sugarkube/apply-helm-bundles.sh
+      TimeoutStartSec=900
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/sugarkube/helm-bundles.d/README
+    permissions: '0644'
+    content: |
+      # Sugarkube Helm bundles
+      #
+      # Drop `*.env` files in this directory to have `/opt/sugarkube/apply-helm-bundles.sh`
+      # automatically install pinned Helm charts after k3s becomes Ready.
+      # Each file exports key=value pairs, for example:
+      #
+      #   RELEASE=my-addon
+      #   CHART=oci://registry.example.com/addons/my-addon
+      #   VERSION=1.2.3
+      #   NAMESPACE=addons
+      #   WAIT_TARGETS=deployment.apps/addon-controller
+      #   VALUES_FILES=/opt/sugarkube/helm-values/addon.yaml
+      #
+      # Optional keys:
+      #   EXTRA_HELM_ARGS="--set key=value --timeout 10m"
+      #   HEALTHCHECK_CMD="kubectl get pods -n addons"
+      #   HEALTHCHECK_TIMEOUT=600
+      #   NOTES="Appears in first-boot report entries"
+      #
+      # Copy values files into `/opt/sugarkube/helm-values/` or any readable path.
+      # The helper logs to `/var/log/sugarkube/helm-bundles.log` and writes
+      # per-release reports under `/boot/first-boot-report/helm-bundles/` when the
+      # boot partition is mounted.
   - path: /etc/systemd/system/sugarkube-telemetry.timer
     permissions: '0644'
     content: |
@@ -285,6 +331,7 @@ runcmd:
   - [bash, -c, 'id pi >/dev/null 2>&1 && usermod -aG docker pi || true']
   - [bash, -c, 'mkdir -p /opt/sugarkube']
   - [bash, -c, 'id pi >/dev/null 2>&1 && chown -R pi:pi /opt/sugarkube || true']
+  - [bash, -c, 'install -m 0755 -d /etc/sugarkube/helm-bundles.d /opt/sugarkube/helm-values']
   - [bash, -c, 'mkdir -p /var/log/journal && systemctl restart systemd-journald']
   - [systemctl, daemon-reexec]   # reload systemd units
   - [systemctl, enable, --now, docker]
@@ -292,6 +339,7 @@ runcmd:
   - [/opt/projects/start-projects.sh]  # projects-runcmd
   - [systemctl, enable, k3s-ready.target]
   - [systemctl, start, k3s-ready.target]
+  - [systemctl, enable, --now, sugarkube-helm-bundles.service]
   - [/opt/sugarkube/export-kubeconfig.sh]
   - [/opt/sugarkube/export-node-token.sh]
   - [bash, -c, 'apt-get autoremove -y']
