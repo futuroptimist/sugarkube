@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import runpy
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,9 +10,10 @@ from typing import List, Tuple
 import pytest
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "sugarkube_teams.py"
-SPEC = importlib.util.spec_from_file_location("sugarkube_teams", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("scripts.sugarkube_teams", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = MODULE
+sys.modules.setdefault("scripts.sugarkube_teams", MODULE)
+sys.modules.setdefault("sugarkube_teams", MODULE)
 SPEC.loader.exec_module(MODULE)  # type: ignore[arg-type]
 
 
@@ -127,6 +129,38 @@ def test_disabled_notification_skips_requests(monkeypatch, tmp_path, http_server
     assert _Recorder.records == []
 
 
+def test_open_request_without_tls(monkeypatch):
+    called = {}
+
+    def fake_urlopen(_request, *, context, timeout):  # noqa: ARG001 - signature compliance
+        called["context"] = context
+        called["timeout"] = timeout
+        return context
+
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+            return False
+
+        def read(self):
+            return b"ok"
+
+    def wrapped_urlopen(*args, **kwargs):  # noqa: ANN001 - forwarded args
+        fake_urlopen(*args, **kwargs)
+        return DummyResponse()
+
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", wrapped_urlopen)
+    request = MODULE.urllib.request.Request("https://example.invalid")
+    MODULE._open_request(request, verify_tls=False, timeout=2.5)  # noqa: SLF001
+    context = called["context"]
+    assert context is not None
+    assert context.check_hostname is False
+    assert context.verify_mode == MODULE.ssl.CERT_NONE
+    assert called["timeout"] == 2.5
+
+
 def test_discord_notification(monkeypatch, tmp_path, http_server):
     env_path = _write_env(
         tmp_path,
@@ -160,6 +194,139 @@ def test_discord_notification(monkeypatch, tmp_path, http_server):
     assert "Disk resized" in embed["description"]
     field_names = {field["name"] for field in embed["fields"]}
     assert field_names == {"Overall", "K3s"}
+
+
+def test_parse_env_file_missing(tmp_path):
+    path = tmp_path / "missing.env"
+    assert MODULE._parse_env_file(path) == {}  # noqa: SLF001
+
+
+def test_parse_env_file_ignores_comments(tmp_path):
+    path = tmp_path / "env"
+    path.write_text("# comment\nKEY=value\ninvalid-line\n")
+    data = MODULE._parse_env_file(path)  # noqa: SLF001
+    assert data == {"KEY": "value"}
+
+
+def test_format_heading_without_emoji():
+    heading = MODULE._format_heading("custom", "alert")  # noqa: SLF001
+    assert heading.startswith("Sugarkube")
+
+
+def test_build_plaintext_empty_lines():
+    message = MODULE._build_plaintext("Heading", ["", " "])  # noqa: SLF001
+    assert message == "Heading"
+
+
+def test_send_slack_requires_url():
+    config = MODULE.TeamsConfig(
+        enable=True,
+        url="",
+        kind="slack",
+        timeout=1.0,
+        verify_tls=True,
+        username=None,
+        icon=None,
+        matrix_room=None,
+        auth_credential=None,
+    )
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._send_slack(config, "hello", {})  # noqa: SLF001
+
+
+def test_send_slack_error(monkeypatch):
+    config = MODULE.TeamsConfig(
+        enable=True,
+        url="https://example.invalid",
+        kind="slack",
+        timeout=1.0,
+        verify_tls=True,
+        username="user",
+        icon=":icon:",
+        matrix_room=None,
+        auth_credential=None,
+    )
+
+    def raise_error(*args, **kwargs):  # noqa: ANN001
+        raise MODULE.urllib.error.URLError("bad")
+
+    monkeypatch.setattr(MODULE, "_open_request", raise_error)
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._send_slack(config, "hi", {"Field": "Value"})  # noqa: SLF001
+
+
+def test_send_matrix_requires_all_config():
+    config = MODULE.TeamsConfig(
+        enable=True,
+        url="https://matrix.invalid",
+        kind="matrix",
+        timeout=1.0,
+        verify_tls=True,
+        username=None,
+        icon=None,
+        matrix_room=None,
+        auth_credential=None,
+    )
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._send_matrix(config, "heading", [], {})  # noqa: SLF001
+
+
+def test_send_matrix_error(monkeypatch):
+    config = MODULE.TeamsConfig(
+        enable=True,
+        url="https://matrix.invalid",
+        kind="matrix",
+        timeout=1.0,
+        verify_tls=True,
+        username=None,
+        icon=None,
+        matrix_room="!room:example",
+        auth_credential="token",
+    )
+
+    def raise_error(*args, **kwargs):  # noqa: ANN001
+        raise MODULE.urllib.error.URLError("bad")
+
+    monkeypatch.setattr(MODULE, "_open_request", raise_error)
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._send_matrix(config, "heading", [], {})  # noqa: SLF001
+
+
+def test_send_discord_requires_url():
+    config = MODULE.TeamsConfig(
+        enable=True,
+        url="",
+        kind="discord",
+        timeout=1.0,
+        verify_tls=True,
+        username=None,
+        icon=None,
+        matrix_room=None,
+        auth_credential=None,
+    )
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._send_discord(config, "heading", [], {})  # noqa: SLF001
+
+
+def test_send_discord_error(monkeypatch):
+    config = MODULE.TeamsConfig(
+        enable=True,
+        url="https://discord.invalid",
+        kind="discord",
+        timeout=1.0,
+        verify_tls=True,
+        username=None,
+        icon=None,
+        matrix_room=None,
+        auth_credential=None,
+    )
+
+    def raise_error(*args, **kwargs):  # noqa: ANN001
+        raise MODULE.urllib.error.URLError("bad")
+
+    monkeypatch.setattr(MODULE, "_open_request", raise_error)
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE._send_discord(config, "heading", [], {})  # noqa: SLF001
 
 
 def test_load_config_env_precedence(tmp_path):
@@ -196,6 +363,99 @@ def test_load_config_env_precedence(tmp_path):
     assert config.auth_credential == "secret"
 
 
+def test_load_config_invalid_timeout(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                "SUGARKUBE_TEAMS_ENABLE=true",
+                "SUGARKUBE_TEAMS_TIMEOUT=abc",
+            ]
+        ),
+    )
+    with pytest.raises(MODULE.TeamsNotificationError):
+        MODULE.load_config({"SUGARKUBE_TEAMS_ENV": str(env_path)})
+
+
 def test_parse_fields_error():
     with pytest.raises(MODULE.TeamsNotificationError):
         MODULE._parse_fields(["missing-value"])  # noqa: SLF001
+
+
+def test_parse_fields_success():
+    fields = MODULE._parse_fields(["Key=Value", "Other = Data"])  # noqa: SLF001
+    assert fields == {"Key": "Value", "Other": "Data"}
+
+
+def test_main_handles_notification_error(monkeypatch, tmp_path, capsys):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                "SUGARKUBE_TEAMS_ENABLE=true",
+                "SUGARKUBE_TEAMS_URL=https://example.invalid",
+            ]
+        ),
+    )
+
+    class FailingNotifier:
+        enabled = True
+
+        @classmethod
+        def from_env(cls):  # noqa: D401, ANN101, ANN201 - simple stub
+            return cls()
+
+        def notify(self, **_kwargs):  # noqa: D401, ANN101, ANN204 - stub method
+            raise MODULE.TeamsNotificationError("boom")
+
+    monkeypatch.setenv("SUGARKUBE_TEAMS_ENV", str(env_path))
+    monkeypatch.setattr(MODULE, "TeamsNotifier", FailingNotifier)
+    result = MODULE.main(["--event", "first-boot", "--status", "info"])
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "sugarkube-teams error" in captured.err
+
+
+def test_main_success(monkeypatch, tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                "SUGARKUBE_TEAMS_ENABLE=true",
+                "SUGARKUBE_TEAMS_URL=https://example.invalid",
+            ]
+        ),
+    )
+
+    class QuietNotifier:
+        enabled = True
+
+        @classmethod
+        def from_env(cls):  # noqa: ANN101, ANN201
+            return cls()
+
+        def notify(self, **_kwargs):  # noqa: ANN101, ANN204
+            return None
+
+    monkeypatch.setenv("SUGARKUBE_TEAMS_ENV", str(env_path))
+    monkeypatch.setattr(MODULE, "TeamsNotifier", QuietNotifier)
+    assert MODULE.main(["--event", "first-boot", "--status", "success"]) == 0
+
+
+def test_module_entrypoint(monkeypatch, tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                "SUGARKUBE_TEAMS_ENABLE=false",
+                "SUGARKUBE_TEAMS_URL=https://example.invalid",
+            ]
+        ),
+    )
+
+    monkeypatch.setenv("SUGARKUBE_TEAMS_ENV", str(env_path))
+    argv = ["sugarkube_teams.py", "--event", "first-boot", "--status", "success"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(MODULE_PATH), run_name="__main__")
+    assert exc.value.code == 0
