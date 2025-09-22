@@ -171,7 +171,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     `make qr-codes`/`just qr-codes` regenerate them. `docs/pi_carrier_qr_labels.md`
     covers printing and placement so every enclosure ships with quickstart and
     troubleshooting links.
-- [ ] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
+- [x] Print cluster token and default kubeconfig to `/boot/` for recovery if first boot stalls.
 - [ ] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
 
 ---

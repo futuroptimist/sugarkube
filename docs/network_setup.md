@@ -107,11 +107,12 @@ Press <kbd>Ctrl</kbd>+<kbd>C</kbd> once all nodes show `Ready` to exit the watch
 
 To run `kubectl` from your laptop, ensure the
 [kubectl client is installed](https://kubernetes.io/docs/tasks/tools/#kubectl).
-Copy the kubeconfig generated on the control-plane node. The image now writes two
-variants to the boot volume:
+Copy the kubeconfig generated on the control-plane node. The image now writes
+two variants to the boot volume and also mirrors the k3s join token file.
 
 - `/boot/sugarkube-kubeconfig` (sanitized; secrets redacted).
 - `/boot/sugarkube-kubeconfig-full` (full admin credentials).
+- `/boot/sugarkube-node-token` (cluster join token for additional agents).
 
 Pull one of these files over SSH (they are owned by `root`) or eject the boot
 media and copy the file locally, then update its server address and verify access:
