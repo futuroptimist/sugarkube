@@ -27,6 +27,10 @@ CONTEXT:
   - `pyspelling -c .spellcheck.yaml`
   - `linkchecker --no-warnings README.md docs/`
   - `git diff --cached | ./scripts/scan-secrets.py`
+- Ensure the refined prompt explicitly instructs contributors to attain **100% patch coverage on the
+  first test run** without retries.
+- Design changes and supporting tests to achieve **100% patch coverage on the first test run** with
+  no retries.
 
 REQUEST:
 1. Choose one unchecked checklist task and implement it end-to-end (code, docs, tooling as
@@ -34,7 +38,7 @@ REQUEST:
 2. Update any affected documentation, samples, or automation scripts to match the new behavior.
 3. Tick the corresponding checkbox in `docs/pi_image_improvement_checklist.md` and summarize the
    change in relevant docs.
-4. Run the commands above and ensure they succeed.
+4. Run the commands above and ensure they succeed with 100% patch coverage on the first attempt.
 5. Commit with a concise message and prepare a PR summary highlighting the checklist item you
    completed.
 
@@ -71,7 +75,8 @@ CONTEXT:
 USER:
 1. Identify confusing, outdated, or missing guidance in the implementation prompt above.
 2. Update the prompt so agents consistently implement unchecked checklist items end-to-end.
-3. Run the commands listed under CONTEXT and confirm they succeed.
+3. Emphasize the need for 100% patch coverage on the first test execution.
+4. Run the commands listed under CONTEXT and confirm they succeed.
 
 OUTPUT:
 A pull request with an improved checklist implementation prompt and passing checks.

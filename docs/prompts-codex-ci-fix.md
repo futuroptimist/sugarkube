@@ -20,6 +20,8 @@ CONTEXT:
 - JavaScript-based actions run with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` so CI surfaces
   incompatibilities before GitHub switches runners to Node24 by default.
 - Run `pre-commit run --all-files` from the repository root; it executes `scripts/checks.sh`.
+- Craft fixes and tests so the resulting diff achieves **100% patch coverage on the first test run**
+  with no retries.
 - If a Node toolchain is present (`package.json` exists), run:
   - `npm ci`
   - `npm run lint`
@@ -33,7 +35,7 @@ CONTEXT:
 REQUEST:
 1. Re-run the failing check locally.
 2. Investigate and apply minimal fixes.
-3. Re-run all checks until they succeed.
+3. Re-run all checks until they succeed with 100% patch coverage on the first attempt.
 
 OUTPUT:
 A pull request describing the fix and showing passing checks.
@@ -57,11 +59,14 @@ Then run:
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
 - `linkchecker --no-warnings README.md docs/`
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Ensure the updated prompt requires contributors to deliver **100% patch coverage on the first
+  test run** without reruns.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Run the commands above.
+3. Add or reinforce guidance about achieving 100% patch coverage on the first test execution.
+4. Run the commands above.
 
 OUTPUT:
 A pull request with the improved prompt doc and passing checks.

@@ -22,6 +22,8 @@ CONTEXT:
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh) for
   linting, formatting, and tests. If `package.json` exists, the script automatically
   runs `npm ci`, `npm run lint`, and `npm run test:ci`.
+- Structure edits and any supporting tests so the diff achieves **100% patch coverage on the first
+  test execution**—no reruns.
 - For documentation changes, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
     [`.spellcheck.yaml`](../.spellcheck.yaml))
@@ -35,12 +37,13 @@ REQUEST:
 2. Improve wording, fix links, or add missing steps.
 3. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`,
    `linkchecker --no-warnings README.md docs/`, and
-   `git diff --cached | ./scripts/scan-secrets.py`. Confirm all checks pass.
+   `git diff --cached | ./scripts/scan-secrets.py`. Confirm all checks pass with 100% patch
+   coverage on the first attempt.
    If `package.json` exists, also run:
    - `npm ci`
    - `npm run lint`
    - `npm run test:ci`
-   Confirm all checks pass.
+   Confirm all checks pass with 100% patch coverage on the first run.
 
 OUTPUT:
 A pull request with the refined documentation and passing checks.
@@ -61,11 +64,14 @@ linting, formatting, and tests; it automatically runs `npm ci`, `npm run lint`, 
 (requires `aspell` and `aspell-en`; see [`.spellcheck.yaml`](../.spellcheck.yaml)),
 `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
+- Ensure the refreshed prompt explicitly directs contributors to deliver **100% patch coverage on
+  the first test run** without retries.
 
 USER:
 1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Run the commands above.
+3. Add or reinforce guidance requiring 100% patch coverage on the first test execution.
+4. Run the commands above.
 
 OUTPUT:
 A pull request with the improved prompt doc and passing checks.
