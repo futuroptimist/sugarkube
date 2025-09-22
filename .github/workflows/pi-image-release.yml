@@ -162,6 +162,36 @@ jobs:
             sugarkube.build.log
             RELEASE_NOTES.md
 
+      - name: Collect support bundle
+        if: always()
+        env:
+          SUPPORT_BUNDLE_HOST: ${{ secrets.SUPPORT_BUNDLE_HOST }}
+          SUPPORT_BUNDLE_USER: ${{ secrets.SUPPORT_BUNDLE_USER }}
+          SUPPORT_BUNDLE_SSH_KEY: ${{ secrets.SUPPORT_BUNDLE_SSH_KEY }}
+        run: |
+          if [ -z "${SUPPORT_BUNDLE_HOST}" ] || [ -z "${SUPPORT_BUNDLE_SSH_KEY}" ]; then
+            echo "Support bundle host not configured; skipping"
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          key_path=~/.ssh/support-bundle
+          printf '%s\n' "${SUPPORT_BUNDLE_SSH_KEY}" >"${key_path}"
+          chmod 600 "${key_path}"
+          user="${SUPPORT_BUNDLE_USER:-pi}"
+          python3 scripts/collect_support_bundle.py \
+            --identity "${key_path}" \
+            --user "${user}" \
+            --output-dir support-bundles \
+            "${SUPPORT_BUNDLE_HOST}"
+
+      - name: Upload support bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sugarkube-support-bundle
+          path: support-bundles
+          if-no-files-found: ignore
+
       - name: Publish GitHub release
         uses: ncipollo/release-action@v1
         with:
