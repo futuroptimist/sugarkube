@@ -12,6 +12,12 @@ Maintainers updating scripts or docs should cross-reference the
 [Pi Image Contributor Guide](./pi_image_contributor_guide.md) to keep automation helpers and
 guidance aligned.
 
+Before flashing or booting new hardware, glance at the hardware boot badge in the top-level
+[`README`](../README.md). The badge is driven by `docs/status/hardware-boot.json` and signals when the
+last manual `pi_smoke_test` run succeeded. Follow the contributor guide's
+[Record hardware boot runs](./pi_image_contributor_guide.md#record-hardware-boot-runs) section to
+refresh the badge after exercising physical clusters.
+
 Need a hands-on reminder next to the hardware? Print the
 [Pi carrier QR labels](./pi_carrier_qr_labels.md) and stick them to the enclosure so anyone can
 scan straight to this quickstart or the troubleshooting matrix while standing at the workbench.

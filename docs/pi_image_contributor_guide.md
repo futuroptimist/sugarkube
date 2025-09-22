@@ -105,6 +105,13 @@ sync.
     [Pi Image Smoke Test Harness](./pi_smoke_test.md).
   - Related tooling: wrapped by `make smoke-test-pi` and `just smoke-test-pi` so operators can pass
     flags through `SMOKE_ARGS` without remembering the Python entry point.
+- `scripts/update_hardware_boot_badge.py`
+  - Purpose: generate shields.io endpoint JSON so the README hardware boot badge reflects the
+    latest physical verification run.
+  - Primary docs: [Pi Image Contributor Guide](./pi_image_contributor_guide.md) §[Record hardware
+    boot runs](#record-hardware-boot-runs).
+  - Related tooling: exposed as `make update-hardware-badge` and `just update-hardware-badge` with a
+    `BADGE_ARGS` passthrough for timestamp/notes.
 - `scripts/sugarkube_doctor.sh`
   - Purpose: dry-run downloads, flash media in a synthetic environment, and optionally run
     repository linters.
@@ -122,6 +129,28 @@ sync.
     for inclusion in `/boot/first-boot-report.txt`.
   - Primary docs: [Pi Headless Provisioning](./pi_headless_provisioning.md),
     [Pi Token + dspace](./pi_token_dspace.md).
+
+#### Record hardware boot runs
+
+Run the smoke test harness against real hardware after image releases or major changes, then update
+the README badge so contributors know the last verified boot date:
+
+```sh
+just update-hardware-badge \
+  BADGE_ARGS="--status pass --timestamp 2025-02-15T16:00:00Z --notes 'Pi 4B cluster'"
+```
+
+Key flags:
+
+- `--status`: `pass`, `warn`, `fail`, or `unknown`; selects the badge colour and base label.
+- `--timestamp`: ISO-8601 instant (UTC recommended). Use `now` to populate with the current time.
+- `--notes`: short free-form annotation that appears after the timestamp (host, tester, etc.).
+- `--description`: optional tooltip text for shields.io consumers.
+- `--link`: hyperlink destination(s) for the badge. Supply once (or twice) to highlight reports.
+
+The helper writes `docs/status/hardware-boot.json` and the README automatically renders the updated
+badge via shields.io. Commit the refreshed JSON alongside your run notes so downstream operators can
+trust the published status.
 
 ### Build workflows
 
