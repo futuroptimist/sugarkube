@@ -26,6 +26,32 @@ Pair them with the [Pi Carrier Field Guide](./pi_carrier_field_guide.md) and its
 cluster.
 Run `make field-guide` or `just field-guide` after editing the Markdown to refresh the PDF copy.
 
+## 0. Prepare your workstation (macOS)
+
+Homebrew users can now install a supported tap and run a guided setup wizard:
+
+```bash
+brew tap sugarkube/sugarkube https://github.com/futuroptimist/sugarkube
+brew install sugarkube
+```
+
+The tap ships a `sugarkube-setup` CLI that audits Homebrew formulas (`qemu`, `coreutils`, `just`,
+`xz`, and `pipx`), ensures `~/sugarkube/{images,reports,cache}` exist, and writes a starter
+`sugarkube.env` with 100% patch coverage reminders. Inspect the plan first:
+
+```bash
+just mac-setup
+```
+
+Then apply the changes automatically (or substitute `make mac-setup`):
+
+```bash
+just mac-setup MAC_SETUP_ARGS="--apply"
+```
+
+The wizard can also run outside macOS by appending `--force`, which keeps docs and CI rehearsals in
+sync without modifying the host.
+
 ## 1. Build or download the image
 
 1. Use the one-line installer to bootstrap everything in one step:
@@ -73,6 +99,18 @@ Run `make field-guide` or `just field-guide` after editing the Markdown to refre
    sha256sum -c path/to/sugarkube.img.xz.sha256
    ```
    The command prints `OK` when the checksum matches the downloaded image.
+6. Before touching hardware, boot the artifact in QEMU to confirm the first-boot
+   automation still produces healthy reports:
+   ```bash
+   sudo make qemu-smoke \
+     QEMU_SMOKE_IMAGE=deploy/sugarkube.img.xz \
+     QEMU_SMOKE_ARGS="--timeout 420"
+   ```
+   The helper wraps `scripts/qemu_pi_smoke_test.py`, which mounts the image,
+   swaps in a stub verifier, boots `qemu-system-aarch64`, and copies
+   `/boot/first-boot-report/` plus `/var/log/sugarkube/` into
+   `artifacts/qemu-smoke/`. Use `just qemu-smoke` with the same environment
+   variables when you prefer Just over Make.
 
 ## 2. Flash the image
 - Generate a self-contained report that expands `.img.xz`, flashes, verifies, and
