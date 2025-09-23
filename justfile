@@ -24,6 +24,16 @@ health_cmd := env_var_or_default("HEALTH_CMD", justfile_directory() + "/scripts/
 health_args := env_var_or_default("HEALTH_ARGS", "")
 smoke_cmd := env_var_or_default("SMOKE_CMD", justfile_directory() + "/scripts/pi_smoke_test.py")
 smoke_args := env_var_or_default("SMOKE_ARGS", "")
+qemu_smoke_cmd := env_var_or_default(
+    "QEMU_SMOKE_CMD",
+    justfile_directory() + "/scripts/qemu_pi_smoke_test.py",
+)
+qemu_smoke_args := env_var_or_default("QEMU_SMOKE_ARGS", "")
+qemu_smoke_image := env_var_or_default("QEMU_SMOKE_IMAGE", "")
+qemu_smoke_artifacts := env_var_or_default(
+    "QEMU_SMOKE_ARTIFACTS",
+    justfile_directory() + "/artifacts/qemu-smoke",
+)
 support_bundle_cmd := env_var_or_default(
     "SUPPORT_BUNDLE_CMD",
     justfile_directory() + "/scripts/collect_support_bundle.py",
@@ -68,6 +78,11 @@ token_place_sample_args := env_var_or_default(
     "TOKEN_PLACE_SAMPLE_ARGS",
     "--samples-dir " + justfile_directory() + "/samples/token_place",
 )
+mac_setup_cmd := env_var_or_default(
+    "MAC_SETUP_CMD",
+    justfile_directory() + "/scripts/sugarkube_setup.py",
+)
+mac_setup_args := env_var_or_default("MAC_SETUP_ARGS", "")
 
 _default:
     @just --list
@@ -137,6 +152,15 @@ monitor-ssd-health:
 smoke-test-pi:
     "{{smoke_cmd}}" {{smoke_args}}
 
+# Boot a built sugarkube image inside QEMU and collect first-boot reports
+# Usage: sudo just qemu-smoke QEMU_SMOKE_IMAGE=deploy/sugarkube.img
+qemu-smoke:
+    if [ -z "{{qemu_smoke_image}}" ]; then
+        echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2
+        exit 1
+    fi
+    sudo "{{qemu_smoke_cmd}}" --image "{{qemu_smoke_image}}" --artifacts-dir "{{qemu_smoke_artifacts}}" {{qemu_smoke_args}}
+
 # Render the printable Pi carrier field guide PDF
 # Usage: just field-guide FIELD_GUIDE_ARGS="--wrap 70"
 field-guide:
@@ -187,6 +211,11 @@ qr-codes:
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
     "{{token_place_sample_cmd}}" {{token_place_sample_args}}
+
+# Run the macOS setup wizard to install brew formulas and scaffold directories
+# Usage: just mac-setup MAC_SETUP_ARGS="--apply"
+mac-setup:
+    "{{mac_setup_cmd}}" {{mac_setup_args}}
 
 # Collect Kubernetes, systemd, and compose diagnostics from a running Pi
 # Usage: just support-bundle SUPPORT_BUNDLE_HOST=pi.local
