@@ -35,9 +35,11 @@ TOKEN_PLACE_SAMPLE_ARGS ?= --samples-dir $(CURDIR)/samples/token_place
 SUPPORT_BUNDLE_CMD ?= $(CURDIR)/scripts/collect_support_bundle.py
 SUPPORT_BUNDLE_ARGS ?=
 SUPPORT_BUNDLE_HOST ?=
+FIELD_GUIDE_CMD ?= $(CURDIR)/scripts/render_field_guide_pdf.py
+FIELD_GUIDE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
+        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi field-guide \
         publish-telemetry notify-teams update-hardware-badge rehearse-join \
         token-place-samples support-bundle
 
@@ -86,6 +88,9 @@ monitor-ssd-health:
 
 smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)
+
+field-guide:
+	$(FIELD_GUIDE_CMD) $(FIELD_GUIDE_ARGS)
 
 publish-telemetry:
         $(TELEMETRY_CMD) $(TELEMETRY_ARGS)
