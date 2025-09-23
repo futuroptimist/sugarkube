@@ -73,6 +73,18 @@ Run `make field-guide` or `just field-guide` after editing the Markdown to refre
    sha256sum -c path/to/sugarkube.img.xz.sha256
    ```
    The command prints `OK` when the checksum matches the downloaded image.
+6. Before touching hardware, boot the artifact in QEMU to confirm the first-boot
+   automation still produces healthy reports:
+   ```bash
+   sudo make qemu-smoke \
+     QEMU_SMOKE_IMAGE=deploy/sugarkube.img.xz \
+     QEMU_SMOKE_ARGS="--timeout 420"
+   ```
+   The helper wraps `scripts/qemu_pi_smoke_test.py`, which mounts the image,
+   swaps in a stub verifier, boots `qemu-system-aarch64`, and copies
+   `/boot/first-boot-report/` plus `/var/log/sugarkube/` into
+   `artifacts/qemu-smoke/`. Use `just qemu-smoke` with the same environment
+   variables when you prefer Just over Make.
 
 ## 2. Flash the image
 - Generate a self-contained report that expands `.img.xz`, flashes, verifies, and

@@ -52,7 +52,8 @@ jobs:
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             install -y --no-install-recommends \
-            quilt qemu-user-static debootstrap libarchive-tools arch-test xz-utils
+            quilt qemu-user-static qemu-system-arm qemu-utils mtools \
+            debootstrap libarchive-tools arch-test xz-utils
 
       - name: Clean up apt cache and temp files
         run: |
@@ -100,6 +101,13 @@ jobs:
             CLONE_TOKEN_PLACE="${CLONE_TOKEN_PLACE}" \
             CLONE_DSPACE="${CLONE_DSPACE}" \
             ./scripts/build_pi_image.sh
+
+      - name: Boot image in QEMU smoke test
+        run: |
+          ./scripts/qemu_pi_smoke_test.py \
+            --image sugarkube.img.xz \
+            --artifacts-dir qemu-smoke-artifacts \
+            --timeout 480
 
       - name: Collect deploy directory listing
         if: always()
@@ -161,6 +169,14 @@ jobs:
             sugarkube.img.xz.manifest.json.pem
             sugarkube.build.log
             RELEASE_NOTES.md
+
+      - name: Upload QEMU smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sugarkube-qemu-smoke
+          path: qemu-smoke-artifacts
+          if-no-files-found: warn
 
       - name: Collect support bundle
         if: always()
