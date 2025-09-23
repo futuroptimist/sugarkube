@@ -49,6 +49,12 @@ confirm the quickstart stays accurate.
 | `scripts/ssd_post_clone_validate.py` | Validate cloned SSDs, compare boot config, and run stress tests. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Validate SSD clones", [SSD Post-Clone Validation](./ssd_post_clone_validation.md) | `make validate-ssd-clone`, `just validate-ssd-clone` |
 | `scripts/ssd_health_monitor.py` | Collect SMART metrics, temperatures, and wear indicators with optional reporting. | [Pi Image Quickstart](./pi_image_quickstart.md) §"Monitor SSD health", [SSD Health Monitor](./ssd_health_monitor.md) | `make monitor-ssd-health`, `just monitor-ssd-health` |
 
+## Printable references
+
+| Script | Purpose | Primary docs | Supporting automation |
+| --- | --- | --- | --- |
+| `scripts/render_field_guide_pdf.py` | Build the one-page Pi carrier field guide PDF without extra dependencies. | [Pi Carrier Field Guide](./pi_carrier_field_guide.md), [Pi Image Quickstart](./pi_image_quickstart.md) | `make field-guide`, `just field-guide` |
+
 ## Keeping docs and automation in sync
 
 - Update both the script *and* its corresponding guide when behaviour changes.

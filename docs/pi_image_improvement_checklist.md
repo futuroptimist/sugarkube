@@ -167,7 +167,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - A 10-minute fast path.
   - Persona-based walkthroughs (solo builder, classroom, maintainer).
   - Deep reference sections with wiring photos.
-- [ ] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
+- [x] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
+  - Added [Pi Carrier Field Guide](./pi_carrier_field_guide.md) with a companion PDF renderer
+    (`scripts/render_field_guide_pdf.py`) plus quickstart/README links so a single sheet stays
+    in sync with tooling expectations at the workbench.
 - [ ] Embed GIFs, screencasts, or narrated clips showing download → flash → first boot → SSD clone → k3s readiness.
 - [x] Provide start-to-finish flowcharts mapping the journey.
 - [x] Expand troubleshooting tables linking LED patterns, journalctl logs, `kubectl` errors, and container health issues to fixes.
