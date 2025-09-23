@@ -24,7 +24,7 @@ work; the downloads and flash runs are unattended.
    ```bash
    git clone https://github.com/futuroptimist/sugarkube.git
    cd sugarkube
-   just codespaces-bootstrap  # or: make codespaces-bootstrap
+   just codespaces-bootstrap
    ```
    The bootstrap target installs `gh`, `curl`, flashing dependencies, and Python requirements. Skip
    this step inside Codespaces where the bootstrap happens automatically.
