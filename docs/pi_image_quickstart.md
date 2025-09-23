@@ -4,6 +4,10 @@ Build a Raspberry Pi OS image that boots with k3s and the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) services.
 
+Need the full narrative? Jump to the [Pi Carrier Launch Playbook](./pi_carrier_launch_playbook.md)
+for a 10-minute fast path, persona walkthroughs, and reference maps that connect each automation
+helper to its documentation. Return here whenever you need the detailed command-by-command view.
+
 Need a visual overview first? Start with the
 [Pi Image Flowcharts](./pi_image_flowcharts.md) to map the journey from download to first boot
 before diving into the commands below.
