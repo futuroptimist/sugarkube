@@ -22,6 +22,7 @@ Review the safety notes before working with power components.
 - [network_setup.md](network_setup.md) — connect the cluster to your network
 - [mac_mini_station.md](mac_mini_station.md) — press-fit cap for the Mac mini keyboard station
 - [electronics_schematics.md](electronics_schematics.md) — KiCad and Fritzing designs
+- [pi_carrier_launch_playbook.md](pi_carrier_launch_playbook.md) — end-to-end guide from download to k3s
 - [pi_image_quickstart.md](pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
 - [pi_smoke_test.md](pi_smoke_test.md) — run remote smoke tests against freshly provisioned Pis
 - [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs

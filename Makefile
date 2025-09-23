@@ -22,6 +22,10 @@ HEALTH_CMD ?= $(CURDIR)/scripts/ssd_health_monitor.py
 HEALTH_ARGS ?=
 SMOKE_CMD ?= $(CURDIR)/scripts/pi_smoke_test.py
 SMOKE_ARGS ?=
+QEMU_SMOKE_CMD ?= $(CURDIR)/scripts/qemu_pi_smoke_test.py
+QEMU_SMOKE_ARGS ?=
+QEMU_SMOKE_IMAGE ?=
+QEMU_SMOKE_ARTIFACTS ?= $(CURDIR)/artifacts/qemu-smoke
 TELEMETRY_CMD ?= $(CURDIR)/scripts/publish_telemetry.py
 TELEMETRY_ARGS ?=
 TEAMS_CMD ?= $(CURDIR)/scripts/sugarkube_teams.py
@@ -39,11 +43,13 @@ SUPPORT_BUNDLE_ARGS ?=
 SUPPORT_BUNDLE_HOST ?=
 FIELD_GUIDE_CMD ?= $(CURDIR)/scripts/render_field_guide_pdf.py
 FIELD_GUIDE_ARGS ?=
+MAC_SETUP_CMD ?= $(CURDIR)/scripts/sugarkube_setup.py
+MAC_SETUP_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi field-guide \
+        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
-        token-place-samples support-bundle
+        token-place-samples support-bundle mac-setup
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -89,10 +95,17 @@ monitor-ssd-health:
 	$(HEALTH_CMD) $(HEALTH_ARGS)
 
 smoke-test-pi:
-	$(SMOKE_CMD) $(SMOKE_ARGS)
+        $(SMOKE_CMD) $(SMOKE_ARGS)
+
+qemu-smoke:
+        @if [ -z "$(QEMU_SMOKE_IMAGE)" ]; then \
+                echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; \
+                exit 1; \
+        fi
+        sudo $(QEMU_SMOKE_CMD) --image "$(QEMU_SMOKE_IMAGE)" --artifacts-dir "$(QEMU_SMOKE_ARTIFACTS)" $(QEMU_SMOKE_ARGS)
 
 field-guide:
-	$(FIELD_GUIDE_CMD) $(FIELD_GUIDE_ARGS)
+        $(FIELD_GUIDE_CMD) $(FIELD_GUIDE_ARGS)
 
 publish-telemetry:
         $(TELEMETRY_CMD) $(TELEMETRY_ARGS)
@@ -113,8 +126,11 @@ token-place-samples:
 	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)
 
 support-bundle:
-	@if [ -z "$(SUPPORT_BUNDLE_HOST)" ]; then \
-	echo "Set SUPPORT_BUNDLE_HOST to the target host (e.g. pi.local) before running support-bundle." >&2; \
-	exit 1; \
-	fi
-	$(SUPPORT_BUNDLE_CMD) "$(SUPPORT_BUNDLE_HOST)" $(SUPPORT_BUNDLE_ARGS)
+        @if [ -z "$(SUPPORT_BUNDLE_HOST)" ]; then \
+        echo "Set SUPPORT_BUNDLE_HOST to the target host (e.g. pi.local) before running support-bundle." >&2; \
+        exit 1; \
+        fi
+        $(SUPPORT_BUNDLE_CMD) "$(SUPPORT_BUNDLE_HOST)" $(SUPPORT_BUNDLE_ARGS)
+
+mac-setup:
+        $(MAC_SETUP_CMD) $(MAC_SETUP_ARGS)

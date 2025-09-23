@@ -8,6 +8,11 @@ Need a visual overview first? Start with the
 [Pi Image Flowcharts](./pi_image_flowcharts.md) to map the journey from download to first boot
 before diving into the commands below.
 
+Prefer a single narrative that fuses the quickstart, provisioning, observability, and
+troubleshooting steps? Keep the [Pi Carrier Launch Playbook](./pi_carrier_launch_playbook.md)
+open in another tab. It provides a 10-minute fast path, persona walkthroughs, and deep reference
+sections that point directly back to this guide for full command details.
+
 Maintainers updating scripts or docs should cross-reference the
 [Pi Image Contributor Guide](./pi_image_contributor_guide.md) to keep automation helpers and
 guidance aligned.
@@ -25,6 +30,32 @@ Pair them with the [Pi Carrier Field Guide](./pi_carrier_field_guide.md) and its
 [`pi_carrier_field_guide.pdf`](./pi_carrier_field_guide.pdf) to keep a one-page checklist beside the
 cluster.
 Run `make field-guide` or `just field-guide` after editing the Markdown to refresh the PDF copy.
+
+## 0. Prepare your workstation (macOS)
+
+Homebrew users can now install a supported tap and run a guided setup wizard:
+
+```bash
+brew tap sugarkube/sugarkube https://github.com/futuroptimist/sugarkube
+brew install sugarkube
+```
+
+The tap ships a `sugarkube-setup` CLI that audits Homebrew formulas (`qemu`, `coreutils`, `just`,
+`xz`, and `pipx`), ensures `~/sugarkube/{images,reports,cache}` exist, and writes a starter
+`sugarkube.env` with 100% patch coverage reminders. Inspect the plan first:
+
+```bash
+just mac-setup
+```
+
+Then apply the changes automatically (or substitute `make mac-setup`):
+
+```bash
+just mac-setup MAC_SETUP_ARGS="--apply"
+```
+
+The wizard can also run outside macOS by appending `--force`, which keeps docs and CI rehearsals in
+sync without modifying the host.
 
 ## 1. Build or download the image
 
@@ -73,6 +104,18 @@ Run `make field-guide` or `just field-guide` after editing the Markdown to refre
    sha256sum -c path/to/sugarkube.img.xz.sha256
    ```
    The command prints `OK` when the checksum matches the downloaded image.
+6. Before touching hardware, boot the artifact in QEMU to confirm the first-boot
+   automation still produces healthy reports:
+   ```bash
+   sudo make qemu-smoke \
+     QEMU_SMOKE_IMAGE=deploy/sugarkube.img.xz \
+     QEMU_SMOKE_ARGS="--timeout 420"
+   ```
+   The helper wraps `scripts/qemu_pi_smoke_test.py`, which mounts the image,
+   swaps in a stub verifier, boots `qemu-system-aarch64`, and copies
+   `/boot/first-boot-report/` plus `/var/log/sugarkube/` into
+   `artifacts/qemu-smoke/`. Use `just qemu-smoke` with the same environment
+   variables when you prefer Just over Make.
 
 ## 2. Flash the image
 - Generate a self-contained report that expands `.img.xz`, flashes, verifies, and
