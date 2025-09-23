@@ -45,6 +45,15 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
      partial downloads and verifies checksums automatically.
+   - Want a hands-off alert when the artifacts land? Run
+    ```bash
+    make notify-workflow \
+      WORKFLOW_NOTIFY_ARGS='--run-url <workflow-url>'
+    ```
+     to poll the run and raise a desktop notification (or console summary) the
+     moment GitHub finishes uploading assets. See the
+     [workflow notification guide](./pi_workflow_notifications.md) for
+     cross-platform options and advanced flags.
 4. Alternatively, build on your machine:
    ```bash
    ./scripts/build_pi_image.sh
