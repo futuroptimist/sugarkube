@@ -43,15 +43,16 @@ the docs you will see the term used in both contexts.
 - [docs/insert_basics.md](docs/insert_basics.md) — guide for heat-set inserts and printed threads
 - [docs/network_setup.md](docs/network_setup.md) — connect the Pi cluster to your network
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
-- [docs/pi_headless_provisioning.md](docs/pi_headless_provisioning.md) — headless boot playbook covering
+- [docs/pi_headless_provisioning.md](docs/pi_headless_provisioning.md) — headless boot playbook for
   `secrets.env` usage
-- [docs/pi_image_quickstart.md](docs/pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
-- [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md) — map automation helpers to
-  the docs that describe them
-- [docs/pi_carrier_field_guide.md](docs/pi_carrier_field_guide.md) — one-page printable checklist with a
-  PDF companion (`docs/pi_carrier_field_guide.pdf`) for the workbench
-- [docs/templates/cloud-init/user-data.example](docs/templates/cloud-init/user-data.example) — cloud-init
-  template for SSH keys and `Wi-Fi` credentials
+- [docs/pi_carrier_launch_playbook.md](docs/pi_carrier_launch_playbook.md) — end-to-end launch
+  playbook with a 10-minute fast path, persona walkthroughs, and deep reference maps
+- [docs/pi_image_quickstart.md](docs/pi_image_quickstart.md) — build, flash, and boot the image
+- [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md) — map automation helpers
+  to the docs that describe them
+- [docs/pi_carrier_field_guide.md](docs/pi_carrier_field_guide.md) — printable checklist with a PDF
+  companion (`docs/pi_carrier_field_guide.pdf`) for the workbench
+- [user-data example](docs/templates/cloud-init/user-data.example) — SSH key and WiFi template
 - `scripts/` — helper scripts for rendering and exports. See
   [docs/contributor_script_map.md](docs/contributor_script_map.md) for a
   contributor-facing map that ties each helper to the guide that explains it.

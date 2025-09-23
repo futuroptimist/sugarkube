@@ -162,11 +162,15 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## Documentation & Onboarding
-- [ ] Merge fragmented docs (`pi_image_quickstart.md`, `pi_image_builder_design.md`, `pi_image_cloudflare.md`, `raspi_cluster_setup.md`, etc.) into a single end-to-end “Pi Carrier Launch Playbook.”
-- [ ] Structure guide with:
+- [x] Merge fragmented docs (`pi_image_quickstart.md`, `pi_image_builder_design.md`, `pi_image_cloudflare.md`, `raspi_cluster_setup.md`, etc.) into a single end-to-end “Pi Carrier Launch Playbook.”
+  - Added [Pi Carrier Launch Playbook](./pi_carrier_launch_playbook.md) and linked it from the
+    quickstart and README.
+- [x] Structure guide with:
   - A 10-minute fast path.
   - Persona-based walkthroughs (solo builder, classroom, maintainer).
   - Deep reference sections with wiring photos.
+  - Implemented within the new playbook alongside cross-links back to detailed
+    references.
 - [x] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
   - Added [Pi Carrier Field Guide](./pi_carrier_field_guide.md) with a companion PDF renderer
     (`scripts/render_field_guide_pdf.py`) plus quickstart/README links so a single sheet stays
