@@ -79,3 +79,28 @@ def test_parse_args_overrides_paths(tmp_path: pathlib.Path):
     assert args.source == src
     assert args.output == dst
     assert args.wrap == 42
+
+
+def test_markdown_to_lines_spacing_and_empty_bullets():
+    markdown = "\n".join(
+        [
+            "Paragraph without trailing blank before heading.",
+            "# Following heading",
+            "- ",
+            "- Bullet with relative [link](docs/guide.md) that should wrap onto multiple "
+            "continuation lines for coverage.",
+            "",
+        ]
+    )
+
+    lines = render_field_guide_pdf.markdown_to_lines(markdown, wrap=50)
+
+    heading_index = lines.index("FOLLOWING HEADING")
+    assert heading_index > 0
+    assert lines[heading_index - 1] == ""
+
+    assert any(line.startswith("  •") for line in lines)
+    assert any("docs/guide.md" in line for line in lines)
+    wrapped_continuations = [line for line in lines if line.startswith("    ")]
+    assert wrapped_continuations, "expected continuation lines for wrapped bullets"
+    assert lines[-1] != ""
