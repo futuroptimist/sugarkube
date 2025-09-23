@@ -188,7 +188,12 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - New `scripts/sugarkube_doctor.sh` chains dry-run downloads, flash validation, and optional lint
     plus link checks via `make doctor`.
 - [ ] Offer a `brew install sugarkube` tap and `sugarkube setup` wizard for macOS.
-- [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
+- [x] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
+  - Added `scripts/workflow_artifact_notifier.py`, a GitHub CLI-backed poller exposed via
+    `make notify-workflow` / `just notify-workflow` that posts native notifications on Linux, macOS,
+    and Windows (with console fallbacks) when release artifacts finish uploading. Documented in
+    [Sugarkube Workflow Artifact Notifications](./pi_workflow_notifications.md) with 100% patch
+    coverage guaranteed by `tests/test_workflow_artifact_notifier.py`.
 - [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
 - [x] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
   - `scripts/generate_qr_codes.py` now exports SVG stickers plus a manifest, and

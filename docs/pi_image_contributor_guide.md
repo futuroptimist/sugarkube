@@ -17,6 +17,8 @@ sync.
   with the automation helpers.
 - Use `pre-commit run --all-files` to exercise `scripts/checks.sh`, which installs spellcheck and
   link-check dependencies automatically when missing.
+- Ship changes with tests that deliver **100% patch coverage on the first `pytest` run**. Design
+  tests before landing code so local runs (and CI) never require retries to close coverage gaps.
 - When adding a new helper, update this mapping and reference it from the relevant guide so the
   quick-start and recovery docs stay authoritative.
 
@@ -96,6 +98,12 @@ sync.
   - Related tooling: imported by `first_boot_service.py` and `ssd_clone_service.py`, installed to
     `/opt/sugarkube/` with a `/usr/local/bin/sugarkube-teams` CLI, and surfaced through
     `make notify-teams` / `just notify-teams` wrappers.
+- `scripts/workflow_artifact_notifier.py`
+  - Purpose: watch GitHub Actions runs and raise desktop notifications when artifacts finish
+    uploading, with console fallbacks when native notification binaries are missing.
+  - Primary docs: [Sugarkube Workflow Artifact Notifications](./pi_workflow_notifications.md).
+  - Related tooling: exposed via `make notify-workflow` / `just notify-workflow` and validated by
+    `tests/test_workflow_artifact_notifier.py` to guarantee first-run patch coverage.
 - `scripts/self_heal_service.py` + `sugarkube-self-heal@.service`
   - Purpose: respond to `projects-compose` and `cloud-init` failures by retrying Docker Compose pulls,
     running `cloud-init clean --logs`, and escalating to `rescue.target` with Markdown summaries under

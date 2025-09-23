@@ -26,6 +26,8 @@ TELEMETRY_CMD ?= $(CURDIR)/scripts/publish_telemetry.py
 TELEMETRY_ARGS ?=
 TEAMS_CMD ?= $(CURDIR)/scripts/sugarkube_teams.py
 TEAMS_ARGS ?=
+WORKFLOW_NOTIFY_CMD ?= $(CURDIR)/scripts/workflow_artifact_notifier.py
+WORKFLOW_NOTIFY_ARGS ?=
 BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
 REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
@@ -40,7 +42,7 @@ FIELD_GUIDE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi field-guide \
-        publish-telemetry notify-teams update-hardware-badge rehearse-join \
+        publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle
 
 install-pi-image:
@@ -98,8 +100,11 @@ publish-telemetry:
 notify-teams:
         $(TEAMS_CMD) $(TEAMS_ARGS)
 
+notify-workflow:
+        $(WORKFLOW_NOTIFY_CMD) $(WORKFLOW_NOTIFY_ARGS)
+
 update-hardware-badge:
-	$(BADGE_CMD) $(BADGE_ARGS)
+        $(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
 	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
