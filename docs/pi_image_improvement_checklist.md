@@ -141,7 +141,11 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## Testing & CI Hardening
-- [ ] Extend pi-image workflow with QEMU smoke tests that boot the image, wait for cloud-init, run verifier, and upload logs.
+- [x] Extend pi-image workflow with QEMU smoke tests that boot the image, wait for cloud-init, run verifier, and upload logs.
+  - `scripts/qemu_pi_smoke_test.py` now prepares the built image for virtualization, boots it via
+    `qemu-system-aarch64`, watches the serial console for `[first-boot]` success messages, and copies
+    `/boot/first-boot-report/` plus `/var/log/sugarkube/` into CI artifacts. The job runs after each
+    release build and the Makefile/Just targets expose the same harness locally.
 - [x] Add contract tests asserting ports are open, health endpoints respond, and container digests remain pinned.
   - Added `tests/projects_compose_contract_test.py` to enforce token.place/dspace port exposure,
     ensure observability images stay pinned to known SHA-256 digests, and expanded the Bats suite to
@@ -162,8 +166,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 ---
 
 ## Documentation & Onboarding
-- [ ] Merge fragmented docs (`pi_image_quickstart.md`, `pi_image_builder_design.md`, `pi_image_cloudflare.md`, `raspi_cluster_setup.md`, etc.) into a single end-to-end “Pi Carrier Launch Playbook.”
-- [ ] Structure guide with:
+- [x] Merge fragmented docs (`pi_image_quickstart.md`, `pi_image_builder_design.md`, `pi_image_cloudflare.md`, `raspi_cluster_setup.md`, etc.) into a single end-to-end “Pi Carrier Launch Playbook.”
+- [x] Structure guide with:
   - A 10-minute fast path.
   - Persona-based walkthroughs (solo builder, classroom, maintainer).
   - Deep reference sections with wiring photos.

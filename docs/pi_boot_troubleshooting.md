@@ -52,6 +52,8 @@ sudo ./scripts/collect_support_bundle.sh --output ~/sugarkube/support-$(date +%Y
 The archive gathers `journalctl`, compose logs, `kubectl get all -A`, and the
 latest `/boot/first-boot-report/summary.json`, making it easier to spot regressions.
 
+### Self-heal automation
+
 Whenever `cloud-init` or `projects-compose.service` enter a failed state, the
 `sugarkube-self-heal@.service` automation records its attempts under
 `/boot/first-boot-report/self-heal/`. If the Pi isolates itself in

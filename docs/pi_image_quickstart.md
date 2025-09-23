@@ -4,6 +4,14 @@ Build a Raspberry Pi OS image that boots with k3s and the
 [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace) services.
 
+Looking for a single narrative that stitches download → flash → first boot →
+SSD migration together? Start with the new [Pi Carrier Launch
+Playbook](./pi_carrier_launch_playbook.md). It merges this quickstart, the
+builder design notes, networking guides, and troubleshooting references into a
+printable handbook with persona walkthroughs and a 10-minute fast path. Return
+to this document when you need detailed command listings or update-specific
+callouts for maintainers.
+
 Need a visual overview first? Start with the
 [Pi Image Flowcharts](./pi_image_flowcharts.md) to map the journey from download to first boot
 before diving into the commands below.
@@ -73,6 +81,18 @@ Run `make field-guide` or `just field-guide` after editing the Markdown to refre
    sha256sum -c path/to/sugarkube.img.xz.sha256
    ```
    The command prints `OK` when the checksum matches the downloaded image.
+6. Before touching hardware, boot the artifact in QEMU to confirm the first-boot
+   automation still produces healthy reports:
+   ```bash
+   sudo make qemu-smoke \
+     QEMU_SMOKE_IMAGE=deploy/sugarkube.img.xz \
+     QEMU_SMOKE_ARGS="--timeout 420"
+   ```
+   The helper wraps `scripts/qemu_pi_smoke_test.py`, which mounts the image,
+   swaps in a stub verifier, boots `qemu-system-aarch64`, and copies
+   `/boot/first-boot-report/` plus `/var/log/sugarkube/` into
+   `artifacts/qemu-smoke/`. Use `just qemu-smoke` with the same environment
+   variables when you prefer Just over Make.
 
 ## 2. Flash the image
 - Generate a self-contained report that expands `.img.xz`, flashes, verifies, and

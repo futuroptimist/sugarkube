@@ -45,7 +45,10 @@ the docs you will see the term used in both contexts.
 - [docs/lcd_mount.md](docs/lcd_mount.md) — optional 1602 LCD standoff locations
 - [docs/pi_headless_provisioning.md](docs/pi_headless_provisioning.md) — headless boot playbook covering
   `secrets.env` usage
-- [docs/pi_image_quickstart.md](docs/pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
+- [docs/pi_carrier_launch_playbook.md](docs/pi_carrier_launch_playbook.md) — end-to-end
+  launch handbook with persona walkthroughs and a 10-minute fast path
+- [docs/pi_image_quickstart.md](docs/pi_image_quickstart.md) — detailed command
+  reference for building, flashing, and verifying the Pi image
 - [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md) — map automation helpers to
   the docs that describe them
 - [docs/pi_carrier_field_guide.md](docs/pi_carrier_field_guide.md) — one-page printable checklist with a

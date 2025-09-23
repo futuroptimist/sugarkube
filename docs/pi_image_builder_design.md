@@ -1,5 +1,10 @@
 # Pi Image Builder – Design
 
+> For an operator-friendly walkthrough that combines download, flashing,
+> provisioning, and troubleshooting, see the consolidated [Pi Carrier Launch
+> Playbook](./pi_carrier_launch_playbook.md). This design document dives deeper
+> into implementation details and automation internals.
+
 ## Goals
 - Deterministic, reproducible Raspberry Pi OS images with cloud-init customizations
 - Cross-platform developer experience (Windows, macOS, Linux)
@@ -95,6 +100,12 @@
   hashes for every attached artifact so downstream tooling can validate the build.
 - Artifacts are signed via GitHub OIDC + cosign. Both the signature and certificate
   are attached to the release for offline verification.
+- After signing, the workflow launches `scripts/qemu_pi_smoke_test.py` to boot the
+  freshly built image inside `qemu-system-aarch64`. The helper swaps in a stub
+  verifier, trims first-boot retry windows, waits for `[first-boot]` success markers
+  on the serial console, and then copies `/boot/first-boot-report` plus
+  `/var/log/sugarkube` into uploadable artifacts so every release ships with the
+  same telemetry operators would retrieve from hardware.
 
 ### Local GitHub Actions dry-run
 - Install [act](https://github.com/nektos/act) and run `act workflow-dispatch --workflows
@@ -118,5 +129,5 @@ Read-only mount for cloud-init file into container
 ## Future Enhancements
 - Parametrize mirror list and implement automatic mirror failover
 - Structured logs from `pi-gen` stages to summarize progress/time
-- Expand the manifest to embed optional QEMU smoke-test results once the
-  virtualization harness is ready
+- Surface QEMU smoke-test metadata (serial logs, report hashes) directly in the
+  release manifest alongside the core artifacts
