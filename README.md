@@ -48,6 +48,8 @@ the docs you will see the term used in both contexts.
 - [docs/pi_image_quickstart.md](docs/pi_image_quickstart.md) — build, flash and boot the preloaded Pi image
 - [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md) — map automation helpers to
   the docs that describe them
+- [docs/pi_carrier_field_guide.md](docs/pi_carrier_field_guide.md) — one-page printable checklist with a
+  PDF companion (`docs/pi_carrier_field_guide.pdf`) for the workbench
 - [docs/templates/cloud-init/user-data.example](docs/templates/cloud-init/user-data.example) — cloud-init
   template for SSH keys and `Wi-Fi` credentials
 - `scripts/` — helper scripts for rendering and exports. See
@@ -78,6 +80,8 @@ the docs you will see the term used in both contexts.
     `--help` for usage
   - `pi_smoke_test.py` — SSH wrapper that runs the verifier remotely, supports reboot checks,
     and emits JSON summaries for CI harnesses
+  - `render_field_guide_pdf.py` — build the Markdown field guide into a single-page PDF without
+    extra pip dependencies so releases can refresh the printable checklist automatically
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when
     available and also run a regex check to catch common tokens
 - `outages/` — structured outage records (see

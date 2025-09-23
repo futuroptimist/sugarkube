@@ -30,6 +30,11 @@ support_bundle_cmd := env_var_or_default(
 )
 support_bundle_args := env_var_or_default("SUPPORT_BUNDLE_ARGS", "")
 support_bundle_host := env_var_or_default("SUPPORT_BUNDLE_HOST", "")
+field_guide_cmd := env_var_or_default(
+    "FIELD_GUIDE_CMD",
+    justfile_directory() + "/scripts/render_field_guide_pdf.py",
+)
+field_guide_args := env_var_or_default("FIELD_GUIDE_ARGS", "")
 telemetry_cmd := env_var_or_default(
     "TELEMETRY_CMD",
     justfile_directory() + "/scripts/publish_telemetry.py",
@@ -40,6 +45,11 @@ teams_cmd := env_var_or_default(
     justfile_directory() + "/scripts/sugarkube_teams.py",
 )
 teams_args := env_var_or_default("TEAMS_ARGS", "")
+workflow_notify_cmd := env_var_or_default(
+    "WORKFLOW_NOTIFY_CMD",
+    justfile_directory() + "/scripts/workflow_artifact_notifier.py",
+)
+workflow_notify_args := env_var_or_default("WORKFLOW_NOTIFY_ARGS", "")
 badge_cmd := env_var_or_default(
     "BADGE_CMD",
     justfile_directory() + "/scripts/update_hardware_boot_badge.py",
@@ -127,6 +137,11 @@ monitor-ssd-health:
 smoke-test-pi:
     "{{smoke_cmd}}" {{smoke_args}}
 
+# Render the printable Pi carrier field guide PDF
+# Usage: just field-guide FIELD_GUIDE_ARGS="--wrap 70"
+field-guide:
+    "{{field_guide_cmd}}" {{field_guide_args}}
+
 # Publish anonymized telemetry payloads once.
 publish-telemetry:
     "{{telemetry_cmd}}" {{telemetry_args}}
@@ -134,6 +149,11 @@ publish-telemetry:
 # Send a manual Slack/Matrix notification using sugarkube-teams
 notify-teams:
     "{{teams_cmd}}" {{teams_args}}
+
+# Watch a workflow run and raise desktop notifications when artifacts are ready
+# Usage: just notify-workflow WORKFLOW_NOTIFY_ARGS="--run-url https://github.com/..."
+notify-workflow:
+    "{{workflow_notify_cmd}}" {{workflow_notify_args}}
 
 # Update the hardware boot conformance badge JSON
 # Usage: just update-hardware-badge BADGE_ARGS="--status warn --notes 'pi-b'"

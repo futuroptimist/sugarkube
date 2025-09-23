@@ -167,7 +167,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - A 10-minute fast path.
   - Persona-based walkthroughs (solo builder, classroom, maintainer).
   - Deep reference sections with wiring photos.
-- [ ] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
+- [x] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
+  - Added [Pi Carrier Field Guide](./pi_carrier_field_guide.md) with a companion PDF renderer
+    (`scripts/render_field_guide_pdf.py`) plus quickstart/README links so a single sheet stays
+    in sync with tooling expectations at the workbench.
 - [ ] Embed GIFs, screencasts, or narrated clips showing download → flash → first boot → SSD clone → k3s readiness.
 - [x] Provide start-to-finish flowcharts mapping the journey.
 - [x] Expand troubleshooting tables linking LED patterns, journalctl logs, `kubectl` errors, and container health issues to fixes.
@@ -185,7 +188,12 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - New `scripts/sugarkube_doctor.sh` chains dry-run downloads, flash validation, and optional lint
     plus link checks via `make doctor`.
 - [ ] Offer a `brew install sugarkube` tap and `sugarkube setup` wizard for macOS.
-- [ ] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
+- [x] Package a cross-platform desktop notifier to alert when workflow artifacts are ready.
+  - Added `scripts/workflow_artifact_notifier.py`, a GitHub CLI-backed poller exposed via
+    `make notify-workflow` / `just notify-workflow` that posts native notifications on Linux, macOS,
+    and Windows (with console fallbacks) when release artifacts finish uploading. Documented in
+    [Sugarkube Workflow Artifact Notifications](./pi_workflow_notifications.md) with 100% patch
+    coverage guaranteed by `tests/test_workflow_artifact_notifier.py`.
 - [x] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
   - Added [Sugarkube Flash Helper](./flash-helper/) plus `scripts/workflow_flash_instructions.py`
     so operators can generate identical guidance from the CLI or the published page.

@@ -26,6 +26,8 @@ TELEMETRY_CMD ?= $(CURDIR)/scripts/publish_telemetry.py
 TELEMETRY_ARGS ?=
 TEAMS_CMD ?= $(CURDIR)/scripts/sugarkube_teams.py
 TEAMS_ARGS ?=
+WORKFLOW_NOTIFY_CMD ?= $(CURDIR)/scripts/workflow_artifact_notifier.py
+WORKFLOW_NOTIFY_ARGS ?=
 BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
 REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
@@ -35,10 +37,12 @@ TOKEN_PLACE_SAMPLE_ARGS ?= --samples-dir $(CURDIR)/samples/token_place
 SUPPORT_BUNDLE_CMD ?= $(CURDIR)/scripts/collect_support_bundle.py
 SUPPORT_BUNDLE_ARGS ?=
 SUPPORT_BUNDLE_HOST ?=
+FIELD_GUIDE_CMD ?= $(CURDIR)/scripts/render_field_guide_pdf.py
+FIELD_GUIDE_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
-        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi \
-        publish-telemetry notify-teams update-hardware-badge rehearse-join \
+        clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi field-guide \
+        publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle
 
 install-pi-image:
@@ -87,14 +91,20 @@ monitor-ssd-health:
 smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)
 
+field-guide:
+	$(FIELD_GUIDE_CMD) $(FIELD_GUIDE_ARGS)
+
 publish-telemetry:
         $(TELEMETRY_CMD) $(TELEMETRY_ARGS)
 
 notify-teams:
         $(TEAMS_CMD) $(TEAMS_ARGS)
 
+notify-workflow:
+        $(WORKFLOW_NOTIFY_CMD) $(WORKFLOW_NOTIFY_ARGS)
+
 update-hardware-badge:
-	$(BADGE_CMD) $(BADGE_ARGS)
+        $(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
 	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)

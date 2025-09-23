@@ -21,6 +21,10 @@ refresh the badge after exercising physical clusters.
 Need a hands-on reminder next to the hardware? Print the
 [Pi carrier QR labels](./pi_carrier_qr_labels.md) and stick them to the enclosure so anyone can
 scan straight to this quickstart or the troubleshooting matrix while standing at the workbench.
+Pair them with the [Pi Carrier Field Guide](./pi_carrier_field_guide.md) and its generated
+[`pi_carrier_field_guide.pdf`](./pi_carrier_field_guide.pdf) to keep a one-page checklist beside the
+cluster.
+Run `make field-guide` or `just field-guide` after editing the Markdown to refresh the PDF copy.
 
 ## 1. Build or download the image
 
@@ -50,6 +54,15 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
      repository root to print the same steps.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
      partial downloads and verifies checksums automatically.
+   - Want a hands-off alert when the artifacts land? Run
+    ```bash
+    make notify-workflow \
+      WORKFLOW_NOTIFY_ARGS='--run-url <workflow-url>'
+    ```
+     to poll the run and raise a desktop notification (or console summary) the
+     moment GitHub finishes uploading assets. See the
+     [workflow notification guide](./pi_workflow_notifications.md) for
+     cross-platform options and advanced flags.
 4. Alternatively, build on your machine:
    ```bash
    ./scripts/build_pi_image.sh
