@@ -59,6 +59,27 @@ def test_system_context_brew_helpers(tmp_path):
     system.run(["echo", "ok"])
 
 
+def test_system_context_platform_and_command(monkeypatch, tmp_path):
+    runner = RecordingRunner({})
+    monkeypatch.setattr(MODULE.platform, "system", lambda: "Darwin")
+
+    observed: list[str | None] = []
+
+    def fake_which(name):
+        observed.append(name)
+        return "/usr/bin/brew"
+
+    monkeypatch.setattr(MODULE.shutil, "which", fake_which)
+
+    system = MODULE.SystemContext(runner=runner, home=tmp_path)
+    assert system.platform() == "darwin"
+    assert system.has_command("brew") is True
+    assert observed == ["brew"]
+
+    monkeypatch.setattr(MODULE.shutil, "which", lambda name: None)
+    assert system.has_command("brew") is False
+
+
 def test_system_context_run_text_errors(tmp_path):
     runner = RecordingRunner({("brew", "tap"): FileNotFoundError("missing brew")})
     system = MODULE.SystemContext(runner=runner, home=tmp_path)

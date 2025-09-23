@@ -52,6 +52,25 @@ def test_decompress_image_copies_into_work_dir(tmp_path: Path) -> None:
     assert dest.read_bytes() == b"contents"
 
 
+def test_run_helper_adds_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command, **kwargs):  # noqa: ANN001 - mimic subprocess signature
+        calls.append((list(command), kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    MODULE._run(["echo", "hi"], sudo=True, capture_output=True, text=False)
+
+    assert calls
+    executed, kwargs = calls[0]
+    assert executed[:2] == ["sudo", "-n"]
+    assert executed[2:] == ["echo", "hi"]
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is False
+
+
 def test_normalise_cmdline_rewrites_root_and_console() -> None:
     result = MODULE._normalise_cmdline("root=PARTUUID=123 quiet")
     assert "root=/dev/mmcblk0p2" in result
