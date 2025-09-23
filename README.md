@@ -100,8 +100,12 @@ use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev
  They also provide
  `download-pi-image`, `install-pi-image`, `doctor`, and `codespaces-bootstrap` shortcuts so GitHub
  Codespaces users can install prerequisites and flash media without additional shell glue.
- `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
- checksum verification.
+`./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
+checksum verification.
+
+Prefer a guided experience? Open [docs/flash-helper/](docs/flash-helper/) to paste a workflow run
+URL and receive OS-specific download, verification, and flashing steps. The same logic is also
+available via `python scripts/workflow_flash_instructions.py --help` for command-line use.
 
 Run `pre-commit run --all-files` before committing.
 This triggers `scripts/checks.sh`, which installs required tooling and runs
