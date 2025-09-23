@@ -30,6 +30,11 @@ support_bundle_cmd := env_var_or_default(
 )
 support_bundle_args := env_var_or_default("SUPPORT_BUNDLE_ARGS", "")
 support_bundle_host := env_var_or_default("SUPPORT_BUNDLE_HOST", "")
+field_guide_cmd := env_var_or_default(
+    "FIELD_GUIDE_CMD",
+    justfile_directory() + "/scripts/render_field_guide_pdf.py",
+)
+field_guide_args := env_var_or_default("FIELD_GUIDE_ARGS", "")
 telemetry_cmd := env_var_or_default(
     "TELEMETRY_CMD",
     justfile_directory() + "/scripts/publish_telemetry.py",
@@ -131,6 +136,11 @@ monitor-ssd-health:
 # Usage: just smoke-test-pi SMOKE_ARGS="pi-a.local --reboot"
 smoke-test-pi:
     "{{smoke_cmd}}" {{smoke_args}}
+
+# Render the printable Pi carrier field guide PDF
+# Usage: just field-guide FIELD_GUIDE_ARGS="--wrap 70"
+field-guide:
+    "{{field_guide_cmd}}" {{field_guide_args}}
 
 # Publish anonymized telemetry payloads once.
 publish-telemetry:

@@ -21,6 +21,10 @@ refresh the badge after exercising physical clusters.
 Need a hands-on reminder next to the hardware? Print the
 [Pi carrier QR labels](./pi_carrier_qr_labels.md) and stick them to the enclosure so anyone can
 scan straight to this quickstart or the troubleshooting matrix while standing at the workbench.
+Pair them with the [Pi Carrier Field Guide](./pi_carrier_field_guide.md) and its generated
+[`pi_carrier_field_guide.pdf`](./pi_carrier_field_guide.pdf) to keep a one-page checklist beside the
+cluster.
+Run `make field-guide` or `just field-guide` after editing the Markdown to refresh the PDF copy.
 
 ## 1. Build or download the image
 
