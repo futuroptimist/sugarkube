@@ -43,6 +43,11 @@ scan straight to this quickstart or the troubleshooting matrix while standing at
 3. In GitHub, open **Actions → pi-image → Run workflow** for a fresh build.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
+   - Need a guided path? Launch the [Sugarkube Flash Helper](./flash-helper/) and paste the
+     workflow URL to receive OS-specific download, verification, and flashing instructions. Prefer
+     the terminal? Run
+     `python scripts/workflow_flash_instructions.py --url <run-url> --os linux|mac|windows` from the
+     repository root to print the same steps.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
      partial downloads and verifies checksums automatically.
 4. Alternatively, build on your machine:
