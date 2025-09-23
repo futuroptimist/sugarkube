@@ -194,7 +194,9 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     and Windows (with console fallbacks) when release artifacts finish uploading. Documented in
     [Sugarkube Workflow Artifact Notifications](./pi_workflow_notifications.md) with 100% patch
     coverage guaranteed by `tests/test_workflow_artifact_notifier.py`.
-- [ ] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
+- [x] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
+  - Added [Sugarkube Flash Helper](./flash-helper/) plus `scripts/workflow_flash_instructions.py`
+    so operators can generate identical guidance from the CLI or the published page.
 - [x] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
   - `scripts/generate_qr_codes.py` now exports SVG stickers plus a manifest, and
     `make qr-codes`/`just qr-codes` regenerate them. `docs/pi_carrier_qr_labels.md`
