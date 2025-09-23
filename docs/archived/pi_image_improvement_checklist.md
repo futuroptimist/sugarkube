@@ -100,7 +100,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     workflow in `docs/ssd_recovery.md` with dry-run guidance and report expectations.
 - [x] Offer an opt-in SSD health monitor (SMART/wear checks).
   - Added `scripts/ssd_health_monitor.py`, Makefile/just wrappers, and
-    [`SSD Health Monitor`](./ssd_health_monitor.md) docs covering manual runs and an optional
+    [`SSD Health Monitor`](../ssd_health_monitor.md) docs covering manual runs and an optional
     systemd timer for recurring SMART snapshots.
 
 ---
@@ -123,14 +123,14 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     install Helm, read `/etc/sugarkube/helm-bundles.d/*.env`, run `helm upgrade --install --atomic`,
     and bail out through the self-heal unit when rollouts or health probes fail. Markdown reports
     now land under `/boot/first-boot-report/helm-bundles/` for air-gapped debugging, and the
-    workflow is documented in [Sugarkube Helm Bundle Hooks](./pi_helm_bundles.md).
+    workflow is documented in [Sugarkube Helm Bundle Hooks](../pi_helm_bundles.md).
 - [x] Bundle sample datasets and token.place collections for first-launch validation.
   - Added `samples/token_place/` plus a replay helper that the image copies into
     `/opt/sugarkube/` and `/opt/projects/token.place/` so first boot can confirm
     health, model listings, and chat completions with a single command.
 - [x] Document and script multi-node join rehearsal for scaling clusters.
   - Added `scripts/pi_multi_node_join_rehearsal.py`, `make rehearse-join`/`just rehearse-join`
-    wrappers, and the [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) guide to
+    wrappers, and the [Pi Multi-Node Join Rehearsal](../pi_multi_node_join_rehearsal.md) guide to
     walk operators through join-secret retrieval and agent preflight checks.
 - [x] Store kubeconfig (sanitized) in `/boot/sugarkube-kubeconfig` for retrieval without SSH.
   - Added `scripts/cloud-init/export-kubeconfig.sh`, installed during image builds and invoked by
@@ -158,7 +158,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     emitting JSON summaries for CI pipelines.
 - [x] Capture support bundles (`kubectl get events`, `helm list`, `systemd-analyze blame`, Compose logs, journal slices) for every pipeline run.
   - Added `scripts/collect_support_bundle.py` plus `make`/`just support-bundle` wrappers and wired
-    the release workflow to archive bundles (documented in [Pi Support Bundles](./pi_support_bundles.md)).
+    the release workflow to archive bundles (documented in [Pi Support Bundles](../pi_support_bundles.md)).
 - [x] Document how to run integration tests locally via `act`.
   - `docs/pi_image_builder_design.md` now includes a quick recipe for dry-running the release workflow with `act`.
 - [x] Publish a conformance badge in the README showing last successful hardware boot.
@@ -167,7 +167,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 
 ## Documentation & Onboarding
 - [x] Merge fragmented docs (`pi_image_quickstart.md`, `pi_image_builder_design.md`, `pi_image_cloudflare.md`, `raspi_cluster_setup.md`, etc.) into a single end-to-end “Pi Carrier Launch Playbook.”
-  - Added [Pi Carrier Launch Playbook](./pi_carrier_launch_playbook.md) and linked it from the
+  - Added [Pi Carrier Launch Playbook](../pi_carrier_launch_playbook.md) and linked it from the
     quickstart and README.
 - [x] Structure guide with:
   - A 10-minute fast path.
@@ -176,7 +176,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Implemented within the new playbook alongside cross-links back to detailed
     references.
 - [x] Include a printable one-page field guide/checklist (PDF) with commands, expected outputs, LED/status reference, and troubleshooting links.
-  - Added [Pi Carrier Field Guide](./pi_carrier_field_guide.md) with a companion PDF renderer
+  - Added [Pi Carrier Field Guide](../pi_carrier_field_guide.md) with a companion PDF renderer
     (`scripts/render_field_guide_pdf.py`) plus quickstart/README links so a single sheet stays
     in sync with tooling expectations at the workbench.
 - [ ] Embed GIFs, screencasts, or narrated clips showing download → flash → first boot → SSD clone → k3s readiness.
@@ -185,7 +185,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Added `docs/pi_boot_troubleshooting.md` plus quickstart references covering
     LED cues, critical commands, and recovery steps.
 - [x] Publish contributor guide mapping automation scripts to docs; enforce sync with linkchecker and spellchecker.
-  - Added [Pi Image Contributor Guide](./pi_image_contributor_guide.md) mapping automation helpers to their
+  - Added [Pi Image Contributor Guide](../pi_image_contributor_guide.md) mapping automation helpers to their
     documentation and introduced `make docs-verify`/`just docs-verify` wrappers to run spellcheck and
     link-check together.
 
@@ -202,10 +202,10 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
   - Added `scripts/workflow_artifact_notifier.py`, a GitHub CLI-backed poller exposed via
     `make notify-workflow` / `just notify-workflow` that posts native notifications on Linux, macOS,
     and Windows (with console fallbacks) when release artifacts finish uploading. Documented in
-    [Sugarkube Workflow Artifact Notifications](./pi_workflow_notifications.md) with 100% patch
+    [Sugarkube Workflow Artifact Notifications](../pi_workflow_notifications.md) with 100% patch
     coverage guaranteed by `tests/test_workflow_artifact_notifier.py`.
 - [x] Serve a web UI (via GitHub Pages) where users paste a workflow URL and get direct flashing instructions tailored to OS.
-  - Added [Sugarkube Flash Helper](./flash-helper/) plus `scripts/workflow_flash_instructions.py`
+  - Added [Sugarkube Flash Helper](../flash-helper/) plus `scripts/workflow_flash_instructions.py`
     so operators can generate identical guidance from the CLI or the published page.
 - [x] Add QR codes on physical `pi_carrier` hardware pointing to quickstart and troubleshooting docs.
   - `scripts/generate_qr_codes.py` now exports SVG stickers plus a manifest, and
@@ -216,7 +216,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Provide optional `sugarkube-teams` webhook that posts boot/clone progress to Slack or Matrix for remote monitoring.
   - Added `scripts/sugarkube_teams.py`, systemd integrations in `first_boot_service.py` and
     `ssd_clone_service.py`, a `/usr/local/bin/sugarkube-teams` CLI, Makefile/justfile wrappers, and
-    the [Sugarkube Team Notifications](./pi_image_team_notifications.md) guide covering Slack/Matrix
+    the [Sugarkube Team Notifications](../pi_image_team_notifications.md) guide covering Slack/Matrix
     setup and troubleshooting.
 
 ---
