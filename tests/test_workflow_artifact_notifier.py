@@ -32,6 +32,18 @@ def test_resolve_reference_defaults():
     assert reference.run_id == 42
 
 
+def test_resolve_reference_from_url():
+    args = argparse.Namespace(
+        run_url="https://github.com/futuroptimist/sugarkube/actions/runs/123",
+        repo=None,
+        run_id=None,
+        default_repo=None,
+    )
+    reference = MODULE._resolve_reference(args)
+    assert reference.repo == "futuroptimist/sugarkube"
+    assert reference.run_id == 123
+
+
 def test_resolve_reference_missing_repo():
     args = argparse.Namespace(run_url=None, repo=None, run_id=None, default_repo=None)
     with pytest.raises(MODULE.WorkflowNotifierError):
@@ -93,6 +105,22 @@ def test_system_notifier_missing_backend():
     notifier = MODULE.SystemNotifier(platform="linux", runner=failing_runner)
     with pytest.raises(MODULE.NotificationUnavailableError):
         notifier.notify(title="X", body="Y", url=None)
+
+
+@pytest.mark.parametrize(
+    "size,expected",
+    [
+        (None, "unknown"),
+        (1024, "1.0 KiB"),
+        (5 * 1024 * 1024, "5.0 MiB"),
+    ],
+)
+def test_format_size(size, expected):
+    assert MODULE._format_size(size) == expected
+
+
+def test_summarize_artifacts_empty():
+    assert MODULE._summarize_artifacts([]) == ["Artifacts: none available"]
 
 
 def test_workflow_watcher_waits(monkeypatch):
@@ -179,6 +207,13 @@ def test_build_message_summary():
     assert "main" in body
     assert "Artifacts:" in body
     assert "old" in body
+
+
+def test_parse_arguments_timeout_disable(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "foo/bar")
+    args = MODULE._parse_arguments(["--run-id", "1", "--timeout", "0"])
+    assert args.timeout is None
+    assert args.default_repo == "foo/bar"
 
 
 def test_cli_print_only(monkeypatch, capsys):
