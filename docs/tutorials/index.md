@@ -34,15 +34,19 @@ directories, run simple commands, and begin building muscle memory with shell pr
 
 ## Tutorial 2: Navigating Linux and the Terminal
 
-This tutorial deepens shell skills by introducing the filesystem hierarchy, package managers, and
-text editors. We will demystify permissions, explain why `sudo` needs to be respected, and teach
-problem solving strategies like reading manual pages. Exercises will have learners install tools,
-inspect running processes, and manipulate files so they feel confident when instructions mention
-commands later in the series.
+**Status:** Published — [Read the tutorial](./tutorial-02-navigating-linux-terminal.md)
 
-We will close with a primer on scripting fundamentals. Readers will write a short Bash script that
-prints status information, discuss the difference between scripts and interactive commands, and learn
-how to document their work using Markdown so future collaborators can follow along.
+**Prerequisites satisfied:** Tutorial 1 transcript and safety notes.
+
+This tutorial deepens shell skills by introducing the filesystem hierarchy, package managers, and
+text editors. We demystify permissions, explain why `sudo` needs to be respected, and teach problem
+solving strategies like reading manual pages. Exercises walk learners through capturing a terminal
+transcript with `script`, mapping critical directories, and taking structured notes for future
+reference.
+
+We close with scripting fundamentals. Readers write a Bash status reporter, compare interactive
+commands with reusable scripts, and practice publishing their findings in Markdown so collaborators
+can review their workflow.
 
 ### Milestones
 
