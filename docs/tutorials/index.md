@@ -175,14 +175,20 @@ lab evidence trail that mirrors Sugarkube's operational expectations.
 
 ## Tutorial 8: Preparing a Sugarkube Development Environment
 
-Now that the foundational pieces are in place, we describe how to clone the repository, install
-prerequisites, and run project automation locally. This tutorial will guide readers through the
-`justfile` and `Makefile`, demonstrate how to run `pre-commit`, and explain the purpose of each script
-under `scripts/`. We will also cover managing secrets using `.env` files, GitHub CLI authentication,
-and the layout of build artifacts on disk.
+**Status:** Published — [Read the tutorial](./tutorial-08-preparing-development-environment.md)
 
-To reinforce the workflow, learners will perform a dry-run image download, execute the verifier in a
-container, and interpret the resulting reports. The exercises will highlight common pitfalls, like
+**Prerequisites satisfied:** Tutorials 1–7 artefacts (safety notes, transcripts, network diagram,
+Git workspace, automation toolkit, validated hardware stack, and Kubernetes sandbox). Bring a
+workstation with administrative access to install tooling.
+
+Now that the foundational pieces are in place, we describe how to clone the repository, install
+prerequisites, and run project automation locally. This tutorial guides readers through the
+`justfile` and `Makefile`, demonstrates how to run `pre-commit`, and explains the purpose of each
+script under `scripts/`. We also cover managing secrets using `.env` files, GitHub CLI
+authentication, and the layout of build artifacts on disk.
+
+To reinforce the workflow, learners perform a dry-run image download, execute the verifier in a
+container, and interpret the resulting reports. The exercises highlight common pitfalls, like
 stale virtual environments or missing system packages, and document troubleshooting steps.
 
 ### Milestones
