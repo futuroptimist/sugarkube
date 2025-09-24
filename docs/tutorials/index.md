@@ -199,6 +199,12 @@ stale virtual environments or missing system packages, and document troubleshoot
 
 ## Tutorial 9: Building and Flashing the Sugarkube Pi Image
 
+**Status:** Published — [Read the tutorial](./tutorial-09-building-flashing-pi-image.md)
+
+**Prerequisites satisfied:** Tutorials 1–8 artefacts (safety notes, lab journals, network
+diagram, Git workspace, automation toolkit, hardware build, Kubernetes sandbox, and local
+development environment) plus access to Docker and at least 20 GB of free disk space.
+
 This tutorial provides an end-to-end walkthrough of generating the Pi image. We will explain the
 pi-gen stages we customize, how configuration overlays are applied, and where build metadata is
 recorded. Learners will run the build locally or via GitHub Actions, monitor progress, and collect the
@@ -217,14 +223,20 @@ tutorial.
 
 ## Tutorial 10: First Boot, Verification, and Self-Healing
 
-Here we detail what happens the first time a Sugarkube Pi boots. Learners will explore `first_boot_service.py`,
-understand the generated reports, and practice interpreting logs under `/boot/first-boot-report/`.
-Step-by-step exercises will validate k3s readiness, confirm token.place and dspace health, and trigger
-the self-healing services to see how automated recovery behaves.
+**Status:** Published — [Read the tutorial](./tutorial-10-first-boot-verification-self-healing.md)
 
-We will also demonstrate retrieving kubeconfig and other artifacts without SSH, showing how the
-workflow supports classroom or remote deployments. Troubleshooting scenarios will teach learners how
-to respond when services fail, encouraging them to gather support bundles before escalating issues.
+**Prerequisites satisfied:** Tutorials 1–9 artefacts (safety notes, lab journals, network diagram,
+Git workspace, automation toolkit, hardware build, Kubernetes sandbox, development environment, and
+bootable media) plus physical access to a Sugarkube Pi on a trusted network.
+
+Here we detail what happens the first time a Sugarkube Pi boots. Learners will explore
+`first_boot_service.py`, understand the generated reports, and practice interpreting logs under
+`/boot/first-boot-report/`. Step-by-step exercises validate k3s readiness, confirm token.place and
+dspace health, and trigger the self-healing services to see how automated recovery behaves.
+
+We also demonstrate retrieving kubeconfig and other artifacts over the network, showing how the
+workflow supports classroom or remote deployments. Troubleshooting scenarios teach learners how to
+respond when services fail, encouraging them to gather support bundles before escalating issues.
 
 ### Milestones
 
