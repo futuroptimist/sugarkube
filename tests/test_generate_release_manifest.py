@@ -66,8 +66,7 @@ def _make_metadata(tmp_path: Path) -> Path:
     return metadata_path
 
 
-def test_release_manifest_outputs(tmp_path):
-    metadata_path = _make_metadata(tmp_path)
+def _run_manifest(metadata_path: Path, tmp_path: Path, qemu_path: Path | None = None) -> dict:
     manifest_path = tmp_path / "manifest.json"
     notes_path = tmp_path / "NOTES.md"
     outputs_file = tmp_path / "github_output.txt"
@@ -94,33 +93,47 @@ def test_release_manifest_outputs(tmp_path):
         "--workflow",
         "pi-image-release",
     ]
+    if qemu_path is not None:
+        cmd.extend(["--qemu-artifacts", str(qemu_path)])
     subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    notes = notes_path.read_text(encoding="utf-8")
+    outputs = dict(
+        line.split("=", 1)
+        for line in outputs_file.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    return {
+        "manifest": manifest,
+        "notes": notes,
+        "outputs": outputs,
+        "manifest_path": manifest_path,
+    }
+
+
+def test_release_manifest_outputs(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    result = _run_manifest(metadata_path, tmp_path)
+
+    manifest = result["manifest"]
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert manifest["version"].startswith("v2024.05.21")
     assert manifest["build"]["stage_durations"]["stage1"] == 30
     assert manifest["artifacts"][0]["name"] == "sugarkube.img.xz"
     assert manifest["artifacts"][1]["contains_sha256"] == metadata["image"]["sha256"]
 
-    notes = notes_path.read_text(encoding="utf-8")
+    notes = result["notes"]
     assert "Stage timings" in notes
     assert metadata["image"]["sha256"] in notes
 
-    outputs = dict(
-        line.split("=", 1)
-        for line in outputs_file.read_text(encoding="utf-8").splitlines()
-        if "=" in line
-    )
+    outputs = result["outputs"]
     assert outputs["tag"].startswith("v2024.05.21")
     assert outputs["prerelease"] == "false"
 
 
 def test_release_manifest_includes_qemu_artifacts(tmp_path):
     metadata_path = _make_metadata(tmp_path)
-    manifest_path = tmp_path / "manifest.json"
-    notes_path = tmp_path / "NOTES.md"
-    outputs_file = tmp_path / "github_output.txt"
     qemu_dir = tmp_path / "qemu-artifacts"
     report_dir = qemu_dir / "first-boot-report"
     report_dir.mkdir(parents=True)
@@ -135,34 +148,9 @@ def test_release_manifest_includes_qemu_artifacts(tmp_path):
         encoding="utf-8",
     )
 
-    env = os.environ.copy()
-    env["SOURCE_DATE_EPOCH"] = "1700000000"
-    env["GITHUB_OUTPUT"] = str(outputs_file)
-    cmd = [
-        sys.executable,
-        str(Path("scripts/generate_release_manifest.py")),
-        "--metadata",
-        str(metadata_path),
-        "--manifest-output",
-        str(manifest_path),
-        "--notes-output",
-        str(notes_path),
-        "--release-channel",
-        "stable",
-        "--repo",
-        "futuroptimist/sugarkube",
-        "--run-id",
-        "12345",
-        "--run-attempt",
-        "1",
-        "--workflow",
-        "pi-image-release",
-        "--qemu-artifacts",
-        str(qemu_dir),
-    ]
-    subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
+    result = _run_manifest(metadata_path, tmp_path, qemu_path=qemu_dir)
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = result["manifest"]
     qemu = manifest["qemu_smoke"]
     assert qemu["status"] == "pass"
     assert qemu["result"] == summary
@@ -174,3 +162,57 @@ def test_release_manifest_includes_qemu_artifacts(tmp_path):
         artifacts["first-boot-report/summary.json"]["sha256"]
         == hashlib.sha256((report_dir / "summary.json").read_bytes()).hexdigest()
     )
+
+
+def test_qemu_artifacts_missing_directory(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    missing_dir = tmp_path / "does-not-exist"
+    result = _run_manifest(metadata_path, tmp_path, qemu_path=missing_dir)
+
+    qemu = result["manifest"]["qemu_smoke"]
+    assert qemu["status"] == "missing"
+    assert qemu["path"].endswith("does-not-exist")
+
+
+def test_qemu_artifacts_path_not_directory(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    qemu_file = tmp_path / "qemu.txt"
+    qemu_file.write_text("not a directory", encoding="utf-8")
+    result = _run_manifest(metadata_path, tmp_path, qemu_path=qemu_file)
+
+    qemu = result["manifest"]["qemu_smoke"]
+    assert qemu["status"] == "invalid"
+    assert qemu["error"] == "not a directory"
+
+
+def test_qemu_artifacts_invalid_smoke_success_json(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    qemu_dir = tmp_path / "qemu-invalid"
+    qemu_dir.mkdir()
+    (qemu_dir / "smoke-success.json").write_text("{not json}", encoding="utf-8")
+    result = _run_manifest(metadata_path, tmp_path, qemu_path=qemu_dir)
+
+    qemu = result["manifest"]["qemu_smoke"]
+    assert qemu["status"] == "invalid"
+    assert "failed to parse smoke-success.json" in qemu["error"]
+
+
+def test_qemu_artifacts_error_payloads(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    qemu_dir = tmp_path / "qemu-error"
+    qemu_dir.mkdir()
+    error_payload = {"error": "timeout waiting for console"}
+    (qemu_dir / "error.json").write_text(json.dumps(error_payload), encoding="utf-8")
+    result = _run_manifest(metadata_path, tmp_path, qemu_path=qemu_dir)
+
+    qemu = result["manifest"]["qemu_smoke"]
+    assert qemu["status"] == "error"
+    assert qemu["error"] == error_payload["error"]
+
+    # Now corrupt the error.json file to exercise the JSON decoding fallback.
+    (qemu_dir / "error.json").write_text("{not json}", encoding="utf-8")
+    result = _run_manifest(metadata_path, tmp_path, qemu_path=qemu_dir)
+
+    qemu = result["manifest"]["qemu_smoke"]
+    assert qemu["status"] == "error"
+    assert "failed to parse error.json" in qemu["error"]
