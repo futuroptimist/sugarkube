@@ -283,6 +283,6 @@ Complete each item before moving on.
 
 ## Next Steps
 When you are ready, continue the roadmap with
-[Tutorial 3: Networking and the Internet Basics](./index.md#tutorial-3-networking-and-the-internet-basics)
-once it is published. Bring `latest-status.txt` and your permissions notes—they will help you
-understand how network services surface in real system reports.
+[Tutorial 3: Networking and the Internet Basics](./index.md#tutorial-3-networking-and-the-internet-basics).
+Bring `latest-status.txt` and your permissions notes—they will help you understand how network
+services surface in real system reports.
