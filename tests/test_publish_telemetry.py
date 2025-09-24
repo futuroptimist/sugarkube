@@ -224,6 +224,12 @@ def test_parse_args_uses_env_defaults(monkeypatch):
     assert args.tags == "one,two"
 
 
+def test_parse_args_defaults_to_three_minute_verifier_timeout(monkeypatch):
+    monkeypatch.delenv("SUGARKUBE_TELEMETRY_VERIFIER_TIMEOUT", raising=False)
+    args = MODULE.parse_args([])
+    assert args.verifier_timeout == pytest.approx(180.0)
+
+
 def test_discover_verifier_path_prefers_explicit(tmp_path, monkeypatch):
     executable = tmp_path / "verifier.sh"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")

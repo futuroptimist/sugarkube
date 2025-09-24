@@ -19,7 +19,7 @@ from typing import Iterable, List, Mapping, MutableMapping, Sequence
 
 TELEMETRY_SCHEMA = "https://sugarkube.dev/telemetry/v1"
 DEFAULT_TIMEOUT = 10.0
-DEFAULT_VERIFIER_TIMEOUT = 120.0
+DEFAULT_VERIFIER_TIMEOUT = 180.0
 
 
 class TelemetryError(RuntimeError):
