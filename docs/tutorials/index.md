@@ -15,6 +15,10 @@ processes, and networks. Hands-on moments will include exploring a Raspberry Pi 
 identifying each component, setting expectations for how delicate hardware should be handled, and
 highlighting basic electrical safety tips before we ever plug anything in.
 
+👉 Start learning with
+[Tutorial 1: Computing Foundations Without Jargon](./tutorial-01-computing-foundations.md), which
+now provides the workspace safety setup and glossary groundwork referenced throughout the roadmap.
+
 The second half introduces operating systems at a conceptual level. We will cover why Linux is a good
 fit for Sugarkube, what distinguishes it from Windows or macOS, and how the command line empowers
 automation. Readers will perform a guided exercise using an online Linux sandbox to navigate
@@ -35,6 +39,9 @@ text editors. We will demystify permissions, explain why `sudo` needs to be resp
 problem solving strategies like reading manual pages. Exercises will have learners install tools,
 inspect running processes, and manipulate files so they feel confident when instructions mention
 commands later in the series.
+
+Prerequisite highlights: come prepared with the lab notes, glossary, and workspace artifacts you
+produced in Tutorial 1.
 
 We will close with a primer on scripting fundamentals. Readers will write a short Bash script that
 prints status information, discuss the difference between scripts and interactive commands, and learn
