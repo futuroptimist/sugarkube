@@ -73,6 +73,60 @@ def _render_checksum_table(artifacts: Iterable[Dict[str, Any]]) -> str:
     return "\n".join([header, *rows])
 
 
+def _hash_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _summarize_qemu_artifacts(base: pathlib.Path) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {"path": str(base), "status": "missing"}
+    if not base.exists():
+        return summary
+    if not base.is_dir():
+        summary["status"] = "invalid"
+        summary["error"] = "not a directory"
+        return summary
+
+    summary["status"] = "unknown"
+    artifacts: list[Dict[str, Any]] = []
+    for file_path in sorted(p for p in base.rglob("*") if p.is_file()):
+        rel_path = file_path.relative_to(base).as_posix()
+        artifacts.append(
+            {
+                "path": rel_path,
+                "sha256": _hash_file(file_path),
+                "size_bytes": file_path.stat().st_size,
+            }
+        )
+    summary["artifacts"] = artifacts
+
+    success_path = base / "smoke-success.json"
+    error_path = base / "error.json"
+    if success_path.exists():
+        try:
+            result = json.loads(success_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            summary["status"] = "invalid"
+            summary["error"] = f"failed to parse smoke-success.json: {exc}"
+        else:
+            summary["result"] = result
+            status = str(result.get("status") or "unknown")
+            summary["status"] = status
+    elif error_path.exists():
+        summary["status"] = "error"
+        try:
+            payload = json.loads(error_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            summary["error"] = f"failed to parse error.json: {exc}"
+        else:
+            summary["error"] = payload.get("error") or payload
+
+    return summary
+
+
 def _build_manifest(
     metadata: Dict[str, Any],
     channel: str,
@@ -198,6 +252,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
     parser.add_argument("--workflow", required=True)
+    parser.add_argument(
+        "--qemu-artifacts",
+        required=False,
+        help="Directory containing QEMU smoke-test outputs to include in the manifest",
+    )
     return parser.parse_args()
 
 
@@ -226,6 +285,9 @@ def main() -> int:
         manifest["build"].get("end"),
     )
     manifest["version"] = version
+
+    if args.qemu_artifacts:
+        manifest["qemu_smoke"] = _summarize_qemu_artifacts(pathlib.Path(args.qemu_artifacts))
 
     _write_manifest(manifest_path, manifest)
     _write_notes(notes_path, manifest, args.repo, version)

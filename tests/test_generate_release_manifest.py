@@ -114,3 +114,63 @@ def test_release_manifest_outputs(tmp_path):
     )
     assert outputs["tag"].startswith("v2024.05.21")
     assert outputs["prerelease"] == "false"
+
+
+def test_release_manifest_includes_qemu_artifacts(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    notes_path = tmp_path / "NOTES.md"
+    outputs_file = tmp_path / "github_output.txt"
+    qemu_dir = tmp_path / "qemu-artifacts"
+    report_dir = qemu_dir / "first-boot-report"
+    report_dir.mkdir(parents=True)
+    serial_log = qemu_dir / "serial.log"
+    serial_log.write_text("boot ok\n", encoding="utf-8")
+    summary = {"status": "pass", "checks": ["cloud_init"]}
+    (qemu_dir / "smoke-success.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
+    (report_dir / "summary.json").write_text(
+        json.dumps({"checks": [{"name": "cloud_init", "status": "pass"}]}),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["SOURCE_DATE_EPOCH"] = "1700000000"
+    env["GITHUB_OUTPUT"] = str(outputs_file)
+    cmd = [
+        sys.executable,
+        str(Path("scripts/generate_release_manifest.py")),
+        "--metadata",
+        str(metadata_path),
+        "--manifest-output",
+        str(manifest_path),
+        "--notes-output",
+        str(notes_path),
+        "--release-channel",
+        "stable",
+        "--repo",
+        "futuroptimist/sugarkube",
+        "--run-id",
+        "12345",
+        "--run-attempt",
+        "1",
+        "--workflow",
+        "pi-image-release",
+        "--qemu-artifacts",
+        str(qemu_dir),
+    ]
+    subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    qemu = manifest["qemu_smoke"]
+    assert qemu["status"] == "pass"
+    assert qemu["result"] == summary
+
+    artifacts = {item["path"]: item for item in qemu["artifacts"]}
+    assert "serial.log" in artifacts
+    assert artifacts["serial.log"]["sha256"] == hashlib.sha256(serial_log.read_bytes()).hexdigest()
+    assert (
+        artifacts["first-boot-report/summary.json"]["sha256"]
+        == hashlib.sha256((report_dir / "summary.json").read_bytes()).hexdigest()
+    )
