@@ -58,16 +58,20 @@ can review their workflow.
 
 ## Tutorial 3: Networking and the Internet Basics
 
-Sugarkube relies on reliable networking, so we dedicate a tutorial to the fundamentals. We will
-introduce IP addresses, DNS, routing, and ports, using diagrams that connect home router concepts to
-Kubernetes services. Readers will experiment with diagnostic tools like `ping`, `traceroute`, and
-`curl` against public endpoints, learning how to interpret latency, packet loss, and HTTP status
-codes.
+**Status:** Published — [Read the tutorial](./tutorial-03-networking-internet-basics.md)
 
-The second half bridges networking theory with Sugarkube needs. Learners will review how Raspberry
-Pis connect over Ethernet or Wi-Fi, how VLANs and subnets can segregate lab traffic, and what it means
-to expose services securely. The tutorial will set expectations for the network configuration tasks
-they will perform in later guides, including firewall adjustments and static DHCP reservations.
+**Prerequisites satisfied:** Tutorial 1 safety notes, Tutorial 2 terminal transcript, and access to a
+home network you can document.
+
+Sugarkube relies on reliable networking, so we dedicate a tutorial to the fundamentals. We introduce
+IP addresses, DNS, routing, and ports, using diagrams that connect home router concepts to Kubernetes
+services. Readers experiment with diagnostic tools like `ping`, `traceroute`, and `curl` against
+public endpoints, learning how to interpret latency, packet loss, and HTTP status codes.
+
+The second half bridges networking theory with Sugarkube needs. Learners review how Raspberry Pis
+connect over Ethernet or Wi-Fi, how VLANs and subnets can segregate lab traffic, and what it means to
+expose services securely. The tutorial sets expectations for the network configuration tasks they
+perform in later guides, including firewall adjustments and static DHCP reservations.
 
 ### Milestones
 
