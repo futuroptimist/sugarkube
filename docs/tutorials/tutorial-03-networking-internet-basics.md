@@ -17,7 +17,7 @@ reservations.
   shell commands and capturing transcripts.
 * A computer with a terminal (Linux, macOS, or Windows with PowerShell).
 * Access to your home router web interface **or** an online router emulator such as the
-  [TP-Link TL-WR940N simulator](https://emulator.tp-link.com/tl-wr940nv6_eu/index.html#emulator). 
+  [TP-Link TL-WR940N simulator](https://emulator.tp-link.com/tl-wr940nv6_eu/index.html#emulator).
 * Optional: a second device (laptop or phone) connected to the same network for end-to-end latency
   checks.
 
@@ -188,7 +188,7 @@ Mark each task complete once you have saved proof in the `sugarkube-tutorial-03`
 > PowerShell. Re-run the command afterward.
 
 ## Next Steps
-Continue the roadmap by preparing for [Tutorial 4: Version Control and Collaboration
-Fundamentals](./index.md#tutorial-4-version-control-and-collaboration-fundamentals) when it becomes
-available. Bring your network diagram and latency logs—they will inform how you structure
-repositories and automation that monitor Sugarkube nodes.
+Continue the roadmap by reading [Tutorial 4: Version Control and Collaboration
+Fundamentals](./index.md#tutorial-4-version-control-and-collaboration-fundamentals). Bring your
+network diagram and latency logs—they will inform how you structure repositories and automation that
+monitor Sugarkube nodes.

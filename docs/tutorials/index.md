@@ -83,6 +83,11 @@ perform in later guides, including firewall adjustments and static DHCP reservat
 
 ## Tutorial 4: Version Control and Collaboration Fundamentals
 
+**Status:** Published — [Read the tutorial](./tutorial-04-version-control-collaboration.md)
+
+**Prerequisites satisfied:** Tutorial 1 safety notes, Tutorial 2 terminal transcript, and Tutorial 3
+network topology diagram.
+
 Before touching the Sugarkube repository, readers need to understand Git and GitHub. This tutorial
 walks through initializing repositories, making commits, branching, and submitting pull requests. We
 will emphasize commit hygiene, writing descriptive messages, and reviewing diffs with confidence.
