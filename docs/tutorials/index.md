@@ -152,19 +152,24 @@ fixtures that can simplify the build process for classroom or maker-space deploy
 
 ## Tutorial 7: Kubernetes and Container Fundamentals
 
-Before tackling Sugarkube-specific automation, learners need to understand the orchestration layer.
-We will explain containers, images, pods, deployments, and services, using diagrams and analogies that
-don't assume prior DevOps knowledge. Readers will use `kind` or `k3d` on their workstation to deploy a
-sample application, scale it, and observe how Kubernetes maintains desired state.
+**Status:** Published — [Read the tutorial](./tutorial-07-kubernetes-container-fundamentals.md)
 
-The tutorial will then map those ideas to Sugarkube. We will preview the workloads shipped on the Pi
-image, explain why k3s was chosen, and show how Helm charts bundle configuration. Exercises will have
-learners inspect manifests, modify a value, and watch the resulting rollout from `kubectl`.
+**Prerequisites satisfied:** Tutorials 1–6 artefacts (safety notes, terminal transcript, network
+diagram, Git workspace, automation toolkit, and validated hardware workspace) plus a workstation or
+VM capable of running Docker or Podman.
+
+Before tackling Sugarkube-specific automation, learners need to understand the orchestration layer.
+The tutorial explains containers, images, pods, deployments, and services through a kind-based lab.
+Readers deploy a sample application, scale it, and observe how Kubernetes maintains desired state.
+
+The second half maps those ideas to Sugarkube. Learners customise a Helm chart, record rollout
+evidence, and simulate pod failures to see reconciliation in action. Exercises emphasise creating a
+lab evidence trail that mirrors Sugarkube's operational expectations.
 
 ### Milestones
 
 1. Launch a local Kubernetes cluster, deploy a sample app, and scale it while observing pod churn.
-2. Customize a Helm values file, upgrade the release, and capture before/after resource footprints.
+2. Customise a Helm values file, upgrade the release, and capture before/after resource footprints.
 3. Simulate a failure by deleting a pod and verifying self-healing while narrating the reconciliation
    loop.
 

@@ -292,7 +292,6 @@ repository README or tracking tool.
 - [ ] Summarised results and mitigation ideas in `reports/thermal-summary.md`.
 
 ## Next Steps
-Proceed to [Tutorial 7: Kubernetes and Container Fundamentals](./index.md#tutorial-7-kubernetes-and-container-fundamentals)
-when it becomes available. The next guide will build on your validated hardware by introducing
-container orchestration concepts and a local Kubernetes lab you can run before flashing the actual
-Sugarkube image.
+Continue to [Tutorial 7: Kubernetes and Container Fundamentals](./tutorial-07-kubernetes-container-fundamentals.md)
+to map your validated hardware to real workloads. The next guide introduces container orchestration
+concepts and a local Kubernetes lab you can run before flashing the actual Sugarkube image.
