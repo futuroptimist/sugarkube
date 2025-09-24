@@ -13,9 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Install aspell
-        run: sudo apt-get update && sudo apt-get install -y aspell aspell-en
-      - name: Spell check
-        uses: rojopolis/spellcheck-github-actions@0.35.0
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          config_path: .spellcheck.yaml
+          python-version: "3.12"
+      - name: Install spellcheck dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aspell aspell-en
+          python -m pip install --upgrade pip
+          python -m pip install pyspelling
+      - name: Run spellcheck
+        run: pyspelling -c .spellcheck.yaml
