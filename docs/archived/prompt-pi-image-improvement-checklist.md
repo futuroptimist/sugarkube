@@ -19,9 +19,9 @@ CONTEXT:
 - Review the checklist in [`docs/pi_image_improvement_checklist.md`](./pi_image_improvement_checklist.md)
   and pick one actionable item.
 - Inspect related guides and scripts such as
-  [`docs/pi_image_quickstart.md`](./pi_image_quickstart.md), [`scripts/`](../scripts/), and the
-  root [`Makefile`](../Makefile) to understand current behavior.
-- Follow [`AGENTS.md`](../AGENTS.md) and repository conventions in [`README.md`](../README.md).
+  [`docs/pi_image_quickstart.md`](../pi_image_quickstart.md), [`scripts/`](../../scripts/), and the
+  root [`Makefile`](../../Makefile) to understand current behavior.
+- Follow [`AGENTS.md`](../../AGENTS.md) and repository conventions in [`README.md`](../../README.md).
 - Before committing, run:
   - `pre-commit run --all-files`
   - `pyspelling -c .spellcheck.yaml`
@@ -63,9 +63,9 @@ CONTEXT:
 - Review the prompt text directly above this one and ensure it is accurate, actionable, and
   aligned with the checklist workflow.
 - Cross-check supporting docs and automation referenced in that prompt (for example,
-  [`docs/pi_image_quickstart.md`](./pi_image_quickstart.md), [`scripts/`](../scripts/), and the root
-  [`Makefile`](../Makefile)).
-- Follow [`AGENTS.md`](../AGENTS.md) and repository conventions in [`README.md`](../README.md).
+  [`docs/pi_image_quickstart.md`](../pi_image_quickstart.md), [`scripts/`](../../scripts/), and the root
+  [`Makefile`](../../Makefile)).
+- Follow [`AGENTS.md`](../../AGENTS.md) and repository conventions in [`README.md`](../../README.md).
 - Before committing, run:
   - `pre-commit run --all-files`
   - `pyspelling -c .spellcheck.yaml`

@@ -31,7 +31,7 @@ Review the safety notes before working with power components.
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
-- [pi_image_improvement_checklist.md](pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
+- [archived/pi_image_improvement_checklist.md](archived/pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
@@ -60,3 +60,4 @@ Start with the basics and progress toward a fully autonomous solar cube.
 - [prompts-codex-docker-repo.md](prompts-codex-docker-repo.md) — improve Docker repo guides
 - [prompts-codex-ci-fix.md](prompts-codex-ci-fix.md) — diagnose and fix failing checks
 - [prompts-codex-spellcheck.md](prompts-codex-spellcheck.md) — correct spelling in docs
+- [prompts-codex-tutorials.md](prompts-codex-tutorials.md) — build the full interactive tutorial series
