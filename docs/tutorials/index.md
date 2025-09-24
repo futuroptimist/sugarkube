@@ -199,6 +199,12 @@ stale virtual environments or missing system packages, and document troubleshoot
 
 ## Tutorial 9: Building and Flashing the Sugarkube Pi Image
 
+**Status:** Published — [Read the tutorial](./tutorial-09-building-flashing-pi-image.md)
+
+**Prerequisites satisfied:** Tutorials 1–8 artefacts (safety notes, lab journals, network
+diagram, Git workspace, automation toolkit, hardware build, Kubernetes sandbox, and local
+development environment) plus access to Docker and at least 20 GB of free disk space.
+
 This tutorial provides an end-to-end walkthrough of generating the Pi image. We will explain the
 pi-gen stages we customize, how configuration overlays are applied, and where build metadata is
 recorded. Learners will run the build locally or via GitHub Actions, monitor progress, and collect the
