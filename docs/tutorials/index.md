@@ -106,21 +106,27 @@ where to find contribution guidelines for both code and documentation changes.
 
 ## Tutorial 5: Programming for Operations with Python and Bash
 
-With collaboration basics covered, we introduce lightweight programming tailored to Sugarkube scripts.
-The tutorial will contrast Bash and Python, explaining when each is preferred and how they interact
-with system utilities. Learners will dissect existing helper scripts, annotate them for clarity, and
-extend small examples to reinforce concepts like functions, loops, and environment variables.
+**Status:** Published — [Read the tutorial](./tutorial-05-programming-for-operations.md)
 
-We conclude by demonstrating how to set up a Python virtual environment, install dependencies with
-`pip`, and run unit tests. The exercises will prepare readers to modify Sugarkube automation without
-fear of breaking packaging or linting rules.
+**Prerequisites satisfied:** Tutorial 1 hardware notes, Tutorial 2 terminal transcript, Tutorial 3
+network diagram, and Tutorial 4 Git practice repository.
+
+With collaboration basics covered, we introduce lightweight programming tailored to Sugarkube scripts.
+Learners build a fresh workspace, configure shell aliases, and create a Bash status collector that
+captures real system metrics. They then write a Python wrapper that validates and formats the logs,
+install `pre-commit`, and run unit tests to enforce quality from the start.
+
+The tutorial emphasizes capturing artifacts—logs, screenshots, transcripts—so future maintainers can
+review operational changes confidently. By the end, readers understand how to extend automation while
+respecting Sugarkube's tooling expectations.
 
 ### Milestones
 
-1. Instrument an existing script with logging statements, then run it to observe and interpret output.
-2. Write a small Python helper that wraps a CLI command, ship it with tests, and lint it using
-   `pre-commit`.
-3. Publish a troubleshooting guide documenting errors encountered and how they were resolved.
+1. Instrument the Bash status collector with logging and archive multiple log files.
+2. Capture rich-terminal output from the Python parser and export JSON reports.
+3. Achieve clean `pytest` and `pre-commit` runs with transcripts saved for review.
+4. Document troubleshooting steps or environment adjustments in the workspace README.
+5. Share the lab repository or evidence bundle with a mentor for feedback.
 
 ## Tutorial 6: Raspberry Pi Hardware and Power Design
 
