@@ -8,12 +8,16 @@ capture the narrative arc, learning goals, and practical exercises we intend to 
 
 ## Tutorial 1: Computing Foundations Without Jargon
 
+**Status:** Published — [Read the tutorial](./tutorial-01-computing-foundations.md)
+
+**Prerequisites satisfied:** None. Bring curiosity and a Raspberry Pi (or diagram) to explore.
+
 We start by explaining the core ideas behind computers—what a CPU, memory, and storage device do—and
-how those pieces collaborate to run everyday applications. The tutorial will rely on real-world
+how those pieces collaborate to run everyday applications. The tutorial relies on real-world
 analogies rather than acronyms, making sure readers feel comfortable with concepts like files,
-processes, and networks. Hands-on moments will include exploring a Raspberry Pi diagram and
-identifying each component, setting expectations for how delicate hardware should be handled, and
-highlighting basic electrical safety tips before we ever plug anything in.
+processes, and networks. Hands-on moments include exploring a Raspberry Pi diagram and identifying
+each component, setting expectations for how delicate hardware should be handled, and highlighting
+basic electrical safety tips before we ever plug anything in.
 
 The second half introduces operating systems at a conceptual level. We will cover why Linux is a good
 fit for Sugarkube, what distinguishes it from Windows or macOS, and how the command line empowers
