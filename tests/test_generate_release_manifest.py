@@ -74,6 +74,16 @@ def test_release_manifest_outputs(tmp_path):
     env = os.environ.copy()
     env["SOURCE_DATE_EPOCH"] = "1700000000"
     env["GITHUB_OUTPUT"] = str(outputs_file)
+    qemu_dir = tmp_path / "qemu-smoke"
+    qemu_dir.mkdir()
+    serial_log = qemu_dir / "serial.log"
+    serial_log.write_text("serial output\n", encoding="utf-8")
+    success_path = qemu_dir / "smoke-success.json"
+    success_path.write_text(json.dumps({"status": "pass"}), encoding="utf-8")
+    report_dir = qemu_dir / "first-boot-report"
+    report_dir.mkdir()
+    (report_dir / "summary.json").write_text("{}\n", encoding="utf-8")
+
     cmd = [
         sys.executable,
         str(Path("scripts/generate_release_manifest.py")),
@@ -93,6 +103,8 @@ def test_release_manifest_outputs(tmp_path):
         "1",
         "--workflow",
         "pi-image-release",
+        "--qemu-artifacts",
+        str(qemu_dir),
     ]
     subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
 
@@ -103,9 +115,21 @@ def test_release_manifest_outputs(tmp_path):
     assert manifest["artifacts"][0]["name"] == "sugarkube.img.xz"
     assert manifest["artifacts"][1]["contains_sha256"] == metadata["image"]["sha256"]
 
+    qemu = manifest["qemu_smoke"]
+    assert qemu["status"] == "pass"
+    serial_entry = next(item for item in qemu["artifacts"] if item["path"] == "serial.log")
+    assert serial_entry["sha256"] == hashlib.sha256(b"serial output\n").hexdigest()
+
+    report_entry = next(
+        item for item in qemu["artifacts"] if item["path"] == "first-boot-report/summary.json"
+    )
+    assert report_entry["sha256"] == hashlib.sha256(b"{}\n").hexdigest()
+
     notes = notes_path.read_text(encoding="utf-8")
     assert "Stage timings" in notes
     assert metadata["image"]["sha256"] in notes
+    assert "QEMU smoke test" in notes
+    assert "serial.log" in notes
 
     outputs = dict(
         line.split("=", 1)

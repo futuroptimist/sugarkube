@@ -134,7 +134,20 @@ Read-only mount for cloud-init file into container
 - No secrets embedded; Cloudflare token remains empty by default
 
 ## Future Enhancements
+We revisited the outstanding follow-up items while closing out the release
+manifest backlog. Parametrizing mirror selection and emitting structured
+`pi-gen` timing logs both span multiple components and remain open long-term
+projects. Surfacing the QEMU smoke test telemetry was self-contained, so the
+manifest work shipped in this change.
+
 - Parametrize mirror list and implement automatic mirror failover
 - Structured logs from `pi-gen` stages to summarize progress/time
-- Surface QEMU smoke-test metadata (serial logs, report hashes) directly in the
-  release manifest alongside the core artifacts
+
+## Release manifest QEMU telemetry
+`scripts/generate_release_manifest.py` now folds QEMU smoke test artifacts into
+the published manifest. The generator hashes the serial console log, the
+`first-boot-report/` contents, and the smoke-test summary so the release record
+captures verifier evidence alongside the disk image and checksum. The release
+notes gain a "QEMU smoke test" section summarizing the status and serial log
+digest. `tests/test_generate_release_manifest.py` exercises this path to ensure
+the manifest and notes stay in sync.

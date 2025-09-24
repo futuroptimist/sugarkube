@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 def _load_metadata(path: pathlib.Path) -> Dict[str, Any]:
@@ -71,6 +71,62 @@ def _render_checksum_table(artifacts: Iterable[Dict[str, Any]]) -> str:
         digest = artifact.get("contains_sha256") or artifact.get("sha256")
         rows.append(f"| `{artifact['name']}` | `{digest}` | {size_str} |")
     return "\n".join([header, *rows])
+
+
+def _hash_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _gather_qemu_smoke(path: pathlib.Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+
+    artifacts: List[Dict[str, Any]] = []
+    for file_path in sorted(p for p in path.rglob("*") if p.is_file()):
+        relative = file_path.relative_to(path).as_posix()
+        artifacts.append(
+            {
+                "path": relative,
+                "sha256": _hash_file(file_path),
+                "size_bytes": file_path.stat().st_size,
+            }
+        )
+
+    summary_path = path / "smoke-success.json"
+    summary_data: Optional[Dict[str, Any]] = None
+    status = "unknown"
+    if summary_path.exists():
+        try:
+            summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+            status = str(summary_data.get("status", status))
+        except json.JSONDecodeError:
+            summary_data = {"error": "invalid_json"}
+            status = "invalid"
+
+    error_path = path / "error.json"
+    error_data: Optional[Dict[str, Any]] = None
+    if error_path.exists():
+        try:
+            error_data = json.loads(error_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            error_data = {"error": "invalid_json"}
+        if status == "unknown":
+            status = "error"
+
+    serial_path = path / "serial.log"
+    serial_relative = serial_path.relative_to(path).as_posix() if serial_path.exists() else None
+
+    return {
+        "status": status,
+        "serial_log": serial_relative,
+        "summary": summary_data,
+        "error": error_data,
+        "artifacts": artifacts,
+    }
 
 
 def _build_manifest(
@@ -163,6 +219,33 @@ def _write_notes(
         "The attached manifest (`sugarkube.img.xz.manifest.json`) contains the",
         "full provenance record including options and workflow metadata.",
     ]
+
+    qemu_smoke = manifest.get("qemu_smoke")
+    if qemu_smoke:
+        lines.extend(["", "## QEMU smoke test"])
+        lines.append(f"- Status: `{qemu_smoke.get('status', 'unknown')}`")
+        serial_rel = qemu_smoke.get("serial_log")
+        if serial_rel:
+            serial_entry = next(
+                (
+                    item
+                    for item in qemu_smoke.get("artifacts", [])
+                    if item.get("path") == serial_rel
+                ),
+                None,
+            )
+            if serial_entry:
+                lines.append(
+                    "- Serial log `{}` SHA-256 `{}`".format(
+                        serial_rel, serial_entry.get("sha256", "")
+                    )
+                )
+        summary = qemu_smoke.get("summary")
+        if isinstance(summary, dict) and summary.get("status"):
+            lines.append(f"- smoke-success.json status: `{summary.get('status')}`")
+        if qemu_smoke.get("error"):
+            lines.append("- Error details captured in `error.json`.")
+
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -198,6 +281,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
     parser.add_argument("--workflow", required=True)
+    parser.add_argument(
+        "--qemu-artifacts",
+        required=False,
+        help="Directory containing qemu smoke test artifacts",
+    )
     return parser.parse_args()
 
 
@@ -218,6 +306,12 @@ def main() -> int:
             "workflow": args.workflow,
         },
     )
+
+    if args.qemu_artifacts:
+        qemu_path = pathlib.Path(args.qemu_artifacts)
+        qemu_info = _gather_qemu_smoke(qemu_path)
+        if qemu_info:
+            manifest["qemu_smoke"] = qemu_info
 
     commit = manifest["source"].get("commit", "")
     version, prerelease, release_name = _version_for_channel(
