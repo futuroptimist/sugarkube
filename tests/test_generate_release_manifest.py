@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import generate_release_manifest as grm
+
 
 def _make_metadata(tmp_path: Path) -> Path:
     image_path = tmp_path / "sugarkube.img.xz"
@@ -138,3 +140,105 @@ def test_release_manifest_outputs(tmp_path):
     )
     assert outputs["tag"].startswith("v2024.05.21")
     assert outputs["prerelease"] == "false"
+
+
+def test_helpers_cover_edge_cases(tmp_path, monkeypatch):
+    # _iso_now should honour SOURCE_DATE_EPOCH.
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700001234")
+    assert grm._iso_now() == "2023-11-14T22:33:54Z"
+
+    # _human_duration should pluralise components correctly.
+    assert grm._human_duration(3661.1) == "1h 1m 1s"
+    assert grm._human_duration(59.6) == "1m 0s"
+
+    # _render helpers behave when data is missing.
+    assert grm._render_stage_table({}) == "No stage timing data was captured."
+    checksum_table = grm._render_checksum_table(
+        [
+            {"name": "serial.log", "sha256": "abc", "size_bytes": 4096},
+            {"name": "smoke-success.json", "contains_sha256": "def", "size_bytes": None},
+        ]
+    )
+    assert "serial.log" in checksum_table
+    assert "?" in checksum_table.splitlines()[-1]
+
+    # _version_for_channel handles nightly and stable release channels.
+    tag, prerelease, name = grm._version_for_channel("nightly", "0123456", "2024-05-21T10:30:00Z")
+    assert tag.startswith("nightly-20240521")
+    assert prerelease is True
+    assert name.startswith("Sugarkube Pi Image nightly")
+
+    tag, prerelease, name = grm._version_for_channel(
+        "stable", "abcdef012345", "2024-05-21T10:30:00Z"
+    )
+    assert tag.startswith("v2024.05.21")
+    assert prerelease is False
+    assert name.startswith("Sugarkube Pi Image 2024")
+
+    # _write_outputs appends key/value pairs as expected.
+    output_file = tmp_path / "outputs.txt"
+    grm._write_outputs(output_file, alpha="1", beta="two")
+    assert output_file.read_text(encoding="utf-8").splitlines() == [
+        "alpha=1",
+        "beta=two",
+    ]
+
+
+def test_gather_qemu_smoke_variants(tmp_path):
+    base = tmp_path / "qemu"
+    base.mkdir()
+    (base / "serial.log").write_text("serial\n", encoding="utf-8")
+    (base / "random.bin").write_bytes(b"\x00\x01")
+    # Invalid JSON should surface as an error but still set status.
+    (base / "smoke-success.json").write_text('{"status":', encoding="utf-8")
+    (base / "error.json").write_text('{"message":"fail"}', encoding="utf-8")
+
+    info = grm._gather_qemu_smoke(base)
+    assert info["status"] == "invalid"
+    assert info["serial_log"] == "serial.log"
+    assert info["error"]["message"] == "fail"
+    assert any(item["path"] == "random.bin" for item in info["artifacts"])
+
+    # Missing directory should return None.
+    assert grm._gather_qemu_smoke(tmp_path / "missing") is None
+
+
+def test_write_notes_includes_qemu_details(tmp_path):
+    manifest = {
+        "source": {"commit": "0123456789abcdef0123456789abcdef01234567"},
+        "build": {
+            "duration_seconds": 90,
+            "stage_durations": {"stage0": 45},
+            "pi_gen": {
+                "branch": "bookworm",
+                "commit": "fedcba9876543210fedcba9876543210fedcba98",
+                "url": "https://example.com/pi-gen",
+            },
+        },
+        "artifacts": [
+            {"name": "serial.log", "sha256": "abc", "size_bytes": 0, "path": "serial.log"},
+        ],
+        "qemu_smoke": {
+            "status": "pass",
+            "serial_log": "serial.log",
+            "artifacts": [
+                {"path": "serial.log", "sha256": "abc", "size_bytes": 0},
+            ],
+            "summary": {"status": "pass"},
+            "error": None,
+        },
+    }
+    notes_path = tmp_path / "notes.md"
+    grm._write_notes(notes_path, manifest, "futuroptimist/sugarkube", "v2024.05.21")
+    notes = notes_path.read_text(encoding="utf-8")
+    assert "QEMU smoke test" in notes
+    assert "serial.log" in notes
+    assert "smoke-success.json status: `pass`" in notes
+
+
+def test_write_manifest_round_trip(tmp_path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest = {"channel": "stable", "generated_at": "2024-01-01T00:00:00Z"}
+    grm._write_manifest(manifest_path, manifest)
+    loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert loaded == manifest
