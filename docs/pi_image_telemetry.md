@@ -101,5 +101,8 @@ Both invocations call `scripts/publish_telemetry.py`, which automatically locate
   `http://<pi-host>:12345/metrics` (Grafana Agent), `:9100` (node), and Netdata's dashboard on
   `:19999`.
 
+Regression tests in `tests/test_publish_telemetry.py` guard this three-minute default so the CLI and
+documentation stay aligned as the helper evolves.
+
 By shipping telemetry hooks as an opt-in service, operators gain shared observability across lab
 installs while keeping the default image silent until explicitly configured.
