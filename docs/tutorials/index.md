@@ -130,6 +130,11 @@ respecting Sugarkube's tooling expectations.
 
 ## Tutorial 6: Raspberry Pi Hardware and Power Design
 
+**Status:** Published — [Read the tutorial](./tutorial-06-raspberry-pi-hardware-power.md)
+
+**Prerequisites satisfied:** Tutorials 1–5 artifacts (safety notes, terminal transcripts, network
+diagram, Git workspace, and automation toolkit) plus access to the Sugarkube hardware kit.
+
 This tutorial returns to hardware, giving a guided tour of the Sugarkube enclosure, power regulation,
 and accessory boards. Readers will learn how to select microSD cards and SSDs, identify compatible USB
 to serial adapters, and respect thermal and electrical constraints. We will cover cable management,
