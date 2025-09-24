@@ -54,6 +54,13 @@ def _color(text: str, color_code: str) -> str:
     return f"\033[{color_code}m{text}\033[0m"
 
 
+def _stdin_is_interactive() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def info(message: str) -> None:
     sys.stdout.write(f"==> {message}\n")
 
@@ -529,18 +536,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not image_path.exists():
         die(f"Image not found: {image_path}")
 
+    target_device: Device | None = None
     if not args.device:
-        summarize_devices(candidates)
-        if not candidates:
-            die("No removable devices detected. Re-run with --device once media is attached.")
-        selection = input("Enter the device number to flash: ").strip()
-        try:
-            index = int(selection) - 1
-        except ValueError:
-            die("Expected a numeric selection.")
-        if index < 0 or index >= len(candidates):
-            die("Selection out of range")
-        target_device = candidates[index]
+        if len(candidates) == 1 and (args.assume_yes or not _stdin_is_interactive()):
+            summarize_devices(candidates)
+            target_device = candidates[0]
+            info(f"Auto-selecting {target_device.path}")
+        else:
+            summarize_devices(candidates)
+            if not candidates:
+                die("No removable devices detected. Re-run with --device once media is attached.")
+            selection = input("Enter the device number to flash: ").strip()
+            try:
+                index = int(selection) - 1
+            except ValueError:
+                die("Expected a numeric selection.")
+            if index < 0 or index >= len(candidates):
+                die("Selection out of range")
+            target_device = candidates[index]
     else:
         target_path = args.device
         matching = [dev for dev in candidates if dev.path == target_path]
@@ -556,6 +569,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 size=size_hint,
                 is_removable=True,
             )
+
+    assert target_device is not None
 
     if not args.dry_run and not _device_exists(target_device.path):
         die(f"Device not found: {target_device.path}")

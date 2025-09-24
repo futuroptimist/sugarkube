@@ -140,7 +140,12 @@ sync without modifying the host.
   ```
   The helper auto-detects removable drives, streams `.img` or `.img.xz`
   without temporary files, verifies the written bytes with SHA-256, and
-  powers the media off when complete. On Windows, run the PowerShell wrapper:
+  powers the media off when complete. When only one removable device is
+  detected, running with `--assume-yes` (or in a non-interactive session)
+  auto-selects that target so automation pipelines no longer block waiting for
+  input. A dedicated test in `tests/flash_pi_media_test.py` covers the
+  auto-selection path alongside the existing `.img.xz` streaming checks. On
+  Windows, run the PowerShell wrapper:
   ```powershell
   pwsh -File scripts/flash_pi_media.ps1 --image $env:USERPROFILE\sugarkube\images\sugarkube.img --device \\.\PhysicalDrive1
   ```
