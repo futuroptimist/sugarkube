@@ -533,7 +533,7 @@ if [ -s "$state_file" ]; then
 fi
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
-  sed -i -E "s#https\?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
   sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
 done
 printf '%s\n' "$target" > "$state_file"
@@ -564,7 +564,7 @@ __APT_MIRROR_ARRAY__
 target="${mirrors[0]}"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
-  sed -i -E "s#https\?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
   sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
 done
 EOSH
@@ -584,7 +584,7 @@ mkdir -p "$(dirname "$state_file")"
 for m in "${try_mirrors[@]}"; do
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
     if [ -f "$f" ]; then
-      sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+      sed -i "s#https?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
       sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
     fi
   done
@@ -617,7 +617,7 @@ mkdir -p "$(dirname "$state_file")"
 for m in "${try_mirrors[@]}"; do
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
     if [ -f "$f" ]; then
-      sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+      sed -i "s#https?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
       sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
     fi
   done
@@ -640,7 +640,7 @@ __APT_MIRROR_ARRAY__
 target="${mirrors[0]}"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
-  sed -i -E "s#https\?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
   sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
 done
 EOSH
@@ -660,7 +660,7 @@ mkdir -p "$(dirname "$state_file")"
 for m in "${try_mirrors[@]}"; do
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
     [ -f "$f" ] || continue
-    sed -i "s#https\?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+    sed -i "s#https?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
     sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
     sed -i -E "s#http://mirror\\.as43289\\.net/raspbian/raspbian#${m}#g" "$f" || true
   done
