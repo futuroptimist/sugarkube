@@ -23,6 +23,12 @@ variables. To avoid accidental overwrites it aborts when the image already
 exists unless `FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning
 builds to replace an existing image. After a successful build the script writes
 `<IMG_NAME>.img.xz.sha256` alongside the image so you can verify integrity.
+Set `PI_GEN_SOURCE_DIR` when you already have a local pi-gen checkout (for
+example cached between CI runs). The script copies that directory into its
+working tree instead of cloning from the network, verifies `build.sh` exists,
+and records the detected branch and commit in the metadata JSON when the source
+is a Git repository. Provide `PI_GEN_BRANCH` manually when you want a custom
+label in the metadata.
 To reduce flaky downloads it pins the
 official Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook

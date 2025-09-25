@@ -15,6 +15,7 @@ Environment variables:
   CLOUD_INIT_PATH   Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
   OUTPUT_DIR        Directory to write the image (default repo root)
   IMG_NAME          Name for the output image (default sugarkube)
+  PI_GEN_SOURCE_DIR Path to an existing pi-gen checkout to copy instead of cloning
   TOKEN_PLACE_BRANCH Branch of token.place to clone (default main)
   DSPACE_BRANCH     Branch of dspace to clone (default v3)
 
@@ -221,8 +222,9 @@ if [ "$ARM64" -eq 1 ]; then
 else
   ARMHF=1
 fi
-# Default to the bookworm release branch; architecture is controlled via config.
-PI_GEN_BRANCH="${PI_GEN_BRANCH:-bookworm}"
+DEFAULT_PI_GEN_BRANCH="bookworm"
+PI_GEN_SOURCE_DIR="${PI_GEN_SOURCE_DIR:-}"
+PI_GEN_BRANCH="${PI_GEN_BRANCH:-}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
@@ -243,12 +245,46 @@ if [[ -z "${PI_GEN_STAGES// }" ]]; then
   exit 1
 fi
 
-git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
-  "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
-  "${WORK_DIR}/pi-gen"
-PI_GEN_COMMIT="$(git -C "${WORK_DIR}/pi-gen" rev-parse HEAD)"
+PI_GEN_DIR="${WORK_DIR}/pi-gen"
+if [ -n "${PI_GEN_SOURCE_DIR}" ]; then
+  if [ ! -d "${PI_GEN_SOURCE_DIR}" ]; then
+    echo "pi-gen source directory not found: ${PI_GEN_SOURCE_DIR}" >&2
+    exit 1
+  fi
+  if [ ! -f "${PI_GEN_SOURCE_DIR}/build.sh" ]; then
+    echo "pi-gen source directory missing build.sh: ${PI_GEN_SOURCE_DIR}" >&2
+    exit 1
+  fi
+  echo "[sugarkube] Using existing pi-gen checkout from ${PI_GEN_SOURCE_DIR}"
+  mkdir -p "${PI_GEN_DIR}"
+  cp -a "${PI_GEN_SOURCE_DIR}/." "${PI_GEN_DIR}/"
+  if git -C "${PI_GEN_SOURCE_DIR}" rev-parse HEAD >/dev/null 2>&1; then
+    PI_GEN_COMMIT="$(git -C "${PI_GEN_SOURCE_DIR}" rev-parse HEAD)"
+    if [ -z "${PI_GEN_BRANCH}" ]; then
+      if branch_detected=$(git -C "${PI_GEN_SOURCE_DIR}" \
+        rev-parse --abbrev-ref HEAD 2>/dev/null); then
+        PI_GEN_BRANCH="${branch_detected}"
+      else
+        PI_GEN_BRANCH="local"
+      fi
+    fi
+  else
+    PI_GEN_COMMIT="local-copy"
+    if [ -z "${PI_GEN_BRANCH}" ]; then
+      PI_GEN_BRANCH="local"
+    fi
+  fi
+else
+  PI_GEN_BRANCH="${PI_GEN_BRANCH:-${DEFAULT_PI_GEN_BRANCH}}"
+  git clone --depth 1 --single-branch --branch "${PI_GEN_BRANCH}" \
+    "${PI_GEN_URL:-https://github.com/RPi-Distro/pi-gen.git}" \
+    "${PI_GEN_DIR}"
+  PI_GEN_COMMIT="$(git -C "${PI_GEN_DIR}" rev-parse HEAD)"
+fi
 
-USER_DATA="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/user-data"
+PI_GEN_BRANCH="${PI_GEN_BRANCH:-${DEFAULT_PI_GEN_BRANCH}}"
+
+USER_DATA="${PI_GEN_DIR}/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
 
 # If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file
@@ -275,56 +311,56 @@ fi
 
 # Bundle pi_node_verifier and optionally clone repos into the image
 install -Dm755 "${REPO_ROOT}/scripts/pi_node_verifier.sh" \
-  "${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
+  "${PI_GEN_DIR}/stage2/02-sugarkube-tools/files/usr/local/sbin/pi_node_verifier.sh"
 
 install -Dm755 "${REPO_ROOT}/scripts/first_boot_service.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/first_boot_service.py"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/first_boot_service.py"
 
 install -Dm755 "${REPO_ROOT}/scripts/self_heal_service.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/self_heal_service.py"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/self_heal_service.py"
 
 install -Dm755 "${REPO_ROOT}/scripts/ssd_clone.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone.py"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone.py"
 
 install -Dm755 "${REPO_ROOT}/scripts/ssd_clone_service.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone_service.py"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/ssd_clone_service.py"
 
 install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/sugarkube_teams.py"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/sugarkube_teams.py"
 
 install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/usr/local/bin/sugarkube-teams"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/bin/sugarkube-teams"
 
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
 
 install -Dm644 "${REPO_ROOT}/scripts/systemd/ssd-clone.service" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/ssd-clone.service"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/ssd-clone.service"
 
-install -d "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
+install -d "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
 ln -sf ../first-boot.service \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
 
 
 install -Dm644 "${REPO_ROOT}/scripts/udev/99-sugarkube-ssd-clone.rules" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/etc/udev/rules.d/99-sugarkube-ssd-clone.rules"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/udev/rules.d/99-sugarkube-ssd-clone.rules"
 
 install -Dm755 "${EXPORT_KUBECONFIG_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/export-kubeconfig.sh"
 
 install -Dm755 "${EXPORT_NODE_TOKEN_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/export-node-token.sh"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/export-node-token.sh"
 
 install -Dm755 "${APPLY_HELM_BUNDLES_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/apply-helm-bundles.sh"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/apply-helm-bundles.sh"
 
 install -Dm755 "${K3S_READY_PATH}" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-ready.sh"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-ready.sh"
 install -Dm755 "${REPO_ROOT}/scripts/token_place_replay_samples.py" \
-  "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/token_place_replay_samples.py"
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/token_place_replay_samples.py"
 
 TOKEN_PLACE_SAMPLES_SRC="${REPO_ROOT}/samples/token_place"
-TOKEN_PLACE_SAMPLES_DEST="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/sugarkube/samples/token-place"
+TOKEN_PLACE_SAMPLES_DEST="${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/samples/token-place"
 if [ -d "${TOKEN_PLACE_SAMPLES_SRC}" ]; then
   rm -rf "${TOKEN_PLACE_SAMPLES_DEST}"
   mkdir -p "${TOKEN_PLACE_SAMPLES_DEST}"
@@ -352,26 +388,26 @@ if [[ "$CLONE_TOKEN_PLACE" != "true" && "$CLONE_DSPACE" != "true" && -z "$EXTRA_
   sed -i '/# projects-runcmd/d' "${USER_DATA}"
 else
   install -Dm644 "${PROJECTS_COMPOSE_TEMP}" \
-    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/docker-compose.yml"
+    "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/docker-compose.yml"
   install -Dm755 "${START_PROJECTS_PATH}" \
-    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/start-projects.sh"
+    "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/start-projects.sh"
   install -Dm755 "${INIT_ENV_PATH}" \
-    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/init-env.sh"
+    "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/init-env.sh"
   install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/grafana-agent.river" \
-    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.river"
+    "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.river"
   install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/grafana-agent.env.example" \
-    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.env.example"
+    "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/observability/grafana-agent.env.example"
   install -Dm644 "${REPO_ROOT}/scripts/cloud-init/observability/netdata.env.example" \
-    "${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/observability/netdata.env.example"
+    "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/observability/netdata.env.example"
   if [[ "$CLONE_TOKEN_PLACE" == "true" && -d "${TOKEN_PLACE_SAMPLES_SRC}" ]]; then
-    token_place_samples_project="${WORK_DIR}/pi-gen/stage2/01-sys-tweaks/files/opt/projects/token.place/samples"
+    token_place_samples_project="${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/projects/token.place/samples"
     rm -rf "${token_place_samples_project}"
     mkdir -p "${token_place_samples_project}"
     cp -a "${TOKEN_PLACE_SAMPLES_SRC}/." "${token_place_samples_project}/"
   fi
 fi
 
-run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
+run_sh="${PI_GEN_DIR}/stage2/02-sugarkube-tools/00-run-chroot.sh"
 {
   echo "#!/usr/bin/env bash"
   echo "set -euo pipefail"
@@ -397,7 +433,7 @@ run_sh="${WORK_DIR}/pi-gen/stage2/02-sugarkube-tools/00-run-chroot.sh"
 } > "$run_sh"
 chmod +x "$run_sh"
 
-cd "${WORK_DIR}/pi-gen"
+cd "${PI_GEN_DIR}"
 export DEBIAN_FRONTEND=noninteractive
 
 # Allow callers to override the build timeout
@@ -552,7 +588,7 @@ sha256sum "${OUT_IMG}" > "${sha256_file}"
 echo "[sugarkube] Image written to ${OUT_IMG}"
 echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"
 
-BUILD_LOG_SOURCE="${WORK_DIR}/pi-gen/work/${IMG_NAME}/build.log"
+BUILD_LOG_SOURCE="${PI_GEN_DIR}/work/${IMG_NAME}/build.log"
 OUT_LOG=""
 if [ -f "${BUILD_LOG_SOURCE}" ]; then
   OUT_LOG="${OUTPUT_DIR}/${IMG_NAME}.build.log"
@@ -588,6 +624,9 @@ metadata_args=(
 )
 if [ -n "${EXTRA_REPOS}" ]; then
   metadata_args+=(--option "extra_repos=${EXTRA_REPOS}")
+fi
+if [ -n "${PI_GEN_SOURCE_DIR}" ]; then
+  metadata_args+=(--option "pi_gen_source_dir=${PI_GEN_SOURCE_DIR}")
 fi
 if [ -n "${OUT_LOG}" ]; then
   metadata_args+=(--build-log "${OUT_LOG}")
