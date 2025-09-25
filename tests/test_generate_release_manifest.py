@@ -222,6 +222,12 @@ def test_render_stage_table_empty():
     assert _render_stage_table({}) == "No stage timing data was captured."
 
 
+def test_render_stage_table_with_values():
+    table = _render_stage_table({"prep": 5, "build": 61})
+    assert "| `prep` | `5s` |" in table
+    assert "| `build` | `1m 1s` |" in table
+
+
 def test_render_checksum_table_prefers_contains_sha256(tmp_path):
     artifact_path = tmp_path / "artifact.bin"
     artifact_path.write_bytes(b"payload")
@@ -238,6 +244,19 @@ def test_render_checksum_table_prefers_contains_sha256(tmp_path):
     assert "artifact.bin" in table
     assert digest in table
     assert "?" in table  # 0-byte size renders as unknown
+
+
+def test_render_checksum_table_with_sizes():
+    table = _render_checksum_table(
+        [
+            {
+                "name": "artifact.bin",
+                "sha256": "cafebabe",
+                "size_bytes": 3 * 1024 * 1024,
+            }
+        ]
+    )
+    assert "3.0 MiB" in table
 
 
 def test_load_qemu_artifacts_missing_directory(tmp_path):
@@ -335,3 +354,38 @@ def test_write_notes_lists_generic_qemu_artifacts(tmp_path):
 
     text = notes_path.read_text(encoding="utf-8")
     assert "Key artifacts: see manifest for full listing" in text
+
+
+def test_write_notes_includes_commit_links(tmp_path):
+    notes_path = tmp_path / "notes.md"
+    manifest = {
+        "source": {"commit": "0123456789abcdef0123456789abcdef01234567"},
+        "build": {
+            "duration_seconds": 90,
+            "stage_durations": {"build": 90},
+            "pi_gen": {
+                "branch": "bookworm",
+                "commit": "89abcdef89abcdef89abcdef89abcdef89abcdef",
+                "url": "https://example.com/pi-gen",
+            },
+        },
+        "artifacts": [
+            {
+                "name": "sugarkube.img.xz",
+                "sha256": "deadbeef",
+                "size_bytes": 1024,
+                "path": "sugarkube.img.xz",
+            },
+        ],
+    }
+
+    _write_notes(notes_path, manifest, "futuroptimist/sugarkube", "vTEST")
+
+    text = notes_path.read_text(encoding="utf-8")
+    assert "[`0123456`]" in text
+    assert (
+        "https://github.com/futuroptimist/sugarkube/commit/0123456789abcdef0123456789abcdef01234567"
+        in text
+    )
+    assert "https://example.com/pi-gen/commit/89abcdef89abcdef89abcdef89abcdef89abcdef" in text
+    assert "`1m 30s`" in text
