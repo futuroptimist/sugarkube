@@ -3,21 +3,22 @@
 ## Overview
 This chapter of the [Sugarkube Tutorial Roadmap](./index.md#tutorial-12-contributing-new-features-and-automation)
 shows you how to plan, implement, and ship an improvement to the project like a seasoned contributor.
-You will turn a feature idea into an actionable issue, drive the change through local automation, and
-publish a polished pull request complete with tests, documentation, and review-ready evidence.
+You will turn a feature idea—whether it targets the Pi carrier CAD, solar telemetry dashboards, or
+automation scripts—into an actionable issue, drive the change through local automation, and publish a
+polished pull request complete with tests, documentation, and review-ready evidence.
 
 By the end you will have:
 * Captured a contribution proposal that aligns with roadmap milestones and clearly states the
   acceptance criteria.
-* Implemented a small automation or documentation enhancement in a clean Git branch while exercising
-  Sugarkube's quality gates.
-* Practiced reviewing your own work, gathering artefacts, and narrating the change so maintainers can
-  merge it confidently.
+* Implemented a small automation, documentation, or hardware improvement in a clean Git branch while
+  exercising Sugarkube's quality gates.
+* Practiced reviewing your own work, gathering artefacts (including photos or renders for hardware),
+  and narrating the change so maintainers can merge it confidently.
 
 ## Prerequisites
 * Completed artefacts from [Tutorial 1](./tutorial-01-computing-foundations.md) through
   [Tutorial 11](./tutorial-11-storage-migration-maintenance.md), especially your Git workspace,
-  automation toolkit, and maintenance notes.
+  automation toolkit, solar maintenance logs, and Pi carrier fit notes.
 * A fork of the Sugarkube repository with SSH access configured, plus a workstation that can run
   Docker (for optional validation) and the required tooling (`python3`, `pre-commit`, `pyspelling`,
   `linkchecker`).
@@ -69,6 +70,9 @@ and notes. Treat this as the audit log you will share with reviewers.
 
 4. If no issue exists, open one in your fork using the "Feature request" template. Paste a summary of
    your brief and link to prerequisite tutorials.
+
+5. For hardware-facing ideas, also review issues labeled `hardware`, `pi-carrier`, or `solar` so you
+   can reference prior art and avoid duplicate work.
 
 > [!TIP]
 > Share the issue URL with your mentor or study group. Ask them to challenge the acceptance criteria
@@ -136,6 +140,9 @@ and notes. Treat this as the audit log you will share with reviewers.
    README, a tutorial, or `docs/automation/` reference files so readers know how to use the new
    capability.
 
+   *Hardware example:* regenerate the Pi carrier assembly renders with `openscad` or `kicad-cli`,
+   photograph printed prototypes inside the aluminium cube, and link to the images in the field guide.
+
 3. Rerun the targeted test and any affected suites until they pass:
 
    ```bash
@@ -153,6 +160,9 @@ and notes. Treat this as the audit log you will share with reviewers.
 5. Record command outputs under `~/sugarkube-labs/tutorial-12/logs/` and update your brief with
    highlights or surprises encountered during implementation.
 
+6. If the change affects hardware or solar operations, attach measurement tables (e.g., new charge
+   controller telemetry) or CAD diffs to your lab evidence bundle.
+
 > [!NOTE]
 > Keep your commits focused. If you discover unrelated issues, file a new ticket and park the idea.
 > Small, reviewable diffs merge faster and reduce the risk of regressions.
@@ -162,6 +172,7 @@ and notes. Treat this as the audit log you will share with reviewers.
    * What problem you solved.
    * How you validated the fix.
    * Links to logs, screenshots, or transcripts stored in your lab workspace.
+   * Photos, renders, or measurement tables if you modified hardware or solar integrations.
 
    ```bash
    mkdir -p docs/changes
@@ -183,9 +194,9 @@ and notes. Treat this as the audit log you will share with reviewers.
    gh pr create --fill --draft --base main --head feature/tutorial-12-lab
    ```
 
-3. Upload supporting artefacts (for example, the `feature-session.typescript` transcript or
-   screenshots) to your lab workspace. Share them with reviewers through the PR description or as
-   attachments if policy allows.
+3. Upload supporting artefacts (for example, the `feature-session.typescript` transcript, Pi carrier
+   photos, or solar telemetry charts) to your lab workspace. Share them with reviewers through the PR
+   description or as attachments if policy allows.
 
 4. Review your own diff in the GitHub UI. Confirm the tests now pass and the documentation reflects the
    new behaviour. Address any formatting or spelling issues before requesting review.

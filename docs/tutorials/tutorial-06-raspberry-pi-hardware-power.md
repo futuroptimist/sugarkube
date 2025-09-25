@@ -2,15 +2,18 @@
 
 ## Overview
 This guide continues the [Sugarkube Tutorial Roadmap](./index.md#tutorial-6-raspberry-pi-hardware-and-power-design)
-by moving from software drills to the physical Sugarkube enclosure. You will identify every
-component in the kit, wire clean power delivery, and validate that the Raspberry Pi stack can run
-safely under load. The lab combines assembly tasks with measurement checkpoints so you build the
-muscle memory required to troubleshoot the real hardware later in the series.
+by moving from software drills to the physical aluminium extrusion Sugarkube cube. You will identify
+every component in the kit—including the 3D-printed Pi carrier and solar charge gear—wire clean power
+delivery, and validate that the Raspberry Pi stack can run safely under load. The lab combines
+assembly tasks with measurement checkpoints so you build the muscle memory required to troubleshoot
+the real outdoor hardware later in the series.
 
 By the end you will have:
-* Documented your hardware inventory with annotated photos.
-* Routed and tested the 5 V power chain feeding the Pi, accessories, and cooling gear.
-* Captured multimeter readings, thermal measurements, and stress-test logs that prove stability.
+* Documented your hardware and solar inventory with annotated photos.
+* Routed and tested the 5 V power chain feeding the Pi, accessories, cooling gear, and charge
+  controller outputs.
+* Captured multimeter readings, solar open-circuit voltages, thermal measurements, and stress-test
+  logs that prove stability.
 * Filed a workspace report so future you (or teammates) can replicate the setup confidently.
 
 ## Prerequisites
@@ -25,10 +28,13 @@ By the end you will have:
 * Automation workspace from
   [Tutorial 5](./tutorial-05-programming-for-operations.md) for organising scripts and evidence.
 * Hardware kit that includes a Raspberry Pi 4 (4 GB or 8 GB recommended), USB-C or PD power supply,
-  powered USB hub, microSD or SSD storage, multimeter, jumper wires, standoffs, and the Sugarkube
-  enclosure panels. Order parts ahead of time using reputable vendors such as
+  powered USB hub, microSD or SSD storage, multimeter, jumper wires, standoffs, aluminium extrusion
+  frame, solar charge controller, MC4 connectors, wiring harness, and the 3D-printed Sugarkube
+  Pi carrier. Order parts ahead of time using reputable vendors such as
   [Pimoroni](https://shop.pimoroni.com/) or
   [SparkFun](https://www.sparkfun.com/) if you still need components.
+* Recommended reading: [Solar Basics](../solar_basics.md) for panel and charge-controller theory, and
+  the [Pi Carrier Field Guide](../pi_carrier_field_guide.md) for printed-part orientation tips.
 
 > [!WARNING]
 > Perform the lab on an anti-static mat or wooden table. Avoid carpeted rooms, and unplug the power
@@ -69,7 +75,11 @@ Complete the steps in order. Store all notes, images, and measurement logs in
    | 5 V fan with heatsink | 1 | for enclosure airflow |
    | Multimeter | 1 | set to DC voltage mode |
    | M2.5 standoff kit | 1 | 12 mm length |
-   | Silicone wiring ties | 6 | for cable management |
+   | Aluminium extrusion cube kit | 1 | cut to Sugarkube dimensions |
+   | 3D-printed Pi carrier assembly | 1 | printed in PETG/ABS |
+   | 100 W solar panel with MC4 leads | 1 | sized for cube roof |
+   | MPPT solar charge controller (12 V) | 1 | outputs 5 V via buck converter |
+   | Weather-resistant wiring ties | 6 | for cable management |
    BOM
    ```
 
@@ -85,9 +95,14 @@ Complete the steps in order. Store all notes, images, and measurement logs in
 > so you do not forget to order replacements before continuing.
 
 ### 2. Prepare the enclosure and mounting hardware
-1. Dry-fit the enclosure panels without screws to understand their orientation.
+1. Dry-fit the aluminium extrusion frame, corner cubes, and acrylic/metal panels without screws to
+   understand their orientation. Confirm the roof panel has mounting holes for the solar brackets.
 2. Install threaded inserts or standoffs per the Sugarkube build guide. Use a soldering iron or
    heat-set tool if required and note the temperature setting in `reports/workspace-log.md`.
+3. Test-fit the 3D-printed Pi carrier on its rails or standoffs. Verify cable passthrough slots align
+   with the carrier’s harness and annotate any sanding or filing you perform.
+4. Mark the planned entry point for the solar wiring loom (gland or grommet). Note any weather sealing
+   material you will add later.
 
    ```bash
    cat <<'LOG' > reports/workspace-log.md
@@ -98,11 +113,11 @@ Complete the steps in order. Store all notes, images, and measurement logs in
    LOG
    ```
 
-3. Photograph the assembled frame (`photos/02-enclosure-frame.jpg`). Ensure screw holes and cable
-   passthroughs are visible.
-4. Update the workspace log with any adjustments, such as sanding edges or swapping screws for longer
-   alternatives.
-5. Commit the changes:
+5. Photograph the assembled frame (`photos/02-enclosure-frame.jpg`). Ensure screw holes, carrier rails,
+   and cable passthroughs are visible.
+6. Update the workspace log with any adjustments, such as sanding edges, swapping screws for longer
+   alternatives, or rotating solar brackets.
+7. Commit the changes:
 
    ```bash
    git add reports/workspace-log.md photos/02-enclosure-frame.jpg
@@ -115,21 +130,27 @@ Complete the steps in order. Store all notes, images, and measurement logs in
 > `photos/02-enclosure-frame-sketched.jpg` for future reference.
 
 ### 3. Route and label the power chain
-1. Place the powered USB hub and SSD within the enclosure. Plan cable paths so USB and fan cables do
-   not cross high-voltage lines.
-2. Cut or coil cables to minimise slack. Use silicone ties to secure them. Capture before/after photos
+1. Place the powered USB hub, SSD, and solar charge controller within the enclosure. Plan cable paths
+   so USB and fan cables do not cross the higher-voltage solar leads.
+2. Mount the charge controller to a panel or DIN rail. Leave clearance for airflow around the buck
+   converter that drops 12 V to 5 V.
+3. Terminate the solar input with MC4 connectors or gland-protected leads. Label the polarity clearly
+   and route the cables through the entry point you marked earlier. Capture before/after photos
    (`photos/03a-cable-before.jpg`, `photos/03b-cable-after.jpg`).
-3. Label both ends of every cable with masking tape or heat-shrink labels (e.g., “Pi USB-C”,
-   “Hub Input”, “Fan 5V”). Update `reports/workspace-log.md` with the labeling scheme.
-4. Create a power map drawing showing how 120 V/240 V mains becomes 5 V DC inside the enclosure.
-   Either draw digitally or by hand, then save as `photos/03c-power-map.jpg`.
-5. Record expected voltage values in `measurements/power-plan.csv`:
+4. Label both ends of every cable with masking tape or heat-shrink labels (e.g., “Pi USB-C”, “Hub
+   Input”, “Fan 5V”, “Solar +”, “Solar -”). Update `reports/workspace-log.md` with the labeling scheme.
+5. Create a power map drawing showing how solar and mains power converge. Include the solar array,
+   charge controller, buck converter, and 5 V distribution. Save the annotated diagram as
+   `photos/03c-power-map.jpg`.
+6. Record expected voltage values in `measurements/power-plan.csv`:
 
    ```bash
    cat <<'CSV' > measurements/power-plan.csv
    node,expected_voltage,notes
    usb-c-input,5.1,Official PSU specification
    hub-output,5.0,Measured at idle
+   solar-array-open-circuit,18.0,Depends on panel model
+   charge-controller-output,5.1,Buck converter feeding USB hub
    pi-gpio-5v,5.0,Measure on pin 2 or 4 relative to pin 6 ground
    fan-header,5.0,Inline switch installed
    ssd-enclosure,5.0,Drawn from powered hub port 1
@@ -148,13 +169,19 @@ Complete the steps in order. Store all notes, images, and measurement logs in
 > Never power the Pi from two sources simultaneously (e.g., USB-C PSU and PoE hat). Doing so risks
 > back-feeding and damaging the board. Stick to a single, known-good supply throughout this lab.
 
-### 4. Mount the Raspberry Pi and accessories
-1. Mount the Raspberry Pi onto the standoffs. Tighten screws until snug but avoid flexing the PCB.
-2. Attach the fan and heatsink assembly. Ensure airflow is directed across the CPU and RAM.
-3. Connect the SSD enclosure to the powered hub. Route the cable so it does not strain the USB-C port.
-4. Insert the microSD card (even if you will boot from SSD later) to ease firmware updates.
-5. Update `reports/workspace-log.md` with the mounting order and any torque values you noted.
-6. Photograph the partially assembled interior (`photos/04-mounting-complete.jpg`) and commit:
+### 4. Mount the Raspberry Pi and Pi carrier harness
+1. Secure the Pi carrier to its rails or standoffs. Confirm the printed latches seat fully without
+   stressing the board.
+2. Mount the Raspberry Pi onto the carrier. Tighten screws until snug but avoid flexing the PCB.
+3. Attach the fan and heatsink assembly. Ensure airflow is directed across the CPU and RAM and that
+   ducts align with the carrier’s cut-outs.
+4. Connect the SSD enclosure to the powered hub. Route the cable through the carrier strain-relief
+   features so it does not tug on the USB-C port.
+5. Insert the microSD card (even if you will boot from SSD later) to ease firmware updates and to
+   secure the carrier’s card retention clip.
+6. Update `reports/workspace-log.md` with the mounting order, torque values, and any carrier fit
+   adjustments.
+7. Photograph the partially assembled interior (`photos/04-mounting-complete.jpg`) and commit:
 
    ```bash
    git add reports/workspace-log.md photos/04-mounting-complete.jpg
@@ -162,7 +189,8 @@ Complete the steps in order. Store all notes, images, and measurement logs in
    ```
 
 ### 5. Validate voltage with a multimeter
-1. Plug the power supply into a surge-protected outlet but leave the Pi off.
+1. Plug the power supply into a surge-protected outlet but leave the Pi off. If daylight is available,
+   connect the solar panel and ensure the charge controller indicates charging.
 2. Set the multimeter to DC voltage. Probe the USB hub output without load to confirm it reads close to
    5.0 V. Record the value in `measurements/voltage-readings.csv` with timestamp:
 
@@ -173,10 +201,13 @@ Complete the steps in order. Store all notes, images, and measurement logs in
    CSV
    ```
 
-3. Power the Pi and repeat measurements on the GPIO 5 V pin and fan header. Append readings using
-   `tee` so you keep a command transcript:
+3. Measure the solar array open-circuit voltage at the MC4 leads (disconnect from controller first).
+   Reconnect the leads, then power the Pi and repeat measurements on the charge controller output, GPIO
+   5 V pin, and fan header. Append readings using `tee` so you keep a command transcript:
 
    ```bash
+   printf "%s,%s,%.2f\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "solar-array-open-circuit" 19.20 | tee -a measurements/voltage-readings.csv
+   printf "%s,%s,%.2f\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "charge-controller-output" 5.12 | tee -a measurements/voltage-readings.csv
    printf "%s,%s,%.2f\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "pi-gpio-5v" 5.03 | tee -a measurements/voltage-readings.csv
    printf "%s,%s,%.2f\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "fan-header" 4.97 | tee -a measurements/voltage-readings.csv
    ```
@@ -192,7 +223,8 @@ Complete the steps in order. Store all notes, images, and measurement logs in
 
 > [!TIP]
 > If your multimeter supports min/max recording, enable it while wiggling cables gently. Spikes or
-> drops indicate loose connectors that should be reworked before proceeding.
+> drops indicate loose connectors that should be reworked before proceeding. Shade the solar panel
+> briefly while observing the charge-controller output so you know how the system reacts to clouds.
 
 ### 6. Stress-test thermals and document results
 1. Boot the Pi using your existing Sugarkube image or Raspberry Pi OS. SSH into it from your
@@ -277,19 +309,24 @@ Use this checklist to verify you met the roadmap milestones. Mark each item comp
 repository README or tracking tool.
 
 ### Milestone 1: Assemble the enclosure and record build evidence
-- [ ] Captured `photos/01-kit-overview.jpg` with labelled components.
-- [ ] Logged enclosure assembly steps and temperatures in `reports/workspace-log.md`.
-- [ ] Produced a time-lapse, annotated photos, or equivalent visual record of the build sequence.
+- [ ] Captured `photos/01-kit-overview.jpg` with labelled components (including solar gear).
+- [ ] Logged enclosure assembly steps, Pi carrier fit adjustments, and temperatures in
+  `reports/workspace-log.md`.
+- [ ] Produced a time-lapse, annotated photos, or equivalent visual record of the build sequence and
+  solar bracket placement.
 
 ### Milestone 2: Perform voltage and continuity checks
-- [ ] Completed `measurements/power-plan.csv` before powering on hardware.
-- [ ] Recorded live readings in `measurements/voltage-readings.csv` after powering on.
+- [ ] Completed `measurements/power-plan.csv` before powering on hardware, including solar nodes.
+- [ ] Recorded live readings (hub, solar array, charge controller, Pi rails) in
+  `measurements/voltage-readings.csv` after powering on.
 - [ ] Compared expected vs. actual values and documented remediation actions.
 
 ### Milestone 3: Stress-test thermal management and document strategies
 - [ ] Ran the `stress-ng` workload and saved output under `measurements/`.
-- [ ] Captured temperature samples and plotted `measurements/thermal-trend.png`.
-- [ ] Summarised results and mitigation ideas in `reports/thermal-summary.md`.
+- [ ] Captured temperature samples and plotted `measurements/thermal-trend.png`, noting weather or
+  solar conditions.
+- [ ] Summarised results and mitigation ideas in `reports/thermal-summary.md`, including outdoor heat
+  considerations.
 
 ## Next Steps
 Continue to [Tutorial 7: Kubernetes and Container Fundamentals](./tutorial-07-kubernetes-container-fundamentals.md)

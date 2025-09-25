@@ -6,6 +6,12 @@ technical background can progress from first principles to confidently maintaini
 platform. Each entry will eventually become its own standalone guide; for now, the descriptions below
 capture the narrative arc, learning goals, and practical exercises we intend to include.
 
+Throughout the series we keep our eye on the real-world goal: installing the aluminium extrusion
+Sugarkube cube in an outdoor setting (like a backyard pergola), wiring its solar array and charge
+controller, and mounting the fully populated 3D-printed Pi carrier. Every tutorial reinforces a piece
+of that deployment so learners finish the sequence ready to assemble, power, and operate the
+solar-backed cluster with confidence.
+
 ## Tutorial 1: Computing Foundations Without Jargon
 
 **Status:** Published — [Read the tutorial](./tutorial-01-computing-foundations.md)
@@ -66,7 +72,9 @@ home network you can document.
 Sugarkube relies on reliable networking, so we dedicate a tutorial to the fundamentals. We introduce
 IP addresses, DNS, routing, and ports, using diagrams that connect home router concepts to Kubernetes
 services. Readers experiment with diagnostic tools like `ping`, `traceroute`, and `curl` against
-public endpoints, learning how to interpret latency, packet loss, and HTTP status codes.
+public endpoints, learning how to interpret latency, packet loss, and HTTP status codes. We also plan
+backhaul routes and wireless links for a backyard enclosure so the aluminium cube and its solar
+instrumentation stay reachable without disrupting household bandwidth.
 
 The second half bridges networking theory with Sugarkube needs. Learners review how Raspberry Pis
 connect over Ethernet or Wi-Fi, how VLANs and subnets can segregate lab traffic, and what it means to
@@ -75,11 +83,12 @@ perform in later guides, including firewall adjustments and static DHCP reservat
 
 ### Milestones
 
-1. Diagram a home network, annotate IP ranges, and mark where Sugarkube gear will connect.
-2. Run latency and bandwidth measurements between two devices, interpret results, and record them in
-   a lab notebook.
+1. Diagram a home network, annotate IP ranges, and mark where Sugarkube gear, the solar charge
+   controller, and monitoring sensors will connect outdoors.
+2. Run latency and bandwidth measurements between two devices (include the planned outdoor drop if
+   possible), interpret results, and record them in a lab notebook.
 3. Configure a sample firewall rule or router reservation in a simulator to cement networking
-   vocabulary.
+   vocabulary and secure remote management of the backyard enclosure.
 
 ## Tutorial 4: Version Control and Collaboration Fundamentals
 
@@ -96,7 +105,8 @@ review feedback.
 
 We also explain how Sugarkube uses automation bots, continuous integration, and the AGENTS.md
 workflow. By the end, readers will know which checks to run locally, how to interpret CI failures, and
-where to find contribution guidelines for both code and documentation changes.
+where to find contribution guidelines for both code and documentation changes—including the hardware
+adjacent ones that cover the Pi carrier CAD files and solar harness wiring templates.
 
 ### Milestones
 
@@ -135,20 +145,25 @@ respecting Sugarkube's tooling expectations.
 **Prerequisites satisfied:** Tutorials 1–5 artifacts (safety notes, terminal transcripts, network
 diagram, Git workspace, and automation toolkit) plus access to the Sugarkube hardware kit.
 
-This tutorial returns to hardware, giving a guided tour of the Sugarkube enclosure, power regulation,
-and accessory boards. Readers will learn how to select microSD cards and SSDs, identify compatible USB
-to serial adapters, and respect thermal and electrical constraints. We will cover cable management,
-mounting considerations, and best practices for handling ribbon cables and GPIO headers.
+This tutorial returns to hardware, giving a guided tour of the aluminium extrusion Sugarkube cube,
+its solar-backed power regulation, and accessory boards. Readers will learn how to select microSD
+cards and SSDs, identify compatible USB to serial adapters, and respect thermal and electrical
+constraints. We will cover cable management, mounting considerations for the 3D-printed Pi carrier,
+and best practices for handling ribbon cables and GPIO headers.
 
-Hands-on sections will include assembling a mock Pi stack, routing power through recommended hubs,
-and verifying voltage with a multimeter. We will emphasize safety, documenting any optional tools or
-fixtures that can simplify the build process for classroom or maker-space deployments.
+Hands-on sections will include assembling a mock Pi stack, dry-fitting the Pi carrier inside the cube
+frame, routing both solar and auxiliary power through recommended hubs, and verifying voltage with a
+multimeter. We will emphasize safety, documenting any optional tools or fixtures (like jig plates or
+printed cable clips) that can simplify the build process for classroom or maker-space deployments.
 
 ### Milestones
 
-1. Assemble the enclosure using a build checklist and record a time-lapse or photo log for reference.
-2. Perform voltage and continuity checks with a multimeter, logging expected versus measured values.
-3. Stress-test thermal management with a controlled workload and document mitigation strategies.
+1. Assemble the enclosure using a build checklist, mount the Pi carrier and solar combiner plate, and
+   record a time-lapse or photo log for reference.
+2. Perform voltage and continuity checks with a multimeter, logging expected versus measured values
+   for both the solar charge controller and 5 V rail.
+3. Stress-test thermal management with a controlled workload and document mitigation strategies for
+   outdoor summer heat.
 
 ## Tutorial 7: Kubernetes and Container Fundamentals
 
@@ -232,17 +247,22 @@ bootable media) plus physical access to a Sugarkube Pi on a trusted network.
 Here we detail what happens the first time a Sugarkube Pi boots. Learners will explore
 `first_boot_service.py`, understand the generated reports, and practice interpreting logs under
 `/boot/first-boot-report/`. Step-by-step exercises validate k3s readiness, confirm token.place and
-dspace health, and trigger the self-healing services to see how automated recovery behaves.
+dspace health, and trigger the self-healing services to see how automated recovery behaves when the
+Pi sits inside the aluminium cube and rides on solar-backed power.
 
 We also demonstrate retrieving kubeconfig and other artifacts over the network, showing how the
 workflow supports classroom or remote deployments. Troubleshooting scenarios teach learners how to
-respond when services fail, encouraging them to gather support bundles before escalating issues.
+respond when services fail, including cases where solar charge dips or outdoor cabling is disturbed,
+encouraging them to gather support bundles before escalating issues.
 
 ### Milestones
 
-1. Boot the Pi, collect first-boot reports, and annotate them with commentary on expected behaviors.
-2. Run the verification suite, remediate any failures, and track actions in an incident log.
-3. Publish a resilience drill that intentionally restarts services and documents recovery timelines.
+1. Boot the Pi inside the cube, collect first-boot reports, and annotate them with commentary on
+   expected behaviors plus solar charge readings.
+2. Run the verification suite, remediate any failures, and track actions in an incident log (note if
+   the solar charge controller triggered a restart).
+3. Publish a resilience drill that intentionally restarts services, documents recovery timelines, and
+   verifies loads resume cleanly after a solar-induced power cycle.
 
 ## Tutorial 11: Storage Migration and Long-Term Maintenance
 
@@ -259,7 +279,8 @@ longevity. We cover backup strategies, log rotation, and proactive maintenance t
 bundles or applying OS patches.
 
 The second half focuses on automation. Learners capture SMART metrics, configure recurring backups,
-and document a monthly maintenance routine so stakeholders can verify upkeep at a glance.
+and document a monthly maintenance routine so stakeholders can verify upkeep at a glance—including
+inspecting solar charge logs, cleaning outdoor cabling, and checking the Pi carrier for weather wear.
 
 ### Milestones
 
@@ -278,11 +299,14 @@ idea aligned with the roadmap.
 
 Once readers can operate Sugarkube, we show them how to extend it. The tutorial walks through
 translating a feature brief into issues, implementing changes in focused commits, and exercising the
-repository's automation checks. Learners rehearse opening draft pull requests, sharing evidence, and
-iterating with reviewers until the contribution is ready to merge.
+repository's automation checks. Example projects include refining the Pi carrier CAD, improving solar
+charge telemetry dashboards, or scripting maintenance helpers for the outdoor enclosure. Learners
+rehearse opening draft pull requests, sharing evidence, and iterating with reviewers until the
+contribution is ready to merge.
 
 We conclude with guidance on documenting lessons learned, planning follow-on work, and sharing
-retrospectives so the community can keep the platform healthy as it evolves.
+retrospectives so the community can keep the platform healthy as it evolves—including ideas for new
+mounting fixtures or weatherproofing techniques.
 
 ### Milestones
 
@@ -301,10 +325,11 @@ environment, storage maintenance evidence, and contribution workflow) plus addit
 expanded power capacity, and optional shared storage hardware.
 
 The capstone tutorial guides power users through expanding Sugarkube beyond a single node. Learners
-pilot multi-node growth, capture baseline metrics, and observe how workloads rebalance under stress.
-They integrate external storage, enforce pod disruption budgets, and explore edge AI deployments that
-exercise GPU or CPU accelerators. Every lab emphasises recording evidence, benchmarking results, and
-turning observations into future roadmap proposals.
+pilot multi-node growth inside the aluminium cube, capture baseline metrics, and observe how workloads
+rebalance under stress while powered by solar. They integrate external storage, enforce pod disruption
+budgets, and explore edge AI deployments that exercise GPU or CPU accelerators. Every lab emphasises
+recording evidence, benchmarking results, and turning observations into future roadmap proposals that
+keep backyard deployments resilient.
 
 We close the series by encouraging readers to transform their experiments into community knowledge:
 issue proposals, documentation updates, and mentorship for new contributors.
