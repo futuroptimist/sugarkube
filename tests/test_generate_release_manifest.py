@@ -21,6 +21,7 @@ _load_qemu_artifacts = _module._load_qemu_artifacts
 _render_checksum_table = _module._render_checksum_table
 _render_stage_table = _module._render_stage_table
 _version_for_channel = _module._version_for_channel
+_write_notes = _module._write_notes
 _write_outputs = _module._write_outputs
 
 
@@ -266,6 +267,18 @@ def test_load_qemu_artifacts_error_file_fallback(tmp_path):
     assert payload["details"]["error"] == "not-json"
 
 
+def test_load_qemu_artifacts_error_file_valid_json(tmp_path):
+    qemu_dir = tmp_path / "qemu"
+    qemu_dir.mkdir()
+    (qemu_dir / "error.json").write_text(
+        json.dumps({"status": "fail", "reason": "timeout"}), encoding="utf-8"
+    )
+
+    payload = _load_qemu_artifacts(qemu_dir)
+    assert payload["status"] == "error"
+    assert payload["details"]["reason"] == "timeout"
+
+
 def test_write_outputs_appends_to_file(tmp_path):
     output_path = tmp_path / "outputs.txt"
     output_path.write_text("existing=1\n", encoding="utf-8")
@@ -275,3 +288,50 @@ def test_write_outputs_appends_to_file(tmp_path):
     assert contents[0] == "existing=1"
     assert "alpha=one" in contents
     assert "beta=two" in contents
+
+
+def test_iso_now_without_epoch(monkeypatch):
+    class FrozenDatetime(_module.dt.datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2024, 6, 1, 12, 34, 56, 789000)
+
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    monkeypatch.setattr(_module.dt, "datetime", FrozenDatetime)
+
+    assert _module._iso_now() == "2024-06-01T12:34:56Z"
+
+
+def test_write_notes_lists_generic_qemu_artifacts(tmp_path):
+    notes_path = tmp_path / "notes.md"
+    manifest = {
+        "source": {"commit": None},
+        "build": {
+            "duration_seconds": 0,
+            "stage_durations": {},
+            "pi_gen": {"branch": "main"},
+        },
+        "artifacts": [
+            {
+                "name": "sugarkube.img.xz",
+                "sha256": "deadbeef",
+                "size_bytes": 1024,
+                "path": "sugarkube.img.xz",
+            }
+        ],
+        "qemu_smoke": {
+            "status": "unknown",
+            "artifacts": [
+                {
+                    "path": "other.txt",
+                    "sha256": "cafebabe",
+                    "size_bytes": 8,
+                }
+            ],
+        },
+    }
+
+    _write_notes(notes_path, manifest, "futuroptimist/sugarkube", "vTEST")
+
+    text = notes_path.read_text(encoding="utf-8")
+    assert "Key artifacts: see manifest for full listing" in text
