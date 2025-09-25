@@ -212,6 +212,11 @@ docs-verify:
     linkchecker --no-warnings "{{justfile_directory()}}/README.md" \
         "{{justfile_directory()}}/docs/"
 
+# Install documentation prerequisites and run spell/link checks without touching
+# code linters. Usage: just simplify-docs
+simplify-docs:
+    "{{justfile_directory()}}/scripts/checks.sh" --docs-only
+
 # Generate printable QR codes that link to the quickstart and troubleshooting docs
 # Usage: just qr-codes QR_ARGS="--output-dir ~/qr"
 qr-codes:
