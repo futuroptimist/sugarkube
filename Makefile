@@ -87,11 +87,11 @@ clone-ssd:
 	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
 
 docs-verify:
-        pyspelling -c .spellcheck.yaml
-        linkchecker --no-warnings README.md docs/
+	pyspelling -c .spellcheck.yaml
+	linkchecker --no-warnings README.md docs/
 
 docs-simplify:
-        $(CURDIR)/scripts/checks.sh --docs-only
+	$(CURDIR)/scripts/checks.sh --docs-only
 
 qr-codes:
 	$(QR_CMD) $(QR_ARGS)
