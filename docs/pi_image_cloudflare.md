@@ -16,7 +16,8 @@ so logs survive reboots. After installation, it removes unused packages with
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
 `PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
 64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
-unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
+unavailable; non-HTTP(S) URLs (for example `git@` or `file://` paths) skip the
+preflight curl check automatically. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
 variables. To avoid accidental overwrites it aborts when the image already

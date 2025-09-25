@@ -204,11 +204,23 @@ DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
 URL_CHECK_TIMEOUT="${URL_CHECK_TIMEOUT:-10}"
 SKIP_URL_CHECK="${SKIP_URL_CHECK:-0}"
+is_http_url() {
+  case "$1" in
+    http://*|https://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ "$SKIP_URL_CHECK" -ne 1 ]; then
   for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
-    if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" "$url" >/dev/null; then
-      echo "Cannot reach $url" >&2
-      exit 1
+    if is_http_url "$url"; then
+      if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" \
+        "$url" >/dev/null; then
+        echo "Cannot reach $url" >&2
+        exit 1
+      fi
+    else
+      echo "Skipping URL reachability check for non-HTTP source: $url"
     fi
   done
 else
