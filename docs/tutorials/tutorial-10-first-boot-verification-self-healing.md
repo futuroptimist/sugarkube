@@ -3,24 +3,27 @@
 ## Overview
 This guide continues the
 [Sugarkube Tutorial Roadmap](./index.md#tutorial-10-first-boot-verification-and-self-healing)
-by showing you how to take the freshly flashed media from Tutorial 9, perform a safe first boot,
-collect the automatically generated health reports, and rehearse the self-healing workflows.
-You will learn how `first_boot_service.py`, the bundled verifier, and supporting systemd units
-collaborate to prove the cluster is ready for use.
+by showing you how to take the freshly flashed media from Tutorial 9, perform a safe first boot inside
+the outdoor aluminium cube, collect the automatically generated health reports, and rehearse the
+self-healing workflows. You will learn how `first_boot_service.py`, the bundled verifier, and
+supporting systemd units collaborate to prove the cluster is ready for use even when powered by the
+solar-backed charge system.
 
 By the end you will have:
-* Captured console evidence for the very first boot, including LEDs, serial output, and timings.
+* Captured console evidence for the very first boot, including LEDs, solar charge readings, serial
+  output, and timings.
 * Exported `/boot/first-boot-report/` artifacts (Markdown, HTML, JSON, and logs) to your lab
-  notebook and annotated what each file proves.
+  notebook and annotated what each file proves for remote solar deployments.
 * Exercised the self-healing routines by re-running the verifier, investigating simulated failures,
-  and confirming the Pi recovers without manual intervention.
+  and confirming the Pi recovers without manual intervention—even across solar-induced power cycles.
 
 ## Prerequisites
 * Completed artefacts from [Tutorial 1](./tutorial-01-computing-foundations.md) through
   [Tutorial 9](./tutorial-09-building-flashing-pi-image.md), including the bootable SD card or SSD
   created in Tutorial 9.
-* Physical access to your Sugarkube Pi, carrier board, or equivalent lab hardware, plus Ethernet and
-  power as specified in [Tutorial 6](./tutorial-06-raspberry-pi-hardware-power.md).
+* Physical access to your Sugarkube Pi mounted in the Pi carrier, plus Ethernet and
+  power as specified in [Tutorial 6](./tutorial-06-raspberry-pi-hardware-power.md), including the
+  solar charge controller harness.
 * A workstation on the same network with SSH access, `scp`, and the Sugarkube repository cloned.
 * Optional but recommended: a USB-to-serial adapter or HDMI capture device so you can log the entire
   boot sequence.
@@ -62,14 +65,18 @@ and transcript there so reviewers can trace each action.
    Press `Ctrl+A` then `D` to detach and keep recording in the background.
 
 > [!TIP]
-> Take a still photo or short video of the hardware layout (power brick, cables, SD card) and save
-> it under `media/`. Annotated visuals help reviewers understand your setup when issues arise.
+> Take a still photo or short video of the hardware layout (power brick, solar charge controller,
+> Pi carrier, cables, SD card) and save it under `media/`. Annotated visuals help reviewers
+> understand your setup when issues arise.
 
 ### 2. Cable the Pi and set expectations
 1. Connect Ethernet to the same VLAN you prepared in earlier tutorials. Plug in HDMI or your serial
    adapter if available.
-2. Insert the SD card or SSD you imaged during Tutorial 9. Double-check it seats firmly in the slot.
-3. Review the expected LED pattern: steady red for power, flashing green while the bootloader and
+2. Land the solar harness on the charge controller and confirm polarity. Note the indicated battery or
+   load voltage in `notes/README.md`.
+3. Insert the SD card or SSD you imaged during Tutorial 9. Double-check it seats firmly in the slot and
+   that the Pi carrier’s strain relief holds the cable bundle.
+4. Review the expected LED pattern: steady red for power, flashing green while the bootloader and
    verifier run, and a heartbeat once the system reaches multi-user mode.
 
 > [!NOTE]
@@ -91,6 +98,17 @@ and transcript there so reviewers can trace each action.
    ```
 
    Record the SSH fingerprint in `notes/README.md`.
+
+5. Capture solar telemetry at first boot. If your charge controller exposes USB or serial data,
+   log it with a command such as:
+
+   ```bash
+   ssh pi@192.0.2.10 'sudo /opt/sugarkube/scripts/charge_controller_status.sh' \
+     | tee logs/charge-controller-first-boot.txt
+   ```
+
+   If no digital interface exists, photograph the controller display and store the image under
+   `media/` with annotated wattage and voltage readings.
 
 > [!TROUBLESHOOT]
 > SSH refusal or timeouts usually mean cloud-init is still applying packages. Run
@@ -159,6 +177,14 @@ and transcript there so reviewers can trace each action.
 
    Redirect each command with `| tee` if you want inline logs.
 
+4. If the charge controller writes to `/var/log/sugarkube/`, export the most recent entry so you can
+   correlate solar health with cluster status:
+
+   ```bash
+   ssh pi@192.0.2.10 'sudo tail -n 100 /var/log/sugarkube/charge-controller.log' \
+     | tee logs/charge-controller-post-boot.txt
+   ```
+
 > [!WARNING]
 > Resist the urge to `sudo systemctl stop first-boot.service` unless you are debugging a hang. The
 > self-heal logic relies on that unit to restart dependent services when failures occur.
@@ -188,6 +214,10 @@ and transcript there so reviewers can trace each action.
 4. Document the timestamps, automatic retries, and any new files under `self-heal/` in
    `notes/README.md`.
 
+5. Optional: briefly disconnect the solar panel (or shade it) to simulate a cloudy drop while
+   monitoring `charge-controller.log`. Confirm the Pi remains powered from the battery buffer and
+   note any voltage dips in your lab journal.
+
 > [!TROUBLESHOOT]
 > If the service does not recover, run `sudo systemctl restart first-boot.service` and inspect
 > `/boot/first-boot-report/self-heal/*.log`. Capture the findings and create a remediation plan
@@ -196,6 +226,7 @@ and transcript there so reviewers can trace each action.
 ### 7. Package your evidence
 1. Update `notes/README.md` with:
    * Power-on timestamps and LED observations.
+   * Charge-controller readings (voltage, wattage, mode) at boot and after self-heal tests.
    * SSH fingerprints, IP assignments, and verifier results.
    * Any troubleshooting steps, including commands that failed and how you resolved them.
 
@@ -211,12 +242,12 @@ and transcript there so reviewers can trace each action.
 ## Milestone Checklist
 Use this checklist to verify you achieved each objective before moving on.
 
-- [ ] Captured first boot observations (console log, LED notes, timestamps) and stored them under
-      `~/sugarkube-labs/tutorial-10/`.
+- [ ] Captured first boot observations (console log, LED notes, solar readings, timestamps) and stored
+      them under `~/sugarkube-labs/tutorial-10/`.
 - [ ] Archived `/boot/first-boot-report/` plus manual verifier rerun logs with annotations that
-      explain each artifact’s purpose.
-- [ ] Simulated a recoverable failure, observed the self-healing response, and documented the
-      outcome in your lab notes.
+      explain each artifact’s purpose and any charge-controller context.
+- [ ] Simulated a recoverable failure (service restart and optional solar dip), observed the
+      self-healing response, and documented the outcome in your lab notes.
 
 ## Next Steps
 When you are satisfied with the evidence, continue to [Tutorial 11: Storage Migration and Long-Term
