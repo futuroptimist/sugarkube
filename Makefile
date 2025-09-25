@@ -122,10 +122,10 @@ update-hardware-badge:
         $(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
-        $(REHEARSAL_CMD) $(REHEARSAL_ARGS)
+	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
 
 cluster-up:
-        $(CLUSTER_CMD) $(CLUSTER_ARGS)
+	$(CLUSTER_CMD) $(CLUSTER_ARGS)
 
 token-place-samples:
 	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)
