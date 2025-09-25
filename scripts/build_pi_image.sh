@@ -204,8 +204,19 @@ DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 RPI_MIRROR="${RPI_MIRROR:-https://archive.raspberrypi.com/debian}"
 URL_CHECK_TIMEOUT="${URL_CHECK_TIMEOUT:-10}"
 SKIP_URL_CHECK="${SKIP_URL_CHECK:-0}"
+is_http_url() {
+  local candidate="$1"
+  [[ "$candidate" =~ ^https?:// ]]
+}
 if [ "$SKIP_URL_CHECK" -ne 1 ]; then
   for url in "$DEBIAN_MIRROR" "$RPI_MIRROR" "$PI_GEN_URL"; do
+    if [ -z "$url" ]; then
+      continue
+    fi
+    if ! is_http_url "$url"; then
+      echo "Skipping reachability check for non-HTTP(S) source: $url"
+      continue
+    fi
     if ! curl -fsIL --connect-timeout "${URL_CHECK_TIMEOUT}" --max-time "${URL_CHECK_TIMEOUT}" "$url" >/dev/null; then
       echo "Cannot reach $url" >&2
       exit 1
@@ -257,7 +268,8 @@ if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then
     echo "TUNNEL_TOKEN_FILE not found: ${TUNNEL_TOKEN_FILE}" >&2
     exit 1
   fi
-  TUNNEL_TOKEN="$(tr -d '\n' < "${TUNNEL_TOKEN_FILE}")"
+  token_from_file="$(tr -d '\r\n' < "${TUNNEL_TOKEN_FILE}")"
+  printf -v TUNNEL_TOKEN '%s' "${token_from_file}"
 fi
 
 # For 32-bit builds, adjust Cloudflare apt source architecture to armhf
