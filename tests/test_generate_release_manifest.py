@@ -1,9 +1,27 @@
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "generate_release_manifest.py"
+_spec = importlib.util.spec_from_file_location("generate_release_manifest", _MODULE_PATH)
+assert _spec and _spec.loader
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+
+_hash_file = _module._hash_file
+_human_duration = _module._human_duration
+_load_metadata = _module._load_metadata
+_load_qemu_artifacts = _module._load_qemu_artifacts
+_render_checksum_table = _module._render_checksum_table
+_render_stage_table = _module._render_stage_table
+_version_for_channel = _module._version_for_channel
+_write_outputs = _module._write_outputs
 
 
 def _make_metadata(tmp_path: Path) -> Path:
@@ -176,3 +194,84 @@ def test_release_manifest_includes_qemu_smoke(tmp_path):
     notes = notes_path.read_text(encoding="utf-8")
     assert "QEMU smoke test" in notes
     assert serial["sha256"] in notes
+
+
+def test_load_metadata_missing_file(tmp_path):
+    missing_path = tmp_path / "does-not-exist.json"
+    with pytest.raises(FileNotFoundError):
+        _load_metadata(missing_path)
+
+
+def test_human_duration_formats_hours_minutes_seconds():
+    assert _human_duration(3661.2) == "1h 1m 1s"
+
+
+def test_version_for_nightly_channel():
+    tag, prerelease, name = _version_for_channel(
+        "nightly",
+        "0123456789abcdef0123456789abcdef01234567",
+        "2024-05-22T12:34:56Z",
+    )
+    assert tag == "nightly-20240522"
+    assert prerelease is True
+    assert name == "Sugarkube Pi Image nightly 2024-05-22"
+
+
+def test_render_stage_table_empty():
+    assert _render_stage_table({}) == "No stage timing data was captured."
+
+
+def test_render_checksum_table_prefers_contains_sha256(tmp_path):
+    artifact_path = tmp_path / "artifact.bin"
+    artifact_path.write_bytes(b"payload")
+    digest = _hash_file(artifact_path)
+    table = _render_checksum_table(
+        [
+            {
+                "name": "artifact.bin",
+                "contains_sha256": digest,
+                "size_bytes": 0,
+            }
+        ]
+    )
+    assert "artifact.bin" in table
+    assert digest in table
+    assert "?" in table  # 0-byte size renders as unknown
+
+
+def test_load_qemu_artifacts_missing_directory(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        _load_qemu_artifacts(tmp_path / "missing")
+
+
+def test_load_qemu_artifacts_invalid_success_json(tmp_path):
+    qemu_dir = tmp_path / "qemu"
+    qemu_dir.mkdir()
+    (qemu_dir / "serial.log").write_text("serial\n", encoding="utf-8")
+    (qemu_dir / "smoke-success.json").write_text("{", encoding="utf-8")
+
+    payload = _load_qemu_artifacts(qemu_dir)
+    assert payload["status"] == "invalid"
+    assert payload["details"]["path"].endswith("smoke-success.json")
+    assert any(artifact["path"] == "serial.log" for artifact in payload["artifacts"])
+
+
+def test_load_qemu_artifacts_error_file_fallback(tmp_path):
+    qemu_dir = tmp_path / "qemu"
+    qemu_dir.mkdir()
+    (qemu_dir / "error.json").write_text("not-json", encoding="utf-8")
+
+    payload = _load_qemu_artifacts(qemu_dir)
+    assert payload["status"] == "error"
+    assert payload["details"]["error"] == "not-json"
+
+
+def test_write_outputs_appends_to_file(tmp_path):
+    output_path = tmp_path / "outputs.txt"
+    output_path.write_text("existing=1\n", encoding="utf-8")
+    _write_outputs(output_path, alpha="one", beta="two")
+
+    contents = output_path.read_text(encoding="utf-8").splitlines()
+    assert contents[0] == "existing=1"
+    assert "alpha=one" in contents
+    assert "beta=two" in contents
