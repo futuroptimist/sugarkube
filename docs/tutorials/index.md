@@ -269,14 +269,20 @@ and document a monthly maintenance routine so stakeholders can verify upkeep at 
 
 ## Tutorial 12: Contributing New Features and Automation
 
-Once readers can operate Sugarkube, we show them how to extend it. The tutorial will highlight the
-pi-image release workflow, explain how to design checklist-driven improvements, and teach strategies
-for writing tests before shipping changes. Learners will practice updating documentation, adding
-scripts, and verifying everything with local CI commands before opening a pull request.
+**Status:** Published — [Read the tutorial](./tutorial-12-contributing-new-features-automation.md)
 
-We conclude with guidance on reviewing contributions from others, triaging issues, and planning larger
-initiatives. By reinforcing collaborative habits, we ensure the community can keep the platform
-healthy as it evolves.
+**Prerequisites satisfied:** Tutorials 1–11 artefacts (safety notes, terminal transcripts, network
+diagram, Git workspace, automation toolkit, hardware stack, Kubernetes sandbox, development
+environment, storage maintenance evidence) plus an authenticated GitHub CLI session and an open feature
+idea aligned with the roadmap.
+
+Once readers can operate Sugarkube, we show them how to extend it. The tutorial walks through
+translating a feature brief into issues, implementing changes in focused commits, and exercising the
+repository's automation checks. Learners rehearse opening draft pull requests, sharing evidence, and
+iterating with reviewers until the contribution is ready to merge.
+
+We conclude with guidance on documenting lessons learned, planning follow-on work, and sharing
+retrospectives so the community can keep the platform healthy as it evolves.
 
 ### Milestones
 
