@@ -67,7 +67,8 @@ sets its mode to `0600` so secrets stay private.
 
 Set `TUNNEL_TOKEN` or `TUNNEL_TOKEN_FILE` to bake a Cloudflare token into
 `/opt/sugarkube/.cloudflared.env`; tokens containing `/` or `&` are escaped
-automatically. Otherwise edit the file after boot.
+automatically and Windows-style carriage returns are stripped when loading from
+`TUNNEL_TOKEN_FILE`. Otherwise edit the file after boot.
 Cloud-init writes `docker-compose.cloudflared.yml` to `/opt/sugarkube`.
 This avoids downloading the file at boot.
 The image installs a `cloudflared-compose` systemd unit which starts the tunnel via Docker
@@ -75,9 +76,11 @@ once the token is present and waits for `network-online.target` to ensure
 connectivity. The script curls the Debian, Raspberry Pi, and pi-gen repositories
 with a 10-second timeout before building; override this via the
 `URL_CHECK_TIMEOUT` environment variable or set `SKIP_URL_CHECK=1` to bypass
-these probes when using local mirrors or working offline. Ensure `curl`, `docker`
-(with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, `xz`, `bsdtar`, and `df`
-are installed before running it; `stdbuf` and `timeout` come from GNU coreutils.
+these probes when using local mirrors or working offline. If a mirror or the
+pi-gen repository is provided via a non-HTTP(S) URL (for example `file:///mnt/pi-gen`
+or an `ssh://` remote) the reachability probe is skipped automatically. Ensure
+`curl`, `docker` (with its daemon running), `git`, `sha256sum`, `stdbuf`, `timeout`, `xz`,
+`bsdtar`, and `df` are installed before running it; `stdbuf` and `timeout` come from GNU coreutils.
 The script validates the cloud-init YAML via PyYAML when available unless
 `SKIP_CLOUD_INIT_VALIDATION=1` is set; python3 with PyYAML is only required when
 validation runs. It checks that both the temporary and output directories have at least 10 GB free
