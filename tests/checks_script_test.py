@@ -18,6 +18,75 @@ def script(tmp_path: Path) -> Path:
     return script
 
 
+def test_docs_only_mode_runs_docs_checks(tmp_path: Path, script: Path) -> None:
+    (tmp_path / ".spellcheck.yaml").write_text("document: []\n")
+    (tmp_path / "README.md").write_text("# README\n")
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "index.md").write_text("# Docs\n")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    def make_stub(name: str, body: str) -> None:
+        path = fake_bin / name
+        path.write_text(body)
+        path.chmod(0o755)
+
+    skip_logs = {
+        name: tmp_path / f"{name}.log"
+        for name in [
+            "flake8",
+            "isort",
+            "black",
+            "pytest",
+            "npm",
+            "npx",
+            "bats",
+        ]
+    }
+    for name, log in skip_logs.items():
+        make_stub(name, f"#!/bin/bash\necho run >> {log}\nexit 0\n")
+
+    pyspelling_log = tmp_path / "pyspelling.log"
+    make_stub(
+        "pyspelling",
+        f'#!/bin/bash\necho "$@" >> {pyspelling_log}\nexit 0\n',
+    )
+
+    linkchecker_log = tmp_path / "linkchecker.log"
+    make_stub(
+        "linkchecker",
+        f'#!/bin/bash\necho "$@" >> {linkchecker_log}\nexit 0\n',
+    )
+
+    make_stub("aspell", "#!/bin/bash\nexit 0\n")
+
+    pip_log = tmp_path / "pip.log"
+    make_stub("pip", f"#!/bin/bash\necho pip >> {pip_log}\nexit 0\n")
+
+    make_stub("python", f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PYTHONPATH"] = str(tmp_path)
+
+    result = subprocess.run(
+        ["/bin/bash", str(script), "--docs-only"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert pyspelling_log.exists()
+    assert any("--no-warnings" in line for line in linkchecker_log.read_text().splitlines())
+    assert not pip_log.exists()
+    for log in skip_logs.values():
+        assert not log.exists()
+
+
 def test_skips_js_checks_when_package_lock_missing(tmp_path: Path, script: Path) -> None:
     # simulate project with package.json but no package-lock.json
     (tmp_path / "package.json").write_text("{}")

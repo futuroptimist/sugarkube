@@ -89,9 +89,10 @@ checks. The prompts require 100% compliance, but setup steps remain scattered.
   expectations for automated contributors.
 
 **First steps:**
-1. Introduce a `just simplify-docs` (and equivalent `make docs-simplify` target)
-   that installs prerequisites, runs spellcheck/linkcheck, and surfaces common
-   fixes.
+1. ✅ Introduce a `just simplify-docs` (and equivalent `make docs-simplify`
+   target) that installs prerequisites, runs spellcheck/linkcheck, and surfaces
+   common fixes. `scripts/checks.sh --docs-only` powers both wrappers and now
+   has regression coverage in `tests/checks_script_test.py::test_docs_only_mode_runs_docs_checks`.
 2. Extend `scripts/checks.sh` with a `--docs-only` flag that skips hardware
    toolchains when unnecessary.
 3. Bundle templates in `docs/templates/` for onboarding updates, prompt refreshes,

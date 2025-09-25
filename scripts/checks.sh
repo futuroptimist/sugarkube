@@ -1,6 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DOCS_ONLY=0
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/checks.sh [--docs-only]
+
+Run Sugarkube's formatting, linting, and test suite. Pass --docs-only to install
+documentation prerequisites and execute spellcheck/linkcheck without invoking
+code linters or hardware-specific tooling.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --docs-only)
+      DOCS_ONLY=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 python_supports_pcbnew() {
   local interpreter="$1"
   if [ -z "$interpreter" ]; then
@@ -311,101 +345,120 @@ maybe_install_kicad() {
   return 1
 }
 
-# Ensure required Python tooling is available.  Some environments may have
-# `flake8` pre-installed but lack other dependencies like `pyspelling` or
-# `linkchecker`, which are needed later in this script.  Install the full set
-# whenever any of these tools are missing.
-if ! command -v flake8 >/dev/null 2>&1 || \
-   ! command -v pyspelling >/dev/null 2>&1 || \
-   ! command -v linkchecker >/dev/null 2>&1; then
-  if command -v uv >/dev/null 2>&1; then
-    uv pip install --system \
-      flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
-      >/dev/null 2>&1
-  else
-    pip install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
-      >/dev/null 2>&1
+# Ensure required tooling is available. In docs-only mode we only install the
+# spellcheck and linkcheck dependencies to keep the run lightweight. The full
+# suite installs linting and test helpers as before.
+if [ "$DOCS_ONLY" -eq 1 ]; then
+  if ! command -v pyspelling >/dev/null 2>&1 || \
+     ! command -v linkchecker >/dev/null 2>&1; then
+    if command -v uv >/dev/null 2>&1; then
+      uv pip install --system pyspelling linkchecker >/dev/null 2>&1
+    else
+      pip install pyspelling linkchecker >/dev/null 2>&1
+    fi
+    if command -v pyenv >/dev/null 2>&1; then
+      pyenv rehash >/dev/null 2>&1
+    fi
+    hash -r
   fi
-  if command -v pyenv >/dev/null 2>&1; then
-    pyenv rehash >/dev/null 2>&1
+else
+  # Some environments may have `flake8` pre-installed but lack other
+  # dependencies like `pyspelling` or `linkchecker`, which are needed later in
+  # this script. Install the full set whenever any of these tools are missing.
+  if ! command -v flake8 >/dev/null 2>&1 || \
+     ! command -v pyspelling >/dev/null 2>&1 || \
+     ! command -v linkchecker >/dev/null 2>&1; then
+    if command -v uv >/dev/null 2>&1; then
+      uv pip install --system \
+        flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+        >/dev/null 2>&1
+    else
+      pip install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+        >/dev/null 2>&1
+    fi
+    if command -v pyenv >/dev/null 2>&1; then
+      pyenv rehash >/dev/null 2>&1
+    fi
+    hash -r
   fi
-  hash -r
 fi
 
 # Ensure KiCad 9 is installed when electronics assets change.  This keeps
 # general CI jobs lightweight while automatically provisioning KiCad for
 # workflows that touch `.kicad_*` or `.kibot/` files.
-if detect_kicad_activity; then
-  if ! maybe_install_kicad; then
-    echo "KiCad is required for electronics changes but automatic installation failed" >&2
-    exit 1
-  fi
-else
-  if ! has_pcbnew; then
-    echo "KiCad not installed; skipping KiBot checks" >&2
-  fi
-fi
-
-# python checks
-flake8 . --exclude=.venv,scripts/qrcodegen.py --max-line-length=100
-isort --check-only . --skip .venv --skip scripts/qrcodegen.py
-black --check . --line-length=100 --exclude "(.venv/|scripts/qrcodegen\\.py)"
-
-# js checks
-if [ -f package.json ]; then
-  if command -v npm >/dev/null 2>&1; then
-    if [ -f package-lock.json ]; then
-      npm ci
-      npx playwright install --with-deps
-      npm run lint
-      npm run format:check
-      npm test -- --coverage
-    else
-      echo "package-lock.json not found, skipping JS checks" >&2
+if [ "$DOCS_ONLY" -eq 0 ]; then
+  if detect_kicad_activity; then
+    if ! maybe_install_kicad; then
+      echo "KiCad is required for electronics changes but automatic installation failed" >&2
+      exit 1
     fi
   else
-    echo "npm not found, skipping JS checks" >&2
-  fi
-fi
-
-# run tests; treat "no tests" exit code 5 as success
-if command -v pytest >/dev/null 2>&1; then
-  if ! pytest --cov=. --cov-report=xml --cov-report=term -q; then
-    rc=$?
-    if [ "$rc" -ne 5 ]; then
-      exit "$rc"
+    if ! has_pcbnew; then
+      echo "KiCad not installed; skipping KiBot checks" >&2
     fi
   fi
-fi
 
-# run bats tests when available
-if ! command -v bats >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    if [ "$(id -u)" -eq 0 ]; then
-      if apt-get update >/dev/null 2>&1 && \
-        apt-get install -y bats >/dev/null 2>&1; then
-        :
+  # python checks
+  flake8 . --exclude=.venv,scripts/qrcodegen.py --max-line-length=100
+  isort --check-only . --skip .venv --skip scripts/qrcodegen.py
+  black --check . --line-length=100 --exclude "(.venv/|scripts/qrcodegen\\.py)"
+
+  # js checks
+  if [ -f package.json ]; then
+    if command -v npm >/dev/null 2>&1; then
+      if [ -f package-lock.json ]; then
+        npm ci
+        npx playwright install --with-deps
+        npm run lint
+        npm run format:check
+        npm test -- --coverage
       else
-        echo "bats install failed; skipping" >&2
-      fi
-    elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-      if sudo -n apt-get update >/dev/null 2>&1 && \
-        sudo -n apt-get install -y bats >/dev/null 2>&1; then
-        :
-      else
-        echo "bats install failed; skipping" >&2
+        echo "package-lock.json not found, skipping JS checks" >&2
       fi
     else
-      echo "bats not installed and no privilege to install; skipping" >&2
+      echo "npm not found, skipping JS checks" >&2
     fi
-  elif command -v brew >/dev/null 2>&1; then
-    brew install bats >/dev/null 2>&1 || true
   fi
-fi
-if command -v bats >/dev/null 2>&1 && ls tests/*.bats >/dev/null 2>&1; then
-  bats tests/*.bats
-else
-  echo "bats not found or no Bats tests, skipping" >&2
+
+  # run tests; treat "no tests" exit code 5 as success
+  if command -v pytest >/dev/null 2>&1; then
+    if ! pytest --cov=. --cov-report=xml --cov-report=term -q; then
+      rc=$?
+      if [ "$rc" -ne 5 ]; then
+        exit "$rc"
+      fi
+    fi
+  fi
+
+  # run bats tests when available
+  if ! command -v bats >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      if [ "$(id -u)" -eq 0 ]; then
+        if apt-get update >/dev/null 2>&1 && \
+          apt-get install -y bats >/dev/null 2>&1; then
+          :
+        else
+          echo "bats install failed; skipping" >&2
+        fi
+      elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        if sudo -n apt-get update >/dev/null 2>&1 && \
+          sudo -n apt-get install -y bats >/dev/null 2>&1; then
+          :
+        else
+          echo "bats install failed; skipping" >&2
+        fi
+      else
+        echo "bats not installed and no privilege to install; skipping" >&2
+      fi
+    elif command -v brew >/dev/null 2>&1; then
+      brew install bats >/dev/null 2>&1 || true
+    fi
+  fi
+  if command -v bats >/dev/null 2>&1 && ls tests/*.bats >/dev/null 2>&1; then
+    bats tests/*.bats
+  else
+    echo "bats not found or no Bats tests, skipping" >&2
+  fi
 fi
 
 # docs checks

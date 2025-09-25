@@ -132,7 +132,7 @@ pre-commit run --all-files
 ```
 
 If you update documentation, install `aspell` and verify spelling and links.
-Run the combined helper after editing Markdown so spellcheck and link checks stay aligned with the
+Prefer the combined helper when editing Markdown so spellcheck and link checks stay aligned with the
 automation mapping surfaced in [docs/pi_image_contributor_guide.md](docs/pi_image_contributor_guide.md):
 
 ```bash
@@ -144,8 +144,19 @@ just docs-verify
 Both commands execute `pyspelling -c .spellcheck.yaml` and
 `linkchecker --no-warnings README.md docs/`. `pyspelling` relies on `aspell` and the English
 dictionary (`aspell-en`); install them manually when the helper cannot. The `scripts/checks.sh`
-helper attempts to install the dependencies via `apt-get` when missing. When you need to run the
-commands directly:
+helper attempts to install the dependencies via `apt-get` when missing. When you want Sugarkube to
+bootstrap the prerequisites automatically without running the full lint suite, use the docs
+simplification target instead:
+
+```bash
+make docs-simplify
+# or
+just simplify-docs
+```
+
+Both wrappers call `scripts/checks.sh --docs-only`, which installs `pyspelling`, `linkchecker`, and
+`aspell` when possible before running the documentation checks. When you need to run the commands
+directly:
 
 ```bash
 sudo apt-get install aspell aspell-en  # Debian/Ubuntu
