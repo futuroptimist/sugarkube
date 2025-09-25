@@ -10,7 +10,7 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
 - [x] Attach artifacts (`.img.xz`), checksums, and changelog snippets to GitHub Releases; include an “image availability” badge in `README.md` linking to the latest download and commit SHAs.
   - Releases now attach the image, checksum, metadata, manifest, signatures, and build log. `README.md` advertises availability with a Shields badge that points to the latest download.
 - [x] Generate a machine-readable manifest (JSON/YAML) recording build inputs, git SHAs, and checksums for provenance verification. Cache pi-gen stage durations, verifier output, and commit IDs for reproducibility.
-  - `scripts/create_build_metadata.py` captures pi-gen commits, stage durations, and build options; `scripts/generate_release_manifest.py` converts that into a provenance manifest and markdown notes, ready to store verifier output when available.
+  - `scripts/create_build_metadata.py` captures pi-gen commits, stage durations, and build options; `scripts/generate_release_manifest.py` converts that into a provenance manifest and markdown notes, embedding QEMU smoke-test digests alongside the core artifacts.
 - [x] Extend `scripts/download_pi_image.sh` (or `grab_pi_image.sh`) to:
   - Resolve the latest release automatically.
   - Resume partial downloads.

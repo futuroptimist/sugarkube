@@ -103,8 +103,10 @@
   `sugarkube.build.log` alongside the artifacts.
 - `scripts/generate_release_manifest.py` converts the metadata into a
   provenance manifest (`sugarkube.img.xz.manifest.json`) and Markdown release notes.
-  The manifest captures workflow run IDs, release channel (stable vs nightly), and
-  hashes for every attached artifact so downstream tooling can validate the build.
+  The manifest captures workflow run IDs, release channel (stable vs nightly),
+  hashes for every attached artifact so downstream tooling can validate the
+  build, plus QEMU smoke-test outputs (serial log digest and first-boot report
+  hashes) so releases document verification evidence inline.
 - Artifacts are signed via GitHub OIDC + cosign. Both the signature and certificate
   are attached to the release for offline verification.
 - After signing, the workflow launches `scripts/qemu_pi_smoke_test.py` to boot the
@@ -136,5 +138,3 @@ Read-only mount for cloud-init file into container
 
 ## Future Enhancements
 - Structured logs from `pi-gen` stages to summarize progress/time
-- Surface QEMU smoke-test metadata (serial logs, report hashes) directly in the
-  release manifest alongside the core artifacts
