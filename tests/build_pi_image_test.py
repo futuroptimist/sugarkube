@@ -623,6 +623,50 @@ def test_installs_ssd_clone_service(tmp_path):
     assert not (tmp_path / "sugarkube.img.xz.xz").exists()
 
 
+def test_configurable_mirror_failover(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["KEEP_WORK_DIR"] = "1"
+    env["APT_REWRITE_MIRRORS"] = (
+        "https://primary.example.invalid/raspbian " "https://secondary.example.invalid/raspbian"
+    )
+
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+
+    match = re.search(r"leaving work dir: (?P<path>\S+)", result.stdout)
+    assert match, result.stdout
+    work_dir = Path(match.group("path"))
+
+    rewrite_script = (
+        work_dir
+        / "pi-gen"
+        / "stage0"
+        / "00-configure-apt"
+        / "files"
+        / "usr"
+        / "local"
+        / "sbin"
+        / "apt-rewrite-mirrors"
+    ).read_text()
+    assert "https://primary.example.invalid/raspbian" in rewrite_script
+    assert "https://secondary.example.invalid/raspbian" in rewrite_script
+
+    stage0_retry = (work_dir / "pi-gen" / "stage0" / "00-configure-apt" / "01-run.sh").read_text()
+    assert "https://primary.example.invalid/raspbian" in stage0_retry
+    assert "https://secondary.example.invalid/raspbian" in stage0_retry
+    assert "try_mirrors=" in stage0_retry
+
+    stage2_retry = (work_dir / "pi-gen" / "stage2" / "00-configure-apt" / "01-run.sh").read_text()
+    assert "https://secondary.example.invalid/raspbian" in stage2_retry
+
+    export_retry = (
+        work_dir / "pi-gen" / "export-image" / "02-set-sources" / "02-run.sh"
+    ).read_text()
+    assert "https://secondary.example.invalid/raspbian" in export_retry
+
+    shutil.rmtree(work_dir)
+
+
 def test_arm64_disables_armhf(tmp_path):
     env = _setup_build_env(tmp_path)
     result, _ = _run_build_script(tmp_path, env)
