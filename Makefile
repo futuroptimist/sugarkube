@@ -36,6 +36,8 @@ BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
 REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
 REHEARSAL_ARGS ?=
+CLUSTER_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
+CLUSTER_ARGS ?=
 TOKEN_PLACE_SAMPLE_CMD ?= $(CURDIR)/scripts/token_place_replay_samples.py
 TOKEN_PLACE_SAMPLE_ARGS ?= --samples-dir $(CURDIR)/samples/token_place
 SUPPORT_BUNDLE_CMD ?= $(CURDIR)/scripts/collect_support_bundle.py
@@ -49,7 +51,7 @@ MAC_SETUP_ARGS ?=
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
-        token-place-samples support-bundle mac-setup
+        token-place-samples support-bundle mac-setup cluster-up
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -120,7 +122,10 @@ update-hardware-badge:
         $(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
-	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
+        $(REHEARSAL_CMD) $(REHEARSAL_ARGS)
+
+cluster-up:
+        $(CLUSTER_CMD) $(CLUSTER_ARGS)
 
 token-place-samples:
 	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)

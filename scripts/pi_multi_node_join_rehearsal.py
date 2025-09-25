@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence
 from urllib.parse import urlparse
@@ -42,6 +43,14 @@ class AgentStatus:
     @property
     def success(self) -> bool:
         return self.error is None and bool(self.payload.get("api_reachable"))
+
+
+@dataclass
+class ApplyStatus:
+    host: str
+    node_name: str
+    success: bool
+    message: str
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -151,6 +160,55 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--json",
         action="store_true",
         help="Emit machine-readable JSON in addition to human-friendly summaries.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "Execute the k3s agent installation on each worker after a successful preflight. "
+            "Requires --agents."
+        ),
+    )
+    parser.add_argument(
+        "--apply-wait",
+        action="store_true",
+        help=("Wait for all nodes (control-plane + agents) to report Ready after applying joins."),
+    )
+    parser.add_argument(
+        "--apply-wait-timeout",
+        type=int,
+        default=300,
+        metavar="SECONDS",
+        help=(
+            "Maximum time to wait for worker nodes to become Ready when --apply-wait is set. "
+            "Defaults to 300 seconds."
+        ),
+    )
+    parser.add_argument(
+        "--apply-wait-interval",
+        type=int,
+        default=10,
+        metavar="SECONDS",
+        help=(
+            "Polling interval while waiting for Ready nodes when --apply-wait is set. "
+            "Defaults to 10 seconds."
+        ),
+    )
+    parser.add_argument(
+        "--node-name-template",
+        default="{host}",
+        help=(
+            "Python format string used to derive the k3s node name for each worker when "
+            "--apply is provided. Receives 'host' and 'index' (1-based). Defaults to '{host}'."
+        ),
+    )
+    parser.add_argument(
+        "--agent-install-extra-args",
+        default="",
+        help=(
+            "Additional arguments appended to INSTALL_K3S_EXEC after the default "
+            "'agent --with-node-id --node-name <name>' string when --apply is used."
+        ),
     )
     parser.add_argument(
         "--reveal-secret",
@@ -469,8 +527,103 @@ def write_join_secret(path: str, join_secret: str) -> None:
     subprocess.run(["chmod", "600", path], check=False)
 
 
+def render_node_name(template: str, host: str, index: int) -> str:
+    try:
+        name = template.format(host=host, index=index)
+    except KeyError as exc:  # pragma: no cover - defensive branch
+        raise RehearsalError(
+            "node-name-template placeholders are limited to {host} and {index}."
+        ) from exc
+    if not name.strip():
+        raise RehearsalError("Rendered node name was empty; adjust --node-name-template.")
+    return name
+
+
+def build_install_exec(node_name: str, extra_args: str) -> str:
+    base = f"agent --with-node-id --node-name {node_name}"
+    extra = extra_args.strip()
+    return f"{base} {extra}".strip() if extra else base
+
+
+def apply_join_to_agent(
+    host: str,
+    index: int,
+    args: argparse.Namespace,
+    server: ServerStatus,
+) -> ApplyStatus:
+    node_name = render_node_name(args.node_name_template, host, index)
+    install_exec = build_install_exec(node_name, args.agent_install_extra_args)
+    token_env = "K3S_" + "TOKEN"
+    env_parts = [
+        f"INSTALL_K3S_EXEC={shlex.quote(install_exec)}",
+        f"K3S_URL={shlex.quote(server.api_url)}",
+        f"{token_env}={shlex.quote(server.join_secret)}",
+    ]
+    runner = "env" if args.agent_no_sudo else "sudo -n env"
+    remote_command = (
+        "set -euo pipefail; "
+        "curl -sfL https://get.k3s.io | "
+        f"{runner} {' '.join(env_parts)} sh -"
+    )
+    command = build_ssh_command(
+        host,
+        user=args.agent_user,
+        port=args.agent_port,
+        identity=args.identity,
+        options=args.agent_ssh_option,
+        connect_timeout=args.connect_timeout,
+        remote_command=remote_command,
+    )
+    result = run_ssh(command)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        message = stderr or stdout or f"exit code {result.returncode}"
+        return ApplyStatus(host=host, node_name=node_name, success=False, message=message)
+    return ApplyStatus(host=host, node_name=node_name, success=True, message="applied")
+
+
+def node_condition_is_ready(node: Dict[str, object]) -> bool:
+    status = node.get("status") if isinstance(node, dict) else {}
+    conditions = status.get("conditions") if isinstance(status, dict) else []
+    if not isinstance(conditions, list):
+        return False
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            continue
+        if condition.get("type") == "Ready":
+            return str(condition.get("status", "False")).lower() == "true"
+    return False
+
+
+def wait_for_nodes_ready(
+    args: argparse.Namespace,
+    expected_total: int,
+    *,
+    timeout: int,
+    interval: int,
+) -> tuple[bool, List[str]]:
+    deadline = time.time() + timeout
+    while True:
+        nodes = fetch_node_inventory(args)
+        summaries = summarise_node_conditions(nodes)
+        ready_count = sum(1 for node in nodes if node_condition_is_ready(node))
+        if len(nodes) >= expected_total and ready_count >= expected_total:
+            return True, summaries
+        if time.time() >= deadline:
+            return False, summaries
+        time.sleep(max(1, interval))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if args.apply and not args.agents:
+        print("ERROR: --apply requires at least one --agents entry.", file=sys.stderr)
+        return 2
+    if args.apply_wait and not args.apply:
+        print("ERROR: --apply-wait is only valid when --apply is set.", file=sys.stderr)
+        return 2
 
     try:
         server = collect_server_status(args)
@@ -513,6 +666,53 @@ def main(argv: Sequence[str] | None = None) -> int:
             agent_reports.append(report)
             print(format_agent_summary(report))
 
+    warnings = [report for report in agent_reports if not report.success]
+
+    apply_reports: List[ApplyStatus] = []
+    readiness_success: Optional[bool] = None
+    readiness_summaries: List[str] = []
+
+    if args.apply:
+        if warnings:
+            print(
+                "\nAborting --apply because one or more agents failed preflight.",
+                file=sys.stderr,
+            )
+            return 1
+        print("\nApplying join commands:")
+        for index, host in enumerate(args.agents, start=1):
+            apply_status = apply_join_to_agent(host, index, args, server)
+            apply_reports.append(apply_status)
+            prefix = "PASS" if apply_status.success else "FAIL"
+            print(f"  [{host}] {prefix}: node={apply_status.node_name} {apply_status.message}")
+        apply_failures = [status for status in apply_reports if not status.success]
+        if args.apply_wait and not apply_failures:
+            expected_total = max(len(server.nodes), 1) + len(args.agents)
+            readiness_success, readiness_summaries = wait_for_nodes_ready(
+                args,
+                expected_total,
+                timeout=args.apply_wait_timeout,
+                interval=args.apply_wait_interval,
+            )
+            print("\nPost-join readiness:")
+            for line in readiness_summaries:
+                print(f"  - {line}")
+            if readiness_success:
+                print("All nodes reported Ready before timeout. You can now deploy workloads.")
+            else:
+                print(
+                    (
+                        "Timed out waiting for nodes to report Ready. Inspect k3s logs "
+                        "on each Pi for details."
+                    ),
+                    file=sys.stderr,
+                )
+        elif args.apply_wait and apply_failures:
+            print(
+                "\nSkipping readiness wait because at least one join command failed.",
+                file=sys.stderr,
+            )
+
     if args.json:
         payload = {
             "server": {
@@ -531,10 +731,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for report in agent_reports
             ],
         }
+        if apply_reports:
+            payload["apply"] = [
+                {
+                    "host": status.host,
+                    "node_name": status.node_name,
+                    "success": status.success,
+                    "message": status.message,
+                }
+                for status in apply_reports
+            ]
+        if readiness_summaries:
+            payload["apply_wait"] = {
+                "success": readiness_success,
+                "nodes": readiness_summaries,
+            }
         print(json.dumps(payload, indent=2))
 
-    warnings = [report for report in agent_reports if not report.success]
-    return 0 if not warnings else 1
+    exit_code = 0
+    if warnings:
+        exit_code = 1
+    if args.apply:
+        if any(not status.success for status in apply_reports):
+            exit_code = 1
+        if args.apply_wait and readiness_success is False:
+            exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point

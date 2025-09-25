@@ -245,6 +245,13 @@ sync without modifying the host.
   The helper retrieves the mirrored `/boot/sugarkube-node-token`, prints a join command template,
   and SSHes into each candidate node to confirm `https://get.k3s.io` and the k3s API are reachable.
   See [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) for option walkthroughs.
+- Ready for a turnkey three-node cluster? Promote the rehearsal into automation and wait for
+  readiness with a single command:
+  ```bash
+  just cluster-up CLUSTER_ARGS="sugar-control.local --agents pi-a.local pi-b.local --apply --apply-wait"
+  ```
+  The helper aborts if a worker fails the preflight, joins each node remotely, and polls the
+  control-plane until all nodes report `Ready`. Swap `just` for `make` if you prefer GNU Make.
 - When `cloud-init` or `projects-compose.service` fail, `sugarkube-self-heal@.service`
   retries Docker Compose pulls, runs `cloud-init clean --logs`, and restarts the units.
   After three unsuccessful attempts it stores escalation summaries under
