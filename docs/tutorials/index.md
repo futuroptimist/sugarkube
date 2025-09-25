@@ -293,18 +293,27 @@ retrospectives so the community can keep the platform healthy as it evolves.
 
 ## Tutorial 13: Advanced Operations and Future Directions
 
-The final tutorial explores topics for power users: multi-node expansions, integrating external
-storage arrays, and experimenting with edge AI workloads. We will dive into customizing Helm bundles,
-writing bespoke self-healing units, and tuning Kubernetes for performance or energy efficiency.
+**Status:** Published — [Read the tutorial](./tutorial-13-advanced-operations-future-directions.md)
 
-We close the series by outlining research questions and stretch goals—hardware-in-the-loop testing,
-recovery console images, and advanced observability pipelines—so motivated readers know where they can
-push the platform next. The tutorial will encourage knowledge sharing, inviting graduates to document
-their experiments and feed improvements back into Sugarkube.
+**Prerequisites satisfied:** Tutorials 1–12 artefacts (safety notes, terminal transcripts, network
+diagram, Git workspace, automation toolkit, hardware stack, Kubernetes sandbox, development
+environment, storage maintenance evidence, and contribution workflow) plus additional worker nodes,
+expanded power capacity, and optional shared storage hardware.
+
+The capstone tutorial guides power users through expanding Sugarkube beyond a single node. Learners
+pilot multi-node growth, capture baseline metrics, and observe how workloads rebalance under stress.
+They integrate external storage, enforce pod disruption budgets, and explore edge AI deployments that
+exercise GPU or CPU accelerators. Every lab emphasises recording evidence, benchmarking results, and
+turning observations into future roadmap proposals.
+
+We close the series by encouraging readers to transform their experiments into community knowledge:
+issue proposals, documentation updates, and mentorship for new contributors.
 
 ### Milestones
 
-1. Prototype a multi-node expansion or edge workload, measure performance, and share reproducible
-   configs.
-2. Conduct a failure-injection exercise, observe recovery, and document tuning insights for others.
-3. Present a roadmap update that ties advanced experiments back to Sugarkube's long-term vision.
+1. Prototype a multi-node expansion, measure performance against the original baseline, and document
+   scheduling behaviour.
+2. Conduct a failure-injection exercise against a stateful workload, observe recovery, and log tuning
+   insights others can replay.
+3. Draft an advanced roadmap update that ties edge workload experiments back to Sugarkube's long-term
+   vision.
