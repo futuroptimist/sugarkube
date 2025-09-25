@@ -12,11 +12,12 @@ Usage: build_pi_image.sh [--help]
 Build a Raspberry Pi OS image preloaded with cloud-init.
 
 Environment variables:
-  CLOUD_INIT_PATH   Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
-  OUTPUT_DIR        Directory to write the image (default repo root)
-  IMG_NAME          Name for the output image (default sugarkube)
+  CLOUD_INIT_PATH    Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
+  OUTPUT_DIR         Directory to write the image (default repo root)
+  IMG_NAME           Name for the output image (default sugarkube)
   TOKEN_PLACE_BRANCH Branch of token.place to clone (default main)
-  DSPACE_BRANCH     Branch of dspace to clone (default v3)
+  DSPACE_BRANCH      Branch of dspace to clone (default v3)
+  APT_PROXY          Optional apt proxy URL applied inside the image
 
 See docs/pi_image_cloudflare.md for details.
 EOF
@@ -495,6 +496,28 @@ else
   echo "Skipping apt mirror rewrites"
 fi
 
+APT_PROXY="${APT_PROXY:-}"
+if [ -n "${APT_PROXY}" ]; then
+  echo "[sugarkube] Configuring apt proxy for pi-gen build"
+  for stage in \
+    "stage0/00-configure-apt/files/etc/apt/apt.conf.d" \
+    "stage2/00-configure-apt/files/etc/apt/apt.conf.d" \
+    "export-image/02-set-sources/files/etc/apt/apt.conf.d"; do
+    python3 - "${stage}/20-proxy.conf" "${APT_PROXY}" <<'PY'
+import pathlib, sys
+dest = pathlib.Path(sys.argv[1])
+value = sys.argv[2]
+dest.parent.mkdir(parents=True, exist_ok=True)
+escaped = value.replace('\\', '\\\\').replace('"', '\\"').strip()
+dest.write_text(
+    f"Acquire::http::Proxy \"{escaped}\";\n"
+    f"Acquire::https::Proxy \"{escaped}\";\n",
+    encoding="utf-8",
+)
+PY
+  done
+fi
+
 cat > config <<CFG
 IMG_NAME="${IMG_NAME}"
 ENABLE_SSH=1
@@ -591,6 +614,9 @@ if [ -n "${EXTRA_REPOS}" ]; then
 fi
 if [ -n "${OUT_LOG}" ]; then
   metadata_args+=(--build-log "${OUT_LOG}")
+fi
+if [ -n "${APT_PROXY}" ]; then
+  metadata_args+=(--option "apt_proxy_configured=true")
 fi
 
 python3 "${REPO_ROOT}/scripts/create_build_metadata.py" "${metadata_args[@]}"

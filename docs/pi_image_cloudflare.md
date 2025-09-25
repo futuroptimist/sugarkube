@@ -42,6 +42,12 @@ containers. Set `DEBUG=1` to trace script execution for troubleshooting.
 Set `KEEP_WORK_DIR=1` to retain the temporary pi-gen work directory instead of
 deleting it, which aids debugging failed builds.
 
+Set `APT_PROXY` to an HTTP or HTTPS proxy URL to add `Acquire::http::Proxy` and
+`Acquire::https::Proxy` entries under `stage0/00-configure-apt`,
+`stage2/00-configure-apt`, and `export-image/02-set-sources`. pi-gen and the
+resulting image then reuse the proxy without printing the URL to stdout, which
+keeps credentials out of logs.
+
 `REQUIRED_SPACE_GB` (default: `10`) controls free disk space checks on the
 temporary work directory and the output location.
 Set `SKIP_CLOUD_INIT_VALIDATION=1` to bypass cloud-init YAML validation when
