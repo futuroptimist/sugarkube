@@ -7,8 +7,9 @@ against candidate worker nodes. Use it after your first node reaches `k3s-ready.
 confidence that the token is accessible, the API endpoint is reachable, and each worker can download
 `https://get.k3s.io` before you touch production hardware.
 
-The script is safe to run repeatedly. It never starts `k3s agent` or modifies cluster state—it only
-reads files and performs connectivity checks.
+By default the script is read-only: it never starts `k3s agent` or modifies cluster state. Add
+`--apply` to promote rehearsal into automation and run the join command remotely, then append
+`--apply-wait` to watch until every node reports `Ready`.
 
 ## Prerequisites
 
@@ -45,6 +46,20 @@ The command:
 Exit code is `0` when every agent passes the preflight; failures or warnings raise a non-zero exit
 code so you can wire the rehearsal into automation.
 
+Ready to go beyond rehearsal? Trigger the full join workflow with:
+
+```bash
+just cluster-up CLUSTER_ARGS="sugar-control.local --agents pi-a.local pi-b.local --apply --apply-wait"
+```
+
+The command reuses the same helper but automatically:
+
+1. Runs the preflight checks described above.
+2. Aborts if any worker fails the preflight so you never join a broken node.
+3. Executes the k3s installer on each worker with a deterministic node name (defaults to the host).
+4. Polls `k3s kubectl get nodes` until the control-plane plus workers report `Ready` or the
+   timeout (default 5 minutes) expires.
+
 ## Join secret handling
 
 By default, the join secret (the mirrored k3s node token) is redacted in the console output.
@@ -66,10 +81,7 @@ correct endpoint during their TCP test.
 
 ## Next steps
 
-Once the rehearsal passes, copy the join secret to your secure clipboard and run the printed command
-on each worker:
-
-Use the join command emitted by the rehearsal (or the one documented in
-[Raspberry Pi Cluster Setup](./raspi_cluster_setup.md#5-form-the-k3s-cluster)) and watch the
-controller with `sudo k3s kubectl get nodes --watch` to confirm each worker registers and
-transitions to `Ready`.
+Once the rehearsal passes, either run the printed join command on each worker or rerun with
+`--apply --apply-wait` to promote it into automation. The
+[`Raspberry Pi Cluster Setup`](./raspi_cluster_setup.md#5-form-the-k3s-cluster) guide shows how to
+monitor `sudo k3s kubectl get nodes --watch` if you prefer to observe manually.

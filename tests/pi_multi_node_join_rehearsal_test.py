@@ -106,6 +106,127 @@ def test_format_agent_summary_error_branch():
     assert rehearsal.format_agent_summary(agent) == "[pi-worker] ERROR: boom"
 
 
+def test_render_node_name_renders_index():
+    assert rehearsal.render_node_name("{host}-{index}", "worker", 2) == "worker-2"
+
+
+def test_build_install_exec_with_extra_args():
+    value = rehearsal.build_install_exec("worker", "--with-taint foo")
+    assert value.endswith("--node-name worker --with-taint foo")
+
+
+def test_apply_join_to_agent_success(monkeypatch):
+    recorded: dict[str, str] = {}
+
+    def fake_build(host: str, **kwargs):
+        recorded["remote"] = kwargs["remote_command"]
+        return ["ssh", host]
+
+    class DummyResult:
+        def __init__(self):
+            self.returncode = 0
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_run(command: list[str]) -> DummyResult:
+        recorded["command"] = " ".join(command)
+        return DummyResult()
+
+    monkeypatch.setattr(rehearsal, "build_ssh_command", fake_build)
+    monkeypatch.setattr(rehearsal, "run_ssh", fake_run)
+
+    args = argparse.Namespace(
+        agent_user="pi",
+        agent_port=22,
+        identity=None,
+        agent_ssh_option=[],
+        connect_timeout=10,
+        agent_no_sudo=False,
+        node_name_template="{host}",
+        agent_install_extra_args="",
+    )
+    server = rehearsal.ServerStatus(
+        host="control",
+        join_secret="secret",
+        api_url="https://10.0.0.10:6443",
+        nodes=[],
+    )
+    status = rehearsal.apply_join_to_agent("pi-worker", 1, args, server)
+    assert status.success
+    assert "curl -sfL" in recorded["remote"]
+    assert "INSTALL_K3S_EXEC" in recorded["remote"]
+    assert "K3S_TOKEN" in recorded["remote"]
+
+
+def test_apply_join_to_agent_failure(monkeypatch):
+    def fake_build(host: str, **kwargs):
+        return ["ssh", host]
+
+    class DummyResult:
+        def __init__(self):
+            self.returncode = 1
+            self.stdout = ""
+            self.stderr = "boom"
+
+    def fake_run(command: list[str]) -> DummyResult:
+        return DummyResult()
+
+    monkeypatch.setattr(rehearsal, "build_ssh_command", fake_build)
+    monkeypatch.setattr(rehearsal, "run_ssh", fake_run)
+
+    args = argparse.Namespace(
+        agent_user="pi",
+        agent_port=22,
+        identity=None,
+        agent_ssh_option=[],
+        connect_timeout=10,
+        agent_no_sudo=True,
+        node_name_template="{host}",
+        agent_install_extra_args="",
+    )
+    server = rehearsal.ServerStatus(
+        host="control",
+        join_secret="secret",
+        api_url="https://10.0.0.10:6443",
+        nodes=[],
+    )
+    status = rehearsal.apply_join_to_agent("pi-worker", 1, args, server)
+    assert not status.success
+    assert status.message == "boom"
+
+
+def test_wait_for_nodes_ready_success(monkeypatch, sample_nodes):
+    monkeypatch.setattr(rehearsal, "fetch_node_inventory", lambda args: sample_nodes)
+    success, summaries = rehearsal.wait_for_nodes_ready(
+        argparse.Namespace(),
+        expected_total=2,
+        timeout=0,
+        interval=1,
+    )
+    assert success is True
+    assert len(summaries) == 2
+
+
+def test_wait_for_nodes_ready_timeout(monkeypatch):
+    calls = 0
+
+    def fake_fetch(args):
+        nonlocal calls
+        calls += 1
+        return []
+
+    monkeypatch.setattr(rehearsal, "fetch_node_inventory", fake_fetch)
+    success, summaries = rehearsal.wait_for_nodes_ready(
+        argparse.Namespace(),
+        expected_total=2,
+        timeout=0,
+        interval=1,
+    )
+    assert success is False
+    assert summaries == []
+    assert calls == 1
+
+
 def test_parse_api_host_rejects_invalid_url():
     with pytest.raises(rehearsal.RehearsalError):
         rehearsal.parse_api_host("notaurl")
@@ -441,6 +562,16 @@ def test_parse_args_round_trip(tmp_path):
             "--reveal-secret",
             "--save-secret",
             str(tmp_path / "out"),
+            "--apply",
+            "--apply-wait",
+            "--apply-wait-timeout",
+            "600",
+            "--apply-wait-interval",
+            "15",
+            "--node-name-template",
+            "node-{index}",
+            "--agent-install-extra-args",
+            "--node-label tier=worker",
         ]
     )
     assert args.server == "control"
@@ -448,6 +579,12 @@ def test_parse_args_round_trip(tmp_path):
     assert args.agents == ["worker1", "worker2"]
     assert args.agent_no_sudo is True
     assert args.json is True
+    assert args.apply is True
+    assert args.apply_wait is True
+    assert args.apply_wait_timeout == 600
+    assert args.apply_wait_interval == 15
+    assert args.node_name_template == "node-{index}"
+    assert args.agent_install_extra_args == "--node-label tier=worker"
 
 
 def test_main_success(monkeypatch, capsys, sample_nodes, tmp_path):
@@ -513,3 +650,152 @@ def test_main_returns_warning_exit(monkeypatch, capsys, sample_nodes):
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Run again with --reveal-secret" in captured.out
+
+
+def test_main_apply_without_agents(monkeypatch):
+    exit_code = rehearsal.main(["control", "--apply"])
+    assert exit_code == 2
+
+
+def test_main_apply_wait_requires_apply(monkeypatch):
+    exit_code = rehearsal.main(["control", "--apply-wait"])
+    assert exit_code == 2
+
+
+def test_main_apply_success_flow(monkeypatch, capsys, sample_nodes):
+    def fake_collect_server_status(args: argparse.Namespace) -> rehearsal.ServerStatus:
+        return rehearsal.ServerStatus(
+            host=args.server,
+            join_secret="secret",
+            api_url="https://10.0.0.10:6443",
+            nodes=sample_nodes[:1],
+        )
+
+    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str):
+        return rehearsal.AgentStatus(host=host, payload={"api_reachable": True})
+
+    def fake_apply(
+        host: str,
+        index: int,
+        args: argparse.Namespace,
+        server: rehearsal.ServerStatus,
+    ) -> rehearsal.ApplyStatus:
+        return rehearsal.ApplyStatus(
+            host=host,
+            node_name=f"node-{index}",
+            success=True,
+            message="ok",
+        )
+
+    def fake_wait(args: argparse.Namespace, expected_total: int, *, timeout: int, interval: int):
+        return True, ["sugar-control: Ready=True (control-plane)", "worker: Ready=True (worker)"]
+
+    monkeypatch.setattr(rehearsal, "collect_server_status", fake_collect_server_status)
+    monkeypatch.setattr(rehearsal, "collect_agent_status", fake_collect_agent_status)
+    monkeypatch.setattr(rehearsal, "apply_join_to_agent", fake_apply)
+    monkeypatch.setattr(rehearsal, "wait_for_nodes_ready", fake_wait)
+
+    exit_code = rehearsal.main(
+        [
+            "control",
+            "--agents",
+            "worker1",
+            "--apply",
+            "--apply-wait",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "apply" in captured.out
+    assert "apply_wait" in captured.out
+
+
+def test_main_apply_failure_skips_wait(monkeypatch, capsys, sample_nodes):
+    def fake_collect_server_status(args: argparse.Namespace) -> rehearsal.ServerStatus:
+        return rehearsal.ServerStatus(
+            host=args.server,
+            join_secret="secret",
+            api_url="https://10.0.0.10:6443",
+            nodes=sample_nodes,
+        )
+
+    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str):
+        return rehearsal.AgentStatus(host=host, payload={"api_reachable": True})
+
+    def fake_apply(
+        host: str,
+        index: int,
+        args: argparse.Namespace,
+        server: rehearsal.ServerStatus,
+    ) -> rehearsal.ApplyStatus:
+        return rehearsal.ApplyStatus(host=host, node_name="node-1", success=False, message="boom")
+
+    wait_calls: list[tuple[object, ...]] = []
+
+    def fake_wait(*args, **kwargs):  # pragma: no cover - should not run
+        wait_calls.append((args, kwargs))
+        return True, []
+
+    monkeypatch.setattr(rehearsal, "collect_server_status", fake_collect_server_status)
+    monkeypatch.setattr(rehearsal, "collect_agent_status", fake_collect_agent_status)
+    monkeypatch.setattr(rehearsal, "apply_join_to_agent", fake_apply)
+    monkeypatch.setattr(rehearsal, "wait_for_nodes_ready", fake_wait)
+
+    exit_code = rehearsal.main(
+        [
+            "control",
+            "--agents",
+            "worker1",
+            "--apply",
+            "--apply-wait",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Skipping readiness wait" in captured.err
+    assert wait_calls == []
+
+
+def test_main_apply_wait_timeout(monkeypatch, capsys, sample_nodes):
+    def fake_collect_server_status(args: argparse.Namespace) -> rehearsal.ServerStatus:
+        return rehearsal.ServerStatus(
+            host=args.server,
+            join_secret="secret",
+            api_url="https://10.0.0.10:6443",
+            nodes=sample_nodes[:1],
+        )
+
+    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str):
+        return rehearsal.AgentStatus(host=host, payload={"api_reachable": True})
+
+    def fake_apply(
+        host: str,
+        index: int,
+        args: argparse.Namespace,
+        server: rehearsal.ServerStatus,
+    ) -> rehearsal.ApplyStatus:
+        return rehearsal.ApplyStatus(host=host, node_name="node-1", success=True, message="applied")
+
+    def fake_wait(args: argparse.Namespace, expected_total: int, *, timeout: int, interval: int):
+        return False, ["sugar-control: Ready=True (control-plane)"]
+
+    monkeypatch.setattr(rehearsal, "collect_server_status", fake_collect_server_status)
+    monkeypatch.setattr(rehearsal, "collect_agent_status", fake_collect_agent_status)
+    monkeypatch.setattr(rehearsal, "apply_join_to_agent", fake_apply)
+    monkeypatch.setattr(rehearsal, "wait_for_nodes_ready", fake_wait)
+
+    exit_code = rehearsal.main(
+        [
+            "control",
+            "--agents",
+            "worker1",
+            "--apply",
+            "--apply-wait",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Timed out waiting for nodes" in captured.err
+    assert "apply_wait" in captured.out

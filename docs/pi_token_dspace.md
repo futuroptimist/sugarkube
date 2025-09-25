@@ -70,6 +70,13 @@ docker compose version
  curl http://<pi-host>:5000  # token.place
  curl http://<pi-host>:3000  # dspace
  ```
+- Expanding to a full Sugarkube cluster? Run the multi-node helper from your workstation once the
+  control-plane boots and `projects-compose.service` is healthy:
+  ```sh
+  just cluster-up CLUSTER_ARGS="sugar-control.local --agents pi-worker-a.local pi-worker-b.local --apply --apply-wait"
+  ```
+  The command blocks until both workers join k3s and report `Ready`, giving you a verified platform
+  before you expose services publicly.
 - The image now ships sample payloads under
   `/opt/projects/token.place/samples/`. Run
   `/opt/sugarkube/token_place_replay_samples.py` to capture JSON health/model/chat

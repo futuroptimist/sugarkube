@@ -70,6 +70,11 @@ rehearsal_cmd := env_var_or_default(
     justfile_directory() + "/scripts/pi_multi_node_join_rehearsal.py",
 )
 rehearsal_args := env_var_or_default("REHEARSAL_ARGS", "")
+cluster_cmd := env_var_or_default(
+    "CLUSTER_CMD",
+    justfile_directory() + "/scripts/pi_multi_node_join_rehearsal.py",
+)
+cluster_args := env_var_or_default("CLUSTER_ARGS", "")
 token_place_sample_cmd := env_var_or_default(
     "TOKEN_PLACE_SAMPLE_CMD",
     justfile_directory() + "/scripts/token_place_replay_samples.py",
@@ -188,6 +193,11 @@ update-hardware-badge:
 # Usage: just rehearse-join REHEARSAL_ARGS="controller.local --agents pi-a.local"
 rehearse-join:
     "{{rehearsal_cmd}}" {{rehearsal_args}}
+
+# Apply the k3s join command to each agent and optionally wait for readiness
+# Usage: just cluster-up CLUSTER_ARGS="control.local --agents worker-a worker-b --apply --apply-wait"
+cluster-up:
+    "{{cluster_cmd}}" {{cluster_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap

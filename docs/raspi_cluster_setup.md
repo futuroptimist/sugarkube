@@ -86,20 +86,27 @@ Follow the steps above for each node so every Pi boots from its own SSD.
 3. Before inviting other nodes, run a rehearsal from your workstation to confirm the token is
    mirrored and workers can reach the API:
    ```bash
-   make rehearse-join REHEARSAL_ARGS="sugar-control.local --agents sugar-worker.local"
+   make rehearse-join REHEARSAL_ARGS="sugar-control.local --agents sugar-worker-a.local sugar-worker-b.local"
    ```
    The helper prints the join command template and checks each worker for network reachability,
    existing `k3s-agent` state, and leftover registration files.
-4. On each additional Pi, join the cluster:
+4. Happy path for a three-node cluster (one control-plane plus two workers):
+   ```bash
+   make cluster-up CLUSTER_ARGS="sugar-control.local --agents sugar-worker-a.local sugar-worker-b.local --apply --apply-wait"
+   ```
+   The automation aborts if a worker fails the preflight, executes the join command remotely when
+   the checks pass, and waits up to five minutes for every node to report `Ready`. Override the
+   timeout with `--apply-wait-timeout` when slower networks need more time.
+5. Prefer a manual join? Run the command emitted during the rehearsal on each worker:
    ```bash
    curl -sfL https://get.k3s.io | \
    K3S_URL=https://<control-ip>:6443 K3S_TOKEN=<token> sh -
    ```
-5. Check that all nodes are ready:
+6. Check that all nodes are ready:
    ```bash
    sudo kubectl get nodes
    ```
-6. (Optional) Copy `/boot/sugarkube-kubeconfig-full` to your workstation for remote
+7. (Optional) Copy `/boot/sugarkube-kubeconfig-full` to your workstation for remote
    `kubectl` access.
 
 ## 6. Deploy applications
