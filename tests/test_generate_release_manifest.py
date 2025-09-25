@@ -71,6 +71,25 @@ def test_release_manifest_outputs(tmp_path):
     manifest_path = tmp_path / "manifest.json"
     notes_path = tmp_path / "NOTES.md"
     outputs_file = tmp_path / "github_output.txt"
+    qemu_dir = tmp_path / "qemu-smoke"
+    qemu_dir.mkdir()
+    serial_log = qemu_dir / "serial.log"
+    serial_payload = "serial ok\n"
+    serial_log.write_text(serial_payload, encoding="utf-8")
+    success_payload = {"status": "pass", "completed_at": "2024-05-21T10:45:00Z"}
+    (qemu_dir / "smoke-success.json").write_text(
+        json.dumps(success_payload, indent=2) + "\n", encoding="utf-8"
+    )
+    report_dir = qemu_dir / "first-boot-report"
+    report_dir.mkdir()
+    summary_json = report_dir / "summary.json"
+    summary_json.write_text('{\n  "status": "ok"\n}\n', encoding="utf-8")
+    summary_md = report_dir / "summary.md"
+    summary_md.write_text("# Summary\n", encoding="utf-8")
+    state_dir = qemu_dir / "sugarkube-state"
+    state_dir.mkdir()
+    state_marker = state_dir / "first-boot.ok"
+    state_marker.write_text("ok\n", encoding="utf-8")
     env = os.environ.copy()
     env["SOURCE_DATE_EPOCH"] = "1700000000"
     env["GITHUB_OUTPUT"] = str(outputs_file)
@@ -93,6 +112,8 @@ def test_release_manifest_outputs(tmp_path):
         "1",
         "--workflow",
         "pi-image-release",
+        "--qemu-artifacts",
+        str(qemu_dir),
     ]
     subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
 
@@ -114,3 +135,19 @@ def test_release_manifest_outputs(tmp_path):
     )
     assert outputs["tag"].startswith("v2024.05.21")
     assert outputs["prerelease"] == "false"
+
+    qemu_meta = manifest["qemu_smoke"]
+    assert qemu_meta["status"] == "pass"
+    expected_serial_hash = hashlib.sha256(serial_payload.encode("utf-8")).hexdigest()
+    assert qemu_meta["serial_log"]["path"] == "serial.log"
+    assert qemu_meta["serial_log"]["sha256"] == expected_serial_hash
+    artifact_paths = {entry["path"] for entry in qemu_meta["artifacts"]}
+    assert "smoke-success.json" in artifact_paths
+    assert "first-boot-report/summary.json" in artifact_paths
+    summary_entry = next(
+        entry
+        for entry in qemu_meta["artifacts"]
+        if entry["path"] == "first-boot-report/summary.json"
+    )
+    expected_summary_hash = hashlib.sha256(summary_json.read_bytes()).hexdigest()
+    assert summary_entry["sha256"] == expected_summary_hash

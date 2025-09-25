@@ -113,6 +113,10 @@
   on the serial console, and then copies `/boot/first-boot-report` plus
   `/var/log/sugarkube` into uploadable artifacts so every release ships with the
   same telemetry operators would retrieve from hardware.
+- `sugarkube.img.xz.manifest.json` now exposes a `qemu_smoke` block that records the
+  serial log digest and hashes for each copied report, allowing downstream tooling
+  to prove the smoke test ran on the published image. Coverage for the new block
+  lives in `tests/test_generate_release_manifest.py`.
 
 ### Local GitHub Actions dry-run
 - Install [act](https://github.com/nektos/act) and run `act workflow-dispatch --workflows
@@ -136,5 +140,3 @@ Read-only mount for cloud-init file into container
 ## Future Enhancements
 - Parametrize mirror list and implement automatic mirror failover
 - Structured logs from `pi-gen` stages to summarize progress/time
-- Surface QEMU smoke-test metadata (serial logs, report hashes) directly in the
-  release manifest alongside the core artifacts

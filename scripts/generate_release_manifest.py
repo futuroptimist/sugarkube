@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 def _load_metadata(path: pathlib.Path) -> Dict[str, Any]:
@@ -71,6 +71,70 @@ def _render_checksum_table(artifacts: Iterable[Dict[str, Any]]) -> str:
         digest = artifact.get("contains_sha256") or artifact.get("sha256")
         rows.append(f"| `{artifact['name']}` | `{digest}` | {size_str} |")
     return "\n".join([header, *rows])
+
+
+def _describe_file(path: pathlib.Path, root: pathlib.Path) -> Dict[str, Any]:
+    relative = path.relative_to(root).as_posix()
+    data = path.read_bytes()
+    return {
+        "path": relative,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _collect_qemu_metadata(base_dir: pathlib.Path) -> Dict[str, Any]:
+    if not base_dir.exists():
+        return {
+            "status": "not_found",
+            "serial_log": None,
+            "artifacts": [],
+            "artifact_root": base_dir.name,
+        }
+
+    files: List[Dict[str, Any]] = []
+    for file_path in sorted(base_dir.rglob("*")):
+        if file_path.is_file():
+            files.append(_describe_file(file_path, base_dir))
+
+    serial_entry = next((entry for entry in files if entry["path"] == "serial.log"), None)
+    artifacts = [entry for entry in files if entry["path"] != "serial.log"]
+
+    status = "unknown"
+    details: Dict[str, Any] = {}
+
+    success_path = base_dir / "smoke-success.json"
+    error_path = base_dir / "error.json"
+
+    if success_path.exists():
+        try:
+            payload = json.loads(success_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            status = "invalid"
+            details = {"path": "smoke-success.json", "error": str(exc)}
+        else:
+            status = payload.get("status") or "unknown"
+            details = {"path": "smoke-success.json", "payload": payload}
+    elif error_path.exists():
+        status = "error"
+        try:
+            payload = json.loads(error_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            details = {"path": "error.json", "error": str(exc)}
+        else:
+            details = {"path": "error.json", "payload": payload}
+    else:
+        status = "missing"
+
+    result: Dict[str, Any] = {
+        "status": status,
+        "serial_log": serial_entry,
+        "artifacts": artifacts,
+        "artifact_root": base_dir.name,
+    }
+    if details:
+        result["details"] = details
+    return result
 
 
 def _build_manifest(
@@ -198,6 +262,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
     parser.add_argument("--workflow", required=True)
+    parser.add_argument(
+        "--qemu-artifacts",
+        required=False,
+        help="Optional path to the QEMU smoke-test artifact directory",
+    )
     return parser.parse_args()
 
 
@@ -218,6 +287,9 @@ def main() -> int:
             "workflow": args.workflow,
         },
     )
+
+    if args.qemu_artifacts:
+        manifest["qemu_smoke"] = _collect_qemu_metadata(pathlib.Path(args.qemu_artifacts))
 
     commit = manifest["source"].get("commit", "")
     version, prerelease, release_name = _version_for_channel(
