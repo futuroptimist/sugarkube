@@ -73,6 +73,63 @@ def _render_checksum_table(artifacts: Iterable[Dict[str, Any]]) -> str:
     return "\n".join([header, *rows])
 
 
+def _hash_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_qemu_artifacts(path: pathlib.Path) -> Dict[str, Any]:
+    root = path.expanduser().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"QEMU artifacts directory not found: {root}")
+
+    artifacts: list[Dict[str, Any]] = []
+    for entry in sorted(root.rglob("*")):
+        if entry.is_file():
+            artifacts.append(
+                {
+                    "path": entry.relative_to(root).as_posix(),
+                    "sha256": _hash_file(entry),
+                    "size_bytes": entry.stat().st_size,
+                }
+            )
+
+    status = "unknown"
+    details: Dict[str, Any] | None = None
+
+    success_file = root / "smoke-success.json"
+    if success_file.exists():
+        try:
+            details = json.loads(success_file.read_text(encoding="utf-8"))
+            status = details.get("status", "unknown") or "unknown"
+        except json.JSONDecodeError as exc:
+            status = "invalid"
+            details = {"error": str(exc), "path": str(success_file)}
+    else:
+        error_file = root / "error.json"
+        if error_file.exists():
+            try:
+                details = json.loads(error_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                details = {
+                    "error": error_file.read_text(encoding="utf-8"),
+                    "path": str(error_file),
+                }
+            status = "error"
+
+    payload: Dict[str, Any] = {
+        "directory": str(root),
+        "status": status,
+        "artifacts": artifacts,
+    }
+    if details:
+        payload["details"] = details
+    return payload
+
+
 def _build_manifest(
     metadata: Dict[str, Any],
     channel: str,
@@ -163,6 +220,27 @@ def _write_notes(
         "The attached manifest (`sugarkube.img.xz.manifest.json`) contains the",
         "full provenance record including options and workflow metadata.",
     ]
+    qemu_smoke = manifest.get("qemu_smoke")
+    if qemu_smoke:
+        lines.extend(
+            [
+                "",
+                "## QEMU smoke test",
+                f"- Status: `{qemu_smoke.get('status', 'unknown')}`",
+            ]
+        )
+        highlights: list[str] = []
+        for artifact in qemu_smoke.get("artifacts", []):
+            if artifact["path"].endswith("serial.log") or artifact["path"].endswith("summary.json"):
+                highlights.append(
+                    f"  - `{artifact['path']}`: `{artifact['sha256']}`"
+                    f" ({artifact['size_bytes']} bytes)"
+                )
+        if highlights:
+            lines.append("- Key artifacts:")
+            lines.extend(highlights)
+        else:
+            lines.append("- Key artifacts: see manifest for full listing")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -198,6 +276,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
     parser.add_argument("--workflow", required=True)
+    parser.add_argument(
+        "--qemu-artifacts",
+        help="Directory containing QEMU smoke test artifacts to embed in the manifest",
+    )
     return parser.parse_args()
 
 
@@ -218,6 +300,8 @@ def main() -> int:
             "workflow": args.workflow,
         },
     )
+    if args.qemu_artifacts:
+        manifest["qemu_smoke"] = _load_qemu_artifacts(pathlib.Path(args.qemu_artifacts))
 
     commit = manifest["source"].get("commit", "")
     version, prerelease, release_name = _version_for_channel(

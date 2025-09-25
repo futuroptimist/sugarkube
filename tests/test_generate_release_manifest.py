@@ -114,3 +114,65 @@ def test_release_manifest_outputs(tmp_path):
     )
     assert outputs["tag"].startswith("v2024.05.21")
     assert outputs["prerelease"] == "false"
+
+
+def test_release_manifest_includes_qemu_smoke(tmp_path):
+    metadata_path = _make_metadata(tmp_path)
+    qemu_dir = tmp_path / "qemu-smoke"
+    report_dir = qemu_dir / "first-boot-report"
+    report_dir.mkdir(parents=True)
+    (qemu_dir / "serial.log").write_text("serial output\n", encoding="utf-8")
+    (qemu_dir / "smoke-success.json").write_text(
+        json.dumps({"status": "pass", "notes": "stub"}), encoding="utf-8"
+    )
+    (report_dir / "summary.json").write_text(
+        json.dumps({"checks": [{"name": "cloud_init", "status": "pass"}]}),
+        encoding="utf-8",
+    )
+    (report_dir / "summary.md").write_text("# Summary\nAll good\n", encoding="utf-8")
+
+    manifest_path = tmp_path / "manifest.json"
+    notes_path = tmp_path / "NOTES.md"
+    outputs_file = tmp_path / "github_output.txt"
+    env = os.environ.copy()
+    env["SOURCE_DATE_EPOCH"] = "1700000000"
+    env["GITHUB_OUTPUT"] = str(outputs_file)
+
+    cmd = [
+        sys.executable,
+        str(Path("scripts/generate_release_manifest.py")),
+        "--metadata",
+        str(metadata_path),
+        "--manifest-output",
+        str(manifest_path),
+        "--notes-output",
+        str(notes_path),
+        "--release-channel",
+        "stable",
+        "--repo",
+        "futuroptimist/sugarkube",
+        "--run-id",
+        "67890",
+        "--run-attempt",
+        "1",
+        "--workflow",
+        "pi-image-release",
+        "--qemu-artifacts",
+        str(qemu_dir),
+    ]
+    subprocess.run(cmd, check=True, env=env, cwd=Path(__file__).resolve().parents[1])
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    qemu = manifest["qemu_smoke"]
+    assert qemu["status"] == "pass"
+    paths = {artifact["path"]: artifact for artifact in qemu["artifacts"]}
+    serial = paths["serial.log"]
+    assert serial["sha256"] == hashlib.sha256("serial output\n".encode()).hexdigest()
+    summary_json = paths["first-boot-report/summary.json"]
+    assert summary_json["size_bytes"] == len(
+        json.dumps({"checks": [{"name": "cloud_init", "status": "pass"}]}).encode("utf-8")
+    )
+
+    notes = notes_path.read_text(encoding="utf-8")
+    assert "QEMU smoke test" in notes
+    assert serial["sha256"] in notes

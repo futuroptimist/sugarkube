@@ -136,7 +136,8 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --run-id "${GITHUB_RUN_ID}" \
             --run-attempt "${GITHUB_RUN_ATTEMPT}" \
-            --workflow "${GITHUB_WORKFLOW}"
+            --workflow "${GITHUB_WORKFLOW}" \
+            --qemu-artifacts "qemu-smoke-artifacts"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3.5.0
