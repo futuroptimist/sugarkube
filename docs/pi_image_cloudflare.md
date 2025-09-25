@@ -33,9 +33,12 @@ To reduce flaky downloads it pins the
 official Raspberry Pi and Debian mirrors, adds `APT_OPTS` (retries, timeouts,
 `-o APT::Get::Fix-Missing=true`), and installs a persistent apt/dpkg Pre-Invoke hook
 that rewrites any raspbian host to a stable HTTPS mirror and bypasses proxies for
-`archive.raspberrypi.com`. Use `APT_REWRITE_MIRROR` to change the rewrite target
-(default: `https://mirror.fcix.net/raspbian/raspbian`). Set `SKIP_MIRROR_REWRITE=1`
-to disable these rewrites when your network already uses a reliable mirror. Use
+`archive.raspberrypi.com`. Use `APT_REWRITE_MIRRORS` to provide a space-separated
+list of preferred raspbian mirrors (the first entry becomes the default while the
+builder rotates through the remainder on failures). `APT_REWRITE_MIRROR` continues
+to work for compatibility and maps to the first entry in the list. Set
+`SKIP_MIRROR_REWRITE=1` to disable these rewrites when your network already uses a
+reliable mirror. Use
 `APT_RETRIES` and `APT_TIMEOUT` to tune the retry count and per-request timeout.
 Override the Raspberry Pi packages mirror with `RPI_MIRROR` (mapped to pi-gen's
 `APT_MIRROR_RASPBERRYPI`) and the Debian mirror with `DEBIAN_MIRROR`. Use
@@ -47,6 +50,9 @@ they're already present or when the build environment disallows privileged
 containers. Set `DEBUG=1` to trace script execution for troubleshooting.
 Set `KEEP_WORK_DIR=1` to retain the temporary pi-gen work directory instead of
 deleting it, which aids debugging failed builds.
+
+Automated coverage in `tests/build_pi_image_test.py::test_configurable_mirror_failover`
+keeps the mirror failover and configuration behavior locked in.
 
 `REQUIRED_SPACE_GB` (default: `10`) controls free disk space checks on the
 temporary work directory and the output location.

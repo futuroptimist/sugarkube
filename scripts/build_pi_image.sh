@@ -459,85 +459,218 @@ APT_OPTS="-o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=${APT_TIM
 APT_OPTS+=" -o APT::Install-Recommends=false -o APT::Install-Suggests=false"
 
 SKIP_MIRROR_REWRITE="${SKIP_MIRROR_REWRITE:-0}"
-APT_REWRITE_MIRROR="${APT_REWRITE_MIRROR:-https://mirror.fcix.net/raspbian/raspbian}"
+
+DEFAULT_APT_MIRRORS=(
+  "https://mirror.fcix.net/raspbian/raspbian"
+  "https://mirrors.ocf.berkeley.edu/raspbian/raspbian"
+  "https://raspbian.raspberrypi.org/raspbian"
+)
+
+if [ -n "${APT_REWRITE_MIRRORS:-}" ]; then
+  # shellcheck disable=SC2206
+  read -r -a _APT_REWRITE_MIRRORS <<<"${APT_REWRITE_MIRRORS}"
+elif [ -n "${APT_REWRITE_MIRROR:-}" ]; then
+  _APT_REWRITE_MIRRORS=("${APT_REWRITE_MIRROR}")
+else
+  _APT_REWRITE_MIRRORS=("${DEFAULT_APT_MIRRORS[@]}")
+fi
+
+APT_REWRITE_MIRRORS=()
+for mirror in "${_APT_REWRITE_MIRRORS[@]}"; do
+  if [ -n "${mirror}" ]; then
+    APT_REWRITE_MIRRORS+=("${mirror}")
+  fi
+done
+if [ "${#APT_REWRITE_MIRRORS[@]}" -eq 0 ]; then
+  APT_REWRITE_MIRRORS=("${DEFAULT_APT_MIRRORS[@]}")
+fi
+
+APT_REWRITE_MIRROR="${APT_REWRITE_MIRRORS[0]}"
+APT_MIRROR_ARRAY_CONTENT=$(printf '  "%s"\n' "${APT_REWRITE_MIRRORS[@]}")
+MIRROR_STATE_FILE="/var/lib/apt/sugarkube-active-mirror"
+export APT_MIRROR_ARRAY_CONTENT MIRROR_STATE_FILE
+
+replace_mirror_placeholders() {
+  local target_file="$1"
+  python3 - <<'PY' "${target_file}"
+import os
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+array = os.environ["APT_MIRROR_ARRAY_CONTENT"].rstrip("\n")
+state_file = os.environ["MIRROR_STATE_FILE"]
+content = path.read_text()
+content = content.replace("__APT_MIRROR_ARRAY__", array)
+content = content.replace("__MIRROR_STATE_FILE__", state_file)
+path.write_text(content)
+PY
+}
 
 if [ "$SKIP_MIRROR_REWRITE" -ne 1 ]; then
   # --- Reliability hooks: mirror rewrites and proxy exceptions ---
-  # 1) Persistent apt/dpkg Pre-Invoke hook to rewrite ANY raspbian host to FCIX
   mkdir -p stage0/00-configure-apt/files/usr/local/sbin
   cat > stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="__APT_REWRITE_MIRROR__"
+mirrors=(
+__APT_MIRROR_ARRAY__
+)
+state_file="__MIRROR_STATE_FILE__"
+state_dir="$(dirname "$state_file")"
+mkdir -p "$state_dir"
+target="${mirrors[0]}"
+if [ -s "$state_file" ]; then
+  while IFS= read -r candidate; do
+    for m in "${mirrors[@]}"; do
+      if [ "$m" = "$candidate" ]; then
+        target="$candidate"
+        break 2
+      fi
+    done
+  done < "$state_file"
+fi
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+  sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
 done
+printf '%s\n' "$target" > "$state_file"
 EOSH
-  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
-    stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
+  replace_mirror_placeholders stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
   chmod +x stage0/00-configure-apt/files/usr/local/sbin/apt-rewrite-mirrors
+
   mkdir -p stage0/00-configure-apt/files/etc/apt/apt.conf.d
   cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/10-rewrite-mirrors <<'EOC'
 APT::Update::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
 DPkg::Pre-Invoke { "/usr/bin/env bash -lc '/usr/local/sbin/apt-rewrite-mirrors'"; };
 EOC
 
-  # 2) Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
+  # Bypass proxy caches for archive.raspberrypi.com to avoid intermittent 503s
   cat > stage0/00-configure-apt/files/etc/apt/apt.conf.d/90-proxy-exceptions <<'EOP'
 Acquire::http::Proxy::archive.raspberrypi.com "DIRECT";
 Acquire::https::Proxy::archive.raspberrypi.com "DIRECT";
 EOP
 
-  # 3) Early rewrite before default 00-run.sh executes in stage0
   mkdir -p stage0/00-configure-apt
   cat > stage0/00-configure-apt/00-run-00-pre.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="__APT_REWRITE_MIRROR__"
+mirrors=(
+__APT_MIRROR_ARRAY__
+)
+target="${mirrors[0]}"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+  sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
 done
 EOSH
-  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
-    stage0/00-configure-apt/00-run-00-pre.sh
+  replace_mirror_placeholders stage0/00-configure-apt/00-run-00-pre.sh
   chmod +x stage0/00-configure-apt/00-run-00-pre.sh
 
-  # 4) Stage2 safeguard rewrite
+  cat > stage0/00-configure-apt/01-run.sh <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+try_mirrors=(
+__APT_MIRROR_ARRAY__
+)
+APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+state_file="__MIRROR_STATE_FILE__"
+mkdir -p "$(dirname "$state_file")"
+for m in "${try_mirrors[@]}"; do
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    if [ -f "$f" ]; then
+      sed -i "s#https?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+      sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
+    fi
+  done
+  if apt-get $APT_OPTS_DEFAULT update; then
+    printf '%s\n' "$m" > "$state_file"
+    if apt-get $APT_OPTS_DEFAULT -o Dpkg::Options::="--force-confnew" dist-upgrade -y; then
+      exit 0
+    fi
+    apt-get $APT_OPTS_DEFAULT -o Dpkg::Options::="--force-confnew" dist-upgrade -y --fix-missing || true
+    printf '%s\n' "$m" > "$state_file"
+  fi
+done
+echo "All apt mirror attempts failed" >&2
+exit 1
+EOSH
+  replace_mirror_placeholders stage0/00-configure-apt/01-run.sh
+  chmod +x stage0/00-configure-apt/01-run.sh
+
   mkdir -p stage2/00-configure-apt
   cat > stage2/00-configure-apt/01-run.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="__APT_REWRITE_MIRROR__"
+try_mirrors=(
+__APT_MIRROR_ARRAY__
+)
+APT_OPTS_DEFAULT="-o Acquire::Retries=10 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::NoCache=true -o Acquire::ForceIPv4=true -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0"
+state_file="__MIRROR_STATE_FILE__"
+mkdir -p "$(dirname "$state_file")"
+for m in "${try_mirrors[@]}"; do
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    if [ -f "$f" ]; then
+      sed -i "s#https?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+      sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
+    fi
+  done
+  if apt-get $APT_OPTS_DEFAULT update; then
+    printf '%s\n' "$m" > "$state_file"
+    break
+  fi
+done
+EOSH
+  replace_mirror_placeholders stage2/00-configure-apt/01-run.sh
+  chmod +x stage2/00-configure-apt/01-run.sh
+
+  cat > stage2/00-configure-apt/00-run-00-pre.sh <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+mirrors=(
+__APT_MIRROR_ARRAY__
+)
+target="${mirrors[0]}"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+  sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${target}#g" "$f" || true
 done
-apt-get -o Acquire::Retries=10 update || true
 EOSH
-  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
-    stage2/00-configure-apt/01-run.sh
-  chmod +x stage2/00-configure-apt/01-run.sh
+  replace_mirror_placeholders stage2/00-configure-apt/00-run-00-pre.sh
+  chmod +x stage2/00-configure-apt/00-run-00-pre.sh
 
-  # 5) Export-image post-rewrite after 02-set-sources resets lists
   mkdir -p export-image/02-set-sources
   cat > export-image/02-set-sources/02-run.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-target="__APT_REWRITE_MIRROR__"
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-  [ -f "$f" ] || continue
-  sed -i -E "s#https?://[^/[:space:]]+/raspbian#${target}#g" "$f" || true
+try_mirrors=(
+__APT_MIRROR_ARRAY__
+)
+state_file="__MIRROR_STATE_FILE__"
+mkdir -p "$(dirname "$state_file")"
+for m in "${try_mirrors[@]}"; do
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    [ -f "$f" ] || continue
+    sed -i "s#https?://[^/\r\n]*/raspbian#${m}#g" "$f" || true
+    sed -i -E "s#https?://raspbian\\.raspberrypi\\.(com|org)/raspbian#${m}#g" "$f" || true
+    sed -i -E "s#http://mirror\\.as43289\\.net/raspbian/raspbian#${m}#g" "$f" || true
+  done
+  if apt-get -o Acquire::Retries=10 update; then
+    printf '%s\n' "$m" > "$state_file"
+    break
+  fi
 done
-apt-get -o Acquire::Retries=10 update || true
 EOSH
-  sed -i "s|__APT_REWRITE_MIRROR__|${APT_REWRITE_MIRROR}|g" \
-    export-image/02-set-sources/02-run.sh
+  replace_mirror_placeholders export-image/02-set-sources/02-run.sh
   chmod +x export-image/02-set-sources/02-run.sh
 else
   echo "Skipping apt mirror rewrites"

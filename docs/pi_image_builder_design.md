@@ -123,8 +123,9 @@
 
 ## Operations & Recovery
 - If apt stalls: rerun; caches and retries reduce recurrence
-- If mirrors fail: the hook should auto-rewrite to stable mirrors. If timeouts persist,
-  re-run; the export-image rewrite handles late-stage resets.
+- If mirrors fail: the hook auto-rewrites to stable mirrors and rotates through the
+  `APT_REWRITE_MIRRORS` list. If timeouts persist, re-run; the export-image rewrite
+  handles late-stage resets.
 - If `binfmt_misc` errors: rerun host `tonistiigi/binfmt` installer
 - Disk requirements: ≥30 GB free; Docker Desktop resources: ≥4 CPUs, ≥8–12 GB RAM
 - Record repeated failures as `outages/*.json` using `outages/schema.json`
@@ -134,7 +135,6 @@ Read-only mount for cloud-init file into container
 - No secrets embedded; Cloudflare token remains empty by default
 
 ## Future Enhancements
-- Parametrize mirror list and implement automatic mirror failover
 - Structured logs from `pi-gen` stages to summarize progress/time
 - Surface QEMU smoke-test metadata (serial logs, report hashes) directly in the
   release manifest alongside the core artifacts
