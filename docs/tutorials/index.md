@@ -246,20 +246,26 @@ respond when services fail, encouraging them to gather support bundles before es
 
 ## Tutorial 11: Storage Migration and Long-Term Maintenance
 
-This tutorial covers SSD cloning, validation, and rollback strategies. Readers will execute the
-`ssd_clone.py` helper, review generated reports, and run the health monitor to gauge drive longevity.
-We will cover backup strategies, log rotation, and proactive maintenance tasks like updating Helm
+**Status:** Published — [Read the tutorial](./tutorial-11-storage-migration-maintenance.md)
+
+**Prerequisites satisfied:** Tutorials 1–10 artefacts (hardware notes, terminal transcripts, network
+diagram, Git workspace, automation toolkit, validated hardware stack, Kubernetes sandbox, development
+environment, bootable media, and first-boot verification evidence) plus the target SSD and USB bridge
+from Tutorial 6.
+
+This tutorial covers SSD cloning, validation, and rollback strategies. Readers execute the
+`scripts/ssd_clone.py` helper, review generated reports, and run the health monitor to gauge drive
+longevity. We cover backup strategies, log rotation, and proactive maintenance tasks like updating Helm
 bundles or applying OS patches.
 
-The second half explores telemetry and observability. Learners will enable optional metrics exporters,
-integrate dashboards, and configure remote notifications so they stay ahead of failures. We will also
-share best practices for documenting maintenance windows and communicating status to collaborators.
+The second half focuses on automation. Learners capture SMART metrics, configure recurring backups,
+and document a monthly maintenance routine so stakeholders can verify upkeep at a glance.
 
 ### Milestones
 
 1. Execute an SSD migration in a lab environment, validate clone integrity, and draft a rollback plan.
 2. Configure backup jobs, verify restore procedures, and capture screenshots or logs as evidence.
-3. Deploy observability tools, define alert thresholds, and test notification pathways end to end.
+3. Deploy observability hooks (logs, SMART, capacity) and test notification pathways end to end.
 
 ## Tutorial 12: Contributing New Features and Automation
 
