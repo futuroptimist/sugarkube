@@ -199,6 +199,86 @@ def test_falls_back_to_workflow_when_release_missing(tmp_path):
     assert "Falling back to latest successful pi-image" in result.stdout
 
 
+def test_errors_when_dir_conflicts_with_output(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    payload = b"conflict"
+    release_img = tmp_path / "release" / "sugarkube.img.xz"
+    release_img.parent.mkdir()
+    release_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    release_sha = tmp_path / "release" / "sugarkube.img.xz.sha256"
+    release_sha.write_text(f"{sha}\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
+
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+
+    result = run_script(
+        "download_pi_image.sh",
+        args=[
+            "--dir",
+            str(other_dir),
+            "--output",
+            str(dest_dir / "sugarkube.img.xz"),
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert "conflicts" in result.stderr
+    assert not (dest_dir / "sugarkube.img.xz").exists()
+
+
+def test_accepts_symlink_dir_matching_output(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    payload = b"symlink"
+    release_img = tmp_path / "release" / "sugarkube.img.xz"
+    release_img.parent.mkdir()
+    release_img.write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    release_sha = tmp_path / "release" / "sugarkube.img.xz.sha256"
+    release_sha.write_text(f"{sha}\n")
+
+    env = _base_env(tmp_path, fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = _release_payload(release_img, release_sha)
+
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(real_dir)
+
+    result = run_script(
+        "download_pi_image.sh",
+        args=[
+            "--dir",
+            str(link_dir),
+            "--output",
+            str(real_dir / "sugarkube.img.xz"),
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    dest = real_dir / "sugarkube.img.xz"
+    checksum = Path(str(dest) + ".sha256")
+    assert dest.read_bytes() == payload
+    assert checksum.read_text().strip() == sha
+
+
 def test_honors_output_override(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

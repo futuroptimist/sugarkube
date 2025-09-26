@@ -14,6 +14,20 @@ die() {
   exit "${2:-1}"
 }
 
+ensure_directory() {
+  local path="$1"
+  if [ -z "$path" ]; then
+    return 0
+  fi
+  if [ -d "$path" ]; then
+    return 0
+  fi
+  if [ -e "$path" ]; then
+    die "Path '$path' exists and is not a directory"
+  fi
+  mkdir -p "$path"
+ }
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     if [ -n "${2:-}" ]; then
@@ -172,8 +186,19 @@ else
   DEST_PATH="${DEST_DIRNAME%/}/$ASSET_NAME"
 fi
 
+if [ -n "$DEST_DIR_OVERRIDE" ]; then
+  ensure_directory "$DEST_DIR_OVERRIDE"
+fi
+
+ensure_directory "$DEST_DIRNAME"
+
+if [ -n "$DEST_ARG" ] && [ -n "$DEST_DIR_OVERRIDE" ]; then
+  if [ "$DEST_DIRNAME" != "$DEST_DIR_OVERRIDE" ] && ! [ "$DEST_DIRNAME" -ef "$DEST_DIR_OVERRIDE" ]; then
+    die "--dir '$DEST_DIR_OVERRIDE' conflicts with --output directory '$DEST_DIRNAME'"
+  fi
+fi
+
 CHECKSUM_PATH="${DEST_PATH}.sha256"
-mkdir -p "$DEST_DIRNAME"
 
 AUTH_HEADER=""
 if [ -n "${GITHUB_TOKEN:-}" ]; then
