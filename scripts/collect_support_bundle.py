@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -207,6 +208,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="PATH:COMMAND:DESCRIPTION",
         help=("Extra command to capture (repeatable). Format: output/path.txt:command:description"),
     )
+    parser.add_argument(
+        "--target",
+        action="append",
+        default=[],
+        metavar="REMOTE_PATH",
+        help=(
+            "Remote file or directory to copy into the bundle. Repeat to capture multiple paths."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -254,9 +264,104 @@ def build_ssh_command(args: argparse.Namespace, remote_command: str) -> List[str
     return cmd
 
 
+def build_scp_command(args: argparse.Namespace, remote_path: str, destination: Path) -> List[str]:
+    remote = f"{args.user}@{args.host}" if args.user else args.host
+    cmd: List[str] = [
+        "scp",
+        "-r",
+        "-p",
+        "-q",
+        "-o",
+        f"ConnectTimeout={args.connect_timeout}",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=no",
+    ]
+    if args.identity:
+        cmd.extend(["-i", args.identity])
+    if args.port and args.port != 22:
+        cmd.extend(["-P", str(args.port)])
+    for option in args.ssh_option:
+        cmd.extend(["-o", option])
+    cmd.append(f"{remote}:{remote_path}")
+    cmd.append(str(destination))
+    return cmd
+
+
 def write_command_output(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _sanitize_target_name(target: str) -> str:
+    candidate = target.strip().strip("/")
+    if not candidate:
+        return "root"
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate)
+    safe = safe.strip("_")
+    return safe or "target"
+
+
+def copy_targets(args: argparse.Namespace, bundle_dir: Path) -> list[dict[str, object]]:
+    targets = getattr(args, "target", [])
+    if not targets:
+        return []
+
+    results: list[dict[str, object]] = []
+    base_dir = bundle_dir / "targets"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    used_names: dict[str, int] = {}
+
+    for raw_target in targets:
+        target = raw_target.strip()
+        if not target:
+            continue
+        safe_name = _sanitize_target_name(target)
+        count = used_names.get(safe_name, 0)
+        used_names[safe_name] = count + 1
+        if count:
+            safe_name = f"{safe_name}-{count + 1}"
+        destination = base_dir / safe_name
+        destination.mkdir(parents=True, exist_ok=True)
+
+        try:
+            completed = subprocess.run(
+                build_scp_command(args, target, destination),
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=args.command_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            results.append(
+                {
+                    "path": target,
+                    "status": "timeout",
+                    "local_path": destination.relative_to(bundle_dir).as_posix(),
+                }
+            )
+            print(
+                f"warning: copying {target} timed out after {args.command_timeout} seconds",
+                file=sys.stderr,
+            )
+            continue
+
+        entry: dict[str, object] = {
+            "path": target,
+            "local_path": destination.relative_to(bundle_dir).as_posix(),
+            "status": "success" if completed.returncode == 0 else "failed",
+        }
+        if completed.returncode != 0:
+            entry["exit_code"] = completed.returncode
+            if completed.stderr:
+                entry["stderr"] = completed.stderr.strip()
+            print(
+                f"warning: failed to copy {target} (exit {completed.returncode})",
+                file=sys.stderr,
+            )
+        results.append(entry)
+    return results
 
 
 def execute_specs(
@@ -354,6 +459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     bundle_dir = build_bundle_dir(output_root, args.host, timestamp)
 
     results = execute_specs(args, specs, bundle_dir)
+    target_results = copy_targets(args, bundle_dir)
 
     summary = {
         "host": args.host,
@@ -362,6 +468,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bundle": bundle_dir.name,
         "results": results,
     }
+    if target_results:
+        summary["targets"] = target_results
     write_command_output(bundle_dir / "summary.json", json.dumps(summary, indent=2))
 
     any_success = any(item["status"] == "success" for item in results)

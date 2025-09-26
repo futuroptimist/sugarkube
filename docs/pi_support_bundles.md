@@ -33,6 +33,12 @@ The script stores results under `support-bundles/<host>-<timestamp>/` and also e
 `.tar.gz`. Override `--no-archive` to keep only the raw directory, and `--spec` to append extra
 commands (`output/path.txt:command:description`).
 
+Pass `--target` to copy remote files or directories into the bundle. Each path is stored beneath
+`targets/` using a sanitized directory name so artefacts like `/boot/first-boot-report/` travel with
+the captured command output. Failures are logged to stderr and recorded in `summary.json` under the
+`targets` key for quick triage. Automated coverage lives in
+`tests/test_collect_support_bundle.py::test_copy_targets_captures_paths`.
+
 Make and Just wrappers mirror the CLI:
 
 ```bash
