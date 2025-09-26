@@ -192,7 +192,9 @@ needs customization or when debugging an unfamiliar scenario.
   reporting.
 - [`sugarkube-self-heal@.service`](../scripts/systemd/self-heal-service/README.md) and
   [`self_heal_service.py`](../scripts/self_heal_service.py) document automated remediation flows
-  when container pulls or cloud-init runs fail.
+  when container pulls or cloud-init runs fail. The README now calls out log locations and links to
+  regression coverage (`tests/self_heal_service_docs_test.py`) so operators know where to start
+  their incident response.
 - [`ssd_post_clone_validate.py`](../scripts/ssd_post_clone_validate.py) checks EEPROM boot order,
   `/etc/fstab`, and stress tests new storage.
 - [`rollback_to_sd.sh`](../scripts/rollback_to_sd.sh) provides a guided rollback if SSD validation

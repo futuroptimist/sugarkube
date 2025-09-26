@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts import create_build_metadata as cbm
+from scripts import create_build_metadata as cbm  # noqa: E402
 
 
 def _create_command_args(
@@ -164,6 +164,4 @@ def test_stage_summary_incomplete_entries(tmp_path):
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["stage_count"] == 1
     assert summary["observed_elapsed_seconds"] == 5
-    assert summary["incomplete_stages"] == [
-        {"name": "stage1", "start_offset_seconds": 5}
-    ]
+    assert summary["incomplete_stages"] == [{"name": "stage1", "start_offset_seconds": 5}]
