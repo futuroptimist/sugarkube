@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import subprocess
@@ -5,7 +7,7 @@ import sys
 from pathlib import Path
 
 
-def _run_create(tmp_path: Path) -> Path:
+def _run_create(tmp_path: Path, *, stage_summary: Path | None = None) -> Path:
     image_path = tmp_path / "sugarkube.img.xz"
     image_path.write_bytes(b"test-image")
     checksum = hashlib.sha256(image_path.read_bytes()).hexdigest()
@@ -69,6 +71,8 @@ def _run_create(tmp_path: Path) -> Path:
         "--option",
         "clone_token_place=false",
     ]
+    if stage_summary is not None:
+        cmd.extend(["--stage-summary", str(stage_summary)])
     subprocess.run(cmd, check=True, cwd=Path(__file__).resolve().parents[1])
     return metadata_path
 
@@ -89,3 +93,30 @@ def test_metadata_contains_stage_durations(tmp_path):
     assert data["options"]["clone_sugarkube"] is True
     assert data["options"]["clone_token_place"] is False
     assert data["verifier"]["status"] == "not_run"
+
+
+def test_stage_summary_outputs_timelines(tmp_path):
+    summary_path = tmp_path / "stage-summary.json"
+    metadata_path = _run_create(tmp_path, stage_summary=summary_path)
+
+    assert metadata_path.exists()
+    assert summary_path.exists()
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["log_path"].endswith("build.log")
+    assert summary["stage_count"] == 3
+    assert summary["total_duration_seconds"] == 95
+
+    stages = summary["stages"]
+    assert [stage["name"] for stage in stages] == [
+        "stage0",
+        "stage1",
+        "export-image",
+    ]
+    assert stages[0]["start_offset_seconds"] == 0
+    assert stages[0]["end_offset_seconds"] == 5
+    assert stages[1]["start_offset_seconds"] == 5
+    assert stages[1]["end_offset_seconds"] == 65
+    assert stages[2]["start_offset_seconds"] == 66
+    assert stages[2]["end_offset_seconds"] == 96
+    assert summary["incomplete_stages"] == []

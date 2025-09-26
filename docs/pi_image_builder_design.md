@@ -136,5 +136,12 @@
 Read-only mount for cloud-init file into container
 - No secrets embedded; Cloudflare token remains empty by default
 
-## Future Enhancements
-- Structured logs from `pi-gen` stages to summarize progress/time
+## Stage telemetry artifacts
+- `build_pi_image.sh` now emits `IMG_NAME.img.xz.stage-summary.json` next to the metadata and
+  checksum outputs. The JSON tracks every stage's start and end offset (in seconds), aggregates total
+  time spent in each stage, and records any stage that began but never completed so failed builds are
+  easy to triage.
+- The structured file supplements `IMG_NAME.build.log` and the metadata JSON so CI dashboards can
+  surface duration trends without re-parsing raw logs.
+- Regression coverage: `tests/test_create_build_metadata.py::test_stage_summary_outputs_timelines`
+  exercises the parser and ensures stage summaries stay in sync with pi-gen output.
