@@ -41,6 +41,25 @@ def test_parse_extra_specs(entry: str, expected_path: Path) -> None:
     assert spec.description == "Extra command"
 
 
+def test_parse_args_includes_target_flag() -> None:
+    args = collect_support_bundle.parse_args(["pi.local"])
+    assert hasattr(args, "target")
+    assert args.target == []
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("", "root"),
+        ("///", "root"),
+        ("!!!", "target"),
+        ("var/log", "var_log"),
+    ],
+)
+def test_sanitize_target_name_variants(raw: str, expected: str) -> None:
+    assert collect_support_bundle._sanitize_target_name(raw) == expected
+
+
 def test_build_bundle_dir_sanitises_host(tmp_path: Path) -> None:
     ts = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     bundle = collect_support_bundle.build_bundle_dir(tmp_path, "pi.local:2222", ts)
@@ -56,6 +75,7 @@ def test_parse_args_defaults() -> None:
     assert args.command_timeout == collect_support_bundle.DEFAULT_COMMAND_TIMEOUT
     assert args.connect_timeout == collect_support_bundle.DEFAULT_CONNECT_TIMEOUT
     assert args.spec == []
+    assert args.target == []
 
 
 def test_parse_extra_specs_invalid_format() -> None:
@@ -76,6 +96,7 @@ def test_build_ssh_command_includes_identity_and_options() -> None:
         port=2022,
         connect_timeout=5,
         ssh_option=["LogLevel=ERROR", "Compression=yes"],
+        target=[],
     )
     cmd = collect_support_bundle.build_ssh_command(args, "echo hi")
     assert cmd[:2] == ["ssh", "-o"]
@@ -89,6 +110,94 @@ def test_write_command_output_creates_parent_dirs(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "output.txt"
     collect_support_bundle.write_command_output(target, "payload")
     assert target.read_text() == "payload"
+
+
+def test_copy_targets_captures_paths(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    class DummyCompleted:
+        def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    responses = [
+        DummyCompleted(0, stdout="ok"),
+        DummyCompleted(5, stderr="denied"),
+    ]
+
+    def fake_run(cmd: list[str], **_kwargs):
+        commands.append(cmd)
+        return responses.pop(0)
+
+    monkeypatch.setattr(collect_support_bundle.subprocess, "run", fake_run)
+
+    args = Namespace(
+        user="pi",
+        host="pi.local",
+        identity="/tmp/id_ed25519",
+        port=2222,
+        connect_timeout=7,
+        ssh_option=["LogLevel=ERROR"],
+        command_timeout=30,
+        target=["/boot/first-boot-report", "/var/log/syslog"],
+    )
+
+    results = collect_support_bundle.copy_targets(args, tmp_path)
+
+    assert len(results) == 2
+    assert results[0]["status"] == "success"
+    assert results[0]["path"] == "/boot/first-boot-report"
+    assert "local_path" in results[0]
+    assert results[1]["status"] == "failed"
+    assert results[1]["path"] == "/var/log/syslog"
+    assert results[1]["exit_code"] == 5
+    assert commands and commands[0][0] == "scp"
+
+
+def test_copy_targets_handles_timeout_and_duplicate_names(
+    tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    class DummyCompleted:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    call_count = 0
+
+    def fake_run(cmd: list[str], **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise collect_support_bundle.subprocess.TimeoutExpired(
+                cmd=cmd, timeout=kwargs.get("timeout", 0)
+            )
+        return DummyCompleted(0)
+
+    monkeypatch.setattr(collect_support_bundle.subprocess, "run", fake_run)
+
+    args = Namespace(
+        user="pi",
+        host="pi.local",
+        identity=None,
+        port=22,
+        connect_timeout=10,
+        ssh_option=[],
+        command_timeout=12,
+        target=["   ", "/var/log/", "etc/config", "etc/config"],
+    )
+
+    results = collect_support_bundle.copy_targets(args, tmp_path)
+
+    captured = capsys.readouterr()
+    assert "timed out" in captured.err
+
+    assert len(results) == 3
+    assert [item["status"] for item in results] == ["timeout", "success", "success"]
+    assert results[0]["local_path"].endswith("targets/var_log")
+    assert results[1]["local_path"].endswith("targets/etc_config")
+    assert results[2]["local_path"].endswith("targets/etc_config-2")
 
 
 def test_execute_specs_writes_logs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -118,6 +227,7 @@ def test_execute_specs_writes_logs(tmp_path: Path, monkeypatch: MonkeyPatch) -> 
         connect_timeout=10,
         ssh_option=[],
         command_timeout=30,
+        target=[],
     )
     specs = [
         collect_support_bundle.CommandSpec(Path("foo.txt"), "echo foo", "first"),
@@ -147,6 +257,7 @@ def test_execute_specs_handles_timeout(tmp_path: Path, monkeypatch: MonkeyPatch)
         connect_timeout=10,
         ssh_option=[],
         command_timeout=10,
+        target=[],
     )
     spec = collect_support_bundle.CommandSpec(Path("foo.txt"), "echo foo", "desc")
     results = collect_support_bundle.execute_specs(args, [spec], tmp_path)
