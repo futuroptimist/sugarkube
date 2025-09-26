@@ -2,7 +2,7 @@
 
 _Last reviewed: 2025-09-24_
 
-Use this backlog alongside [`docs/prompts-simplification.md`](docs/prompts-simplification.md)
+Use this backlog alongside [`docs/prompts/simplification.md`](docs/prompts/simplification.md)
 when you staff simplification-focused PRs. Every initiative keeps existing
 hardware and software workflows intact while removing friction for new
 contributors.
@@ -85,7 +85,7 @@ checks. The prompts require 100% compliance, but setup steps remain scattered.
 **Current assets:**
 - [`scripts/checks.sh`](scripts/checks.sh) – orchestrates repo-wide tooling.
 - [`justfile`](justfile) and [`Makefile`](Makefile) – existing task runners.
-- [`docs/prompts-codex-docs.md`](docs/prompts-codex-docs.md) – sets doc-quality
+- [`docs/prompts/codex/docs.md`](docs/prompts/codex/docs.md) – sets doc-quality
   expectations for automated contributors.
 
 **First steps:**

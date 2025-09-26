@@ -1,6 +1,6 @@
 ---
 title: 'Sugarkube Codex CI-Failure Fix Prompt'
-slug: 'prompts-codex-ci-fix'
+slug: 'codex-ci-fix'
 ---
 
 # Codex CI-Failure Fix Prompt
@@ -15,8 +15,8 @@ PURPOSE:
 Diagnose and fix continuous integration failures so all checks pass.
 
 CONTEXT:
-- Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md) for workflow and testing requirements.
-- Inspect [`.github/workflows/`](../.github/workflows/) to understand the checks run in continuous integration.
+- Follow [AGENTS.md](../../../AGENTS.md) and [README.md](../../../README.md) for workflow and testing requirements.
+- Inspect [`.github/workflows/`](../../../.github/workflows/) to understand the checks run in continuous integration.
 - JavaScript-based actions run with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` so CI surfaces
   incompatibilities before GitHub switches runners to Node24 by default.
 - Run `pre-commit run --all-files` from the repository root; it executes `scripts/checks.sh`.
@@ -49,7 +49,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [AGENTS.md](../AGENTS.md) and [README.md](../README.md).
+Follow [AGENTS.md](../../../AGENTS.md) and [README.md](../../../README.md).
 Run `pre-commit run --all-files`.
 If a Node toolchain exists (`package.json` is present), also run:
 - `npm ci`
@@ -63,7 +63,7 @@ Then run:
   test run** without reruns.
 
 USER:
-1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
+1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
 3. Add or reinforce guidance about achieving 100% patch coverage on the first test execution.
 4. Run the commands above.

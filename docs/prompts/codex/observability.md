@@ -1,6 +1,6 @@
 ---
 title: 'Sugarkube Codex Observability Prompt'
-slug: 'prompts-codex-observability'
+slug: 'codex-observability'
 ---
 
 # Codex — Observability Bootstrap
