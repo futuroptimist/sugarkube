@@ -2,38 +2,25 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def _run_create(tmp_path: Path, *, stage_summary: Path | None = None) -> Path:
-    image_path = tmp_path / "sugarkube.img.xz"
-    image_path.write_bytes(b"test-image")
-    checksum = hashlib.sha256(image_path.read_bytes()).hexdigest()
-    checksum_path = tmp_path / "sugarkube.img.xz.sha256"
-    checksum_path.write_text(f"{checksum}  {image_path.name}\n", encoding="utf-8")
+from scripts import create_build_metadata as cbm
 
-    build_log = tmp_path / "build.log"
-    build_log.write_text(
-        "\n".join(
-            [
-                "[00:00:00] Begin stage0",
-                "[00:00:05] End stage0",
-                "[00:00:05] Begin stage1",
-                "[00:01:05] End stage1",
-                "[00:01:06] Begin export-image",
-                "[00:01:36] End export-image",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
-    metadata_path = tmp_path / "metadata.json"
-    cmd = [
-        sys.executable,
-        str(Path("scripts/create_build_metadata.py")),
+def _create_command_args(
+    *,
+    metadata_path: Path,
+    image_path: Path,
+    checksum_path: Path,
+    build_log: Path,
+    stage_summary: Path | None,
+) -> list[str]:
+    args = [
         "--output",
         str(metadata_path),
         "--image",
@@ -72,8 +59,42 @@ def _run_create(tmp_path: Path, *, stage_summary: Path | None = None) -> Path:
         "clone_token_place=false",
     ]
     if stage_summary is not None:
-        cmd.extend(["--stage-summary", str(stage_summary)])
-    subprocess.run(cmd, check=True, cwd=Path(__file__).resolve().parents[1])
+        args.extend(["--stage-summary", str(stage_summary)])
+    return args
+
+
+def _run_create(tmp_path: Path, *, stage_summary: Path | None = None) -> Path:
+    image_path = tmp_path / "sugarkube.img.xz"
+    image_path.write_bytes(b"test-image")
+    checksum = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    checksum_path = tmp_path / "sugarkube.img.xz.sha256"
+    checksum_path.write_text(f"{checksum}  {image_path.name}\n", encoding="utf-8")
+
+    build_log = tmp_path / "build.log"
+    build_log.write_text(
+        "\n".join(
+            [
+                "[00:00:00] Begin stage0",
+                "[00:00:05] End stage0",
+                "[00:00:05] Begin stage1",
+                "[00:01:05] End stage1",
+                "[00:01:06] Begin export-image",
+                "[00:01:36] End export-image",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    metadata_path = tmp_path / "metadata.json"
+    args = _create_command_args(
+        metadata_path=metadata_path,
+        image_path=image_path,
+        checksum_path=checksum_path,
+        build_log=build_log,
+        stage_summary=stage_summary,
+    )
+    cbm.main(args)
     return metadata_path
 
 
@@ -120,3 +141,29 @@ def test_stage_summary_outputs_timelines(tmp_path):
     assert stages[2]["start_offset_seconds"] == 66
     assert stages[2]["end_offset_seconds"] == 96
     assert summary["incomplete_stages"] == []
+
+
+def test_stage_summary_incomplete_entries(tmp_path):
+    log_path = tmp_path / "build.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "[00:00:00] Begin stage0",
+                "[00:00:05] End stage0",
+                "[00:00:05] Begin stage1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    timer = cbm._parse_stage_log(log_path)
+    summary_path = tmp_path / "summary.json"
+    cbm._write_stage_summary(summary_path, timer, log_path)
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["stage_count"] == 1
+    assert summary["observed_elapsed_seconds"] == 5
+    assert summary["incomplete_stages"] == [
+        {"name": "stage1", "start_offset_seconds": 5}
+    ]
