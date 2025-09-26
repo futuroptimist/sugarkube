@@ -8,6 +8,7 @@ warn() {
 JSON=false
 REPORT_PATH=""
 ENABLE_LOG=true
+SKIP_COMPOSE=${SKIP_COMPOSE:-false}
 DEFAULT_REPORT="/boot/first-boot-report.txt"
 MIGRATION_LOG=${MIGRATION_LOG:-/var/log/sugarkube/migrations.log}
 TOKEN_PLACE_HEALTH_URL=${TOKEN_PLACE_HEALTH_URL:-http://127.0.0.1:5000/}
@@ -15,6 +16,22 @@ TOKEN_PLACE_HEALTH_INSECURE=${TOKEN_PLACE_HEALTH_INSECURE:-false}
 DSPACE_HEALTH_URL=${DSPACE_HEALTH_URL:-http://127.0.0.1:3000/}
 DSPACE_HEALTH_INSECURE=${DSPACE_HEALTH_INSECURE:-false}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-5}
+
+set_skip_compose() {
+  local value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    1|true|yes|on)
+      SKIP_COMPOSE=true
+      ;;
+    0|false|no|off)
+      SKIP_COMPOSE=false
+      ;;
+    *)
+      echo "Invalid value for --skip-compose: $1" >&2
+      exit 1
+      ;;
+  esac
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,18 +49,31 @@ while [[ $# -gt 0 ]]; do
     --log=*)
       REPORT_PATH="${1#*=}"
       ;;
+    --skip-compose)
+      if [[ $# -ge 2 && "$2" != --* ]]; then
+        set_skip_compose "$2"
+        shift
+      else
+        SKIP_COMPOSE=true
+      fi
+      ;;
+    --skip-compose=*)
+      set_skip_compose "${1#*=}"
+      ;;
     --no-log)
       ENABLE_LOG=false
       ;;
     --help)
       cat <<'EOF'
-Usage: pi_node_verifier.sh [--json] [--log PATH] [--no-log]
+Usage: pi_node_verifier.sh [--json] [--log PATH] [--no-log] [--skip-compose[=BOOL]]
 
 Options:
   --json       Emit machine-readable JSON results.
   --log PATH   Append a Markdown summary to PATH.
                Defaults to /boot/first-boot-report.txt when writable.
   --no-log     Disable report generation entirely.
+  --skip-compose[=BOOL]
+               Skip the projects-compose.service health check. Defaults to false.
   --help       Show this message.
 EOF
       exit 0
@@ -273,6 +303,10 @@ check_k3s_node_ready() {
 }
 
 check_projects_compose_active() {
+  if $SKIP_COMPOSE; then
+    print_result "projects_compose_active" "skip"
+    return
+  fi
   if ! command -v systemctl >/dev/null 2>&1; then
     print_result "projects_compose_active" "skip"
     return
