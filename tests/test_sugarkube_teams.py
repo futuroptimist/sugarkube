@@ -442,6 +442,35 @@ def test_main_success(monkeypatch, tmp_path):
     assert MODULE.main(["--event", "first-boot", "--status", "success"]) == 0
 
 
+def test_main_warns_when_disabled(monkeypatch, tmp_path, capsys):
+    env_path = _write_env(
+        tmp_path,
+        "\n".join(
+            [
+                "SUGARKUBE_TEAMS_ENABLE=false",
+                "SUGARKUBE_TEAMS_URL=https://example.invalid",
+            ]
+        ),
+    )
+
+    class DisabledNotifier:
+        enabled = False
+
+        @classmethod
+        def from_env(cls):  # noqa: ANN101, ANN201
+            return cls()
+
+        def notify(self, **_kwargs):  # noqa: ANN101, ANN204
+            raise AssertionError("notification should not be attempted when disabled")
+
+    monkeypatch.setenv("SUGARKUBE_TEAMS_ENV", str(env_path))
+    monkeypatch.setattr(MODULE, "TeamsNotifier", DisabledNotifier)
+    assert MODULE.main(["--event", "first-boot", "--status", "info"]) == 0
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
+    assert "disabled" in captured.err.lower()
+
+
 def test_module_entrypoint(monkeypatch, tmp_path):
     env_path = _write_env(
         tmp_path,

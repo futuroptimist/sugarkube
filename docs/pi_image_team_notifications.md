@@ -103,6 +103,10 @@ sudo sugarkube-teams --event first-boot --status info \
   --line "Manual test" --field Environment=lab
 ```
 
+When the webhook remains disabled, the CLI prints a warning and exits successfully, keeping
+scripted runs safe (regression coverage:
+`tests/test_sugarkube_teams.py::test_main_warns_when_disabled`).
+
 You can also invoke the helper through repository tooling:
 
 ```sh

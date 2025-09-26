@@ -365,6 +365,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     notifier = TeamsNotifier.from_env()
+    if not notifier.enabled:
+        sys.stderr.write(
+            "sugarkube-teams warning: webhook disabled; set SUGARKUBE_TEAMS_ENABLE=true and "
+            "SUGARKUBE_TEAMS_URL to send notifications.\n"
+        )
+        return 0
     try:
         notifier.notify(
             event=args.event,
