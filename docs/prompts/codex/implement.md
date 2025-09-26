@@ -1,6 +1,6 @@
 ---
 title: 'Sugarkube Codex Implement Prompt'
-slug: 'prompts-codex-implement'
+slug: 'codex-implement'
 ---
 
 # Codex Implement Prompt
@@ -31,17 +31,17 @@ USAGE NOTES:
 - Copy this block whenever converting planned Sugarkube work into reality.
 
 CONTEXT:
-- Follow [README.md](../README.md), [CONTRIBUTING.md](../CONTRIBUTING.md), and
+- Follow [README.md](../../../README.md), [CONTRIBUTING.md](../../../CONTRIBUTING.md), and
   the [AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
-- Review [.github/workflows/](../.github/workflows/) so local checks mirror CI.
-- Consult [`llms.txt`](../llms.txt), [`docs/index.md`](../docs/index.md), and
+- Review [.github/workflows/](../../../.github/workflows/) so local checks mirror CI.
+- Consult [`llms.txt`](../../../llms.txt), [`docs/index.md`](../../../docs/index.md), and
   neighboring source files to understand module intent before extending them.
-- Tests live in [`tests/`](../tests/). Python suites run via
+- Tests live in [`tests/`](../../../tests/). Python suites run via
   [pytest](https://docs.pytest.org/en/stable/) and shell suites use
   [Bats](https://bats-core.readthedocs.io/). Match existing patterns when
   adding new coverage.
 - Run `pre-commit run --all-files`; it invokes
-  [`scripts/checks.sh`](../scripts/checks.sh) to install tooling, format code,
+  [`scripts/checks.sh`](../../../scripts/checks.sh) to install tooling, format code,
   lint, and execute tests. When documentation changes, also run
   `pyspelling -c .spellcheck.yaml` and
   `linkchecker --no-warnings README.md docs/`.
@@ -54,14 +54,14 @@ CONTEXT:
   single PR.
 - Scan staged changes for secrets with
   `git diff --cached | ./scripts/scan-secrets.py` (script lives at
-  [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
-- Log persistent failures in [`outages/`](../outages/) as JSON per
-  [`outages/schema.json`](../outages/schema.json).
+  [`scripts/scan-secrets.py`](../../../scripts/scan-secrets.py)).
+- Log persistent failures in [`outages/`](../../../outages/) as JSON per
+  [`outages/schema.json`](../../../outages/schema.json).
 
 REQUEST:
 1. Inventory existing future-work references and justify why the chosen item can
    ship in a single PR right now.
-2. Add a failing automated test in [`tests/`](../tests/) (or an equivalent
+2. Add a failing automated test in [`tests/`](../../../tests/) (or an equivalent
    scripted check) that captures the promised behavior. Once it passes, expand
    coverage for edge cases and regressions.
 3. Implement the smallest change that fulfills the promise, remove or update
@@ -83,17 +83,17 @@ SYSTEM:
 You are an automated contributor for the sugarkube repository.
 
 PURPOSE:
-Improve or expand `docs/prompts-codex-implement.md`.
+Improve or expand `docs/prompts/codex/implement.md`.
 
 USAGE NOTES:
-- Use this prompt to refine `docs/prompts-codex-implement.md`.
+- Use this prompt to refine `docs/prompts/codex/implement.md`.
 
 CONTEXT:
-- Follow [README.md](../README.md), [CONTRIBUTING.md](../CONTRIBUTING.md), and
+- Follow [README.md](../../../README.md), [CONTRIBUTING.md](../../../CONTRIBUTING.md), and
   the [AGENTS spec](https://agentsmd.net/AGENTS.md) for instruction semantics.
-- Review [.github/workflows/](../.github/workflows/) to anticipate CI checks.
+- Review [.github/workflows/](../../../.github/workflows/) to anticipate CI checks.
 - Run `pre-commit run --all-files` (invokes
-  [`scripts/checks.sh`](../scripts/checks.sh)). For documentation updates, also
+  [`scripts/checks.sh`](../../../scripts/checks.sh)). For documentation updates, also
   run `pyspelling -c .spellcheck.yaml` and
   `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
@@ -107,5 +107,5 @@ REQUEST:
 3. Run the commands above and resolve any failures.
 
 OUTPUT:
-A pull request that updates `docs/prompts-codex-implement.md` with passing checks.
+A pull request that updates `docs/prompts/codex/implement.md` with passing checks.
 ```

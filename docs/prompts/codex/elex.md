@@ -1,6 +1,6 @@
 ---
 title: 'Sugarkube Codex Electronics Prompt'
-slug: 'prompts-codex-elex'
+slug: 'codex-elex'
 ---
 
 # Codex Electronics Prompt
@@ -15,11 +15,11 @@ PURPOSE:
 Maintain KiCad and Fritzing sources for the hardware.
 
 CONTEXT:
-- Electronics files live under [`elex/`](../elex/).
+- Electronics files live under [`elex/`](../../../elex/).
 - The `power_ring` project uses KiCad 9+ and [KiBot](https://github.com/INTI-CMNB/kibot)
-  ([`.kibot/power_ring.yaml`](../.kibot/power_ring.yaml)).
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for repository conventions.
-- Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../scripts/checks.sh)
+  ([`.kibot/power_ring.yaml`](../../../.kibot/power_ring.yaml)).
+- Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md) for repository conventions.
+- Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../../../scripts/checks.sh)
   for linting, formatting, and tests. The script auto-installs KiCad 9 whenever
   `.kicad_*` or `.kibot/` assets change (or when you set
   `SUGARKUBE_FORCE_KICAD_INSTALL=1`), so KiBot exports succeed without manual
@@ -35,8 +35,8 @@ CONTEXT:
   execution**—no retries.
 - Scan staged changes for secrets with
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Log persistent tool failures in [`outages/`](../outages/) per
-  [`outages/schema.json`](../outages/schema.json).
+- Log persistent tool failures in [`outages/`](../../../outages/) per
+  [`outages/schema.json`](../../../outages/schema.json).
 
 REQUEST:
 1. Modify schematics or PCB layouts in `elex/power_ring`.
@@ -62,7 +62,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
 `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
@@ -70,7 +70,7 @@ Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
   without retries.
 
 USER:
-1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
+1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
 3. Add or reinforce guidance that requires 100% patch coverage on the first test execution.
 4. Run the commands above.

@@ -1,6 +1,6 @@
 ---
 title: 'Sugarkube Codex CAD Prompt'
-slug: 'prompts-codex-cad'
+slug: 'codex-cad'
 ---
 
 # Sugarkube Codex CAD Prompt
@@ -15,23 +15,23 @@ PURPOSE:
 Keep OpenSCAD models current and ensure they render cleanly.
 
 CONTEXT:
-- CAD files reside in [`cad/`](../cad/).
-- [`scripts/openscad_render.sh`](../scripts/openscad_render.sh) wraps
+- CAD files reside in [`cad/`](../../../cad/).
+- [`scripts/openscad_render.sh`](../../../scripts/openscad_render.sh) wraps
   `openscad -o stl/... --export-format binstl`. Run it from the repository root so meshes land
-  in the git-ignored [`stl/`](../stl/) directory (see [`.gitignore`](../.gitignore)). Ensure
+  in the git-ignored [`stl/`](../../../stl/) directory (see [`.gitignore`](../../../.gitignore)). Ensure
   [OpenSCAD](https://openscad.org/) is installed and available on `PATH`; the script exits
   early if the binary is missing.
-- The CI workflow [`scad-to-stl.yml`](../.github/workflows/scad-to-stl.yml) regenerates these
+- The CI workflow [`scad-to-stl.yml`](../../../.github/workflows/scad-to-stl.yml) regenerates these
   models as artifacts. Do not commit `.stl` files.
 - Render each model in all supported `standoff_mode` variants—e.g., `heatset`, `printed`,
   or `nut`. `STANDOFF_MODE` is optional; the script normalizes the value
   (case-insensitive, trims whitespace) and defaults to the model’s `standoff_mode`
   value (often `heatset`). Invalid values cause the render script to exit with an error.
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md); see the
+- Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md); see the
   [AGENTS.md spec](https://agentsmd.net/) for instruction semantics.
-- Inspect [`.github/workflows/`](../.github/workflows/) to see which checks run in CI.
+- Inspect [`.github/workflows/`](../../../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` from the repository root to lint, format, and test via
-  [`scripts/checks.sh`](../scripts/checks.sh).
+  [`scripts/checks.sh`](../../../scripts/checks.sh).
 - Ensure code, scripts, and tests yield **100% patch coverage on the first test run**—no retries.
 - If `package.json` defines them, run:
   - `npm ci`
@@ -40,14 +40,14 @@ CONTEXT:
   - `npm run test:ci`
 - For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
-    [`.spellcheck.yaml`](../.spellcheck.yaml))
+    [`.spellcheck.yaml`](../../../.spellcheck.yaml))
   - `linkchecker --no-warnings README.md docs/` to verify links in
-    [`README.md`](../README.md) and [`docs/`](../docs/) (installed by
-    [`scripts/checks.sh`](../scripts/checks.sh))
+    [`README.md`](../../../README.md) and [`docs/`](../../../docs/) (installed by
+    [`scripts/checks.sh`](../../../scripts/checks.sh))
 - Scan staged changes for secrets before committing using
   `git diff --cached | ./scripts/scan-secrets.py`.
-- Log tool failures in [`outages/`](../outages/) using
-  [`outages/schema.json`](../outages/schema.json).
+- Log tool failures in [`outages/`](../../../outages/) using
+  [`outages/schema.json`](../../../outages/schema.json).
 
 REQUEST:
 1. Inspect `cad/*.scad` for todo comments or needed adjustments.
@@ -77,7 +77,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md).
 Run `pre-commit run --all-files`.
 
 If `package.json` exists, also run:
@@ -90,15 +90,15 @@ If `package.json` exists, also run:
 Then run:
 
 - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; see
-  [`.spellcheck.yaml`](../.spellcheck.yaml))
+  [`.spellcheck.yaml`](../../../.spellcheck.yaml))
 - `linkchecker --no-warnings README.md docs/` (installed by
-  [`scripts/checks.sh`](../scripts/checks.sh))
+  [`scripts/checks.sh`](../../../scripts/checks.sh))
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Ensure the revised prompt explicitly directs contributors to secure **100% patch coverage on
   the first test execution** without retries.
 
 USER:
-1. Pick one prompt doc under `docs/` (for example, `prompts-codex-cad.md`).
+1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
 3. Add or reinforce guidance that requires 100% patch coverage on the first test run.
 4. Run the commands above.

@@ -51,13 +51,17 @@ Review the safety notes before working with power components.
 Start with the basics and progress toward a fully autonomous solar cube.
 
 ## LLM Prompts
-- [prompts-codex.md](prompts-codex.md) — baseline Codex instructions for maintaining the repo
-- [prompts-codex-cad.md](prompts-codex-cad.md) — keep OpenSCAD models rendering cleanly
-- [prompts-codex-docs.md](prompts-codex-docs.md) — refine build guides and reference docs
-- [prompts-codex-pi-image.md](prompts-codex-pi-image.md) — maintain the Pi image tooling
-- [prompts-codex-pi-token-dspace.md](prompts-codex-pi-token-dspace.md) —
+- [prompts/codex/automation.md](prompts/codex/automation.md) — baseline Codex instructions for maintaining the repo
+- [prompts/codex/cad.md](prompts/codex/cad.md) — keep OpenSCAD models rendering cleanly
+- [prompts/codex/docs.md](prompts/codex/docs.md) — refine build guides and reference docs
+- [prompts/codex/pi-image.md](prompts/codex/pi-image.md) — maintain the Pi image tooling
+- [prompts/codex/pi-token-dspace.md](prompts/codex/pi-token-dspace.md) —
   bootstrap token.place & dspace on Pi
-- [prompts-codex-docker-repo.md](prompts-codex-docker-repo.md) — improve Docker repo guides
-- [prompts-codex-ci-fix.md](prompts-codex-ci-fix.md) — diagnose and fix failing checks
-- [prompts-codex-spellcheck.md](prompts-codex-spellcheck.md) — correct spelling in docs
-- [prompts-codex-tutorials.md](prompts-codex-tutorials.md) — build the full interactive tutorial series
+- [prompts/codex/docker-repo.md](prompts/codex/docker-repo.md) — improve Docker repo guides
+- [prompts/codex/ci-fix.md](prompts/codex/ci-fix.md) — diagnose and fix failing checks
+- [prompts/codex/tests.md](prompts/codex/tests.md) — strengthen automated test coverage
+- [prompts/codex/spellcheck.md](prompts/codex/spellcheck.md) — correct spelling in docs
+- [prompts/codex/implement.md](prompts/codex/implement.md) — grow features with a tests-first workflow
+- [prompts/codex/elex.md](prompts/codex/elex.md) — keep electronics documentation current
+- [prompts/codex/observability.md](prompts/codex/observability.md) — expand monitoring and alerting
+- [archived/prompt-codex-tutorials.md](archived/prompt-codex-tutorials.md) — build the full interactive tutorial series (archived)

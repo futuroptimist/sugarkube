@@ -1,21 +1,21 @@
 ---
 title: 'Sugarkube Simplification Prompt'
-slug: 'prompts-simplification'
+slug: 'simplification'
 ---
 
 # Codebase Simplification Prompt
 
 Use this prompt when you want an automated contributor to simplify the sugarkube
 repository **without** reducing existing capabilities. It pairs well with the
-roadmap in [`simplification_suggestions.md`](../simplification_suggestions.md),
+roadmap in [`simplification_suggestions.md`](../../simplification_suggestions.md),
 which captures current opportunities and ready-made follow-up tasks.
 
 ## Before you run the prompt
 
-* Confirm you understand the repo topology from [`README.md`](../README.md) and
-  the contributor map in [`docs/contributor_script_map.md`](../docs/contributor_script_map.md).
-* Review the automation stack described in [`llms.txt`](../llms.txt) and the
-  active workflows inside [`.github/workflows/`](../.github/workflows/) so local
+* Confirm you understand the repo topology from [`README.md`](../../README.md) and
+  the contributor map in [`docs/contributor_script_map.md`](../contributor_script_map.md).
+* Review the automation stack described in [`llms.txt`](../../llms.txt) and the
+  active workflows inside [`.github/workflows/`](../../.github/workflows/) so local
   runs mirror CI expectations.
 * Skim the simplification backlog above and log any new ideas you discover so
   they remain actionable for future iterations.
@@ -29,14 +29,14 @@ Retain the repo's functionality while simplifying framing, onboarding,
 maintenance chores, and the learning curve.
 
 CONTEXT:
-- Sugarkube blends hardware (see [`cad/`](../cad/) and [`elex/`](../elex/)) with
+- Sugarkube blends hardware (see [`cad/`](../../cad/) and [`elex/`](../../elex/)) with
   software helpers (`scripts/`, `Formula/`, and automation under
-  [`docs/`](../docs/)). Start with the contributor story in
-  [`docs/index.md`](../docs/index.md) and the script map linked above.
-- Follow [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md),
-  and [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md).
+  [`docs/`](../)). Start with the contributor story in
+  [`docs/index.md`](../index.md) and the script map linked above.
+- Follow [`AGENTS.md`](../../AGENTS.md), [`CONTRIBUTING.md`](../../CONTRIBUTING.md),
+  and [`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md).
 - Run `pre-commit run --all-files`, which shells into
-  [`scripts/checks.sh`](../scripts/checks.sh) to install tooling, lint, format,
+  [`scripts/checks.sh`](../../scripts/checks.sh) to install tooling, lint, format,
   and execute tests. The helper triggers `npm ci`, `npm run lint`, and
   `npm run test:ci` whenever a `package.json` is present.
 - When documentation changes (`README.md` or files under `docs/`), additionally
@@ -45,10 +45,10 @@ CONTEXT:
   - `linkchecker --no-warnings README.md docs/`
 - Before committing, scan staged changes with
   `git diff --cached | ./scripts/scan-secrets.py` (script lives at
-  [`scripts/scan-secrets.py`](../scripts/scan-secrets.py)).
+  [`scripts/scan-secrets.py`](../../scripts/scan-secrets.py)).
 - Demand **100% patch coverage on the first test run**—no retries.
 - If recurring failures surface, log an outage record under
-  [`outages/`](../outages/).
+  [`outages/`](../../outages/).
 
 REQUEST:
 1. Audit onboarding flows, contributor ergonomics, and redundant scaffolding.
@@ -62,7 +62,7 @@ REQUEST:
 OUTPUT:
 A pull request summarizing simplifications, test results, and follow-up ideas
 for future cleanups. Cross-link relevant entries in
-[`simplification_suggestions.md`](../simplification_suggestions.md) or add new
+[`simplification_suggestions.md`](../../simplification_suggestions.md) or add new
 ones so the backlog stays fresh.
 ```
 
@@ -75,11 +75,11 @@ expectations change.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md), and
-[`README.md`](../README.md). Consult [`llms.txt`](../llms.txt) for the current
+Follow [`AGENTS.md`](../../AGENTS.md), [`CONTRIBUTING.md`](../../CONTRIBUTING.md), and
+[`README.md`](../../README.md). Consult [`llms.txt`](../../llms.txt) for the current
 component map.
 Run `pre-commit run --all-files` (invokes
-[`scripts/checks.sh`](../scripts/checks.sh) to install tooling and execute
+[`scripts/checks.sh`](../../scripts/checks.sh) to install tooling and execute
 linters, formatters, and tests). When docs change also run:
 - `pyspelling -c .spellcheck.yaml`
 - `linkchecker --no-warnings README.md docs/`
@@ -88,7 +88,7 @@ Ensure the final diff delivers **100% patch coverage on the first test run**.
 
 USER:
 1. Review this prompt for stale context, missing onboarding cues, or redundant
-   instructions compared to other `docs/prompts-*.md` files.
+   instructions compared to other prompt docs under `docs/prompts/`.
 2. Refresh links, command references, and expectations so they align with the
    current repository workflow and the simplification backlog.
 3. Tighten the language to emphasize simplification outcomes and safety checks
@@ -96,6 +96,6 @@ USER:
 4. Run the commands above and fix any failures.
 
 OUTPUT:
-A pull request that modernizes `docs/prompts-simplification.md` while preserving
+A pull request that modernizes `docs/prompts/simplification.md` while preserving
 its focus on safe simplification.
 ```

@@ -1,6 +1,6 @@
 ---
 title: 'Sugarkube Codex Pi token.place & dspace Prompt'
-slug: 'prompts-codex-pi-token-dspace'
+slug: 'codex-pi-token-dspace'
 ---
 
 # Codex Pi token.place & dspace Prompt
@@ -22,32 +22,32 @@ Reduce the end-to-end steps to build and deploy a Pi image ready for
 `token.place` and `dspace`, leaving extension points for future repos.
 
 CONTEXT:
-- Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md) for workflow
+- Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md) for workflow
   guidelines.
-- Raspberry Pi OS build script: [`scripts/build_pi_image.sh`](../scripts/build_pi_image.sh)
+- Raspberry Pi OS build script: [`scripts/build_pi_image.sh`](../../../scripts/build_pi_image.sh)
   (targets Raspberry Pi OS Bookworm 64‑bit).
 - Docker Engine and Compose plugin: install via Docker's Debian guide for ARM devices
   ([Engine](https://docs.docker.com/engine/install/debian/) and
   [Compose plugin](https://docs.docker.com/compose/install/linux/#install-using-the-repository)).
   Confirm with `docker --version` and `docker compose version`.
 - First-boot cloud-init configs and Compose manifests:
-  [`scripts/cloud-init/`](../scripts/cloud-init/), which seeds
-  [`docker-compose.yml`](../scripts/cloud-init/docker-compose.yml) for `token.place`
+  [`scripts/cloud-init/`](../../../scripts/cloud-init/), which seeds
+  [`docker-compose.yml`](../../../scripts/cloud-init/docker-compose.yml) for `token.place`
   and `dspace`.
 - Upstream apps:
   - [token.place](https://github.com/futuroptimist/token.place) — see its
     [README](https://github.com/futuroptimist/token.place#readme) for service details.
   - [dspace](https://github.com/democratizedspace/dspace) — see its
     [README](https://github.com/democratizedspace/dspace#readme).
-- Existing Pi image prompt: [`prompts-codex-pi-image.md`](./prompts-codex-pi-image.md).
+- Existing Pi image prompt: [`pi-image.md`](pi-image.md).
 - Repository checks:
-  - `pre-commit run --all-files` (executes [`scripts/checks.sh`](../scripts/checks.sh))
+  - `pre-commit run --all-files` (executes [`scripts/checks.sh`](../../../scripts/checks.sh))
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
   - `git diff --cached | ./scripts/scan-secrets.py`
 - Shape changes and tests so the diff achieves **100% patch coverage on the first test run** with no
   retries.
-- Review [CI workflows](../.github/workflows/) to anticipate automated checks.
+- Review [CI workflows](../../../.github/workflows/) to anticipate automated checks.
 
 REQUEST:
 1. Add or refine scripts and docs so `token.place` and `dspace` run as services on the Pi
@@ -70,7 +70,7 @@ Use this prompt to refine sugarkube's own prompt documentation.
 ```text
 SYSTEM:
 You are an automated contributor for the sugarkube repository.
-Follow [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
 `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
