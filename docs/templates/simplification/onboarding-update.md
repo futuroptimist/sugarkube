@@ -1,0 +1,34 @@
+# Onboarding Update Template
+
+## Goals
+- What onboarding friction are we removing?
+- Which personas benefit (hardware, docs, automation)?
+- How will we measure success (time-to-first-change, tutorial completion, etc.)?
+
+## Required Artifacts
+- Link to the updated quickstart, handbook, or tutorial draft.
+- Evidence that automation (`make doctor`, `just start-here`, etc.) reflects the
+  new path.
+- Screenshots or recordings that walk through the refreshed flow.
+
+## Stakeholders
+- DRI:
+- Reviewers:
+- Impacted docs/scripts:
+
+## Rollout Plan
+- Dry run the new onboarding steps on a clean workstation or Codespace.
+- Capture before/after diffs for docs and automation helpers.
+- Coordinate announcements (Slack, docs site changelog, README badges).
+
+## Follow-up
+- Survey new contributors after launch and record feedback.
+- Archive evidence in `notes/onboarding/`.
+- File follow-up issues for deferred improvements.
+
+## Actions
+- [ ] Draft reviewed by stakeholders
+- [ ] Automation validated with `pre-commit run --all-files`
+- [ ] Docs checks: `pyspelling -c .spellcheck.yaml`
+- [ ] Docs checks: `linkchecker --no-warnings README.md docs/`
+- [ ] Post-launch survey scheduled
