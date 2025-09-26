@@ -744,6 +744,7 @@ else
 fi
 
 METADATA_PATH="${OUT_IMG}.metadata.json"
+STAGE_SUMMARY_PATH="${OUT_IMG}.stages.json"
 metadata_args=(
   --output "${METADATA_PATH}"
   --image "${OUT_IMG}"
@@ -775,7 +776,11 @@ if [ -n "${PI_GEN_SOURCE_DIR}" ]; then
 fi
 if [ -n "${OUT_LOG}" ]; then
   metadata_args+=(--build-log "${OUT_LOG}")
+  metadata_args+=(--stage-summary "${STAGE_SUMMARY_PATH}")
 fi
 
 python3 "${REPO_ROOT}/scripts/create_build_metadata.py" "${metadata_args[@]}"
 echo "[sugarkube] Build metadata captured at ${METADATA_PATH}"
+if [ -f "${STAGE_SUMMARY_PATH}" ]; then
+  echo "[sugarkube] Stage summary written to ${STAGE_SUMMARY_PATH}"
+fi

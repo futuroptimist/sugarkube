@@ -100,7 +100,9 @@
 - `build_pi_image.sh` now writes `sugarkube.img.xz.metadata.json` with the pi-gen
   commit, stage durations parsed from `work/<img>/build.log`, the git ref used for
   the build, and all toggles passed to the script. The log itself is copied to
-  `sugarkube.build.log` alongside the artifacts.
+  `sugarkube.build.log` alongside the artifacts, and a companion
+  `sugarkube.img.xz.stages.json` file enumerates each pi-gen stage with its
+  start/end timestamps and elapsed seconds for quick progress summaries.
 - `scripts/generate_release_manifest.py` converts the metadata into a
   provenance manifest (`sugarkube.img.xz.manifest.json`) and Markdown release notes.
   The manifest captures workflow run IDs, release channel (stable vs nightly),
@@ -135,6 +137,3 @@
 ## Security
 Read-only mount for cloud-init file into container
 - No secrets embedded; Cloudflare token remains empty by default
-
-## Future Enhancements
-- Structured logs from `pi-gen` stages to summarize progress/time

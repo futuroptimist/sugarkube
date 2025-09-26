@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 
-def _run_create(tmp_path: Path) -> Path:
+def _run_create(tmp_path: Path, *, write_summary: bool = False) -> Path:
     image_path = tmp_path / "sugarkube.img.xz"
     image_path.write_bytes(b"test-image")
     checksum = hashlib.sha256(image_path.read_bytes()).hexdigest()
@@ -29,6 +29,7 @@ def _run_create(tmp_path: Path) -> Path:
     )
 
     metadata_path = tmp_path / "metadata.json"
+    stage_summary_path = tmp_path / "stage-summary.json"
     cmd = [
         sys.executable,
         str(Path("scripts/create_build_metadata.py")),
@@ -69,7 +70,11 @@ def _run_create(tmp_path: Path) -> Path:
         "--option",
         "clone_token_place=false",
     ]
+    if write_summary:
+        cmd.extend(["--stage-summary", str(stage_summary_path)])
     subprocess.run(cmd, check=True, cwd=Path(__file__).resolve().parents[1])
+    if write_summary:
+        assert stage_summary_path.exists()
     return metadata_path
 
 
@@ -89,3 +94,23 @@ def test_metadata_contains_stage_durations(tmp_path):
     assert data["options"]["clone_sugarkube"] is True
     assert data["options"]["clone_token_place"] is False
     assert data["verifier"]["status"] == "not_run"
+
+
+def test_stage_summary_file_contains_structured_entries(tmp_path):
+    metadata_path = _run_create(tmp_path, write_summary=True)
+    summary_path = metadata_path.parent / "stage-summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert [entry["name"] for entry in summary] == [
+        "stage0",
+        "stage1",
+        "export-image",
+    ]
+    assert summary[0]["duration_seconds"] == 5
+    assert summary[1]["duration_seconds"] == 60
+    assert summary[2]["duration_seconds"] == 30
+    assert summary[2]["first_start_seconds"] == 66
+    assert summary[2]["last_end_seconds"] == 96
+    assert metadata["build"]["stage_summary"] == summary
+    assert metadata["build"]["stage_summary_path"] == str(summary_path)

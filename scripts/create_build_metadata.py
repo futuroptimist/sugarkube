@@ -26,7 +26,7 @@ class StageTimer:
 
     def __init__(self) -> None:
         self._starts: Dict[str, float] = {}
-        self._durations: Dict[str, float] = {}
+        self._stats: Dict[str, Dict[str, float | int | None]] = {}
         self._last_timestamp: float = 0.0
         self._day_offset: float = 0.0
 
@@ -43,25 +43,77 @@ class StageTimer:
         self._last_timestamp = timestamp
         phase = match.group(4)
         name = match.group(5)
+        stats = self._stats.setdefault(
+            name,
+            {
+                "duration": 0.0,
+                "occurrences": 0,
+                "first_start": None,
+                "last_end": None,
+            },
+        )
         if phase == "Begin":
             self._starts[name] = timestamp
+            first_start = stats["first_start"]
+            if first_start is None or timestamp < float(first_start):
+                stats["first_start"] = timestamp
         elif phase == "End" and name in self._starts:
             start = self._starts.pop(name)
-            self._durations[name] = self._durations.get(name, 0.0) + (timestamp - start)
+            stats["duration"] = float(stats["duration"]) + (timestamp - start)
+            stats["occurrences"] = int(stats["occurrences"]) + 1
+            last_end = stats["last_end"]
+            if last_end is None or timestamp > float(last_end):
+                stats["last_end"] = timestamp
+
+    @staticmethod
+    def _normalize(value: float | int | None) -> float | int | None:
+        if value is None:
+            return None
+        number = float(value)
+        if number.is_integer():
+            return int(number)
+        return round(number, 6)
 
     def durations(self) -> Dict[str, float]:
-        return {k: v for k, v in sorted(self._durations.items())}
+        return {
+            name: self._normalize(stats["duration"])
+            for name, stats in sorted(self._stats.items())
+            if int(stats["occurrences"]) > 0
+        }
+
+    def summary(self) -> List[Dict[str, float | int]]:
+        def _sort_key(item: Tuple[str, Dict[str, float | int | None]]) -> Tuple[float, str]:
+            name, stats = item
+            first_start = stats.get("first_start")
+            return (float(first_start) if first_start is not None else float("inf"), name)
+
+        summary: List[Dict[str, float | int]] = []
+        for name, stats in sorted(self._stats.items(), key=_sort_key):
+            if int(stats["occurrences"]) == 0:
+                continue
+            summary.append(
+                {
+                    "name": name,
+                    "duration_seconds": self._normalize(stats["duration"]),
+                    "occurrences": int(stats["occurrences"]),
+                    "first_start_seconds": self._normalize(stats["first_start"]),
+                    "last_end_seconds": self._normalize(stats["last_end"]),
+                }
+            )
+        return summary
 
 
-def _load_stage_durations(path: pathlib.Path) -> Dict[str, float]:
+def _load_stage_metrics(
+    path: pathlib.Path,
+) -> Tuple[Dict[str, float], List[Dict[str, float | int]]]:
     timer = StageTimer()
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 timer.observe(line)
     except FileNotFoundError:
-        return {}
-    return timer.durations()
+        return {}, []
+    return timer.durations(), timer.summary()
 
 
 def _parse_options(pairs: Iterable[str]) -> Dict[str, object]:
@@ -169,6 +221,11 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
         required=False,
         help="Path to cached verifier JSON output",
     )
+    parser.add_argument(
+        "--stage-summary",
+        required=False,
+        help="Optional JSON output path for structured stage timing data",
+    )
     return parser.parse_args(argv)
 
 
@@ -181,6 +238,7 @@ def main(argv: List[str]) -> int:
     image_path = pathlib.Path(args.image)
     checksum_path = pathlib.Path(args.checksum)
     build_log_path = pathlib.Path(args.build_log) if args.build_log else None
+    stage_summary_path = pathlib.Path(args.stage_summary) if args.stage_summary else None
 
     if not image_path.exists():
         raise FileNotFoundError(f"image not found: {image_path}")
@@ -190,9 +248,16 @@ def main(argv: List[str]) -> int:
     checksum = _read_checksum(checksum_path, image_path)
     image_size = image_path.stat().st_size
 
+    if stage_summary_path and not build_log_path:
+        raise ValueError("--stage-summary requires --build-log")
+
     stage_durations: Dict[str, float] = {}
+    stage_summary: List[Dict[str, float | int]] = []
     if build_log_path:
-        stage_durations = _load_stage_durations(build_log_path)
+        stage_durations, stage_summary = _load_stage_metrics(build_log_path)
+    if stage_summary_path:
+        stage_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        stage_summary_path.write_text(json.dumps(stage_summary, indent=2) + "\n", encoding="utf-8")
 
     options = _parse_options(args.option)
 
@@ -211,6 +276,8 @@ def main(argv: List[str]) -> int:
             "end": args.build_end,
             "duration_seconds": args.duration_seconds,
             "stage_durations": stage_durations,
+            "stage_summary": stage_summary,
+            "stage_summary_path": str(stage_summary_path) if stage_summary_path else None,
             "pi_gen": {
                 "url": args.pi_gen_url,
                 "branch": args.pi_gen_branch,
