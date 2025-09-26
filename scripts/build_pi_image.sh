@@ -744,6 +744,7 @@ else
 fi
 
 METADATA_PATH="${OUT_IMG}.metadata.json"
+STAGE_SUMMARY_PATH="${OUT_IMG}.stage-summary.json"
 metadata_args=(
   --output "${METADATA_PATH}"
   --image "${OUT_IMG}"
@@ -776,6 +777,12 @@ fi
 if [ -n "${OUT_LOG}" ]; then
   metadata_args+=(--build-log "${OUT_LOG}")
 fi
+metadata_args+=(--stage-summary "${STAGE_SUMMARY_PATH}")
 
 python3 "${REPO_ROOT}/scripts/create_build_metadata.py" "${metadata_args[@]}"
 echo "[sugarkube] Build metadata captured at ${METADATA_PATH}"
+if [ -s "${STAGE_SUMMARY_PATH}" ]; then
+  echo "[sugarkube] Stage summary captured at ${STAGE_SUMMARY_PATH}"
+elif [ -e "${STAGE_SUMMARY_PATH}" ]; then
+  echo "[sugarkube] Stage summary written to ${STAGE_SUMMARY_PATH} (no stage data)"
+fi

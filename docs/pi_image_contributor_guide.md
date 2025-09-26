@@ -48,7 +48,10 @@ sync.
     releases.
   - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
   - Related tooling: referenced from the release workflow and validated by tests under
-    `tests/test_create_build_metadata.py` and `tests/test_generate_release_manifest.py`.
+    `tests/test_create_build_metadata.py` and `tests/test_generate_release_manifest.py`. The metadata
+    helper also writes `IMG_NAME.img.xz.stage-summary.json`, and
+    `tests/test_create_build_metadata.py::test_stage_summary_outputs_timelines` ensures those
+    structured stage timelines stay accurate.
 - `scripts/sugarkube-latest`
   - Purpose: minimal wrapper for `download_pi_image.sh` when you only need the compressed artifact.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md).
