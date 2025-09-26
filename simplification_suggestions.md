@@ -95,8 +95,8 @@ checks. The prompts require 100% compliance, but setup steps remain scattered.
    has regression coverage in `tests/checks_script_test.py::test_docs_only_mode_runs_docs_checks`.
 2. Extend `scripts/checks.sh` with a `--docs-only` flag that skips hardware
    toolchains when unnecessary.
-3. Bundle templates in `docs/templates/` for onboarding updates, prompt refreshes,
-   and simplification sprints so authors can focus on content.
+3. ✅ Bundle templates in `docs/templates/simplification/` for onboarding updates,
+   prompt refreshes, and simplification sprints so authors can focus on content.
 
 **Safeguards:**
 - Ensure the new targets still respect `AGENTS.md` expectations (100% patch
