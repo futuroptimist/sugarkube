@@ -210,7 +210,9 @@ needs customization or when debugging an unfamiliar scenario.
   diagnostics before and after applying fixes.
 - If observability dashboards go dark, rerun `token_place_replay_samples.py` and
   `scripts/pi_node_verifier.sh --skip-compose=false` to regenerate first-boot reports and confirm
-  container health.
+  container health. When `projects-compose` is intentionally offline, pass `--skip-compose`
+  instead to bypass the service probe (regression coverage:
+  `tests/pi_node_verifier_skip_test.bats` ensures the flag works).
 - When SSD migrations or clones stall, combine `ssd_clone.py --resume` with the Markdown reports
   under `~/sugarkube/reports/ssd-clone/` and reference [`ssd_recovery.md`](./ssd_recovery.md) for
   fallback to SD cards.
