@@ -104,8 +104,9 @@ fast path above.
   [`pi_headless_provisioning.md`](./pi_headless_provisioning.md) to stage Wi-Fi credentials and
   tokens in `secrets.env` files consumed by cloud-init so SD cards stay clean of long-lived secrets.
 - **Verify before leaving the site:** Run `make support-bundle` or
-  `./scripts/collect_support_bundle.py --target /boot/first-boot-report/support-bundles` to archive
-  logs for future debugging.
+  `./scripts/collect_support_bundle.py --target /boot/first-boot-report` to archive first-boot logs
+  for future debugging. The helper stores copied directories under `targets/` in the bundle so the
+  exported reports remain alongside the captured command output.
 
 ### Classroom facilitator (multiple Pis, shared bench)
 
