@@ -76,6 +76,7 @@ STL
 STLs
 Shift
 Sugarkube
+symlinks
 Victron
 WSL
 Wh
