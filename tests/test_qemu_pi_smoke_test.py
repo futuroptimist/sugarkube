@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import lzma
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -112,6 +113,15 @@ def test_prepare_image_installs_stub_and_dropin(
         outputs.append(command)
         if command[:2] == ["losetup", "--find"]:
             return subprocess.CompletedProcess(command, 0, stdout="/dev/loop7\n", stderr="")
+        if command and command[0] == "install":
+            try:
+                flag_index = command.index("-T")
+            except ValueError as exc:  # pragma: no cover - defensive
+                raise AssertionError("install invocation missing -T flag") from exc
+            source = Path(command[flag_index + 1])
+            dest = Path(command[flag_index + 2])
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(MODULE, "_run", fake_run)
