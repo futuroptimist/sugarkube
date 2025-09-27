@@ -145,9 +145,32 @@ def _find_dtb(boot_dir: Path) -> Path:
     raise SmokeTestError("Unable to locate a Raspberry Pi device tree blob")
 
 
+def _install_text_file(root_dir: Path, relative_path: Path, content: str, *, mode: int) -> None:
+    """Install a text file inside the mounted image using root permissions."""
+
+    target = root_dir / relative_path
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+        tmp.write(content.rstrip("\n"))
+        tmp.write("\n")
+        tmp_path = Path(tmp.name)
+
+    try:
+        _run(
+            [
+                "install",
+                "-Dm",
+                f"{mode:03o}",
+                "-T",
+                str(tmp_path),
+                str(target),
+            ],
+            sudo=True,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def _install_stub(root_dir: Path) -> None:
-    target = root_dir / STUB_VERIFIER_PATH.relative_to("/")
-    target.parent.mkdir(parents=True, exist_ok=True)
     script = textwrap.dedent(
         """
         #!/usr/bin/env bash
@@ -211,14 +234,10 @@ JSON
         fi
         """
     ).strip()
-    target.write_text(script + "\n")
-    target.chmod(0o755)
+    _install_text_file(root_dir, STUB_VERIFIER_PATH.relative_to("/"), script, mode=0o755)
 
 
 def _install_dropin(root_dir: Path) -> None:
-    dropin_dir = root_dir / "etc/systemd/system/first-boot.service.d"
-    dropin_dir.mkdir(parents=True, exist_ok=True)
-    dropin = dropin_dir / DROPIN_NAME
     content = textwrap.dedent(
         f"""
         [Service]
@@ -231,7 +250,8 @@ def _install_dropin(root_dir: Path) -> None:
         Environment=DSPACE_HEALTH_URL=skip
         """
     ).strip()
-    dropin.write_text(content + "\n")
+    dropin_path = Path("etc/systemd/system/first-boot.service.d") / DROPIN_NAME
+    _install_text_file(root_dir, dropin_path, content, mode=0o644)
 
 
 def prepare_image(image: Path, work_dir: Path) -> PreparedImage:
@@ -260,9 +280,12 @@ def prepare_image(image: Path, work_dir: Path) -> PreparedImage:
         with mount_partition(root_device, root_mount) as root_dir:
             _install_stub(root_dir)
             _install_dropin(root_dir)
-            expand_marker = root_dir / "var/log/sugarkube/rootfs-expanded"
-            expand_marker.parent.mkdir(parents=True, exist_ok=True)
-            expand_marker.write_text("qemu-smoke\n")
+            _install_text_file(
+                root_dir,
+                Path("var/log/sugarkube/rootfs-expanded"),
+                "qemu-smoke",
+                mode=0o644,
+            )
 
     return PreparedImage(image, kernel_dest, dtb_dest, cmdline)
 
