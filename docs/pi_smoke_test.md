@@ -18,6 +18,10 @@ scripts/pi_smoke_test.py 192.168.1.50
 
 # Test multiple hosts and emit JSON for CI consumers
 scripts/pi_smoke_test.py --json pi-a.local pi-b.local
+
+# Supply hosts via repeatable --host flags when positional arguments are
+# awkward (for example when templating commands)
+scripts/pi_smoke_test.py --host pi-a.local --host pi-b.local --json
 ```
 
 The script prints a PASS/FAIL line for each host. When `--json` is supplied the final line
@@ -58,3 +62,9 @@ SMOKE_ARGS="pi-a.local" just smoke-test-pi
 
 Both helpers call the Python harness, so they support the same flags as invoking the script
 directly.
+
+## Test coverage
+
+Automated assurance for the CLI lives in
+`tests/pi_smoke_test_unit_test.py::test_parse_args_accepts_host_flag`, which
+guards the `--host` flag support documented above.
