@@ -320,6 +320,136 @@ def send_payload(
         raise TelemetryError(f"telemetry upload failed: {exc.reason}") from exc
 
 
+def _normalise_timestamp(raw: object) -> _dt.datetime:
+    if isinstance(raw, str) and raw.strip():
+        text = raw.strip().replace("Z", "+00:00")
+        try:
+            return _dt.datetime.fromisoformat(text).astimezone(_dt.timezone.utc)
+        except ValueError:
+            pass
+    return _dt.datetime.now(tz=_dt.timezone.utc)
+
+
+def render_markdown_snapshot(payload: Mapping[str, object]) -> str:
+    generated_at = _normalise_timestamp(payload.get("generated_at"))
+    instance_id = ""
+    instance = payload.get("instance")
+    if isinstance(instance, Mapping):
+        value = instance.get("id")
+        if isinstance(value, str):
+            instance_id = value
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, Sequence) and not isinstance(raw_tags, (str, bytes)):
+        tags = list(raw_tags)
+    else:
+        tags = []
+    raw_errors = payload.get("errors")
+    if isinstance(raw_errors, Sequence) and not isinstance(raw_errors, (str, bytes)):
+        errors = list(raw_errors)
+    else:
+        errors = []
+    verifier = payload.get("verifier") if isinstance(payload.get("verifier"), Mapping) else {}
+    summary = verifier.get("summary") if isinstance(verifier, Mapping) else {}
+    checks = verifier.get("checks") if isinstance(verifier, Mapping) else []
+    if not isinstance(summary, Mapping):
+        summary = {}
+    if not isinstance(checks, Sequence):
+        checks = []
+    raw_environment = payload.get("environment")
+    if isinstance(raw_environment, Mapping):
+        environment = raw_environment
+    else:
+        environment = {}
+
+    lines: list[str] = []
+    lines.append("# Sugarkube Telemetry Snapshot")
+    lines.append("")
+    generated_display = generated_at.strftime("%Y-%m-%d %H:%M:%S %Z")
+    lines.append(f"- Generated: {generated_display}")
+    if instance_id:
+        lines.append(f"- Instance: `{instance_id}`")
+    else:
+        lines.append("- Instance: _(unknown)_")
+    if tags:
+        formatted_tags = ", ".join(f"`{str(tag)}`" for tag in tags)
+        lines.append(f"- Tags: {formatted_tags}")
+    else:
+        lines.append("- Tags: _(none)_")
+    if errors:
+        formatted_errors = ", ".join(str(error) for error in errors)
+        lines.append(f"- Errors: {formatted_errors}")
+    else:
+        lines.append("- Errors: _(none)_")
+
+    lines.append("")
+    lines.append("## Verifier Summary")
+    lines.append("| Total | Passed | Failed | Skipped | Other |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    totals = {
+        "total": summary.get("total", 0),
+        "passed": summary.get("passed", 0),
+        "failed": summary.get("failed", 0),
+        "skipped": summary.get("skipped", 0),
+        "other": summary.get("other", 0),
+    }
+    lines.append("| {total} | {passed} | {failed} | {skipped} | {other} |".format(**totals))
+
+    raw_failed = summary.get("failed_checks") if isinstance(summary, Mapping) else None
+    if isinstance(raw_failed, Sequence) and not isinstance(raw_failed, (str, bytes)):
+        failed_checks = list(raw_failed)
+    else:
+        failed_checks = []
+    if failed_checks:
+        lines.append("")
+        lines.append("### Failed Checks")
+        for entry in failed_checks:
+            lines.append(f"- {entry}")
+
+    rendered_checks: list[Mapping[str, object]] = []
+    for entry in checks:
+        if isinstance(entry, Mapping):
+            rendered_checks.append(entry)
+    if rendered_checks:
+        lines.append("")
+        lines.append("### Checks")
+        lines.append("| Check | Status |")
+        lines.append("| --- | --- |")
+        for entry in rendered_checks:
+            name = str(entry.get("name", "unknown"))
+            status = str(entry.get("status", "")) or "unknown"
+            lines.append(f"| {name} | {status} |")
+
+    if environment:
+        lines.append("")
+        lines.append("## Environment")
+        for key in sorted(environment):
+            value = environment[key]
+            if isinstance(value, Mapping):
+                parts = [
+                    f"{inner_key}={inner_value}" for inner_key, inner_value in sorted(value.items())
+                ]
+                details = ", ".join(parts)
+                lines.append(f"- {key}: {details}")
+            else:
+                lines.append(f"- {key}: {value}")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_metrics_snapshot(payload: Mapping[str, object], directory: Path) -> Path:
+    timestamp = _normalise_timestamp(payload.get("generated_at"))
+    slug = timestamp.strftime("%Y%m%dT%H%M%SZ")
+    target_dir = Path(directory)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    candidate = target_dir / f"{slug}.md"
+    counter = 1
+    while candidate.exists():
+        candidate = target_dir / f"{slug}-{counter:02d}.md"
+        counter += 1
+    candidate.write_text(render_markdown_snapshot(payload), encoding="utf-8")
+    return candidate
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -374,6 +504,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print payload JSON after a successful upload",
     )
+    parser.add_argument(
+        "--metrics-dir",
+        default=os.environ.get("SUGARKUBE_TELEMETRY_METRICS_DIR", ""),
+        help="Write Markdown telemetry snapshots to this directory",
+    )
     args = parser.parse_args(argv)
     args.timeout = coerce_timeout(
         args.timeout,
@@ -410,6 +545,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         errors=errors,
         tags=tags,
     )
+    metrics_dir = args.metrics_dir.strip()
+    if metrics_dir:
+        try:
+            snapshot_path = write_metrics_snapshot(payload, Path(metrics_dir).expanduser())
+        except OSError as exc:
+            raise TelemetryError(f"failed to write telemetry snapshot: {exc}") from exc
+        else:
+            log(f"wrote telemetry snapshot to {snapshot_path}")
     if args.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0

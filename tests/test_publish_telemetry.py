@@ -433,6 +433,53 @@ def test_send_payload_raises_for_url_error(monkeypatch):
         MODULE.send_payload({}, endpoint="https://example", auth_bearer=None, timeout=1.0)
 
 
+def _sample_payload() -> dict[str, object]:
+    return {
+        "schema": MODULE.TELEMETRY_SCHEMA,
+        "generated_at": "2025-03-01T12:34:56+00:00",
+        "instance": {"id": "abc123"},
+        "verifier": {
+            "summary": {
+                "total": 2,
+                "passed": 1,
+                "failed": 1,
+                "skipped": 0,
+                "other": 0,
+                "failed_checks": ["projects"],
+            },
+            "checks": [
+                {"name": "ready", "status": "pass"},
+                {"name": "projects", "status": "fail"},
+            ],
+        },
+        "environment": {
+            "kernel": "Linux 6.1",
+            "hardware_model": "Pi 5",
+            "uptime_seconds": 123,
+        },
+        "tags": ["lab"],
+        "errors": ["verifier_exit_1"],
+    }
+
+
+def test_render_markdown_snapshot_highlights_summary():
+    snapshot = MODULE.render_markdown_snapshot(_sample_payload())
+    assert "## Verifier Summary" in snapshot
+    assert "| Total | Passed | Failed | Skipped | Other |" in snapshot
+    assert "projects" in snapshot
+    assert "Pi 5" in snapshot
+
+
+def test_write_metrics_snapshot_creates_file(tmp_path):
+    payload = _sample_payload()
+    path = MODULE.write_metrics_snapshot(payload, tmp_path)
+    assert path.exists()
+    contents = path.read_text(encoding="utf-8")
+    assert "Telemetry Snapshot" in contents
+    # ensure filename uses timestamp derived from payload
+    assert "20250301" in path.stem
+
+
 def test_main_returns_when_disabled(monkeypatch):
     monkeypatch.delenv("SUGARKUBE_TELEMETRY_ENABLE", raising=False)
     called = False
@@ -471,7 +518,7 @@ def test_main_dry_run_prints_payload(monkeypatch, capsys):
     assert '"id"' in captured.out
 
 
-def test_main_uploads_payload_and_prints(monkeypatch, capsys):
+def test_main_uploads_payload_and_prints(monkeypatch, capsys, tmp_path: Path):
     monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
     monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
     monkeypatch.setattr(
@@ -483,6 +530,13 @@ def test_main_uploads_payload_and_prints(monkeypatch, capsys):
     monkeypatch.setattr(MODULE, "collect_environment", lambda: {"kernel": "Linux"})
     monkeypatch.setattr(MODULE, "parse_tags", lambda raw: ["tag"])
     sent = {}
+    snapshots: list[Path] = []
+
+    def fake_snapshot(payload, directory):
+        dest = directory / "snapshot.md"
+        dest.write_text("snapshot", encoding="utf-8")
+        snapshots.append(dest)
+        return dest
 
     def fake_send(payload, *, endpoint, auth_bearer, timeout):  # noqa: ANN001, ANN002
         sent["payload"] = payload
@@ -491,6 +545,7 @@ def test_main_uploads_payload_and_prints(monkeypatch, capsys):
         sent["timeout"] = timeout
 
     monkeypatch.setattr(MODULE, "send_payload", fake_send)
+    monkeypatch.setattr(MODULE, "write_metrics_snapshot", fake_snapshot)
     exit_code = MODULE.main(
         [
             "--endpoint",
@@ -500,6 +555,8 @@ def test_main_uploads_payload_and_prints(monkeypatch, capsys):
             "--timeout",
             "5",
             "--print-payload",
+            "--metrics-dir",
+            str(tmp_path),
         ]
     )
     assert exit_code == 0
@@ -507,6 +564,7 @@ def test_main_uploads_payload_and_prints(monkeypatch, capsys):
     assert sent["auth"] == "abc"
     assert sent["timeout"] == pytest.approx(5)
     assert sent["payload"]["errors"] == ["warn"]
+    assert snapshots and snapshots[0].exists()
     captured = capsys.readouterr()
     assert '"warn"' in captured.out
 
