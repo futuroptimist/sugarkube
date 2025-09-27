@@ -35,6 +35,8 @@ the docs you will see the term used in both contexts.
 - `hardware/` — accessories like the Mac mini keyboard station cap (see
   [docs/mac_mini_station.md](docs/mac_mini_station.md))
 - `docs/` — build instructions, safety notes, and learning resources
+- [docs/start-here.md](docs/start-here.md) — quick orientation with 15-minute,
+  day-one, and advanced reference tracks
 - [docs/solar_basics.md](docs/solar_basics.md) — introduction to how solar panels generate
   power
 - [docs/electronics_basics.md](docs/electronics_basics.md) — essential circuits and tools

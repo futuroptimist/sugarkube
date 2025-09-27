@@ -59,8 +59,9 @@ others—without a "start here" narrative.
   guides.
 
 **First steps:**
-1. Draft a `docs/start-here.md` handbook with three tracks: 15-minute tour,
-   day-one contributor checklist, and advanced references.
+1. ✅ Drafted [`docs/start-here.md`](docs/start-here.md), a handbook with three
+   tracks: 15-minute tour, day-one contributor checklist, and advanced
+   references.
 2. Use tabbed callouts (matching the docs site markdown extensions) to
    differentiate hardware builders vs. software contributors.
 3. Embed a quick architecture diagram or recorded walkthrough so new folks
