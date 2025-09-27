@@ -41,6 +41,8 @@ Review the safety notes before working with power components.
 - [token_place_sample_datasets.md](token_place_sample_datasets.md) — replay bundled
   token.place health and chat samples
 - [pi_image_builder_design.md](pi_image_builder_design.md) — design and reliability features of the image builder
+- [hardware/index.md](hardware/index.md) — curated hub for safety notes and hardware build guides
+- [software/index.md](software/index.md) — single stop for automation, playbooks, and contributor tooling
 
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work
