@@ -24,7 +24,7 @@ def test_status_readme_lists_core_kpis() -> None:
 def test_status_readme_calls_out_measurement_sources() -> None:
     text = DOC_PATH.read_text(encoding="utf-8")
     expected_phrases = [
-        "pi-image workflow",
+        "`pi-image` workflow",
         "pi_smoke_test",
         "tutorial artifacts",
     ]
