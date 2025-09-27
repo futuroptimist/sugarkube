@@ -152,7 +152,7 @@ and record navigation improvements in the docs changelog.
   exporter for Pi builds.
 
 **First steps:**
-1. Define a core set of ergonomics KPIs (image build duration, smoke-test pass
+1. ✅ Define a core set of ergonomics KPIs (image build duration, smoke-test pass
    rate, onboarding checklist completion time) and document them in
    `docs/status/README.md`.
 2. Extend the telemetry publisher to emit these metrics into Grafana (or persist
