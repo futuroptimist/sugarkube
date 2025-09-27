@@ -17,12 +17,15 @@ SPEC.loader.exec_module(ssd_clone)  # type: ignore[attr-defined]
 
 @pytest.fixture(autouse=True)
 def _clear_env():
-    original = os.environ.pop(ssd_clone.ENV_TARGET, None)
+    original_target = os.environ.pop(ssd_clone.ENV_TARGET, None)
+    original_extra = os.environ.pop(ssd_clone.ENV_EXTRA_ARGS, None)
     try:
         yield
     finally:
-        if original is not None:
-            os.environ[ssd_clone.ENV_TARGET] = original
+        if original_target is not None:
+            os.environ[ssd_clone.ENV_TARGET] = original_target
+        if original_extra is not None:
+            os.environ[ssd_clone.ENV_EXTRA_ARGS] = original_extra
 
 
 @pytest.fixture
@@ -400,3 +403,29 @@ def test_update_configs_rewrites_files(monkeypatch, tmp_path):
     assert "root=PARTUUID=root-new" in cmdline
     assert "PARTUUID=root-new / ext4" in fstab
     assert "PARTUUID=boot-new /boot" in fstab
+
+
+def test_parse_args_honors_env_extra(monkeypatch):
+    monkeypatch.setenv(ssd_clone.ENV_EXTRA_ARGS, "--dry-run --verbose")
+    args = ssd_clone.parse_args(["--auto-target"])
+    assert args.auto_target is True
+    assert args.dry_run is True
+    assert args.verbose is True
+
+
+def test_parse_args_invalid_env(monkeypatch):
+    monkeypatch.setenv(ssd_clone.ENV_EXTRA_ARGS, "'unterminated")
+    with pytest.raises(SystemExit, match="Invalid"):
+        ssd_clone.parse_args(["--auto-target"])
+
+
+def test_parse_args_cli_overrides_env(monkeypatch, tmp_path):
+    env_state_file = tmp_path / "env.json"
+    cli_state_file = tmp_path / "cli.json"
+    monkeypatch.setenv(
+        ssd_clone.ENV_EXTRA_ARGS,
+        f"--state-file {env_state_file} --dry-run",
+    )
+    args = ssd_clone.parse_args(["--auto-target", "--state-file", str(cli_state_file)])
+    assert args.state_file == cli_state_file
+    assert args.dry_run is True

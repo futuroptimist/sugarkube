@@ -13,13 +13,14 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 STATE_DIR = Path("/var/log/sugarkube")
 STATE_FILE = STATE_DIR / "ssd-clone.state.json"
 DONE_FILE = STATE_DIR / "ssd-clone.done"
 MOUNT_ROOT = Path("/mnt/ssd-clone")
 ENV_TARGET = "SUGARKUBE_SSD_CLONE_TARGET"
+ENV_EXTRA_ARGS = "SUGARKUBE_SSD_CLONE_EXTRA_ARGS"
 
 
 class CommandError(RuntimeError):
@@ -99,7 +100,17 @@ def ensure_root() -> None:
         raise SystemExit("This script must be run as root to access block devices.")
 
 
-def parse_args() -> argparse.Namespace:
+def _env_extra_args() -> List[str]:
+    raw = os.environ.get(ENV_EXTRA_ARGS, "").strip()
+    if not raw:
+        return []
+    try:
+        return shlex.split(raw)
+    except ValueError as error:
+        raise SystemExit(f"Invalid {ENV_EXTRA_ARGS}: {error}") from error
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Clone the active SD card to a target SSD. Preview actions with --dry-run and "
@@ -143,7 +154,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show stdout/stderr from helper commands.",
     )
-    return parser.parse_args()
+    env_args = _env_extra_args()
+    cli_args = list(argv) if argv is not None else sys.argv[1:]
+    return parser.parse_args([*env_args, *cli_args])
 
 
 def lsblk_json(fields: List[str]) -> Dict[str, object]:
