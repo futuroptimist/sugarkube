@@ -49,4 +49,37 @@ The layout now includes a "SugarKube" copper label for easy identification.
 
 ## Fritzing Sketch
 
-Placeholder for wiring diagrams created with Fritzing.
+Use the wiring map below to reproduce the power ring harness in
+[Fritzing](https://fritzing.org/) or during bench assembly. The repository now
+ships a structured connection list at
+[`docs/fritzing/power_ring_wiring.csv`](./fritzing/power_ring_wiring.csv) that
+records every net, suggested wire colour, and safety note. Import it into a
+spreadsheet while you route traces so each jumper is accounted for.
+
+![Power ring wiring diagram](images/power_ring_wiring.svg)
+
+| Connector | Function | Suggested Wire | Notes |
+| --- | --- | --- | --- |
+| J1 | 12&nbsp;V DC input screw terminal | 16&nbsp;AWG red (positive) / 16&nbsp;AWG black (return) | Feed from a regulated supply or charge controller and keep leads short. |
+| F1 | 10&nbsp;A blade fuse | Inline with J1 positive lead | Protects the entire ring; carry spares for field swaps. |
+| TP1 / TP2 | Voltage test points | 22&nbsp;AWG jumpers | Clip a multimeter here before powering downstream loads. |
+| J2&nbsp;–&nbsp;J5 | 2-pin JST-VH branch outputs | 18&nbsp;AWG red/black pairs | Power Raspberry Pi nodes, fans, or lighting; label each lead to match the project. |
+| LED1 + R1 | Power indicator LED and series resistor | 26&nbsp;AWG | Choose the resistor footprint that matches your LED forward voltage/current. |
+
+### Recreate or customise the sketch
+
+1. Launch Fritzing 1.0 or newer and create a **New Sketch**.
+2. In the **Parts** bin, drag a 2-pin screw terminal, four 2-pin JST-VH
+   connectors, a mini blade fuse, two test points, and an LED with a series
+   resistor onto the breadboard view.
+3. Use the table above together with the CSV manifest to route positive leads in
+   red and returns in black. Add labels such as `OUT1`–`OUT4` so the layout
+   mirrors the KiCad schematic.
+4. (Optional) Set the breadboard background image to
+   `docs/images/power_ring_wiring.svg` for a quick reference while wiring.
+5. Export the updated design via **File → Export → Image (SVG)** to refresh the
+   diagram in this repository and attach the `.fzz` sketch to build logs or
+   design reviews.
+
+Because the wiring list lives alongside the KiCad project, any connector or fuse
+changes can be captured in both files during the same pull request.
