@@ -60,6 +60,26 @@ or documentation updates whenever the numbers move.
 * Tie simplification proposals back to at least one KPI so reviewers can confirm
   the expected impact.
 
+## Metrics snapshots
+
+Generate Markdown snapshots under `docs/status/metrics/` after each telemetry
+run to keep a local history of verifier health, environment details, and failed
+checks. The helper writes timestamped files (for example,
+`20250301T123456Z.md`) that can be linked from changelogs or retrospectives.
+
+```bash
+scripts/publish_telemetry.py \
+  --endpoint https://collector.example/upload \
+  --token $SUGARKUBE_TOKEN \
+  --metrics-dir docs/status/metrics
+```
+
+The snapshot includes:
+
+- The anonymised instance identifier and generated timestamp.
+- Tags, error annotations, and the verifier pass/fail summary.
+- A table of every check and the environment metadata collected during the run.
+
 ## Related resources
 
 - [docs/pi_image_quickstart.md](../pi_image_quickstart.md) — operational source
