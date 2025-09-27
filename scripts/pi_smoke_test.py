@@ -45,9 +45,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "hosts",
-        nargs="+",
-        help="Hostname or IP address of the Pi to verify."
-        " Accept multiple values to test several nodes in sequence.",
+        nargs="*",
+        metavar="HOST",
+        help=(
+            "Hostname or IP address of the Pi to verify. "
+            "Accept multiple values to test several nodes in sequence."
+        ),
+    )
+    parser.add_argument(
+        "--host",
+        dest="hosts_from_flag",
+        action="append",
+        metavar="HOST",
+        help="Add a host to the verification list (repeatable).",
     )
     parser.add_argument(
         "--user",
@@ -149,7 +159,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Emit a machine-readable JSON summary in addition to human-readable output.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    hosts: List[str] = []
+    if args.hosts:
+        hosts.extend(args.hosts)
+    if args.hosts_from_flag:
+        hosts.extend(args.hosts_from_flag)
+
+    if not hosts:
+        parser.error("provide at least one host via positional arguments or --host")
+
+    args.hosts = hosts
+    delattr(args, "hosts_from_flag")
+    return args
 
 
 def parse_verifier_output(output: str) -> List[Dict[str, str]]:

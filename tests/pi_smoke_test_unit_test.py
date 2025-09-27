@@ -27,6 +27,12 @@ def test_parse_verifier_output_success():
     assert checks == payload["checks"]
 
 
+def test_parse_args_accepts_host_flag():
+    args = MODULE.parse_args(["--host", "pi.local", "--json"])
+    assert args.hosts == ["pi.local"]
+    assert args.json is True
+
+
 def test_parse_verifier_output_errors_on_empty():
     with pytest.raises(MODULE.SmokeTestError):
         MODULE.parse_verifier_output("\n \n")
