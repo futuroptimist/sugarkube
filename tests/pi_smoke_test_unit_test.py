@@ -33,6 +33,17 @@ def test_parse_args_accepts_host_flag():
     assert args.json is True
 
 
+def test_parse_args_combines_positional_and_flag_hosts():
+    args = MODULE.parse_args(["pi-a.local", "--host", "pi-b.local"])
+    assert args.hosts == ["pi-a.local", "pi-b.local"]
+
+
+def test_parse_args_requires_at_least_one_host():
+    with pytest.raises(SystemExit) as excinfo:
+        MODULE.parse_args([])
+    assert excinfo.value.code == 2
+
+
 def test_parse_verifier_output_errors_on_empty():
     with pytest.raises(MODULE.SmokeTestError):
         MODULE.parse_verifier_output("\n \n")
