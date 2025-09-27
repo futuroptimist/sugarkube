@@ -334,3 +334,34 @@ def test_main_all_failures_return_nonzero(
     assert exit_code == 1
     assert "warning: no commands succeeded" in captured.err
     assert "Support bundle saved to" in captured.out
+
+
+def test_main_includes_target_results(
+    tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(collect_support_bundle, "default_specs", lambda: [])
+
+    def fake_execute(args, specs, bundle_dir):
+        (bundle_dir / "artifact.txt").write_text("data")
+        return [
+            {"command": {"description": "ok"}, "exit_code": 0, "status": "success"}
+        ]
+
+    def fake_copy_targets(args, bundle_dir):
+        return [{"path": "log.txt", "status": "success"}]
+
+    monkeypatch.setattr(collect_support_bundle, "execute_specs", fake_execute)
+    monkeypatch.setattr(collect_support_bundle, "copy_targets", fake_copy_targets)
+
+    exit_code = collect_support_bundle.main(
+        ["pi.local", "--output-dir", str(tmp_path), "--no-archive"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Support bundle saved to" in captured.out
+
+    bundle_dirs = [p for p in tmp_path.iterdir() if p.is_dir()]
+    assert bundle_dirs
+    summary_path = bundle_dirs[0] / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    assert summary["targets"] == [{"path": "log.txt", "status": "success"}]
