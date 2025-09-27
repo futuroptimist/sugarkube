@@ -103,6 +103,7 @@ def test_pick_target_auto_select_error(monkeypatch, capsys):
 def test_run_clone_with_extra_args(monkeypatch, tmp_path):
     target = str(tmp_path / "dev" / "sdc")
     command_seen = {}
+    messages: list[str] = []
 
     def fake_run(command, check=False):  # noqa: ARG001
         command_seen["command"] = command
@@ -113,9 +114,11 @@ def test_run_clone_with_extra_args(monkeypatch, tmp_path):
         return Result()
 
     monkeypatch.setattr(MODULE, "EXTRA_ARGS", "--foo bar")
+    monkeypatch.setattr(MODULE, "log", messages.append)
     monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
     MODULE.run_clone(target)
-    assert command_seen["command"][-2:] == ["--foo", "bar"]
+    assert command_seen["command"] == [str(MODULE.CLONE_HELPER), "--target", target, "--resume"]
+    assert any("SUGARKUBE_SSD_CLONE_EXTRA_ARGS" in message for message in messages)
 
 
 def test_ssd_clone_service_success(monkeypatch, tmp_path):
