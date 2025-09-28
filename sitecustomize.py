@@ -1,4 +1,5 @@
 """Support coverage collection in subprocesses started by tests."""
+
 import os
 
 if os.getenv("COVERAGE_PROCESS_START"):

@@ -157,8 +157,11 @@ and record navigation improvements in the docs changelog.
 1. ✅ Define a core set of ergonomics KPIs (image build duration, smoke-test pass
    rate, onboarding checklist completion time) and document them in
    `docs/status/README.md`.
-2. Extend the telemetry publisher to emit these metrics into Grafana (or persist
-   markdown snapshots under `docs/status/metrics/`).
+2. ✅ Extend the telemetry publisher to emit these metrics into Grafana (or
+   persist markdown snapshots under `docs/status/metrics/`). The CLI now accepts
+   `--markdown-dir`/`SUGARKUBE_TELEMETRY_MARKDOWN_DIR` to write Markdown
+   summaries with regression coverage in
+   `tests/test_publish_telemetry.py::test_main_writes_markdown_snapshot`.
 3. Add a changelog section dedicated to ergonomics improvements so momentum is
    visible across releases.
 
