@@ -450,5 +450,6 @@ Use this list to confirm you met the roadmap goals. Mark each item with `[x]` wh
 
 ## Next Steps
 Proceed to [Tutorial 6: Raspberry Pi Hardware and Power Design](./index.md#tutorial-6-raspberry-pi-hardware-and-power-design).
-While the full guide is forthcoming, review the roadmap entry now and gather the required tools so you
-can transition smoothly once it is published.
+The hardware-focused guide is published—review its tool checklist and lab safety reminders so you can
+transition smoothly into the next build. Regression coverage lives in
+`tests/test_tutorial_05_next_steps.py` to keep this hand-off accurate as the tutorials evolve.
