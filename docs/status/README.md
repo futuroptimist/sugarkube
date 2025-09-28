@@ -41,7 +41,7 @@ or documentation updates whenever the numbers move.
 
 * **What it measures:** The elapsed time for a new contributor to work through
   the onboarding checklist from [docs/tutorials/index.md](../tutorials/index.md)
-  (cloning the repo, running `just codespaces-bootstrap`, generating required
+  (cloning the repo, running `just codespaces-bootstrap` or `make codespaces-bootstrap`, generating required
   artifacts, and opening their first PR).
 * **Why it matters:** Lower completion times signal that documentation, prompts,
   and automation helpers remain approachable.

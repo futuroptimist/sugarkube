@@ -102,11 +102,11 @@ the manifest so you can verify the build inputs and commit hashes before
  via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
  download, verify, and expand the latest release. When you prefer a task runner,
 use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev/sdX just flash-pi` to
- chain download → verification → flashing with the streaming helper. The `just` recipes read
- `FLASH_DEVICE` (and optional `DOWNLOAD_ARGS`) from the environment, so prefix the variable as shown.
- They also provide
- `download-pi-image`, `install-pi-image`, `doctor`, and `codespaces-bootstrap` shortcuts so GitHub
- Codespaces users can install prerequisites and flash media without additional shell glue.
+chain download → verification → flashing with the streaming helper. The recipe variables read
+`FLASH_DEVICE` (and optional `DOWNLOAD_ARGS`) from the environment, so prefix the variable as shown. Both the
+Makefile and justfile expose `download-pi-image`, `install-pi-image`, `doctor`, and `codespaces-bootstrap`
+shortcuts so GitHub
+Codespaces users can install prerequisites and flash media without additional shell glue.
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
 
