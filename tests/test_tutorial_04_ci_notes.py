@@ -24,3 +24,17 @@ def test_ci_notes_no_longer_mark_pre_commit_as_planned() -> None:
     assert (
         "planned for Sugarkube contributions" not in text
     ), "Tutorial 4 still labels pre-commit usage as future work"
+
+
+def test_ci_notes_reference_pyspelling_command() -> None:
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert (
+        "`pyspelling -c .spellcheck.yaml`" in text
+    ), "Tutorial 4 should direct readers to run pyspelling with the project config"
+
+
+def test_ci_notes_reference_linkchecker_command() -> None:
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert (
+        "`linkchecker --no-warnings README.md docs/`" in text
+    ), "Tutorial 4 should remind readers to run linkchecker before opening a PR"
