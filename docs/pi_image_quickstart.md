@@ -272,7 +272,9 @@ sync without modifying the host.
     Store it securely after ejecting the media or copy it into your own
     workstation to bootstrap kubectl access immediately.
   - `/boot/sugarkube-node-token` contains the k3s cluster join token. Use it to
-    recover stalled boots, enroll new agents, or reseed the control plane.
+    recover stalled boots, enroll new agents, or reseed the control plane. A
+    systemd path unit watches for the token and re-runs the exporter if k3s
+    publishes it later in the boot sequence.
   Copy any of these files from another machine after ejecting the boot media.
   Regenerate fresh copies later with `sudo k3s kubectl config view --raw` or
   `sudo cat /var/lib/rancher/k3s/server/node-token` if you need to rotate them.
