@@ -20,7 +20,7 @@ import tempfile
 import textwrap
 import time
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable, Sequence, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -79,12 +79,7 @@ def _expand_image(
     return expanded, True, total, duration, digest, tempdir
 
 
-def _select_device(args: argparse.Namespace) -> flash.Device:
-    devices = flash.filter_candidates(flash.discover_devices())
-    if args.list_devices:
-        flash.summarize_devices(devices)
-        raise SystemExit(0)
-
+def _select_device(args: argparse.Namespace, devices: Sequence[flash.Device]) -> flash.Device:
     if args.device:
         for dev in devices:
             if dev.path == args.device:
@@ -418,6 +413,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    devices = flash.filter_candidates(flash.discover_devices())
+
+    if args.list_devices:
+        flash.summarize_devices(devices)
+        return 0
+
     if not args.image:
         raise FlashReportError(
             "Provide --image pointing to the sugarkube release (sugarkube.img or .img.xz)."
@@ -427,7 +428,9 @@ def main(argv: list[str] | None = None) -> int:
     if not source_image.exists():
         raise FlashReportError(f"Image not found: {source_image}")
 
-    device = _select_device(args)
+    # Regression coverage:
+    # tests/flash_pi_media_report_test.py::test_list_devices_without_image_exits_cleanly
+    device = _select_device(args, devices)
     _ensure_device_ready(device, keep_mounted=args.keep_mounted, dry_run=args.dry_run)
 
     if not args.assume_yes:
