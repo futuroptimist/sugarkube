@@ -520,3 +520,30 @@ def test_main_requires_endpoint_when_not_dry_run(monkeypatch):
     monkeypatch.setattr(MODULE, "parse_tags", lambda raw: [])
     with pytest.raises(MODULE.TelemetryError, match="endpoint not configured"):
         MODULE.main([])
+
+
+def test_main_writes_markdown_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
+    monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
+    monkeypatch.setattr(
+        MODULE,
+        "run_verifier",
+        lambda path, timeout: ([{"name": "ready", "status": "pass"}], ["warn"]),
+    )
+    monkeypatch.setattr(MODULE, "hashed_identifier", lambda **_: "abcdef1234567890")
+    monkeypatch.setattr(
+        MODULE,
+        "collect_environment",
+        lambda: {"kernel": "Linux 6.1", "uptime_seconds": 42, "hardware_model": "Pi 5"},
+    )
+    monkeypatch.setattr(MODULE, "parse_tags", lambda raw: ["lab", "pi"])
+    monkeypatch.setattr(MODULE, "send_payload", lambda payload, **kwargs: None)
+    exit_code = MODULE.main(["--endpoint", "https://example", "--markdown-dir", str(tmp_path)])
+    assert exit_code == 0
+    snapshots = list(tmp_path.glob("telemetry-*.md"))
+    assert snapshots, "expected markdown snapshot file"
+    content = snapshots[0].read_text(encoding="utf-8")
+    assert "Sugarkube Telemetry Snapshot" in content
+    assert "`lab`" in content
+    assert "warn" in content
+    assert "| Total | Passed | Failed" in content

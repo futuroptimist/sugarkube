@@ -343,9 +343,7 @@ def test_main_includes_target_results(
 
     def fake_execute(args, specs, bundle_dir):
         (bundle_dir / "artifact.txt").write_text("data")
-        return [
-            {"command": {"description": "ok"}, "exit_code": 0, "status": "success"}
-        ]
+        return [{"command": {"description": "ok"}, "exit_code": 0, "status": "success"}]
 
     def fake_copy_targets(args, bundle_dir):
         return [{"path": "log.txt", "status": "success"}]

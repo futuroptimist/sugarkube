@@ -170,12 +170,14 @@ def test_stage_summary_incomplete_entries(tmp_path):
 
 
 def test_parse_options_casts_and_validates():
-    result = cbm._parse_options([
-        "threads=4",
-        "ratio=0.5",
-        "enabled=true",
-        "label=sugarkube",
-    ])
+    result = cbm._parse_options(
+        [
+            "threads=4",
+            "ratio=0.5",
+            "enabled=true",
+            "label=sugarkube",
+        ]
+    )
 
     assert result == {
         "threads": 4,
