@@ -264,6 +264,8 @@ become part of your milestone evidence.
    ## Local checks
    - `git status` to confirm a clean worktree before commits.
    - `pre-commit run --all-files` to execute the repository checks before every PR.
+   - `pyspelling -c .spellcheck.yaml` to confirm documentation changes pass the spell checker.
+   - `linkchecker --no-warnings README.md docs/` to validate links across the handbook.
 
    ## GitHub checks
    - Pull requests trigger documentation linting and spell checking.
@@ -277,7 +279,8 @@ become part of your milestone evidence.
    ```
 
 > [!NOTE]
-> Sugarkube's automated tests verify this tutorial keeps `pre-commit run --all-files`
+> Sugarkube's automated tests verify this tutorial keeps `pre-commit run --all-files`,
+> `pyspelling -c .spellcheck.yaml`, and `linkchecker --no-warnings README.md docs/`
 > in the checklist so future contributors learn to run the project checks locally.
 
 3. Commit and push the notes:
