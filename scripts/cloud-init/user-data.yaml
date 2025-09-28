@@ -190,6 +190,64 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-export-kubeconfig.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Export k3s kubeconfig snapshots to /boot
+      After=k3s-ready.target
+      Wants=k3s-ready.target
+      ConditionPathExists=/opt/sugarkube/export-kubeconfig.sh
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/sugarkube/export-kubeconfig.sh
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-export-kubeconfig.path
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Watch for new k3s kubeconfig snapshots
+      Wants=sugarkube-export-kubeconfig.service
+
+      [Path]
+      PathExists=/etc/rancher/k3s/k3s.yaml
+      PathModified=/etc/rancher/k3s/k3s.yaml
+      Unit=sugarkube-export-kubeconfig.service
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-export-node-token.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Mirror k3s node token into /boot
+      After=k3s-ready.target
+      Wants=k3s-ready.target
+      ConditionPathExists=/opt/sugarkube/export-node-token.sh
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/sugarkube/export-node-token.sh
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/sugarkube-export-node-token.path
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Watch for k3s node token updates
+      Wants=sugarkube-export-node-token.service
+
+      [Path]
+      PathExists=/var/lib/rancher/k3s/server/node-token
+      PathModified=/var/lib/rancher/k3s/server/node-token
+      Unit=sugarkube-export-node-token.service
+
+      [Install]
+      WantedBy=multi-user.target
   - path: /etc/systemd/system/sugarkube-helm-bundles.service
     permissions: '0644'
     content: |
@@ -362,8 +420,10 @@ runcmd:
   - [systemctl, enable, k3s-ready.target]
   - [systemctl, start, k3s-ready.target]
   - [systemctl, enable, --now, sugarkube-helm-bundles.service]
-  - [/opt/sugarkube/export-kubeconfig.sh]
-  - [/opt/sugarkube/export-node-token.sh]
+  - [systemctl, enable, --now, sugarkube-export-kubeconfig.path]
+  - [systemctl, enable, --now, sugarkube-export-node-token.path]
+  - [systemctl, start, sugarkube-export-kubeconfig.service]
+  - [systemctl, start, sugarkube-export-node-token.service]
   - [bash, -c, 'apt-get autoremove -y']
   - [bash, -c, 'apt-get clean && rm -rf /var/lib/apt/lists/*']
   - |
