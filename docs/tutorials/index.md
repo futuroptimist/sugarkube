@@ -1,10 +1,14 @@
 # Sugarkube Tutorial Roadmap
 
 Sugarkube combines hardware, software, and operational practices into a cohesive home-lab scale
-platform. This roadmap outlines the tutorials we plan to write, sequenced so a newcomer with no prior
-technical background can progress from first principles to confidently maintaining and extending the
-platform. Each entry will eventually become its own standalone guide; for now, the descriptions below
-capture the narrative arc, learning goals, and practical exercises we intend to include.
+platform. This roadmap outlines the published tutorials so a newcomer with no prior technical
+background can progress from first principles to confidently maintaining and extending the platform.
+Every entry links to a maintained standalone guide, with the summaries below highlighting the
+narrative arc, learning goals, and practical exercises they cover.
+
+> [!NOTE]
+> Automated coverage in `tests/test_tutorial_index_publication.py` ensures this roadmap keeps
+> acknowledging the published guides.
 
 Throughout the series we keep our eye on the real-world goal: installing the aluminium extrusion
 Sugarkube cube in an outdoor setting (like a backyard pergola), wiring its solar array and charge
