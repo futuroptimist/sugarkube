@@ -162,8 +162,9 @@ and record navigation improvements in the docs changelog.
    `--markdown-dir`/`SUGARKUBE_TELEMETRY_MARKDOWN_DIR` to write Markdown
    summaries with regression coverage in
    `tests/test_publish_telemetry.py::test_main_writes_markdown_snapshot`.
-3. Add a changelog section dedicated to ergonomics improvements so momentum is
-   visible across releases.
+3. ✅ Add a changelog section dedicated to ergonomics improvements so momentum is
+   visible across releases. Guarded by
+   `tests/test_changelog.py::test_changelog_includes_ergonomics_section`.
 
 **Safeguards:**
 - Gate any new telemetry behind configurable credentials to avoid leaking secrets
