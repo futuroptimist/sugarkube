@@ -20,6 +20,7 @@ from typing import Iterable, List, Mapping, MutableMapping, Sequence
 TELEMETRY_SCHEMA = "https://sugarkube.dev/telemetry/v1"
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_VERIFIER_TIMEOUT = 180.0
+DEFAULT_MARKDOWN_DIR_ENV = "SUGARKUBE_TELEMETRY_MARKDOWN_DIR"
 
 
 class TelemetryError(RuntimeError):
@@ -105,6 +106,117 @@ def summarise_checks(checks: Iterable[Mapping[str, str]]) -> MutableMapping[str,
         "other": other,
         "failed_checks": failed,
     }
+
+
+def _markdown_summary(payload: Mapping[str, object]) -> str:
+    if isinstance(payload.get("instance"), Mapping):
+        instance_id = str(payload["instance"].get("id", "unknown")).strip() or "unknown"
+    else:
+        instance_id = "unknown"
+    verifier = payload.get("verifier", {})
+    summary = verifier.get("summary", {}) if isinstance(verifier, Mapping) else {}
+    environment = payload.get("environment", {})
+    env_lines: list[str] = []
+    if isinstance(environment, Mapping):
+        uptime = environment.get("uptime_seconds")
+        if isinstance(uptime, (int, float)):
+            env_lines.append(f"* Uptime: {int(uptime)} seconds")
+        kernel = environment.get("kernel")
+        if isinstance(kernel, str) and kernel:
+            env_lines.append(f"* Kernel: {kernel}")
+        hardware = environment.get("hardware_model")
+        if isinstance(hardware, str) and hardware:
+            cleaned = hardware.replace("\x00", "").strip()
+            if cleaned:
+                env_lines.append(f"* Hardware: {cleaned}")
+        os_release = environment.get("os_release")
+        if isinstance(os_release, Mapping) and os_release:
+            pretty = os_release.get("PRETTY_NAME") or os_release.get("ID")
+            if isinstance(pretty, str) and pretty:
+                env_lines.append(f"* OS: {pretty}")
+    tags_value = payload.get("tags")
+    if isinstance(tags_value, list) and tags_value:
+        tag_list = ", ".join(f"`{tag}`" for tag in tags_value if isinstance(tag, str) and tag)
+    else:
+        tag_list = ""
+    errors_value = payload.get("errors")
+    errors: list[str] = []
+    if isinstance(errors_value, Iterable) and not isinstance(errors_value, (str, bytes)):
+        for entry in errors_value:
+            if isinstance(entry, str) and entry:
+                errors.append(entry)
+    failed_checks = []
+    if isinstance(summary, Mapping):
+        failed = summary.get("failed_checks")
+        if isinstance(failed, Iterable) and not isinstance(failed, (str, bytes)):
+            for check in failed:
+                if isinstance(check, str) and check:
+                    failed_checks.append(check)
+    now = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    lines = [
+        "# Sugarkube Telemetry Snapshot",
+        "",
+        f"Generated: {now}",
+        f"Instance ID: `{instance_id}`",
+    ]
+    if tag_list:
+        lines.append(f"Tags: {tag_list}")
+    lines.append("")
+    if isinstance(summary, Mapping) and summary:
+        total = summary.get("total", 0)
+        passed = summary.get("passed", 0)
+        failed_count = summary.get("failed", 0)
+        skipped = summary.get("skipped", 0)
+        other = summary.get("other", 0)
+        lines.extend(
+            [
+                "## Verifier Summary",
+                "",
+                "| Total | Passed | Failed | Skipped | Other |",
+                "| ----- | ------ | ------ | ------- | ----- |",
+                f"| {total} | {passed} | {failed_count} | {skipped} | {other} |",
+                "",
+            ]
+        )
+        if failed_checks:
+            lines.append("### Failed Checks")
+            lines.append("")
+            for check in failed_checks:
+                lines.append(f"- {check}")
+            lines.append("")
+    if env_lines:
+        lines.append("## Environment")
+        lines.append("")
+        lines.extend(env_lines)
+        lines.append("")
+    if errors:
+        lines.append("## Errors")
+        lines.append("")
+        for entry in errors:
+            lines.append(f"- {entry}")
+        lines.append("")
+    if not errors:
+        lines.append("## Errors")
+        lines.append("")
+        lines.append("- None")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def write_markdown_snapshot(
+    payload: Mapping[str, object], directory: str | os.PathLike[str]
+) -> Path:
+    target = Path(directory).expanduser()
+    target.mkdir(parents=True, exist_ok=True)
+    instance = payload.get("instance", {})
+    if isinstance(instance, Mapping):
+        identifier = str(instance.get("id", "snapshot"))
+    else:
+        identifier = "snapshot"
+    slug = "".join(ch for ch in identifier.lower() if ch.isalnum())[:16] or "snapshot"
+    path = target / f"telemetry-{slug}.md"
+    path.write_text(_markdown_summary(payload), encoding="utf-8")
+    return path
 
 
 def read_text(path: Path) -> str:
@@ -374,6 +486,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print payload JSON after a successful upload",
     )
+    parser.add_argument(
+        "--markdown-dir",
+        help="Directory to write a Markdown snapshot of the telemetry payload",
+        default=os.environ.get(DEFAULT_MARKDOWN_DIR_ENV, ""),
+    )
     args = parser.parse_args(argv)
     args.timeout = coerce_timeout(
         args.timeout,
@@ -410,6 +527,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         errors=errors,
         tags=tags,
     )
+    snapshot_target = getattr(args, "markdown_dir", "")
+    if isinstance(snapshot_target, str) and snapshot_target.strip():
+        try:
+            write_markdown_snapshot(payload, snapshot_target)
+        except OSError as exc:
+            raise TelemetryError(f"failed to write markdown snapshot: {exc}") from exc
     if args.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0

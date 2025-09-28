@@ -520,3 +520,118 @@ def test_main_requires_endpoint_when_not_dry_run(monkeypatch):
     monkeypatch.setattr(MODULE, "parse_tags", lambda raw: [])
     with pytest.raises(MODULE.TelemetryError, match="endpoint not configured"):
         MODULE.main([])
+
+
+def test_main_writes_markdown_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
+    monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
+    monkeypatch.setattr(
+        MODULE,
+        "run_verifier",
+        lambda path, timeout: ([{"name": "ready", "status": "pass"}], ["warn"]),
+    )
+    monkeypatch.setattr(MODULE, "hashed_identifier", lambda **_: "abcdef1234567890")
+    monkeypatch.setattr(
+        MODULE,
+        "collect_environment",
+        lambda: {"kernel": "Linux 6.1", "uptime_seconds": 42, "hardware_model": "Pi 5"},
+    )
+    monkeypatch.setattr(MODULE, "parse_tags", lambda raw: ["lab", "pi"])
+    monkeypatch.setattr(MODULE, "send_payload", lambda payload, **kwargs: None)
+    exit_code = MODULE.main(["--endpoint", "https://example", "--markdown-dir", str(tmp_path)])
+    assert exit_code == 0
+    snapshots = list(tmp_path.glob("telemetry-*.md"))
+    assert snapshots, "expected markdown snapshot file"
+    content = snapshots[0].read_text(encoding="utf-8")
+    assert "Sugarkube Telemetry Snapshot" in content
+    assert "`lab`" in content
+    assert "warn" in content
+    assert "| Total | Passed | Failed" in content
+
+
+def test_main_handles_markdown_snapshot_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
+    monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
+    monkeypatch.setattr(MODULE, "run_verifier", lambda path, timeout: ([], []))
+    monkeypatch.setattr(MODULE, "hashed_identifier", lambda **_: "id")
+    monkeypatch.setattr(MODULE, "collect_environment", lambda: {})
+    monkeypatch.setattr(MODULE, "parse_tags", lambda raw: [])
+    monkeypatch.setattr(MODULE, "send_payload", lambda payload, **kwargs: None)
+
+    def fail_snapshot(payload, directory):  # noqa: ANN001, ANN002
+        raise OSError("disk full")
+
+    monkeypatch.setattr(MODULE, "write_markdown_snapshot", fail_snapshot)
+    with pytest.raises(MODULE.TelemetryError, match="disk full"):
+        MODULE.main(
+            [
+                "--endpoint",
+                "https://example",
+                "--markdown-dir",
+                str(tmp_path / "snapshots"),
+            ]
+        )
+
+
+def test_markdown_summary_formats_sections():
+    payload = {
+        "instance": {"id": "NODE-01"},
+        "verifier": {
+            "summary": {
+                "total": 3,
+                "passed": 1,
+                "failed": 1,
+                "skipped": 1,
+                "other": 0,
+                "failed_checks": ["dns"],
+            }
+        },
+        "environment": {
+            "uptime_seconds": 99.9,
+            "kernel": "Linux 6.1",
+            "hardware_model": "Pi 5\x00",
+            "os_release": {"PRETTY_NAME": "Debian"},
+        },
+        "tags": ["core", 12, ""],
+        "errors": ["verifier_exit"],
+    }
+    summary = MODULE._markdown_summary(payload)
+    assert "Instance ID: `NODE-01`" in summary
+    assert "* Uptime: 99 seconds" in summary
+    assert "* Hardware: Pi 5" in summary
+    assert "* OS: Debian" in summary
+    assert "Tags: `core`" in summary
+    assert "- dns" in summary
+    assert "- verifier_exit" in summary
+
+
+def test_markdown_summary_lists_none_when_no_errors():
+    payload = {
+        "instance": {"id": "node"},
+        "verifier": {
+            "summary": {
+                "total": 1,
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "other": 0,
+                "failed_checks": [],
+            }
+        },
+        "environment": {},
+    }
+    summary = MODULE._markdown_summary(payload)
+    assert "- None" in summary
+
+
+def test_write_markdown_snapshot_slugifies_identifier(tmp_path):
+    payload = {"instance": {"id": "THIS-IS-A-VERY-LONG-IDENTIFIER"}}
+    path = MODULE.write_markdown_snapshot(payload, tmp_path)
+    assert path.name == "telemetry-thisisaverylongi.md"
+    assert path.read_text(encoding="utf-8").startswith("# Sugarkube Telemetry Snapshot")
+
+
+def test_write_markdown_snapshot_handles_missing_identifier(tmp_path):
+    payload = {"instance": {"id": "!!!"}}
+    path = MODULE.write_markdown_snapshot(payload, tmp_path)
+    assert path.name == "telemetry-snapshot.md"
