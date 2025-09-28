@@ -9,6 +9,7 @@ JSON=false
 REPORT_PATH=""
 ENABLE_LOG=true
 SKIP_COMPOSE=${SKIP_COMPOSE:-false}
+FULL=false
 DEFAULT_REPORT="/boot/first-boot-report.txt"
 MIGRATION_LOG=${MIGRATION_LOG:-/var/log/sugarkube/migrations.log}
 TOKEN_PLACE_HEALTH_URL=${TOKEN_PLACE_HEALTH_URL:-http://127.0.0.1:5000/}
@@ -60,18 +61,23 @@ while [[ $# -gt 0 ]]; do
     --skip-compose=*)
       set_skip_compose "${1#*=}"
       ;;
+    --full)
+      FULL=true
+      JSON=true
+      ;;
     --no-log)
       ENABLE_LOG=false
       ;;
     --help)
       cat <<'EOF'
-Usage: pi_node_verifier.sh [--json] [--log PATH] [--no-log] [--skip-compose[=BOOL]]
+Usage: pi_node_verifier.sh [--json] [--log PATH] [--no-log] [--skip-compose[=BOOL]] [--full]
 
 Options:
   --json       Emit machine-readable JSON results.
   --log PATH   Append a Markdown summary to PATH.
                Defaults to /boot/first-boot-report.txt when writable.
   --no-log     Disable report generation entirely.
+  --full       Print text output and a JSON summary (implies --json).
   --skip-compose[=BOOL]
                Skip the projects-compose.service health check. Defaults to false.
   --help       Show this message.
@@ -101,7 +107,7 @@ check_statuses=()
 print_result() {
   local name="$1"
   local status="$2"
-  if ! $JSON; then
+  if ! $JSON || $FULL; then
     printf '%s: %s\n' "$name" "$status"
   fi
   json_parts+=('{"name":"'"$name"'","status":"'"$status"'"}')
