@@ -79,8 +79,8 @@ the docs you will see the term used in both contexts.
   - `flash_pi_media.sh` — stream `.img` or `.img.xz` directly to removable
     media with SHA-256 verification and automatic eject. A PowerShell wrapper
     (`flash_pi_media.ps1`) shells out to the same Python core on Windows.
-  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output or
-    `--help` for usage
+  - `pi_node_verifier.sh` — check k3s prerequisites; use `--json` for machine output,
+    `--full` to print text plus the JSON summary in one run, or `--help` for usage
   - `pi_smoke_test.py` — SSH wrapper that runs the verifier remotely, supports reboot checks,
     and emits JSON summaries for CI harnesses
   - `render_field_guide_pdf.py` — build the Markdown field guide into a single-page PDF without

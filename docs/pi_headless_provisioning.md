@@ -86,6 +86,11 @@ ssh sugaradmin@sugarkube-node01.local
 sudo /usr/local/bin/pi_node_verifier.sh --full
 ```
 
+The `--full` flag emits both the standard text table and a JSON payload in one invocation, making
+it easy to refresh `/boot/first-boot-report.txt` while feeding structured output into follow-up
+automation. Regression coverage lives in
+`tests/pi_node_verifier_output_test.bats::pi_node_verifier --full emits text and JSON`.
+
 5. (Optional) Copy `/boot/sugarkube-kubeconfig-full` (or the sanitized
    `/boot/sugarkube-kubeconfig`) from another machine to share cluster endpoints with teammates.
    The sanitized export redacts client keys and tokens—prefer the `-full` variant when you need

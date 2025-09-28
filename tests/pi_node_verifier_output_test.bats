@@ -14,6 +14,20 @@
   echo "$output" | grep "dspace_http:"
 }
 
+@test "pi_node_verifier --full emits text and JSON" {
+  run "$BATS_TEST_DIRNAME/../scripts/pi_node_verifier.sh" --full
+  [ "$status" -eq 0 ]
+  echo "$output" | grep "cloud_init:"
+  json_line="$(printf '%s\n' "$output" | grep '"checks"')"
+  [ -n "$json_line" ]
+  JSON_LINE="$json_line" python - <<'PY'
+import json
+import os
+
+json.loads(os.environ["JSON_LINE"])
+PY
+}
+
 @test "pi_node_verifier marks HTTP checks as pass when endpoints respond" {
   port=$(python - <<'PY'
 import socket
