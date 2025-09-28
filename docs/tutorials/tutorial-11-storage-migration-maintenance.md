@@ -328,5 +328,9 @@ Use this list to confirm you met every objective before moving on:
 
 ## Next Steps
 Continue to [Tutorial 12: Contributing New Features and Automation](./tutorial-12-contributing-new-features-and-automation.md)
-(once published) to learn how to propose improvements, extend automation, and collaborate on future
-Sugarkube releases.
+to learn how to propose improvements, extend automation, and collaborate on future Sugarkube
+releases.
+
+> [!NOTE]
+> Automated coverage in `tests/test_tutorial_11_12_next_steps.py` keeps this section pointing to the
+> published Tutorial 12 guide.
