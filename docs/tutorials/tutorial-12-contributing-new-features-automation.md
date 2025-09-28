@@ -245,10 +245,10 @@ supporting evidence (issue links, commit hashes, transcripts, or screenshots).
 
 ## Next Steps
 Advance to [Tutorial 13: Advanced Operations and Future Directions](./index.md#tutorial-13-advanced-operations-and-future-directions)
-to continue expanding your operational toolkit. Bring the contribution evidence you just
-produced—future experiments will build on your ability to plan, implement, and communicate complex
-changes.
+to extend the contribution workflow into long-term platform stewardship. Bring the contribution
+evidence you just produced—future experiments will build on your ability to plan, implement, and
+communicate complex changes.
 
 > [!NOTE]
-> `tests/test_tutorial_11_12_next_steps.py` ensures this section always references the published
-> Tutorial 13 follow-up guide.
+> Automated coverage in `tests/test_tutorial_next_steps.py` keeps this "Next Steps" section aligned
+> with the published tutorial roadmap.
