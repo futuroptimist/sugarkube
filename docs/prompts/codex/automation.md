@@ -31,7 +31,8 @@ CONTEXT:
   automatically runs `npm ci`, `npm run lint`, and `npm run test:ci` when a
   `package.json` is present.
 - Design your code and tests so the resulting diff achieves **100% patch coverage on
-  the first test run**—no retries.
+  the first test run**—no retries—to minimize the chance of regressions or unexpected
+  functionality being introduced.
 - When documentation files (`README.md` or anything under
   [`docs/`](../../../docs/)) change, additionally run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`; config in
@@ -48,7 +49,9 @@ REQUEST:
 1. Identify a small bug fix or documentation clarification.
 2. Implement the change following the project's existing style.
 3. Update relevant documentation when needed.
-4. Run all checks above and ensure they pass with 100% patch coverage on the first attempt.
+4. Run all checks above and ensure they pass with 100% patch coverage on the first
+   attempt to minimize the chance of regressions or unexpected functionality being
+   introduced.
 
 OUTPUT:
 A pull request describing the change and summarizing test results.
@@ -76,14 +79,17 @@ checks. `scripts/checks.sh` automatically runs `npm ci`, `npm run lint`, and
 - `git diff --cached | ./scripts/scan-secrets.py`
   (script: [`scripts/scan-secrets.py`](../../../scripts/scan-secrets.py)) to avoid
   committing credentials
-- Ensure the prompt instructs contributors to achieve **100% patch coverage on the first
-  test run** without retries.
+- Ensure the prompt instructs contributors to achieve **100% patch coverage on the
+  first test run** without retries to minimize the chance of regressions or unexpected
+  functionality being introduced.
 Fix any issues reported by these tools.
 
 USER:
 1. Choose a `docs/prompts/codex/*.md` file to update (for example, `docs/prompts/codex/cad.md`).
 2. Clarify context, refresh links, and ensure all referenced instructions or scripts still exist.
-3. Explicitly direct contributors to deliver 100% patch coverage on the first test execution.
+3. Explicitly direct contributors to deliver 100% patch coverage on the first test
+   execution to minimize the chance of regressions or unexpected functionality being
+   introduced.
 4. Run the commands above and address any failures.
 
 OUTPUT:

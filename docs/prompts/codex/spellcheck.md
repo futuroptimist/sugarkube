@@ -21,8 +21,9 @@ CONTEXT:
 - Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md).
 - Run `pre-commit run --all-files` to invoke [`scripts/checks.sh`](../../../scripts/checks.sh) for
   linting, formatting, and tests.
-- Ensure edits and any accompanying tests achieve **100% patch coverage on the first test run** with
-  no retries.
+- Ensure edits and any accompanying tests achieve **100% patch coverage on the first
+  test run** with no retries to minimize the chance of regressions or unexpected
+  functionality being introduced.
 - If a Node toolchain is present (`package.json` exists), also run:
   - `npm ci`
   - `npm run lint`
@@ -33,8 +34,9 @@ CONTEXT:
 REQUEST:
 1. Run the spellcheck and review results.
 2. Fix misspellings or update `.wordlist.txt`.
-3. Re-run spellcheck and link checks until clean and confirm 100% patch coverage on the first
-   attempt.
+3. Re-run spellcheck and link checks until clean and confirm 100% patch coverage on
+   the first attempt to minimize the chance of regressions or unexpected
+   functionality being introduced.
 
 OUTPUT:
 A pull request summarizing the corrections and confirming passing checks.
@@ -59,14 +61,16 @@ Then run:
   [`.spellcheck.yaml`](../../../.spellcheck.yaml))
 - `linkchecker --no-warnings README.md docs/`
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Ensure the prompt clearly requires contributors to maintain **100% patch coverage on the first
-  test run** without retries.
+- Ensure the prompt clearly requires contributors to maintain **100% patch
+  coverage on the first test run** without retries to minimize the chance of
+  regressions or unexpected functionality being introduced.
 
 USER:
 1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Add or reinforce guidance directing contributors to achieve 100% patch coverage on the first test
-   execution.
+3. Add or reinforce guidance directing contributors to achieve 100% patch
+   coverage on the first test execution to minimize the chance of regressions or
+   unexpected functionality being introduced.
 4. Run the commands above.
 
 OUTPUT:

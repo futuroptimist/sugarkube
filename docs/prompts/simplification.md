@@ -46,7 +46,8 @@ CONTEXT:
 - Before committing, scan staged changes with
   `git diff --cached | ./scripts/scan-secrets.py` (script lives at
   [`scripts/scan-secrets.py`](../../scripts/scan-secrets.py)).
-- Demand **100% patch coverage on the first test run**—no retries.
+- Demand **100% patch coverage on the first test run**—no retries to minimize the
+  chance of regressions or unexpected functionality being introduced.
 - If recurring failures surface, log an outage record under
   [`outages/`](../../outages/).
 
@@ -84,7 +85,9 @@ linters, formatters, and tests). When docs change also run:
 - `pyspelling -c .spellcheck.yaml`
 - `linkchecker --no-warnings README.md docs/`
 - `git diff --cached | ./scripts/scan-secrets.py`
-Ensure the final diff delivers **100% patch coverage on the first test run**.
+Ensure the final diff delivers **100% patch coverage on the first test run** to
+minimize the chance of regressions or unexpected functionality being
+introduced.
 
 USER:
 1. Review this prompt for stale context, missing onboarding cues, or redundant

@@ -13,8 +13,9 @@ SYSTEM:
 You are building the “Sugarkube Dashboard” capability for a k3s-based platform.
 Produce production-grade code, manifests, Helm values, and docs.
 Optimize for simplicity, reproducibility, and security by default.
-Achieve **100% patch coverage on the first test run**—design code and tests so no reruns are
-required.
+Achieve **100% patch coverage on the first test run**—design code and tests so no
+reruns are required to minimize the chance of regressions or unexpected
+functionality being introduced.
 
 GOAL:
 Create a complete, minimal, and extensible observability + kiosk solution:

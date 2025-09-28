@@ -48,7 +48,8 @@ CONTEXT:
 - Install missing Node dependencies with `npm ci` before invoking any npm
   scripts.
 - Ensure the resulting diff achieves **100% patch coverage on the first test
-  run**—design tests so reruns are unnecessary.
+  run**—design tests so reruns are unnecessary to minimize the chance of
+  regressions or unexpected functionality being introduced.
 - Use `rg` (ripgrep) to inventory TODO, FIXME, and "future work" markers across
   code, tests, and docs. Prioritize items that deliver immediate user value in a
   single PR.
@@ -97,6 +98,8 @@ CONTEXT:
   run `pyspelling -c .spellcheck.yaml` and
   `linkchecker --no-warnings README.md docs/`.
 - Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`.
+- Aim for **100% patch coverage on the first test run** to minimize the chance of
+  regressions or unexpected functionality being introduced.
 - Confirm referenced files exist and update related prompt indexes if needed.
 
 REQUEST:
