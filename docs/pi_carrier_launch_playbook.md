@@ -26,8 +26,9 @@ work; the downloads and flash runs are unattended.
    cd sugarkube
    just codespaces-bootstrap
    ```
-   The bootstrap target installs `gh`, `curl`, flashing dependencies, and Python requirements. Skip
-   this step inside Codespaces where the bootstrap happens automatically.
+   The bootstrap target installs `gh`, `curl`, flashing dependencies, and Python requirements. Prefer
+   `make codespaces-bootstrap` when you would rather stay inside the Makefile. Skip this step inside
+   Codespaces where the bootstrap happens automatically.
 
 2. **Grab the latest release:**
    ```bash

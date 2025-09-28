@@ -51,7 +51,7 @@ MAC_SETUP_ARGS ?=
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
         clone-ssd docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
-        token-place-samples support-bundle mac-setup cluster-up
+        token-place-samples support-bundle mac-setup cluster-up codespaces-bootstrap
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -92,6 +92,10 @@ docs-verify:
 
 docs-simplify:
 	$(CURDIR)/scripts/checks.sh --docs-only
+
+codespaces-bootstrap:
+	sudo apt-get update
+	sudo apt-get install -y curl gh jq pv unzip xz-utils
 
 qr-codes:
 	$(QR_CMD) $(QR_ARGS)
