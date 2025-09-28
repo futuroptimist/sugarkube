@@ -439,5 +439,9 @@ repository README or tracking spreadsheet.
 
 ## Next Steps
 Advance to [Tutorial 8: Preparing a Sugarkube Development Environment](./index.md#tutorial-8-preparing-a-sugarkube-development-environment)
-when it becomes available. That guide will translate your Kubernetes sandbox experience into the
-exact automation workflow used inside the Sugarkube repository.
+to translate your Kubernetes sandbox experience into the exact automation workflow used inside the
+Sugarkube repository.
+
+> [!NOTE]
+> Automated coverage in `tests/test_tutorial_next_steps.py` keeps this "Next Steps" section aligned
+> with the published tutorial roadmap.

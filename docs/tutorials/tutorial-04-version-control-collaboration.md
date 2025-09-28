@@ -321,7 +321,10 @@ Use this list to verify you met the roadmap milestones. Mark each box when you h
 > `git add <file>` followed by `git rebase --continue` or `git merge --continue`.
 
 ## Next Steps
-Continue your journey with
-[Tutorial 5: Programming for Operations with Python and Bash](./index.md#tutorial-5-programming-for-operations-with-python-and-bash)
-when it becomes available. Bring the repositories and notes you created here—they provide a working
-sandbox for scripting and automation practice.
+Advance to [Tutorial 5: Programming for Operations with Python and Bash](./index.md#tutorial-5-programming-for-operations-with-python-and-bash).
+Bring the repositories and notes you created here—they provide a working sandbox for scripting and
+automation practice.
+
+> [!NOTE]
+> Automated coverage in `tests/test_tutorial_next_steps.py` keeps this "Next Steps" section aligned
+> with the published tutorial roadmap.
