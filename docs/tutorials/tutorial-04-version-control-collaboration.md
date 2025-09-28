@@ -263,7 +263,7 @@ become part of your milestone evidence.
 
    ## Local checks
    - `git status` to confirm a clean worktree before commits.
-   - `pre-commit run --all-files` (planned for Sugarkube contributions).
+   - `pre-commit run --all-files` to execute the repository checks before every PR.
 
    ## GitHub checks
    - Pull requests trigger documentation linting and spell checking.
@@ -275,6 +275,10 @@ become part of your milestone evidence.
    - Update the pull request with findings and request help if needed.
    CI
    ```
+
+> [!NOTE]
+> Sugarkube's automated tests verify this tutorial keeps `pre-commit run --all-files`
+> in the checklist so future contributors learn to run the project checks locally.
 
 3. Commit and push the notes:
 
