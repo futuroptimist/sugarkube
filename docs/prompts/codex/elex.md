@@ -31,8 +31,9 @@ CONTEXT:
   commit is available. For documentation updates, also run:
   - `pyspelling -c .spellcheck.yaml` (requires `aspell` and `aspell-en`)
   - `linkchecker --no-warnings README.md docs/`
-- Ensure schematic, PCB, and script updates land with **100% patch coverage on the first test
-  execution**—no retries.
+- Ensure schematic, PCB, and script updates land with **100% patch coverage on the
+  first test execution**—no retries to minimize the chance of regressions or
+  unexpected functionality being introduced.
 - Scan staged changes for secrets with
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
 - Log persistent tool failures in [`outages/`](../../../outages/) per
@@ -47,8 +48,9 @@ REQUEST:
 3. Update any related documentation.
 4. Re-run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml`, and
    `linkchecker --no-warnings README.md docs/`; scan staged changes with
-   `git diff --cached | ./scripts/scan-secrets.py` and confirm 100% patch coverage on the first
-   attempt.
+   `git diff --cached | ./scripts/scan-secrets.py` and confirm 100% patch
+   coverage on the first attempt to minimize the chance of regressions or unexpected
+   functionality being introduced.
 
 OUTPUT:
 A pull request summarizing electronics updates and confirming KiBot export.
@@ -66,13 +68,16 @@ Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
 `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Ensure the updated prompt explicitly mandates **100% patch coverage on the first test run**
-  without retries.
+- Ensure the updated prompt explicitly mandates **100% patch coverage on the first
+  test run** without retries to minimize the chance of regressions or unexpected
+  functionality being introduced.
 
 USER:
 1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Add or reinforce guidance that requires 100% patch coverage on the first test execution.
+3. Add or reinforce guidance that requires 100% patch coverage on the first test
+   execution to minimize the chance of regressions or unexpected functionality being
+   introduced.
 4. Run the commands above.
 
 OUTPUT:

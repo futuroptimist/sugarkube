@@ -21,16 +21,18 @@ CONTEXT:
 - Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
   `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
   `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Ensure walkthrough updates and supporting tests yield **100% patch coverage on the first test
-  run**—no retries.
+- Ensure walkthrough updates and supporting tests yield **100% patch coverage on the
+  first test run**—no retries to minimize the chance of regressions or unexpected
+  functionality being introduced.
 - File recurring deployment failures in [`outages/`](../../../outages/) per
   [`outages/schema.json`](../../../outages/schema.json).
 
 REQUEST:
 1. Expand the walkthrough or add examples.
 2. Reference token.place and dspace where helpful.
-3. Verify all commands and links and confirm the diff achieves 100% patch coverage on the first
-   test execution.
+3. Verify all commands and links and confirm the diff achieves 100% patch coverage on
+   the first test execution to minimize the chance of regressions or unexpected
+   functionality being introduced.
 
 OUTPUT:
 A pull request with passing checks and a concise summary.
@@ -48,13 +50,16 @@ Follow [`AGENTS.md`](../../../AGENTS.md) and [`README.md`](../../../README.md).
 Run `pre-commit run --all-files`, `pyspelling -c .spellcheck.yaml` (requires
 `aspell` and `aspell-en`), `linkchecker --no-warnings README.md docs/`, and
 `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Ensure the revised prompt emphasizes achieving **100% patch coverage on the first test run**
-  without retries.
+- Ensure the revised prompt emphasizes achieving **100% patch coverage on the first
+  test run** without retries to minimize the chance of regressions or unexpected
+  functionality being introduced.
 
 USER:
 1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Add or reinforce guidance that mandates 100% patch coverage on the first test execution.
+3. Add or reinforce guidance that mandates 100% patch coverage on the first test
+   execution to minimize the chance of regressions or unexpected functionality being
+   introduced.
 4. Run the commands above.
 
 OUTPUT:

@@ -32,7 +32,9 @@ CONTEXT:
 - Inspect [`.github/workflows/`](../../../.github/workflows/) to see which checks run in CI.
 - Run `pre-commit run --all-files` from the repository root to lint, format, and test via
   [`scripts/checks.sh`](../../../scripts/checks.sh).
-- Ensure code, scripts, and tests yield **100% patch coverage on the first test run**—no retries.
+- Ensure code, scripts, and tests yield **100% patch coverage on the first test run**—no
+  retries to minimize the chance of regressions or unexpected functionality being
+  introduced.
 - If `package.json` defines them, run:
   - `npm ci`
   - `npm run lint`
@@ -59,9 +61,10 @@ REQUEST:
    STANDOFF_MODE=nut ./scripts/openscad_render.sh path/to/model.scad
    ~~~
 
-4. Run `pre-commit run --all-files` and confirm the resulting diff reports 100% patch coverage on
-   the first attempt; for docs changes also run `pyspelling -c .spellcheck.yaml` and
-   `linkchecker --no-warnings README.md docs/`.
+4. Run `pre-commit run --all-files` and confirm the resulting diff reports 100% patch
+   coverage on the first attempt to minimize the chance of regressions or unexpected
+   functionality being introduced; for docs changes also run `pyspelling -c
+   .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/`.
 5. Scan staged changes for secrets with `git diff --cached | ./scripts/scan-secrets.py`
    before committing updated SCAD sources and any documentation.
 
@@ -94,13 +97,15 @@ Then run:
 - `linkchecker --no-warnings README.md docs/` (installed by
   [`scripts/checks.sh`](../../../scripts/checks.sh))
 - `git diff --cached | ./scripts/scan-secrets.py` before committing.
-- Ensure the revised prompt explicitly directs contributors to secure **100% patch coverage on
-  the first test execution** without retries.
+- Ensure the revised prompt explicitly directs contributors to secure **100% patch
+  coverage on the first test execution** without retries to minimize the chance of
+  regressions or unexpected functionality being introduced.
 
 USER:
 1. Pick one prompt doc under `docs/prompts/codex/` (for example, `docs/prompts/codex/cad.md`).
 2. Fix outdated instructions, links, or formatting.
-3. Add or reinforce guidance that requires 100% patch coverage on the first test run.
+3. Add or reinforce guidance that requires 100% patch coverage on the first test run to
+   minimize the chance of regressions or unexpected functionality being introduced.
 4. Run the commands above.
 
 OUTPUT:
