@@ -62,8 +62,10 @@ others—without a "start here" narrative.
 1. ✅ Drafted [`docs/start-here.md`](docs/start-here.md), a handbook with three
    tracks: 15-minute tour, day-one contributor checklist, and advanced
    references.
-2. Use tabbed callouts (matching the docs site markdown extensions) to
-   differentiate hardware builders vs. software contributors.
+2. ✅ Use tabbed callouts (matching the docs site markdown extensions) to
+   differentiate hardware builders vs. software contributors (see
+   `docs/start-here.md`; regression coverage:
+   `tests/test_start_here_doc.py::test_start_here_doc_includes_persona_tabs`).
 3. Embed a quick architecture diagram or recorded walkthrough so new folks
    understand how the Pi image, solar hardware, and CI fit together.
 
