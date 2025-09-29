@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,87 @@ def test_docs_only_mode_runs_docs_checks(tmp_path: Path, script: Path) -> None:
     assert not pip_log.exists()
     for log in skip_logs.values():
         assert not log.exists()
+
+
+def test_docs_only_mode_falls_back_to_python_module_pip(tmp_path: Path, script: Path) -> None:
+    (tmp_path / ".spellcheck.yaml").write_text("document: []\n")
+    (tmp_path / "README.md").write_text("# README\n")
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "index.md").write_text("# Docs\n")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    python_log = tmp_path / "python-pip.log"
+    pyspelling_log = tmp_path / "pyspelling.log"
+    linkchecker_log = tmp_path / "linkchecker.log"
+
+    def write_stub(path: Path, content: str) -> None:
+        path.write_text(content)
+        path.chmod(0o755)
+
+    python_stub = f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+  echo "$@" >> "{python_log}"
+  if [ -x /bin/cat ]; then CAT=/bin/cat; else CAT=/usr/bin/cat; fi
+  if [ -x /bin/chmod ]; then CHMOD=/bin/chmod; else CHMOD=/usr/bin/chmod; fi
+  "$CAT" > "{fake_bin / 'pyspelling'}" <<'PY'
+#!/bin/bash
+echo "$@" >> "{pyspelling_log}"
+exit 0
+PY
+  "$CHMOD" +x "{fake_bin / 'pyspelling'}"
+  "$CAT" > "{fake_bin / 'linkchecker'}" <<'LC'
+#!/bin/bash
+echo "$@" >> "{linkchecker_log}"
+exit 0
+LC
+  "$CHMOD" +x "{fake_bin / 'linkchecker'}"
+  exit 0
+fi
+echo "unexpected args: $@" >&2
+exit 1
+"""
+
+    write_stub(fake_bin / "python", python_stub)
+    write_stub(
+        fake_bin / "python3",
+        f"#!/bin/bash\nexec \"{fake_bin / 'python'}\" \"$@\"\n",
+    )
+    write_stub(fake_bin / "aspell", "#!/bin/bash\nexit 0\n")
+    write_stub(
+        fake_bin / "id",
+        textwrap.dedent(
+            """\
+            #!/bin/bash
+            if [ "$1" = "-u" ]; then
+              echo 1000
+            else
+              exit 0
+            fi
+            """
+        ),
+    )
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    env["PYTHONPATH"] = str(tmp_path)
+
+    result = subprocess.run(
+        ["/bin/bash", str(script), "--docs-only"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert python_log.exists(), "expected python -m pip fallback to run"
+    log_line = python_log.read_text().strip()
+    assert "-m pip install pyspelling linkchecker" in log_line
+    assert pyspelling_log.exists(), "pyspelling command should run after installation"
+    assert linkchecker_log.exists(), "linkchecker command should run after installation"
 
 
 def test_skips_js_checks_when_package_lock_missing(tmp_path: Path, script: Path) -> None:

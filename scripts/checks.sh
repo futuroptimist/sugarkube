@@ -3,6 +3,34 @@ set -euo pipefail
 
 DOCS_ONLY=0
 
+pip_install() {
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install --system "$@"
+    return $?
+  fi
+
+  local -a pip_commands=(pip pip3)
+  local cmd
+  for cmd in "${pip_commands[@]}"; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      "$cmd" install "$@"
+      return $?
+    fi
+  done
+
+  local -a interpreters=(python3 python)
+  local interpreter
+  for interpreter in "${interpreters[@]}"; do
+    if command -v "$interpreter" >/dev/null 2>&1; then
+      "$interpreter" -m pip install "$@"
+      return $?
+    fi
+  done
+
+  echo "No pip-compatible installer found; install packages manually: $*" >&2
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Usage: scripts/checks.sh [--docs-only]
@@ -351,10 +379,9 @@ maybe_install_kicad() {
 if [ "$DOCS_ONLY" -eq 1 ]; then
   if ! command -v pyspelling >/dev/null 2>&1 || \
      ! command -v linkchecker >/dev/null 2>&1; then
-    if command -v uv >/dev/null 2>&1; then
-      uv pip install --system pyspelling linkchecker >/dev/null 2>&1
-    else
-      pip install pyspelling linkchecker >/dev/null 2>&1
+    if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
+      echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
+      exit 1
     fi
     if command -v pyenv >/dev/null 2>&1; then
       pyenv rehash >/dev/null 2>&1
@@ -368,13 +395,10 @@ else
   if ! command -v flake8 >/dev/null 2>&1 || \
      ! command -v pyspelling >/dev/null 2>&1 || \
      ! command -v linkchecker >/dev/null 2>&1; then
-    if command -v uv >/dev/null 2>&1; then
-      uv pip install --system \
-        flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
-        >/dev/null 2>&1
-    else
-      pip install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
-        >/dev/null 2>&1
+    if ! pip_install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+      >/dev/null 2>&1; then
+      echo "Failed to install lint/test dependencies; aborting" >&2
+      exit 1
     fi
     if command -v pyenv >/dev/null 2>&1; then
       pyenv rehash >/dev/null 2>&1

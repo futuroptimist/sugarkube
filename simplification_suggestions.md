@@ -98,8 +98,11 @@ checks. The prompts require 100% compliance, but setup steps remain scattered.
    target) that installs prerequisites, runs spellcheck/linkcheck, and surfaces
    common fixes. `scripts/checks.sh --docs-only` powers both wrappers and now
    has regression coverage in `tests/checks_script_test.py::test_docs_only_mode_runs_docs_checks`.
-2. Extend `scripts/checks.sh` with a `--docs-only` flag that skips hardware
-   toolchains when unnecessary.
+2. ✅ Extend `scripts/checks.sh` with a `--docs-only` flag that skips hardware
+   toolchains when unnecessary. The docs-only mode now falls back to
+   `python -m pip` when the `pip` shim is unavailable so the automation can
+   still install `pyspelling`/`linkchecker` (regression coverage:
+   `tests/checks_script_test.py::test_docs_only_mode_falls_back_to_python_module_pip`).
 3. ✅ Bundle templates in `docs/templates/simplification/` for onboarding updates,
    prompt refreshes, and simplification sprints so authors can focus on content.
 
