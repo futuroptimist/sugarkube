@@ -40,3 +40,13 @@ def test_start_here_doc_includes_persona_tabs() -> None:
     assert (
         '=== "Software contributors"' in text
     ), "Start-here guide should present a tab for software contributors"
+
+
+def test_start_here_doc_embeds_architecture_diagram() -> None:
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert (
+        "![Sugarkube architecture overview" in text
+    ), "Start-here guide should embed an architecture diagram for quick orientation"
+    assert (
+        "images/sugarkube_diagram.svg" in text
+    ), "Start-here guide should reference the shared architecture diagram asset"

@@ -4,6 +4,11 @@ Kick off your Sugarkube journey from a single launchpad. This guide condenses th
 three tracks so you can build context quickly, complete the onboarding chores, and know where to dive
 when you are ready for deeper automation or hardware projects.
 
+![Sugarkube architecture overview linking solar, Pi cluster, and CI automation](images/sugarkube_diagram.svg)
+
+*Figure: Solar panels feed the charge controller and batteries powering the Pi cluster while CI
+automation keeps the image, tooling, and observability assets in sync.*
+
 ## Persona quick links
 
 Use the tabs below to jump straight to the references that match how you plan to contribute today.
@@ -35,8 +40,8 @@ docs apply to you.
 ## 15-minute tour
 
 > [!TIP]
-> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.  
-> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.  
+> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
+> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
