@@ -213,7 +213,19 @@ cluster-up:
 # Usage: just codespaces-bootstrap
 codespaces-bootstrap:
     sudo apt-get update
-    sudo apt-get install -y curl gh jq pv unzip xz-utils
+    sudo apt-get install -y \
+        aspell \
+        aspell-en \
+        curl \
+        gh \
+        jq \
+        pv \
+        python3 \
+        python3-pip \
+        python3-venv \
+        unzip \
+        xz-utils
+    python3 -m pip install --user --upgrade pip pre-commit pyspelling linkchecker
 
 # Run spellcheck and linkcheck to keep docs automation aligned
 # Usage: just docs-verify

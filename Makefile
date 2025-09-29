@@ -100,7 +100,8 @@ docs-simplify:
 
 codespaces-bootstrap:
 	sudo apt-get update
-	sudo apt-get install -y curl gh jq pv unzip xz-utils
+	sudo apt-get install -y curl gh jq pv unzip xz-utils aspell aspell-en python3 python3-pip python3-venv
+	python3 -m pip install --user --upgrade pip pre-commit pyspelling linkchecker
 
 qr-codes:
 	$(QR_CMD) $(QR_ARGS)
