@@ -6,6 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from scripts import start_here
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "start_here.py"
 DOC_PATH = REPO_ROOT / "docs" / "start-here.md"
@@ -31,6 +35,50 @@ def test_start_here_script_reports_doc_path() -> None:
         text=True,
     )
     assert result.stdout.strip() == str(DOC_PATH), "Expected the CLI to print docs/start-here.md"
+
+
+def test_start_here_main_prints_contents(tmp_path, capsys, monkeypatch) -> None:
+    """Calling the script without flags should surface the handbook contents."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Welcome to Sugarkube", encoding="utf-8")
+    monkeypatch.setattr(start_here, "DOC_PATH", guide)
+
+    exit_code = start_here.main([])
+
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert exit_code == 0
+    assert lines[0] == f"Sugarkube Start Here guide: {guide}"
+    assert "Welcome to Sugarkube" in captured.out
+
+
+def test_start_here_main_path_only_alias(tmp_path, capsys, monkeypatch) -> None:
+    """The deprecated --no-content flag should continue to emit the path."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Stub", encoding="utf-8")
+    monkeypatch.setattr(start_here, "DOC_PATH", guide)
+
+    exit_code = start_here.main(["--no-content"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip() == str(guide)
+
+
+def test_start_here_main_errors_when_missing(tmp_path, capsys, monkeypatch) -> None:
+    """If the handbook disappears, the CLI should explain how to restore it."""
+
+    missing = tmp_path / "start-here.md"
+    monkeypatch.setattr(start_here, "DOC_PATH", missing)
+
+    with pytest.raises(SystemExit) as excinfo:
+        start_here.main([])
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "docs/start-here.md is missing" in captured.err
 
 
 def test_justfile_exposes_start_here_target() -> None:
