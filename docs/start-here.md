@@ -4,6 +4,34 @@ Kick off your Sugarkube journey from a single launchpad. This guide condenses th
 three tracks so you can build context quickly, complete the onboarding chores, and know where to dive
 when you are ready for deeper automation or hardware projects.
 
+## Persona quick links
+
+Use the tabs below to jump straight to the references that match how you plan to contribute today.
+Each list links to maintained guides and tooling so you can gather context without guessing which
+docs apply to you.
+
+=== "Hardware builders"
+
+    - Print the [Pi carrier launch playbook](./pi_carrier_launch_playbook.md) to prepare the enclosure
+      build, wiring harness, and solar checks.
+    - Stage the [hardware index](./hardware/index.md) for diagrams, bill of materials, and safety
+      notes before you open a toolkit.
+    - Bookmark [tutorial 6](./tutorials/tutorial-06-raspberry-pi-hardware-power.md) to rehearse power
+      budgeting and enclosure assembly.
+    - Keep [docs/ssd_recovery.md](./ssd_recovery.md) handy for contingency plans when a boot device
+      misbehaves during testing.
+
+=== "Software contributors"
+
+    - Start with the [software index](./software/index.md) for quick access to automation guides and
+      helper scripts.
+    - Review [docs/pi_image_quickstart.md](./pi_image_quickstart.md) to understand the build pipeline
+      before you edit cloud-init or verifier hooks.
+    - Practice the contribution workflow by following
+      [tutorial 12](./tutorials/tutorial-12-contributing-new-features-automation.md).
+    - Skim [docs/prompts/codex/tests.md](./prompts/codex/tests.md) so you know which checks run in CI
+      and how to extend regression coverage.
+
 ## 15-minute tour
 
 > [!TIP]

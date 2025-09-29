@@ -30,3 +30,13 @@ def test_start_here_doc_cross_links_resources() -> None:
     ]
     for link in required_links:
         assert link in text, f"Expected reference to '{link}' in docs/start-here.md"
+
+
+def test_start_here_doc_includes_persona_tabs() -> None:
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert (
+        '=== "Hardware builders"' in text
+    ), "Start-here guide should present a tab for hardware builders"
+    assert (
+        '=== "Software contributors"' in text
+    ), "Start-here guide should present a tab for software contributors"
