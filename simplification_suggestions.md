@@ -66,8 +66,10 @@ others—without a "start here" narrative.
    differentiate hardware builders vs. software contributors (see
    `docs/start-here.md`; regression coverage:
    `tests/test_start_here_doc.py::test_start_here_doc_includes_persona_tabs`).
-3. Embed a quick architecture diagram or recorded walkthrough so new folks
-   understand how the Pi image, solar hardware, and CI fit together.
+3. ✅ Embed a quick architecture diagram so new folks understand how the Pi
+   image, solar hardware, and CI fit together (see `docs/start-here.md`; regression
+   coverage:
+   `tests/test_start_here_doc.py::test_start_here_doc_embeds_architecture_diagram`).
 
 **Safeguards:**
 - Cross-link safety notices and ESD guidelines from the new handbook to avoid
