@@ -35,8 +35,8 @@ docs apply to you.
 ## 15-minute tour
 
 > [!TIP]
-> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.  
-> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.  
+> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
+> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
@@ -55,8 +55,10 @@ docs apply to you.
 > Budget a focused afternoon to work through these steps. They line up with Tutorials 1–4 and leave
 > you with verified tooling plus a pull request rehearsal.
 
-1. Run either `just codespaces-bootstrap` or `make codespaces-bootstrap` to install the Python, spell
-   check, and link check prerequisites wired into `pre-commit`.
+1. Run either `just codespaces-bootstrap` or `make codespaces-bootstrap` to install CLI essentials
+   (`curl`, `gh`, `jq`, `pv`, `unzip`, `xz-utils`), Python tooling (`python3`, `python3-pip`,
+   `python3-venv`), and the documentation prerequisites (`aspell`, `aspell-en`, `pre-commit`,
+   `pyspelling`, `linkchecker`) wired into `pre-commit`.
 2. Execute `pre-commit run --all-files` once locally; it shells into `scripts/checks.sh` so you see
    the full lint, test, and docs pipeline.
 3. Follow the first four tutorials in [docs/tutorials/index.md](./tutorials/index.md) to capture lab
