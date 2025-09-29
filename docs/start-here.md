@@ -35,8 +35,8 @@ docs apply to you.
 ## 15-minute tour
 
 > [!TIP]
-> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.  
-> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.  
+> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
+> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
