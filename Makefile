@@ -47,8 +47,10 @@ FIELD_GUIDE_CMD ?= $(CURDIR)/scripts/render_field_guide_pdf.py
 FIELD_GUIDE_ARGS ?=
 MAC_SETUP_CMD ?= $(CURDIR)/scripts/sugarkube_setup.py
 MAC_SETUP_ARGS ?=
+START_HERE_CMD ?= $(CURDIR)/scripts/start_here.py
+START_HERE_ARGS ?=
 
-.PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor rollback-to-sd \
+.PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
         clone-ssd docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle mac-setup cluster-up codespaces-bootstrap
@@ -75,6 +77,9 @@ flash-pi-report: install-pi-image
 
 doctor:
 	$(CURDIR)/scripts/sugarkube_doctor.sh
+
+start-here:
+	$(START_HERE_CMD) $(START_HERE_ARGS)
 
 rollback-to-sd:
 	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)

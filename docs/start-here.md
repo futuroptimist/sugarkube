@@ -4,6 +4,11 @@ Kick off your Sugarkube journey from a single launchpad. This guide condenses th
 three tracks so you can build context quickly, complete the onboarding chores, and know where to dive
 when you are ready for deeper automation or hardware projects.
 
+> [!TIP]
+> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
+> Append `--path-only` to either command when you simply need the absolute path for note-taking or
+> automation evidence.
+
 ## 15-minute tour
 
 > [!TIP]

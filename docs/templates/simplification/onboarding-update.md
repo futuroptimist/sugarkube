@@ -7,8 +7,8 @@
 
 ## Required Artifacts
 - Link to the updated quickstart, handbook, or tutorial draft.
-- Evidence that automation (`make doctor`, `just start-here`, etc.) reflects the
-  new path.
+- Evidence that automation (`make doctor`, `just start-here`, `make start-here --path-only`) reflects
+  the new path and prints the updated guidance.
 - Screenshots or recordings that walk through the refreshed flow.
 
 ## Stakeholders
