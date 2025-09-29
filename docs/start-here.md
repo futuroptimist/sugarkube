@@ -4,14 +4,39 @@ Kick off your Sugarkube journey from a single launchpad. This guide condenses th
 three tracks so you can build context quickly, complete the onboarding chores, and know where to dive
 when you are ready for deeper automation or hardware projects.
 
-> [!TIP]
-> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
-> Append `--path-only` to either command when you simply need the absolute path for note-taking or
-> automation evidence.
+## Persona quick links
+
+Use the tabs below to jump straight to the references that match how you plan to contribute today.
+Each list links to maintained guides and tooling so you can gather context without guessing which
+docs apply to you.
+
+=== "Hardware builders"
+
+    - Print the [Pi carrier launch playbook](./pi_carrier_launch_playbook.md) to prepare the enclosure
+      build, wiring harness, and solar checks.
+    - Stage the [hardware index](./hardware/index.md) for diagrams, bill of materials, and safety
+      notes before you open a toolkit.
+    - Bookmark [tutorial 6](./tutorials/tutorial-06-raspberry-pi-hardware-power.md) to rehearse power
+      budgeting and enclosure assembly.
+    - Keep [docs/ssd_recovery.md](./ssd_recovery.md) handy for contingency plans when a boot device
+      misbehaves during testing.
+
+=== "Software contributors"
+
+    - Start with the [software index](./software/index.md) for quick access to automation guides and
+      helper scripts.
+    - Review [docs/pi_image_quickstart.md](./pi_image_quickstart.md) to understand the build pipeline
+      before you edit cloud-init or verifier hooks.
+    - Practice the contribution workflow by following
+      [tutorial 12](./tutorials/tutorial-12-contributing-new-features-automation.md).
+    - Skim [docs/prompts/codex/tests.md](./prompts/codex/tests.md) so you know which checks run in CI
+      and how to extend regression coverage.
 
 ## 15-minute tour
 
 > [!TIP]
+> Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.  
+> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.  
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
@@ -27,7 +52,7 @@ when you are ready for deeper automation or hardware projects.
 ## Day-one contributor checklist
 
 > [!IMPORTANT]
-> Budget a focused afternoon to work through these steps. They line up with Tutorials 1–4 and leave
+> Budget a focused afternoon to work through these steps. They line up with Tutorials 1–4 and leave
 > you with verified tooling plus a pull request rehearsal.
 
 1. Run either `just codespaces-bootstrap` or `make codespaces-bootstrap` to install the Python, spell
