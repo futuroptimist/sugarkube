@@ -21,7 +21,10 @@ humans can detect missing data quickly.
 
 ## Collect bundles locally
 
-Run the helper directly when you have SSH access to a Pi:
+Run the helper directly when you have SSH access to a Pi. A
+`collect_support_bundle.sh` wrapper ships alongside it for runbooks that still
+reference the historical shell entrypoint; both commands execute the same
+Python implementation:
 
 ```bash
 ./scripts/collect_support_bundle.py pi-a.local \
