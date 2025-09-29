@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -198,6 +200,20 @@ def test_copy_targets_handles_timeout_and_duplicate_names(
     assert results[0]["local_path"].endswith("targets/var_log")
     assert results[1]["local_path"].endswith("targets/etc_config")
     assert results[2]["local_path"].endswith("targets/etc_config-2")
+
+
+def test_shell_wrapper_exposes_python_cli() -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.sh"
+    assert script.exists(), "collect_support_bundle.sh wrapper should ship alongside the docs"
+    assert os.access(script, os.X_OK), "collect_support_bundle.sh must be executable"
+    result = subprocess.run(
+        [str(script), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "collect_support_bundle.py" in result.stdout
 
 
 def test_execute_specs_writes_logs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

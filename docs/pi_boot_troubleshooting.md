@@ -43,10 +43,18 @@ guide the moment a boot hiccup appears.
 ## When to escalate
 
 If the table does not cover your scenario, collect the following bundle and
-attach it to an issue or outage report:
+attach it to an issue or outage report. The `.sh` wrapper delegates to the
+Python helper so older runbooks keep working while the CLI remains a single
+source of truth:
 
 ```bash
 sudo ./scripts/collect_support_bundle.sh --output ~/sugarkube/support-$(date +%Y%m%d).tar.gz
+```
+
+You can invoke the Python entrypoint directly if you prefer:
+
+```bash
+sudo ./scripts/collect_support_bundle.py --output ~/sugarkube/support-$(date +%Y%m%d).tar.gz
 ```
 
 The archive gathers `journalctl`, compose logs, `kubectl get all -A`, and the
