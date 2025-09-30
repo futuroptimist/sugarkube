@@ -67,7 +67,8 @@ sync.
     parity across platforms.
 - `scripts/flash_pi_media_report.py`
   - Purpose: generate Markdown, HTML, and JSON flash reports that capture hardware IDs, checksum
-    results, and optional cloud-init diffs.
+    results, and optional cloud-init diffs (regression coverage:
+    `tests/flash_pi_media_linux_test.py::test_resolve_linux_system_id_prefers_by_id`).
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [Pi Boot & Cluster Troubleshooting](./pi_boot_troubleshooting.md).
   - Related tooling: exposed through `make flash-pi-report`, `just flash-pi-report`, and archived by

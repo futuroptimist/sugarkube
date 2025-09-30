@@ -42,6 +42,8 @@ from typing import Iterable, List, Optional, Sequence
 
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB to balance throughput and memory usage.
 PROGRESS_INTERVAL = 1.0  # seconds
+LINUX_BY_ID_ROOT = Path("/dev/disk/by-id")
+LINUX_SYS_BLOCK_ROOT = Path("/sys/block")
 
 
 def _supports_color(stream: io.TextIOBase) -> bool:
@@ -111,6 +113,35 @@ def _run(cmd: Sequence[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=False, capture_output=True, text=True, **kwargs)
 
 
+def _resolve_linux_system_id(path: str) -> Optional[str]:
+    """Best-effort identifier for Linux block devices."""
+
+    device_path = Path(path)
+    try:
+        resolved = device_path.resolve()
+    except FileNotFoundError:
+        resolved = device_path
+    device_name = resolved.name
+
+    if LINUX_BY_ID_ROOT.exists():
+        for entry in LINUX_BY_ID_ROOT.iterdir():
+            try:
+                target = entry.resolve()
+            except OSError:
+                continue
+            if target == resolved or target.name == device_name:
+                return entry.name
+
+    for candidate in ("serial", "wwid"):
+        serial_path = LINUX_SYS_BLOCK_ROOT / device_name / "device" / candidate
+        if serial_path.exists():
+            value = serial_path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+
+    return None
+
+
 def _list_linux_devices() -> List[Device]:
     lsblk = shutil.which("lsblk")
     devices: List[Device] = []
@@ -136,6 +167,17 @@ def _list_linux_devices() -> List[Device]:
                     desc = entry.get("model") or entry.get("name") or "disk"
                     rm = bool(entry.get("rm"))
                     tran = entry.get("tran")
+                    serial = entry.get("serial")
+                    if isinstance(serial, str):
+                        identifier = serial.strip() or None
+                    else:
+                        identifier = None
+                    if not identifier:
+                        wwn = entry.get("wwn")
+                        if isinstance(wwn, str):
+                            identifier = wwn.strip() or None
+                    if not identifier:
+                        identifier = _resolve_linux_system_id(path)
                     mounts: List[str] = []
                     if "children" in entry:
                         for child in entry["children"]:
@@ -149,6 +191,7 @@ def _list_linux_devices() -> List[Device]:
                             size=size,
                             is_removable=rm or (tran in {"usb", "mmc"}),
                             bus=tran,
+                            system_id=identifier,
                             mountpoints=tuple(mounts),
                         )
                     )
@@ -169,12 +212,14 @@ def _list_linux_devices() -> List[Device]:
         model = model_path.read_text().strip() if model_path.exists() else device.name
         removable_path = sys_block / device.name / "removable"
         removable = removable_path.read_text().strip() == "1" if removable_path.exists() else False
+        identifier = _resolve_linux_system_id(path)
         devices.append(
             Device(
                 path=path,
                 description=model,
                 size=size,
                 is_removable=removable,
+                system_id=identifier,
             )
         )
     return devices
