@@ -132,8 +132,10 @@ sync without modifying the host.
     --cloud-init ~/sugarkube/cloud-init/user-data.yaml
   ```
   The wrapper stores Markdown/HTML/JSON logs under
-  `~/sugarkube/reports/flash-*/flash-report.*`, capturing hardware IDs, checksum
-  verification, and optional cloud-init diffs. Use
+  `~/sugarkube/reports/flash-*/flash-report.*`, capturing hardware IDs (resolved
+  from `/dev/disk/by-id` symlinks or serials), checksum verification, and
+  optional cloud-init diffs (regression coverage:
+  `tests/flash_pi_media_linux_test.py::test_list_linux_devices_falls_back_to_by_id`). Use
   ```bash
   sudo FLASH_DEVICE=/dev/sdX FLASH_REPORT_ARGS="--cloud-init ~/override.yaml" make flash-pi-report
   ```
