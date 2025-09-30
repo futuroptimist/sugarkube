@@ -49,6 +49,8 @@ MAC_SETUP_CMD ?= $(CURDIR)/scripts/sugarkube_setup.py
 MAC_SETUP_ARGS ?=
 START_HERE_CMD ?= $(CURDIR)/scripts/start_here.py
 START_HERE_ARGS ?=
+DOCS_VERIFY_CMD ?= $(CURDIR)/scripts/docs_verify.sh
+DOCS_VERIFY_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
         clone-ssd docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
@@ -92,8 +94,7 @@ clone-ssd:
 	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
 
 docs-verify:
-	pyspelling -c .spellcheck.yaml
-	linkchecker --no-warnings README.md docs/
+        $(DOCS_VERIFY_CMD) $(DOCS_VERIFY_ARGS)
 
 docs-simplify:
 	$(CURDIR)/scripts/checks.sh --docs-only
