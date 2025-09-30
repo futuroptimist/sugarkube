@@ -250,6 +250,9 @@ Use this checklist to verify you achieved each objective before moving on.
       self-healing response, and documented the outcome in your lab notes.
 
 ## Next Steps
-When you are satisfied with the evidence, continue to [Tutorial 11: Storage Migration and Long-Term
-Maintenance](./index.md#tutorial-11-storage-migration-and-long-term-maintenance) (once published).
-You will clone the boot media, validate SSD migrations, and build a sustainable maintenance cadence.
+Advance to [Tutorial 11: Storage Migration and Long-Term Maintenance](./tutorial-11-storage-migration-maintenance.md)
+to clone the boot media, validate SSD migrations, and build a sustainable maintenance cadence.
+
+> [!NOTE]
+> Automated coverage in `tests/test_tutorial_next_steps.py` keeps this "Next Steps" section aligned
+> with the published tutorial roadmap.

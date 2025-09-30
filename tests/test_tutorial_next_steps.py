@@ -10,6 +10,10 @@ DOCS_DIR = Path(__file__).resolve().parents[1] / "docs" / "tutorials"
 
 TUTORIAL_NEXT_STEPS = (
     (
+        "tutorial-10-first-boot-verification-self-healing.md",
+        "Advance to [Tutorial 11: Storage Migration and Long-Term Maintenance]",
+    ),
+    (
         "tutorial-04-version-control-collaboration.md",
         "Advance to [Tutorial 5: Programming for Operations with Python and Bash]",
     ),
@@ -31,3 +35,7 @@ def test_next_steps_reference_published_tutorial(filename: str, expected_fragmen
         "when it becomes available" not in text
     ), "Next Steps should highlight published follow-up tutorials"
     assert expected_fragment in text, "Next Steps should link directly to the follow-up tutorial"
+    if filename == "tutorial-10-first-boot-verification-self-healing.md":
+        assert (
+            "./tutorial-11-storage-migration-maintenance.md" in text
+        ), "Tutorial 10 should link directly to the published Tutorial 11 guide"
