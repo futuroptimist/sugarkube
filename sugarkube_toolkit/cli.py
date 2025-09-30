@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from . import runner
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+DOWNLOAD_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "download_pi_image.sh"
 
 DOC_VERIFY_COMMANDS: list[list[str]] = [
     ["pyspelling", "-c", ".spellcheck.yaml"],
@@ -39,6 +44,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_parser.set_defaults(handler=_handle_docs_verify)
 
+    pi_parser = subparsers.add_parser(
+        "pi",
+        help="Raspberry Pi image workflows (download, flashing, and validation).",
+    )
+    pi_subparsers = pi_parser.add_subparsers(dest="command")
+
+    download_parser = pi_subparsers.add_parser(
+        "download",
+        help="Download the latest Sugarkube image via scripts/download_pi_image.sh.",
+    )
+    download_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation without executing it.",
+    )
+    download_parser.set_defaults(handler=_handle_pi_download)
+
     return parser
 
 
@@ -51,12 +73,48 @@ def _handle_docs_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _normalize_script_args(args: Sequence[str]) -> list[str]:
+    script_args = list(args)
+    if script_args and script_args[0] == "--":
+        return script_args[1:]
+    return script_args
+
+
+def _handle_pi_download(args: argparse.Namespace) -> int:
+    script = DOWNLOAD_PI_IMAGE_SCRIPT
+    if not script.exists():
+        print(
+            "scripts/download_pi_image.sh is missing. "
+            "Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
+    try:
+        runner.run_commands([command], dry_run=args.dry_run)
+    except runner.CommandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    parsed_args = list(argv) if argv is not None else None
+    args, extras = parser.parse_known_args(parsed_args)
 
     handler = getattr(args, "handler", None)
     if handler is None:
         parser.print_help()
         return 1
+
+    if handler is _handle_pi_download:
+        combined = list(getattr(args, "script_args", []))
+        if extras:
+            combined.extend(extras)
+        args.script_args = combined
+    elif extras:
+        parser.error("unrecognized arguments: " + " ".join(extras))
+
     return handler(args)

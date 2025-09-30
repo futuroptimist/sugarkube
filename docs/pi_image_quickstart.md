@@ -89,6 +89,10 @@ sync without modifying the host.
      repository root to print the same steps.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
      partial downloads and verifies checksums automatically.
+   - Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` shows the
+     underlying helper, then runs `scripts/download_pi_image.sh` with the flags you provide. Pass the
+     same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight to the
+     shell script.
    - Want a hands-off alert when the artifacts land? Run
     ```bash
     make notify-workflow \

@@ -39,6 +39,11 @@ before they can automate common tasks.
 3. ✅ Provide thin wrapper scripts that print a deprecation notice before handing
    off to the new CLI so existing docs remain valid during the transition
    (regression coverage: `tests/test_docs_verify_wrapper.py`).
+4. ✅ Add a `sugarkube pi download` subcommand that proxies to
+   `scripts/download_pi_image.sh`, keeping the first Pi image workflow available
+   from the unified CLI (regression coverage:
+   `tests/test_sugarkube_toolkit_cli.py::test_pi_download_invokes_helper`). Follow-up
+   subcommands will continue wrapping the remaining automation.
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not

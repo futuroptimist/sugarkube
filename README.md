@@ -60,7 +60,10 @@ the docs you will see the term used in both contexts.
   contributor-facing map that ties each helper to the guide that explains it.
   - `download_pi_image.sh` — fetch the latest Pi image via the GitHub CLI; supports `--dry-run`
     metadata checks and reconciles `--dir`/`--output` directories with POSIX `test -ef`
-    instead of `realpath` so macOS-friendly symlinks work without extra tooling
+    instead of `realpath` so macOS-friendly symlinks work without extra tooling.
+    Invoke it from the unified CLI with
+    `python -m sugarkube_toolkit pi download [--dry-run] [helper args...]` when you prefer
+    a consistent entry point across automation helpers.
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
     `.img.sha256`; safe to run via `curl | bash`
