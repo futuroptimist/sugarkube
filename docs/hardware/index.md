@@ -1,3 +1,9 @@
+---
+title: Sugarkube Hardware Index
+persona: hardware
+description: Entry point for hardware safety, build, and maintenance playbooks.
+---
+
 # Sugarkube Hardware Index
 
 Use this page to jump straight to the physical build resources, safety notes,

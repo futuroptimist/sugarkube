@@ -133,8 +133,9 @@ which makes it difficult to filter by persona.
 1. ✅ Introduce [`docs/hardware/index.md`](docs/hardware/index.md) and
    [`docs/software/index.md`](docs/software/index.md) pages that summarize
    relevant guides, tooling, and safety notices.
-2. Tag existing pages with front matter metadata (e.g., `persona: hardware`) so
-   the static site can build filtered navigation panes.
+2. ✅ Tag existing pages with front matter metadata (e.g., `persona: hardware`)
+   so the static site can build filtered navigation panes. Regression coverage:
+   `tests/test_persona_index_docs.py::test_persona_indexes_expose_front_matter_metadata`.
 3. Move duplicated primers into a shared "Fundamentals" section referenced by
    both personas.
 

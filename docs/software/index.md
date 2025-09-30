@@ -1,3 +1,9 @@
+---
+title: Sugarkube Software Index
+persona: software
+description: Entry point for automation, telemetry, and software operations guides.
+---
+
 # Sugarkube Software Index
 
 Navigate software automation, release tooling, and operations guides from a
