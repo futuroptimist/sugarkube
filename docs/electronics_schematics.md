@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Electronics Schematics
 
 The `elex` folder collects KiCad and Fritzing designs used throughout the Sugarkube

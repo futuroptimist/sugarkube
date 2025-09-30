@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Mac mini station
 
 Press-fit saddle cap extension for the Mac mini M4 keyboard station.

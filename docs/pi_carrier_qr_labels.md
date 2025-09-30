@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Pi Carrier QR Labels
 
 Quick-response stickers turn the physical pi_carrier into a living manual. Scan a label and jump straight to the guide you need without digging through bookmarks or the GitHub repo.

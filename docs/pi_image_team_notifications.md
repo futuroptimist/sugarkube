@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Sugarkube Team Notifications
 
 The Pi image now ships an optional `sugarkube-teams` helper that mirrors first boot and SSD clone

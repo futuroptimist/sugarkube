@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Pi Multi-Node Join Rehearsal
 
 Scaling from a single Sugarkube control-plane to a multi-node k3s cluster is smoother when you

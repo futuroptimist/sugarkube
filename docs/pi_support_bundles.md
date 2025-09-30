@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Pi Support Bundles
 
 Gather a point-in-time snapshot of a running Sugarkube Pi when debugging first boot,

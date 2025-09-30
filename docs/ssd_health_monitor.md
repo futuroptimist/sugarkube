@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # SSD Health Monitor
 
 The sugarkube image now ships an opt-in helper that wraps `smartctl` to record SSD health metrics,

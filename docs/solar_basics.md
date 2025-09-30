@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Solar Power Basics
 
 This primer explains how photovoltaic panels convert sunlight into electricity and how to size a simple system.

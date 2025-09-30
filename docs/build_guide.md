@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Build Guide
 
 This project uses 20x20 aluminium extrusion to suspend four 100 W solar panels around a cube.

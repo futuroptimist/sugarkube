@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Sugarkube Automation Script Map
 
 Keep documentation and tooling changes aligned by using this reference when updating

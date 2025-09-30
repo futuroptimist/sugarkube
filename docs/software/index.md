@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Sugarkube Software Index
 
 Navigate software automation, release tooling, and operations guides from a

@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Sugarkube Hardware Index
 
 Use this page to jump straight to the physical build resources, safety notes,

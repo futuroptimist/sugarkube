@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # SSD Recovery and Rollback
 
 When an SSD migration stalls or the cloned drive fails later, falling back to the

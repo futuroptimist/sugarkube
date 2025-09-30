@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Pi Image Telemetry Hooks
 
 The sugarkube image now ships an optional telemetry publisher that reports anonymized verifier

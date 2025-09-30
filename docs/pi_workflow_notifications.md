@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Sugarkube Workflow Artifact Notifications
 
 Track GitHub Actions runs without keeping a browser tab open. The

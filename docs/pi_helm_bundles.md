@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Sugarkube Helm Bundle Hooks
 
 The base image now ships with `sugarkube-helm-bundles.service`, a post-boot helper that

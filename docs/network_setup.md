@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Network Setup
 
 This guide explains how to connect your Pi cluster to a home network.

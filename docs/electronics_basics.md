@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Electronics Essentials
 
 Beginners can start here to learn the fundamentals needed to assemble the power system and troubleshoot issues.

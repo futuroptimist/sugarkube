@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Pi Image Flowcharts
 
 These flowcharts map the sugarkube Pi journey from download to a healthy k3s cluster.

@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Pi Image Quickstart
 
 Build a Raspberry Pi OS image that boots with k3s and the

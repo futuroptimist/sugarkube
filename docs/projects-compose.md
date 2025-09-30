@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # projects-compose Service
 
 The prebuilt Pi image includes Docker Engine, the Compose plugin and a

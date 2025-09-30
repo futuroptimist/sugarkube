@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Start Here
 
 Kick off your Sugarkube journey from a single launchpad. This guide condenses the repository into
