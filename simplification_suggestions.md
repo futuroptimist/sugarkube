@@ -36,8 +36,9 @@ before they can automate common tasks.
    initial `docs verify` subcommand that chains `pyspelling` and `linkchecker`
    (`tests/test_sugarkube_toolkit_cli.py`). Follow-up subcommands will wrap the
    image and Pi automation.
-3. Provide thin wrapper scripts that print a deprecation notice before handing
-   off to the new CLI so existing docs remain valid during the transition.
+3. ✅ Provide thin wrapper scripts that print a deprecation notice before handing
+   off to the new CLI so existing docs remain valid during the transition
+   (regression coverage: `tests/test_docs_verify_wrapper.py`).
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not

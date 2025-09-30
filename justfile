@@ -93,6 +93,11 @@ start_here_cmd := env_var_or_default(
     justfile_directory() + "/scripts/start_here.py",
 )
 start_here_args := env_var_or_default("START_HERE_ARGS", "")
+docs_verify_cmd := env_var_or_default(
+    "DOCS_VERIFY_CMD",
+    justfile_directory() + "/scripts/docs_verify.sh",
+)
+docs_verify_args := env_var_or_default("DOCS_VERIFY_ARGS", "")
 
 _default:
     @just --list
@@ -230,9 +235,7 @@ codespaces-bootstrap:
 # Run spellcheck and linkcheck to keep docs automation aligned
 # Usage: just docs-verify
 docs-verify:
-    pyspelling -c "{{justfile_directory()}}/.spellcheck.yaml"
-    linkchecker --no-warnings "{{justfile_directory()}}/README.md" \
-        "{{justfile_directory()}}/docs/"
+    "{{docs_verify_cmd}}" {{docs_verify_args}}
 
 # Install documentation prerequisites and run spell/link checks without touching
 # code linters. Usage: just simplify-docs
