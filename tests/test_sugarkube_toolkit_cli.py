@@ -128,3 +128,45 @@ def test_pi_download_reports_missing_script(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "scripts/download_pi_image.sh is missing" in captured.err
+
+
+def test_pi_download_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Handler should surface helper failures via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(["bash", "download_pi_image.sh"], returncode=1, stderr="boom")
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["pi", "download", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
+def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding script arguments."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "download", "--dry-run", "--", "--flag", "value"])
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts" / "download_pi_image.sh"),
+            "--flag",
+            "value",
+        ]
+    ]
