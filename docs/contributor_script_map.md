@@ -60,6 +60,12 @@ confirm the quickstart stays accurate.
 | --- | --- | --- | --- |
 | `scripts/render_field_guide_pdf.py` | Build the one-page Pi carrier field guide PDF without extra dependencies. | [Pi Carrier Field Guide](./pi_carrier_field_guide.md), [Pi Image Quickstart](./pi_image_quickstart.md) | `make field-guide`, `just field-guide` |
 
+## Unified CLI wrappers
+
+| Command | Purpose | Primary docs | Supporting automation |
+| --- | --- | --- | --- |
+| `python -m sugarkube_toolkit docs verify [--dry-run]` | Run `pyspelling` and `linkchecker` together, mirroring the contribution workflow expectations. | [simplification_suggestions.md](../simplification_suggestions.md) §1 | `scripts/toolkit/` shared runner, `tests/test_sugarkube_toolkit_cli.py` |
+
 ## Keeping docs and automation in sync
 
 - Update both the script *and* its corresponding guide when behaviour changes.

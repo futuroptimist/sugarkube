@@ -1,0 +1,58 @@
+"""Regression coverage for the unified Sugarkube CLI."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+import pytest
+
+from sugarkube_toolkit import cli, runner
+
+
+def test_docs_verify_invokes_doc_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docs verify should chain the documented lint commands."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["docs", "verify"])
+
+    assert exit_code == 0
+    assert recorded == [
+        ["pyspelling", "-c", ".spellcheck.yaml"],
+        ["linkchecker", "--no-warnings", "README.md", "docs/"],
+    ]
+
+
+def test_docs_verify_supports_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
+    """Dry-run mode should print the commands without executing them."""
+
+    exit_code = cli.main(["docs", "verify", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "pyspelling -c .spellcheck.yaml" in captured.out
+    assert "linkchecker --no-warnings README.md docs/" in captured.out
+
+
+def test_docs_verify_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Command failures should surface an actionable error message."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(["pyspelling"], returncode=3, stderr="missing dictionary")
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["docs", "verify"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "missing dictionary" in captured.err

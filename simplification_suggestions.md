@@ -28,10 +28,14 @@ before they can automate common tasks.
   CLI packaging.
 
 **First steps:**
-1. Group shared logic (logging, argument parsing, artifact handling) into a
-   dedicated Python module such as `scripts/toolkit/`.
-2. Expose a unified `sugarkube` CLI via `python -m sugarkube_toolkit` with
-   subcommands like `image build`, `image flash`, `pi verify`, and `docs verify`.
+1. ✅ Introduced a shared runner under `scripts/toolkit/` that re-exports
+   `sugarkube_toolkit.runner` helpers so both the new CLI and legacy scripts can
+   share subprocess handling (regression coverage:
+   `tests/test_sugarkube_toolkit_cli.py::test_docs_verify_invokes_doc_checks`).
+2. ✅ Expose a unified `sugarkube` CLI via `python -m sugarkube_toolkit` with an
+   initial `docs verify` subcommand that chains `pyspelling` and `linkchecker`
+   (`tests/test_sugarkube_toolkit_cli.py`). Follow-up subcommands will wrap the
+   image and Pi automation.
 3. Provide thin wrapper scripts that print a deprecation notice before handing
    off to the new CLI so existing docs remain valid during the transition.
 
