@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 
-Write-Warning "[DEPRECATED] scripts/docs_verify.ps1 will be removed once callers migrate to 'python -m sugarkube_toolkit docs verify'." 
+Write-Warning "[DEPRECATED] scripts/docs_verify.ps1 will be removed once callers migrate to 'python -m sugarkube_toolkit docs verify'."
 Write-Host "Forwarding to the unified CLI—update your workflow to call it directly." -ForegroundColor Yellow
 
 $python = $env:SUGARKUBE_PYTHON

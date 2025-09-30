@@ -65,6 +65,7 @@ confirm the quickstart stays accurate.
 | Command | Purpose | Primary docs | Supporting automation |
 | --- | --- | --- | --- |
 | `python -m sugarkube_toolkit docs verify [--dry-run]` | Run `pyspelling` and `linkchecker` together, mirroring the contribution workflow expectations. | [simplification_suggestions.md](../simplification_suggestions.md) §1 | `scripts/toolkit/` shared runner, `tests/test_sugarkube_toolkit_cli.py` |
+| `python -m sugarkube_toolkit pi download [--dry-run] [args...]` | Download the latest release via `scripts/download_pi_image.sh` without leaving the unified CLI. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `scripts/download_pi_image.sh`, `tests/test_sugarkube_toolkit_cli.py` |
 | `scripts/docs_verify.sh` / `scripts/docs_verify.ps1` | Print a deprecation notice before forwarding to the unified CLI. | [simplification_suggestions.md](../simplification_suggestions.md) §1 | `tests/test_docs_verify_wrapper.py` |
 
 ## Keeping docs and automation in sync
