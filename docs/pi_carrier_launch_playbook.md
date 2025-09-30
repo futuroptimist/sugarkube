@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Pi Carrier Launch Playbook
 
 The Pi Carrier Launch Playbook stitches every quickstart, builder note, and troubleshooting

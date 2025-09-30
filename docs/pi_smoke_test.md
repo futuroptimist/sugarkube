@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Pi Image Smoke Test Harness
 
 The Pi image now ships with `pi_node_verifier.sh` to validate cluster readiness on the node

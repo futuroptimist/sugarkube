@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Pi Boot & Cluster Troubleshooting Matrix
 
 This quick-reference collects the symptoms we see most often after flashing a

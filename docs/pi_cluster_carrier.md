@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Pi Cluster Carrier
 
 This design mounts three Raspberry Pi 5 boards on a common plate. Each Pi is rotated 45° so the USB and Ethernet ports remain accessible. By default the boards are arranged in a 2×2 grid with one corner empty so the plate fits on printers with a 256 mm build area (e.g. the Bambu Lab A1). Brass heat‑set inserts can be used for durability, or you can print threads directly.

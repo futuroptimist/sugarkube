@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Heat-Set Inserts and Printed Threads
 
 This project relies on M2.5 fasteners for the Pi carrier. You can use brass heat‑set inserts

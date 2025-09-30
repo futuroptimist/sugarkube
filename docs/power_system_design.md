@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Power System Design
 
 This section dives deeper into sizing batteries and choosing a charge controller

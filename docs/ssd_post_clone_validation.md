@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # SSD Post-Clone Validation
 
 When the Raspberry Pi boots from a newly cloned SSD, run the validation helper to confirm

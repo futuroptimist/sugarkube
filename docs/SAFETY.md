@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Safety
 
 This setup uses a 12 V LiFePO4 battery and outdoor wiring. Follow these precautions:

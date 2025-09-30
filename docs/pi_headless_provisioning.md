@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Headless Sugarkube Provisioning
 
 This guide explains how to provision a fresh sugarkube Pi image without attaching a monitor or keyboard. It uses `cloud-init` user data and a small `secrets.env` helper to inject Wi-Fi credentials, SSH keys, and optional API tokens on the first boot.

@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # token.place and dspace Runbook
 
 This runbook walks through building the Raspberry Pi image, flashing it, booting,

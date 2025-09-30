@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Raspberry Pi Cluster Setup
 
 This expanded guide walks through building a three-node Raspberry Pi 5 cluster and installing k3s

@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Pi Image Contributor Guide
 
 This guide links every Pi image automation helper to the documentation that explains how to use it.

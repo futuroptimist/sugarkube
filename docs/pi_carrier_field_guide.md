@@ -1,3 +1,9 @@
+---
+personas:
+  - hardware
+  - software
+---
+
 # Sugarkube Pi Carrier Field Guide
 
 The essentials to go from download to a healthy k3s cluster. Print on US Letter

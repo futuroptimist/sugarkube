@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Docker Repo Deployment Walkthrough
 
 This guide shows how to run any GitHub project that ships a `Dockerfile` or

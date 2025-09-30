@@ -1,3 +1,8 @@
+---
+personas:
+  - software
+---
+
 # Pi Image Builder – Design
 
 ## Goals

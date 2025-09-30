@@ -1,3 +1,8 @@
+---
+personas:
+  - hardware
+---
+
 # Optional LCD Mount
 
 The basic Pi carrier can host a 1602 I²C LCD in the free quadrant.
