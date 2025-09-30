@@ -9,12 +9,14 @@ Use this page to jump straight to the physical build resources, safety notes,
 and maintenance routines that keep the enclosure healthy. Cross-link the guides
 you touch in PRs so hardware and documentation stay in sync.
 
+## Shared Fundamentals
+- [Sugarkube Fundamentals](../fundamentals/index.md) — review background primers
+  once before diving into persona-specific hardware checklists.
+
 ## Safety and Planning
 - [SAFETY.md](../SAFETY.md) — wiring, battery handling, and workbench checklists.
 - [power_system_design.md](../power_system_design.md) — plan panel, charge controller,
   and battery sizing.
-- [electronics_basics.md](../electronics_basics.md) — refresh core terminology before
-  soldering or probing circuits.
 
 ## Build Guides and Fixtures
 - [build_guide.md](../build_guide.md) — step-by-step frame assembly and wiring.

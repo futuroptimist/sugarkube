@@ -9,6 +9,10 @@ Navigate software automation, release tooling, and operations guides from a
 single hub. Each section links back to the docs that explain how the Pi image
 and supporting services stay healthy.
 
+## Shared Fundamentals
+- [Sugarkube Fundamentals](../fundamentals/index.md) — keep core concepts fresh
+  so automation guides can skip repeated primers.
+
 ## Image Tooling
 - [pi_image_quickstart.md](../pi_image_quickstart.md) — build, flash, and verify the
   published image.

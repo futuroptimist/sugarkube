@@ -142,8 +142,9 @@ which makes it difficult to filter by persona.
    `personas: [hardware, software]`) so the static site can build filtered
    navigation panes (regression coverage:
    `tests/test_doc_personas.py::test_doc_front_matter_personas`).
-3. Move duplicated primers into a shared "Fundamentals" section referenced by
-   both personas.
+3. ✅ Move duplicated primers into a shared "Fundamentals" section referenced by
+   both personas (`docs/fundamentals/index.md`; regression coverage:
+   `tests/test_doc_fundamentals.py`).
 
 **Safeguards:**
 - Maintain canonical URLs by adding redirect stubs or shortlinks when pages move.
