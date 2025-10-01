@@ -12,6 +12,7 @@ from . import runner
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 DOWNLOAD_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "download_pi_image.sh"
+FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
 
 DOC_VERIFY_COMMANDS: list[list[str]] = [
     ["pyspelling", "-c", ".spellcheck.yaml"],
@@ -61,6 +62,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     download_parser.set_defaults(handler=_handle_pi_download)
 
+    flash_parser = pi_subparsers.add_parser(
+        "flash",
+        help="Flash the Sugarkube image via scripts/flash_pi_media.sh.",
+    )
+    flash_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the flashing helper invocation without executing it.",
+    )
+    flash_parser.set_defaults(handler=_handle_pi_flash)
+
     return parser
 
 
@@ -99,6 +111,25 @@ def _handle_pi_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_pi_flash(args: argparse.Namespace) -> int:
+    script = FLASH_PI_MEDIA_SCRIPT
+    if not script.exists():
+        print(
+            "scripts/flash_pi_media.sh is missing. "
+            "Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
+    try:
+        runner.run_commands([command], dry_run=args.dry_run)
+    except runner.CommandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     parsed_args = list(argv) if argv is not None else None
@@ -109,7 +140,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    if handler is _handle_pi_download:
+    if handler in {_handle_pi_download, _handle_pi_flash}:
         combined = list(getattr(args, "script_args", []))
         if extras:
             combined.extend(extras)

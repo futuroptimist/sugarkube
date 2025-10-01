@@ -157,6 +157,11 @@ sync without modifying the host.
   The helper auto-detects removable drives, streams `.img` or `.img.xz`
   without temporary files, verifies the written bytes with SHA-256, and
   powers the media off when complete. On Windows, run the PowerShell wrapper:
+  Prefer the unified CLI? Preview the helper with
+  `python -m sugarkube_toolkit pi flash --dry-run -- --image ~/sugarkube/images/sugarkube.img --device /dev/sdX --assume-yes`,
+  then drop `--dry-run` when you're ready. Everything after the `--` flows
+  straight to `scripts/flash_pi_media.sh`, so `--cloud-init` and other
+  documented flags work unchanged.
   ```powershell
   pwsh -File scripts/flash_pi_media.ps1 --image $env:USERPROFILE\sugarkube\images\sugarkube.img --device \\.\PhysicalDrive1
   ```
