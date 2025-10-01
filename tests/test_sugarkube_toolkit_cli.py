@@ -170,3 +170,115 @@ def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
             "value",
         ]
     ]
+
+
+def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pi flash should wrap the flashing helper script."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "flash", "--dry-run"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"
+
+    assert exit_code == 0
+    assert recorded == [["bash", str(expected_script)]]
+
+
+def test_pi_flash_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forward CLI arguments to the flash helper for docs parity."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "flash",
+            "--dry-run",
+            "--image",
+            "~/sugarkube/images/sugarkube.img",
+            "--device",
+            "/dev/sdX",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"),
+            "--image",
+            "~/sugarkube/images/sugarkube.img",
+            "--device",
+            "/dev/sdX",
+        ]
+    ]
+
+
+def test_pi_flash_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing flash helper scripts should surface an actionable error."""
+
+    monkeypatch.setattr(cli, "FLASH_PI_MEDIA_SCRIPT", Path("/nonexistent/flash_pi_media.sh"))
+
+    exit_code = cli.main(["pi", "flash", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "scripts/flash_pi_media.sh is missing" in captured.err
+
+
+def test_pi_flash_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Flash handler should surface helper failures via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(["bash", "flash_pi_media.sh"], returncode=1, stderr="boom")
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["pi", "flash", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
+def test_pi_flash_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding flash args."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "flash", "--dry-run", "--", "--assume-yes"])
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"),
+            "--assume-yes",
+        ]
+    ]

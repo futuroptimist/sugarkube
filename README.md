@@ -112,6 +112,14 @@ shortcuts so GitHub
 Codespaces users can install prerequisites and flash media without additional shell glue.
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
+Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` previews the
+release helper. Reuse the streaming helper via:
+
+```bash
+python -m sugarkube_toolkit pi flash --dry-run -- --image ~/sugarkube/images/sugarkube.img --device /dev/sdX
+```
+
+Drop `--dry-run` when you're ready to write media.
 
 Prefer a guided experience? Open [docs/flash-helper/](docs/flash-helper/) to paste a workflow run
 URL and receive OS-specific download, verification, and flashing steps. The same logic is also

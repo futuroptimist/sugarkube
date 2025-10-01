@@ -44,6 +44,9 @@ before they can automate common tasks.
    from the unified CLI (regression coverage:
    `tests/test_sugarkube_toolkit_cli.py::test_pi_download_invokes_helper`). Follow-up
    subcommands will continue wrapping the remaining automation.
+5. ✅ Extend the CLI with `sugarkube pi flash` so contributors can stream images
+   without leaving the unified entrypoint (regression coverage:
+   `tests/test_sugarkube_toolkit_cli.py::test_pi_flash_invokes_helper`).
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not
