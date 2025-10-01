@@ -116,7 +116,6 @@ Check off each task when you have evidence stored in your notes folder.
 > before touching it. When in doubt, ask in the Raspberry Pi forums with a photo attached.
 
 ## Next Steps
-Continue with the roadmap by reading
-[Tutorial 2: Navigating Linux and the Terminal](./index.md#tutorial-2-navigating-linux-and-the-terminal)
-once it is published. Bring your terminal transcript and safety notes—they will inform the follow-up
-lessons on permissions, editors, and scripting.
+Continue with the roadmap by reading [Tutorial 2: Navigating Linux and the Terminal](
+./index.md#tutorial-2-navigating-linux-and-the-terminal). Bring your terminal transcript and safety
+notes—they will inform the follow-up lessons on permissions, editors, and scripting.
