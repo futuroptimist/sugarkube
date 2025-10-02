@@ -68,6 +68,20 @@ SMOKE_ARGS="pi-a.local" just smoke-test-pi
 Both helpers call the Python harness, so they support the same flags as invoking the script
 directly.
 
+## Unified CLI entrypoint
+
+Prefer the consolidated Sugarkube CLI? Run the smoke test via the new `sugarkube pi smoke`
+subcommand:
+
+```bash
+python -m sugarkube_toolkit pi smoke --dry-run -- --json pi-a.local pi-b.local
+```
+
+Drop `--dry-run` to run the verifier immediately. Everything after the standalone `--` flows to
+`scripts/pi_smoke_test.py`, so existing documentation continues to apply. Regression coverage lives
+in `tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_invokes_helper` and the surrounding
+`test_pi_smoke_*` cases.
+
 ## Test coverage
 
 Automated assurance for the CLI lives in
