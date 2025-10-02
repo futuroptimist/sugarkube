@@ -47,6 +47,9 @@ before they can automate common tasks.
 5. ✅ Extend the CLI with `sugarkube pi flash` so contributors can stream images
    without leaving the unified entrypoint (regression coverage:
    `tests/test_sugarkube_toolkit_cli.py::test_pi_flash_invokes_helper`).
+6. ✅ Wrap the Pi smoke test harness behind `sugarkube pi smoke` so the unified CLI
+   now covers download, flashing, and post-boot verification (regression
+   coverage: `tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_invokes_helper`).
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not
