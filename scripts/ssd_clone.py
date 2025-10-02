@@ -11,15 +11,20 @@ import secrets
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 STATE_DIR = Path("/var/log/sugarkube")
 STATE_FILE = STATE_DIR / "ssd-clone.state.json"
 DONE_FILE = STATE_DIR / "ssd-clone.done"
 MOUNT_ROOT = Path("/mnt/ssd-clone")
 ENV_TARGET = "SUGARKUBE_SSD_CLONE_TARGET"
+ENV_WAIT = "SUGARKUBE_SSD_CLONE_WAIT_SECS"
+ENV_POLL = "SUGARKUBE_SSD_CLONE_POLL_SECS"
+DEFAULT_WAIT_SECS = 900
+DEFAULT_POLL_SECS = 10
 
 
 class CommandError(RuntimeError):
@@ -173,6 +178,40 @@ def device_size_bytes(device: str) -> int:
     return int(result.stdout.strip())
 
 
+def _read_wait_seconds(value: Optional[int]) -> int:
+    if value is not None:
+        wait = value
+    else:
+        raw = os.environ.get(ENV_WAIT)
+        if raw in (None, ""):
+            wait = DEFAULT_WAIT_SECS
+        else:
+            try:
+                wait = int(raw)
+            except ValueError as error:
+                raise SystemExit(f"{ENV_WAIT} must be an integer (received {raw!r}).") from error
+    if wait < 0:
+        raise SystemExit(f"{ENV_WAIT} must be non-negative (received {wait}).")
+    return wait
+
+
+def _read_poll_seconds(value: Optional[int]) -> int:
+    if value is not None:
+        poll = value
+    else:
+        raw = os.environ.get(ENV_POLL)
+        if raw in (None, ""):
+            poll = DEFAULT_POLL_SECS
+        else:
+            try:
+                poll = int(raw)
+            except ValueError as error:
+                raise SystemExit(f"{ENV_POLL} must be an integer (received {raw!r}).") from error
+    if poll <= 0:
+        raise SystemExit(f"{ENV_POLL} must be greater than zero (received {poll}).")
+    return poll
+
+
 def resolve_env_target() -> Optional[str]:
     target = os.environ.get(ENV_TARGET)
     if not target:
@@ -189,22 +228,21 @@ def resolve_env_target() -> Optional[str]:
     return target
 
 
-def auto_select_target() -> str:
-    env_target = resolve_env_target()
-    if env_target:
-        return env_target
-    source_disk = os.path.realpath(parent_disk(resolve_mount_device("/")))
-    source_size = device_size_bytes(source_disk)
+def _pick_best_candidate(
+    source_disk: str, source_size: int
+) -> Optional[tuple[int, int, str, dict[str, object]]]:
     data = lsblk_json(["NAME", "KNAME", "TYPE", "TRAN", "HOTPLUG", "SIZE", "MODEL"])
     blockdevices = data.get("blockdevices", [])
     if not isinstance(blockdevices, list):
-        raise SystemExit("Unexpected lsblk JSON structure; expected a list of block devices.")
-    best: Optional[Tuple[int, int, str, Dict[str, object]]] = None
+        raise SystemExit("Unexpected lsblk JSON structure: blockdevices should be a list.")
+    best: Optional[tuple[int, int, str, dict[str, object]]] = None
     for entry in blockdevices:
+        if not isinstance(entry, dict):
+            continue
         if str(entry.get("type")) != "disk":
             continue
         name = entry.get("kname") or entry.get("name")
-        if not name:
+        if not isinstance(name, str) or not name:
             continue
         device = f"/dev/{name}"
         real = os.path.realpath(device)
@@ -212,7 +250,6 @@ def auto_select_target() -> str:
             continue
         size = int(entry.get("size") or 0)
         if size < source_size:
-            # Skip disks that cannot hold the source contents.
             continue
         hotplug = int(entry.get("hotplug") or 0)
         tran = str(entry.get("tran") or "").lower()
@@ -223,23 +260,48 @@ def auto_select_target() -> str:
             score += 40
         if "ssd" in str(entry.get("model") or "").lower():
             score += 5
-        # Prefer larger disks to leave headroom.
         score += min(size // (1024**3), 100)
         candidate = (score, size, device, entry)
         if best is None or candidate > best:
             best = candidate
-    if not best:
-        raise SystemExit(
-            "Unable to automatically determine a target disk. "
-            "Attach an SSD and retry or set SUGARKUBE_SSD_CLONE_TARGET."
-        )
-    device = best[2]
-    print(
-        "Auto-selected clone target:",
-        device,
-        f"(model={best[3].get('model', 'unknown')}, size={best[1]} bytes)",
+    return best
+
+
+def auto_select_target(*, wait_secs: Optional[int] = None, poll_secs: Optional[int] = None) -> str:
+    env_target = resolve_env_target()
+    if env_target:
+        return env_target
+    wait = _read_wait_seconds(wait_secs)
+    poll = _read_poll_seconds(poll_secs)
+    source_disk = os.path.realpath(parent_disk(resolve_mount_device("/")))
+    source_size = device_size_bytes(source_disk)
+    failure_message = (
+        "Unable to automatically determine a target disk. "
+        "Attach an SSD and retry or set SUGARKUBE_SSD_CLONE_TARGET."
     )
-    return device
+    deadline = None if wait == 0 else time.monotonic() + wait
+    waiting_announced = False
+    while True:
+        best = _pick_best_candidate(source_disk, source_size)
+        if best:
+            device = best[2]
+            print(
+                "Auto-selected clone target:",
+                device,
+                f"(model={best[3].get('model', 'unknown')}, size={best[1]} bytes)",
+            )
+            return device
+        if wait == 0:
+            raise SystemExit(failure_message)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise SystemExit(failure_message)
+        if not waiting_announced:
+            print(
+                "Waiting for an SSD to appear before cloning. "
+                f"Polling every {poll} seconds (timeout {wait} seconds)."
+            )
+            waiting_announced = True
+        time.sleep(poll)
 
 
 def load_state(ctx: CloneContext) -> None:

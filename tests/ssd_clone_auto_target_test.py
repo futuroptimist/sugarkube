@@ -17,12 +17,18 @@ SPEC.loader.exec_module(ssd_clone)  # type: ignore[attr-defined]
 
 @pytest.fixture(autouse=True)
 def _clear_env():
-    original = os.environ.pop(ssd_clone.ENV_TARGET, None)
+    original_target = os.environ.pop(ssd_clone.ENV_TARGET, None)
+    original_wait = os.environ.pop(ssd_clone.ENV_WAIT, None)
+    original_poll = os.environ.pop(ssd_clone.ENV_POLL, None)
     try:
         yield
     finally:
-        if original is not None:
-            os.environ[ssd_clone.ENV_TARGET] = original
+        if original_target is not None:
+            os.environ[ssd_clone.ENV_TARGET] = original_target
+        if original_wait is not None:
+            os.environ[ssd_clone.ENV_WAIT] = original_wait
+        if original_poll is not None:
+            os.environ[ssd_clone.ENV_POLL] = original_poll
 
 
 @pytest.fixture
@@ -86,6 +92,7 @@ def test_resolve_env_target_rejects_source_disk(monkeypatch):
 
 def test_auto_select_target_requires_list(monkeypatch, fake_disk_layout):
     monkeypatch.setattr(ssd_clone, "lsblk_json", lambda _: {"blockdevices": {}})
+    os.environ[ssd_clone.ENV_WAIT] = "0"
     with pytest.raises(SystemExit, match="Unexpected lsblk JSON structure"):
         ssd_clone.auto_select_target()
 
@@ -98,6 +105,7 @@ def test_auto_select_target_errors_without_candidates(monkeypatch, fake_disk_lay
             "blockdevices": [{"name": "mmcblk0", "type": "disk", "size": 32 * 1024 * 1024 * 1024}]
         },
     )
+    os.environ[ssd_clone.ENV_WAIT] = "0"
     with pytest.raises(SystemExit, match="Unable to automatically determine"):
         ssd_clone.auto_select_target()
 
@@ -178,6 +186,98 @@ def test_auto_select_target_skips_non_viable(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert target == "/dev/sdc"
     assert "Auto-selected clone target: /dev/sdc" in captured.out
+
+
+def test_auto_select_target_waits_for_hotplug(monkeypatch):
+    monkeypatch.setattr(ssd_clone, "resolve_env_target", lambda: None)
+    monkeypatch.setattr(ssd_clone, "resolve_mount_device", lambda _: "/dev/mmcblk0p2")
+    monkeypatch.setattr(ssd_clone, "parent_disk", lambda _: "/dev/mmcblk0")
+    monkeypatch.setattr(ssd_clone.os.path, "realpath", lambda path: path)
+    monkeypatch.setattr(ssd_clone, "device_size_bytes", lambda _: 16 * 1024 * 1024 * 1024)
+
+    responses = [
+        {"blockdevices": [{"name": "mmcblk0", "type": "disk", "size": 16 * 1024 * 1024 * 1024}]},
+        {
+            "blockdevices": [
+                {"name": "mmcblk0", "type": "disk", "size": 16 * 1024 * 1024 * 1024},
+                {
+                    "name": "sda",
+                    "type": "disk",
+                    "size": 64 * 1024 * 1024 * 1024,
+                    "hotplug": 1,
+                    "tran": "usb",
+                    "model": "HotplugSSD",
+                },
+            ]
+        },
+    ]
+    call_counter = {"count": 0}
+
+    def fake_lsblk(_fields):
+        index = min(call_counter["count"], len(responses) - 1)
+        call_counter["count"] += 1
+        return responses[index]
+
+    monkeypatch.setattr(ssd_clone, "lsblk_json", fake_lsblk)
+
+    timeline = iter([0.0, 0.5, 1.0, 1.5])
+    monkeypatch.setattr(ssd_clone.time, "monotonic", lambda: next(timeline))
+    sleeps: list[float] = []
+    monkeypatch.setattr(ssd_clone.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    target = ssd_clone.auto_select_target(wait_secs=2, poll_secs=1)
+
+    assert target == "/dev/sda"
+    assert sleeps == [1]
+
+
+def test_auto_select_target_timeout(monkeypatch):
+    monkeypatch.setattr(ssd_clone, "resolve_env_target", lambda: None)
+    monkeypatch.setattr(ssd_clone, "resolve_mount_device", lambda _: "/dev/mmcblk0p2")
+    monkeypatch.setattr(ssd_clone, "parent_disk", lambda _: "/dev/mmcblk0")
+    monkeypatch.setattr(ssd_clone.os.path, "realpath", lambda path: path)
+    monkeypatch.setattr(ssd_clone, "device_size_bytes", lambda _: 16 * 1024 * 1024 * 1024)
+    monkeypatch.setattr(
+        ssd_clone,
+        "lsblk_json",
+        lambda _fields: {
+            "blockdevices": [
+                {
+                    "name": "mmcblk0",
+                    "type": "disk",
+                    "size": 16 * 1024 * 1024 * 1024,
+                }
+            ]
+        },
+    )
+
+    class FakeClock:
+        def __init__(self):
+            self.values = [0.0, 1.0, 2.1]
+
+        def monotonic(self):
+            return self.values.pop(0)
+
+        def sleep(self, _seconds):
+            pass
+
+    clock = FakeClock()
+    monkeypatch.setattr(ssd_clone.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(ssd_clone.time, "sleep", clock.sleep)
+
+    with pytest.raises(SystemExit, match="Unable to automatically determine"):
+        ssd_clone.auto_select_target(wait_secs=2, poll_secs=1)
+
+
+def test_auto_select_target_rejects_invalid_env(monkeypatch):
+    monkeypatch.setattr(ssd_clone, "resolve_env_target", lambda: None)
+    os.environ[ssd_clone.ENV_WAIT] = "not-a-number"
+    with pytest.raises(SystemExit, match=ssd_clone.ENV_WAIT):
+        ssd_clone.auto_select_target()
+    os.environ[ssd_clone.ENV_WAIT] = "0"
+    os.environ[ssd_clone.ENV_POLL] = "0"
+    with pytest.raises(SystemExit, match=ssd_clone.ENV_POLL):
+        ssd_clone.auto_select_target()
 
 
 def make_context(tmp_path, **overrides):

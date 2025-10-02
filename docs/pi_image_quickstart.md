@@ -361,7 +361,11 @@ flags (for example, `--dry-run`) with `SUGARKUBE_SSD_CLONE_EXTRA_ARGS`. Both env
 variables are respected by the systemd unit and by manual invocations of
 `scripts/ssd_clone.py --auto-target`. Adjust the discovery window with
 `SUGARKUBE_SSD_CLONE_WAIT_SECS` (default: 900 seconds) or poll frequency with
-`SUGARKUBE_SSD_CLONE_POLL_SECS` when slower storage bridges are involved.
+`SUGARKUBE_SSD_CLONE_POLL_SECS` when slower storage bridges are involved
+(regression coverage:
+`tests/ssd_clone_auto_target_test.py::test_auto_select_target_waits_for_hotplug`
+and
+`tests/ssd_clone_auto_target_test.py::test_auto_select_target_timeout`).
 
 ### Clone the SD card to SSD with confidence
 
