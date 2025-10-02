@@ -149,6 +149,9 @@ sync without modifying the host.
   `python -m sugarkube_toolkit pi report --dry-run -- --image ~/sugarkube/images/sugarkube.img.xz --device /dev/sdX --assume-yes`,
   then drop `--dry-run` when you're ready. Everything after the `--` flows to
   `scripts/flash_pi_media_report.py`, so `--cloud-init` and other documented flags work unchanged.
+  Regression coverage:
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`
+  (plus the neighbouring `test_pi_report_*` cases) ensures the CLI forwards arguments exactly as documented.
   > [!TIP]
   > Need to confirm which removable drives are visible before flashing? Run
   > `python3 scripts/flash_pi_media_report.py --list-devices` without
