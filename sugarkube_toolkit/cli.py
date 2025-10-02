@@ -11,6 +11,7 @@ from . import runner
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+CHECKS_SCRIPT = SCRIPTS_DIR / "checks.sh"
 DOWNLOAD_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "download_pi_image.sh"
 FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
 PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
@@ -209,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    if handler in {_handle_pi_download, _handle_pi_flash, _handle_pi_smoke}:
+    if handler in {_handle_docs_simplify, _handle_pi_download, _handle_pi_flash, _handle_pi_smoke}:
         combined = list(getattr(args, "script_args", []))
         if extras:
             combined.extend(extras)
