@@ -95,7 +95,9 @@ Both invocations call `scripts/publish_telemetry.py`, which automatically locate
 ### Capture Markdown snapshots
 
 Set `SUGARKUBE_TELEMETRY_MARKDOWN_DIR` or pass `--markdown-dir docs/status/metrics` to archive each
-payload as a Markdown snapshot alongside your dashboards. The helper writes
+payload as a Markdown snapshot alongside your dashboards. Store the results in
+[`docs/status/metrics/`](./status/metrics/README.md) so your status reports can
+reference the latest exports. The helper writes
 `telemetry-<hash>.md` files that summarize verifier counts, failed checks, environment metadata, and
 errors so changes are easy to track during retros. Regression coverage lives in
 `tests/test_publish_telemetry.py::test_main_writes_markdown_snapshot`.
