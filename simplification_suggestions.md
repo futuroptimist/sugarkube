@@ -47,6 +47,10 @@ before they can automate common tasks.
 5. ✅ Extend the CLI with `sugarkube pi flash` so contributors can stream images
    without leaving the unified entrypoint (regression coverage:
    `tests/test_sugarkube_toolkit_cli.py::test_pi_flash_invokes_helper`).
+6. ✅ Add `sugarkube docs simplify` to run `scripts/checks.sh --docs-only` from the
+   unified CLI, keeping docs-only automation alongside other helpers (regression
+   coverage:
+   `tests/test_sugarkube_toolkit_cli.py::test_docs_simplify_invokes_checks_helper`).
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not
