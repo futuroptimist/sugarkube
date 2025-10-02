@@ -60,6 +60,88 @@ def test_docs_verify_surfaces_failures(
     assert "missing dictionary" in captured.err
 
 
+def test_docs_simplify_invokes_checks_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docs simplify should call the docs-only checks helper."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["docs", "simplify"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
+
+    assert exit_code == 0
+    assert recorded == [["bash", str(expected_script), "--docs-only"]]
+
+
+def test_docs_simplify_supports_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
+    """Dry-run mode should surface the forwarded helper invocation."""
+
+    exit_code = cli.main(["docs", "simplify", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "bash" in captured.out
+    assert "scripts/checks.sh --docs-only" in captured.out
+
+
+def test_docs_simplify_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding helper args."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["docs", "simplify", "--dry-run", "--", "--skip-install"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "checks.sh"
+
+    assert exit_code == 0
+    assert recorded == [["bash", str(expected_script), "--docs-only", "--skip-install"]]
+
+
+def test_docs_simplify_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing helper scripts should yield a clear error."""
+
+    monkeypatch.setattr(cli, "CHECKS_SCRIPT", Path("/nonexistent/checks.sh"))
+
+    exit_code = cli.main(["docs", "simplify"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "scripts/checks.sh is missing" in captured.err
+
+
+def test_docs_simplify_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Helper failures should bubble up through stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(["bash", "checks.sh"], returncode=1, stderr="boom")
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["docs", "simplify"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
 def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi download should wrap the documented helper script."""
 

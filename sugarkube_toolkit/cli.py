@@ -11,6 +11,7 @@ from . import runner
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+CHECKS_SCRIPT = SCRIPTS_DIR / "checks.sh"
 DOWNLOAD_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "download_pi_image.sh"
 FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
 PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
@@ -45,6 +46,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the commands without executing them.",
     )
     verify_parser.set_defaults(handler=_handle_docs_verify)
+
+    simplify_parser = docs_subparsers.add_parser(
+        "simplify",
+        help="Install docs prerequisites and run scripts/checks.sh --docs-only.",
+    )
+    simplify_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation without executing it.",
+    )
+    simplify_parser.set_defaults(handler=_handle_docs_simplify)
 
     pi_parser = subparsers.add_parser(
         "pi",
@@ -91,6 +103,29 @@ def build_parser() -> argparse.ArgumentParser:
 def _handle_docs_verify(args: argparse.Namespace) -> int:
     try:
         runner.run_commands(DOC_VERIFY_COMMANDS, dry_run=args.dry_run)
+    except runner.CommandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_docs_simplify(args: argparse.Namespace) -> int:
+    script = CHECKS_SCRIPT
+    if not script.exists():
+        print(
+            "scripts/checks.sh is missing. Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = [
+        "bash",
+        str(script),
+        "--docs-only",
+        *_normalize_script_args(getattr(args, "script_args", [])),
+    ]
+    try:
+        runner.run_commands([command], dry_run=args.dry_run)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -175,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    if handler in {_handle_pi_download, _handle_pi_flash, _handle_pi_smoke}:
+    if handler in {_handle_docs_simplify, _handle_pi_download, _handle_pi_flash, _handle_pi_smoke}:
         combined = list(getattr(args, "script_args", []))
         if extras:
             combined.extend(extras)
