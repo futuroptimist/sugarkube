@@ -327,10 +327,10 @@ Use this list to confirm you met every objective before moving on:
 - [ ] Authored a monthly maintenance checklist and synced supporting logs to your lab notebook.
 
 ## Next Steps
-Continue to [Tutorial 12: Contributing New Features and Automation](./tutorial-12-contributing-new-features-and-automation.md)
+Continue to [Tutorial 12: Contributing New Features and Automation](./tutorial-12-contributing-new-features-automation.md)
 to learn how to propose improvements, extend automation, and collaborate on future Sugarkube
 releases.
 
 > [!NOTE]
 > Automated coverage in `tests/test_tutorial_11_12_next_steps.py` keeps this section pointing to the
-> published Tutorial 12 guide.
+> published Tutorial 12 guide, and `tests/test_tutorial_next_steps_links.py` ensures the link resolves.
