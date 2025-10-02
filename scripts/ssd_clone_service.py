@@ -68,7 +68,9 @@ def pick_target() -> Optional[str]:
         log(f"Environment target {AUTO_TARGET} missing; waiting for the device to appear.")
         return None
     try:
-        return ssd_clone.auto_select_target()
+        # Let the service control its own polling loop so each iteration stays
+        # responsive. The helper should not block waiting for devices here.
+        return ssd_clone.auto_select_target(wait_secs=0)
     except SystemExit as error:
         log(str(error))
         return None
