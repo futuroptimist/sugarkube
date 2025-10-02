@@ -145,11 +145,17 @@ sync without modifying the host.
   ```
   or the equivalent `just flash-pi-report` recipe to combine install → flash →
   report in one go.
+  Prefer the unified CLI? Preview the helper with
+  `python -m sugarkube_toolkit pi report --dry-run -- --image ~/sugarkube/images/sugarkube.img.xz --device /dev/sdX --assume-yes`,
+  then drop `--dry-run` when you're ready. Everything after the `--` flows to
+  `scripts/flash_pi_media_report.py`, so `--cloud-init` and other documented flags work unchanged.
   > [!TIP]
   > Need to confirm which removable drives are visible before flashing? Run
   > `python3 scripts/flash_pi_media_report.py --list-devices` without
   > specifying `--image`; regression coverage lives in
   > `tests/flash_pi_media_report_test.py::test_list_devices_without_image_exits_cleanly`.
+  > Prefer the CLI wrapper? Run
+  > `python -m sugarkube_toolkit pi report --dry-run -- --list-devices` for the same preview.
 - Stream the expanded image (or the `.img.xz`) directly to removable media:
   ```bash
   sudo ./scripts/flash_pi_media.sh --image ~/sugarkube/images/sugarkube.img --device /dev/sdX --assume-yes
