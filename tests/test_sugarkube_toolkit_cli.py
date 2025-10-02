@@ -285,8 +285,8 @@ def test_pi_flash_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> Non
     ]
 
 
-def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    """pi report should wrap the flash report helper script."""
+def test_pi_smoke_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pi smoke should wrap the smoke test helper script."""
 
     recorded: list[list[str]] = []
 
@@ -297,17 +297,16 @@ def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
-    exit_code = cli.main(["pi", "report", "--dry-run"])
+    exit_code = cli.main(["pi", "smoke", "--dry-run"])
 
-    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"
-    expected_interpreter = sys.executable or "python3"
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "pi_smoke_test.py"
 
     assert exit_code == 0
-    assert recorded == [[expected_interpreter, str(expected_script)]]
+    assert recorded == [[sys.executable, str(expected_script)]]
 
 
-def test_pi_report_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Forward CLI arguments to the flash report helper for docs parity."""
+def test_pi_smoke_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forward CLI arguments to the smoke helper for docs parity."""
 
     recorded: list[list[str]] = []
 
@@ -321,37 +320,59 @@ def test_pi_report_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> 
     exit_code = cli.main(
         [
             "pi",
-            "report",
+            "smoke",
             "--dry-run",
-            "--image",
-            "~/sugarkube/images/sugarkube.img",
-            "--device",
-            "/dev/sdX",
-            "--report",
-            "~/reports/flash.md",
+            "--json",
+            "pi-a.local",
+            "pi-b.local",
         ]
     )
-
-    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"
-    expected_interpreter = sys.executable or "python3"
 
     assert exit_code == 0
     assert recorded == [
         [
-            expected_interpreter,
-            str(expected_script),
-            "--image",
-            "~/sugarkube/images/sugarkube.img",
-            "--device",
-            "/dev/sdX",
-            "--report",
-            "~/reports/flash.md",
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "pi_smoke_test.py"),
+            "--json",
+            "pi-a.local",
+            "pi-b.local",
         ]
     ]
 
 
-def test_pi_report_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A leading `--` should be stripped before forwarding report args."""
+def test_pi_smoke_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing smoke helper script should surface an actionable error."""
+
+    monkeypatch.setattr(cli, "PI_SMOKE_TEST_SCRIPT", Path("/nonexistent/pi_smoke_test.py"))
+
+    exit_code = cli.main(["pi", "smoke", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "scripts/pi_smoke_test.py is missing" in captured.err
+
+
+def test_pi_smoke_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Smoke handler should surface helper failures via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError([sys.executable, "pi_smoke_test.py"], returncode=1, stderr="boom")
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["pi", "smoke", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
+def test_pi_smoke_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding smoke args."""
 
     recorded: list[list[str]] = []
 
@@ -362,47 +383,13 @@ def test_pi_report_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
-    exit_code = cli.main(["pi", "report", "--dry-run", "--", "--assume-yes"])
-
-    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"
-    expected_interpreter = sys.executable or "python3"
+    exit_code = cli.main(["pi", "smoke", "--dry-run", "--", "--json"])
 
     assert exit_code == 0
-    assert recorded == [[expected_interpreter, str(expected_script), "--assume-yes"]]
-
-
-def test_pi_report_reports_missing_script(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Missing flash report helper scripts should surface an actionable error."""
-
-    monkeypatch.setattr(
-        cli,
-        "FLASH_PI_MEDIA_REPORT_SCRIPT",
-        Path("/nonexistent/flash_pi_media_report.py"),
-    )
-
-    exit_code = cli.main(["pi", "report", "--dry-run"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "scripts/flash_pi_media_report.py is missing" in captured.err
-
-
-def test_pi_report_surfaces_failures(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Flash report handler should surface helper failures via stderr and exit code."""
-
-    def boom(*_args, **_kwargs):
-        raise runner.CommandError(
-            ["python", "flash_pi_media_report.py"], returncode=1, stderr="boom"
-        )
-
-    monkeypatch.setattr(runner, "run_commands", boom)
-
-    exit_code = cli.main(["pi", "report", "--dry-run"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "boom" in captured.err
+    assert recorded == [
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "pi_smoke_test.py"),
+            "--json",
+        ]
+    ]
