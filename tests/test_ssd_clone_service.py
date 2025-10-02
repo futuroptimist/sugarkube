@@ -90,7 +90,7 @@ def test_ensure_root_requires_privileges(monkeypatch):
 def test_pick_target_auto_select_error(monkeypatch, capsys):
     monkeypatch.setattr(MODULE, "AUTO_TARGET", None)
 
-    def fake_auto_select():
+    def fake_auto_select(*_args, **_kwargs):
         raise SystemExit("no target")
 
     monkeypatch.setattr(MODULE.ssd_clone, "auto_select_target", fake_auto_select)
@@ -138,7 +138,7 @@ def test_ssd_clone_service_success(monkeypatch, tmp_path):
     monkeypatch.setattr(
         MODULE.ssd_clone,
         "auto_select_target",
-        lambda: str(target_path),
+        lambda *_args, **_kwargs: str(target_path),
     )
 
     def fake_run(command, check=False):  # noqa: ARG001 - subprocess signature
@@ -177,7 +177,11 @@ def test_ssd_clone_service_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(MODULE.time, "sleep", lambda _secs: None)
     monkeypatch.setattr(MODULE, "log", lambda _msg: None)
 
-    monkeypatch.setattr(MODULE.ssd_clone, "auto_select_target", lambda: None)
+    monkeypatch.setattr(
+        MODULE.ssd_clone,
+        "auto_select_target",
+        lambda *_args, **_kwargs: None,
+    )
 
     with pytest.raises(SystemExit) as exc:
         MODULE.main()
@@ -203,7 +207,11 @@ def test_ssd_clone_service_failure_exit(monkeypatch, tmp_path):
     target_path.parent.mkdir()
     target_path.write_text("target")
 
-    monkeypatch.setattr(MODULE.ssd_clone, "auto_select_target", lambda: str(target_path))
+    monkeypatch.setattr(
+        MODULE.ssd_clone,
+        "auto_select_target",
+        lambda *_args, **_kwargs: str(target_path),
+    )
 
     def fake_run(command, check=False):  # noqa: ARG001 - subprocess signature
         assert command[0] == str(helper)
@@ -263,7 +271,11 @@ def test_main_raises_exit_code(monkeypatch, tmp_path):
     target_path = tmp_path / "dev" / "sdd"
     target_path.parent.mkdir()
     target_path.write_text("target")
-    monkeypatch.setattr(MODULE.ssd_clone, "auto_select_target", lambda: str(target_path))
+    monkeypatch.setattr(
+        MODULE.ssd_clone,
+        "auto_select_target",
+        lambda *_args, **_kwargs: str(target_path),
+    )
 
     def fake_run(command, check=False):  # noqa: ARG001
         class Result:
