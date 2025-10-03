@@ -255,6 +255,127 @@ def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
     ]
 
 
+def test_pi_install_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pi install should wrap the installer helper script."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "install", "--dry-run"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "install_sugarkube_image.sh"
+
+    assert exit_code == 0
+    assert recorded == [["bash", str(expected_script)]]
+
+
+def test_pi_install_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forward CLI arguments to the install helper for docs parity."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "install",
+            "--dry-run",
+            "--dir",
+            "~/sugarkube/images",
+            "--image",
+            "~/sugarkube/images/sugarkube.img",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts" / "install_sugarkube_image.sh"),
+            "--dir",
+            "~/sugarkube/images",
+            "--image",
+            "~/sugarkube/images/sugarkube.img",
+        ]
+    ]
+
+
+def test_pi_install_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing install helper scripts should surface an actionable error."""
+
+    monkeypatch.setattr(
+        cli, "INSTALL_PI_IMAGE_SCRIPT", Path("/nonexistent/install_sugarkube_image.sh")
+    )
+
+    exit_code = cli.main(["pi", "install", "--dry-run"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "scripts/install_sugarkube_image.sh is missing" in captured.err
+
+
+def test_pi_install_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Install handler should surface helper failures via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(
+            ["bash", "install_sugarkube_image.sh"],
+            returncode=1,
+            stderr="boom",
+        )
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["pi", "install", "--dry-run"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
+def test_pi_install_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding install args."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "install", "--dry-run", "--", "--dir", "~/sugarkube/images"])
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts" / "install_sugarkube_image.sh"),
+            "--dir",
+            "~/sugarkube/images",
+        ]
+    ]
+
+
 def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi flash should wrap the flashing helper script."""
 

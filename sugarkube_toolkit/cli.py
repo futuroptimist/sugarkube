@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 CHECKS_SCRIPT = SCRIPTS_DIR / "checks.sh"
 DOWNLOAD_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "download_pi_image.sh"
+INSTALL_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "install_sugarkube_image.sh"
 FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
 FLASH_PI_MEDIA_REPORT_SCRIPT = SCRIPTS_DIR / "flash_pi_media_report.py"
 PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
@@ -76,6 +77,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the helper invocation without executing it.",
     )
     download_parser.set_defaults(handler=_handle_pi_download)
+
+    install_parser = pi_subparsers.add_parser(
+        "install",
+        help="Install the Sugarkube image via scripts/install_sugarkube_image.sh.",
+    )
+    install_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation without executing it.",
+    )
+    install_parser.set_defaults(handler=_handle_pi_install)
 
     flash_parser = pi_subparsers.add_parser(
         "flash",
@@ -168,6 +180,25 @@ def _handle_pi_download(args: argparse.Namespace) -> int:
     if not script.exists():
         print(
             "scripts/download_pi_image.sh is missing. "
+            "Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
+    try:
+        runner.run_commands([command], dry_run=args.dry_run)
+    except runner.CommandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_pi_install(args: argparse.Namespace) -> int:
+    script = INSTALL_PI_IMAGE_SCRIPT
+    if not script.exists():
+        print(
+            "scripts/install_sugarkube_image.sh is missing. "
             "Run from the repository root or reinstall the tooling.",
             file=sys.stderr,
         )
@@ -283,6 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if handler in {
         _handle_docs_simplify,
         _handle_pi_download,
+        _handle_pi_install,
         _handle_pi_flash,
         _handle_pi_report,
         _handle_pi_smoke,
