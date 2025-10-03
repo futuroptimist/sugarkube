@@ -37,6 +37,16 @@ Run the rehearsal directly with `just` or `make` once your controller is online:
 just rehearse-join REHEARSAL_ARGS="sugar-control.local --agents pi-a.local pi-b.local"
 ```
 
+Prefer to stay inside the unified CLI? Preview the helper with:
+
+```bash
+python -m sugarkube_toolkit pi rehearse --dry-run -- sugar-control.local --agents pi-a.local pi-b.local
+```
+
+Drop `--dry-run` to run the rehearsal immediately. Everything after the standalone `--` is forwarded to
+`scripts/pi_multi_node_join_rehearsal.py`, matching the behaviour described throughout this guide
+(`tests/test_sugarkube_toolkit_cli.py::test_pi_rehearse_invokes_helper` guards the CLI parity).
+
 The command:
 
 1. Connects to `sugar-control.local` over SSH and reads `/boot/sugarkube-node-token`.

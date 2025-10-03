@@ -50,10 +50,9 @@ before they can automate common tasks.
 6. ✅ Wrap the Pi smoke test harness behind `sugarkube pi smoke` so the unified CLI
    now covers download, flashing, and post-boot verification (regression
    coverage: `tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_invokes_helper`).
-7. ✅ Extend the CLI with `sugarkube pi install` so contributors can drive the
-   downloader/expander without leaving the unified entry point (regression
-   coverage: `tests/test_sugarkube_toolkit_cli.py::test_pi_install_invokes_helper`
-   and neighbouring `test_pi_install_*` cases).
+7. ✅ Extend the CLI with `sugarkube pi rehearse` so multi-node join rehearsals are
+   accessible from the unified entry point (regression coverage:
+   `tests/test_sugarkube_toolkit_cli.py::test_pi_rehearse_invokes_helper`).
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not
