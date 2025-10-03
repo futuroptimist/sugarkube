@@ -32,4 +32,6 @@ Each Pi image copies this folder to both `/opt/projects/token.place/samples` and
    enabled.
 
 Set `TOKEN_PLACE_URL` or pass `--base-url` to target a different host. Use
-`--dry-run` to simply validate that the sample payloads are present.
+`--dry-run` to simply validate that the sample payloads are present. Automated
+coverage (`tests/test_token_place_samples.py::test_main_honors_token_place_url_env`)
+guards the environment variable behavior.

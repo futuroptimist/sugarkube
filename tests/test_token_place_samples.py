@@ -198,6 +198,47 @@ def test_replay_samples_writes_reports(tmp_path: Path, monkeypatch: pytest.Monke
         assert "url" in data and "data" in data
 
 
+def test_main_honors_token_place_url_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    samples_dir = _make_sample_dir(tmp_path)
+    output_dir = tmp_path / "reports"
+    monkeypatch.setenv("TOKEN_PLACE_URL", "http://env.example")
+
+    recorded: dict[str, object] = {}
+
+    def fake_replay_samples(
+        *,
+        base_url: str,
+        samples_dir: Path,
+        output_dir: Path,
+        timeout: int,
+    ) -> None:
+        recorded.update(
+            {
+                "base_url": base_url,
+                "samples_dir": samples_dir,
+                "output_dir": output_dir,
+                "timeout": timeout,
+            }
+        )
+
+    monkeypatch.setattr(replay, "replay_samples", fake_replay_samples)
+
+    exit_code = replay.main(
+        [
+            "--samples-dir",
+            str(samples_dir),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded["base_url"] == "http://env.example"
+    assert recorded["samples_dir"] == samples_dir
+    assert recorded["output_dir"] == output_dir
+    assert recorded["timeout"] == replay.DEFAULT_TIMEOUT
+
+
 def test_replay_samples_requires_assistant_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -46,4 +46,6 @@ just token-place-samples
 ```
 
 Pass `TOKEN_PLACE_SAMPLE_ARGS="--dry-run"` (or `TOKEN_PLACE_URL` / `--base-url`)
-when targeting a different host.
+when targeting a different host. Regression coverage
+(`tests/test_token_place_samples.py::test_main_honors_token_place_url_env`) keeps
+the helper aligned with the environment variable behavior.

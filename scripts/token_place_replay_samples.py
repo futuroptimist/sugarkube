@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Iterable, Optional
 from urllib import error, request
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5000"
+TOKEN_PLACE_URL_ENV = "TOKEN_PLACE_URL"
 DEFAULT_SAMPLE = "openai-chat-demo.json"
 DEFAULT_REPORT_DIR = Path.home() / "sugarkube" / "reports" / "token-place-samples"
 DEFAULT_TIMEOUT = 10
@@ -123,8 +125,13 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-url",
-        default=DEFAULT_BASE_URL,
-        help=f"token.place base URL (default: {DEFAULT_BASE_URL})",
+        default=os.environ.get(TOKEN_PLACE_URL_ENV, DEFAULT_BASE_URL),
+        help=(
+            "token.place base URL (default: {default}; set {env} to override)".format(
+                default=DEFAULT_BASE_URL,
+                env=TOKEN_PLACE_URL_ENV,
+            )
+        ),
     )
     parser.add_argument(
         "--samples-dir",
