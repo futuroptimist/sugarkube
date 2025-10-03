@@ -270,12 +270,15 @@ sync without modifying the host.
   probes by exporting `TOKEN_PLACE_HEALTH_URL`, `DSPACE_HEALTH_URL`, and related
   `*_INSECURE` flags before invoking `/opt/sugarkube/pi_node_verifier.sh`.
 - Before plugging in additional hardware, rehearse the join flow from your workstation:
-  ```bash
-  make rehearse-join REHEARSAL_ARGS="sugar-control.local --agents pi-a.local pi-b.local"
-  ```
-  The helper retrieves the mirrored `/boot/sugarkube-node-token`, prints a join command template,
-  and SSHes into each candidate node to confirm `https://get.k3s.io` and the k3s API are reachable.
-  See [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) for option walkthroughs.
+```bash
+make rehearse-join REHEARSAL_ARGS="sugar-control.local --agents pi-a.local pi-b.local"
+```
+The helper retrieves the mirrored `/boot/sugarkube-node-token`, prints a join command template,
+and SSHes into each candidate node to confirm `https://get.k3s.io` and the k3s API are reachable.
+See [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) for option walkthroughs.
+Prefer the unified CLI? `python -m sugarkube_toolkit pi rehearse --dry-run -- sugar-control.local --agents pi-a.local pi-b.local`
+shows the forwarded invocation before running it. Drop `--dry-run` to execute immediately—the CLI
+forwards everything after `--` to `scripts/pi_multi_node_join_rehearsal.py`.
 - Ready for a turnkey three-node cluster? Promote the rehearsal into automation and wait for
   readiness with a single command:
   ```bash

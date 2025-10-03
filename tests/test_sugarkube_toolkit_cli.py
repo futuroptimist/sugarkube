@@ -595,3 +595,133 @@ def test_pi_smoke_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> Non
             "--json",
         ]
     ]
+
+
+def test_pi_rehearse_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pi rehearse should wrap the multi-node rehearsal helper script."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "rehearse", "--dry-run"])
+
+    expected_script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "pi_multi_node_join_rehearsal.py"
+    )
+
+    assert exit_code == 0
+    assert recorded == [[sys.executable, str(expected_script)]]
+
+
+def test_pi_rehearse_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forward CLI arguments to the rehearsal helper for docs parity."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "rehearse",
+            "--dry-run",
+            "--server-url",
+            "https://controller.sugarkube.lan:6443",
+            "sugar-control.local",
+            "--agents",
+            "pi-a.local",
+            "pi-b.local",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(
+                Path(__file__).resolve().parents[1] / "scripts" / "pi_multi_node_join_rehearsal.py"
+            ),
+            "--server-url",
+            "https://controller.sugarkube.lan:6443",
+            "sugar-control.local",
+            "--agents",
+            "pi-a.local",
+            "pi-b.local",
+        ]
+    ]
+
+
+def test_pi_rehearse_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing rehearsal helper scripts should surface an actionable error."""
+
+    monkeypatch.setattr(
+        cli, "PI_JOIN_REHEARSAL_SCRIPT", Path("/nonexistent/pi_multi_node_join_rehearsal.py")
+    )
+
+    exit_code = cli.main(["pi", "rehearse", "--dry-run"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "scripts/pi_multi_node_join_rehearsal.py is missing" in captured.err
+
+
+def test_pi_rehearse_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rehearsal handler should surface helper failures via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(
+            [sys.executable, "pi_multi_node_join_rehearsal.py"],
+            returncode=1,
+            stderr="boom",
+        )
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["pi", "rehearse", "--dry-run"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
+def test_pi_rehearse_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding rehearsal args."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "rehearse", "--dry-run", "--", "--json"])
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(
+                Path(__file__).resolve().parents[1] / "scripts" / "pi_multi_node_join_rehearsal.py"
+            ),
+            "--json",
+        ]
+    ]
