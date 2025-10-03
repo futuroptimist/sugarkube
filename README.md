@@ -66,7 +66,9 @@ the docs you will see the term used in both contexts.
     a consistent entry point across automation helpers.
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
-    `.img.sha256`; safe to run via `curl | bash`
+    `.img.sha256`; safe to run via `curl | bash`. Invoke it from the unified CLI with
+    `python -m sugarkube_toolkit pi install [--dry-run] [helper args...]` when you want
+    the same behavior without leaving the `sugarkube` entry point.
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
     clean up temporary work directories, use POSIX `test -ef` to compare paths
     without `realpath`, and fall back to `unzip` when `bsdtar` is unavailable
@@ -113,7 +115,16 @@ Codespaces users can install prerequisites and flash media without additional sh
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
 Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` previews the
-release helper. Reuse the streaming helper via:
+release helper. Need the combined installer that downloads and expands the image? Run
+
+```bash
+python -m sugarkube_toolkit pi install --dry-run -- --dir ~/sugarkube/images --image ~/sugarkube/images/sugarkube.img
+```
+
+Drop `--dry-run` once you are ready; flags after the standalone `--` flow directly to
+`scripts/install_sugarkube_image.sh`.
+
+Reuse the streaming helper via:
 
 ```bash
 python -m sugarkube_toolkit pi flash --dry-run -- --image ~/sugarkube/images/sugarkube.img --device /dev/sdX

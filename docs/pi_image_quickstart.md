@@ -79,6 +79,16 @@ sync without modifying the host.
    All flags supported by `download_pi_image.sh` are forwarded, so `--release`
    and `--asset` continue to work. `./scripts/sugarkube-latest` remains
    available if you only need the compressed artifact.
+   Prefer the unified CLI? Preview the helper with:
+   ```bash
+   python -m sugarkube_toolkit pi install --dry-run -- --dir ~/sugarkube/images --image ~/sugarkube/images/sugarkube.img
+   ```
+   Drop `--dry-run` when you're ready. Everything after the standalone `--`
+   flows to `scripts/install_sugarkube_image.sh`, so `--release` and other
+   documented flags work unchanged. Regression coverage in
+   `tests/test_sugarkube_toolkit_cli.py::test_pi_install_invokes_helper`
+   (plus neighbouring `test_pi_install_*` cases) ensures the CLI forwards
+   arguments exactly as documented.
 3. In GitHub, open **Actions → pi-image → Run workflow** for a fresh build.
    - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
    - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
