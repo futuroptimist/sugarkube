@@ -42,6 +42,20 @@ check_space() {
   fi
 }
 
+ensure_packages() {
+  local packages_file="$1"
+  shift || true
+  if [ ! -d "$(dirname "$packages_file")" ]; then
+    mkdir -p "$(dirname "$packages_file")"
+  fi
+  touch "$packages_file"
+  for pkg in "$@"; do
+    if [ -n "$pkg" ] && ! grep -qxF "$pkg" "$packages_file"; then
+      echo "$pkg" >>"$packages_file"
+    fi
+  done
+}
+
 # Build a Raspberry Pi OS image with cloud-init files preloaded.
 # Requires curl, docker, git, sha256sum, stdbuf, timeout, xz, bsdtar, df and roughly
 # 10 GB of free disk space. Set PI_GEN_URL to override the default pi-gen repository.
@@ -297,6 +311,9 @@ PI_GEN_BRANCH="${PI_GEN_BRANCH:-${DEFAULT_PI_GEN_BRANCH}}"
 
 USER_DATA="${PI_GEN_DIR}/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
+
+ensure_packages "${PI_GEN_DIR}/stage2/01-sys-tweaks/00-packages" \
+  policykit-1
 
 # If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file
 if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then

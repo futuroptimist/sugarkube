@@ -471,9 +471,14 @@ def main() -> int:
         log_exit = _invoke_verifier_log(verifier, log_path)
 
     payload = _render_summary(result, metadata, cloud_init_text)
-    _write_json(report_dir / "summary.json", payload)
-    _write_markdown(report_dir / "summary.md", payload)
-    _write_html(report_dir / "summary.html", payload)
+    summary_json = report_dir / "summary.json"
+    summary_md = report_dir / "summary.md"
+    summary_html = report_dir / "summary.html"
+
+    _write_json(summary_json, payload)
+    _write_markdown(summary_md, payload)
+    _write_html(summary_html, payload)
+    _log(f"summary.json written to {summary_json}")
 
     if cloud_init_text is not None:
         (report_dir / "cloud-init.log").write_text(cloud_init_text + "\n")

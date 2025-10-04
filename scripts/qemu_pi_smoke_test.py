@@ -242,7 +242,6 @@ def _install_dropin(root_dir: Path) -> None:
         f"""
         [Service]
         Environment=FIRST_BOOT_VERIFIER={STUB_VERIFIER_PATH}
-        Environment=FIRST_BOOT_SKIP_LOG=1
         Environment=FIRST_BOOT_ATTEMPTS=1
         Environment=FIRST_BOOT_RETRY_DELAY=5
         Environment=FIRST_BOOT_CLOUD_INIT_TIMEOUT=180
