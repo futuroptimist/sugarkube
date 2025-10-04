@@ -34,8 +34,9 @@ before they can automate common tasks.
    `tests/test_sugarkube_toolkit_cli.py::test_docs_verify_invokes_doc_checks`).
 2. ✅ Expose a unified `sugarkube` CLI via `python -m sugarkube_toolkit` with an
    initial `docs verify` subcommand that chains `pyspelling` and `linkchecker`
-   (`tests/test_sugarkube_toolkit_cli.py`). Follow-up subcommands will wrap the
-   image and Pi automation.
+   (`tests/test_sugarkube_toolkit_cli.py`). Follow-up subcommands now wrap the
+   image download, install, flashing, reporting, smoke, and rehearsal workflows
+   (regression coverage: `tests/test_sugarkube_toolkit_cli.py`).
 3. ✅ Provide thin wrapper scripts that print a deprecation notice before handing
    off to the new CLI so existing docs remain valid during the transition
    (regression coverage: `tests/test_docs_verify_wrapper.py`).
