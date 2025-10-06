@@ -20,6 +20,7 @@ def _clear_env():
     original_target = os.environ.pop(ssd_clone.ENV_TARGET, None)
     original_wait = os.environ.pop(ssd_clone.ENV_WAIT, None)
     original_poll = os.environ.pop(ssd_clone.ENV_POLL, None)
+    original_extra = os.environ.pop(ssd_clone.ENV_EXTRA_ARGS, None)
     try:
         yield
     finally:
@@ -29,6 +30,8 @@ def _clear_env():
             os.environ[ssd_clone.ENV_WAIT] = original_wait
         if original_poll is not None:
             os.environ[ssd_clone.ENV_POLL] = original_poll
+        if original_extra is not None:
+            os.environ[ssd_clone.ENV_EXTRA_ARGS] = original_extra
 
 
 @pytest.fixture
@@ -71,6 +74,19 @@ def test_auto_select_target_honors_env_override(monkeypatch, fake_disk_layout):
     os.environ[ssd_clone.ENV_TARGET] = override
     target = ssd_clone.auto_select_target()
     assert target == override
+
+
+def test_parse_args_appends_extra_env(monkeypatch):
+    monkeypatch.setenv(ssd_clone.ENV_EXTRA_ARGS, "--dry-run --resume")
+    args = ssd_clone.parse_args(["--target", "/dev/sdz"])
+    assert args.dry_run is True
+    assert args.resume is True
+
+
+def test_parse_args_rejects_bad_extra_env(monkeypatch):
+    monkeypatch.setenv(ssd_clone.ENV_EXTRA_ARGS, "'unterminated")
+    with pytest.raises(SystemExit, match=ssd_clone.ENV_EXTRA_ARGS):
+        ssd_clone.parse_args(["--target", "/dev/sdz"])
 
 
 def test_resolve_env_target_missing_device(monkeypatch):

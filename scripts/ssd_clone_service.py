@@ -30,7 +30,7 @@ STATE_DIR = ssd_clone.STATE_DIR
 CLONE_HELPER = SCRIPT_ROOT / "ssd_clone.py"
 POLL_INTERVAL = int(os.environ.get("SUGARKUBE_SSD_CLONE_POLL_SECS", "10"))
 MAX_WAIT = int(os.environ.get("SUGARKUBE_SSD_CLONE_WAIT_SECS", "900"))
-EXTRA_ARGS = os.environ.get("SUGARKUBE_SSD_CLONE_EXTRA_ARGS", "")
+EXTRA_ARGS = os.environ.get(ssd_clone.ENV_EXTRA_ARGS, "")
 AUTO_TARGET = os.environ.get(ssd_clone.ENV_TARGET)
 LOG_PREFIX = "[ssd-clone-service]"
 
