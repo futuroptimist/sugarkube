@@ -10,6 +10,12 @@ scripts or guides. Each table row links a helper to the documentation that intro
 plus any supporting automation. After editing a script or doc, rerun the docs checks to
 confirm the quickstart stays accurate.
 
+> **Note:** The unified CLI forces helpers to run from the repository root so relative
+> paths stay stable even when you invoke it from nested directories. Use the CLI entries
+> below when you want consistent automation regardless of your current working directory.
+> The reminder is enforced by `tests/test_cli_docs_repo_root.py` so contributors keep the
+> documentation aligned.
+
 ## Image download and install helpers
 
 | Script | Purpose | Primary docs | Supporting automation |

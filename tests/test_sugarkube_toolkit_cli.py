@@ -17,9 +17,14 @@ def test_docs_verify_invokes_doc_checks(monkeypatch: pytest.MonkeyPatch) -> None
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -66,9 +71,14 @@ def test_docs_simplify_invokes_checks_helper(monkeypatch: pytest.MonkeyPatch) ->
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -97,9 +107,14 @@ def test_docs_simplify_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -148,9 +163,14 @@ def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -168,9 +188,14 @@ def test_pi_download_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -236,9 +261,14 @@ def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -261,9 +291,14 @@ def test_pi_install_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -281,9 +316,14 @@ def test_pi_install_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) ->
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -357,9 +397,14 @@ def test_pi_install_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> N
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -382,9 +427,14 @@ def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -402,9 +452,14 @@ def test_pi_flash_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> N
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -470,9 +525,14 @@ def test_pi_flash_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> Non
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -494,9 +554,14 @@ def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -514,9 +579,14 @@ def test_pi_report_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> 
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -590,9 +660,14 @@ def test_pi_report_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> No
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -614,9 +689,14 @@ def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> No
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -634,9 +714,14 @@ def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPa
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -708,9 +793,14 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -744,9 +834,14 @@ def test_pi_smoke_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -764,9 +859,14 @@ def test_pi_smoke_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> N
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -830,9 +930,14 @@ def test_pi_smoke_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> Non
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -854,9 +959,14 @@ def test_pi_rehearse_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -876,9 +986,14 @@ def test_pi_rehearse_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
@@ -976,3 +1091,25 @@ def test_pi_rehearse_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
             "--json",
         ]
     ]
+
+
+def test_docs_simplify_runs_from_repo_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docs simplify should execute from the repository root."""
+
+    captured_cwd: list[Path | None] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        captured_cwd.append(cwd)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["docs", "simplify", "--dry-run"])
+
+    assert exit_code == 0
+    assert captured_cwd and captured_cwd[0] == cli.REPO_ROOT
