@@ -18,6 +18,7 @@ FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
 FLASH_PI_MEDIA_REPORT_SCRIPT = SCRIPTS_DIR / "flash_pi_media_report.py"
 PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
 PI_JOIN_REHEARSAL_SCRIPT = SCRIPTS_DIR / "pi_multi_node_join_rehearsal.py"
+COLLECT_SUPPORT_BUNDLE_SCRIPT = SCRIPTS_DIR / "collect_support_bundle.py"
 
 DOC_VERIFY_COMMANDS: list[list[str]] = [
     ["pyspelling", "-c", ".spellcheck.yaml"],
@@ -132,6 +133,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the rehearsal helper invocation without executing it.",
     )
     rehearse_parser.set_defaults(handler=_handle_pi_rehearse)
+
+    support_bundle_parser = pi_subparsers.add_parser(
+        "support-bundle",
+        help="Collect diagnostics via scripts/collect_support_bundle.py.",
+    )
+    support_bundle_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the support bundle helper invocation without executing it.",
+    )
+    support_bundle_parser.set_defaults(handler=_handle_pi_support_bundle)
 
     return parser
 
@@ -301,6 +313,29 @@ def _handle_pi_rehearse(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
+    script = COLLECT_SUPPORT_BUNDLE_SCRIPT
+    if not script.exists():
+        print(
+            "scripts/collect_support_bundle.py is missing. "
+            "Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = [
+        sys.executable,
+        str(script),
+        *_normalize_script_args(getattr(args, "script_args", [])),
+    ]
+    try:
+        runner.run_commands([command], dry_run=args.dry_run)
+    except runner.CommandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     parsed_args = list(argv) if argv is not None else None
@@ -319,6 +354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _handle_pi_report,
         _handle_pi_smoke,
         _handle_pi_rehearse,
+        _handle_pi_support_bundle,
     }:
         combined = list(getattr(args, "script_args", []))
         if extras:

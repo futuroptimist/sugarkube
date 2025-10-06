@@ -43,8 +43,10 @@ before they can automate common tasks.
 4. ✅ Add a `sugarkube pi download` subcommand that proxies to
    `scripts/download_pi_image.sh`, keeping the first Pi image workflow available
    from the unified CLI (regression coverage:
-   `tests/test_sugarkube_toolkit_cli.py::test_pi_download_invokes_helper`). Follow-up
-   subcommands will continue wrapping the remaining automation.
+   `tests/test_sugarkube_toolkit_cli.py::test_pi_download_invokes_helper`). Extend
+   the CLI with `sugarkube pi support-bundle` so remote diagnostics collection is
+   also available without leaving the unified entry point (regression coverage:
+   `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_invokes_helper`).
 5. ✅ Extend the CLI with `sugarkube pi flash` so contributors can stream images
    without leaving the unified entrypoint (regression coverage:
    `tests/test_sugarkube_toolkit_cli.py::test_pi_flash_invokes_helper`).

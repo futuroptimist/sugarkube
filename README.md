@@ -88,6 +88,10 @@ the docs you will see the term used in both contexts.
     `--full` to print text plus the JSON summary in one run, or `--help` for usage
   - `pi_smoke_test.py` — SSH wrapper that runs the verifier remotely, supports reboot checks,
     and emits JSON summaries for CI harnesses
+  - `collect_support_bundle.py` — gather Kubernetes, systemd, and Docker diagnostics into timestamped
+    archives. Invoke it from the unified CLI with
+    `python -m sugarkube_toolkit pi support-bundle [--dry-run] [args...]` when you want the same
+    workflow without leaving the `sugarkube` entry point.
   - `render_field_guide_pdf.py` — build the Markdown field guide into a single-page PDF without
     extra pip dependencies so releases can refresh the printable checklist automatically
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when

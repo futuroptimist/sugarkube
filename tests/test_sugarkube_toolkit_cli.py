@@ -608,6 +608,136 @@ def test_pi_report_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> No
     ]
 
 
+def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pi support-bundle should wrap the support bundle helper script."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "support-bundle", "--dry-run"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"
+
+    assert exit_code == 0
+    assert recorded == [[sys.executable, str(expected_script)]]
+
+
+def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forward CLI arguments to the support bundle helper for docs parity."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "support-bundle",
+            "--dry-run",
+            "pi-a.local",
+            "--identity",
+            "~/.ssh/id_ed25519",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "pi-a.local",
+            "--identity",
+            "~/.ssh/id_ed25519",
+        ]
+    ]
+
+
+def test_pi_support_bundle_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing support bundle helper should surface an actionable error."""
+
+    monkeypatch.setattr(
+        cli, "COLLECT_SUPPORT_BUNDLE_SCRIPT", Path("/nonexistent/support_bundle.py")
+    )
+
+    exit_code = cli.main(["pi", "support-bundle", "--dry-run"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "scripts/collect_support_bundle.py is missing" in captured.err
+
+
+def test_pi_support_bundle_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Support bundle handler should surface helper failures via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(
+            [sys.executable, "collect_support_bundle.py"],
+            returncode=1,
+            stderr="boom",
+        )
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["pi", "support-bundle", "--dry-run"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
+def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leading `--` should be stripped before forwarding support bundle args."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+    ) -> None:
+        recorded.extend(commands)
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "support-bundle",
+            "--dry-run",
+            "--",
+            "pi-b.local",
+            "--output-dir",
+            "~/support-bundles",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "pi-b.local",
+            "--output-dir",
+            "~/support-bundles",
+        ]
+    ]
+
+
 def test_pi_smoke_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi smoke should wrap the smoke test helper script."""
 

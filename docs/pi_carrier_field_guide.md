@@ -43,6 +43,8 @@ or A4 and keep near the build bench.
 - Review `/boot/first-boot-report/self-heal/` on the Pi for automated recovery
   attempts and escalations.
 - Pull a support bundle: `just support-bundle SUPPORT_BUNDLE_HOST=pi.local` and
-  attach the resulting archive to issues.
+  attach the resulting archive to issues. Prefer CLI tooling? Run
+  `python -m sugarkube_toolkit pi support-bundle --dry-run -- pi.local` first, then rerun without
+  `--dry-run` when you're ready to collect logs.
 - More guidance: [Pi Image Quickstart](./pi_image_quickstart.md) and
   [Pi Boot Troubleshooting](./pi_boot_troubleshooting.md).

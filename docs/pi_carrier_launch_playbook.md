@@ -113,7 +113,9 @@ fast path above.
 - **Verify before leaving the site:** Run `make support-bundle` or
   `./scripts/collect_support_bundle.py --target /boot/first-boot-report` to archive first-boot logs
   for future debugging. The helper stores copied directories under `targets/` in the bundle so the
-  exported reports remain alongside the captured command output.
+  exported reports remain alongside the captured command output. Prefer the unified CLI? Use
+  `python -m sugarkube_toolkit pi support-bundle --dry-run -- <pi-host>` to preview the invocation,
+  then rerun without `--dry-run` when you're ready to capture diagnostics.
 
 ### Classroom facilitator (multiple Pis, shared bench)
 
