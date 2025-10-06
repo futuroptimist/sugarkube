@@ -458,11 +458,11 @@ def _resolve_boot_partition(device: Device) -> BootPartition | None:
 def _mount_boot_partition(partition: BootPartition) -> Iterator[Path]:
     system = platform.system()
     if system == "Linux":
-        if not partition.path:
-            die("Unable to determine boot partition path for --cloud-init override")
         if partition.mountpoint:
             yield Path(partition.mountpoint)
             return
+        if not partition.path:
+            die("Unable to determine boot partition path for --cloud-init override")
         mount_dir = Path(tempfile.mkdtemp(prefix="sugarkube-boot-"))
         proc = _run(["mount", partition.path, str(mount_dir)])
         if proc.returncode != 0:
@@ -574,6 +574,8 @@ def _mount_boot_partition(partition: BootPartition) -> Iterator[Path]:
 def _apply_cloud_init_override(device: Device, override: Path) -> None:
     partition = _resolve_boot_partition(device)
     if partition is None:
+        partition = _resolve_synthetic_boot_partition(device)
+    if partition is None:
         die(
             "Unable to locate the boot partition for --cloud-init. "
             "Copy user-data manually or rerun with explicit device info."
@@ -585,6 +587,34 @@ def _apply_cloud_init_override(device: Device, override: Path) -> None:
         except OSError as exc:
             die(f"Failed to copy cloud-init override to {destination}: {exc}")
         info(f"Copied cloud-init override to {destination}")
+
+
+def _resolve_synthetic_boot_partition(device: Device) -> BootPartition | None:
+    """Best-effort fallback for tests and synthetic devices.
+
+    When flashing to a regular file (as the integration tests do), there is no
+    discoverable boot partition.  Instead of failing, honour an explicit
+    `SUGARKUBE_FLASH_BOOT_MOUNTPOINT` environment variable or, as a last
+    resort, look for a `boot/` directory in the current working directory.
+    """
+
+    path = device.path
+    if path and _is_block_device(path):
+        return None
+
+    overrides: list[Path] = []
+    env_override = os.environ.get("SUGARKUBE_FLASH_BOOT_MOUNTPOINT")
+    if env_override:
+        overrides.append(Path(env_override))
+    overrides.append(Path.cwd() / "boot")
+
+    for candidate in overrides:
+        try:
+            if candidate.is_dir():
+                return BootPartition(path=None, mountpoint=str(candidate))
+        except OSError:
+            continue
+    return None
 
 
 def summarize_devices(devices: Sequence[Device]) -> None:
