@@ -23,4 +23,18 @@ find_python() {
 
 PYTHON_INTERPRETER="$(find_python)"
 
+# Ensure the repository root is available on PYTHONPATH even when the
+# wrapper is launched from a different working directory. This mirrors the
+# behavior suggested in the documentation where `scripts/` is added to PATH.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -d "$PROJECT_ROOT" ]; then
+  if [ -n "${PYTHONPATH:-}" ]; then
+    export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+  else
+    export PYTHONPATH="$PROJECT_ROOT"
+  fi
+fi
+
 exec "$PYTHON_INTERPRETER" -m sugarkube_toolkit "$@"
