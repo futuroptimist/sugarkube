@@ -503,8 +503,9 @@ can reference them while writing future proposals.
    Capture `fio` output for the operations runbook.
 
 4. Harden remote access by replacing SSH credential pairs and disabling keyboard-interactive logins.
-   Follow the procedure you documented in Tutorial 11 and update
-   `operations/security-checklist.md` with the date and fingerprint details.
+   Follow the procedure you documented in Tutorial 11 and update the
+   [operations/security-checklist.md](../operations/security-checklist.md) log with the
+   rotation date, fingerprints, and bastion approvals.
 
 5. Take a final cluster snapshot:
 
@@ -525,7 +526,8 @@ Use this checklist to confirm you met the roadmap milestones.
 - [ ] Failure-injection exercise: simulated node disruption recovered without data loss,
       with findings logged in `storage/failover-report.md`.
 - [ ] Advanced roadmap update: drafted `edge-ai/tuning-experiments.md` and
-      `operations/security-checklist.md` summarising optimisation insights and proposed next steps.
+      [operations/security-checklist.md](../operations/security-checklist.md) summarising optimisation
+      insights and proposed next steps.
 
 ## Next Steps
 You now possess the full Sugarkube lifecycle—from first boot to advanced experimentation. Continue

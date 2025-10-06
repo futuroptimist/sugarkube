@@ -28,6 +28,8 @@ Review the safety notes before working with power components.
 - [pi_image_contributor_guide.md](pi_image_contributor_guide.md) — map automation helpers to the docs
   they inform
 - [pi_support_bundles.md](pi_support_bundles.md) — collect diagnostics into shareable archives
+- [operations/security-checklist.md](operations/security-checklist.md) — log SSH hardening and credential
+  rotations for field operations.
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
