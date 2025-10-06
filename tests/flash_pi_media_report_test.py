@@ -31,7 +31,7 @@ def test_run_flash_forwards_cloud_init(monkeypatch: pytest.MonkeyPatch) -> None:
         recorded["argv"] = argv
         return 0
 
-    monkeypatch.setattr(flash, "main", fake_main)
+    monkeypatch.setattr(report.flash, "main", fake_main)
 
     args = SimpleNamespace(
         no_eject=False,
