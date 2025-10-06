@@ -1073,9 +1073,14 @@ def test_pi_rehearse_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
     recorded: list[list[str]] = []
 
     def fake_run(
-        commands: list[list[str]], *, dry_run: bool = False, env: Mapping[str, str] | None = None
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
