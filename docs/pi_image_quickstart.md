@@ -375,7 +375,9 @@ journalctl -u ssd-clone.service
 Override detection by exporting `SUGARKUBE_SSD_CLONE_TARGET=/dev/sdX` or extend the helper
 flags (for example, `--dry-run`) with `SUGARKUBE_SSD_CLONE_EXTRA_ARGS`. Both environment
 variables are respected by the systemd unit and by manual invocations of
-`scripts/ssd_clone.py --auto-target`. Adjust the discovery window with
+`scripts/ssd_clone.py --auto-target`, and automated coverage in
+`tests/ssd_clone_auto_target_test.py::test_parse_args_appends_extra_env` keeps the manual
+path honest. Adjust the discovery window with
 `SUGARKUBE_SSD_CLONE_WAIT_SECS` (default: 900 seconds) or poll frequency with
 `SUGARKUBE_SSD_CLONE_POLL_SECS` when slower storage bridges are involved
 (regression coverage:
