@@ -70,17 +70,21 @@ directly.
 
 ## Unified CLI entrypoint
 
-Prefer the consolidated Sugarkube CLI? Run the smoke test via the new `sugarkube pi smoke`
-subcommand:
+Prefer the consolidated Sugarkube CLI? The repository ships a `scripts/sugarkube` launcher that
+forwards to `python -m sugarkube_toolkit`, letting you run the smoke test via the documented
+`sugarkube pi smoke` subcommand:
 
 ```bash
-python -m sugarkube_toolkit pi smoke --dry-run -- --json pi-a.local pi-b.local
+./scripts/sugarkube pi smoke --dry-run -- --json pi-a.local pi-b.local
+# or, after adding scripts/ to PATH:
+sugarkube pi smoke --dry-run -- --json pi-a.local pi-b.local
 ```
 
 Drop `--dry-run` to run the verifier immediately. Everything after the standalone `--` flows to
 `scripts/pi_smoke_test.py`, so existing documentation continues to apply. Regression coverage lives
-in `tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_invokes_helper` and the surrounding
-`test_pi_smoke_*` cases.
+in `tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_invokes_helper`,
+`tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_drops_script_separator`, and the
+new `tests/test_sugarkube_cli_entrypoint.py::test_sugarkube_script_invokes_cli` case.
 
 ## Test coverage
 
