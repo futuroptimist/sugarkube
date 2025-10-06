@@ -136,6 +136,8 @@ def _run_flash(
         argv.append("--keep-mounted")
     if args.dry_run:
         argv.append("--dry-run")
+    if args.cloud_init:
+        argv.extend(["--cloud-init", str(args.cloud_init)])
     if not device.path:
         raise FlashReportError("Device path is required for flashing.")
     stdout_buffer = io.StringIO()

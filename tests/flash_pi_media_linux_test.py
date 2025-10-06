@@ -120,3 +120,32 @@ def test_list_linux_devices_falls_back_to_by_id(
     devices = flash._list_linux_devices()
     assert devices
     assert devices[0].system_id == "usb-TestDisk-999"
+
+
+def test_resolve_boot_partition_linux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "blockdevices": [
+            {
+                "type": "disk",
+                "path": "/dev/sdz",
+                "children": [
+                    {"path": "/dev/sdz1", "start": "2048", "mountpoint": "/mnt/boot"},
+                    {"path": "/dev/sdz2", "start": "4096"},
+                ],
+            }
+        ]
+    }
+    monkeypatch.setattr(flash.shutil, "which", lambda _: "/bin/lsblk")
+    monkeypatch.setattr(
+        flash,
+        "_run",
+        lambda *args, **kwargs: DummyCompletedProcess(json.dumps(payload)),
+    )
+
+    partition = flash._resolve_boot_partition_linux(
+        flash.Device(path="/dev/sdz", description="disk", size=0, is_removable=True)
+    )
+
+    assert partition is not None
+    assert partition.path == "/dev/sdz1"
+    assert partition.mountpoint == "/mnt/boot"
