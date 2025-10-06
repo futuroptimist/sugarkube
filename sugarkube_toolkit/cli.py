@@ -329,7 +329,7 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
