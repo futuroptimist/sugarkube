@@ -180,7 +180,11 @@ sync without modifying the host.
   `python -m sugarkube_toolkit pi flash --dry-run -- --image ~/sugarkube/images/sugarkube.img --device /dev/sdX --assume-yes`,
   then drop `--dry-run` when you're ready. Everything after the `--` flows
   straight to `scripts/flash_pi_media.sh`, so `--cloud-init` and other
-  documented flags work unchanged.
+  documented flags work unchanged. Regression coverage:
+  `tests/flash_pi_media_test.py::test_cloud_init_override_copies_user_data`
+  confirms the override lands in `/boot/user-data`, while
+  `tests/flash_pi_media_report_test.py::test_run_flash_forwards_cloud_init`
+  ensures the reporting wrapper forwards the same flag.
   ```powershell
   pwsh -File scripts/flash_pi_media.ps1 --image $env:USERPROFILE\sugarkube\images\sugarkube.img --device \\.\PhysicalDrive1
   ```

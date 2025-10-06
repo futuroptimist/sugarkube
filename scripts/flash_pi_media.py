@@ -26,19 +26,23 @@ testing and dry-runs possible without touching real hardware.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import textwrap
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, Iterator, List, Optional, Sequence
 
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB to balance throughput and memory usage.
 PROGRESS_INTERVAL = 1.0  # seconds
@@ -107,6 +111,16 @@ class Device:
     @property
     def human_size(self) -> str:
         return _format_size(self.size)
+
+
+@dataclass
+class BootPartition:
+    """Metadata about a boot partition used for cloud-init overrides."""
+
+    path: str | None
+    mountpoint: str | None = None
+    identifier: str | None = None
+    disk_number: str | None = None
 
 
 def _run(cmd: Sequence[str], **kwargs) -> subprocess.CompletedProcess:
@@ -341,6 +355,268 @@ def filter_candidates(devices: Sequence[Device]) -> List[Device]:
     return candidates
 
 
+def _resolve_boot_partition_linux(device: Device) -> BootPartition | None:
+    if not device.path:
+        return None
+    if not shutil.which("lsblk"):
+        return None
+    proc = _run(["lsblk", "-J", "-O", device.path])
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        warn("lsblk returned unexpected output while resolving boot partition")
+        return None
+
+    for entry in payload.get("blockdevices", []):
+        entry_path = entry.get("path") or f"/dev/{entry.get('name')}"
+        if entry_path != device.path:
+            continue
+        children = entry.get("children") or []
+        if not children:
+            return None
+
+        def _start(child: dict) -> int:
+            try:
+                return int(child.get("start", 0))
+            except (TypeError, ValueError):
+                return 0
+
+        first = sorted(children, key=_start)[0]
+        part_path = first.get("path")
+        if not part_path:
+            return None
+        mountpoint = first.get("mountpoint") or None
+        return BootPartition(path=part_path, mountpoint=mountpoint)
+
+    return None
+
+
+def _resolve_boot_partition_macos(device: Device) -> BootPartition | None:
+    if not device.system_id and not device.path:
+        return None
+    proc = _run(["/usr/sbin/diskutil", "list", "-plist"])
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:  # pragma: no cover - plistlib import only when available
+        import plistlib
+    except Exception:  # pragma: no cover - defensive guard
+        return None
+
+    try:
+        data = plistlib.loads(proc.stdout.encode("utf-8"))
+    except Exception:  # pragma: no cover - defensive parse
+        return None
+
+    for disk in data.get("AllDisksAndPartitions", []):
+        identifier = disk.get("DeviceIdentifier")
+        path = f"/dev/{identifier}" if identifier else None
+        if identifier and (identifier == device.system_id or path == device.path):
+            partitions = disk.get("Partitions", [])
+            if not partitions:
+                return None
+            part = sorted(
+                partitions,
+                key=lambda item: item.get("PartitionNumber", 0) or 0,
+            )[0]
+            part_id = part.get("DeviceIdentifier")
+            if not part_id:
+                return None
+            mountpoint = part.get("MountPoint") or None
+            return BootPartition(
+                path=f"/dev/{part_id}",
+                mountpoint=mountpoint,
+                identifier=part_id,
+            )
+    return None
+
+
+def _resolve_boot_partition_windows(device: Device) -> BootPartition | None:
+    disk_number = device.system_id
+    if not disk_number and device.path:
+        match = re.search(r"PhysicalDrive(\d+)", device.path)
+        if match:
+            disk_number = match.group(1)
+    if not disk_number:
+        return None
+    return BootPartition(path=None, disk_number=str(disk_number))
+
+
+def _resolve_boot_partition(device: Device) -> BootPartition | None:
+    system = platform.system()
+    if system == "Linux":
+        return _resolve_boot_partition_linux(device)
+    if system == "Darwin":
+        return _resolve_boot_partition_macos(device)
+    if system == "Windows":
+        return _resolve_boot_partition_windows(device)
+    return None
+
+
+@contextlib.contextmanager
+def _mount_boot_partition(partition: BootPartition) -> Iterator[Path]:
+    system = platform.system()
+    if system == "Linux":
+        if partition.mountpoint:
+            yield Path(partition.mountpoint)
+            return
+        if not partition.path:
+            die("Unable to determine boot partition path for --cloud-init override")
+        mount_dir = Path(tempfile.mkdtemp(prefix="sugarkube-boot-"))
+        proc = _run(["mount", partition.path, str(mount_dir)])
+        if proc.returncode != 0:
+            shutil.rmtree(mount_dir, ignore_errors=True)
+            stderr = (proc.stderr or "").strip()
+            die(f"Failed to mount {partition.path}: {stderr or 'unknown error'}")
+        try:
+            yield mount_dir
+        finally:
+            _run(["umount", str(mount_dir)])
+            shutil.rmtree(mount_dir, ignore_errors=True)
+        return
+
+    if system == "Darwin":
+        if not partition.identifier:
+            die("Unable to determine macOS partition identifier for cloud-init override")
+        if partition.mountpoint:
+            yield Path(partition.mountpoint)
+            return
+        proc = _run(["/usr/sbin/diskutil", "mount", partition.identifier])
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            die(f"diskutil could not mount {partition.identifier}: {stderr or 'unknown error'}")
+        try:
+            info_proc = _run(["/usr/sbin/diskutil", "info", "-plist", partition.identifier])
+            if info_proc.returncode != 0 or not info_proc.stdout:
+                die(f"diskutil info failed for {partition.identifier}")
+            import plistlib  # pragma: no cover - macOS only
+
+            info_data = plistlib.loads(info_proc.stdout.encode("utf-8"))
+            mountpoint = info_data.get("MountPoint")
+            if not mountpoint:
+                die(f"diskutil did not report a mount point for {partition.identifier}")
+            yield Path(mountpoint)
+        finally:
+            _run(["/usr/sbin/diskutil", "unmount", partition.identifier])
+        return
+
+    if system == "Windows":
+        if not partition.disk_number:
+            die("Unable to determine disk number for cloud-init override")
+        command = textwrap.dedent(
+            f"""
+            $partition = Get-Partition -DiskNumber {partition.disk_number} |
+              Sort-Object PartitionNumber |
+              Select-Object -First 1;
+            if (-not $partition) {{ exit 1 }}
+            $volume = $partition | Get-Volume -ErrorAction SilentlyContinue;
+            $assigned = $false;
+            if (-not $volume) {{
+              $used = Get-Volume |
+                Where-Object DriveLetter |
+                Select-Object -ExpandProperty DriveLetter;
+              $letters = [char[]](65..90) |
+                ForEach-Object {{ [string]$_ }};
+              $free = $letters |
+                Where-Object {{ $used -notcontains $_ }} |
+                Select-Object -First 1;
+              if (-not $free) {{ exit 2 }}
+              $partition |
+                Set-Partition -NewDriveLetter $free -ErrorAction Stop;
+              $assigned = $true;
+              $volume = $partition |
+                Get-Volume -ErrorAction Stop;
+            }}
+            $path = if ($volume.DriveLetter) {{
+              $volume.DriveLetter + ':\\'
+            }} elseif ($volume.Path) {{
+              $volume.Path
+            }} else {{ '' }};
+            if (-not $path) {{ exit 3 }}
+            $result = [pscustomobject]@{{{{
+              Path = $path;
+              DriveLetter = $volume.DriveLetter;
+              Assigned = $assigned;
+            }}}}
+            $result | ConvertTo-Json -Compress
+            """
+        )
+
+        payload = _powershell_json(command)
+        if not payload:
+            die("Unable to mount Windows boot partition for cloud-init override")
+        mount_path = Path(payload["Path"])
+        assigned = bool(payload.get("Assigned"))
+        drive_letter = payload.get("DriveLetter")
+        try:
+            yield mount_path
+        finally:
+            if assigned and drive_letter:
+                cleanup = textwrap.dedent(
+                    f"""
+                    $partition = Get-Partition -DiskNumber {partition.disk_number} `
+                      -PartitionNumber 1 -ErrorAction SilentlyContinue;
+                    if ($partition) {{
+                      $partition |
+                        Remove-PartitionAccessPath `
+                          -DriveLetter {drive_letter} `
+                          -ErrorAction SilentlyContinue;
+                    }}
+                    """
+                )
+                _run(["powershell", "-NoProfile", "-Command", cleanup])
+        return
+
+    die("--cloud-init overrides are not supported on this platform")
+
+
+def _apply_cloud_init_override(device: Device, override: Path) -> None:
+    partition = _resolve_boot_partition(device)
+    if partition is None:
+        partition = _resolve_synthetic_boot_partition(device)
+    if partition is None:
+        die(
+            "Unable to locate the boot partition for --cloud-init. "
+            "Copy user-data manually or rerun with explicit device info."
+        )
+    with _mount_boot_partition(partition) as mountpoint:
+        destination = mountpoint / "user-data"
+        try:
+            shutil.copyfile(override, destination)
+        except OSError as exc:
+            die(f"Failed to copy cloud-init override to {destination}: {exc}")
+        info(f"Copied cloud-init override to {destination}")
+
+
+def _resolve_synthetic_boot_partition(device: Device) -> BootPartition | None:
+    """Best-effort fallback for tests and synthetic devices.
+
+    When flashing to a regular file (as the integration tests do), there is no
+    discoverable boot partition.  Instead of failing, honour an explicit
+    `SUGARKUBE_FLASH_BOOT_MOUNTPOINT` environment variable or, as a last
+    resort, look for a `boot/` directory in the current working directory.
+    """
+
+    path = device.path
+    if path and _is_block_device(path):
+        return None
+
+    overrides: list[Path] = []
+    env_override = os.environ.get("SUGARKUBE_FLASH_BOOT_MOUNTPOINT")
+    if env_override:
+        overrides.append(Path(env_override))
+    overrides.append(Path.cwd() / "boot")
+
+    for candidate in overrides:
+        try:
+            if candidate.is_dir():
+                return BootPartition(path=None, mountpoint=str(candidate))
+        except OSError:
+            continue
+    return None
+
+
 def summarize_devices(devices: Sequence[Device]) -> None:
     if not devices:
         info("No removable drives detected. Pass --device explicitly if one is attached.")
@@ -532,6 +808,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Validate inputs and read the image without writing to the device.",
     )
     parser.add_argument(
+        "--cloud-init",
+        help="Path to a cloud-init user-data file to copy onto the boot partition after flashing.",
+    )
+    parser.add_argument(
         "--bytes",
         type=int,
         default=0,
@@ -573,6 +853,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not image_path.exists():
         die(f"Image not found: {image_path}")
+
+    cloud_init_path: Path | None = None
+    if getattr(args, "cloud_init", None):
+        candidate = Path(args.cloud_init).expanduser().resolve()
+        if not candidate.exists():
+            die(f"Cloud-init override not found: {candidate}")
+        cloud_init_path = candidate
 
     if not args.device:
         summarize_devices(candidates)
@@ -661,6 +948,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"Expected {expected_hash}, got {actual_hash}."
         )
     info(f"Verified device SHA-256: {actual_hash}")
+
+    if cloud_init_path is not None:
+        _apply_cloud_init_override(target_device, cloud_init_path)
 
     if not args.no_eject:
         _auto_eject(target_device)
