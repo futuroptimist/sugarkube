@@ -38,6 +38,16 @@ Python implementation:
   --output-dir ~/sugarkube/support-bundles
 ```
 
+Prefer the unified CLI? Preview the helper with:
+
+```bash
+python -m sugarkube_toolkit pi support-bundle --dry-run -- pi-a.local \
+  --identity ~/.ssh/id_ed25519 --output-dir ~/sugarkube/support-bundles
+```
+
+Drop `--dry-run` to collect artefacts immediately. Arguments after the standalone `--` flow directly to
+`scripts/collect_support_bundle.py`, matching the behaviour described above.
+
 The script stores results under `support-bundles/<host>-<timestamp>/` and also emits a matching
 `.tar.gz`. Override `--no-archive` to keep only the raw directory, and `--spec` to append extra
 commands (`output/path.txt:command:description`).

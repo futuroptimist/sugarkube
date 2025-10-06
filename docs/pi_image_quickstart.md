@@ -264,6 +264,10 @@ sync without modifying the host.
   ```
   Swap in `just support-bundle` when you prefer Just. The helper saves transcripts under
   `support-bundles/` alongside `summary.json` so you can attach the archive to issues or CI logs.
+  Prefer the unified CLI? Preview the helper with
+  `python -m sugarkube_toolkit pi support-bundle --dry-run -- pi-a.local --identity ~/.ssh/id_ed25519`
+  and drop `--dry-run` once you're ready to collect diagnostics. Everything after the standalone `--`
+  flows directly to `scripts/collect_support_bundle.py`.
 - A new `first-boot.service` waits for `cloud-init` to finish, expands the root
   filesystem when needed, then runs `pi_node_verifier.sh` (with retries) and
   writes Markdown, HTML, and JSON snapshots under `/boot/first-boot-report/`.
