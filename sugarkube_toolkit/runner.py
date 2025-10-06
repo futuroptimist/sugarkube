@@ -45,6 +45,7 @@ def run_commands(
     *,
     dry_run: bool = False,
     env: Mapping[str, str] | None = None,
+    cwd: os.PathLike[str] | str | None = None,
 ) -> None:
     """Run each command, stopping at the first failure.
 
@@ -64,6 +65,7 @@ def run_commands(
             check=False,
             text=True,
             stderr=subprocess.PIPE,
+            cwd=str(cwd) if cwd is not None else None,
         )
         if result.returncode != 0:
             raise CommandError(command, result.returncode, stderr=result.stderr)

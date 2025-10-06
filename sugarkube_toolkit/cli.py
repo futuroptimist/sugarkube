@@ -150,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _handle_docs_verify(args: argparse.Namespace) -> int:
     try:
-        runner.run_commands(DOC_VERIFY_COMMANDS, dry_run=args.dry_run)
+        runner.run_commands(DOC_VERIFY_COMMANDS, dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -173,7 +173,7 @@ def _handle_docs_simplify(args: argparse.Namespace) -> int:
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -199,7 +199,7 @@ def _handle_pi_download(args: argparse.Namespace) -> int:
 
     command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -218,7 +218,7 @@ def _handle_pi_install(args: argparse.Namespace) -> int:
 
     command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -237,7 +237,7 @@ def _handle_pi_flash(args: argparse.Namespace) -> int:
 
     command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -260,7 +260,7 @@ def _handle_pi_report(args: argparse.Namespace) -> int:
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -283,7 +283,7 @@ def _handle_pi_smoke(args: argparse.Namespace) -> int:
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -306,7 +306,7 @@ def _handle_pi_rehearse(args: argparse.Namespace) -> int:
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -329,7 +329,7 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
     try:
-        runner.run_commands([command], dry_run=args.dry_run)
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1

@@ -47,7 +47,7 @@ def test_run_commands_merges_environment(monkeypatch: pytest.MonkeyPatch):
 
     recorded = {}
 
-    def fake_run(command, *, env, check, text, stderr):
+    def fake_run(command, *, env, check, text, stderr, cwd=None):
         recorded.update(
             {
                 "command": command,
@@ -55,6 +55,7 @@ def test_run_commands_merges_environment(monkeypatch: pytest.MonkeyPatch):
                 "check": check,
                 "text": text,
                 "stderr": stderr,
+                "cwd": cwd,
             }
         )
         return SimpleNamespace(returncode=0)
@@ -67,6 +68,7 @@ def test_run_commands_merges_environment(monkeypatch: pytest.MonkeyPatch):
     assert recorded["check"] is False
     assert recorded["text"] is True
     assert recorded["stderr"] is runner.subprocess.PIPE
+    assert recorded["cwd"] is None
     assert recorded["env"]["EXTRA"] == "value"
     assert recorded["env"]["MERGE_TEST"] == "override"
     assert os.environ["MERGE_TEST"] == "original"

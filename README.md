@@ -63,7 +63,10 @@ the docs you will see the term used in both contexts.
     instead of `realpath` so macOS-friendly symlinks work without extra tooling.
     Invoke it from the unified CLI with
     `python -m sugarkube_toolkit pi download [--dry-run] [helper args...]` when you prefer
-    a consistent entry point across automation helpers.
+    a consistent entry point across automation helpers. The unified CLI always runs helpers
+    from the repository root so relative paths to `scripts/` and docs work even when you
+    launch it from nested directories (`tests/test_cli_docs_repo_root.py` guards the docs
+    call-out).
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
     `.img.sha256`; safe to run via `curl | bash`. Invoke it from the unified CLI with
@@ -119,7 +122,9 @@ Codespaces users can install prerequisites and flash media without additional sh
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
 Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` previews the
-release helper. Need the combined installer that downloads and expands the image? Run
+release helper. The CLI forces the working directory to the repository root before invoking
+helpers, so you can run it from anywhere inside the clone. Need the combined installer that
+downloads and expands the image? Run
 
 ```bash
 python -m sugarkube_toolkit pi install --dry-run -- --dir ~/sugarkube/images --image ~/sugarkube/images/sugarkube.img
