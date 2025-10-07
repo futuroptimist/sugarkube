@@ -157,6 +157,72 @@ def test_docs_simplify_surfaces_failures(
     assert "boom" in captured.err
 
 
+def test_doctor_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The doctor command should wrap the legacy helper script."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["doctor", "--dry-run"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "sugarkube_doctor.sh"
+
+    assert exit_code == 0
+    assert recorded == [["bash", str(expected_script)]]
+
+
+def test_doctor_supports_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
+    """Dry-run mode should surface the forwarded helper invocation."""
+
+    exit_code = cli.main(["doctor", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "sugarkube_doctor.sh" in captured.out
+
+
+def test_doctor_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing helper scripts should surface a clear error."""
+
+    monkeypatch.setattr(cli, "SUGARKUBE_DOCTOR_SCRIPT", Path("/nonexistent/sugarkube_doctor.sh"))
+
+    exit_code = cli.main(["doctor", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "scripts/sugarkube_doctor.sh is missing" in captured.err
+
+
+def test_doctor_surfaces_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Helper failures should bubble up via stderr and exit code."""
+
+    def boom(*_args, **_kwargs):
+        raise runner.CommandError(["bash", "sugarkube_doctor.sh"], returncode=1, stderr="boom")
+
+    monkeypatch.setattr(runner, "run_commands", boom)
+
+    exit_code = cli.main(["doctor"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "boom" in captured.err
+
+
 def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi download should wrap the documented helper script."""
 
