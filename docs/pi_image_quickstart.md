@@ -99,11 +99,18 @@ sync without modifying the host.
      repository root to print the same steps.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
      partial downloads and verifies checksums automatically.
-  - Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` shows the
-    underlying helper, then runs `scripts/download_pi_image.sh --dry-run` with the flags you provide.
-    Pass the same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight
-    to the shell script, including the preview mode so you can inspect the exact `curl` commands
-    without fetching the artifact.
+  - Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
+    repository root to preview the helper. When you're in a nested directory, call
+    `./scripts/sugarkube pi download --dry-run` so the wrapper bootstraps `PYTHONPATH`. Both
+    commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide.
+    Pass the same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow
+    straight to the shell script, including the preview mode so you can inspect the exact
+    `curl` commands without fetching the artifact.
+
+> [!NOTE]
+> The same repository-root rule applies to other `python -m sugarkube_toolkit ...` examples below.
+> Use the `./scripts/sugarkube` wrapper (or add `scripts/` to `PATH`) whenever you're launching
+> commands from a nested directory so the CLI can import correctly.
    - Want a hands-off alert when the artifacts land? Run
     ```bash
     make notify-workflow \
