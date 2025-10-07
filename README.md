@@ -95,6 +95,9 @@ the docs you will see the term used in both contexts.
     archives. Invoke it from the unified CLI with
     `python -m sugarkube_toolkit pi support-bundle [--dry-run] [args...]` when you want the same
     workflow without leaving the `sugarkube` entry point.
+  - `sugarkube_doctor.sh` — chain download dry-runs, flash validation, and linting checks. Invoke it
+    from the unified CLI with `python -m sugarkube_toolkit doctor [--dry-run] [-- args...]` to avoid
+    memorizing the standalone helper.
   - `render_field_guide_pdf.py` — build the Markdown field guide into a single-page PDF without
     extra pip dependencies so releases can refresh the printable checklist automatically
   - `scan-secrets.py` — scan diffs for high-risk patterns using `ripsecrets` when

@@ -56,6 +56,9 @@ before they can automate common tasks.
 7. ✅ Extend the CLI with `sugarkube pi rehearse` so multi-node join rehearsals are
    accessible from the unified entry point (regression coverage:
    `tests/test_sugarkube_toolkit_cli.py::test_pi_rehearse_invokes_helper`).
+8. ✅ Surface the end-to-end dry-run workflow behind `sugarkube doctor` so
+   contributors no longer need to memorize the standalone helper (regression
+   coverage: `tests/test_sugarkube_toolkit_cli.py::test_doctor_invokes_helper`).
 
 **Safeguards:**
 - Mirror existing exit codes and output formats so CI and human workflows do not

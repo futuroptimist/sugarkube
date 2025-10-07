@@ -12,6 +12,7 @@ from . import runner
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 CHECKS_SCRIPT = SCRIPTS_DIR / "checks.sh"
+SUGARKUBE_DOCTOR_SCRIPT = SCRIPTS_DIR / "sugarkube_doctor.sh"
 DOWNLOAD_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "download_pi_image.sh"
 INSTALL_PI_IMAGE_SCRIPT = SCRIPTS_DIR / "install_sugarkube_image.sh"
 FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
@@ -35,6 +36,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(handler=None)
 
     subparsers = parser.add_subparsers(dest="section")
+
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run the sugarkube doctor workflow end-to-end.",
+    )
+    doctor_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation without executing it.",
+    )
+    doctor_parser.set_defaults(handler=_handle_doctor)
 
     docs_parser = subparsers.add_parser(
         "docs",
@@ -189,6 +201,25 @@ def _handle_docs_simplify(args: argparse.Namespace) -> int:
         "--docs-only",
         *_normalize_script_args(getattr(args, "script_args", [])),
     ]
+    try:
+        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
+    except runner.CommandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_doctor(args: argparse.Namespace) -> int:
+    script = SUGARKUBE_DOCTOR_SCRIPT
+    if not script.exists():
+        print(
+            "scripts/sugarkube_doctor.sh is missing. "
+            "Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
     try:
         runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
@@ -388,6 +419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     if handler in {
+        _handle_doctor,
         _handle_docs_simplify,
         _handle_pi_download,
         _handle_pi_install,

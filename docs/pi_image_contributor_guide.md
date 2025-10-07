@@ -149,8 +149,9 @@ sync.
     repository linters.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [Pi Image Flowcharts](./pi_image_flowcharts.md).
-  - Related tooling: executed via `make doctor` or `just doctor` and prints hints when `pyspelling`
-    or `linkchecker` are missing locally.
+  - Related tooling: executed via `make doctor` or `just doctor`, mirrored in the unified CLI as
+    `python -m sugarkube_toolkit doctor [--dry-run]`, and prints hints when `pyspelling` or
+    `linkchecker` are missing locally.
 - `scripts/rollback_to_sd.sh`
   - Purpose: undo SSD migrations by restoring `/boot/cmdline.txt` and `/etc/fstab` to SD defaults,
     writing a Markdown report alongside the boot partition.
