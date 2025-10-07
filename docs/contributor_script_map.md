@@ -13,8 +13,9 @@ confirm the quickstart stays accurate.
 > **Note:** The unified CLI forces helpers to run from the repository root so relative
 > paths stay stable even when you invoke it from nested directories. Use the CLI entries
 > below when you want consistent automation regardless of your current working directory.
-> The reminder is enforced by `tests/test_cli_docs_repo_root.py` so contributors keep the
-> documentation aligned.
+> The reminder is enforced by `tests/test_cli_docs_repo_root.py`, which uses
+> `monkeypatch.chdir` to enter nested folders before invoking `docs verify` and
+> `docs simplify` so the documentation stays aligned.
 
 ## Image download and install helpers
 

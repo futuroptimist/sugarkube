@@ -65,8 +65,9 @@ the docs you will see the term used in both contexts.
     `python -m sugarkube_toolkit pi download [--dry-run] [helper args...]` when you prefer
     a consistent entry point across automation helpers. The unified CLI always runs helpers
     from the repository root so relative paths to `scripts/` and docs work even when you
-    launch it from nested directories (`tests/test_cli_docs_repo_root.py` guards the docs
-    call-out).
+    launch it from nested directories. `tests/test_cli_docs_repo_root.py` guards the docs
+    call-out by invoking `monkeypatch.chdir` to enter a temporary folder before
+    running both `docs verify` and `docs simplify`.
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
     `.img.sha256`; safe to run via `curl | bash`. Invoke it from the unified CLI with
