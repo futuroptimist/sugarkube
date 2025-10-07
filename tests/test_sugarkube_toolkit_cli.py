@@ -157,6 +157,54 @@ def test_docs_simplify_surfaces_failures(
     assert "boom" in captured.err
 
 
+def test_docs_start_here_prints_path_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs start-here --path-only` should emit the absolute handbook path."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Welcome", encoding="utf-8")
+    monkeypatch.setattr(cli, "START_HERE_DOC", guide)
+
+    exit_code = cli.main(["docs", "start-here", "--path-only"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip() == str(guide)
+
+
+def test_docs_start_here_prints_contents(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Calling `docs start-here` without flags should show the handbook contents."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Hello Sugarkube", encoding="utf-8")
+    monkeypatch.setattr(cli, "START_HERE_DOC", guide)
+
+    exit_code = cli.main(["docs", "start-here"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.splitlines()[0] == f"Sugarkube Start Here guide: {guide}"
+    assert "Hello Sugarkube" in captured.out
+
+
+def test_docs_start_here_handles_missing_doc(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing handbooks should surface actionable errors."""
+
+    missing = tmp_path / "start-here.md"
+    monkeypatch.setattr(cli, "START_HERE_DOC", missing)
+
+    exit_code = cli.main(["docs", "start-here"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "docs/start-here.md is missing" in captured.err
+
+
 def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi download should wrap the documented helper script."""
 
