@@ -47,7 +47,10 @@ docs apply to you.
 
 > [!TIP]
 > Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
-> Append `--path-only` to either command when you simply need the absolute path for note-taking or automation evidence.
+> Need just the absolute path? Run `python -m sugarkube_toolkit docs start-here --path-only`.
+> This prints the location without extra tooling.
+> When using the Make/Just wrappers, forward `START_HERE_ARGS="--path-only"`
+> so they pass the flag through (for example, `make start-here START_HERE_ARGS="--path-only"`).
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
