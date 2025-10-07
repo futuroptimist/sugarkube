@@ -332,7 +332,9 @@ def _handle_pi_report(args: argparse.Namespace) -> int:
     if args.dry_run and not script_dry_run:
         command.append("--dry-run")
     command.extend(script_args)
-    dry_run = args.dry_run and not script_dry_run
+
+    # Always execute the helper so it can perform its own dry-run handling.
+    dry_run = False
     try:
         runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
