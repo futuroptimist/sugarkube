@@ -13,9 +13,11 @@ confirm the quickstart stays accurate.
 > **Note:** The unified CLI forces helpers to run from the repository root so relative
 > paths stay stable even when you invoke it from nested directories. Use the CLI entries
 > below when you want consistent automation regardless of your current working directory.
-> The reminder is enforced by `tests/test_cli_docs_repo_root.py`, which uses
-> `monkeypatch.chdir` to enter nested folders before invoking `docs verify` and
-> `docs simplify` so the documentation stays aligned.
+> You can also run `python -m sugarkube_toolkit ...` from the repository root for direct
+> imports, or call `./scripts/sugarkube ...` (or add `scripts/` to your `PATH`) to let the
+> wrapper bootstrap `PYTHONPATH` automatically. The reminder is enforced by
+> `tests/test_cli_docs_repo_root.py`, which uses `monkeypatch.chdir` to enter nested folders
+> before invoking `docs verify` and `docs simplify` so the documentation stays aligned.
 
 ## Image download and install helpers
 

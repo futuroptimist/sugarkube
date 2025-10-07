@@ -677,6 +677,7 @@ def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi report should wrap the flash report helper script."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -686,6 +687,7 @@ def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -695,13 +697,15 @@ def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"
 
     assert exit_code == 0
-    assert recorded == [[sys.executable, str(expected_script)]]
+    assert recorded == [[sys.executable, str(expected_script), "--dry-run"]]
+    assert dry_run_flags == [False]
 
 
 def test_pi_report_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forward CLI arguments to the report helper for docs parity."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -711,6 +715,7 @@ def test_pi_report_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> 
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -732,12 +737,47 @@ def test_pi_report_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> 
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"),
+            "--dry-run",
             "--image",
             "~/sugarkube/images/sugarkube.img.xz",
             "--device",
             "/dev/sdX",
         ]
     ]
+    assert dry_run_flags == [False]
+
+
+def test_pi_report_respects_existing_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid duplicating --dry-run when callers forward it manually."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "report", "--dry-run", "--", "--dry-run", "--list-devices"])
+
+    expected = [
+        sys.executable,
+        str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"),
+        "--dry-run",
+        "--list-devices",
+    ]
+
+    assert exit_code == 0
+    assert recorded == [expected]
+    assert dry_run_flags == [False]
 
 
 def test_pi_report_reports_missing_script(

@@ -47,8 +47,10 @@ docs apply to you.
 
 > [!TIP]
 > Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
-> Need just the absolute path? Run `python -m sugarkube_toolkit docs start-here --path-only`.
-> This prints the location without extra tooling.
+> Need just the absolute path? Run `python -m sugarkube_toolkit docs start-here --path-only`
+> from the repository root. When you're working out of a nested directory, call
+> `./scripts/sugarkube docs start-here --path-only` (or add `scripts/` to `PATH`) so the
+> wrapper bootstraps `PYTHONPATH` before forwarding to the CLI.
 > When using the Make/Just wrappers, forward `START_HERE_ARGS="--path-only"`
 > so they pass the flag through (for example, `make start-here START_HERE_ARGS="--path-only"`).
 > Skim this track the moment you clone the repository. It orients you before you touch any

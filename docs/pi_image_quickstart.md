@@ -99,11 +99,18 @@ sync without modifying the host.
      repository root to print the same steps.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
      partial downloads and verifies checksums automatically.
-  - Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` shows the
-    underlying helper, then runs `scripts/download_pi_image.sh --dry-run` with the flags you provide.
-    Pass the same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight
-    to the shell script, including the preview mode so you can inspect the exact `curl` commands
-    without fetching the artifact.
+  - Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
+    repository root to preview the helper. When you're in a nested directory, call
+    `./scripts/sugarkube pi download --dry-run` so the wrapper bootstraps `PYTHONPATH`. Both
+    commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide.
+    Pass the same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow
+    straight to the shell script, including the preview mode so you can inspect the exact
+    `curl` commands without fetching the artifact.
+
+> [!NOTE]
+> The same repository-root rule applies to other `python -m sugarkube_toolkit ...` examples below.
+> Use the `./scripts/sugarkube` wrapper (or add `scripts/` to `PATH`) whenever you're launching
+> commands from a nested directory so the CLI can import correctly.
    - Want a hands-off alert when the artifacts land? Run
     ```bash
     make notify-workflow \
@@ -161,15 +168,19 @@ sync without modifying the host.
   then drop `--dry-run` when you're ready. Everything after the `--` flows to
   `scripts/flash_pi_media_report.py`, so `--cloud-init` and other documented flags work unchanged.
   Regression coverage:
-  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`
-  (plus the neighbouring `test_pi_report_*` cases) ensures the CLI forwards arguments exactly as documented.
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`,
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_forwards_additional_args`, and
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_respects_existing_dry_run`
+  ensure the CLI forwards arguments exactly as documented while preserving safe dry-run previews.
   > [!TIP]
   > Need to confirm which removable drives are visible before flashing? Run
   > `python3 scripts/flash_pi_media_report.py --list-devices` without
   > specifying `--image`; regression coverage lives in
   > `tests/flash_pi_media_report_test.py::test_list_devices_without_image_exits_cleanly`.
   > Prefer the CLI wrapper? Run
-  > `python -m sugarkube_toolkit pi report --dry-run -- --list-devices` for the same preview.
+  > `python -m sugarkube_toolkit pi report --dry-run -- --list-devices` for the same preview. The
+  > unified CLI forwards its `--dry-run` flag to the helper so the inventory still runs without
+  > touching hardware.
 - Stream the expanded image (or the `.img.xz`) directly to removable media:
   ```bash
   sudo ./scripts/flash_pi_media.sh --image ~/sugarkube/images/sugarkube.img --device /dev/sdX --assume-yes

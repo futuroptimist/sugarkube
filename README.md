@@ -67,7 +67,11 @@ the docs you will see the term used in both contexts.
     from the repository root so relative paths to `scripts/` and docs work even when you
     launch it from nested directories. `tests/test_cli_docs_repo_root.py` guards the docs
     call-out by invoking `monkeypatch.chdir` to enter a temporary folder before
-    running both `docs verify` and `docs simplify`.
+    running both `docs verify` and `docs simplify`. If you prefer, you can also run
+    `python -m` commands from the repository root so the package can be imported cleanly;
+    from a nested directory, `./scripts/sugarkube ...` (or adding `scripts/` to your `PATH`)
+    bootstraps `PYTHONPATH` before forwarding to the CLI. Either way, the CLI executes
+    helpers from the repository root so relative paths to scripts and docs remain stable.
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
     `.img.sha256`; safe to run via `curl | bash`. Invoke it from the unified CLI with
