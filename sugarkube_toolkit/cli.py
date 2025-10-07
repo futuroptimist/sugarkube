@@ -20,6 +20,7 @@ FLASH_PI_MEDIA_REPORT_SCRIPT = SCRIPTS_DIR / "flash_pi_media_report.py"
 PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
 PI_JOIN_REHEARSAL_SCRIPT = SCRIPTS_DIR / "pi_multi_node_join_rehearsal.py"
 COLLECT_SUPPORT_BUNDLE_SCRIPT = SCRIPTS_DIR / "collect_support_bundle.py"
+START_HERE_DOC = REPO_ROOT / "docs" / "start-here.md"
 
 DOC_VERIFY_COMMANDS: list[list[str]] = [
     ["pyspelling", "-c", ".spellcheck.yaml"],
@@ -73,6 +74,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the helper invocation without executing it.",
     )
     simplify_parser.set_defaults(handler=_handle_docs_simplify)
+
+    start_here_parser = docs_subparsers.add_parser(
+        "start-here",
+        help="Print the Start Here handbook path or contents without leaving the CLI.",
+    )
+    start_here_parser.add_argument(
+        "--path-only",
+        action="store_true",
+        help="Emit only the absolute path to docs/start-here.md.",
+    )
+    start_here_parser.add_argument(
+        "--no-content",
+        action="store_true",
+        help="Deprecated alias for --path-only maintained for legacy wrappers.",
+    )
+    start_here_parser.set_defaults(handler=_handle_docs_start_here)
 
     pi_parser = subparsers.add_parser(
         "pi",
@@ -211,6 +228,24 @@ def _handle_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_docs_start_here(args: argparse.Namespace) -> int:
+    if not START_HERE_DOC.exists():
+        print(
+            "docs/start-here.md is missing; restore the handbook before continuing.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.path_only or args.no_content:
+        print(START_HERE_DOC)
+        return 0
+
+    print(f"Sugarkube Start Here guide: {START_HERE_DOC}")
+    print()
+    print(START_HERE_DOC.read_text(encoding="utf-8"))
+    return 0
+
+
 def _normalize_script_args(args: Sequence[str]) -> list[str]:
     script_args = list(args)
     if script_args and script_args[0] == "--":
@@ -228,9 +263,15 @@ def _handle_pi_download(args: argparse.Namespace) -> int:
         )
         return 1
 
-    command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
+    script_args = _normalize_script_args(getattr(args, "script_args", []))
+    command = ["bash", str(script)]
+    script_dry_run = "--dry-run" in script_args
+    if args.dry_run and not script_dry_run:
+        command.append("--dry-run")
+    command.extend(script_args)
+    dry_run = False if args.dry_run and not script_dry_run else args.dry_run
     try:
-        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
+        runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1

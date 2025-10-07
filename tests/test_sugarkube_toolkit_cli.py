@@ -223,10 +223,59 @@ def test_doctor_surfaces_failures(
     assert "boom" in captured.err
 
 
+def test_docs_start_here_prints_path_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs start-here --path-only` should emit the absolute handbook path."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Welcome", encoding="utf-8")
+    monkeypatch.setattr(cli, "START_HERE_DOC", guide)
+
+    exit_code = cli.main(["docs", "start-here", "--path-only"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip() == str(guide)
+
+
+def test_docs_start_here_prints_contents(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Calling `docs start-here` without flags should show the handbook contents."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Hello Sugarkube", encoding="utf-8")
+    monkeypatch.setattr(cli, "START_HERE_DOC", guide)
+
+    exit_code = cli.main(["docs", "start-here"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.splitlines()[0] == f"Sugarkube Start Here guide: {guide}"
+    assert "Hello Sugarkube" in captured.out
+
+
+def test_docs_start_here_handles_missing_doc(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing handbooks should surface actionable errors."""
+
+    missing = tmp_path / "start-here.md"
+    monkeypatch.setattr(cli, "START_HERE_DOC", missing)
+
+    exit_code = cli.main(["docs", "start-here"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "docs/start-here.md is missing" in captured.err
+
+
 def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi download should wrap the documented helper script."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -236,6 +285,7 @@ def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -245,13 +295,15 @@ def test_pi_download_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     expected_script = Path(__file__).resolve().parents[1] / "scripts" / "download_pi_image.sh"
 
     assert exit_code == 0
-    assert recorded == [["bash", str(expected_script)]]
+    assert recorded == [["bash", str(expected_script), "--dry-run"]]
+    assert dry_run_flags == [False]
 
 
 def test_pi_download_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forward CLI arguments to the helper script for parity with docs."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -261,6 +313,7 @@ def test_pi_download_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -282,12 +335,14 @@ def test_pi_download_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -
         [
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts" / "download_pi_image.sh"),
+            "--dry-run",
             "--dir",
             "~/sugarkube/images",
             "--output",
             "~/sugarkube/images/custom.img.xz",
         ]
     ]
+    assert dry_run_flags == [False]
 
 
 def test_pi_download_reports_missing_script(
@@ -325,6 +380,7 @@ def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
     """A leading `--` should be stripped before forwarding script arguments."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -334,6 +390,7 @@ def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -345,10 +402,12 @@ def test_pi_download_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> 
         [
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts" / "download_pi_image.sh"),
+            "--dry-run",
             "--flag",
             "value",
         ]
     ]
+    assert dry_run_flags == [False]
 
 
 def test_pi_install_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
