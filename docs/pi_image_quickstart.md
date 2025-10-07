@@ -168,15 +168,19 @@ sync without modifying the host.
   then drop `--dry-run` when you're ready. Everything after the `--` flows to
   `scripts/flash_pi_media_report.py`, so `--cloud-init` and other documented flags work unchanged.
   Regression coverage:
-  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`
-  (plus the neighbouring `test_pi_report_*` cases) ensures the CLI forwards arguments exactly as documented.
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`,
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_forwards_additional_args`, and
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_respects_existing_dry_run`
+  ensure the CLI forwards arguments exactly as documented while preserving safe dry-run previews.
   > [!TIP]
   > Need to confirm which removable drives are visible before flashing? Run
   > `python3 scripts/flash_pi_media_report.py --list-devices` without
   > specifying `--image`; regression coverage lives in
   > `tests/flash_pi_media_report_test.py::test_list_devices_without_image_exits_cleanly`.
   > Prefer the CLI wrapper? Run
-  > `python -m sugarkube_toolkit pi report --dry-run -- --list-devices` for the same preview.
+  > `python -m sugarkube_toolkit pi report --dry-run -- --list-devices` for the same preview. The
+  > unified CLI forwards its `--dry-run` flag to the helper so the inventory still runs without
+  > touching hardware.
 - Stream the expanded image (or the `.img.xz`) directly to removable media:
   ```bash
   sudo ./scripts/flash_pi_media.sh --image ~/sugarkube/images/sugarkube.img --device /dev/sdX --assume-yes
