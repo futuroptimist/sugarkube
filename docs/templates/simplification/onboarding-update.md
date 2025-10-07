@@ -9,8 +9,9 @@
 - Link to the updated quickstart, handbook, or tutorial draft.
 - Evidence that automation (`make doctor`, `START_HERE_ARGS="--path-only" just start-here`,
   `START_HERE_ARGS="--path-only" make start-here`,
-  `python -m sugarkube_toolkit docs start-here --path-only`) reflects the new path and prints the
-  updated guidance.
+  `python -m sugarkube_toolkit docs start-here --path-only` from the repo root or
+  `./scripts/sugarkube docs start-here --path-only` when working in a subdirectory)
+  reflects the new path and prints the updated guidance.
 - Screenshots or recordings that walk through the refreshed flow.
 
 ## Stakeholders

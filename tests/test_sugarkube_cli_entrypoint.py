@@ -49,3 +49,22 @@ os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
     recorded_args = json.loads(args_file.read_text(encoding="utf-8"))
     assert recorded_args[:2] == ["-m", "sugarkube_toolkit"]
     assert recorded_args[2:] == ["docs", "start-here", "--path-only"]
+
+
+def test_sugarkube_script_sets_repo_root_from_subdirectory() -> None:
+    """The wrapper should work even when launched outside the repository root."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "sugarkube"
+    assert script.exists(), "scripts/sugarkube entry point is missing"
+
+    result = subprocess.run(
+        [str(script), "docs", "start-here", "--path-only"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo_root / "tests",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("docs/start-here.md"), result.stdout

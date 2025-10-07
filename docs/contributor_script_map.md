@@ -10,11 +10,12 @@ scripts or guides. Each table row links a helper to the documentation that intro
 plus any supporting automation. After editing a script or doc, rerun the docs checks to
 confirm the quickstart stays accurate.
 
-> **Note:** The unified CLI forces helpers to run from the repository root so relative
-> paths stay stable even when you invoke it from nested directories. Use the CLI entries
-> below when you want consistent automation regardless of your current working directory.
-> The reminder is enforced by `tests/test_cli_docs_repo_root.py` so contributors keep the
-> documentation aligned.
+> **Note:** Run `python -m sugarkube_toolkit ...` from the repository root so the module can
+> be imported. When you're working from a nested directory, call `./scripts/sugarkube ...`
+> (or add `scripts/` to `PATH`) and the wrapper will bootstrap `PYTHONPATH` before
+> forwarding to the CLI. The wrapper still forces helpers to execute from the repository
+> root so relative paths stay stable. The reminder is enforced by
+> `tests/test_cli_docs_repo_root.py` so contributors keep the documentation aligned.
 
 ## Image download and install helpers
 
