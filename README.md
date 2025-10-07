@@ -63,12 +63,15 @@ the docs you will see the term used in both contexts.
     instead of `realpath` so macOS-friendly symlinks work without extra tooling.
     Invoke it from the unified CLI with
     `python -m sugarkube_toolkit pi download [--dry-run] [helper args...]` when you prefer
-    a consistent entry point across automation helpers. Run `python -m` commands from the
-    repository root so the package can be imported cleanly; if you are working from a
-    nested directory, call `./scripts/sugarkube ...` (or add `scripts/` to `PATH`) so the
-    wrapper bootstraps `PYTHONPATH` before forwarding to the CLI. The CLI still executes
-    helpers from the repository root so relative paths to `scripts/` and docs remain
-    stable (`tests/test_cli_docs_repo_root.py` guards the docs call-out).
+    a consistent entry point across automation helpers. The unified CLI always runs helpers
+    from the repository root so relative paths to `scripts/` and docs work even when you
+    launch it from nested directories. `tests/test_cli_docs_repo_root.py` guards the docs
+    call-out by invoking `monkeypatch.chdir` to enter a temporary folder before
+    running both `docs verify` and `docs simplify`. If you prefer, you can also run
+    `python -m` commands from the repository root so the package can be imported cleanly;
+    from a nested directory, `./scripts/sugarkube ...` (or adding `scripts/` to your `PATH`)
+    bootstraps `PYTHONPATH` before forwarding to the CLI. Either way, the CLI executes
+    helpers from the repository root so relative paths to scripts and docs remain stable.
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
     `.img.sha256`; safe to run via `curl | bash`. Invoke it from the unified CLI with
