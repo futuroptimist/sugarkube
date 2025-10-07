@@ -83,8 +83,9 @@ sugarkube pi smoke --dry-run -- --json pi-a.local pi-b.local
 Drop `--dry-run` to run the verifier immediately. Everything after the standalone `--` flows to
 `scripts/pi_smoke_test.py`, so existing documentation continues to apply. Regression coverage lives
 in `tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_invokes_helper`,
-`tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_drops_script_separator`, and the
-new `tests/test_sugarkube_cli_entrypoint.py::test_sugarkube_script_invokes_cli` case.
+`tests/test_sugarkube_toolkit_cli.py::test_pi_smoke_drops_script_separator`, and
+`tests/test_sugarkube_cli_entrypoint.py::test_sugarkube_script_invokes_cli`, which verifies the
+legacy wrapper delegates to the unified CLI.
 
 ## Test coverage
 
