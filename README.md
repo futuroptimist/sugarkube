@@ -182,13 +182,14 @@ make docs-verify
 just docs-verify
 ```
 
-Both commands call `scripts/docs_verify.sh`, which prints a deprecation notice before handing off to
-`python -m sugarkube_toolkit docs verify`. The CLI runs the same `pyspelling -c .spellcheck.yaml`
-and `linkchecker --no-warnings README.md docs/` commands documented throughout the repo.
-`pyspelling` relies on `aspell` and the English dictionary (`aspell-en`); install them manually when
-the helper cannot. The `scripts/checks.sh` helper attempts to install the dependencies via
-`apt-get` when missing. When you want Sugarkube to bootstrap the prerequisites automatically without
-running the full lint suite, use the docs
+Both commands shell into the unified CLI via `scripts/sugarkube docs verify`, which in turn runs
+`python -m sugarkube_toolkit docs verify`. The CLI executes the same `pyspelling -c .spellcheck.yaml`
+and `linkchecker --no-warnings README.md docs/` commands documented throughout the repo. Provide
+`DOCS_VERIFY_ARGS="--dry-run"` to preview the commands before they execute. `pyspelling` relies on
+`aspell` and the English dictionary (`aspell-en`); install them manually when the helper cannot. The
+`scripts/checks.sh` helper attempts to install the dependencies via `apt-get` when missing. When you
+want Sugarkube to bootstrap the prerequisites automatically without running the full lint suite, use
+the docs
 simplification target instead:
 
 ```bash
