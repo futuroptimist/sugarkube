@@ -509,8 +509,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    snapshot_target_raw = getattr(args, "markdown_dir", "")
+    snapshot_requested = isinstance(snapshot_target_raw, str) and bool(snapshot_target_raw.strip())
     enabled = env_flag(os.environ.get("SUGARKUBE_TELEMETRY_ENABLE"))
-    if not (args.force or args.dry_run or enabled):
+    if not (args.force or args.dry_run or enabled or snapshot_requested):
         log("telemetry disabled (set SUGARKUBE_TELEMETRY_ENABLE=true to enable)")
         return 0
     verifier_path = discover_verifier_path(args.verifier)
@@ -527,27 +529,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         errors=errors,
         tags=tags,
     )
-    snapshot_target = getattr(args, "markdown_dir", "")
-    if isinstance(snapshot_target, str) and snapshot_target.strip():
+    if snapshot_requested:
         try:
-            write_markdown_snapshot(payload, snapshot_target)
+            write_markdown_snapshot(payload, snapshot_target_raw)
         except OSError as exc:
             raise TelemetryError(f"failed to write markdown snapshot: {exc}") from exc
     if args.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    uploads_enabled = enabled or args.force
     endpoint = args.endpoint.strip()
-    if not endpoint:
-        raise TelemetryError(
-            "telemetry endpoint not configured "
-            "(set SUGARKUBE_TELEMETRY_ENDPOINT or pass --endpoint)"
+    if uploads_enabled:
+        if not endpoint:
+            raise TelemetryError(
+                "telemetry endpoint not configured "
+                "(set SUGARKUBE_TELEMETRY_ENDPOINT or pass --endpoint)"
+            )
+        send_payload(
+            payload,
+            endpoint=endpoint,
+            auth_bearer=args.auth_bearer,
+            timeout=args.timeout,
         )
-    send_payload(
-        payload,
-        endpoint=endpoint,
-        auth_bearer=args.auth_bearer,
-        timeout=args.timeout,
-    )
+    else:
+        if endpoint:
+            log(
+                "telemetry disabled; skipping upload "
+                "(set SUGARKUBE_TELEMETRY_ENABLE=true or pass --force)"
+            )
     if args.print_payload:
         print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

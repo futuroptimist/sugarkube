@@ -549,6 +549,42 @@ def test_main_writes_markdown_snapshot(monkeypatch, tmp_path):
     assert "| Total | Passed | Failed" in content
 
 
+def test_main_writes_markdown_snapshot_when_disabled(monkeypatch, tmp_path):
+    """Snapshot exports should still work when telemetry uploads are disabled."""
+
+    monkeypatch.delenv("SUGARKUBE_TELEMETRY_ENABLE", raising=False)
+    monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
+    monkeypatch.setattr(
+        MODULE,
+        "run_verifier",
+        lambda path, timeout: ([{"name": "ready", "status": "pass"}], []),
+    )
+    monkeypatch.setattr(MODULE, "hashed_identifier", lambda **_: "abcdef1234567890")
+    monkeypatch.setattr(MODULE, "collect_environment", lambda: {"kernel": "Linux"})
+    monkeypatch.setattr(MODULE, "parse_tags", lambda raw: ["lab"])
+
+    def fail_send(*_args, **_kwargs):  # noqa: ANN001, ANN002
+        raise AssertionError("send_payload should not run when telemetry is disabled")
+
+    monkeypatch.setattr(MODULE, "send_payload", fail_send)
+
+    exit_code = MODULE.main(
+        [
+            "--endpoint",
+            "https://example",
+            "--markdown-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    snapshots = list(tmp_path.glob("telemetry-*.md"))
+    assert snapshots, "expected markdown snapshot file"
+    content = snapshots[0].read_text(encoding="utf-8")
+    assert "Sugarkube Telemetry Snapshot" in content
+    assert "`lab`" in content
+
+
 def test_main_handles_markdown_snapshot_failure(monkeypatch, tmp_path):
     monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
     monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
