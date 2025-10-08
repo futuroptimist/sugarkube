@@ -80,7 +80,7 @@ doctor:
 	$(CURDIR)/scripts/sugarkube_doctor.sh
 
 start-here:
-        $(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
+	$(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
 
 rollback-to-sd:
 	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
