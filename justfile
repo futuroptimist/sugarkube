@@ -93,9 +93,9 @@ start_here_cmd := env_var_or_default(
     justfile_directory() + "/scripts/start_here.py",
 )
 start_here_args := env_var_or_default("START_HERE_ARGS", "")
-docs_verify_cmd := env_var_or_default(
-    "DOCS_VERIFY_CMD",
-    justfile_directory() + "/scripts/docs_verify.sh",
+sugarkube_cli := env_var_or_default(
+    "SUGARKUBE_CLI",
+    justfile_directory() + "/scripts/sugarkube",
 )
 docs_verify_args := env_var_or_default("DOCS_VERIFY_ARGS", "")
 
@@ -235,7 +235,7 @@ codespaces-bootstrap:
 # Run spellcheck and linkcheck to keep docs automation aligned
 # Usage: just docs-verify
 docs-verify:
-    "{{docs_verify_cmd}}" {{docs_verify_args}}
+    "{{sugarkube_cli}}" docs verify {{docs_verify_args}}
 
 # Install documentation prerequisites and run spell/link checks without touching
 # code linters. Usage: just simplify-docs

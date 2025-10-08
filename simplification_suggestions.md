@@ -37,9 +37,10 @@ before they can automate common tasks.
    (`tests/test_sugarkube_toolkit_cli.py`). Follow-up subcommands now wrap the
    image download, install, flashing, reporting, smoke, and rehearsal workflows
    (regression coverage: `tests/test_sugarkube_toolkit_cli.py`).
-3. ✅ Provide thin wrapper scripts that print a deprecation notice before handing
-   off to the new CLI so existing docs remain valid during the transition
-   (regression coverage: `tests/test_docs_verify_wrapper.py`).
+3. ✅ Migrate the `make`/`just docs-verify` wrappers to call the unified CLI
+   directly, removing the transitional shell and PowerShell scripts now that
+   documentation has caught up (regression coverage:
+   `tests/test_docs_verify_wrapper.py`).
 4. ✅ Add a `sugarkube pi download` subcommand that proxies to
    `scripts/download_pi_image.sh`, keeping the first Pi image workflow available
    from the unified CLI (regression coverage:

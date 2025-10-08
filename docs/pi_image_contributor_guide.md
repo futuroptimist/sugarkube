@@ -17,9 +17,11 @@ sync.
   # or
   just docs-verify
   ```
-  Both commands execute `pyspelling -c .spellcheck.yaml` and
-  `linkchecker --no-warnings README.md docs/` so every update keeps the documentation consistent
-  with the automation helpers.
+  Both commands call the unified CLI via `scripts/sugarkube docs verify`, which runs
+  `pyspelling -c .spellcheck.yaml` and `linkchecker --no-warnings README.md docs/` so every update
+  keeps the documentation consistent with the automation helpers. Provide
+  `DOCS_VERIFY_ARGS="--dry-run"` if you want the wrappers to print the commands before executing
+  them.
 - Use `pre-commit run --all-files` to exercise `scripts/checks.sh`, which installs spellcheck and
   link-check dependencies automatically when missing.
 - Ship changes with tests that deliver **100% patch coverage on the first `pytest` run**. Design
