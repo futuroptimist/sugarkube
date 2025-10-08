@@ -890,7 +890,7 @@ def test_pi_report_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
-    exit_code = cli.main(["pi", "report", "--dry-run", "--", "--list-devices"])
+    exit_code = cli.main(["pi", "report", "--", "--list-devices"])
 
     assert exit_code == 0
     assert recorded == [
@@ -900,6 +900,38 @@ def test_pi_report_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> No
             "--list-devices",
         ]
     ]
+
+
+def test_pi_report_appends_cli_dry_run_with_separator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI dry-run should still reach the helper when callers use `--` separators."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "report", "--dry-run", "--", "--list-devices"])
+
+    expected_command = [
+        sys.executable,
+        str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media_report.py"),
+        "--dry-run",
+        "--list-devices",
+    ]
+
+    assert exit_code == 0
+    assert recorded == [expected_command]
 
 
 def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:

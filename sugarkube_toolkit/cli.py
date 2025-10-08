@@ -337,12 +337,9 @@ def _handle_pi_report(args: argparse.Namespace) -> int:
 
     raw_script_args = list(getattr(args, "script_args", []))
     script_args = _normalize_script_args(raw_script_args)
-    script_dry_run = "--dry-run" in script_args
-    script_separator_used = bool(raw_script_args) and raw_script_args[0] == "--"
-    command = [sys.executable, str(script)]
-    if args.dry_run and not script_dry_run and not script_separator_used:
-        command.append("--dry-run")
-    command.extend(script_args)
+    if args.dry_run and "--dry-run" not in script_args:
+        script_args = ["--dry-run", *script_args]
+    command = [sys.executable, str(script), *script_args]
 
     # Always execute the helper so it can perform its own dry-run handling.
     dry_run = False

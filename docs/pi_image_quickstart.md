@@ -169,9 +169,11 @@ sync without modifying the host.
   `scripts/flash_pi_media_report.py`, so `--cloud-init` and other documented flags work unchanged.
   Regression coverage:
   `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`,
-  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_forwards_additional_args`, and
-  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_respects_existing_dry_run`
-  ensure the CLI forwards arguments exactly as documented while preserving safe dry-run previews.
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_forwards_additional_args`,
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_respects_existing_dry_run`, and
+  `tests/test_sugarkube_toolkit_cli.py::test_pi_report_appends_cli_dry_run_with_separator`
+  ensure the CLI forwards arguments exactly as documented while preserving safe dry-run previews,
+  even when you supply additional flags after `--`.
   > [!TIP]
   > Need to confirm which removable drives are visible before flashing? Run
   > `python3 scripts/flash_pi_media_report.py --list-devices` without
