@@ -40,7 +40,8 @@ directories, run simple commands, and begin building muscle memory with shell pr
    workstation.
 2. Practice in a browser sandbox: run file inspection commands, create directories, and capture the
    transcript for later reference.
-3. Summarize key terms in a shared glossary so future tutorials can link to an agreed vocabulary.
+3. Summarize key terms in the [Sugarkube Glossary](../glossary.md) so future tutorials can link to
+   an agreed vocabulary.
 
 ## Tutorial 2: Navigating Linux and the Terminal
 
