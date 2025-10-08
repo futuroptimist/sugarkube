@@ -550,6 +550,7 @@ def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi flash should wrap the flashing helper script."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -559,6 +560,7 @@ def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -568,13 +570,15 @@ def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"
 
     assert exit_code == 0
-    assert recorded == [["bash", str(expected_script)]]
+    assert recorded == [["bash", str(expected_script), "--dry-run"]]
+    assert dry_run_flags == [False]
 
 
 def test_pi_flash_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forward CLI arguments to the flash helper for docs parity."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -584,6 +588,7 @@ def test_pi_flash_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> N
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -605,12 +610,14 @@ def test_pi_flash_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> N
         [
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"),
+            "--dry-run",
             "--image",
             "~/sugarkube/images/sugarkube.img",
             "--device",
             "/dev/sdX",
         ]
     ]
+    assert dry_run_flags == [False]
 
 
 def test_pi_flash_reports_missing_script(
@@ -668,9 +675,56 @@ def test_pi_flash_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> Non
         [
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"),
+            "--dry-run",
             "--assume-yes",
         ]
     ]
+
+
+def test_pi_flash_respects_existing_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid duplicating --dry-run when callers forward it manually."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "flash",
+            "--dry-run",
+            "--",
+            "--dry-run",
+            "--device",
+            "/dev/sdX",
+        ]
+    )
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "flash_pi_media.sh"
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(expected_script),
+            "--dry-run",
+            "--device",
+            "/dev/sdX",
+        ]
+    ]
+    assert dry_run_flags == [False]
 
 
 def test_pi_report_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
