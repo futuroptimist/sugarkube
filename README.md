@@ -129,10 +129,12 @@ shortcuts so GitHub
 Codespaces users can install prerequisites and flash media without additional shell glue.
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
-Prefer a unified entry point? `python -m sugarkube_toolkit pi download --dry-run` previews the
-release helper. The CLI forces the working directory to the repository root before invoking
-helpers, so you can run it from anywhere inside the clone. Need the combined installer that
-downloads and expands the image? Run
+Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
+repository root to preview the release helper. Once running, the CLI forces the working directory to
+the repository root before invoking helpers. Working from a nested directory? Call
+`./scripts/sugarkube pi download --dry-run` (or add `scripts/` to your `PATH`) so the wrapper
+bootstraps `PYTHONPATH` before forwarding to the CLI. Need the combined installer that downloads and
+expands the image? Run
 
 ```bash
 python -m sugarkube_toolkit pi install --dry-run -- --dir ~/sugarkube/images --image ~/sugarkube/images/sugarkube.img
