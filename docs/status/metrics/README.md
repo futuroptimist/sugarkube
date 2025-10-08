@@ -16,6 +16,12 @@ python scripts/publish_telemetry.py \
   --markdown-dir docs/status/metrics
 ```
 
+> **Note:** When `SUGARKUBE_TELEMETRY_ENABLE` remains `false`, the helper still
+> runs the verifier and writes the Markdown snapshot, but it skips uploading the
+> payload and prints a reminder to enable telemetry (or pass `--force`) once
+> you're ready to publish it. Regression coverage:
+> `tests/test_publish_telemetry.py::test_main_writes_markdown_snapshot_when_disabled`.
+
 When automating from cron or CI, set the environment variable instead of passing
 the flag explicitly:
 
