@@ -82,13 +82,18 @@ def test_start_here_main_errors_when_missing(tmp_path, capsys, monkeypatch) -> N
 
 
 def test_justfile_exposes_start_here_target() -> None:
-    """The justfile should provide a start-here recipe like the docs describe."""
+    """The justfile should route through the unified CLI like the docs describe."""
 
     text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
     assert (
         "start-here:" in text
     ), "Add a start-here recipe to the justfile so automation can call it"
-    assert "scripts/start_here.py" in text, "The just target should invoke scripts/start_here.py"
+    assert (
+        '"{{sugarkube_cli}}" docs start-here' in text
+    ), "Just start-here recipe should invoke the sugarkube CLI subcommand"
+    assert (
+        "{{start_here_args}}" in text
+    ), "The recipe should continue forwarding START_HERE_ARGS to the CLI"
 
 
 def test_makefile_exposes_start_here_target() -> None:
@@ -96,4 +101,9 @@ def test_makefile_exposes_start_here_target() -> None:
 
     text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert "start-here:" in text, "Add a start-here target to the Makefile"
-    assert "scripts/start_here.py" in text, "The Make target should invoke scripts/start_here.py"
+    assert (
+        "$(SUGARKUBE_CLI) docs start-here" in text
+    ), "Make start-here target should invoke the sugarkube CLI subcommand"
+    assert (
+        "$(START_HERE_ARGS)" in text
+    ), "The target should continue forwarding START_HERE_ARGS to the CLI"

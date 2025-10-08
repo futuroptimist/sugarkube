@@ -88,10 +88,6 @@ mac_setup_cmd := env_var_or_default(
     justfile_directory() + "/scripts/sugarkube_setup.py",
 )
 mac_setup_args := env_var_or_default("MAC_SETUP_ARGS", "")
-start_here_cmd := env_var_or_default(
-    "START_HERE_CMD",
-    justfile_directory() + "/scripts/start_here.py",
-)
 start_here_args := env_var_or_default("START_HERE_ARGS", "")
 sugarkube_cli := env_var_or_default(
     "SUGARKUBE_CLI",
@@ -141,7 +137,7 @@ doctor:
 # Surface the Start Here handbook in the terminal
 # Usage: just start-here START_HERE_ARGS="--path-only"
 start-here:
-    "{{start_here_cmd}}" {{start_here_args}}
+    "{{sugarkube_cli}}" docs start-here {{start_here_args}}
 
 # Revert cmdline.txt and fstab entries back to the SD card defaults
 # Usage: sudo just rollback-to-sd
