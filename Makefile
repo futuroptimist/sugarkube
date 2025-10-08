@@ -47,7 +47,6 @@ FIELD_GUIDE_CMD ?= $(CURDIR)/scripts/render_field_guide_pdf.py
 FIELD_GUIDE_ARGS ?=
 MAC_SETUP_CMD ?= $(CURDIR)/scripts/sugarkube_setup.py
 MAC_SETUP_ARGS ?=
-START_HERE_CMD ?= $(CURDIR)/scripts/start_here.py
 START_HERE_ARGS ?=
 SUGARKUBE_CLI ?= $(CURDIR)/scripts/sugarkube
 DOCS_VERIFY_ARGS ?=
@@ -81,7 +80,7 @@ doctor:
 	$(CURDIR)/scripts/sugarkube_doctor.sh
 
 start-here:
-	$(START_HERE_CMD) $(START_HERE_ARGS)
+        $(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
 
 rollback-to-sd:
 	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)

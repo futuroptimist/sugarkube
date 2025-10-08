@@ -47,6 +47,8 @@ docs apply to you.
 
 > [!TIP]
 > Run `just start-here` (or `make start-here`) to print this handbook directly in your terminal.
+> Both wrappers call the unified CLI (`sugarkube docs start-here`) so updates to the
+> subcommand automatically flow through task runners.
 > Need just the absolute path? Run `python -m sugarkube_toolkit docs start-here --path-only`
 > from the repository root. When you're working out of a nested directory, call
 > `./scripts/sugarkube docs start-here --path-only` (or add `scripts/` to `PATH`) so the

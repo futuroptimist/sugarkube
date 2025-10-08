@@ -11,7 +11,8 @@
   `START_HERE_ARGS="--path-only" make start-here`,
   `python -m sugarkube_toolkit docs start-here --path-only` from the repo root or
   `./scripts/sugarkube docs start-here --path-only` when working in a subdirectory)
-  reflects the new path and prints the updated guidance.
+  reflects the new path and prints the updated guidance. The Make/Just wrappers now
+  defer to `sugarkube docs start-here`, keeping their output aligned with the CLI.
 - Screenshots or recordings that walk through the refreshed flow.
 
 ## Stakeholders
