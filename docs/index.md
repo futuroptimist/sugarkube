@@ -15,6 +15,7 @@ Pi cluster and aquarium aerator while the frame supports climbing plants.*
 Review the safety notes before working with power components.
 
 - [start-here.md](start-here.md) — orientation tracks for newcomers
+- [glossary.md](glossary.md) — shared vocabulary for the tutorials and docs
 - [SAFETY.md](SAFETY.md) — wiring and battery safety guidelines
 - [build_guide.md](build_guide.md) — step-by-step assembly instructions
 - [pi_cluster_carrier.md](pi_cluster_carrier.md) — details on the Raspberry Pi mounting plate
