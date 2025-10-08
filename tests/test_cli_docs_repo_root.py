@@ -74,3 +74,24 @@ def test_readme_points_to_sugarkube_wrapper_for_nested_usage() -> None:
     readme_text = Path("README.md").read_text(encoding="utf-8")
 
     assert "scripts/sugarkube" in readme_text, "README should mention the wrapper for nested usage"
+
+
+def test_readme_python_module_section_mentions_repo_root() -> None:
+    """README should spell out that python -m invocations start from the repo root."""
+
+    readme_text = Path("README.md").read_text(encoding="utf-8")
+
+    marker = "python -m sugarkube_toolkit pi download --dry-run"
+    assert marker in readme_text, "README should document the python -m entry point"
+
+    start = readme_text.index(marker)
+    begin = max(0, start - 120)
+    end = start + 500
+    snippet = readme_text[begin:end]
+
+    assert (
+        "repository root" in snippet
+    ), "Clarify that python -m commands run from the repository root"
+    assert (
+        "scripts/sugarkube" in snippet
+    ), "Mention scripts/sugarkube alongside the python -m guidance"
