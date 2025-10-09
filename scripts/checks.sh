@@ -435,7 +435,8 @@ if [ "$DOCS_ONLY" -eq 0 ]; then
         npx playwright install --with-deps
         npm run lint
         npm run format:check
-        npm test -- --coverage
+        # Guarded by tests/checks_script_test.py::test_runs_js_checks_when_package_lock_present.
+        npm run test:ci
       else
         echo "package-lock.json not found, skipping JS checks" >&2
       fi

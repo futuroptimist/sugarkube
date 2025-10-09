@@ -215,6 +215,8 @@ linkchecker --no-warnings README.md docs/
 Prefer the unified CLI? `python -m sugarkube_toolkit docs simplify [--dry-run] [-- args...]`
 wraps the same `scripts/checks.sh --docs-only` helper so you can stay inside a single entry point.
 Additional arguments after `--` are forwarded directly to the script.
+Regression coverage: `tests/checks_script_test.py::test_runs_js_checks_when_package_lock_present`
+verifies the helper runs `npm run test:ci` alongside linting and formatting when Node tooling exists.
 
 The `--no-warnings` flag prevents linkchecker from returning a non-zero exit code on benign Markdown
 parsing warnings.
