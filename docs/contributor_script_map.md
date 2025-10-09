@@ -25,7 +25,7 @@ confirm the quickstart stays accurate.
 | --- | --- | --- | --- |
 | `scripts/download_pi_image.sh` | Resolve the latest release, resume partial downloads, and verify checksums/signatures. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `download-pi-image` / `just download-pi-image` targets |
 | `scripts/sugarkube-latest` | Convenience wrapper that defaults to release downloads. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | Works with the same flags as `download_pi_image.sh`. |
-| `scripts/install_sugarkube_image.sh` | One-line installer that bootstraps `gh`, downloads, verifies, and expands the latest release. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `install-pi-image`, `just install-pi-image`, curl one-liner |
+| `scripts/install_sugarkube_image.sh` | One-line installer that bootstraps `gh`, downloads, verifies, and expands the latest release (`--dry-run` prints the planned steps). | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `install-pi-image`, `just install-pi-image`, curl one-liner |
 | `scripts/collect_pi_image.sh` | Normalize pi-gen output, clean staging directories, and compress images for release. | [Pi Image Builder Design](./pi_image_builder_design.md) | Used inside GitHub Actions and local builds via `make build-pi-image`. |
 | `scripts/build_pi_image.sh` | Build the Raspberry Pi OS image with cloud-init, k3s, and bundled repos. | [Pi Image Builder Design](./pi_image_builder_design.md) | Called by `Makefile`/`just` build targets and the pi-image workflow. |
 

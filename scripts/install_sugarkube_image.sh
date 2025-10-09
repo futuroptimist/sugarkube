@@ -223,6 +223,7 @@ Options:
       --checksum NAME     Override the checksum asset name (default: asset + .sha256).
       --mode MODE         Pass through to download helper (auto, release, workflow).
       --download-only     Skip expansion; leave only the .img.xz and checksum.
+      --dry-run           Print the actions that would run without downloading or expanding.
       --skip-gh-install   Do not attempt to bootstrap the GitHub CLI automatically.
       --download-script PATH
                           Use a local download_pi_image.sh instead of fetching from GitHub.
@@ -251,8 +252,37 @@ OUTPUT_ARCHIVE=""
 IMAGE_DEST=""
 DEST_DIR_OVERRIDE=""
 DOWNLOAD_ONLY=0
+DRY_RUN=0
 SKIP_GH_INSTALL=0
 HELPER_OVERRIDE="${SUGARKUBE_INSTALL_HELPER:-}"
+
+print_dry_run_plan() {
+  log "Dry run: would install GitHub CLI if missing (skipped)."
+
+  if [ -n "$HELPER_OVERRIDE" ]; then
+    log "Dry run: would use $HELPER_OVERRIDE to download $ASSET_NAME into $OUTPUT_ARCHIVE."
+  else
+    local raw_base
+    raw_base="${SUGARKUBE_RAW_BASE_URL:-https://raw.githubusercontent.com/${OWNER}/${REPO}/main}"
+    log "Dry run: would download helper from ${raw_base}/scripts/download_pi_image.sh."
+    if [ "${#DOWNLOAD_ARGS[@]}" -gt 0 ]; then
+      local formatted
+      formatted="$(printf ' %q' "${DOWNLOAD_ARGS[@]}")"
+      formatted="${formatted# }"
+      log "Dry run: would run download helper with args: ${formatted}"
+    else
+      log "Dry run: would run download helper with default arguments."
+    fi
+  fi
+
+  log "Dry run: would verify checksum $CHECKSUM_NAME."
+  if [ "$DOWNLOAD_ONLY" -eq 1 ]; then
+    log "Dry run: would skip expansion (--download-only)."
+  else
+    log "Dry run: would expand archive to $IMAGE_DEST."
+  fi
+  log "Dry run: would write checksum to ${IMAGE_DEST}.sha256."
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -318,6 +348,10 @@ while [ "$#" -gt 0 ]; do
       DOWNLOAD_ONLY=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --skip-gh-install)
       SKIP_GH_INSTALL=1
       shift
@@ -361,6 +395,11 @@ if [ -z "$IMAGE_DEST" ]; then
   else
     IMAGE_DEST="${OUTPUT_ARCHIVE}.img"
   fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  print_dry_run_plan
+  exit 0
 fi
 
 DEST_DIR="$(dirname "$OUTPUT_ARCHIVE")"
