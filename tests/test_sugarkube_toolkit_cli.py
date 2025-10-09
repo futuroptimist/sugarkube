@@ -414,6 +414,7 @@ def test_pi_install_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi install should wrap the installer helper script."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -423,6 +424,7 @@ def test_pi_install_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -433,12 +435,14 @@ def test_pi_install_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert exit_code == 0
     assert recorded == [["bash", str(expected_script)]]
+    assert dry_run_flags == [True]
 
 
 def test_pi_install_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forward CLI arguments to the install helper for docs parity."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -448,6 +452,7 @@ def test_pi_install_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) ->
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -475,6 +480,7 @@ def test_pi_install_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) ->
             "~/sugarkube/images/sugarkube.img",
         ]
     ]
+    assert dry_run_flags == [True]
 
 
 def test_pi_install_reports_missing_script(
@@ -520,6 +526,7 @@ def test_pi_install_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> N
     """A leading `--` should be stripped before forwarding install args."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -529,6 +536,7 @@ def test_pi_install_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> N
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -544,6 +552,80 @@ def test_pi_install_drops_script_separator(monkeypatch: pytest.MonkeyPatch) -> N
             "~/sugarkube/images",
         ]
     ]
+    assert dry_run_flags == [True]
+
+
+def test_pi_install_respects_existing_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not duplicate --dry-run when forwarded directly to the helper."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "install", "--dry-run", "--", "--dry-run", "--dir", "~/images"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "install_sugarkube_image.sh"
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(expected_script),
+            "--dry-run",
+            "--dir",
+            "~/images",
+        ]
+    ]
+    assert dry_run_flags == [True]
+
+
+def test_pi_install_uses_script_dry_run_without_cli_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A forwarded --dry-run should still preview the helper execution."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["pi", "install", "--", "--dry-run", "--dir", "~/images"])
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "install_sugarkube_image.sh"
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "bash",
+            str(expected_script),
+            "--dry-run",
+            "--dir",
+            "~/images",
+        ]
+    ]
+    assert dry_run_flags == [True]
 
 
 def test_pi_flash_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:

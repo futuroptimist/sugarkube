@@ -288,9 +288,15 @@ def _handle_pi_install(args: argparse.Namespace) -> int:
         )
         return 1
 
-    command = ["bash", str(script), *_normalize_script_args(getattr(args, "script_args", []))]
+    script_args = _normalize_script_args(getattr(args, "script_args", []))
+    script_dry_run = "--dry-run" in script_args
+
+    command = ["bash", str(script)]
+    command.extend(script_args)
+
+    dry_run = args.dry_run or script_dry_run
     try:
-        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
+        runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
