@@ -10,10 +10,10 @@ Kick off your Sugarkube journey from a single launchpad. This guide condenses th
 three tracks so you can build context quickly, complete the onboarding chores, and know where to dive
 when you are ready for deeper automation or hardware projects.
 
-![Sugarkube architecture overview linking solar, Pi cluster, and CI automation](images/sugarkube_diagram.svg)
+![Sugarkube power flow from sunlight through solar, charge controller, batteries, and DC loads](images/sugarkube_diagram.svg)
 
-*Figure: Solar panels feed the charge controller and batteries powering the Pi cluster while CI
-automation keeps the image, tooling, and observability assets in sync.*
+*Figure: Sunlight charges the frame-mounted solar array, which routes through the charge controller,
+batteries, and DC distribution harness before powering the Pi cluster and aeration pumps.*
 
 ## Persona quick links
 
