@@ -55,6 +55,22 @@ def test_start_here_main_prints_contents(tmp_path, capsys, monkeypatch) -> None:
     assert captured.out.count("---") == 0
 
 
+def test_strip_front_matter_returns_original_when_absent() -> None:
+    """Plain text without front matter should be returned unchanged."""
+
+    text = "Welcome to Sugarkube"
+
+    assert start_here._strip_front_matter(text) == text
+
+
+def test_strip_front_matter_returns_original_when_unclosed() -> None:
+    """If the leading delimiter never closes, fall back to the original text."""
+
+    text = "---\nauthor: sugarkube\nWelcome to Sugarkube"
+
+    assert start_here._strip_front_matter(text) == text
+
+
 def test_start_here_main_path_only_alias(tmp_path, capsys, monkeypatch) -> None:
     """The deprecated --no-content flag should continue to emit the path."""
 

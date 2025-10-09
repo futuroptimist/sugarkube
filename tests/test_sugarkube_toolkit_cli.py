@@ -258,6 +258,22 @@ def test_docs_start_here_prints_contents(
     assert captured.out.count("---") == 0
 
 
+def test_docs_strip_front_matter_passthrough_when_missing_delimiter() -> None:
+    """Plain text should pass through unchanged when no front matter exists."""
+
+    text = "Welcome to Sugarkube"
+
+    assert cli._strip_front_matter(text) == text
+
+
+def test_docs_strip_front_matter_passthrough_when_unclosed() -> None:
+    """When the closing delimiter never appears, the contents should be unchanged."""
+
+    text = "---\nstatus: draft\nGreetings"
+
+    assert cli._strip_front_matter(text) == text
+
+
 def test_docs_start_here_handles_missing_doc(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
