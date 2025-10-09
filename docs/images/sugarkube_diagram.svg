@@ -41,7 +41,7 @@
         Sugarkube frame
       </text>
       <text x="140" y="232" font-size="14" text-anchor="middle" fill="#475569">
-        Solar panels & Pi enclosure
+        Solar panels &amp; Pi enclosure
       </text>
     </g>
 
@@ -71,7 +71,7 @@
         DC distribution
       </text>
       <text x="75" y="56" font-size="14" text-anchor="middle" fill="#92400e">
-        Fuses & wiring harness
+        Fuses &amp; wiring harness
       </text>
     </g>
 
