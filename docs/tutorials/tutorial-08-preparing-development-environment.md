@@ -320,7 +320,12 @@ Use this section to verify progress against the roadmap. Mark each item as you c
 
 ## Next Steps
 Once you are comfortable running local automation, continue with the roadmap entry for
-[Tutorial 9: Building and Flashing the Sugarkube Pi Image]
-(./index.md#tutorial-9-building-and-flashing-the-sugarkube-pi-image).
+[Tutorial 9: Building and Flashing the Sugarkube Pi Image][tutorial-9-roadmap].
 Publish your lab evidence alongside your pull requests so reviewers can trust the environment you
 used.
+
+> [!NOTE]
+> Regression coverage in `tests/test_tutorial_next_steps_links.py::test_next_steps_inline_links_are_compact`
+> keeps this Next Steps link formatted on a single line so Markdown renders it correctly.
+
+[tutorial-9-roadmap]: ./index.md#tutorial-9-building-and-flashing-the-sugarkube-pi-image

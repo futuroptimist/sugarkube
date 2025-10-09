@@ -9,21 +9,29 @@ from typing import Iterable
 DOCS_DIR = Path(__file__).resolve().parents[1] / "docs" / "tutorials"
 
 
+def _iter_next_steps_blocks(text: str) -> Iterable[str]:
+    start = 0
+    heading = "## Next Steps"
+    while True:
+        start = text.find(heading, start)
+        if start == -1:
+            break
+
+        end = text.find("\n## ", start + len(heading))
+        if end == -1:
+            end = len(text)
+
+        yield text[start:end]
+        start = end
+
+
 def _extract_reference_definitions(text: str) -> dict[str, str]:
     pattern = re.compile(r"^\[(?P<key>[^\]]+)\]:\s*(?P<value>\S+)", re.MULTILINE)
     return {match.group("key"): match.group("value") for match in pattern.finditer(text)}
 
 
 def _iter_next_steps_links(text: str) -> Iterable[str]:
-    start = text.find("## Next Steps")
-    if start == -1:
-        return []
-
-    end = text.find("\n## ", start + len("## Next Steps"))
-    if end == -1:
-        end = len(text)
-
-    block = text[start:end]
+    block = next(_iter_next_steps_blocks(text), "")
     definitions = _extract_reference_definitions(text)
 
     inline_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -54,3 +62,15 @@ def test_next_steps_links_reference_existing_files() -> None:
 
             resolved = (path.parent / target).resolve()
             assert resolved.exists(), f"{path.name} Next Steps references missing guide: {link}"
+
+
+def test_next_steps_inline_links_are_compact() -> None:
+    """Inline links should stay on a single line so Markdown renders them."""
+
+    pattern = re.compile(r"\[[^\]]+\]\s*\n\s*\(")
+    for path in sorted(DOCS_DIR.glob("tutorial-*.md")):
+        text = path.read_text(encoding="utf-8")
+        for block in _iter_next_steps_blocks(text):
+            assert not pattern.search(
+                block
+            ), f"{path.name} Next Steps should place inline links on a single line"
