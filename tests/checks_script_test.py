@@ -259,7 +259,7 @@ def test_runs_js_checks_when_package_lock_present(tmp_path: Path, script: Path) 
     assert "ci" in npm_lines
     assert any("run lint" in line for line in npm_lines)
     assert any("run format:check" in line for line in npm_lines)
-    assert any("test -- --coverage" in line for line in npm_lines)
+    assert any("run test:ci" in line for line in npm_lines)
     npx_lines = npx_log.read_text().splitlines()
     assert any("playwright install --with-deps" in line for line in npx_lines)
 
