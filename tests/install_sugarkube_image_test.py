@@ -178,3 +178,28 @@ chmod +x "${HOOK_DEST}/gh"
     assert result.returncode == 0, result.stderr
     assert (fake_bin / "gh").exists()
     assert not sentinel.exists()
+
+
+def test_install_dry_run_previews_without_changes(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "HOME": str(tmp_path / "home"),
+            "GITHUB_TOKEN": "dummy",
+            "GH_TOKEN": "dummy",
+            "SUGARKUBE_INSTALL_HELPER": str(BASE_DIR / "scripts" / "download_pi_image.sh"),
+        }
+    )
+
+    preview_dir = tmp_path / "preview"
+    result = run_install(args=["--dry-run", "--dir", str(preview_dir)], env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Dry-run" in result.stdout
+    assert not preview_dir.exists()
+    assert not (Path(env["HOME"]) / "sugarkube").exists()
