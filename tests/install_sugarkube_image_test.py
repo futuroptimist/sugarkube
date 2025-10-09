@@ -66,6 +66,23 @@ def make_release_payload(image: Path, checksum: Path) -> str:
     )
 
 
+def test_install_dry_run_previews_actions(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home")})
+
+    result = run_install(
+        args=["--dry-run", "--dir", str(tmp_path / "images")],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    stdout = result.stdout
+    assert "Dry run: would download" in stdout
+    assert "Dry run: would expand archive" in stdout
+    assert not (tmp_path / "images").exists()
+
+
 def test_install_downloads_and_expands(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
