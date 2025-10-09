@@ -242,7 +242,7 @@ def _handle_docs_start_here(args: argparse.Namespace) -> int:
 
     print(f"Sugarkube Start Here guide: {START_HERE_DOC}")
     print()
-    print(START_HERE_DOC.read_text(encoding="utf-8"))
+    print(_strip_front_matter(START_HERE_DOC.read_text(encoding="utf-8")))
     return 0
 
 
@@ -251,6 +251,22 @@ def _normalize_script_args(args: Sequence[str]) -> list[str]:
     if script_args and script_args[0] == "--":
         return script_args[1:]
     return script_args
+
+
+def _strip_front_matter(text: str) -> str:
+    if not text.lstrip().startswith("---"):
+        return text
+
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return text
+
+    for idx, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            remainder_start = idx + 1
+            return "".join(lines[remainder_start:])
+
+    return text
 
 
 def _handle_pi_download(args: argparse.Namespace) -> int:
