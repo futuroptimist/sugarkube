@@ -41,7 +41,7 @@ def test_start_here_main_prints_contents(tmp_path, capsys, monkeypatch) -> None:
     """Calling the script without flags should surface the handbook contents."""
 
     guide = tmp_path / "start-here.md"
-    guide.write_text("Welcome to Sugarkube", encoding="utf-8")
+    guide.write_text("---\nowner: sugarkube\n---\nWelcome to Sugarkube", encoding="utf-8")
     monkeypatch.setattr(start_here, "DOC_PATH", guide)
 
     exit_code = start_here.main([])
@@ -51,6 +51,24 @@ def test_start_here_main_prints_contents(tmp_path, capsys, monkeypatch) -> None:
     assert exit_code == 0
     assert lines[0] == f"Sugarkube Start Here guide: {guide}"
     assert "Welcome to Sugarkube" in captured.out
+    assert "owner: sugarkube" not in captured.out
+    assert captured.out.count("---") == 0
+
+
+def test_strip_front_matter_returns_original_when_absent() -> None:
+    """Plain text without front matter should be returned unchanged."""
+
+    text = "Welcome to Sugarkube"
+
+    assert start_here._strip_front_matter(text) == text
+
+
+def test_strip_front_matter_returns_original_when_unclosed() -> None:
+    """If the leading delimiter never closes, fall back to the original text."""
+
+    text = "---\nauthor: sugarkube\nWelcome to Sugarkube"
+
+    assert start_here._strip_front_matter(text) == text
 
 
 def test_start_here_main_path_only_alias(tmp_path, capsys, monkeypatch) -> None:

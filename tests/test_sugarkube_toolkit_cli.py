@@ -245,7 +245,7 @@ def test_docs_start_here_prints_contents(
     """Calling `docs start-here` without flags should show the handbook contents."""
 
     guide = tmp_path / "start-here.md"
-    guide.write_text("Hello Sugarkube", encoding="utf-8")
+    guide.write_text("---\nowner: cli\n---\nHello Sugarkube", encoding="utf-8")
     monkeypatch.setattr(cli, "START_HERE_DOC", guide)
 
     exit_code = cli.main(["docs", "start-here"])
@@ -254,6 +254,24 @@ def test_docs_start_here_prints_contents(
     assert exit_code == 0
     assert captured.out.splitlines()[0] == f"Sugarkube Start Here guide: {guide}"
     assert "Hello Sugarkube" in captured.out
+    assert "owner: cli" not in captured.out
+    assert captured.out.count("---") == 0
+
+
+def test_docs_strip_front_matter_passthrough_when_missing_delimiter() -> None:
+    """Plain text should pass through unchanged when no front matter exists."""
+
+    text = "Welcome to Sugarkube"
+
+    assert cli._strip_front_matter(text) == text
+
+
+def test_docs_strip_front_matter_passthrough_when_unclosed() -> None:
+    """When the closing delimiter never appears, the contents should be unchanged."""
+
+    text = "---\nstatus: draft\nGreetings"
+
+    assert cli._strip_front_matter(text) == text
 
 
 def test_docs_start_here_handles_missing_doc(

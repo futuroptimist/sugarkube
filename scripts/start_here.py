@@ -46,8 +46,24 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Sugarkube Start Here guide: {DOC_PATH}")
     print()
-    print(DOC_PATH.read_text(encoding="utf-8"))
+    print(_strip_front_matter(DOC_PATH.read_text(encoding="utf-8")))
     return 0
+
+
+def _strip_front_matter(text: str) -> str:
+    if not text.lstrip().startswith("---"):
+        return text
+
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return text
+
+    for idx, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            remainder_start = idx + 1
+            return "".join(lines[remainder_start:])
+
+    return text
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via CLI
