@@ -10,7 +10,7 @@ Kick off your Sugarkube journey from a single launchpad. This guide condenses th
 three tracks so you can build context quickly, complete the onboarding chores, and know where to dive
 when you are ready for deeper automation or hardware projects.
 
-![Sugarkube power flow from sunlight through solar, charge controller, batteries, and DC loads](images/sugarkube_diagram.svg)
+![Sugarkube architecture overview showing power flow from sunlight through solar, charge controller, batteries, and DC loads](images/sugarkube_diagram.svg)
 
 *Figure: Sunlight charges the frame-mounted solar array, which routes through the charge controller,
 batteries, and DC distribution harness before powering the Pi cluster and aeration pumps.*
