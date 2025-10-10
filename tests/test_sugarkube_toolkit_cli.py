@@ -1040,6 +1040,7 @@ def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> No
     """pi support-bundle should wrap the support bundle helper script."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -1049,6 +1050,7 @@ def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> No
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -1058,13 +1060,15 @@ def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> No
     expected_script = Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"
 
     assert exit_code == 0
-    assert recorded == [[sys.executable, str(expected_script)]]
+    assert recorded == [[sys.executable, str(expected_script), "--dry-run"]]
+    assert dry_run_flags == [False]
 
 
 def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forward CLI arguments to the support bundle helper for docs parity."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -1074,6 +1078,7 @@ def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPa
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -1094,11 +1099,13 @@ def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPa
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "--dry-run",
             "pi-a.local",
             "--identity",
             "~/.ssh/id_ed25519",
         ]
     ]
+    assert dry_run_flags == [False]
 
 
 def test_pi_support_bundle_reports_missing_script(
@@ -1144,6 +1151,7 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
     """A leading `--` should be stripped before forwarding support bundle args."""
 
     recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
 
     def fake_run(
         commands: list[list[str]],
@@ -1153,6 +1161,7 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
         cwd: Path | None = None,
     ) -> None:
         recorded.extend(commands)
+        dry_run_flags.append(dry_run)
         assert cwd == cli.REPO_ROOT
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
@@ -1174,11 +1183,55 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "--dry-run",
             "pi-b.local",
             "--output-dir",
             "~/support-bundles",
         ]
     ]
+    assert dry_run_flags == [False]
+
+
+def test_pi_support_bundle_respects_existing_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid duplicating --dry-run when the helper flag is provided explicitly."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "pi",
+            "support-bundle",
+            "--dry-run",
+            "--",
+            "--dry-run",
+            "pi-c.local",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "--dry-run",
+            "pi-c.local",
+        ]
+    ]
+    assert dry_run_flags == [False]
 
 
 def test_pi_smoke_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
