@@ -105,7 +105,10 @@ structure's living canopy.
   - `collect_support_bundle.py` — gather Kubernetes, systemd, and Docker diagnostics into timestamped
     archives. Invoke it from the unified CLI with
     `python -m sugarkube_toolkit pi support-bundle [--dry-run] [args...]` when you want the same
-    workflow without leaving the `sugarkube` entry point.
+    workflow without leaving the `sugarkube` entry point. The CLI `--dry-run` flag prints the
+    helper invocation without executing it so you can confirm the host and arguments before running
+    the collection (guarded by
+    `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_invokes_helper`).
   - `sugarkube_doctor.sh` — chain download dry-runs, flash validation, and linting checks. Invoke it
     from the unified CLI with `python -m sugarkube_toolkit doctor [--dry-run] [-- args...]` to avoid
     memorizing the standalone helper.
