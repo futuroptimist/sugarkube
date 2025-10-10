@@ -11,7 +11,10 @@ improvements and share context with reviewers.
 ## Structure
 
 - `onboarding/` — track feature briefs, lab journals, and retrospective notes
-  produced while following the onboarding update template.
+  produced while following the onboarding update template. The directory ships
+  with a `README.md` and seed `feature-brief.md` so docs referencing this path
+  stay accurate. Regression coverage lives in
+  `tests/test_notes_directory.py::test_onboarding_feature_brief_stub_exists`.
 - Additional subdirectories — feel free to add project-specific folders (for
   example, `notes/tests/` or `notes/research/`) while keeping sensitive data out
   of the repository.

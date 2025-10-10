@@ -21,3 +21,23 @@ def test_notes_directory_exists() -> None:
     assert (
         "tests/test_notes_directory.py" in text
     ), "notes README should record the regression coverage for this workspace"
+
+
+def test_onboarding_feature_brief_stub_exists() -> None:
+    """The onboarding workspace should provide a feature brief scaffold."""
+
+    onboarding_dir = Path("notes") / "onboarding"
+    assert onboarding_dir.is_dir(), "notes/onboarding/ should exist for onboarding feature briefs"
+
+    readme = onboarding_dir / "README.md"
+    assert readme.is_file(), "notes/onboarding/README.md should explain how to use the workspace"
+
+    feature_brief = onboarding_dir / "feature-brief.md"
+    assert (
+        feature_brief.is_file()
+    ), "Seed notes/onboarding/feature-brief.md so docs referencing it stay accurate"
+
+    text = feature_brief.read_text(encoding="utf-8")
+    assert (
+        "docs/templates/simplification/onboarding-update.md" in text
+    ), "Feature brief stub should link back to the onboarding update template"
