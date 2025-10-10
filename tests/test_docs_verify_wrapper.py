@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -36,3 +37,20 @@ def test_docs_verify_wrappers_invoke_unified_cli() -> None:
     assert (
         '"{{sugarkube_cli}}" docs verify' in justfile_text
     ), "Just docs-verify recipe should call the CLI subcommand"
+
+
+def test_make_docs_verify_runs_cli() -> None:
+    """The Makefile target should execute the CLI in dry-run mode."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["make", "docs-verify", "DOCS_VERIFY_ARGS=--dry-run"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "$ pyspelling -c .spellcheck.yaml" in result.stdout
+    assert "$ linkchecker --no-warnings README.md docs/" in result.stdout

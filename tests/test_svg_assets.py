@@ -10,11 +10,7 @@ SVG_DIRS = [
 
 
 def test_svg_assets_parse_cleanly() -> None:
-    svg_paths = [
-        path
-        for directory in SVG_DIRS
-        for path in sorted(directory.glob("*.svg"))
-    ]
+    svg_paths = [path for directory in SVG_DIRS for path in sorted(directory.glob("*.svg"))]
     assert svg_paths, "Expected at least one SVG asset to validate"
 
     for svg_path in svg_paths:

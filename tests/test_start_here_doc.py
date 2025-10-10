@@ -51,11 +51,7 @@ def test_start_here_doc_embeds_architecture_diagram() -> None:
         "images/sugarkube_diagram.svg" in text
     ), "Start-here guide should reference the shared architecture diagram asset"
     lines = text.splitlines()
-    diagram_lines = [
-        line
-        for line in lines
-        if "![Sugarkube architecture overview" in line
-    ]
+    diagram_lines = [line for line in lines if "![Sugarkube architecture overview" in line]
     assert diagram_lines, "Diagram embed should reside on a single Markdown line"
     assert all(
         ")](images/sugarkube_diagram.svg)" in line or "(images/sugarkube_diagram.svg)" in line
