@@ -71,6 +71,14 @@ def test_strip_front_matter_returns_original_when_unclosed() -> None:
     assert start_here._strip_front_matter(text) == text
 
 
+def test_strip_front_matter_handles_bom() -> None:
+    """Leading UTF-8 BOM markers should be ignored when stripping metadata."""
+
+    text = "\ufeff---\nowner: start-here\n---\nWelcome"
+
+    assert start_here._strip_front_matter(text) == "Welcome"
+
+
 def test_start_here_main_path_only_alias(tmp_path, capsys, monkeypatch) -> None:
     """The deprecated --no-content flag should continue to emit the path."""
 

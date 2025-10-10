@@ -254,6 +254,9 @@ def _normalize_script_args(args: Sequence[str]) -> list[str]:
 
 
 def _strip_front_matter(text: str) -> str:
+    if text.startswith("\ufeff"):
+        text = text[1:]
+
     if not text.lstrip().startswith("---"):
         return text
 

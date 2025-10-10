@@ -274,6 +274,14 @@ def test_docs_strip_front_matter_passthrough_when_unclosed() -> None:
     assert cli._strip_front_matter(text) == text
 
 
+def test_docs_strip_front_matter_handles_bom() -> None:
+    """The CLI should drop UTF-8 BOM markers before removing metadata."""
+
+    text = "\ufeff---\nowner: cli\n---\nHello Sugarkube"
+
+    assert cli._strip_front_matter(text) == "Hello Sugarkube"
+
+
 def test_docs_start_here_handles_missing_doc(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
