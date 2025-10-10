@@ -312,7 +312,9 @@ def _handle_pi_install(args: argparse.Namespace) -> int:
         command.append("--dry-run")
     command.extend(script_args)
 
-    dry_run = False if args.dry_run or script_dry_run else args.dry_run
+    # Always execute the helper so it can render its own dry-run preview.
+    # The CLI forwards --dry-run, but the script handles printing preview output.
+    dry_run = False
     try:
         runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:

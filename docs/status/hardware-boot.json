@@ -1,11 +1,7 @@
 {
   "cacheSeconds": 900,
   "color": "brightgreen",
-  "description": "Most recent manual verification against physical hardware.",
   "label": "hardware boot",
-  "link": [
-    "https://github.com/futuroptimist/sugarkube/blob/main/docs/pi_smoke_test.md"
-  ],
   "message": "passing \u2022 2025-02-15 16:00 UTC \u2022 Pi 4B cluster",
   "namedLogo": "raspberry-pi",
   "schemaVersion": 1

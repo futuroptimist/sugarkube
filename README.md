@@ -20,7 +20,12 @@ frame so the installation is surrounded by greenery.
 
 "Sugarkube" refers to both the aluminium cube covered in solar panels **and**
 the helper scripts that provide "syntactic sugar" for Kubernetes. Throughout
-the docs you will see the term used in both contexts.
+the docs you will see the term used in both contexts. The physical cube is
+designed to be saturated with greenery: ground-level pots and grow bags tuck
+between the uprights while hanging planters fill the airspace. Hardy
+fruiting plants such as strawberries thrive in this arrangement and literally
+embed glucose, fructose, and sucrose—the sugars that inspired the name—into the
+structure's living canopy.
 
 ## Repository layout
 
@@ -74,7 +79,8 @@ the docs you will see the term used in both contexts.
     helpers from the repository root so relative paths to scripts and docs remain stable.
   - `install_sugarkube_image.sh` — install the GitHub CLI when missing, download the
     latest release, verify checksums, expand the `.img.xz`, and emit a new
-    `.img.sha256`; safe to run via `curl | bash`. Invoke it from the unified CLI with
+    `.img.sha256`; safe to run via `curl | bash`. Pass `--dry-run` to print the
+    download/expansion plan without touching disk. Invoke it from the unified CLI with
     `python -m sugarkube_toolkit pi install [--dry-run] [helper args...]` when you want
     the same behavior without leaving the `sugarkube` entry point.
   - `collect_pi_image.sh` — normalize pi-gen output into a single `.img.xz`,
