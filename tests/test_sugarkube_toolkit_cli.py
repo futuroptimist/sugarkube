@@ -237,6 +237,25 @@ def test_docs_start_here_prints_path_only(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.strip() == str(guide)
+    assert captured.err == ""
+
+
+def test_docs_start_here_no_content_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deprecated --no-content alias should emit a warning and the handbook path."""
+
+    guide = tmp_path / "start-here.md"
+    guide.write_text("Stub", encoding="utf-8")
+    monkeypatch.setattr(cli, "START_HERE_DOC", guide)
+
+    exit_code = cli.main(["docs", "start-here", "--no-content"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip() == str(guide)
+    assert "deprecated" in captured.err
+    assert "--path-only" in captured.err
 
 
 def test_docs_start_here_prints_contents(

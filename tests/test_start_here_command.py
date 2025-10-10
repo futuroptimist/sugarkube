@@ -79,8 +79,8 @@ def test_strip_front_matter_handles_bom() -> None:
     assert start_here._strip_front_matter(text) == "Welcome"
 
 
-def test_start_here_main_path_only_alias(tmp_path, capsys, monkeypatch) -> None:
-    """The deprecated --no-content flag should continue to emit the path."""
+def test_start_here_main_path_only_alias_warns(tmp_path, capsys, monkeypatch) -> None:
+    """The deprecated --no-content flag should warn while returning the path."""
 
     guide = tmp_path / "start-here.md"
     guide.write_text("Stub", encoding="utf-8")
@@ -91,6 +91,8 @@ def test_start_here_main_path_only_alias(tmp_path, capsys, monkeypatch) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.strip() == str(guide)
+    assert "deprecated" in captured.err
+    assert "--path-only" in captured.err
 
 
 def test_start_here_main_errors_when_missing(tmp_path, capsys, monkeypatch) -> None:

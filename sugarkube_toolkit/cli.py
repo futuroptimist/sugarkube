@@ -236,6 +236,12 @@ def _handle_docs_start_here(args: argparse.Namespace) -> int:
         )
         return 1
 
+    if args.no_content:
+        print(
+            "WARNING: --no-content is deprecated; use --path-only instead.",
+            file=sys.stderr,
+        )
+
     if args.path_only or args.no_content:
         print(START_HERE_DOC)
         return 0
