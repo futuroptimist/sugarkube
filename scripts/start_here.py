@@ -57,6 +57,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _strip_front_matter(text: str) -> str:
+    if text.startswith("\ufeff"):
+        text = text[1:]
+
     if not text.lstrip().startswith("---"):
         return text
 

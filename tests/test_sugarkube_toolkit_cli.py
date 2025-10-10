@@ -293,6 +293,14 @@ def test_docs_strip_front_matter_passthrough_when_unclosed() -> None:
     assert cli._strip_front_matter(text) == text
 
 
+def test_docs_strip_front_matter_handles_bom() -> None:
+    """The CLI should drop UTF-8 BOM markers before removing metadata."""
+
+    text = "\ufeff---\nowner: cli\n---\nHello Sugarkube"
+
+    assert cli._strip_front_matter(text) == "Hello Sugarkube"
+
+
 def test_docs_start_here_handles_missing_doc(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1056,7 +1064,7 @@ def test_pi_report_appends_cli_dry_run_with_separator(
 
 
 def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    """pi support-bundle should wrap the support bundle helper script."""
+    """pi support-bundle should preview the helper invocation with --dry-run."""
 
     recorded: list[list[str]] = []
     dry_run_flags: list[bool] = []
@@ -1074,13 +1082,13 @@ def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(runner, "run_commands", fake_run)
 
-    exit_code = cli.main(["pi", "support-bundle", "--dry-run"])
+    exit_code = cli.main(["pi", "support-bundle", "--dry-run", "pi.local"])
 
     expected_script = Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"
 
     assert exit_code == 0
-    assert recorded == [[sys.executable, str(expected_script), "--dry-run"]]
-    assert dry_run_flags == [False]
+    assert recorded == [[sys.executable, str(expected_script), "pi.local"]]
+    assert dry_run_flags == [True]
 
 
 def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1118,13 +1126,12 @@ def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPa
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
-            "--dry-run",
             "pi-a.local",
             "--identity",
             "~/.ssh/id_ed25519",
         ]
     ]
-    assert dry_run_flags == [False]
+    assert dry_run_flags == [True]
 
 
 def test_pi_support_bundle_reports_missing_script(
@@ -1136,7 +1143,7 @@ def test_pi_support_bundle_reports_missing_script(
         cli, "COLLECT_SUPPORT_BUNDLE_SCRIPT", Path("/nonexistent/support_bundle.py")
     )
 
-    exit_code = cli.main(["pi", "support-bundle", "--dry-run"])
+    exit_code = cli.main(["pi", "support-bundle", "--dry-run", "pi.local"])
 
     captured = capsys.readouterr()
 
@@ -1158,7 +1165,7 @@ def test_pi_support_bundle_surfaces_failures(
 
     monkeypatch.setattr(runner, "run_commands", boom)
 
-    exit_code = cli.main(["pi", "support-bundle", "--dry-run"])
+    exit_code = cli.main(["pi", "support-bundle", "pi.local"])
 
     captured = capsys.readouterr()
 
@@ -1202,17 +1209,16 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
-            "--dry-run",
             "pi-b.local",
             "--output-dir",
             "~/support-bundles",
         ]
     ]
-    assert dry_run_flags == [False]
+    assert dry_run_flags == [True]
 
 
-def test_pi_support_bundle_respects_existing_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Avoid duplicating --dry-run when the helper flag is provided explicitly."""
+def test_pi_support_bundle_filters_helper_dry_run_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop helper-level --dry-run during CLI previews to avoid script errors."""
 
     recorded: list[list[str]] = []
     dry_run_flags: list[bool] = []
@@ -1246,11 +1252,10 @@ def test_pi_support_bundle_respects_existing_dry_run(monkeypatch: pytest.MonkeyP
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
-            "--dry-run",
             "pi-c.local",
         ]
     ]
-    assert dry_run_flags == [False]
+    assert dry_run_flags == [True]
 
 
 def test_pi_smoke_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
