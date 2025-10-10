@@ -40,6 +40,12 @@ def main(argv: list[str] | None = None) -> int:
     if not DOC_PATH.exists():
         parser.error("docs/start-here.md is missing; re-run after restoring the handbook.")
 
+    if args.no_content:
+        print(
+            "WARNING: --no-content is deprecated; use --path-only instead.",
+            file=sys.stderr,
+        )
+
     if args.path_only or args.no_content:
         print(DOC_PATH)
         return 0

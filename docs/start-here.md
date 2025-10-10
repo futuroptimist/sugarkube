@@ -56,6 +56,10 @@ docs apply to you.
 > When using the Make/Just wrappers, forward `START_HERE_ARGS="--path-only"`
 > so they pass the flag through (for example, `make start-here START_HERE_ARGS="--path-only"`).
 > The CLI hides the YAML front matter so you only see the handbook content in your terminal output.
+> Legacy scripts that still forward `--no-content` trigger a deprecation warning before the CLI
+> prints the handbook path. Regression coverage lives in
+> `tests/test_sugarkube_toolkit_cli.py::test_docs_start_here_no_content_warns` and
+> `tests/test_start_here_command.py::test_start_here_main_path_only_alias_warns`.
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
