@@ -78,8 +78,8 @@ def test_install_dry_run_previews_actions(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     stdout = result.stdout
-    assert "Dry run: would download" in stdout
-    assert "Dry run: would expand archive" in stdout
+    assert "Dry-run: would download" in stdout
+    assert "Dry-run: would expand archive" in stdout
     assert not (tmp_path / "images").exists()
 
 

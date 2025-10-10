@@ -87,8 +87,8 @@ sync without modifying the host.
    flows to `scripts/install_sugarkube_image.sh`, so `--release` and other
    documented flags work unchanged. The CLI forwards `--dry-run` to the
    installer so the helper prints the same plan it would execute, just like
-   calling the shell script directly ("Dry run: would download …",
-   "Dry run: would expand archive …"). Regression coverage in
+   calling the shell script directly ("Dry-run: would download …",
+   "Dry-run: would expand archive …"). Regression coverage in
    `tests/test_sugarkube_toolkit_cli.py::test_pi_install_invokes_helper`,
    `tests/test_sugarkube_toolkit_cli.py::test_pi_install_respects_existing_dry_run`,
    and `tests/install_sugarkube_image_test.py::test_install_dry_run_previews_without_changes`
