@@ -93,7 +93,7 @@ clone-ssd:
 	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
 
 docs-verify:
-        $(SUGARKUBE_CLI) docs verify $(DOCS_VERIFY_ARGS)
+	$(SUGARKUBE_CLI) docs verify $(DOCS_VERIFY_ARGS)
 
 docs-simplify:
 	$(CURDIR)/scripts/checks.sh --docs-only
@@ -110,29 +110,29 @@ monitor-ssd-health:
 	$(HEALTH_CMD) $(HEALTH_ARGS)
 
 smoke-test-pi:
-        $(SMOKE_CMD) $(SMOKE_ARGS)
+	$(SMOKE_CMD) $(SMOKE_ARGS)
 
 qemu-smoke:
-        @if [ -z "$(QEMU_SMOKE_IMAGE)" ]; then \
-                echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; \
-                exit 1; \
-        fi
-        sudo $(QEMU_SMOKE_CMD) --image "$(QEMU_SMOKE_IMAGE)" --artifacts-dir "$(QEMU_SMOKE_ARTIFACTS)" $(QEMU_SMOKE_ARGS)
+	@if [ -z "$(QEMU_SMOKE_IMAGE)" ]; then \
+		echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; \
+		exit 1; \
+	fi
+	sudo $(QEMU_SMOKE_CMD) --image "$(QEMU_SMOKE_IMAGE)" --artifacts-dir "$(QEMU_SMOKE_ARTIFACTS)" $(QEMU_SMOKE_ARGS)
 
 field-guide:
-        $(FIELD_GUIDE_CMD) $(FIELD_GUIDE_ARGS)
+	$(FIELD_GUIDE_CMD) $(FIELD_GUIDE_ARGS)
 
 publish-telemetry:
-        $(TELEMETRY_CMD) $(TELEMETRY_ARGS)
+	$(TELEMETRY_CMD) $(TELEMETRY_ARGS)
 
 notify-teams:
-        $(TEAMS_CMD) $(TEAMS_ARGS)
+	$(TEAMS_CMD) $(TEAMS_ARGS)
 
 notify-workflow:
-        $(WORKFLOW_NOTIFY_CMD) $(WORKFLOW_NOTIFY_ARGS)
+	$(WORKFLOW_NOTIFY_CMD) $(WORKFLOW_NOTIFY_ARGS)
 
 update-hardware-badge:
-        $(BADGE_CMD) $(BADGE_ARGS)
+	$(BADGE_CMD) $(BADGE_ARGS)
 
 rehearse-join:
 	$(REHEARSAL_CMD) $(REHEARSAL_ARGS)
@@ -144,11 +144,11 @@ token-place-samples:
 	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)
 
 support-bundle:
-        @if [ -z "$(SUPPORT_BUNDLE_HOST)" ]; then \
-        echo "Set SUPPORT_BUNDLE_HOST to the target host (e.g. pi.local) before running support-bundle." >&2; \
-        exit 1; \
-        fi
-        $(SUPPORT_BUNDLE_CMD) "$(SUPPORT_BUNDLE_HOST)" $(SUPPORT_BUNDLE_ARGS)
+	@if [ -z "$(SUPPORT_BUNDLE_HOST)" ]; then \
+		echo "Set SUPPORT_BUNDLE_HOST to the target host (e.g. pi.local) before running support-bundle." >&2; \
+		exit 1; \
+	fi
+	$(SUPPORT_BUNDLE_CMD) "$(SUPPORT_BUNDLE_HOST)" $(SUPPORT_BUNDLE_ARGS)
 
 mac-setup:
-        $(MAC_SETUP_CMD) $(MAC_SETUP_ARGS)
+	$(MAC_SETUP_CMD) $(MAC_SETUP_ARGS)

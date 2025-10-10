@@ -222,7 +222,8 @@ Prefer the unified CLI? `python -m sugarkube_toolkit docs simplify [--dry-run] [
 wraps the same `scripts/checks.sh --docs-only` helper so you can stay inside a single entry point.
 Additional arguments after `--` are forwarded directly to the script.
 Regression coverage: `tests/checks_script_test.py::test_runs_js_checks_when_package_lock_present`
-verifies the helper runs `npm run test:ci` alongside linting and formatting when Node tooling exists.
+verifies the helper runs `npm run test:ci` alongside linting and formatting when Node tooling exists, and
+`tests/test_docs_verify_wrapper.py::test_make_docs_verify_runs_cli` exercises the Make target in dry-run mode so these instructions stay accurate.
 
 The `--no-warnings` flag prevents linkchecker from returning a non-zero exit code on benign Markdown
 parsing warnings.
