@@ -13,6 +13,9 @@
   `./scripts/sugarkube docs start-here --path-only` when working in a subdirectory)
   reflects the new path and prints the updated guidance. The Make/Just wrappers now
   defer to `sugarkube docs start-here`, keeping their output aligned with the CLI.
+- Update `notes/README.md` (guarded by `tests/test_notes_directory.py`) with links to
+  any onboarding evidence you add under `notes/` so collaborators can follow the
+  breadcrumbs left by this template.
 - Screenshots or recordings that walk through the refreshed flow.
 
 ## Stakeholders
