@@ -14,6 +14,20 @@ die() {
   exit "${2:-1}"
 }
 
+format_command() {
+  local formatted=""
+  local quoted part
+  for part in "$@"; do
+    printf -v quoted '%q' "$part"
+    if [ -z "$formatted" ]; then
+      formatted="$quoted"
+    else
+      formatted="$formatted $quoted"
+    fi
+  done
+  printf '%s' "$formatted"
+}
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     if [ -n "${2:-}" ]; then
@@ -223,7 +237,8 @@ Options:
       --checksum NAME     Override the checksum asset name (default: asset + .sha256).
       --mode MODE         Pass through to download helper (auto, release, workflow).
       --download-only     Skip expansion; leave only the .img.xz and checksum.
-      --dry-run           Print the actions that would run without downloading or expanding.
+      --dry-run           Preview the helper commands that would run without downloading
+                          or expanding (prints "Dry-run: would download …" etc.).
       --skip-gh-install   Do not attempt to bootstrap the GitHub CLI automatically.
       --download-script PATH
                           Use a local download_pi_image.sh instead of fetching from GitHub.
@@ -257,31 +272,31 @@ SKIP_GH_INSTALL=0
 HELPER_OVERRIDE="${SUGARKUBE_INSTALL_HELPER:-}"
 
 print_dry_run_plan() {
-  log "Dry run: would install GitHub CLI if missing (skipped)."
+  log "Dry-run: would install GitHub CLI if missing (skipped)."
 
   if [ -n "$HELPER_OVERRIDE" ]; then
-    log "Dry run: would use $HELPER_OVERRIDE to download $ASSET_NAME into $OUTPUT_ARCHIVE."
+    log "Dry-run: would use $HELPER_OVERRIDE to download $ASSET_NAME into $OUTPUT_ARCHIVE."
   else
     local raw_base
     raw_base="${SUGARKUBE_RAW_BASE_URL:-https://raw.githubusercontent.com/${OWNER}/${REPO}/main}"
-    log "Dry run: would download helper from ${raw_base}/scripts/download_pi_image.sh."
+    log "Dry-run: would download helper from ${raw_base}/scripts/download_pi_image.sh."
     if [ "${#DOWNLOAD_ARGS[@]}" -gt 0 ]; then
       local formatted
       formatted="$(printf ' %q' "${DOWNLOAD_ARGS[@]}")"
       formatted="${formatted# }"
-      log "Dry run: would run download helper with args: ${formatted}"
+      log "Dry-run: would run download helper with args: ${formatted}"
     else
-      log "Dry run: would run download helper with default arguments."
+      log "Dry-run: would run download helper with default arguments."
     fi
   fi
 
-  log "Dry run: would verify checksum $CHECKSUM_NAME."
+  log "Dry-run: would verify checksum $CHECKSUM_NAME."
   if [ "$DOWNLOAD_ONLY" -eq 1 ]; then
-    log "Dry run: would skip expansion (--download-only)."
+    log "Dry-run: would skip expansion (--download-only)."
   else
-    log "Dry run: would expand archive to $IMAGE_DEST."
+    log "Dry-run: would expand archive to $IMAGE_DEST."
   fi
-  log "Dry run: would write checksum to ${IMAGE_DEST}.sha256."
+  log "Dry-run: would write checksum to ${IMAGE_DEST}.sha256."
 }
 
 while [ "$#" -gt 0 ]; do
@@ -403,21 +418,36 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 DEST_DIR="$(dirname "$OUTPUT_ARCHIVE")"
-mkdir -p "$DEST_DIR"
-mkdir -p "$(dirname "$IMAGE_DEST")"
+IMAGE_DIR="$(dirname "$IMAGE_DEST")"
 
-if [ "$SKIP_GH_INSTALL" -eq 0 ]; then
-  install_gh
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "Dry-run: would create directory $DEST_DIR"
+  log "Dry-run: would create directory $IMAGE_DIR"
 else
-  if ! command -v gh >/dev/null 2>&1; then
-    die "gh is required; rerun without --skip-gh-install once it is installed"
-  fi
+  mkdir -p "$DEST_DIR"
+  mkdir -p "$IMAGE_DIR"
 fi
 
-require_cmd curl "curl is required to download the helper"
+if [ "$DRY_RUN" -eq 1 ]; then
+  if [ "$SKIP_GH_INSTALL" -eq 0 ]; then
+    log "Dry-run: would install gh if it is missing"
+  elif ! command -v gh >/dev/null 2>&1; then
+    log "Dry-run: gh is not installed; rerun without --skip-gh-install after installing it"
+  fi
+else
+  if [ "$SKIP_GH_INSTALL" -eq 0 ]; then
+    install_gh
+  else
+    if ! command -v gh >/dev/null 2>&1; then
+      die "gh is required; rerun without --skip-gh-install once it is installed"
+    fi
+  fi
+  require_cmd curl "curl is required to download the helper"
+fi
 
 HELPER_SCRIPT=""
 HELPER_TMP=""
+HELPER_DISPLAY=""
 cleanup_helper() {
   if [ -n "$HELPER_TMP" ] && [ -f "$HELPER_TMP" ]; then
     rm -f "$HELPER_TMP"
@@ -426,27 +456,63 @@ cleanup_helper() {
 trap cleanup_helper EXIT
 
 if [ -n "$HELPER_OVERRIDE" ]; then
-  if [ ! -x "$HELPER_OVERRIDE" ]; then
-    die "Download helper '$HELPER_OVERRIDE' is not executable"
+  HELPER_DISPLAY="$HELPER_OVERRIDE"
+  if [ ! -e "$HELPER_OVERRIDE" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "Dry-run: helper '$HELPER_OVERRIDE' does not exist; real execution would fail"
+    else
+      die "Download helper '$HELPER_OVERRIDE' does not exist"
+    fi
+  elif [ ! -x "$HELPER_OVERRIDE" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "Dry-run: helper '$HELPER_OVERRIDE' is not executable; real execution would fail"
+    else
+      die "Download helper '$HELPER_OVERRIDE' is not executable"
+    fi
   fi
   HELPER_SCRIPT="$HELPER_OVERRIDE"
 else
   RAW_BASE="${SUGARKUBE_RAW_BASE_URL:-https://raw.githubusercontent.com/${OWNER}/${REPO}/main}"
-  HELPER_TMP="$(mktemp)"
-  if ! curl -fsSL "$RAW_BASE/scripts/download_pi_image.sh" -o "$HELPER_TMP"; then
-    die "Failed to fetch download helper from $RAW_BASE"
+  HELPER_DISPLAY="$RAW_BASE/scripts/download_pi_image.sh"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: would download helper from $HELPER_DISPLAY"
+    HELPER_SCRIPT="$HELPER_DISPLAY"
+  else
+    HELPER_TMP="$(mktemp)"
+    if ! curl -fsSL "$RAW_BASE/scripts/download_pi_image.sh" -o "$HELPER_TMP"; then
+      die "Failed to fetch download helper from $RAW_BASE"
+    fi
+    chmod +x "$HELPER_TMP"
+    HELPER_SCRIPT="$HELPER_TMP"
   fi
-  chmod +x "$HELPER_TMP"
-  HELPER_SCRIPT="$HELPER_TMP"
 fi
 
-log "Downloading sugarkube image to $OUTPUT_ARCHIVE"
-if ! "$HELPER_SCRIPT" "${DOWNLOAD_ARGS[@]}"; then
-  die "Download helper failed"
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "Dry-run: would download sugarkube image to $OUTPUT_ARCHIVE"
+  if [ -n "$HELPER_SCRIPT" ]; then
+    log "Dry-run: would invoke $(format_command "$HELPER_SCRIPT" "${DOWNLOAD_ARGS[@]}")"
+  fi
+else
+  log "Downloading sugarkube image to $OUTPUT_ARCHIVE"
+  if ! "$HELPER_SCRIPT" "${DOWNLOAD_ARGS[@]}"; then
+    die "Download helper failed"
+  fi
 fi
 
 if [ "$DOWNLOAD_ONLY" -eq 1 ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: would skip expansion (--download-only)."
+    log "Dry-run: preview complete."
+    exit 0
+  fi
   log "Download complete. Skipping expansion (--download-only)."
+  exit 0
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "Dry-run: would expand $(basename "$OUTPUT_ARCHIVE") to $IMAGE_DEST"
+  log "Dry-run: would write checksum to ${IMAGE_DEST}.sha256"
+  log "Dry-run: preview complete."
   exit 0
 fi
 
