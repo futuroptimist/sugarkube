@@ -55,7 +55,8 @@ docs apply to you.
 > wrapper bootstraps `PYTHONPATH` before forwarding to the CLI.
 > When using the Make/Just wrappers, forward `START_HERE_ARGS="--path-only"`
 > so they pass the flag through (for example, `make start-here START_HERE_ARGS="--path-only"`).
-> The CLI hides the YAML front matter so you only see the handbook content in your terminal output.
+> The CLI hides the YAML front matter so you only see the handbook content in your terminal output,
+> even when a UTF-8 BOM slips in from Windows editors.
 > Skim this track the moment you clone the repository. It orients you before you touch any
 > automation.
 
