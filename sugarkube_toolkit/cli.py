@@ -443,10 +443,13 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
         return 1
 
     script_args = _normalize_script_args(getattr(args, "script_args", []))
+    command: list[str] = [sys.executable, str(script)]
+
     if args.dry_run:
         script_args = [arg for arg in script_args if arg != "--dry-run"]
+        command.append("--dry-run")
 
-    command = [sys.executable, str(script), *script_args]
+    command.extend(script_args)
 
     dry_run = args.dry_run
     try:

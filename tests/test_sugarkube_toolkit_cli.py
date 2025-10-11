@@ -1087,7 +1087,7 @@ def test_pi_support_bundle_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> No
     expected_script = Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"
 
     assert exit_code == 0
-    assert recorded == [[sys.executable, str(expected_script), "pi.local"]]
+    assert recorded == [[sys.executable, str(expected_script), "--dry-run", "pi.local"]]
     assert dry_run_flags == [True]
 
 
@@ -1115,6 +1115,7 @@ def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPa
             "pi",
             "support-bundle",
             "--dry-run",
+            "--dry-run",
             "pi-a.local",
             "--identity",
             "~/.ssh/id_ed25519",
@@ -1126,6 +1127,7 @@ def test_pi_support_bundle_forwards_additional_args(monkeypatch: pytest.MonkeyPa
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "--dry-run",
             "pi-a.local",
             "--identity",
             "~/.ssh/id_ed25519",
@@ -1198,6 +1200,7 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
             "support-bundle",
             "--dry-run",
             "--",
+            "--dry-run",
             "pi-b.local",
             "--output-dir",
             "~/support-bundles",
@@ -1209,6 +1212,7 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "--dry-run",
             "pi-b.local",
             "--output-dir",
             "~/support-bundles",
@@ -1218,7 +1222,7 @@ def test_pi_support_bundle_drops_script_separator(monkeypatch: pytest.MonkeyPatc
 
 
 def test_pi_support_bundle_filters_helper_dry_run_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop helper-level --dry-run during CLI previews to avoid script errors."""
+    """Preview should include --dry-run exactly once even when callers forward it."""
 
     recorded: list[list[str]] = []
     dry_run_flags: list[bool] = []
@@ -1252,6 +1256,7 @@ def test_pi_support_bundle_filters_helper_dry_run_flag(monkeypatch: pytest.Monke
         [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "scripts" / "collect_support_bundle.py"),
+            "--dry-run",
             "pi-c.local",
         ]
     ]

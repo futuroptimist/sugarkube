@@ -49,8 +49,10 @@ Drop `--dry-run` to collect artefacts immediately. Arguments after the standalon
 `scripts/collect_support_bundle.py`, matching the behaviour described above.
 Regression coverage in
 `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_invokes_helper`
-ensures the CLI forwards `--dry-run` to the helper so the preview matches the
-documented workflow.
+prints the helper invocation with `--dry-run` so the preview matches the
+documented workflow, while
+`tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_filters_helper_dry_run_flag`
+keeps the flag deduplicated when callers forward their own `--` arguments.
 
 The script stores results under `support-bundles/<host>-<timestamp>/` and also emits a matching
 `.tar.gz`. Override `--no-archive` to keep only the raw directory, and `--spec` to append extra
