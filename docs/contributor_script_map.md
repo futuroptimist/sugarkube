@@ -36,6 +36,7 @@ confirm the quickstart stays accurate.
 | `scripts/flash_pi_media.sh` | Stream `.img`/`.img.xz` to removable media with checksum verification and auto-eject. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `Makefile`/`just` `flash-pi` targets, PowerShell wrapper |
 | `scripts/flash_pi_media.py` | Cross-platform core used by Bash and PowerShell wrappers. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | Imported by `flash_pi_media.sh` and `flash_pi_media.ps1`. |
 | `scripts/flash_pi_media_report.py` | Generate Markdown/HTML/JSON flash reports with optional cloud-init diffs. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `make flash-pi-report`, `just flash-pi-report`, report templates under `~/sugarkube/reports/`. |
+| `scripts/pi_cluster_bootstrap.py` | Trigger the `pi-image` workflow, download artifacts, flash media, and run join rehearsals from a single TOML config. | [Raspberry Pi Cluster Setup](./raspi_cluster_setup.md) §Fast path | `python -m sugarkube_toolkit pi cluster`, `make cluster-bootstrap`, `just cluster-bootstrap` |
 | `scripts/render_pi_imager_preset.py` | Merge secrets into Raspberry Pi Imager presets. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | Works with presets in `docs/templates/pi-imager/`. |
 
 ## Boot verification and troubleshooting

@@ -75,6 +75,7 @@ cluster_cmd := env_var_or_default(
     justfile_directory() + "/scripts/pi_multi_node_join_rehearsal.py",
 )
 cluster_args := env_var_or_default("CLUSTER_ARGS", "")
+cluster_bootstrap_args := env_var_or_default("CLUSTER_BOOTSTRAP_ARGS", "")
 token_place_sample_cmd := env_var_or_default(
     "TOKEN_PLACE_SAMPLE_CMD",
     justfile_directory() + "/scripts/token_place_replay_samples.py",
@@ -209,6 +210,10 @@ rehearse-join:
 # Usage: just cluster-up CLUSTER_ARGS="control.local --agents worker-a worker-b --apply --apply-wait"
 cluster-up:
     "{{cluster_cmd}}" {{cluster_args}}
+
+# Usage: just cluster-bootstrap CLUSTER_BOOTSTRAP_ARGS="--config cluster.toml"
+cluster-bootstrap:
+    "{{sugarkube_cli}}" pi cluster {{cluster_bootstrap_args}}
 
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 # Usage: just codespaces-bootstrap
