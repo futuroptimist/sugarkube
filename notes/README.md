@@ -15,6 +15,10 @@ improvements and share context with reviewers.
   with a `README.md` and seed `feature-brief.md` so docs referencing this path
   stay accurate. Regression coverage lives in
   `tests/test_notes_directory.py::test_onboarding_feature_brief_stub_exists`.
+- `feature-brief.md` — top-level pointer used by tutorials that reference
+  `notes/feature-brief.md`. It links directly to the onboarding workspace and
+  is covered by
+  `tests/test_notes_directory.py::test_feature_brief_redirect_stub_exists`.
 - Additional subdirectories — feel free to add project-specific folders (for
   example, `notes/tests/` or `notes/research/`) while keeping sensitive data out
   of the repository.

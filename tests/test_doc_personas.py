@@ -38,6 +38,7 @@ PERSONA_EXPECTATIONS = {
     Path("docs/pi_support_bundles.md"): ["hardware", "software"],
     Path("docs/pi_token_dspace.md"): ["software"],
     Path("docs/pi_workflow_notifications.md"): ["software"],
+    Path("docs/operations/security-checklist.md"): ["software"],
     Path("docs/power_system_design.md"): ["hardware"],
     Path("docs/projects-compose.md"): ["software"],
     Path("docs/raspi_cluster_setup.md"): ["hardware", "software"],

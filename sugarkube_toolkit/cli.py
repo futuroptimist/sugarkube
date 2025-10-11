@@ -433,13 +433,19 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
         interpreter=sys.executable,
         missing_hint=(
             "scripts/collect_support_bundle.py is missing. "
-            "Run from the repository root or reinstall the tooling."
-        ),
-        auto_dry_run=False,
-        always_execute=False,
-        strip_cli_dry_run=True,
-    )
+            "Run from the repository root or reinstall the tooling.",
+            file=sys.stderr,
+        )
+        return 1
 
+    script_args = _normalize_script_args(getattr(args, "script_args", []))
+    command: list[str] = [sys.executable, str(script)]
+
+    if args.dry_run:
+        script_args = [arg for arg in script_args if arg != "--dry-run"]
+        command.append("--dry-run")
+
+    command.extend(script_args)
 
 def _handle_pi_cluster(args: argparse.Namespace) -> int:
     prefix: list[str] = []

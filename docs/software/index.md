@@ -34,6 +34,8 @@ and supporting services stay healthy.
   rollout covering hardware prep through k3s readiness.
 - [Pi Support Bundles](../pi_support_bundles.md) — collect evidence for
   debugging.
+- [operations/security-checklist.md](../operations/security-checklist.md) — record
+  credential rotations and post-maintenance evidence.
 - [projects-compose.md](../projects-compose.md) — run token.place and dspace via
   Docker Compose.
 - [pi_token_dspace.md](../pi_token_dspace.md) — expose token.place/dspace through
