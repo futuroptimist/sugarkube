@@ -62,13 +62,26 @@ fi || {
 }
 
 unset GIT_DIR GIT_WORK_TREE
+
+input_file="$1"
+case "$input_file" in
+/*)
+absolute_file="$input_file"
+;;
+*)
+dirname_result=$(dirname "$input_file") || exit 1
+absolute_dir=$(cd "$dirname_result" && (pwd -P 2>/dev/null || pwd)) || exit 1
+absolute_file="$absolute_dir/$(basename "$input_file")"
+;;
+esac
+
 cd "$worktree" &&
 
-if grep -q "^diff --git " "$1"
+if grep -q "^diff --git " "$absolute_file"
 then
-        validate_patch "$1"
+        validate_patch "$absolute_file"
 else
-        validate_cover_letter "$1"
+        validate_cover_letter "$absolute_file"
 fi &&
 
 if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
