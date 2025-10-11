@@ -749,6 +749,45 @@ def test_pi_flash_forwards_additional_args(monkeypatch: pytest.MonkeyPatch) -> N
     assert dry_run_flags == [False]
 
 
+def test_pi_cluster_invokes_bootstrap_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pi cluster should wrap the bootstrap helper with config flags."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        ["pi", "cluster", "--config", "cluster.toml", "--skip-download", "--dry-run"]
+    )
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "pi_cluster_bootstrap.py"
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(expected_script),
+            "--config",
+            "cluster.toml",
+            "--skip-download",
+            "--dry-run",
+        ]
+    ]
+    assert dry_run_flags == [False]
+
+
 def test_pi_flash_reports_missing_script(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

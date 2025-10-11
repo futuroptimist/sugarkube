@@ -25,15 +25,44 @@ Linux command line.
 - SSH client (e.g. `ssh` on macOS/Linux or PuTTY on Windows)
 - Internet connection to download images and packages
 
+## Fast path: bootstrap all three nodes automatically
+1. Copy [`samples/pi-cluster/three-node.toml`](../samples/pi-cluster/three-node.toml) to a
+   writable directory and edit it to match your hardware:
+   - Update `device` entries with the removable drives for each Pi.
+   - Set `hostname`, Wi-Fi credentials, and SSH keys once and reuse them across nodes.
+   - Adjust the `cluster.join` section with your control-plane hostname or IPs.
+   - The sample now ships with `[image.workflow] trigger = true`, so the helper automatically
+     dispatches the `pi-image` workflow, waits for the run to finish, and downloads the artifact
+     without leaving the terminal. Disable it (`trigger = false`) when you already have a fresh
+     image cached locally.
+2. Preview the workflow without touching hardware:
+   ```bash
+   python -m sugarkube_toolkit pi cluster --config ./cluster.toml --dry-run
+   ```
+   The helper prints the commands it would execute (download, flash, join) so you can validate
+   device paths and arguments before proceeding.
+3. Drop `--dry-run` when you're ready:
+   ```bash
+   python -m sugarkube_toolkit pi cluster --config ./cluster.toml
+   ```
+   The automation dispatches the `pi-image` workflow (when `image.workflow.trigger` is enabled),
+   waits for the build to complete, downloads the artifact (or reuses an existing
+   `install_sugarkube_image.sh` cache), flashes each SD card via `flash_pi_media_report.py`, copies
+   per-node cloud-init overrides that inject the hostnames and Wi-Fi credentials you supplied, and
+   finally runs `pi_multi_node_join_rehearsal.py --apply` to bring the workers online. Use
+   `just cluster-bootstrap CLUSTER_BOOTSTRAP_ARGS="--config ./cluster.toml"` when you prefer Just
+   recipes.
+
+Skip to [§5](#5-form-the-k3s-cluster) after the helper completes—the control-plane and workers
+will already share the same image, hostname overrides, and join token.
+
 ## 1. Prepare the OS image
 1. Trigger the build in GitHub:
-   - Open [Actions → pi-image → Run workflow][pi-image].
-   - Enable **token.place** and **dspace** if you want those repos baked in.
-   - After the run succeeds, download `sugarkube.img.xz`:
-     ```bash
-     scripts/download_pi_image.sh
-     ```
-     or grab it from the workflow run.
+   - If you used the `[image.workflow] trigger = true` default, the cluster bootstrapper already
+     dispatched the workflow and downloaded the artifact for you—skip to step 2.
+   - Otherwise open [Actions → pi-image → Run workflow][pi-image], enable **token.place** and
+     **dspace** if you want those repos baked in, then download `sugarkube.img.xz` with
+     `scripts/download_pi_image.sh` or from the workflow run page.
 
    Alternatively, build locally:
    - Linux/macOS: `./scripts/build_pi_image.sh`

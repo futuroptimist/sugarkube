@@ -38,6 +38,7 @@ REHEARSAL_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
 REHEARSAL_ARGS ?=
 CLUSTER_CMD ?= $(CURDIR)/scripts/pi_multi_node_join_rehearsal.py
 CLUSTER_ARGS ?=
+CLUSTER_BOOTSTRAP_ARGS ?=
 TOKEN_PLACE_SAMPLE_CMD ?= $(CURDIR)/scripts/token_place_replay_samples.py
 TOKEN_PLACE_SAMPLE_ARGS ?= --samples-dir $(CURDIR)/samples/token_place
 SUPPORT_BUNDLE_CMD ?= $(CURDIR)/scripts/collect_support_bundle.py
@@ -54,7 +55,7 @@ DOCS_VERIFY_ARGS ?=
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
         clone-ssd docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
-        token-place-samples support-bundle mac-setup cluster-up codespaces-bootstrap
+        token-place-samples support-bundle mac-setup cluster-up cluster-bootstrap codespaces-bootstrap
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -139,6 +140,9 @@ rehearse-join:
 
 cluster-up:
 	$(CLUSTER_CMD) $(CLUSTER_ARGS)
+
+cluster-bootstrap:
+	$(SUGARKUBE_CLI) pi cluster $(CLUSTER_BOOTSTRAP_ARGS)
 
 token-place-samples:
 	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)

@@ -95,23 +95,33 @@ sync without modifying the host.
    (plus neighbouring `test_pi_install_*` cases) ensures the CLI forwards
    arguments exactly as documented and the shell helper's preview mode stays
    aligned with the documentation.
-3. In GitHub, open **Actions → pi-image → Run workflow** for a fresh build.
-   - Tick **token.place** and **dspace** to bake those repos into `/opt/projects`.
-   - Wait for the run to finish; it uploads `sugarkube.img.xz` as an artifact.
-   - Need a guided path? Launch the [Sugarkube Flash Helper](./flash-helper/) and paste the
-     workflow URL to receive OS-specific download, verification, and flashing instructions. Prefer
-     the terminal? Run
-     `python scripts/workflow_flash_instructions.py --url <run-url> --os linux|mac|windows` from the
-     repository root to print the same steps.
-   - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes
-     partial downloads and verifies checksums automatically.
-  - Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
-    repository root to preview the helper. When you're in a nested directory, call
-    `./scripts/sugarkube pi download --dry-run` so the wrapper bootstraps `PYTHONPATH`. Both
-    commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide.
-    Pass the same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow
-    straight to the shell script, including the preview mode so you can inspect the exact
-    `curl` commands without fetching the artifact.
+   > [!TIP]
+   > Provisioning a full three-node cluster? Copy
+   > [`samples/pi-cluster/three-node.toml`](../samples/pi-cluster/three-node.toml), edit the
+   > hostnames and devices, then run
+   > `python -m sugarkube_toolkit pi cluster --config ./cluster.toml`. The helper chains
+   > `install_sugarkube_image.sh`, `flash_pi_media_report.py`, and
+   > `pi_multi_node_join_rehearsal.py --apply` so you only swap media when prompted.
+3. Want a fresh workflow artifact? You now have two options:
+   - **Hands-off:** enable `[image.workflow] trigger = true` in your cluster config (the
+     `samples/pi-cluster/three-node.toml` starter already does). The bootstrapper dispatches the
+     `pi-image` workflow, polls until the run completes, and downloads the artifact automatically
+     before flashing media.
+   - **Manual:** open **Actions → pi-image → Run workflow**, tick **token.place** and **dspace** to
+     bake those repos into `/opt/projects`, then download `sugarkube.img.xz` once the run succeeds.
+     Need a guided path? Launch the [Sugarkube Flash Helper](./flash-helper/) and paste the workflow
+     URL to receive OS-specific download, verification, and flashing instructions. Prefer the
+     terminal? Run `python scripts/workflow_flash_instructions.py --url <run-url> --os
+     linux|mac|windows` from the repository root to print the same steps.
+   - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes partial downloads and
+     verifies checksums automatically.
+   - Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
+     repository root to preview the helper. When you're in a nested directory, call
+     `./scripts/sugarkube pi download --dry-run` so the wrapper bootstraps `PYTHONPATH`. Both
+     commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide. Pass the
+     same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight to the
+     shell script, including the preview mode so you can inspect the exact `curl` commands without
+     fetching the artifact.
 
 > [!NOTE]
 > The same repository-root rule applies to other `python -m sugarkube_toolkit ...` examples below.

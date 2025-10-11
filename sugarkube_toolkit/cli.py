@@ -19,6 +19,7 @@ FLASH_PI_MEDIA_SCRIPT = SCRIPTS_DIR / "flash_pi_media.sh"
 FLASH_PI_MEDIA_REPORT_SCRIPT = SCRIPTS_DIR / "flash_pi_media_report.py"
 PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
 PI_JOIN_REHEARSAL_SCRIPT = SCRIPTS_DIR / "pi_multi_node_join_rehearsal.py"
+CLUSTER_BOOTSTRAP_SCRIPT = SCRIPTS_DIR / "pi_cluster_bootstrap.py"
 COLLECT_SUPPORT_BUNDLE_SCRIPT = SCRIPTS_DIR / "collect_support_bundle.py"
 START_HERE_DOC = REPO_ROOT / "docs" / "start-here.md"
 
@@ -174,6 +175,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     support_bundle_parser.set_defaults(handler=_handle_pi_support_bundle)
 
+    cluster_parser = pi_subparsers.add_parser(
+        "cluster",
+        help="Bootstrap multi-node clusters via scripts/pi_cluster_bootstrap.py.",
+    )
+    cluster_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to the cluster configuration TOML file.",
+    )
+    cluster_parser.add_argument(
+        "--skip-download",
+        action="store_true",
+        help="Skip downloading the pi-image artifact before flashing media.",
+    )
+    cluster_parser.add_argument(
+        "--skip-join",
+        action="store_true",
+        help="Skip running the join rehearsal/apply stage after flashing.",
+    )
+    cluster_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the helper invocation without executing it.",
+    )
+    cluster_parser.set_defaults(handler=_handle_pi_cluster)
+
     return parser
 
 
@@ -278,183 +305,163 @@ def _strip_front_matter(text: str) -> str:
     return text
 
 
-def _handle_pi_download(args: argparse.Namespace) -> int:
-    script = DOWNLOAD_PI_IMAGE_SCRIPT
+def _forward_to_helper(
+    *,
+    script: Path,
+    args: argparse.Namespace,
+    interpreter: str,
+    missing_hint: str,
+    prefix: Sequence[str] | None = None,
+    auto_dry_run: bool = True,
+    always_execute: bool = False,
+    strip_cli_dry_run: bool = False,
+) -> int:
     if not script.exists():
-        print(
-            "scripts/download_pi_image.sh is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
+        print(missing_hint, file=sys.stderr)
         return 1
 
     script_args = _normalize_script_args(getattr(args, "script_args", []))
-    command = ["bash", str(script)]
-    script_dry_run = "--dry-run" in script_args
-    if args.dry_run and not script_dry_run:
-        command.append("--dry-run")
-    command.extend(script_args)
-    dry_run = False if args.dry_run and not script_dry_run else args.dry_run
+    if strip_cli_dry_run and args.dry_run:
+        script_args = [arg for arg in script_args if arg != "--dry-run"]
+
+    combined_prefix = list(prefix or [])
+    script_has_dry_run = "--dry-run" in script_args or "--dry-run" in combined_prefix
+
+    if args.dry_run and auto_dry_run and not script_has_dry_run:
+        combined_prefix.append("--dry-run")
+        script_has_dry_run = True
+
+    command = [interpreter, str(script), *combined_prefix, *script_args]
+
+    dry_run = False if always_execute else args.dry_run and not script_has_dry_run
     try:
         runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
     except runner.CommandError as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
+
+
+def _handle_pi_download(args: argparse.Namespace) -> int:
+    return _forward_to_helper(
+        script=DOWNLOAD_PI_IMAGE_SCRIPT,
+        args=args,
+        interpreter="bash",
+        missing_hint=(
+            "scripts/download_pi_image.sh is missing. "
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=True,
+        always_execute=False,
+    )
 
 
 def _handle_pi_install(args: argparse.Namespace) -> int:
-    script = INSTALL_PI_IMAGE_SCRIPT
-    if not script.exists():
-        print(
+    return _forward_to_helper(
+        script=INSTALL_PI_IMAGE_SCRIPT,
+        args=args,
+        interpreter="bash",
+        missing_hint=(
             "scripts/install_sugarkube_image.sh is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
-        return 1
-
-    script_args = _normalize_script_args(getattr(args, "script_args", []))
-    script_dry_run = "--dry-run" in script_args
-
-    command = ["bash", str(script)]
-    if args.dry_run and not script_dry_run:
-        command.append("--dry-run")
-    command.extend(script_args)
-
-    # Always execute the helper so it can render its own dry-run preview.
-    # The CLI forwards --dry-run, but the script handles printing preview output.
-    dry_run = False
-    try:
-        runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
-    except runner.CommandError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    return 0
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=True,
+        always_execute=True,
+    )
 
 
 def _handle_pi_flash(args: argparse.Namespace) -> int:
-    script = FLASH_PI_MEDIA_SCRIPT
-    if not script.exists():
-        print(
+    return _forward_to_helper(
+        script=FLASH_PI_MEDIA_SCRIPT,
+        args=args,
+        interpreter="bash",
+        missing_hint=(
             "scripts/flash_pi_media.sh is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
-        return 1
-
-    raw_script_args = list(getattr(args, "script_args", []))
-    script_args = _normalize_script_args(raw_script_args)
-    script_dry_run = "--dry-run" in script_args
-
-    command = ["bash", str(script)]
-    if args.dry_run and not script_dry_run:
-        command.append("--dry-run")
-    command.extend(script_args)
-
-    dry_run = False if args.dry_run or script_dry_run else args.dry_run
-    try:
-        runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
-    except runner.CommandError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    return 0
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=True,
+        always_execute=False,
+    )
 
 
 def _handle_pi_report(args: argparse.Namespace) -> int:
-    script = FLASH_PI_MEDIA_REPORT_SCRIPT
-    if not script.exists():
-        print(
+    return _forward_to_helper(
+        script=FLASH_PI_MEDIA_REPORT_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
             "scripts/flash_pi_media_report.py is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
-        return 1
-
-    raw_script_args = list(getattr(args, "script_args", []))
-    script_args = _normalize_script_args(raw_script_args)
-    if args.dry_run and "--dry-run" not in script_args:
-        script_args = ["--dry-run", *script_args]
-    command = [sys.executable, str(script), *script_args]
-
-    # Always execute the helper so it can perform its own dry-run handling.
-    dry_run = False
-    try:
-        runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
-    except runner.CommandError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    return 0
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=True,
+        always_execute=True,
+    )
 
 
 def _handle_pi_smoke(args: argparse.Namespace) -> int:
-    script = PI_SMOKE_TEST_SCRIPT
-    if not script.exists():
-        print(
+    return _forward_to_helper(
+        script=PI_SMOKE_TEST_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
             "scripts/pi_smoke_test.py is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
-        return 1
-
-    command = [
-        sys.executable,
-        str(script),
-        *_normalize_script_args(getattr(args, "script_args", [])),
-    ]
-    try:
-        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
-    except runner.CommandError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    return 0
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=False,
+        always_execute=False,
+    )
 
 
 def _handle_pi_rehearse(args: argparse.Namespace) -> int:
-    script = PI_JOIN_REHEARSAL_SCRIPT
-    if not script.exists():
-        print(
+    return _forward_to_helper(
+        script=PI_JOIN_REHEARSAL_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
             "scripts/pi_multi_node_join_rehearsal.py is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
-        return 1
-
-    command = [
-        sys.executable,
-        str(script),
-        *_normalize_script_args(getattr(args, "script_args", [])),
-    ]
-    try:
-        runner.run_commands([command], dry_run=args.dry_run, cwd=REPO_ROOT)
-    except runner.CommandError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    return 0
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=False,
+        always_execute=False,
+    )
 
 
 def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
-    script = COLLECT_SUPPORT_BUNDLE_SCRIPT
-    if not script.exists():
-        print(
+    return _forward_to_helper(
+        script=COLLECT_SUPPORT_BUNDLE_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
             "scripts/collect_support_bundle.py is missing. "
-            "Run from the repository root or reinstall the tooling.",
-            file=sys.stderr,
-        )
-        return 1
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=False,
+        always_execute=False,
+        strip_cli_dry_run=True,
+    )
 
-    script_args = _normalize_script_args(getattr(args, "script_args", []))
-    if args.dry_run:
-        script_args = [arg for arg in script_args if arg != "--dry-run"]
 
-    command = [sys.executable, str(script), *script_args]
+def _handle_pi_cluster(args: argparse.Namespace) -> int:
+    prefix: list[str] = []
+    if args.config:
+        prefix.extend(["--config", args.config])
+    if args.skip_download:
+        prefix.append("--skip-download")
+    if args.skip_join:
+        prefix.append("--skip-join")
 
-    dry_run = args.dry_run
-    try:
-        runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
-    except runner.CommandError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    return 0
+    return _forward_to_helper(
+        script=CLUSTER_BOOTSTRAP_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
+            "scripts/pi_cluster_bootstrap.py is missing. "
+            "Run from the repository root or reinstall the tooling."
+        ),
+        prefix=prefix,
+        auto_dry_run=True,
+        always_execute=True,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -477,6 +484,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _handle_pi_smoke,
         _handle_pi_rehearse,
         _handle_pi_support_bundle,
+        _handle_pi_cluster,
     }:
         combined = list(getattr(args, "script_args", []))
         if extras:
