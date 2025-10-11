@@ -41,3 +41,15 @@ def test_onboarding_feature_brief_stub_exists() -> None:
     assert (
         "docs/templates/simplification/onboarding-update.md" in text
     ), "Feature brief stub should link back to the onboarding update template"
+
+
+def test_feature_brief_redirect_stub_exists() -> None:
+    """Docs reference notes/feature-brief.md; ensure a pointer exists."""
+
+    stub = Path("notes") / "feature-brief.md"
+    assert stub.is_file(), "Add notes/feature-brief.md so tutorial references remain accurate"
+
+    text = stub.read_text(encoding="utf-8")
+    assert (
+        "notes/onboarding/feature-brief.md" in text
+    ), "Feature brief stub should point to notes/onboarding/feature-brief.md"
