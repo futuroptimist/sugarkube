@@ -38,6 +38,8 @@ Review the safety notes before working with power components.
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
+- [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
+  verification steps
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare
 - [token_place_sample_datasets.md](token_place_sample_datasets.md) — replay bundled
   token.place health and chat samples
