@@ -50,12 +50,16 @@ The tap ships a `sugarkube-setup` CLI that audits Homebrew formulas (`qemu`, `co
 
 ```bash
 just mac-setup
+# or
+task mac:setup
 ```
 
 Then apply the changes automatically (or substitute `make mac-setup`):
 
 ```bash
 just mac-setup MAC_SETUP_ARGS="--apply"
+# or
+task mac:setup MAC_SETUP_ARGS="--apply"
 ```
 
 The wizard can also run outside macOS by appending `--force`, which keeps docs and CI rehearsals in
