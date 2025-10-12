@@ -144,7 +144,9 @@ Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry
 repository root to preview the release helper. Once running, the CLI forces the working directory to
 the repository root before invoking helpers. Working from a nested directory? Call
 `./scripts/sugarkube pi download --dry-run` (or add `scripts/` to your `PATH`) so the wrapper
-bootstraps `PYTHONPATH` before forwarding to the CLI. Need the combined installer that downloads and
+bootstraps `PYTHONPATH` before forwarding to the CLI. When prerequisites such as the GitHub CLI,
+`curl`, or `sha256sum` are missing, the dry-run prints reminders instead of aborting so you can
+review the planned commands first. Need the combined installer that downloads and
 expands the image? Run
 
 ```bash

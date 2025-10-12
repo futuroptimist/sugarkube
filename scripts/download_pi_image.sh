@@ -38,6 +38,18 @@ require_cmd() {
   fi
 }
 
+write_preview_placeholder() {
+  local path="$1"
+  shift
+  {
+    printf '# Sugarkube download preview (pending)\n'
+    while [ "$#" -gt 0 ]; do
+      printf '# %s\n' "$1"
+      shift
+    done
+  } >"$path"
+}
+
 find_python() {
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "python3"
@@ -87,6 +99,9 @@ DEST_DIR_OVERRIDE=""
 ASSET_NAME="$DEFAULT_ASSET"
 CHECKSUM_NAME="$DEFAULT_CHECKSUM"
 DRY_RUN=0
+HAS_GH=1
+HAS_CURL=1
+HAS_SHA256SUM=1
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -169,10 +184,42 @@ if [ -n "$RELEASE_TAG" ] && [ "$MODE" = "workflow" ]; then
   die "--release cannot be used with --mode workflow"
 fi
 
-require_cmd gh "gh is required"
-require_cmd curl "curl is required to download release assets"
-require_cmd sha256sum "sha256sum is required to verify downloads"
-PYTHON_BIN="$(find_python)"
+if ! command -v gh >/dev/null 2>&1; then
+  HAS_GH=0
+  if [ "$DRY_RUN" -eq 0 ]; then
+    die "gh is required"
+  fi
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  HAS_CURL=0
+  if [ "$DRY_RUN" -eq 0 ]; then
+    die "curl is required to download release assets"
+  fi
+fi
+
+if ! command -v sha256sum >/dev/null 2>&1; then
+  HAS_SHA256SUM=0
+  if [ "$DRY_RUN" -eq 0 ]; then
+    die "sha256sum is required to verify downloads"
+  fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  if [ "$HAS_GH" -eq 0 ]; then
+    log "Dry-run: GitHub CLI (gh) is not installed; install it before running without --dry-run."
+  fi
+  if [ "$HAS_CURL" -eq 0 ]; then
+    log "Dry-run: curl is not installed; install it before running without --dry-run."
+  fi
+  if [ "$HAS_SHA256SUM" -eq 0 ]; then
+    log "Dry-run: sha256sum is not installed; install coreutils before running without --dry-run."
+  fi
+fi
+PYTHON_BIN=""
+if [ "$HAS_GH" -eq 1 ]; then
+  PYTHON_BIN="$(find_python)"
+fi
 
 if [ -n "$DEST_ARG" ]; then
   DEST_PATH="$DEST_ARG"
@@ -203,7 +250,7 @@ CHECKSUM_PATH="${DEST_PATH}.sha256"
 AUTH_HEADER=""
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   AUTH_HEADER="Authorization: token ${GITHUB_TOKEN}"
-else
+elif [ "$HAS_GH" -eq 1 ]; then
   if TOKEN_VALUE=$(gh auth token 2>/dev/null); then
     if [ -n "$TOKEN_VALUE" ]; then
       AUTH_HEADER="Authorization: token ${TOKEN_VALUE}"
@@ -286,6 +333,22 @@ print(tag)
 }
 
 download_from_release() {
+  if [ "$HAS_GH" -eq 0 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "Dry-run: skipping release metadata lookup because gh is not installed."
+      write_preview_placeholder \
+        "${DEST_PATH}.url" \
+        "GitHub CLI (gh) is required to resolve release URLs during a real run." \
+        "Install gh and rerun without --dry-run to download the latest image."
+      write_preview_placeholder \
+        "${CHECKSUM_PATH}.url" \
+        "GitHub CLI (gh) is required to resolve checksum URLs during a real run." \
+        "Install gh and rerun without --dry-run to verify the checksum."
+      return 0
+    fi
+    return 1
+  fi
+
   local endpoint
   if [ -n "$RELEASE_TAG" ]; then
     endpoint="repos/${OWNER}/${REPO}/releases/tags/${RELEASE_TAG}"
@@ -324,6 +387,18 @@ download_from_release() {
 }
 
 download_from_workflow() {
+  if [ "$HAS_GH" -eq 0 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "Dry-run: skipping workflow artifact lookup because gh is not installed."
+      write_preview_placeholder \
+        "${DEST_PATH}.run" \
+        "GitHub CLI (gh) is required to discover workflow artifacts during a real run." \
+        "Install gh and rerun without --dry-run to download the workflow image."
+      return 0
+    fi
+    return 1
+  fi
+
   log "Falling back to latest successful pi-image workflow artifact"
   local run_id
   run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""

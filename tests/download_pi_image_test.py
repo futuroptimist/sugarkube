@@ -1,8 +1,11 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -91,12 +94,90 @@ exit 1
     script.chmod(0o755)
 
 
+def _symlink_utilities(bin_dir: Path, commands: list[str]) -> None:
+    for cmd in commands:
+        system_path = shutil.which(cmd)
+        if not system_path:
+            continue
+        link_path = bin_dir / cmd
+        if link_path.exists():
+            continue
+        link_path.symlink_to(system_path)
+
+
 def test_requires_gh(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
     result = run_script("download_pi_image.sh", env=env, cwd=tmp_path)
     assert result.returncode != 0
     assert "gh is required" in result.stderr
+
+
+def test_dry_run_succeeds_without_gh(tmp_path):
+    if shutil.which("gh"):
+        pytest.skip("gh present on PATH; dry-run reminder test requires it to be missing")
+
+    env = os.environ.copy()
+    env["PATH"] = os.environ.get("PATH", "")
+    env["HOME"] = str(tmp_path / "home")
+
+    result = run_script("download_pi_image.sh", args=["--dry-run"], env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Dry-run" in result.stdout
+    assert "GitHub CLI (gh) is not installed" in result.stdout
+
+    dest = Path(env["HOME"]) / "sugarkube" / "images" / "sugarkube.img.xz"
+    url_placeholder = Path(str(dest) + ".url")
+    checksum_placeholder = Path(str(dest) + ".sha256.url")
+    assert url_placeholder.exists()
+    assert checksum_placeholder.exists()
+    placeholder_text = url_placeholder.read_text(encoding="utf-8")
+    assert "GitHub CLI" in placeholder_text
+
+
+def test_dry_run_logs_missing_curl_and_sha256sum(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    python_path = shutil.which("python3") or shutil.which("python")
+    if not python_path:
+        pytest.skip("python interpreter not found for stubbed PATH")
+    (fake_bin / "python3").symlink_to(python_path)
+
+    _symlink_utilities(fake_bin, ["env", "bash", "mkdir", "dirname"])
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = json.dumps(
+        {
+            "tag_name": "v0.0.1",
+            "assets": [
+                {
+                    "name": "sugarkube.img.xz",
+                    "browser_download_url": "https://example.invalid/image",
+                },
+                {
+                    "name": "sugarkube.img.xz.sha256",
+                    "browser_download_url": "https://example.invalid/checksum",
+                },
+            ],
+        }
+    )
+
+    result = run_script("download_pi_image.sh", args=["--dry-run"], env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Dry-run: curl is not installed" in result.stdout
+    assert "Dry-run: sha256sum is not installed" in result.stdout
+
+    dest = Path(env["HOME"]) / "sugarkube" / "images" / "sugarkube.img.xz"
+    url_placeholder = Path(str(dest) + ".url")
+    checksum_placeholder = Path(str(dest) + ".sha256.url")
+    assert url_placeholder.exists()
+    assert checksum_placeholder.exists()
 
 
 def _base_env(tmp_path, fake_bin):
