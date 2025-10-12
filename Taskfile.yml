@@ -1,0 +1,240 @@
+version: '3'
+
+vars:
+  REPO_ROOT: '{{.TASKFILE_DIR}}'
+  SCRIPTS_DIR: '{{.REPO_ROOT}}/scripts'
+  SUGARKUBE_CLI: '{{.REPO_ROOT}}/scripts/sugarkube'
+  PYTHON: '{{default "python3" .PYTHON}}'
+  MAC_SETUP_SCRIPT: '{{.SCRIPTS_DIR}}/sugarkube_setup.py'
+
+tasks:
+  default:
+    desc: List available Sugarkube tasks.
+    cmds:
+      - task --list
+    silent: true
+
+  docs:verify:
+    desc: Run spellcheck and link validation via the unified CLI.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      DOCS_VERIFY_ARGS: '{{default "" .DOCS_VERIFY_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} docs verify{{if ne .DOCS_VERIFY_ARGS ""}} {{.DOCS_VERIFY_ARGS}}{{end}}
+
+  docs:simplify:
+    desc: Install docs prerequisites and run scripts/checks.sh --docs-only.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      DOCS_SIMPLIFY_ARGS: '{{default "" .DOCS_SIMPLIFY_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} docs simplify{{if ne .DOCS_SIMPLIFY_ARGS ""}} {{.DOCS_SIMPLIFY_ARGS}}{{end}}
+
+  docs:start-here:
+    desc: Surface the Start Here handbook from the CLI wrapper.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      START_HERE_ARGS: '{{default "" .START_HERE_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} docs start-here{{if ne .START_HERE_ARGS ""}} {{.START_HERE_ARGS}}{{end}}
+
+  doctor:
+    desc: Run the sugarkube doctor workflow without memorising the script path.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      DOCTOR_ARGS: '{{default "" .DOCTOR_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} doctor{{if ne .DOCTOR_ARGS ""}} {{.DOCTOR_ARGS}}{{end}}
+
+  mac:setup:
+    desc: Run the macOS workstation setup wizard.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      MAC_SETUP_ARGS: '{{default "" .MAC_SETUP_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.MAC_SETUP_SCRIPT}}{{if ne .MAC_SETUP_ARGS ""}} {{.MAC_SETUP_ARGS}}{{end}}
+
+  pi:download:
+    desc: Download the latest Sugarkube image through the CLI.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_DOWNLOAD_ARGS: '{{default "" .PI_DOWNLOAD_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi download{{if ne .PI_DOWNLOAD_ARGS ""}} {{.PI_DOWNLOAD_ARGS}}{{end}}
+
+  pi:install:
+    desc: Install the Sugarkube image via scripts/install_sugarkube_image.sh.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_INSTALL_ARGS: '{{default "" .PI_INSTALL_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi install{{if ne .PI_INSTALL_ARGS ""}} {{.PI_INSTALL_ARGS}}{{end}}
+
+  pi:flash:
+    desc: Flash removable media with the Sugarkube image helper.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_FLASH_ARGS: '{{default "" .PI_FLASH_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi flash{{if ne .PI_FLASH_ARGS ""}} {{.PI_FLASH_ARGS}}{{end}}
+
+  pi:report:
+    desc: Generate flash reports through the unified CLI.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_REPORT_ARGS: '{{default "" .PI_REPORT_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi report{{if ne .PI_REPORT_ARGS ""}} {{.PI_REPORT_ARGS}}{{end}}
+
+  pi:smoke:
+    desc: Run the Pi smoke-test helper from the unified CLI.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_SMOKE_ARGS: '{{default "" .PI_SMOKE_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi smoke{{if ne .PI_SMOKE_ARGS ""}} {{.PI_SMOKE_ARGS}}{{end}}
+
+  pi:rehearse:
+    desc: Rehearse multi-node joins via the CLI wrapper.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_REHEARSE_ARGS: '{{default "" .PI_REHEARSE_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi rehearse{{if ne .PI_REHEARSE_ARGS ""}} {{.PI_REHEARSE_ARGS}}{{end}}
+
+  pi:support-bundle:
+    desc: Collect Sugarkube diagnostics using the CLI support-bundle command.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_SUPPORT_BUNDLE_ARGS: '{{default "" .PI_SUPPORT_BUNDLE_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi support-bundle{{if ne .PI_SUPPORT_BUNDLE_ARGS ""}} {{.PI_SUPPORT_BUNDLE_ARGS}}{{end}}
+
+  pi:cluster:
+    desc: Bootstrap clusters via scripts/pi_cluster_bootstrap.py.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      PI_CLUSTER_ARGS: '{{default "" .PI_CLUSTER_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} pi cluster{{if ne .PI_CLUSTER_ARGS ""}} {{.PI_CLUSTER_ARGS}}{{end}}
+
+  notify:workflow:
+    desc: Watch a workflow run and surface notifications when assets land.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      WORKFLOW_NOTIFY_ARGS: '{{default "" .WORKFLOW_NOTIFY_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/workflow_artifact_notifier.py{{if ne .WORKFLOW_NOTIFY_ARGS ""}} {{.WORKFLOW_NOTIFY_ARGS}}{{end}}
+
+  notify:teams:
+    desc: Send notifications through the sugarkube-teams helper.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      TEAMS_ARGS: '{{default "" .TEAMS_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/sugarkube_teams.py{{if ne .TEAMS_ARGS ""}} {{.TEAMS_ARGS}}{{end}}
+
+  publish:telemetry:
+    desc: Publish telemetry snapshots via scripts/publish_telemetry.py.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      TELEMETRY_ARGS: '{{default "" .TELEMETRY_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/publish_telemetry.py{{if ne .TELEMETRY_ARGS ""}} {{.TELEMETRY_ARGS}}{{end}}
+
+  qr:codes:
+    desc: Render QR codes that link to quickstart and troubleshooting docs.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      QR_ARGS: '{{default "" .QR_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/generate_qr_codes.py{{if ne .QR_ARGS ""}} {{.QR_ARGS}}{{end}}
+
+  token-place:samples:
+    desc: Replay bundled token.place payload samples and write reports.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      TOKEN_PLACE_SAMPLE_ARGS: '{{default "" .TOKEN_PLACE_SAMPLE_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/token_place_replay_samples.py{{if ne .TOKEN_PLACE_SAMPLE_ARGS ""}} {{.TOKEN_PLACE_SAMPLE_ARGS}}{{end}}
+
+  field:guide:
+    desc: Render the printable Pi carrier field guide PDF.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      FIELD_GUIDE_ARGS: '{{default "" .FIELD_GUIDE_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/render_field_guide_pdf.py{{if ne .FIELD_GUIDE_ARGS ""}} {{.FIELD_GUIDE_ARGS}}{{end}}
+
+  ssd:clone:
+    desc: Clone the active SD card to a target device.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      SSD_CLONE_ARGS: '{{default "" .SSD_CLONE_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/ssd_clone.py{{if ne .SSD_CLONE_ARGS ""}} {{.SSD_CLONE_ARGS}}{{end}}
+
+  ssd:validate:
+    desc: Run post-clone validation checks.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      SSD_VALIDATE_ARGS: '{{default "" .SSD_VALIDATE_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/ssd_post_clone_validate.py{{if ne .SSD_VALIDATE_ARGS ""}} {{.SSD_VALIDATE_ARGS}}{{end}}
+
+  ssd:monitor:
+    desc: Collect SMART metrics and wear indicators for the active SSD.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      SSD_MONITOR_ARGS: '{{default "" .SSD_MONITOR_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/ssd_health_monitor.py{{if ne .SSD_MONITOR_ARGS ""}} {{.SSD_MONITOR_ARGS}}{{end}}
+
+  ssd:rollback:
+    desc: Restore /boot and /etc/fstab after SSD rollback.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      SSD_ROLLBACK_ARGS: '{{default "" .SSD_ROLLBACK_ARGS}}'
+    cmds:
+      - |
+        bash {{.SCRIPTS_DIR}}/rollback_to_sd.sh{{if ne .SSD_ROLLBACK_ARGS ""}} {{.SSD_ROLLBACK_ARGS}}{{end}}
+
+  qemu:smoke:
+    desc: Boot the Sugarkube image in QEMU and collect first-boot reports.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      QEMU_SMOKE_ARGS: '{{default "" .QEMU_SMOKE_ARGS}}'
+    cmds:
+      - |
+        sudo {{.PYTHON}} {{.SCRIPTS_DIR}}/qemu_pi_smoke_test.py{{if ne .QEMU_SMOKE_ARGS ""}} {{.QEMU_SMOKE_ARGS}}{{end}}
+
+  cluster:up:
+    desc: Apply the k3s join command to each agent and optionally wait for readiness.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      CLUSTER_ARGS: '{{default "" .CLUSTER_ARGS}}'
+    cmds:
+      - |
+        {{.PYTHON}} {{.SCRIPTS_DIR}}/pi_multi_node_join_rehearsal.py{{if ne .CLUSTER_ARGS ""}} {{.CLUSTER_ARGS}}{{end}}

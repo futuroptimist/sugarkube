@@ -18,6 +18,9 @@ confirm the quickstart stays accurate.
 > wrapper bootstrap `PYTHONPATH` automatically. The reminder is enforced by
 > `tests/test_cli_docs_repo_root.py`, which uses `monkeypatch.chdir` to enter nested folders
 > before invoking `docs verify` and `docs simplify` so the documentation stays aligned.
+> Prefer [go-task](https://taskfile.dev)? `Taskfile.yml` mirrors these helpers with namespaced
+> entries such as `task docs:verify` and `task pi:download` so contributors can stick to a
+> single task runner.
 
 ## Image download and install helpers
 

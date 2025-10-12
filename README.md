@@ -131,9 +131,11 @@ the manifest so you can verify the build inputs and commit hashes before
  via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
  download, verify, and expand the latest release. When you prefer a task runner,
 use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev/sdX just flash-pi` to
-chain download → verification → flashing with the streaming helper. The recipe variables read
-`FLASH_DEVICE` (and optional `DOWNLOAD_ARGS`) from the environment, so prefix the variable as shown. Both the
-Makefile and justfile expose `download-pi-image`, `install-pi-image`, `doctor`, and `codespaces-bootstrap`
+chain download → verification → flashing with the streaming helper. Prefer go-task? Run
+`sudo task pi:flash PI_FLASH_ARGS="-- --device /dev/sdX"` to reach the same helper via the new Taskfile. The
+recipe variables read `FLASH_DEVICE` (and optional `DOWNLOAD_ARGS`) from the environment, so prefix the
+variable as shown. Both the Makefile, justfile, and Taskfile expose `download-pi-image`, `install-pi-image`,
+`doctor`, and `codespaces-bootstrap`
 shortcuts so GitHub
 Codespaces users can install prerequisites and flash media without additional shell glue.
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
@@ -195,6 +197,8 @@ automation mapping surfaced in [docs/pi_image_contributor_guide.md](docs/pi_imag
 make docs-verify
 # or
 just docs-verify
+# or
+task docs:verify
 ```
 
 Both commands shell into the unified CLI via `scripts/sugarkube docs verify`, which in turn runs
@@ -211,6 +215,8 @@ simplification target instead:
 make docs-simplify
 # or
 just simplify-docs
+# or
+task docs:simplify
 ```
 
 Both wrappers call the unified CLI (`sugarkube docs simplify`), which shells into
