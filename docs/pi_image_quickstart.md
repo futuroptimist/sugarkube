@@ -121,7 +121,9 @@ sync without modifying the host.
      commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide. Pass the
      same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight to the
      shell script, including the preview mode so you can inspect the exact `curl` commands without
-     fetching the artifact.
+     fetching the artifact. When prerequisites such as the GitHub CLI, `curl`, or `sha256sum` are
+     missing, the dry-run prints reminders instead of exiting so you can install them before running
+     without `--dry-run`.
 
 > [!NOTE]
 > The same repository-root rule applies to other `python -m sugarkube_toolkit ...` examples below.

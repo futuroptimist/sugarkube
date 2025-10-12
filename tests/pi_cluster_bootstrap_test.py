@@ -59,7 +59,7 @@ def test_command_runner_json_bails_when_dry_run(tmp_path: Path) -> None:
 def test_execute_returns_stdout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class Result:
         returncode = 0
-        stdout = "{\"ok\": true}"
+        stdout = '{"ok": true}'
 
     monkeypatch.setattr(core.subprocess, "run", lambda *args, **kwargs: Result())
 
@@ -81,7 +81,9 @@ def test_execute_raises_on_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert "exit code 7" in str(exc.value)
 
 
-def test_ensure_scripts_exist_detects_missing_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_ensure_scripts_exist_detects_missing_helpers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     missing = tmp_path / "missing.sh"
     monkeypatch.setattr(core, "INSTALL_SCRIPT", missing)
     monkeypatch.setattr(core, "FLASH_REPORT_SCRIPT", missing)
@@ -187,7 +189,9 @@ def test_wait_for_workflow_completion_times_out(monkeypatch: pytest.MonkeyPatch)
         core._wait_for_workflow_completion("123", workflow, runner)
 
 
-def test_wait_for_workflow_completion_returns_when_data_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_for_workflow_completion_returns_when_data_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workflow = core.WorkflowConfig(trigger=True, wait=True)
     runner = _StubRunner(responses=[None])
 
@@ -213,7 +217,12 @@ def test_run_bootstrap_invokes_workflow_and_join(
         base_cloud_init=base_cloud,
         report_root=report_root,
     )
-    node = core.NodeConfig(device="/dev/sdz", name="alpha", report_dir=report_root / "alpha", use_sudo=False)
+    node = core.NodeConfig(
+        device="/dev/sdz",
+        name="alpha",
+        report_dir=report_root / "alpha",
+        use_sudo=False,
+    )
     workflow = core.WorkflowConfig(trigger=True)
     join = core.JoinConfig(server="controller")
     config = core.ClusterConfig(
@@ -318,9 +327,7 @@ def test_parse_args_round_trips_flags() -> None:
     assert args.skip_join is True
 
 
-def test_main_invokes_bootstrap_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_main_invokes_bootstrap_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = tmp_path / "cluster.toml"
     config_path.write_text("# config")
     sentinel_config = object()
