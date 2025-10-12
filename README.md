@@ -213,10 +213,11 @@ make docs-simplify
 just simplify-docs
 ```
 
-Both wrappers call `scripts/checks.sh --docs-only`, which installs `pyspelling`, `linkchecker`, and
-`aspell` when possible before running the documentation checks. The helper falls back to
-`python -m pip` automatically when a standalone `pip` shim is missing so minimal
-environments still bootstrap correctly. When you need to run the commands directly:
+Both wrappers call the unified CLI (`sugarkube docs simplify`), which shells into
+`scripts/checks.sh --docs-only` to install `pyspelling`, `linkchecker`, and `aspell` before running
+the documentation checks. The helper falls back to `python -m pip` automatically when a standalone
+`pip` shim is missing so minimal environments still bootstrap correctly. When you need to run the
+commands directly:
 
 ```bash
 sudo apt-get install aspell aspell-en  # Debian/Ubuntu

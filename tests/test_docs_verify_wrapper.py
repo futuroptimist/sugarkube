@@ -39,6 +39,28 @@ def test_docs_verify_wrappers_invoke_unified_cli() -> None:
     ), "Just docs-verify recipe should call the CLI subcommand"
 
 
+def test_docs_simplify_wrappers_invoke_unified_cli() -> None:
+    """Docs simplify wrappers should also delegate to the unified CLI."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    makefile_text = (repo_root / "Makefile").read_text(encoding="utf-8")
+    justfile_text = (repo_root / "justfile").read_text(encoding="utf-8")
+
+    assert (
+        "DOCS_SIMPLIFY_ARGS ?=" in makefile_text
+    ), "Expose DOCS_SIMPLIFY_ARGS so the Make target can pass CLI flags"
+    assert (
+        "$(SUGARKUBE_CLI) docs simplify" in makefile_text
+    ), "Make docs-simplify target should call the sugarkube CLI subcommand"
+
+    assert (
+        "simplify_docs_args := env_var_or_default" in justfile_text
+    ), "Expose SIMPLIFY_DOCS_ARGS so the Just recipe mirrors Make"
+    assert (
+        '"{{sugarkube_cli}}" docs simplify' in justfile_text
+    ), "Just simplify-docs recipe should invoke the CLI subcommand"
+
+
 def test_make_docs_verify_runs_cli() -> None:
     """The Makefile target should execute the CLI in dry-run mode."""
 
@@ -54,3 +76,20 @@ def test_make_docs_verify_runs_cli() -> None:
     assert result.returncode == 0, result.stderr
     assert "$ pyspelling -c .spellcheck.yaml" in result.stdout
     assert "$ linkchecker --no-warnings README.md docs/" in result.stdout
+
+
+def test_make_docs_simplify_runs_cli() -> None:
+    """The docs-simplify target should proxy through the CLI in dry-run mode."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["make", "docs-simplify", "DOCS_SIMPLIFY_ARGS=--dry-run"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "$ bash" in result.stdout
+    assert "scripts/checks.sh --docs-only" in result.stdout

@@ -334,9 +334,7 @@ def _forward_to_helper(
     command = [interpreter, str(script), *combined_prefix, *script_args]
 
     dry_run = (
-        False
-        if always_execute
-        else args.dry_run and (strip_cli_dry_run or not script_has_dry_run)
+        False if always_execute else args.dry_run and (strip_cli_dry_run or not script_has_dry_run)
     )
     try:
         runner.run_commands([command], dry_run=dry_run, cwd=REPO_ROOT)
@@ -443,6 +441,7 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
         always_execute=False,
         strip_cli_dry_run=True,
     )
+
 
 def _handle_pi_cluster(args: argparse.Namespace) -> int:
     prefix: list[str] = []
