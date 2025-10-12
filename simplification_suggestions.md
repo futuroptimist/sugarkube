@@ -40,7 +40,10 @@ before they can automate common tasks.
 3. ✅ Migrate the `make`/`just docs-verify` wrappers to call the unified CLI
    directly, removing the transitional shell and PowerShell scripts now that
    documentation has caught up (regression coverage:
-   `tests/test_docs_verify_wrapper.py`).
+   `tests/test_docs_verify_wrapper.py`). Extend the docs simplification wrappers
+   to forward through the same CLI entry point so dry-run previews and argument
+   passthrough stay consistent (`tests/test_docs_verify_wrapper.py::test_docs_simplify_wrappers_invoke_unified_cli`,
+   `tests/test_docs_verify_wrapper.py::test_make_docs_simplify_runs_cli`).
 4. ✅ Add a `sugarkube pi download` subcommand that proxies to
    `scripts/download_pi_image.sh`, keeping the first Pi image workflow available
    from the unified CLI (regression coverage:

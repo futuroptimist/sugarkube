@@ -95,6 +95,7 @@ sugarkube_cli := env_var_or_default(
     justfile_directory() + "/scripts/sugarkube",
 )
 docs_verify_args := env_var_or_default("DOCS_VERIFY_ARGS", "")
+simplify_docs_args := env_var_or_default("SIMPLIFY_DOCS_ARGS", "")
 
 _default:
     @just --list
@@ -239,9 +240,9 @@ docs-verify:
     "{{sugarkube_cli}}" docs verify {{docs_verify_args}}
 
 # Install documentation prerequisites and run spell/link checks without touching
-# code linters. Usage: just simplify-docs
+# code linters. Usage: just simplify-docs (forwards to sugarkube docs simplify)
 simplify-docs:
-    "{{justfile_directory()}}/scripts/checks.sh" --docs-only
+    "{{sugarkube_cli}}" docs simplify {{simplify_docs_args}}
 
 # Generate printable QR codes that link to the quickstart and troubleshooting docs
 # Usage: just qr-codes QR_ARGS="--output-dir ~/qr"

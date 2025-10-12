@@ -51,6 +51,7 @@ MAC_SETUP_ARGS ?=
 START_HERE_ARGS ?=
 SUGARKUBE_CLI ?= $(CURDIR)/scripts/sugarkube
 DOCS_VERIFY_ARGS ?=
+DOCS_SIMPLIFY_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
         clone-ssd docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
@@ -97,7 +98,7 @@ docs-verify:
 	$(SUGARKUBE_CLI) docs verify $(DOCS_VERIFY_ARGS)
 
 docs-simplify:
-	$(CURDIR)/scripts/checks.sh --docs-only
+	$(SUGARKUBE_CLI) docs simplify $(DOCS_SIMPLIFY_ARGS)
 
 codespaces-bootstrap:
 	sudo apt-get update
