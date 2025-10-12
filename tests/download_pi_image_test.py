@@ -94,6 +94,17 @@ exit 1
     script.chmod(0o755)
 
 
+def _symlink_utilities(bin_dir: Path, commands: list[str]) -> None:
+    for cmd in commands:
+        system_path = shutil.which(cmd)
+        if not system_path:
+            continue
+        link_path = bin_dir / cmd
+        if link_path.exists():
+            continue
+        link_path.symlink_to(system_path)
+
+
 def test_requires_gh(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
@@ -134,6 +145,8 @@ def test_dry_run_logs_missing_curl_and_sha256sum(tmp_path):
     if not python_path:
         pytest.skip("python interpreter not found for stubbed PATH")
     (fake_bin / "python3").symlink_to(python_path)
+
+    _symlink_utilities(fake_bin, ["env", "bash", "mkdir", "dirname"])
 
     env = os.environ.copy()
     env["PATH"] = str(fake_bin)
