@@ -92,6 +92,10 @@ correct endpoint during their TCP test.
 - Use `--agent-no-sudo` when workers cannot run privileged commands; the script still verifies basic
   reachability but skips filesystem probes.
 - Supply `--json` to capture machine-readable summaries for logging systems.
+- Pair `--json` with `--json-output ~/logs/rehearsal.json` to persist the structured payload on disk for
+  automation or evidence gathering (regression coverage:
+  `tests/pi_multi_node_join_rehearsal_test.py::test_main_json_output_writes_file`). Secrets remain
+  redacted unless you also pass `--reveal-secret`.
 - Export `REHEARSAL_ARGS` in CI or home-lab automation to block deployments when a worker loses
   network access or when the mirrored join secret goes missing.
 
