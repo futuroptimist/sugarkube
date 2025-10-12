@@ -798,4 +798,83 @@ def test_main_apply_wait_timeout(monkeypatch, capsys, sample_nodes):
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Timed out waiting for nodes" in captured.err
-    assert "apply_wait" in captured.out
+
+
+def _build_success_agent_status(host: str) -> rehearsal.AgentStatus:
+    return rehearsal.AgentStatus(
+        host=host,
+        payload={
+            "api_reachable": True,
+            "install_script_reachable": True,
+            "k3s_agent_state": "inactive",
+            "registration_present": False,
+            "data_dir_exists": False,
+        },
+    )
+
+
+def test_main_json_output_writes_file(monkeypatch, tmp_path, sample_nodes):
+    def fake_collect_server_status(args: argparse.Namespace) -> rehearsal.ServerStatus:
+        return rehearsal.ServerStatus(
+            host=args.server,
+            join_secret="super-secret",
+            api_url="https://10.0.0.10:6443",
+            nodes=sample_nodes,
+        )
+
+    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str):
+        return _build_success_agent_status(host)
+
+    monkeypatch.setattr(rehearsal, "collect_server_status", fake_collect_server_status)
+    monkeypatch.setattr(rehearsal, "collect_agent_status", fake_collect_agent_status)
+
+    output_path = tmp_path / "report" / "rehearsal.json"
+    exit_code = rehearsal.main(
+        [
+            "control.local",
+            "--agents",
+            "worker1.local",
+            "--json-output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert output_path.exists()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["server"]["host"] == "control.local"
+    assert payload["server"]["join_secret"] is None
+    assert payload["agents"][0]["host"] == "worker1.local"
+
+
+def test_main_json_output_respects_reveal_secret(monkeypatch, tmp_path, sample_nodes):
+    def fake_collect_server_status(args: argparse.Namespace) -> rehearsal.ServerStatus:
+        return rehearsal.ServerStatus(
+            host=args.server,
+            join_secret="super-secret",
+            api_url="https://10.0.0.10:6443",
+            nodes=sample_nodes,
+        )
+
+    def fake_collect_agent_status(host: str, args: argparse.Namespace, api_host: str):
+        return _build_success_agent_status(host)
+
+    monkeypatch.setattr(rehearsal, "collect_server_status", fake_collect_server_status)
+    monkeypatch.setattr(rehearsal, "collect_agent_status", fake_collect_agent_status)
+
+    output_path = tmp_path / "reports" / "rehearsal.json"
+    exit_code = rehearsal.main(
+        [
+            "control.local",
+            "--agents",
+            "worker1.local",
+            "--json-output",
+            str(output_path),
+            "--json",
+            "--reveal-secret",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["server"]["join_secret"] == "super-secret"

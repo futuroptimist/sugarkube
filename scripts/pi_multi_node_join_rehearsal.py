@@ -11,6 +11,7 @@ import sys
 import textwrap
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 from urllib.parse import urlparse
 
@@ -160,6 +161,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--json",
         action="store_true",
         help="Emit machine-readable JSON in addition to human-friendly summaries.",
+    )
+    parser.add_argument(
+        "--json-output",
+        help="Write the JSON payload to this path (directories are created automatically).",
     )
     parser.add_argument(
         "--apply",
@@ -713,7 +718,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-    if args.json:
+    payload: dict[str, object] | None = None
+    if args.json or args.json_output:
         payload = {
             "server": {
                 "host": server.host,
@@ -746,7 +752,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "success": readiness_success,
                 "nodes": readiness_summaries,
             }
+
+    if args.json and payload is not None:
         print(json.dumps(payload, indent=2))
+
+    if args.json_output and payload is not None:
+        output_path = Path(args.json_output).expanduser()
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"ERROR: Failed to write JSON output to {output_path}: {exc}", file=sys.stderr)
+            return 1
 
     exit_code = 0
     if warnings:
