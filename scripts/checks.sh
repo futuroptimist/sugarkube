@@ -2,6 +2,7 @@
 set -euo pipefail
 
 DOCS_ONLY=0
+SKIP_INSTALL=0
 
 pip_install() {
   if command -v uv >/dev/null 2>&1; then
@@ -31,13 +32,30 @@ pip_install() {
   return 1
 }
 
+ensure_commands_available() {
+  local missing=0
+  local cmd
+  for cmd in "$@"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "$cmd is not installed; rerun without --skip-install to bootstrap dependencies." >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
 usage() {
   cat <<'EOF'
-Usage: scripts/checks.sh [--docs-only]
+Usage: scripts/checks.sh [--docs-only] [--skip-install]
 
 Run Sugarkube's formatting, linting, and test suite. Pass --docs-only to install
 documentation prerequisites and execute spellcheck/linkcheck without invoking
-code linters or hardware-specific tooling.
+code linters or hardware-specific tooling. Provide --skip-install to skip
+bootstrapping dependencies and rely on tools already present in the
+environment.
 EOF
 }
 
@@ -45,6 +63,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --docs-only)
       DOCS_ONLY=1
+      ;;
+    --skip-install)
+      SKIP_INSTALL=1
       ;;
     -h|--help)
       usage
@@ -274,6 +295,11 @@ maybe_install_kicad() {
     return 0
   fi
 
+  if [ "$SKIP_INSTALL" -eq 1 ]; then
+    echo "KiCad installation skipped (--skip-install); install KiCad 9 manually." >&2
+    return 1
+  fi
+
   echo "KiCad 9 is required for KiBot exports; attempting automatic install" >&2
 
   if command -v apt-get >/dev/null 2>&1; then
@@ -379,14 +405,20 @@ maybe_install_kicad() {
 if [ "$DOCS_ONLY" -eq 1 ]; then
   if ! command -v pyspelling >/dev/null 2>&1 || \
      ! command -v linkchecker >/dev/null 2>&1; then
-    if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
-      echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
-      exit 1
+    if [ "$SKIP_INSTALL" -eq 1 ]; then
+      if ! ensure_commands_available pyspelling linkchecker; then
+        exit 1
+      fi
+    else
+      if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
+        echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
+        exit 1
+      fi
+      if command -v pyenv >/dev/null 2>&1; then
+        pyenv rehash >/dev/null 2>&1
+      fi
+      hash -r
     fi
-    if command -v pyenv >/dev/null 2>&1; then
-      pyenv rehash >/dev/null 2>&1
-    fi
-    hash -r
   fi
 else
   # Some environments may have `flake8` pre-installed but lack other
@@ -395,15 +427,21 @@ else
   if ! command -v flake8 >/dev/null 2>&1 || \
      ! command -v pyspelling >/dev/null 2>&1 || \
      ! command -v linkchecker >/dev/null 2>&1; then
-    if ! pip_install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
-      >/dev/null 2>&1; then
-      echo "Failed to install lint/test dependencies; aborting" >&2
-      exit 1
+    if [ "$SKIP_INSTALL" -eq 1 ]; then
+      if ! ensure_commands_available flake8 isort black pytest coverage pyspelling linkchecker; then
+        exit 1
+      fi
+    else
+      if ! pip_install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+        >/dev/null 2>&1; then
+        echo "Failed to install lint/test dependencies; aborting" >&2
+        exit 1
+      fi
+      if command -v pyenv >/dev/null 2>&1; then
+        pyenv rehash >/dev/null 2>&1
+      fi
+      hash -r
     fi
-    if command -v pyenv >/dev/null 2>&1; then
-      pyenv rehash >/dev/null 2>&1
-    fi
-    hash -r
   fi
 fi
 
@@ -457,7 +495,9 @@ if [ "$DOCS_ONLY" -eq 0 ]; then
 
   # run bats tests when available
   if ! command -v bats >/dev/null 2>&1; then
-    if command -v apt-get >/dev/null 2>&1; then
+    if [ "$SKIP_INSTALL" -eq 1 ]; then
+      echo "bats not installed and --skip-install provided; skipping" >&2
+    elif command -v apt-get >/dev/null 2>&1; then
       if [ "$(id -u)" -eq 0 ]; then
         if apt-get update >/dev/null 2>&1 && \
           apt-get install -y bats >/dev/null 2>&1; then
@@ -490,7 +530,9 @@ fi
 # Spell checking requires `aspell`. Attempt to install it when possible but
 # continue gracefully if installation is not possible.
 if ! command -v aspell >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
+  if [ "$SKIP_INSTALL" -eq 1 ]; then
+    echo "aspell not installed and --skip-install provided; skipping spell check" >&2
+  elif command -v apt-get >/dev/null 2>&1; then
     SUDO=""
     if [ "$(id -u)" -ne 0 ]; then
       if command -v sudo >/dev/null 2>&1; then

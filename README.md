@@ -223,9 +223,10 @@ task docs:simplify
 
 Both wrappers call the unified CLI (`sugarkube docs simplify`), which shells into
 `scripts/checks.sh --docs-only` to install `pyspelling`, `linkchecker`, and `aspell` before running
-the documentation checks. The helper falls back to `python -m pip` automatically when a standalone
-`pip` shim is missing so minimal environments still bootstrap correctly. When you need to run the
-commands directly:
+the documentation checks. Add `--skip-install` when those dependencies already exist so the helper
+reuses the current environment instead of invoking `apt-get` or `pip`. The helper falls back to
+`python -m pip` automatically when a standalone `pip` shim is missing so minimal environments still
+bootstrap correctly. When you need to run the commands directly:
 
 ```bash
 sudo apt-get install aspell aspell-en  # Debian/Ubuntu
@@ -238,8 +239,12 @@ Prefer the unified CLI? `python -m sugarkube_toolkit docs simplify [--dry-run] [
 wraps the same `scripts/checks.sh --docs-only` helper so you can stay inside a single entry point.
 Additional arguments after `--` are forwarded directly to the script.
 Regression coverage: `tests/checks_script_test.py::test_runs_js_checks_when_package_lock_present`
-verifies the helper runs `npm run test:ci` alongside linting and formatting when Node tooling exists, and
-`tests/test_docs_verify_wrapper.py::test_make_docs_verify_runs_cli` exercises the Make target in dry-run mode so these instructions stay accurate.
+verifies the helper runs `npm run test:ci` alongside linting and formatting when Node tooling exists,
+`tests/checks_script_test.py::test_docs_only_skip_install_uses_existing_tools` exercises the docs-only
+`--skip-install` path, and `tests/checks_script_test.py::test_skip_install_avoids_dependency_bootstrap`
+covers full runs that reuse preinstalled tooling. `tests/test_docs_verify_wrapper.py::
+test_make_docs_verify_runs_cli` exercises the Make target in dry-run mode so these instructions stay
+accurate.
 
 The `--no-warnings` flag prevents linkchecker from returning a non-zero exit code on benign Markdown
 parsing warnings.
