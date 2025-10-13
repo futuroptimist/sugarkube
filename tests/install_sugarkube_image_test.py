@@ -48,6 +48,61 @@ exit 1
     script.chmod(0o755)
 
 
+def create_download_helper(script: Path) -> None:
+    script.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift || true
+      ;;
+  esac
+done
+
+if [ -z "$output" ]; then
+  echo "missing --output" >&2
+  exit 1
+fi
+
+python3 - "$output" <<'PYCODE'
+import lzma
+import os
+import pathlib
+import sys
+
+dest = pathlib.Path(sys.argv[1])
+dest.parent.mkdir(parents=True, exist_ok=True)
+payload = os.environ.get("SUGARKUBE_TEST_PAYLOAD", "sugarkube-image").encode("utf-8")
+with lzma.open(dest, "wb") as fh:
+    fh.write(payload)
+PYCODE
+
+python3 - "$output" <<'PYCODE'
+import hashlib
+import pathlib
+import sys
+
+dest = pathlib.Path(sys.argv[1])
+sha = hashlib.sha256(dest.read_bytes()).hexdigest()
+checksum = dest.parent / (dest.name + ".sha256")
+checksum.write_text(sha + '\\n')
+PYCODE
+
+if [ "${SKIP_HELPER_RUN_MARKER:-0}" -ne 1 ]; then
+  printf '%s\n' "${SUGARKUBE_TEST_RUN_ID:-helper-run}" >"${output}.run"
+fi
+"""
+    )
+    script.chmod(0o755)
+
+
 def make_release_payload(image: Path, checksum: Path) -> str:
     return json.dumps(
         {
@@ -122,6 +177,167 @@ def test_install_downloads_and_expands(tmp_path):
     assert expanded.read_bytes() == image_bytes
     checksum_path = Path(str(expanded) + ".sha256")
     assert checksum_path.exists()
+
+
+def test_install_forwards_workflow_run(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    gh_stub = fake_bin / "gh"
+    gh_stub.write_text("#!/usr/bin/env bash\nexit 0\n")
+    gh_stub.chmod(0o755)
+
+    helper_log = tmp_path / "helper_args.log"
+    helper_script = tmp_path / "helper.sh"
+    helper_script.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$@" >>"{helper_log}"
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift || true
+      ;;
+  esac
+done
+if [ -n "$output" ]; then
+  mkdir -p "$(dirname "$output")"
+  echo stub-image >"$output"
+  echo d41d8cd98f00b204e9800998ecf8427e  "$(basename "$output")" >"${{output}}.sha256"
+fi
+"""
+    )
+    helper_script.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "HOME": str(tmp_path / "home"),
+            "SUGARKUBE_INSTALL_HELPER": str(helper_script),
+        }
+    )
+
+    result = run_install(
+        args=[
+            "--workflow-run",
+            "101",
+            "--download-only",
+            "--skip-gh-install",
+            "--dir",
+            str(tmp_path / "images"),
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    logged_args = helper_log.read_text(encoding="utf-8")
+    assert "--workflow-run" in logged_args
+    assert "101" in logged_args
+
+
+def test_install_propagates_workflow_run_marker(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    helper_script = tmp_path / "download_helper.sh"
+    create_download_helper(helper_script)
+
+    run_id = "4242"
+    download_dir = tmp_path / "downloads"
+    image_dir = tmp_path / "images"
+    image_dest = image_dir / "sugarkube.img"
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "HOME": str(tmp_path / "home"),
+            "SUGARKUBE_INSTALL_HELPER": str(helper_script),
+            "SUGARKUBE_TEST_RUN_ID": run_id,
+        }
+    )
+
+    result = run_install(
+        args=[
+            "--workflow-run",
+            run_id,
+            "--skip-gh-install",
+            "--dir",
+            str(download_dir),
+            "--image",
+            str(image_dest),
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    archive = download_dir / "sugarkube.img.xz"
+    archive_run = Path(str(archive) + ".run")
+    image_run = Path(str(image_dest) + ".run")
+
+    assert archive.exists()
+    assert image_dest.exists()
+    assert archive_run.read_text(encoding="utf-8").strip() == run_id
+    assert image_run.read_text(encoding="utf-8").strip() == run_id
+
+
+def test_install_synthesizes_run_marker_when_helper_skips(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    helper_script = tmp_path / "download_helper.sh"
+    create_download_helper(helper_script)
+
+    run_id = "5150"
+    download_dir = tmp_path / "downloads"
+    image_dir = tmp_path / "images"
+    image_dest = image_dir / "sugarkube.img"
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "HOME": str(tmp_path / "home"),
+            "SUGARKUBE_INSTALL_HELPER": str(helper_script),
+            "SUGARKUBE_TEST_RUN_ID": run_id,
+            "SKIP_HELPER_RUN_MARKER": "1",
+        }
+    )
+
+    result = run_install(
+        args=[
+            "--workflow-run",
+            run_id,
+            "--skip-gh-install",
+            "--dir",
+            str(download_dir),
+            "--image",
+            str(image_dest),
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    archive = download_dir / "sugarkube.img.xz"
+    archive_run = Path(str(archive) + ".run")
+    image_run = Path(str(image_dest) + ".run")
+
+    assert archive.exists()
+    assert image_dest.exists()
+    assert archive_run.read_text(encoding="utf-8").strip() == run_id
+    assert image_run.read_text(encoding="utf-8").strip() == run_id
 
 
 def test_install_uses_custom_gh_hook(tmp_path):

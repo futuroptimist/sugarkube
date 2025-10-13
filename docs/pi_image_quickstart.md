@@ -110,7 +110,9 @@ sync without modifying the host.
    - **Hands-off:** enable `[image.workflow] trigger = true` in your cluster config (the
      `samples/pi-cluster/three-node.toml` starter already does). The bootstrapper dispatches the
      `pi-image` workflow, polls until the run completes, and downloads the artifact automatically
-     before flashing media.
+    before flashing media. The helper records the workflow run ID it triggered and forwards it to
+    `install_sugarkube_image.sh`, so both the compressed archive and the expanded `.img` gain a
+    `.run` marker pointing to the exact build that was flashed.
    - **Manual:** open **Actions → pi-image → Run workflow**, tick **token.place** and **dspace** to
      bake those repos into `/opt/projects`, then download `sugarkube.img.xz` once the run succeeds.
      Need a guided path? Launch the [Sugarkube Flash Helper](./flash-helper/) and paste the workflow

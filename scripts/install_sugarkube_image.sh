@@ -236,6 +236,7 @@ Options:
       --asset NAME        Override the release asset name (default: sugarkube.img.xz).
       --checksum NAME     Override the checksum asset name (default: asset + .sha256).
       --mode MODE         Pass through to download helper (auto, release, workflow).
+      --workflow-run ID   Pin workflow downloads to a specific run ID.
       --download-only     Skip expansion; leave only the .img.xz and checksum.
       --dry-run           Preview the helper commands that would run without downloading
                           or expanding (prints "Dry-run: would download …" etc.).
@@ -252,6 +253,7 @@ Environment variables:
   SUGARKUBE_IMAGE_DIR        Default image directory (default: ~/sugarkube/images).
   SUGARKUBE_IMAGE_ASSET      Default asset name (default: sugarkube.img.xz).
   SUGARKUBE_CHECKSUM_ASSET   Default checksum asset name.
+  SUGARKUBE_WORKFLOW_RUN_ID  Default workflow run ID when --workflow-run is omitted.
   SUGARKUBE_RAW_BASE_URL     Base URL for fetching helper scripts (default: GitHub main).
 USAGE
 }
@@ -270,6 +272,7 @@ DOWNLOAD_ONLY=0
 DRY_RUN=0
 SKIP_GH_INSTALL=0
 HELPER_OVERRIDE="${SUGARKUBE_INSTALL_HELPER:-}"
+WORKFLOW_RUN_ID="${SUGARKUBE_WORKFLOW_RUN_ID:-}"
 
 print_dry_run_plan() {
   log "Dry-run: would install GitHub CLI if missing (skipped)."
@@ -359,6 +362,13 @@ while [ "$#" -gt 0 ]; do
       DOWNLOAD_ARGS+=("--mode" "$2")
       shift 2
       ;;
+    --workflow-run)
+      if [ "$#" -lt 2 ]; then
+        die "--workflow-run requires a value"
+      fi
+      WORKFLOW_RUN_ID="$2"
+      shift 2
+      ;;
     --download-only)
       DOWNLOAD_ONLY=1
       shift
@@ -402,6 +412,10 @@ fi
 if [ -z "$OUTPUT_ARCHIVE" ]; then
   OUTPUT_ARCHIVE="${DEFAULT_DIR%/}/${ASSET_NAME}"
   DOWNLOAD_ARGS+=("--output" "$OUTPUT_ARCHIVE")
+fi
+
+if [ -n "$WORKFLOW_RUN_ID" ]; then
+  DOWNLOAD_ARGS+=("--workflow-run" "$WORKFLOW_RUN_ID")
 fi
 
 if [ -z "$IMAGE_DEST" ]; then
@@ -497,6 +511,10 @@ else
   if ! "$HELPER_SCRIPT" "${DOWNLOAD_ARGS[@]}"; then
     die "Download helper failed"
   fi
+  if [ -n "$WORKFLOW_RUN_ID" ] && [ ! -f "${OUTPUT_ARCHIVE}.run" ]; then
+    printf '%s\n' "$WORKFLOW_RUN_ID" >"${OUTPUT_ARCHIVE}.run"
+    log "Pinned workflow run $WORKFLOW_RUN_ID next to $(basename "$OUTPUT_ARCHIVE")"
+  fi
 fi
 
 if [ "$DOWNLOAD_ONLY" -eq 1 ]; then
@@ -522,6 +540,17 @@ fi
 
 log "Expanding $(basename "$OUTPUT_ARCHIVE") to $IMAGE_DEST"
 expand_archive "$OUTPUT_ARCHIVE" "$IMAGE_DEST"
+
+run_marker="${OUTPUT_ARCHIVE}.run"
+if [ -f "$run_marker" ]; then
+  if ! cp "$run_marker" "${IMAGE_DEST}.run"; then
+    die "Failed to copy workflow run marker to ${IMAGE_DEST}.run"
+  fi
+  log "Copied workflow run marker to ${IMAGE_DEST}.run"
+elif [ -n "$WORKFLOW_RUN_ID" ]; then
+  printf '%s\n' "$WORKFLOW_RUN_ID" >"${IMAGE_DEST}.run"
+  log "Pinned workflow run $WORKFLOW_RUN_ID next to $(basename "$IMAGE_DEST")"
+fi
 
 local_sha="$(hash_file "$IMAGE_DEST")"
 printf '%s  %s\n' "$local_sha" "$IMAGE_DEST" >"${IMAGE_DEST}.sha256"
