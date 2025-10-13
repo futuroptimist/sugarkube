@@ -141,7 +141,10 @@ sync without modifying the host.
      to poll the run and raise a desktop notification (or console summary) the
      moment GitHub finishes uploading assets. See the
      [workflow notification guide](./pi_workflow_notifications.md) for
-     cross-platform options and advanced flags.
+     cross-platform options and advanced flags. Prefer other runners? Use `just
+     notify-workflow`, `task notify:workflow`, or run `python -m sugarkube_toolkit
+     notify workflow --run-url <workflow-url>` for the same helper via the unified
+     CLI.
 4. Alternatively, build on your machine:
    ```bash
    ./scripts/build_pi_image.sh

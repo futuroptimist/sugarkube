@@ -59,6 +59,12 @@ confirm the quickstart stays accurate.
 | `scripts/sugarkube_doctor.sh` | Chain download dry-runs, flash validation, and linting checks. | [README](../README.md) `make doctor` section | Wrapped by `make doctor` / `just doctor` and the unified CLI. |
 | `scripts/rollback_to_sd.sh` | Restore `/boot/cmdline.txt` and `/etc/fstab` after SSD issues, emitting Markdown reports. | [SSD Recovery and Rollback](./ssd_recovery.md) | Referenced by Makefile/justfile shortcuts. |
 
+## Notifications
+
+| Script | Purpose | Primary docs | Supporting automation |
+| --- | --- | --- | --- |
+| `scripts/workflow_artifact_notifier.py` | Poll GitHub Actions runs until artifacts upload, then raise desktop notifications and print summaries. | [Pi Workflow Notifications](./pi_workflow_notifications.md) | `make notify-workflow`, `just notify-workflow`, `task notify:workflow` |
+
 ## SSD validation and monitoring
 
 | Script | Purpose | Primary docs | Supporting automation |
@@ -88,6 +94,7 @@ confirm the quickstart stays accurate.
 | `python -m sugarkube_toolkit pi report [--dry-run] [args...]` | Generate flash reports via `scripts/flash_pi_media_report.py` without leaving the unified CLI. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `scripts/flash_pi_media_report.py`, `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`, `tests/test_sugarkube_toolkit_cli.py::test_pi_report_appends_cli_dry_run_with_separator` |
 | `python -m sugarkube_toolkit pi rehearse [--dry-run] [args...]` | Rehearse multi-node joins via `scripts/pi_multi_node_join_rehearsal.py` without leaving the unified CLI. | [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) | `scripts/pi_multi_node_join_rehearsal.py`, `tests/test_sugarkube_toolkit_cli.py::test_pi_rehearse_invokes_helper` |
 | `python -m sugarkube_toolkit pi support-bundle [--dry-run] [args...]` | Collect Sugarkube diagnostics via `scripts/collect_support_bundle.py` without leaving the unified CLI. `--dry-run` prints the invocation for review instead of executing the helper. | [Pi Support Bundles](./pi_support_bundles.md) | `scripts/collect_support_bundle.py`, `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_invokes_helper`, `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_filters_helper_dry_run_flag` |
+| `python -m sugarkube_toolkit notify workflow [--dry-run] [args...]` | Monitor workflow runs and raise notifications via `scripts/workflow_artifact_notifier.py` without memorising the script path. | [Pi Workflow Notifications](./pi_workflow_notifications.md) | `scripts/workflow_artifact_notifier.py`, `tests/test_sugarkube_toolkit_cli.py::test_notify_workflow_invokes_helper` |
 | `python -m sugarkube_toolkit token-place samples [--dry-run] [-- args...]` | Replay bundled token.place health/model/chat payloads without leaving the CLI. | [token.place Sample Datasets](./token_place_sample_datasets.md), [Pi token.place & dspace Runbook](./pi_token_dspace.md) | `scripts/token_place_replay_samples.py`, `tests/test_sugarkube_toolkit_cli.py::test_token_place_samples_invokes_helper`, `tests/test_token_place_wrappers.py` |
 
 ## Keeping docs and automation in sync
