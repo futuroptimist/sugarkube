@@ -239,6 +239,30 @@ run_kubectl() {
   fi
 }
 
+check_pi_home_repos() {
+  local base="/home/pi"
+  if [[ ! -d "$base" ]]; then
+    warn "$base missing"
+    print_result "pi_home_repos" "fail"
+    return
+  fi
+
+  local missing=()
+  local repo
+  for repo in sugarkube token.place dspace; do
+    if [[ ! -d "$base/$repo/.git" ]]; then
+      missing+=("$repo")
+    fi
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    print_result "pi_home_repos" "pass"
+  else
+    warn "missing repositories under $base: ${missing[*]}"
+    print_result "pi_home_repos" "fail"
+  fi
+}
+
 http_health_check() {
   local name="$1"
   local url="$2"
@@ -390,6 +414,8 @@ fi
 
 check_k3s_node_ready
 check_projects_compose_active
+
+check_pi_home_repos
 
 if [[ -n "$TOKEN_PLACE_HEALTH_URL" && "$TOKEN_PLACE_HEALTH_URL" != "skip" ]]; then
   http_health_check "token_place_http" "$TOKEN_PLACE_HEALTH_URL" \

@@ -32,6 +32,7 @@ without needing root privileges:
 
 from __future__ import annotations
 
+import errno
 import html
 import json
 import os
@@ -42,7 +43,6 @@ import subprocess
 import sys
 import textwrap
 import time
-import errno
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,7 +105,7 @@ def _ensure_boot_writable(target: Path) -> None:
             raise
 
         result = subprocess.run(
-            ["mount", "-o", f"remount,rw", str(BOOT_DIR)],
+            ["mount", "-o", "remount,rw", str(BOOT_DIR)],
             capture_output=True,
             text=True,
             check=False,
@@ -265,6 +265,7 @@ def _render_summary(result: VerifierResult, metadata: dict, cloud_init_text: Opt
         "cloud_init": status_map.get("cloud_init", "unknown"),
         "k3s": status_map.get("k3s_node_ready", "unknown"),
         "projects_compose": status_map.get("projects_compose_active", "unknown"),
+        "pi_home_repos": status_map.get("pi_home_repos", "unknown"),
         "token_place": status_map.get("token_place_http", "unknown"),
         "dspace": status_map.get("dspace_http", "unknown"),
     }
@@ -323,6 +324,7 @@ def _write_markdown(path: Path, payload: dict) -> None:
         "cloud_init": "cloud-init",
         "k3s": "k3s node",
         "projects_compose": "projects-compose",
+        "pi_home_repos": "/home/pi repositories",
         "token_place": "token.place",
         "dspace": "dspace",
     }
