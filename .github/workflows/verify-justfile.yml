@@ -1,0 +1,23 @@
+name: Verify Justfile formatting
+
+on:
+  push:
+    paths:
+      - justfile
+      - .github/workflows/verify-justfile.yml
+  pull_request:
+    paths:
+      - justfile
+      - .github/workflows/verify-justfile.yml
+
+jobs:
+  justfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
+      - name: Check Justfile formatting
+        run: just --fmt --unstable --check
