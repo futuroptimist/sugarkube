@@ -53,6 +53,36 @@ def test_decompress_image_copies_into_work_dir(tmp_path: Path) -> None:
     assert dest.read_bytes() == b"contents"
 
 
+def test_detect_machine_prefers_raspi4(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(command, **kwargs):  # noqa: ANN001 - mimic subprocess signature
+        assert command == ["qemu", "-machine", "help"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="raspi4    Raspberry Pi 4\nraspi3    Raspberry Pi 3\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    assert MODULE._detect_machine("qemu") == "raspi4"
+
+
+def test_detect_machine_falls_back_to_raspi3(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(command, **kwargs):  # noqa: ANN001 - mimic subprocess signature
+        assert command == ["qemu", "-machine", "help"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="virt-2.12  Generic Virt\nraspi3    Raspberry Pi 3\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    assert MODULE._detect_machine("qemu") == "raspi3"
+
+
 def test_run_helper_adds_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
 
@@ -205,6 +235,8 @@ def test_run_qemu_records_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         ]
     )
 
+    monkeypatch.setattr(MODULE, "_detect_machine", lambda *_: "raspi4")
+
     monkeypatch.setattr(
         MODULE.subprocess,
         "Popen",
@@ -228,6 +260,7 @@ def test_run_qemu_raises_on_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     process = FakeProcess(["still booting\n"])
 
+    monkeypatch.setattr(MODULE, "_detect_machine", lambda *_: "raspi4")
     monkeypatch.setattr(MODULE.subprocess, "Popen", lambda *_, **__: process)
 
     with pytest.raises(MODULE.SmokeTestError):
@@ -249,6 +282,7 @@ def test_run_qemu_raises_if_process_exits_without_success(
 
     process = FakeProcess(["booting\n", "still booting\n"])
 
+    monkeypatch.setattr(MODULE, "_detect_machine", lambda *_: "raspi4")
     monkeypatch.setattr(MODULE.subprocess, "Popen", lambda *_, **__: process)
 
     with pytest.raises(MODULE.SmokeTestError):
@@ -309,6 +343,7 @@ def test_run_qemu_kills_unresponsive_process(
 
         return fake_monotonic
 
+    monkeypatch.setattr(MODULE, "_detect_machine", lambda *_: "raspi4")
     monkeypatch.setattr(MODULE.subprocess, "Popen", lambda *_, **__: process)
     monkeypatch.setattr(MODULE.time, "monotonic", fake_monotonic_factory())
 

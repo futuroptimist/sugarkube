@@ -33,6 +33,9 @@ SERIAL_SUCCESS_MARKERS = (
 )
 
 
+PREFERRED_MACHINES = ("raspi5", "raspi4", "raspi3")
+
+
 @dataclass(slots=True)
 class PreparedImage:
     image_path: Path
@@ -297,6 +300,40 @@ def _stream_qemu_output(process: subprocess.Popen[str], log_file: io.TextIOBase)
         yield line
 
 
+def _detect_machine(qemu_binary: str) -> str:
+    """Return the best-supported Raspberry Pi machine type for the given QEMU binary."""
+
+    try:
+        result = subprocess.run(  # noqa: S603 - trusted binary
+            [qemu_binary, "-machine", "help"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise SmokeTestError(
+            f"Unable to list supported machines via {qemu_binary!r}: {exc}"
+        ) from exc
+
+    available: set[str] = set()
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("Supported machines"):
+            continue
+        name = stripped.split(maxsplit=1)[0]
+        if name:
+            available.add(name)
+
+    for candidate in PREFERRED_MACHINES:
+        if candidate in available:
+            return candidate
+
+    if available:
+        return sorted(available)[0]
+
+    raise SmokeTestError(f"No supported machine types reported by {qemu_binary!r}")
+
+
 def run_qemu(
     prepared: PreparedImage,
     *,
@@ -304,10 +341,12 @@ def run_qemu(
     qemu_binary: str = "qemu-system-aarch64",
     log_path: Path,
 ) -> None:
+    machine = _detect_machine(qemu_binary)
+
     command = [
         qemu_binary,
         "-M",
-        "raspi4",
+        machine,
         "-smp",
         "4",
         "-m",
