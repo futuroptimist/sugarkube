@@ -547,29 +547,162 @@ else
 fi
 
 run_sh="${PI_GEN_DIR}/stage2/02-sugarkube-tools/00-run-chroot.sh"
-{
-  echo "#!/usr/bin/env bash"
-  echo "set -euo pipefail"
-  if [[ "$CLONE_SUGARKUBE" == "true" || "$CLONE_TOKEN_PLACE" == "true" || "$CLONE_DSPACE" == "true" || -n "$EXTRA_REPOS" ]]; then
-    echo "apt-get update"
-    echo "apt-get install -y git"
-    echo "install -d /opt/projects"
-    echo "cd /opt/projects"
-    [[ "$CLONE_SUGARKUBE" == "true" ]] && echo "git clone --depth 1 https://github.com/futuroptimist/sugarkube.git"
-    [[ "$CLONE_TOKEN_PLACE" == "true" ]] && \
-      echo "git clone --depth 1 --branch ${TOKEN_PLACE_BRANCH} https://github.com/futuroptimist/token.place.git"
-    [[ "$CLONE_DSPACE" == "true" ]] && \
-      echo "git clone --depth 1 --branch ${DSPACE_BRANCH} https://github.com/democratizedspace/dspace.git"
-    if [[ -n "$EXTRA_REPOS" ]]; then
-      for repo in $EXTRA_REPOS; do
-        echo "git clone --depth 1 $repo"
-      done
-    fi
-    echo "chown -R pi:pi /opt/projects"
-  else
-    echo 'echo "no optional repositories selected; skipping clones"'
+cat >"$run_sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CLONE_SUGARKUBE="__CLONE_SUGARKUBE__"
+CLONE_TOKEN_PLACE="__CLONE_TOKEN_PLACE__"
+CLONE_DSPACE="__CLONE_DSPACE__"
+EXTRA_REPOS="__EXTRA_REPOS__"
+TOKEN_PLACE_BRANCH="__TOKEN_PLACE_BRANCH__"
+DSPACE_BRANCH="__DSPACE_BRANCH__"
+
+warn() {
+  printf 'warning: %s\n' "$1" >&2
+}
+
+clone_into_projects() {
+  local name="$1"
+  local url="$2"
+  local branch="${3:-}"
+  local dest="/opt/projects/$name"
+
+  if [[ -d "$dest/.git" ]]; then
+    echo "repo $name already present at $dest; skipping clone"
+    return 0
   fi
-} > "$run_sh"
+
+  local -a cmd=(git clone --depth 1)
+  if [[ -n "$branch" ]]; then
+    cmd+=(--branch "$branch")
+  fi
+  cmd+=("$url" "$dest")
+
+  if "${cmd[@]}"; then
+    chown -R pi:pi "$dest"
+    echo "cloned $name into $dest"
+  else
+    warn "failed to clone $name from $url"
+    rm -rf "$dest"
+  fi
+}
+
+sync_repo_to_home() {
+  local name="$1"
+  local source="/opt/projects/$name"
+  local dest="/home/pi/$name"
+
+  if [[ ! -d "$source/.git" ]]; then
+    warn "cannot sync $name to /home/pi; source repo missing at $source"
+    return 0
+  fi
+
+  rm -rf "$dest"
+  mkdir -p /home/pi
+  cp -a "$source" "$dest"
+  chown -R pi:pi "$dest"
+  echo "synced $name to $dest"
+}
+
+clone_extra_repo() {
+  local url="$1"
+  [[ -z "$url" ]] && return 0
+
+  local name
+  name="${url##*/}"
+  name="${name%.git}"
+  if [[ -z "$name" ]]; then
+    warn "unable to derive repository name from $url"
+    return 0
+  fi
+
+  local dest="/opt/projects/$name"
+  if [[ -d "$dest/.git" ]]; then
+    echo "extra repo $name already present at $dest; skipping clone"
+    return 0
+  fi
+
+  if git clone --depth 1 "$url" "$dest"; then
+    chown -R pi:pi "$dest"
+    echo "cloned extra repo $url into $dest"
+  else
+    warn "failed to clone extra repo from $url"
+    rm -rf "$dest"
+  fi
+}
+
+if [[ "$CLONE_SUGARKUBE" != "true" && "$CLONE_TOKEN_PLACE" != "true" && "$CLONE_DSPACE" != "true" && -z "$EXTRA_REPOS" ]]; then
+  warn "no optional repositories selected; skipping clones"
+  exit 0
+fi
+
+apt-get update
+apt-get install -y git
+install -d -m 755 -o pi -g pi /opt/projects
+install -d -m 755 -o pi -g pi /home/pi
+
+if [[ "$CLONE_SUGARKUBE" == "true" ]]; then
+  clone_into_projects "sugarkube" "https://github.com/futuroptimist/sugarkube.git"
+  sync_repo_to_home "sugarkube"
+  if [[ ! -d /home/pi/sugarkube/.git ]]; then
+    warn "sugarkube repo missing from /home/pi after clone attempt"
+  fi
+else
+  warn "skipping clone of sugarkube (CLONE_SUGARKUBE=$CLONE_SUGARKUBE)"
+fi
+
+if [[ "$CLONE_TOKEN_PLACE" == "true" ]]; then
+  clone_into_projects "token.place" "https://github.com/futuroptimist/token.place.git" "$TOKEN_PLACE_BRANCH"
+  sync_repo_to_home "token.place"
+  if [[ ! -d /home/pi/token.place/.git ]]; then
+    warn "token.place repo missing from /home/pi after clone attempt"
+  fi
+else
+  warn "skipping clone of token.place (CLONE_TOKEN_PLACE=$CLONE_TOKEN_PLACE)"
+fi
+
+if [[ "$CLONE_DSPACE" == "true" ]]; then
+  clone_into_projects "dspace" "https://github.com/democratizedspace/dspace.git" "$DSPACE_BRANCH"
+  sync_repo_to_home "dspace"
+  if [[ ! -d /home/pi/dspace/.git ]]; then
+    warn "dspace repo missing from /home/pi after clone attempt"
+  fi
+else
+  warn "skipping clone of dspace (CLONE_DSPACE=$CLONE_DSPACE)"
+fi
+
+if [[ -n "$EXTRA_REPOS" ]]; then
+  for repo in $EXTRA_REPOS; do
+    clone_extra_repo "$repo"
+  done
+fi
+
+echo "contents of /home/pi after cloning:"
+ls -la /home/pi
+EOF
+
+python3 - "$run_sh" "${CLONE_SUGARKUBE}" "${CLONE_TOKEN_PLACE}" "${CLONE_DSPACE}" "${EXTRA_REPOS}" "${TOKEN_PLACE_BRANCH}" "${DSPACE_BRANCH}" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+content = path.read_text()
+keys = [
+    "__CLONE_SUGARKUBE__",
+    "__CLONE_TOKEN_PLACE__",
+    "__CLONE_DSPACE__",
+    "__EXTRA_REPOS__",
+    "__TOKEN_PLACE_BRANCH__",
+    "__DSPACE_BRANCH__",
+]
+
+for key, value in zip(keys, sys.argv[2:]):
+    content = content.replace(key, value)
+
+path.write_text(content)
+PY
+
 chmod +x "$run_sh"
 
 cd "${PI_GEN_DIR}"

@@ -265,17 +265,22 @@ def _render_summary(result: VerifierResult, metadata: dict, cloud_init_text: Opt
         "cloud_init": status_map.get("cloud_init", "unknown"),
         "k3s": status_map.get("k3s_node_ready", "unknown"),
         "projects_compose": status_map.get("projects_compose_active", "unknown"),
+        "pi_home_repos": status_map.get("pi_home_repos", "skip"),
         "token_place": status_map.get("token_place_http", "unknown"),
         "dspace": status_map.get("dspace_http", "unknown"),
     }
 
-    statuses = summary.values()
+    statuses = list(summary.values())
     if any(status == "fail" for status in statuses):
         overall = "fail"
-    elif all(status == "pass" for status in statuses):
-        overall = "pass"
     else:
-        overall = "mixed"
+        counted_statuses = [status for status in statuses if status != "skip"]
+        if counted_statuses and all(status == "pass" for status in counted_statuses):
+            overall = "pass"
+        elif not counted_statuses:
+            overall = "unknown"
+        else:
+            overall = "mixed"
 
     rendered = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -323,6 +328,7 @@ def _write_markdown(path: Path, payload: dict) -> None:
         "cloud_init": "cloud-init",
         "k3s": "k3s node",
         "projects_compose": "projects-compose",
+        "pi_home_repos": "/home/pi repositories",
         "token_place": "token.place",
         "dspace": "dspace",
     }
