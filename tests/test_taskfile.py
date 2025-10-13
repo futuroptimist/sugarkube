@@ -37,6 +37,26 @@ def test_taskfile_exposes_cli_wrappers() -> None:
         assert snippet in text, f"Taskfile {task_name} command should include `{snippet}`"
 
 
+def test_taskfile_includes_make_style_aliases() -> None:
+    """Taskfile should mirror the download/install shortcuts documented in the README."""
+
+    text = TASKFILE.read_text(encoding="utf-8")
+
+    assert (
+        "download-pi-image:" in text
+    ), "Taskfile should expose a download-pi-image alias for go-task users"
+    assert (
+        "task: pi:download" in text
+    ), "download-pi-image alias should delegate to the pi:download helper"
+
+    assert (
+        "install-pi-image:" in text
+    ), "Taskfile should expose an install-pi-image alias for go-task users"
+    assert (
+        "task: pi:install" in text
+    ), "install-pi-image alias should delegate to the pi:install helper"
+
+
 def test_docs_reference_taskfile_shortcuts() -> None:
     """Docs should point readers to the Taskfile equivalents."""
 

@@ -138,9 +138,12 @@ variable as shown. Both the Makefile, justfile, and Taskfile expose `download-pi
 `doctor`, and `codespaces-bootstrap`
 shortcuts so GitHub
 Codespaces users can install prerequisites and flash media without additional shell glue—pick the runner
-you prefer (`make codespaces-bootstrap`, `just codespaces-bootstrap`, or `task codespaces-bootstrap`).
-Regression coverage: `tests/test_codespaces_bootstrap.py` keeps the package lists aligned across each
-wrapper.
+you prefer (`make codespaces-bootstrap`, `just codespaces-bootstrap`, or `task codespaces-bootstrap`). Go-task
+users can also call the hyphenated aliases directly (`task download-pi-image`, `task install-pi-image`),
+which forward `DOWNLOAD_ARGS` the same way as the Make and just wrappers. Regression coverage:
+`tests/test_codespaces_bootstrap.py` keeps the package lists aligned across each wrapper, and
+`tests/test_taskfile.py::test_taskfile_includes_make_style_aliases` ensures the Taskfile mirrors the
+documented shortcuts.
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
 Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
