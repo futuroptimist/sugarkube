@@ -19,8 +19,9 @@
 #   sendemail.validateRemote (default: origin)
 #   sendemail.validateRemoteRef (default: HEAD)
 #
-# Replace the TODO placeholders with appropriate checks according to your
-# needs.
+# Customize the checks according to your needs. This sample applies each patch,
+# scans it for secrets, and then runs the repository automation suite before
+# sending mail.
 
 validate_cover_letter () {
 file="$1"
@@ -32,6 +33,30 @@ validate_patch () {
 file="$1"
 # Ensure that the patch applies without conflicts.
 git am -3 "$file" || return
+
+# Scan the patch diff for secrets before sending it downstream.
+if [ -x "./scripts/scan-secrets.py" ]; then
+        if ! ./scripts/scan-secrets.py < "$file"; then
+                echo "sendemail-validate: secret scan failed for $file" >&2
+                return 1
+        fi
+elif [ -f "./scripts/scan-secrets.py" ]; then
+        if command -v python3 >/dev/null 2>&1; then
+                if ! python3 ./scripts/scan-secrets.py < "$file"; then
+                        echo "sendemail-validate: secret scan failed for $file" >&2
+                        return 1
+                fi
+        elif command -v python >/dev/null 2>&1; then
+                if ! python ./scripts/scan-secrets.py < "$file"; then
+                        echo "sendemail-validate: secret scan failed for $file" >&2
+                        return 1
+                fi
+        else
+                echo "sendemail-validate: warning: no Python interpreter found; skipping secret scan" >&2
+        fi
+else
+        echo "sendemail-validate: warning: scripts/scan-secrets.py missing; skipping secret scan" >&2
+fi
 true
 }
 
