@@ -1302,6 +1302,36 @@ def test_pi_support_bundle_filters_helper_dry_run_flag(monkeypatch: pytest.Monke
     assert dry_run_flags == [True]
 
 
+def test_token_place_samples_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """token-place samples should forward to the replay helper."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["token-place", "samples", "--dry-run"])
+
+    expected_script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "token_place_replay_samples.py"
+    )
+
+    assert exit_code == 0
+    assert recorded == [[sys.executable, str(expected_script), "--dry-run"]]
+    assert dry_run_flags == [False]
+
+
 def test_pi_smoke_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """pi smoke should wrap the smoke test helper script."""
 

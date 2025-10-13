@@ -83,9 +83,13 @@ docker compose version
   The command blocks until both workers join k3s and report `Ready`, giving you a verified platform
   before you expose services publicly.
 - The image now ships sample payloads under
-  `/opt/projects/token.place/samples/`. Run
-  `/opt/sugarkube/token_place_replay_samples.py` to capture JSON health/model/chat
-  reports in `~/sugarkube/reports/token-place-samples/` without leaving SSH.
+  `/opt/projects/token.place/samples/`. Run the unified CLI (or the installed
+  helper at `/opt/sugarkube/token_place_replay_samples.py`) to capture JSON
+  health/model/chat reports in `~/sugarkube/reports/token-place-samples/`
+  without leaving SSH:
+  ```sh
+  python -m sugarkube_toolkit token-place samples --base-url http://127.0.0.1:5000
+  ```
 
 ### Automate health verification
 

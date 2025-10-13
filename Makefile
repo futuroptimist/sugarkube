@@ -149,7 +149,7 @@ cluster-bootstrap:
 	$(SUGARKUBE_CLI) pi cluster $(CLUSTER_BOOTSTRAP_ARGS)
 
 token-place-samples:
-	$(TOKEN_PLACE_SAMPLE_CMD) $(TOKEN_PLACE_SAMPLE_ARGS)
+	$(SUGARKUBE_CLI) token-place samples $(TOKEN_PLACE_SAMPLE_ARGS)
 
 support-bundle:
 	@if [ -z "$(SUPPORT_BUNDLE_HOST)" ]; then \

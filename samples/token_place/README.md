@@ -23,7 +23,13 @@ Each Pi image copies this folder to both `/opt/projects/token.place/samples` and
 
 1. Ensure `projects-compose.service` is running on the Pi so `token.place` is
    available on port 5000.
-2. Run the helper script:
+2. Run the helper script (via the CLI or installed copy):
+   ```sh
+   python -m sugarkube_toolkit token-place samples
+   ```
+   ```sh
+   ./scripts/sugarkube token-place samples
+   ```
    ```sh
    /opt/sugarkube/token_place_replay_samples.py
    ```
