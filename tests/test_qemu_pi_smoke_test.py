@@ -533,6 +533,47 @@ def test_main_tolerates_missing_serial_markers_when_reports_exist(
     assert summary["status"] == "pass"
 
 
+def test_main_requires_ok_marker_or_passing_summary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image = tmp_path / "image.img"
+    image.write_text("i")
+
+    def fake_decompress(*_, **__):  # noqa: ARG001 - compat
+        return image
+
+    def fake_prepare(*_, **__):  # noqa: ARG001 - compat
+        return MODULE.PreparedImage(image, image, image, "")
+
+    def fake_run(*_, **__):  # noqa: ARG001 - compat
+        raise MODULE.SmokeTestError("first-boot success markers not observed in serial output")
+
+    def fake_collect(_image: Path, _work: Path, dest: Path) -> None:
+        report_dir = dest / "first-boot-report"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        (report_dir / "summary.json").write_text(json.dumps({"overall": "fail"}))
+        # intentionally omit first-boot.ok marker
+
+    monkeypatch.setattr(MODULE, "decompress_image", fake_decompress)
+    monkeypatch.setattr(MODULE, "prepare_image", fake_prepare)
+    monkeypatch.setattr(MODULE, "run_qemu", fake_run)
+    monkeypatch.setattr(MODULE, "collect_reports", fake_collect)
+
+    artifacts = tmp_path / "artifacts"
+    exit_code = MODULE.main(
+        [
+            "--image",
+            str(image),
+            "--artifacts-dir",
+            str(artifacts),
+        ]
+    )
+
+    assert exit_code == 1
+    error = json.loads((artifacts / "error.json").read_text())
+    assert error["error"] == "first-boot success markers not observed in serial output"
+
+
 def test_main_records_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     image = tmp_path / "image.img"
     image.write_text("i")

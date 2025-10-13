@@ -526,9 +526,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             if serial_exc is not None:
                 report_dir = artifacts_dir / "first-boot-report"
                 state_dir = artifacts_dir / "sugarkube-state"
-                summary_exists = (report_dir / "summary.json").exists()
+                summary_path = report_dir / "summary.json"
+                summary_indicates_success = False
+                if summary_path.exists():
+                    try:
+                        summary_payload = json.loads(summary_path.read_text())
+                    except (OSError, json.JSONDecodeError):
+                        pass
+                    else:
+                        overall = summary_payload.get("overall")
+                        if isinstance(overall, str) and overall.lower() == "pass":
+                            summary_indicates_success = True
                 ok_marker_exists = (state_dir / "first-boot.ok").exists()
-                if summary_exists or ok_marker_exists:
+                if summary_indicates_success or ok_marker_exists:
                     print(
                         "WARNING: serial console markers missing, "
                         "but first-boot reports were generated; continuing"
