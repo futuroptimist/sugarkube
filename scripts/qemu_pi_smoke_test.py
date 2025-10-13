@@ -250,6 +250,9 @@ def _install_dropin(root_dir: Path) -> None:
         Environment=FIRST_BOOT_CLOUD_INIT_TIMEOUT=180
         Environment=TOKEN_PLACE_HEALTH_URL=skip
         Environment=DSPACE_HEALTH_URL=skip
+        Environment=PYTHONUNBUFFERED=1
+        StandardOutput=journal+console
+        StandardError=journal+console
         """
     ).strip()
     dropin_path = Path("etc/systemd/system/first-boot.service.d") / DROPIN_NAME
