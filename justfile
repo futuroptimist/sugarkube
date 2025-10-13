@@ -109,10 +109,7 @@ rollback-to-sd:
 
 # Usage: sudo just clone-ssd CLONE_TARGET=/dev/sda CLONE_ARGS="--dry-run"
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then
-        echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2
-        exit 1
-    fi
+    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
     "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 # Run post-clone validation against the active root filesystem
@@ -137,10 +134,7 @@ smoke-test-pi:
 
 # Usage: sudo just qemu-smoke QEMU_SMOKE_IMAGE=deploy/sugarkube.img
 qemu-smoke:
-    if [ -z "{{ qemu_smoke_image }}" ]; then
-        echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2
-        exit 1
-    fi
+    if [ -z "{{ qemu_smoke_image }}" ]; then echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; exit 1; fi
     sudo "{{ qemu_smoke_cmd }}" --image "{{ qemu_smoke_image }}" --artifacts-dir "{{ qemu_smoke_artifacts }}" {{ qemu_smoke_args }}
 
 # Render the printable Pi carrier field guide PDF
@@ -238,8 +232,5 @@ mac-setup:
 
 # Usage: just support-bundle SUPPORT_BUNDLE_HOST=pi.local
 support-bundle:
-    if [ -z "{{ support_bundle_host }}" ]; then
-        echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2
-        exit 1
-    fi
+    if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi
     "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}

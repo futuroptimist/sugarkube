@@ -1,4 +1,4 @@
-"""Assertions that guard justfile syntax for flash recipes."""
+"""Assertions that guard justfile syntax for guarded recipes."""
 
 from __future__ import annotations
 
@@ -62,9 +62,33 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
                 '    "{{ flash_report_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }} {{ flash_report_args }}',
             ],
         ),
+        (
+            "clone-ssd",
+            "clone-ssd:",
+            [
+                '    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi',
+                '    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}',
+            ],
+        ),
+        (
+            "qemu-smoke",
+            "qemu-smoke:",
+            [
+                '    if [ -z "{{ qemu_smoke_image }}" ]; then echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; exit 1; fi',
+                '    sudo "{{ qemu_smoke_cmd }}" --image "{{ qemu_smoke_image }}" --artifacts-dir "{{ qemu_smoke_artifacts }}" {{ qemu_smoke_args }}',
+            ],
+        ),
+        (
+            "support-bundle",
+            "support-bundle:",
+            [
+                '    if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi',
+                '    "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}',
+            ],
+        ),
     ],
 )
-def test_flash_recipes_have_expected_guards_and_commands(
+def test_guarded_recipes_have_expected_guards_and_commands(
     target: str, expected_header: str, expected_body: list[str]
 ) -> None:
     header, body = _extract_recipe(target)
