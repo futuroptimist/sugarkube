@@ -151,6 +151,7 @@ def test_first_boot_service_success(monkeypatch, tmp_path):
     summary = json.loads((report_dir / "summary.json").read_text())
     assert summary["overall"] == "pass"
     assert summary["summary"]["k3s"] == "pass"
+    assert summary["summary"]["pi_home_repos"] == "skip"
     assert (report_dir / "summary.md").exists()
     assert (report_dir / "summary.html").exists()
     assert (report_dir / "cloud-init.log").read_text().startswith("status: done")
