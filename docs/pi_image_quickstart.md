@@ -521,8 +521,8 @@ Makefile/justfile shortcuts.
 ## Codespaces-friendly automation
 
 - Launch a new GitHub Codespace on this repository using the default Ubuntu image.
-- Run `just codespaces-bootstrap` (or `make codespaces-bootstrap`) once to install `gh`, `pv`, and
-  other helpers that the download + flash scripts expect.
+- Run `just codespaces-bootstrap` (or `task codespaces-bootstrap`, `make codespaces-bootstrap`) once to
+  install `gh`, `pv`, and other helpers that the download + flash scripts expect.
 - Use `just install-pi-image` or `just download-pi-image` to populate `~/sugarkube/images` with
   the latest release, or trigger `sudo FLASH_DEVICE=/dev/sdX just flash-pi` when you attach a USB
   flasher to the Codespace via the browser or VS Code desktop.

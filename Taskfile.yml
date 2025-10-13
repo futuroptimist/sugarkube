@@ -50,6 +50,28 @@ tasks:
       - |
         {{.SUGARKUBE_CLI}} doctor{{if ne .DOCTOR_ARGS ""}} {{.DOCTOR_ARGS}}{{end}}
 
+  codespaces-bootstrap:
+    desc: Install CLI dependencies inside GitHub Codespaces or fresh containers.
+    dir: '{{.REPO_ROOT}}'
+    cmds:
+      - |
+        sudo apt-get update
+      - |
+        sudo apt-get install -y \
+          curl \
+          gh \
+          jq \
+          pv \
+          unzip \
+          xz-utils \
+          aspell \
+          aspell-en \
+          python3 \
+          python3-pip \
+          python3-venv
+      - |
+        python3 -m pip install --user --upgrade pip pre-commit pyspelling linkchecker
+
   mac:setup:
     desc: Run the macOS workstation setup wizard.
     dir: '{{.REPO_ROOT}}'

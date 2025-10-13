@@ -50,7 +50,8 @@ The `pi_carrier` cluster should feel "plug in and go." This checklist combines a
     reusable `secrets.env` workflows and verifier integration.
 - [x] Support Codespaces or `just` recipes to build and flash media with minimal local tooling.
   - Added a root `justfile` mirroring the Makefile helpers plus a `codespaces-bootstrap` target so
-    Codespaces environments can install prerequisites and flash media using the same scripts.
+    Codespaces environments can install prerequisites and flash media using the same scripts. The
+    Taskfile now mirrors the bootstrap helper for go-task users as well.
 
 ---
 
