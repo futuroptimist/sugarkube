@@ -33,8 +33,8 @@ work; the downloads and flash runs are unattended.
    just codespaces-bootstrap
    ```
    The bootstrap target installs `gh`, `curl`, flashing dependencies, and Python requirements. Prefer
-   `make codespaces-bootstrap` when you would rather stay inside the Makefile. Skip this step inside
-   Codespaces where the bootstrap happens automatically.
+   `task codespaces-bootstrap` or `make codespaces-bootstrap` when you would rather stay inside those
+   runners. Skip this step inside Codespaces where the bootstrap happens automatically.
 
 2. **Grab the latest release:**
    ```bash

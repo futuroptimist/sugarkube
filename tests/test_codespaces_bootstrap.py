@@ -28,9 +28,49 @@ def _extract_justfile_recipe(target: str) -> list[str]:
     return [line.strip() for line in match.group(1).strip().splitlines()]
 
 
+def _extract_taskfile_commands(target: str) -> list[str]:
+    lines = (REPO_ROOT / "Taskfile.yml").read_text(encoding="utf-8").splitlines()
+
+    commands: list[str] = []
+    inside_target = False
+    target_indent: int | None = None
+    literal_indent: int | None = None
+
+    for line in lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        if not inside_target:
+            if stripped.startswith(f"{target}:"):
+                inside_target = True
+                target_indent = indent
+            continue
+
+        assert target_indent is not None  # for type checkers
+
+        if indent <= target_indent and stripped:
+            break
+
+        if literal_indent is not None:
+            if indent > literal_indent:
+                if stripped:
+                    commands.append(stripped)
+                continue
+            literal_indent = None
+
+        if stripped.startswith("- |"):
+            literal_indent = indent
+
+    if not commands:
+        pytest.fail(f"{target} task missing from Taskfile.yml")
+
+    return commands
+
+
 def test_codespaces_bootstrap_installs_doc_prereqs() -> None:
     make_cmds = _extract_makefile_target("codespaces-bootstrap")
     just_cmds = _extract_justfile_recipe("codespaces-bootstrap")
+    task_cmds = _extract_taskfile_commands("codespaces-bootstrap")
 
     apt_packages = {"aspell", "aspell-en", "python3", "python3-pip", "python3-venv"}
     pip_packages = {"pre-commit", "pyspelling", "linkchecker"}
@@ -53,15 +93,20 @@ def test_codespaces_bootstrap_installs_doc_prereqs() -> None:
 
     make_apt_packages = collect_apt_packages(make_cmds)
     just_apt_packages = collect_apt_packages(just_cmds)
+    task_apt_packages = collect_apt_packages(task_cmds)
 
     for package in apt_packages:
         assert package in make_apt_packages, f"{package} missing from Makefile apt install"
         assert package in just_apt_packages, f"{package} missing from justfile apt install"
+        assert package in task_apt_packages, f"{package} missing from Taskfile apt install"
 
     make_pip = next((cmd for cmd in make_cmds if "pip install" in cmd), None)
     just_pip = next((cmd for cmd in just_cmds if "pip install" in cmd), None)
+    task_pip = next((cmd for cmd in task_cmds if "pip install" in cmd), None)
     assert make_pip and just_pip, "codespaces bootstrap must install Python tooling via pip"
+    assert task_pip, "codespaces bootstrap task must install Python tooling via pip"
 
     for package in pip_packages:
         assert package in make_pip, f"{package} missing from Makefile pip install"
         assert package in just_pip, f"{package} missing from justfile pip install"
+        assert package in task_pip, f"{package} missing from Taskfile pip install"

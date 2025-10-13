@@ -137,7 +137,10 @@ recipe variables read `FLASH_DEVICE` (and optional `DOWNLOAD_ARGS`) from the env
 variable as shown. Both the Makefile, justfile, and Taskfile expose `download-pi-image`, `install-pi-image`,
 `doctor`, and `codespaces-bootstrap`
 shortcuts so GitHub
-Codespaces users can install prerequisites and flash media without additional shell glue.
+Codespaces users can install prerequisites and flash media without additional shell glue—pick the runner
+you prefer (`make codespaces-bootstrap`, `just codespaces-bootstrap`, or `task codespaces-bootstrap`).
+Regression coverage: `tests/test_codespaces_bootstrap.py` keeps the package lists aligned across each
+wrapper.
 `./scripts/sugarkube-latest` remains available when you only need the `.img.xz` artifact with
 checksum verification.
 Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
