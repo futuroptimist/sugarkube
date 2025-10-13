@@ -130,6 +130,21 @@ jobs:
             CLONE_DSPACE="${CLONE_DSPACE}" \
             ./scripts/build_pi_image.sh
 
+      - name: pi-image-verify-just
+        if: always()
+        run: |
+          log=$(find deploy -maxdepth 2 -name '*.build.log' -print -quit)
+          if [ -z "$log" ]; then
+            echo "pi-gen build log missing" >&2
+            exit 1
+          fi
+          echo '--- just verification ---'
+          if ! grep -F '✅ just command verified' "$log"; then
+            echo "just verification line missing" >&2
+            exit 1
+          fi
+          grep -F '[sugarkube] just version' "$log" || true
+
       - name: Verify pi-gen Docker image
         run: |
           if ! docker image inspect pi-gen:latest > /dev/null 2>&1; then

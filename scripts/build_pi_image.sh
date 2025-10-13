@@ -315,6 +315,116 @@ cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
 ensure_packages "${PI_GEN_DIR}/stage2/01-sys-tweaks/00-packages" \
   policykit-1
 
+just_path_profile="${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/profile.d/sugarkube-path.sh"
+install -d "$(dirname "${just_path_profile}")"
+cat >"${just_path_profile}" <<'EOSH'
+# Ensure /usr/local bin directories stay ahead of system paths for both pi and root users.
+case ":${PATH}:" in
+  *:/usr/local/bin:*) ;;
+  *)
+    PATH="/usr/local/bin:${PATH}"
+    ;;
+esac
+case ":${PATH}:" in
+  *:/usr/local/sbin:*) ;;
+  *)
+    PATH="/usr/local/sbin:${PATH}"
+    ;;
+esac
+export PATH
+EOSH
+
+just_install_script="${PI_GEN_DIR}/stage2/01-sys-tweaks/03-run-chroot-just.sh"
+install -d "$(dirname "${just_install_script}")"
+cat >"${just_install_script}" <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+APT_RETRIES=${APT_RETRIES:-5}
+APT_TIMEOUT=${APT_TIMEOUT:-30}
+APT_OPTS=(
+  -o Acquire::Retries="${APT_RETRIES}"
+  -o Acquire::http::Timeout="${APT_TIMEOUT}"
+  -o Acquire::https::Timeout="${APT_TIMEOUT}"
+  -o Acquire::http::NoCache=true
+  -o APT::Get::Fix-Missing=true
+  -o APT::Install-Recommends=false
+  -o APT::Install-Suggests=false
+)
+
+ensure_profile_path() {
+  local profile="$1"
+  if [ -f "${profile}" ] && ! grep -q '/usr/local/bin' "${profile}"; then
+    {
+      printf '\n# Added by sugarkube build to keep just available in PATH\n'
+      printf 'export PATH="/usr/local/bin:$PATH"\n'
+    } >>"${profile}"
+  fi
+}
+
+ensure_profile_path "/home/pi/.profile"
+ensure_profile_path "/root/.profile"
+
+mkdir -p /etc/profile.d
+cat >/etc/profile.d/sugarkube-path.sh <<'EOF'
+case ":${PATH}:" in
+  *:/usr/local/bin:*) ;;
+  *) PATH="/usr/local/bin:${PATH}" ;;
+esac
+case ":${PATH}:" in
+  *:/usr/local/sbin:*) ;;
+  *) PATH="/usr/local/sbin:${PATH}" ;;
+esac
+export PATH
+EOF
+
+if ! command -v just >/dev/null 2>&1; then
+  apt_failed=0
+  if command -v apt-get >/dev/null 2>&1; then
+    if ! apt-get "${APT_OPTS[@]}" update; then
+      apt_failed=1
+    elif ! apt-get "${APT_OPTS[@]}" install -y --no-install-recommends just; then
+      apt_failed=1
+    fi
+  else
+    apt_failed=1
+  fi
+
+  if ! command -v just >/dev/null 2>&1; then
+    if [ "${apt_failed}" -ne 0 ]; then
+      echo "apt-get failed to install just; using upstream installer" >&2
+    fi
+    if ! curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin; then
+      echo "Failed to install just" >&2
+      exit 1
+    fi
+  fi
+fi
+
+just_path=$(command -v just || true)
+if [ -z "${just_path}" ]; then
+  echo "just not found after installation attempts" >&2
+  exit 1
+fi
+
+printf '✅ just command verified at %s\n' "${just_path}"
+just_version=$(just --version 2>&1 | head -n1 || true)
+if [ -n "${just_version}" ]; then
+  printf '[sugarkube] just version: %s\n' "${just_version}"
+fi
+
+if [ -f /opt/sugarkube/justfile ]; then
+  if su - pi -c 'cd /opt/sugarkube && PATH="/usr/local/bin:$PATH" just --list >/tmp/sugarkube-just-list.txt'; then
+    rm -f /tmp/sugarkube-just-list.txt
+    printf '[sugarkube] Verified just --list for /opt/sugarkube justfile\n'
+  else
+    echo 'just --list failed for /opt/sugarkube' >&2
+    exit 1
+  fi
+fi
+EOSH
+chmod +x "${just_install_script}"
+
 # If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file
 if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then
   if [ ! -f "${TUNNEL_TOKEN_FILE}" ]; then

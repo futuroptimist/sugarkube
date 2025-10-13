@@ -152,6 +152,10 @@ sync without modifying the host.
    ./scripts/build_pi_image.sh
    ```
    Skip either project with `CLONE_TOKEN_PLACE=false` or `CLONE_DSPACE=false`.
+   All workflow-built images now ship with the [`just`](https://just.systems/)
+   CLI preinstalled at `/usr/local/bin/just`, so you can immediately run helpers
+   such as `just clone-ssd`, `just validate-ssd-clone`, and `just smoke-test-pi`
+   right after first boot without installing additional tooling.
 5. After any download or build, verify integrity:
    ```bash
    sha256sum -c path/to/sugarkube.img.xz.sha256
