@@ -54,7 +54,7 @@ DOCS_VERIFY_ARGS ?=
 DOCS_SIMPLIFY_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
-        clone-ssd docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
+        clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle mac-setup cluster-up cluster-bootstrap codespaces-bootstrap
 
@@ -93,6 +93,9 @@ clone-ssd:
 		exit 1; \
 	fi
 	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
+
+validate-ssd-clone:
+	$(VALIDATE_CMD) $(VALIDATE_ARGS)
 
 docs-verify:
 	$(SUGARKUBE_CLI) docs verify $(DOCS_VERIFY_ARGS)
