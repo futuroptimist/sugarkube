@@ -59,6 +59,9 @@ reports elsewhere:
 sudo VALIDATE_ARGS='--stress-mb 512 --report-dir /mnt/ssd-reports' make validate-ssd-clone
 ```
 
+Regression coverage: `tests/test_validate_ssd_make_target.py` ensures the Make wrapper remains wired
+up.
+
 ## Customize the run
 
 Key flags exposed by `ssd_post_clone_validate.py`:
