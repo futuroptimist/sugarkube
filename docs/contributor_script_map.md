@@ -28,7 +28,7 @@ confirm the quickstart stays accurate.
 | --- | --- | --- | --- |
 | `scripts/download_pi_image.sh` | Resolve the latest release, resume partial downloads, and verify checksums/signatures. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `download-pi-image` / `just download-pi-image` targets |
 | `scripts/sugarkube-latest` | Convenience wrapper that defaults to release downloads. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | Works with the same flags as `download_pi_image.sh`. |
-| `scripts/install_sugarkube_image.sh` | One-line installer that bootstraps `gh`, downloads, verifies, and expands the latest release (`--dry-run` prints the planned steps). | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `install-pi-image`, `just install-pi-image`, curl one-liner |
+| `scripts/install_sugarkube_image.sh` | One-line installer that bootstraps `gh`, downloads, verifies, expands the latest release (`--dry-run` prints the planned steps), and mirrors workflow run markers onto both the archive and expanded image when provided. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `install-pi-image`, `just install-pi-image`, curl one-liner |
 | `scripts/collect_pi_image.sh` | Normalize pi-gen output, clean staging directories, and compress images for release. | [Pi Image Builder Design](./pi_image_builder_design.md) | Used inside GitHub Actions and local builds via `make build-pi-image`. |
 | `scripts/build_pi_image.sh` | Build the Raspberry Pi OS image with cloud-init, k3s, and bundled repos. | [Pi Image Builder Design](./pi_image_builder_design.md) | Called by `Makefile`/`just` build targets and the pi-image workflow. |
 
@@ -39,7 +39,7 @@ confirm the quickstart stays accurate.
 | `scripts/flash_pi_media.sh` | Stream `.img`/`.img.xz` to removable media with checksum verification and auto-eject. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `Makefile`/`just` `flash-pi` targets, PowerShell wrapper |
 | `scripts/flash_pi_media.py` | Cross-platform core used by Bash and PowerShell wrappers. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | Imported by `flash_pi_media.sh` and `flash_pi_media.ps1`. |
 | `scripts/flash_pi_media_report.py` | Generate Markdown/HTML/JSON flash reports with optional cloud-init diffs. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `make flash-pi-report`, `just flash-pi-report`, report templates under `~/sugarkube/reports/`. |
-| `scripts/pi_cluster_bootstrap.py` | Trigger the `pi-image` workflow, download artifacts, flash media, and run join rehearsals from a single TOML config. | [Raspberry Pi Cluster Setup](./raspi_cluster_setup.md) §Fast path | `python -m sugarkube_toolkit pi cluster`, `make cluster-bootstrap`, `just cluster-bootstrap` |
+| `scripts/pi_cluster_bootstrap.py` | Trigger the `pi-image` workflow, pin the resulting run ID, download artifacts, flash media, and run join rehearsals from a single TOML config. | [Raspberry Pi Cluster Setup](./raspi_cluster_setup.md) §Fast path | `python -m sugarkube_toolkit pi cluster`, `make cluster-bootstrap`, `just cluster-bootstrap` |
 | `scripts/render_pi_imager_preset.py` | Merge secrets into Raspberry Pi Imager presets. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | Works with presets in `docs/templates/pi-imager/`. |
 
 ## Boot verification and troubleshooting
