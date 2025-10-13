@@ -7,8 +7,8 @@ ConditionPathExists=!/var/log/sugarkube/first-boot.ok
 [Service]
 Type=oneshot
 ExecStart=/opt/sugarkube/first_boot_service.py
-StandardOutput=journal
-StandardError=journal
+StandardOutput=journal+console
+StandardError=journal+console
 
 [Install]
 WantedBy=multi-user.target
