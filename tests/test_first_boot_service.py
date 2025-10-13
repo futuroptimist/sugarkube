@@ -1,6 +1,6 @@
+import errno
 import importlib.util
 import json
-import errno
 import sys
 from pathlib import Path
 
