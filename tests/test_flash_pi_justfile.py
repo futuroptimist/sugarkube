@@ -50,10 +50,7 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
             "flash-pi",
             "flash-pi: install-pi-image",
             [
-                '    if [ -z "{{ flash_device }}" ]; then',
-                '    echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2',
-                "    exit 1",
-                "    fi",
+                '    if [ -z "{{ flash_device }}" ]; then echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2; exit 1; fi',
                 '    "{{ flash_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }}',
             ],
         ),
@@ -61,10 +58,7 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
             "flash-pi-report",
             "flash-pi-report: install-pi-image",
             [
-                '    if [ -z "{{ flash_device }}" ]; then',
-                '    echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2',
-                "    exit 1",
-                "    fi",
+                '    if [ -z "{{ flash_device }}" ]; then echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2; exit 1; fi',
                 '    "{{ flash_report_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }} {{ flash_report_args }}',
             ],
         ),
