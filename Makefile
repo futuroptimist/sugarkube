@@ -133,7 +133,7 @@ notify-teams:
 	$(TEAMS_CMD) $(TEAMS_ARGS)
 
 notify-workflow:
-        $(SUGARKUBE_CLI) notify workflow $(WORKFLOW_NOTIFY_ARGS)
+	$(SUGARKUBE_CLI) notify workflow $(WORKFLOW_NOTIFY_ARGS)
 
 update-hardware-badge:
 	$(BADGE_CMD) $(BADGE_ARGS)
