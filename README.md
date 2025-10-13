@@ -179,8 +179,11 @@ This triggers `scripts/checks.sh`, which installs required tooling and runs
 linters, tests, and documentation checks. If you send patches with `git send-email`,
 copy [`hooks/sendemail-validate.sample`](hooks/sendemail-validate.sample) to
 `.git/hooks/sendemail-validate` so the email workflow executes the same checks
-after applying your series. Regression coverage:
-`tests/test_sendemail_validate_hook.py::test_sendemail_hook_runs_repo_checks`.
+after applying your series and scans each patch for secrets before sending.
+Regression coverage:
+`tests/test_sendemail_validate_hook.py::test_sendemail_hook_runs_repo_checks`
+and
+`tests/test_sendemail_validate_hook.py::test_sendemail_hook_scans_patches_for_secrets`.
 
 [hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
 [pi-smoke-test-doc]: docs/pi_smoke_test.md

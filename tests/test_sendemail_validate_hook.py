@@ -12,3 +12,13 @@ def test_sendemail_hook_runs_repo_checks() -> None:
 
     text = HOOK_PATH.read_text(encoding="utf-8")
     assert "./scripts/checks.sh" in text, "Hook sample should run scripts/checks.sh"
+
+
+def test_sendemail_hook_scans_patches_for_secrets() -> None:
+    """The sample hook should scan patches for secrets before emailing them."""
+
+    text = HOOK_PATH.read_text(encoding="utf-8")
+    assert (
+        "./scripts/scan-secrets.py" in text
+    ), "Hook sample should invoke the secret scanning helper"
+    assert '< "$file"' in text, "Hook should pass the patch diff to the secret scanner"
