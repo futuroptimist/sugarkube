@@ -86,18 +86,44 @@ tasks:
     dir: '{{.REPO_ROOT}}'
     vars:
       PI_DOWNLOAD_ARGS: '{{default "" .PI_DOWNLOAD_ARGS}}'
+      DOWNLOAD_ARGS: '{{default "" .DOWNLOAD_ARGS}}'
     cmds:
       - |
-        {{.SUGARKUBE_CLI}} pi download{{if ne .PI_DOWNLOAD_ARGS ""}} {{.PI_DOWNLOAD_ARGS}}{{end}}
+        {{- $downloadArgs := default .DOWNLOAD_ARGS .PI_DOWNLOAD_ARGS -}}
+        {{.SUGARKUBE_CLI}} pi download{{if ne $downloadArgs ""}} {{$downloadArgs}}{{end}}
 
   pi:install:
     desc: Install the Sugarkube image via scripts/install_sugarkube_image.sh.
     dir: '{{.REPO_ROOT}}'
     vars:
       PI_INSTALL_ARGS: '{{default "" .PI_INSTALL_ARGS}}'
+      PI_DOWNLOAD_ARGS: '{{default "" .PI_DOWNLOAD_ARGS}}'
+      DOWNLOAD_ARGS: '{{default "" .DOWNLOAD_ARGS}}'
     cmds:
       - |
-        {{.SUGARKUBE_CLI}} pi install{{if ne .PI_INSTALL_ARGS ""}} {{.PI_INSTALL_ARGS}}{{end}}
+        {{- $installArgs := default (default .DOWNLOAD_ARGS .PI_DOWNLOAD_ARGS) .PI_INSTALL_ARGS -}}
+        {{.SUGARKUBE_CLI}} pi install{{if ne $installArgs ""}} {{$installArgs}}{{end}}
+
+  download-pi-image:
+    desc: Mirror the download helper exposed by the Makefile and justfile.
+    vars:
+      DOWNLOAD_ARGS: '{{default "" .DOWNLOAD_ARGS}}'
+      PI_DOWNLOAD_ARGS: '{{default "" .PI_DOWNLOAD_ARGS}}'
+    cmds:
+      - task: pi:download
+        vars:
+          PI_DOWNLOAD_ARGS: '{{default .DOWNLOAD_ARGS .PI_DOWNLOAD_ARGS}}'
+
+  install-pi-image:
+    desc: Mirror the install helper exposed by the Makefile and justfile.
+    vars:
+      DOWNLOAD_ARGS: '{{default "" .DOWNLOAD_ARGS}}'
+      PI_DOWNLOAD_ARGS: '{{default "" .PI_DOWNLOAD_ARGS}}'
+      PI_INSTALL_ARGS: '{{default "" .PI_INSTALL_ARGS}}'
+    cmds:
+      - task: pi:install
+        vars:
+          PI_INSTALL_ARGS: '{{default (default .DOWNLOAD_ARGS .PI_DOWNLOAD_ARGS) .PI_INSTALL_ARGS}}'
 
   pi:flash:
     desc: Flash removable media with the Sugarkube image helper.
