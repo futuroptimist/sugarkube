@@ -163,7 +163,11 @@ def test_prepare_image_installs_stub_and_dropin(
     assert stub.exists()
     assert "Sugarkube smoke verifier" in stub.read_text()
     assert dropin.exists()
-    assert f"Environment=FIRST_BOOT_VERIFIER={MODULE.STUB_VERIFIER_PATH}" in dropin.read_text()
+    dropin_text = dropin.read_text()
+    assert f"Environment=FIRST_BOOT_VERIFIER={MODULE.STUB_VERIFIER_PATH}" in dropin_text
+    assert "Environment=PYTHONUNBUFFERED=1" in dropin_text
+    assert "StandardOutput=journal+console" in dropin_text
+    assert "StandardError=journal+console" in dropin_text
     assert prepared.kernel.name == "kernel8.img"
     assert prepared.dtb.name == "bcm2711-rpi-4-b.dtb"
     assert "root=/dev/mmcblk0p2" in prepared.cmdline
