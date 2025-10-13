@@ -8,9 +8,9 @@ personas:
 Track GitHub Actions runs without keeping a browser tab open. The
 `workflow_artifact_notifier.py` helper polls a workflow run, waits until the
 artifacts finish uploading, and then raises a desktop notification using the
-native facilities on Linux, macOS, or Windows. The script powers the new
-`make notify-workflow` / `just notify-workflow` targets and is safe to run from
-any workstation with the GitHub CLI installed.
+native facilities on Linux, macOS, or Windows. Invoke it via the unified CLI or
+through the task runners so any workstation with the GitHub CLI installed can
+listen for artifacts without remembering the script path.
 
 > ⚠️ When updating this helper, add or adjust tests so `pytest` achieves **100%
 > patch coverage on the first run**—no retries. The notifier ships with a unit
@@ -33,6 +33,12 @@ make notify-workflow \
 # or
 just notify-workflow \
   workflow_notify_args='--run-url https://github.com/futuroptimist/sugarkube/actions/runs/<run-id>'
+# or
+task notify:workflow \
+  WORKFLOW_NOTIFY_ARGS='--run-url https://github.com/futuroptimist/sugarkube/actions/runs/<run-id>'
+# or
+python -m sugarkube_toolkit notify workflow \
+  --run-url https://github.com/futuroptimist/sugarkube/actions/runs/<run-id>
 ```
 
 The helper polls `gh api /repos/<repo>/actions/runs/<id>` every 30 seconds until

@@ -78,8 +78,8 @@ install-pi-image:
 # Usage: sudo just flash-pi FLASH_DEVICE=/dev/sdX
 flash-pi: install-pi-image
     if [ -z "{{ flash_device }}" ]; then
-    echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2
-    exit 1
+        echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2
+        exit 1
     fi
     "{{ flash_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }}
 
@@ -88,8 +88,8 @@ flash-pi: install-pi-image
 # Usage: sudo just flash-pi-report FLASH_DEVICE=/dev/sdX FLASH_REPORT_ARGS="--cloud-init ~/user-data"
 flash-pi-report: install-pi-image
     if [ -z "{{ flash_device }}" ]; then
-    echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2
-    exit 1
+        echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2
+        exit 1
     fi
     "{{ flash_report_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }} {{ flash_report_args }}
 
@@ -116,8 +116,8 @@ rollback-to-sd:
 # Usage: sudo just clone-ssd CLONE_TARGET=/dev/sda CLONE_ARGS="--dry-run"
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then
-    echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2
-    exit 1
+        echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2
+        exit 1
     fi
     "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
@@ -144,8 +144,8 @@ smoke-test-pi:
 # Usage: sudo just qemu-smoke QEMU_SMOKE_IMAGE=deploy/sugarkube.img
 qemu-smoke:
     if [ -z "{{ qemu_smoke_image }}" ]; then
-    echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2
-    exit 1
+        echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2
+        exit 1
     fi
     sudo "{{ qemu_smoke_cmd }}" --image "{{ qemu_smoke_image }}" --artifacts-dir "{{ qemu_smoke_artifacts }}" {{ qemu_smoke_args }}
 
@@ -197,17 +197,17 @@ cluster-bootstrap:
 codespaces-bootstrap:
     sudo apt-get update
     sudo apt-get install -y \
-    aspell \
-    aspell-en \
-    curl \
-    gh \
-    jq \
-    pv \
-    python3 \
-    python3-pip \
-    python3-venv \
-    unzip \
-    xz-utils
+        aspell \
+        aspell-en \
+        curl \
+        gh \
+        jq \
+        pv \
+        python3 \
+        python3-pip \
+        python3-venv \
+        unzip \
+        xz-utils
     python3 -m pip install --user --upgrade pip pre-commit pyspelling linkchecker
 
 # Run spellcheck and linkcheck to keep docs automation aligned
@@ -245,7 +245,7 @@ mac-setup:
 # Usage: just support-bundle SUPPORT_BUNDLE_HOST=pi.local
 support-bundle:
     if [ -z "{{ support_bundle_host }}" ]; then
-    echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2
-    exit 1
+        echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2
+        exit 1
     fi
     "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}

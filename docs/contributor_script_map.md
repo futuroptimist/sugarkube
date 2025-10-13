@@ -28,7 +28,7 @@ confirm the quickstart stays accurate.
 | --- | --- | --- | --- |
 | `scripts/download_pi_image.sh` | Resolve the latest release, resume partial downloads, and verify checksums/signatures. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `download-pi-image` / `just download-pi-image` targets |
 | `scripts/sugarkube-latest` | Convenience wrapper that defaults to release downloads. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | Works with the same flags as `download_pi_image.sh`. |
-| `scripts/install_sugarkube_image.sh` | One-line installer that bootstraps `gh`, downloads, verifies, and expands the latest release (`--dry-run` prints the planned steps). | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `install-pi-image`, `just install-pi-image`, curl one-liner |
+| `scripts/install_sugarkube_image.sh` | One-line installer that bootstraps `gh`, downloads, verifies, expands the latest release (`--dry-run` prints the planned steps), and mirrors workflow run markers onto both the archive and expanded image when provided. | [Pi Image Quickstart](./pi_image_quickstart.md) §1 | `Makefile` `install-pi-image`, `just install-pi-image`, curl one-liner |
 | `scripts/collect_pi_image.sh` | Normalize pi-gen output, clean staging directories, and compress images for release. | [Pi Image Builder Design](./pi_image_builder_design.md) | Used inside GitHub Actions and local builds via `make build-pi-image`. |
 | `scripts/build_pi_image.sh` | Build the Raspberry Pi OS image with cloud-init, k3s, and bundled repos. | [Pi Image Builder Design](./pi_image_builder_design.md) | Called by `Makefile`/`just` build targets and the pi-image workflow. |
 
@@ -39,7 +39,7 @@ confirm the quickstart stays accurate.
 | `scripts/flash_pi_media.sh` | Stream `.img`/`.img.xz` to removable media with checksum verification and auto-eject. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `Makefile`/`just` `flash-pi` targets, PowerShell wrapper |
 | `scripts/flash_pi_media.py` | Cross-platform core used by Bash and PowerShell wrappers. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | Imported by `flash_pi_media.sh` and `flash_pi_media.ps1`. |
 | `scripts/flash_pi_media_report.py` | Generate Markdown/HTML/JSON flash reports with optional cloud-init diffs. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `make flash-pi-report`, `just flash-pi-report`, report templates under `~/sugarkube/reports/`. |
-| `scripts/pi_cluster_bootstrap.py` | Trigger the `pi-image` workflow, download artifacts, flash media, and run join rehearsals from a single TOML config. | [Raspberry Pi Cluster Setup](./raspi_cluster_setup.md) §Fast path | `python -m sugarkube_toolkit pi cluster`, `make cluster-bootstrap`, `just cluster-bootstrap` |
+| `scripts/pi_cluster_bootstrap.py` | Trigger the `pi-image` workflow, pin the resulting run ID, download artifacts, flash media, and run join rehearsals from a single TOML config. | [Raspberry Pi Cluster Setup](./raspi_cluster_setup.md) §Fast path | `python -m sugarkube_toolkit pi cluster`, `make cluster-bootstrap`, `just cluster-bootstrap` |
 | `scripts/render_pi_imager_preset.py` | Merge secrets into Raspberry Pi Imager presets. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | Works with presets in `docs/templates/pi-imager/`. |
 
 ## Boot verification and troubleshooting
@@ -58,6 +58,12 @@ confirm the quickstart stays accurate.
 | `scripts/cloud-init/start-projects.sh` | Launch bundled projects and log migration events for the verifier. | [Pi Image Quickstart](./pi_image_quickstart.md) §3 | Triggered by cloud-init service units. |
 | `scripts/sugarkube_doctor.sh` | Chain download dry-runs, flash validation, and linting checks. | [README](../README.md) `make doctor` section | Wrapped by `make doctor` / `just doctor` and the unified CLI. |
 | `scripts/rollback_to_sd.sh` | Restore `/boot/cmdline.txt` and `/etc/fstab` after SSD issues, emitting Markdown reports. | [SSD Recovery and Rollback](./ssd_recovery.md) | Referenced by Makefile/justfile shortcuts. |
+
+## Notifications
+
+| Script | Purpose | Primary docs | Supporting automation |
+| --- | --- | --- | --- |
+| `scripts/workflow_artifact_notifier.py` | Poll GitHub Actions runs until artifacts upload, then raise desktop notifications and print summaries. | [Pi Workflow Notifications](./pi_workflow_notifications.md) | `make notify-workflow`, `just notify-workflow`, `task notify:workflow` |
 
 ## SSD validation and monitoring
 
@@ -88,6 +94,7 @@ confirm the quickstart stays accurate.
 | `python -m sugarkube_toolkit pi report [--dry-run] [args...]` | Generate flash reports via `scripts/flash_pi_media_report.py` without leaving the unified CLI. | [Pi Image Quickstart](./pi_image_quickstart.md) §2 | `scripts/flash_pi_media_report.py`, `tests/test_sugarkube_toolkit_cli.py::test_pi_report_invokes_helper`, `tests/test_sugarkube_toolkit_cli.py::test_pi_report_appends_cli_dry_run_with_separator` |
 | `python -m sugarkube_toolkit pi rehearse [--dry-run] [args...]` | Rehearse multi-node joins via `scripts/pi_multi_node_join_rehearsal.py` without leaving the unified CLI. | [Pi Multi-Node Join Rehearsal](./pi_multi_node_join_rehearsal.md) | `scripts/pi_multi_node_join_rehearsal.py`, `tests/test_sugarkube_toolkit_cli.py::test_pi_rehearse_invokes_helper` |
 | `python -m sugarkube_toolkit pi support-bundle [--dry-run] [args...]` | Collect Sugarkube diagnostics via `scripts/collect_support_bundle.py` without leaving the unified CLI. `--dry-run` prints the invocation for review instead of executing the helper. | [Pi Support Bundles](./pi_support_bundles.md) | `scripts/collect_support_bundle.py`, `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_invokes_helper`, `tests/test_sugarkube_toolkit_cli.py::test_pi_support_bundle_filters_helper_dry_run_flag` |
+| `python -m sugarkube_toolkit notify workflow [--dry-run] [args...]` | Monitor workflow runs and raise notifications via `scripts/workflow_artifact_notifier.py` without memorising the script path. | [Pi Workflow Notifications](./pi_workflow_notifications.md) | `scripts/workflow_artifact_notifier.py`, `tests/test_sugarkube_toolkit_cli.py::test_notify_workflow_invokes_helper` |
 | `python -m sugarkube_toolkit token-place samples [--dry-run] [-- args...]` | Replay bundled token.place health/model/chat payloads without leaving the CLI. | [token.place Sample Datasets](./token_place_sample_datasets.md), [Pi token.place & dspace Runbook](./pi_token_dspace.md) | `scripts/token_place_replay_samples.py`, `tests/test_sugarkube_toolkit_cli.py::test_token_place_samples_invokes_helper`, `tests/test_token_place_wrappers.py` |
 
 ## Keeping docs and automation in sync

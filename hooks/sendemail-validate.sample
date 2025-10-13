@@ -19,8 +19,9 @@
 #   sendemail.validateRemote (default: origin)
 #   sendemail.validateRemoteRef (default: HEAD)
 #
-# Replace the TODO placeholders with appropriate checks according to your
-# needs.
+# Customize the checks according to your needs. This sample applies each patch,
+# scans it for secrets, and then runs the repository automation suite before
+# sending mail.
 
 validate_cover_letter () {
 file="$1"
@@ -28,11 +29,99 @@ file="$1"
 [ -r "$file" ]
 }
 
+register_cleanup () {
+cmd=$1
+if [ -n "$SEND_EMAIL_VALIDATE_CLEANUP" ]; then
+SEND_EMAIL_VALIDATE_CLEANUP="$SEND_EMAIL_VALIDATE_CLEANUP; $cmd"
+else
+SEND_EMAIL_VALIDATE_CLEANUP="$cmd"
+fi
+trap "$SEND_EMAIL_VALIDATE_CLEANUP" EXIT
+}
+
+prepare_secret_scanner () {
+if [ "${SEND_EMAIL_VALIDATE_SCANNER_STATUS+set}" = set ]; then
+return "$SEND_EMAIL_VALIDATE_SCANNER_STATUS"
+fi
+
+SEND_EMAIL_VALIDATE_SCANNER_STATUS=1
+scanner_file="./scripts/scan-secrets.py"
+
+if [ ! -f "$scanner_file" ]; then
+echo "sendemail-validate: warning: scripts/scan-secrets.py missing; skipping secret scan" >&2
+return "$SEND_EMAIL_VALIDATE_SCANNER_STATUS"
+fi
+
+if ! SEND_EMAIL_VALIDATE_SCANNER_TMP=$(mktemp --tmpdir sendemail-validate.scan.XXXXXX 2>/dev/null); then
+echo "sendemail-validate: error: failed to create temporary scanner" >&2
+SEND_EMAIL_VALIDATE_SCANNER_STATUS=2
+return "$SEND_EMAIL_VALIDATE_SCANNER_STATUS"
+fi
+
+if ! cp "$scanner_file" "$SEND_EMAIL_VALIDATE_SCANNER_TMP"; then
+echo "sendemail-validate: error: failed to copy scanner" >&2
+rm -f "$SEND_EMAIL_VALIDATE_SCANNER_TMP"
+SEND_EMAIL_VALIDATE_SCANNER_STATUS=2
+return "$SEND_EMAIL_VALIDATE_SCANNER_STATUS"
+fi
+
+chmod +x "$SEND_EMAIL_VALIDATE_SCANNER_TMP" 2>/dev/null || true
+register_cleanup 'rm -f "$SEND_EMAIL_VALIDATE_SCANNER_TMP"'
+
+SEND_EMAIL_VALIDATE_SCANNER_INTERPRETER=
+if [ -x "$scanner_file" ]; then
+SEND_EMAIL_VALIDATE_SCANNER_STATUS=0
+else
+if command -v python3 >/dev/null 2>&1; then
+SEND_EMAIL_VALIDATE_SCANNER_INTERPRETER=python3
+SEND_EMAIL_VALIDATE_SCANNER_STATUS=0
+elif command -v python >/dev/null 2>&1; then
+SEND_EMAIL_VALIDATE_SCANNER_INTERPRETER=python
+SEND_EMAIL_VALIDATE_SCANNER_STATUS=0
+else
+echo "sendemail-validate: warning: no Python interpreter found; skipping secret scan" >&2
+fi
+fi
+
+return "$SEND_EMAIL_VALIDATE_SCANNER_STATUS"
+}
+
+run_secret_scan () {
+file="$1"
+prepare_secret_scanner
+status=$?
+case $status in
+0)
+if [ -n "$SEND_EMAIL_VALIDATE_SCANNER_INTERPRETER" ]; then
+if ! "$SEND_EMAIL_VALIDATE_SCANNER_INTERPRETER" "$SEND_EMAIL_VALIDATE_SCANNER_TMP" < "$file"; then
+echo "sendemail-validate: secret scan failed for $file" >&2
+return 1
+fi
+else
+if ! "$SEND_EMAIL_VALIDATE_SCANNER_TMP" < "$file"; then
+echo "sendemail-validate: secret scan failed for $file" >&2
+return 1
+fi
+fi
+;;
+1)
+return 0
+;;
+*)
+return 1
+;;
+esac
+}
+
 validate_patch () {
 file="$1"
+# Scan the patch diff for secrets before sending it downstream.
+if ! run_secret_scan "$file"; then
+return 1
+fi
+
 # Ensure that the patch applies without conflicts.
-git am -3 "$file" || return
-true
+git am -3 "$file"
 }
 
 validate_series () {
@@ -86,7 +175,7 @@ fi &&
 
 if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
 then
-        git config --unset-all sendemail.validateWorktree &&
-        trap 'git worktree remove -ff "$worktree"' EXIT &&
-        validate_series
+git config --unset-all sendemail.validateWorktree &&
+register_cleanup 'git worktree remove -ff "$worktree"' &&
+validate_series
 fi

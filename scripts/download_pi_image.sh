@@ -74,6 +74,7 @@ Options:
       --asset NAME      Override the image asset name (default: sugarkube.img.xz)
       --checksum NAME   Override the checksum asset name (default: asset + .sha256)
       --mode MODE       Force download mode: release, workflow, or auto (default)
+      --workflow-run ID Download artifacts from a specific workflow run ID
       --dry-run         Resolve metadata without downloading artifacts
   -h, --help            Show this message
 
@@ -98,6 +99,7 @@ DEST_ARG=""
 DEST_DIR_OVERRIDE=""
 ASSET_NAME="$DEFAULT_ASSET"
 CHECKSUM_NAME="$DEFAULT_CHECKSUM"
+WORKFLOW_RUN_ID=""
 DRY_RUN=0
 HAS_GH=1
 HAS_CURL=1
@@ -151,6 +153,13 @@ while [ "$#" -gt 0 ]; do
       MODE="$2"
       shift 2
       ;;
+    --workflow-run)
+      if [ "$#" -lt 2 ]; then
+        die "--workflow-run requires a value"
+      fi
+      WORKFLOW_RUN_ID="$2"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -182,6 +191,15 @@ esac
 
 if [ -n "$RELEASE_TAG" ] && [ "$MODE" = "workflow" ]; then
   die "--release cannot be used with --mode workflow"
+fi
+
+if [ -n "$WORKFLOW_RUN_ID" ]; then
+  if [ "$MODE" = "release" ]; then
+    die "--workflow-run cannot be used with --mode release"
+  fi
+  if [ "$MODE" = "auto" ]; then
+    MODE="workflow"
+  fi
 fi
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -399,11 +417,16 @@ download_from_workflow() {
     return 1
   fi
 
-  log "Falling back to latest successful pi-image workflow artifact"
   local run_id
-  run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
-  if [ -z "$run_id" ]; then
-    die "no pi-image workflow runs found"
+  if [ -n "$WORKFLOW_RUN_ID" ]; then
+    run_id="$WORKFLOW_RUN_ID"
+    log "Using workflow run ${run_id}"
+  else
+    log "Falling back to latest successful pi-image workflow artifact"
+    run_id=$(gh run list --workflow pi-image.yml --branch main --json databaseId -q '.[0].databaseId') || run_id=""
+    if [ -z "$run_id" ]; then
+      die "no pi-image workflow runs found"
+    fi
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
     log "Dry-run: would download artifact sugarkube-img from run ${run_id}"

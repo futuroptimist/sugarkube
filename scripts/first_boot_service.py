@@ -32,6 +32,7 @@ without needing root privileges:
 
 from __future__ import annotations
 
+import errno
 import html
 import json
 import os
@@ -42,7 +43,6 @@ import subprocess
 import sys
 import textwrap
 import time
-import errno
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,7 +105,7 @@ def _ensure_boot_writable(target: Path) -> None:
             raise
 
         result = subprocess.run(
-            ["mount", "-o", f"remount,rw", str(BOOT_DIR)],
+            ["mount", "-o", "remount,rw", str(BOOT_DIR)],
             capture_output=True,
             text=True,
             check=False,

@@ -23,6 +23,7 @@ CLUSTER_BOOTSTRAP_SCRIPT = SCRIPTS_DIR / "pi_cluster_bootstrap.py"
 COLLECT_SUPPORT_BUNDLE_SCRIPT = SCRIPTS_DIR / "collect_support_bundle.py"
 START_HERE_DOC = REPO_ROOT / "docs" / "start-here.md"
 TOKEN_PLACE_SAMPLES_SCRIPT = SCRIPTS_DIR / "token_place_replay_samples.py"
+WORKFLOW_NOTIFY_SCRIPT = SCRIPTS_DIR / "workflow_artifact_notifier.py"
 
 DOC_VERIFY_COMMANDS: list[list[str]] = [
     ["pyspelling", "-c", ".spellcheck.yaml"],
@@ -218,6 +219,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preview the helper invocation without executing it.",
     )
     cluster_parser.set_defaults(handler=_handle_pi_cluster)
+
+    notify_parser = subparsers.add_parser(
+        "notify",
+        help="Notification helpers (workflow artifact monitoring).",
+    )
+    notify_subparsers = notify_parser.add_subparsers(dest="command")
+
+    workflow_notify_parser = notify_subparsers.add_parser(
+        "workflow",
+        help="Watch a workflow run and surface artifact notifications.",
+    )
+    workflow_notify_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation without executing it.",
+    )
+    workflow_notify_parser.set_defaults(handler=_handle_notify_workflow)
 
     return parser
 
@@ -475,6 +493,20 @@ def _handle_token_place_samples(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_notify_workflow(args: argparse.Namespace) -> int:
+    return _forward_to_helper(
+        script=WORKFLOW_NOTIFY_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
+            "scripts/workflow_artifact_notifier.py is missing. "
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=False,
+        always_execute=False,
+    )
+
+
 def _handle_pi_cluster(args: argparse.Namespace) -> int:
     prefix: list[str] = []
     if args.config:
@@ -520,6 +552,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _handle_pi_support_bundle,
         _handle_token_place_samples,
         _handle_pi_cluster,
+        _handle_notify_workflow,
     }:
         combined = list(getattr(args, "script_args", []))
         if extras:

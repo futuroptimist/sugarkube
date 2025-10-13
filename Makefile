@@ -30,7 +30,6 @@ TELEMETRY_CMD ?= $(CURDIR)/scripts/publish_telemetry.py
 TELEMETRY_ARGS ?=
 TEAMS_CMD ?= $(CURDIR)/scripts/sugarkube_teams.py
 TEAMS_ARGS ?=
-WORKFLOW_NOTIFY_CMD ?= $(CURDIR)/scripts/workflow_artifact_notifier.py
 WORKFLOW_NOTIFY_ARGS ?=
 BADGE_CMD ?= $(CURDIR)/scripts/update_hardware_boot_badge.py
 BADGE_ARGS ?=
@@ -134,7 +133,7 @@ notify-teams:
 	$(TEAMS_CMD) $(TEAMS_ARGS)
 
 notify-workflow:
-	$(WORKFLOW_NOTIFY_CMD) $(WORKFLOW_NOTIFY_ARGS)
+	$(SUGARKUBE_CLI) notify workflow $(WORKFLOW_NOTIFY_ARGS)
 
 update-hardware-badge:
 	$(BADGE_CMD) $(BADGE_ARGS)
