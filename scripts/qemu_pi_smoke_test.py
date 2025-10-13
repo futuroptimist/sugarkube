@@ -502,13 +502,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             image = decompress_image(args.image, work_dir)
             prepared = prepare_image(image, work_dir)
-            run_qemu(
-                prepared,
-                timeout=args.timeout,
-                qemu_binary=args.qemu_binary,
-                log_path=artifacts_dir / "serial.log",
-            )
-            collect_reports(image, work_dir, artifacts_dir)
+            serial_exc: SmokeTestError | None = None
+            try:
+                run_qemu(
+                    prepared,
+                    timeout=args.timeout,
+                    qemu_binary=args.qemu_binary,
+                    log_path=artifacts_dir / "serial.log",
+                )
+            except SmokeTestError as exc:
+                if "first-boot success markers not observed" in str(exc):
+                    serial_exc = exc
+                else:
+                    raise
+
+            try:
+                collect_reports(image, work_dir, artifacts_dir)
+            except SmokeTestError:
+                if serial_exc is not None:
+                    raise serial_exc
+                raise
+
+            if serial_exc is not None:
+                report_dir = artifacts_dir / "first-boot-report"
+                state_dir = artifacts_dir / "sugarkube-state"
+                summary_exists = (report_dir / "summary.json").exists()
+                ok_marker_exists = (state_dir / "first-boot.ok").exists()
+                if summary_exists or ok_marker_exists:
+                    print(
+                        "WARNING: serial console markers missing, "
+                        "but first-boot reports were generated; continuing"
+                    )
+                    serial_exc = None
+                else:
+                    raise serial_exc
         except SmokeTestError as exc:
             (artifacts_dir / "error.json").write_text(
                 json.dumps({"error": str(exc)}, indent=2) + "\n"

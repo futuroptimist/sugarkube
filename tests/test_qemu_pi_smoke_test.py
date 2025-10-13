@@ -490,6 +490,49 @@ def test_main_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert called.decompress and called.prepare and called.run and called.collect
 
 
+def test_main_tolerates_missing_serial_markers_when_reports_exist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image = tmp_path / "image.img"
+    image.write_text("i")
+
+    def fake_decompress(*_, **__):  # noqa: ARG001 - compat
+        return image
+
+    def fake_prepare(*_, **__):  # noqa: ARG001 - compat
+        return MODULE.PreparedImage(image, image, image, "")
+
+    def fake_run(*_, **__):  # noqa: ARG001 - compat
+        raise MODULE.SmokeTestError("first-boot success markers not observed in serial output")
+
+    def fake_collect(_image: Path, _work: Path, dest: Path) -> None:
+        report_dir = dest / "first-boot-report"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        (report_dir / "summary.json").write_text("{}\n")
+        state_dir = dest / "sugarkube-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "first-boot.ok").write_text("ok\n")
+
+    monkeypatch.setattr(MODULE, "decompress_image", fake_decompress)
+    monkeypatch.setattr(MODULE, "prepare_image", fake_prepare)
+    monkeypatch.setattr(MODULE, "run_qemu", fake_run)
+    monkeypatch.setattr(MODULE, "collect_reports", fake_collect)
+
+    artifacts = tmp_path / "artifacts"
+    exit_code = MODULE.main(
+        [
+            "--image",
+            str(image),
+            "--artifacts-dir",
+            str(artifacts),
+        ]
+    )
+
+    assert exit_code == 0
+    summary = json.loads((artifacts / "smoke-success.json").read_text())
+    assert summary["status"] == "pass"
+
+
 def test_main_records_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     image = tmp_path / "image.img"
     image.write_text("i")
