@@ -252,7 +252,7 @@ qr-codes:
 # Replay bundled token.place sample payloads and write reports
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
-    "{{token_place_sample_cmd}}" {{token_place_sample_args}}
+    "{{sugarkube_cli}}" token-place samples {{token_place_sample_args}}
 
 # Run the macOS setup wizard to install brew formulas and scaffold directories
 # Usage: just mac-setup MAC_SETUP_ARGS="--apply"

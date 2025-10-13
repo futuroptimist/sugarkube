@@ -174,7 +174,7 @@ tasks:
       TOKEN_PLACE_SAMPLE_ARGS: '{{default "" .TOKEN_PLACE_SAMPLE_ARGS}}'
     cmds:
       - |
-        {{.PYTHON}} {{.SCRIPTS_DIR}}/token_place_replay_samples.py{{if ne .TOKEN_PLACE_SAMPLE_ARGS ""}} {{.TOKEN_PLACE_SAMPLE_ARGS}}{{end}}
+        {{.SUGARKUBE_CLI}} token-place samples{{if ne .TOKEN_PLACE_SAMPLE_ARGS ""}} {{.TOKEN_PLACE_SAMPLE_ARGS}}{{end}}
 
   field:guide:
     desc: Render the printable Pi carrier field guide PDF.

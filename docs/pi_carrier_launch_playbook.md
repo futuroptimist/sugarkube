@@ -67,6 +67,9 @@ work; the downloads and flash runs are unattended.
 
 6. **Replay token.place samples:**
    ```bash
+   python -m sugarkube_toolkit token-place samples --base-url http://127.0.0.1:5000
+   ```
+   ```bash
    /opt/sugarkube/token_place_replay_samples.py
    ```
    The helper generates JSON transcripts under `~/sugarkube/reports/token-place-samples/`, proving

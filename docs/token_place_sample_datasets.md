@@ -37,9 +37,13 @@ three probes against the relay:
 The script falls back to the `/api/v1/*` paths automatically and writes the
 responses to `~/sugarkube/reports/token-place-samples/`.
 
-Run it locally with the `make` or `just` wrappers:
+Run it locally with the unified CLI or the existing wrappers:
 
 ```sh
+python -m sugarkube_toolkit token-place samples --dry-run
+# or when working from a subdirectory
+./scripts/sugarkube token-place samples --dry-run
+# or use the task runners
 make token-place-samples
 # or
 just token-place-samples

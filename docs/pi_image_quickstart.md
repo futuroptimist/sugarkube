@@ -270,6 +270,9 @@ sync without modifying the host.
 - Replay the bundled token.place sample dataset to confirm the relay answers
   health, model, and chat requests:
   ```bash
+  python -m sugarkube_toolkit token-place samples --base-url http://127.0.0.1:5000
+  ```
+  ```bash
   /opt/sugarkube/token_place_replay_samples.py
   ```
   The helper stores JSON responses under

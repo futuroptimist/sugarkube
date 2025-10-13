@@ -22,6 +22,7 @@ PI_JOIN_REHEARSAL_SCRIPT = SCRIPTS_DIR / "pi_multi_node_join_rehearsal.py"
 CLUSTER_BOOTSTRAP_SCRIPT = SCRIPTS_DIR / "pi_cluster_bootstrap.py"
 COLLECT_SUPPORT_BUNDLE_SCRIPT = SCRIPTS_DIR / "collect_support_bundle.py"
 START_HERE_DOC = REPO_ROOT / "docs" / "start-here.md"
+TOKEN_PLACE_SAMPLES_SCRIPT = SCRIPTS_DIR / "token_place_replay_samples.py"
 
 DOC_VERIFY_COMMANDS: list[list[str]] = [
     ["pyspelling", "-c", ".spellcheck.yaml"],
@@ -174,6 +175,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the support bundle helper invocation without executing it.",
     )
     support_bundle_parser.set_defaults(handler=_handle_pi_support_bundle)
+
+    token_place_parser = subparsers.add_parser(
+        "token-place",
+        help="token.place workflows (sample payload replays).",
+    )
+    token_place_subparsers = token_place_parser.add_subparsers(dest="command")
+
+    token_place_samples_parser = token_place_subparsers.add_parser(
+        "samples",
+        help="Replay bundled token.place sample payloads via the helper script.",
+    )
+    token_place_samples_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation with --dry-run forwarded.",
+    )
+    token_place_samples_parser.set_defaults(handler=_handle_token_place_samples)
 
     cluster_parser = pi_subparsers.add_parser(
         "cluster",
@@ -443,6 +461,20 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_token_place_samples(args: argparse.Namespace) -> int:
+    return _forward_to_helper(
+        script=TOKEN_PLACE_SAMPLES_SCRIPT,
+        args=args,
+        interpreter=sys.executable,
+        missing_hint=(
+            "scripts/token_place_replay_samples.py is missing. "
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=True,
+        always_execute=False,
+    )
+
+
 def _handle_pi_cluster(args: argparse.Namespace) -> int:
     prefix: list[str] = []
     if args.config:
@@ -486,6 +518,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _handle_pi_smoke,
         _handle_pi_rehearse,
         _handle_pi_support_bundle,
+        _handle_token_place_samples,
         _handle_pi_cluster,
     }:
         combined = list(getattr(args, "script_args", []))
