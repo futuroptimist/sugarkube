@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import errno
 import sys
 from pathlib import Path
 
@@ -510,3 +511,38 @@ def test_success_path_removes_fail_marker(monkeypatch, tmp_path):
 
     assert MODULE.main() == 0
     assert not fail_marker.exists()
+
+
+def test_ensure_boot_writable_remounts(monkeypatch, tmp_path):
+    boot_dir = tmp_path / "boot"
+    boot_dir.mkdir()
+    target = boot_dir / "first-boot-report" / "summary.json"
+
+    monkeypatch.setattr(MODULE, "BOOT_DIR", boot_dir)
+    MODULE._BOOT_WRITE_READY = False
+
+    attempts = {"count": 0}
+
+    def fake_try(path: Path) -> None:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise OSError(errno.EROFS, "Read-only file system")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("ok\n")
+
+    monkeypatch.setattr(MODULE, "_try_boot_write", fake_try)
+
+    mount_calls: list[list[str]] = []
+
+    def fake_run(args, capture_output, text, check):  # noqa: ARG001
+        mount_calls.append(list(args))
+        return MODULE.subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    MODULE._ensure_boot_writable(target)
+    assert mount_calls == [["mount", "-o", "remount,rw", str(boot_dir)]]
+    assert attempts["count"] == 2
+
+    MODULE._ensure_boot_writable(target)
+    assert mount_calls == [["mount", "-o", "remount,rw", str(boot_dir)]]

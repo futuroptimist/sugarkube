@@ -42,6 +42,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import errno
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +53,10 @@ try:  # pragma: no cover - optional dependency during upgrades
 except Exception:  # pylint: disable=broad-except
     TeamsNotifier = None  # type: ignore[assignment]
     TeamsNotificationError = RuntimeError  # type: ignore[assignment]
+
+
+BOOT_DIR = Path("/boot")
+_BOOT_WRITE_READY = False
 
 
 @dataclass
@@ -69,6 +74,53 @@ def _log(message: str) -> None:
 
 def _warn(message: str) -> None:
     print(f"[first-boot] warning: {message}", file=sys.stderr)
+
+
+def _try_boot_write(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("ok\n")
+
+
+def _ensure_boot_writable(target: Path) -> None:
+    """Best-effort remount /boot read-write when needed for report files."""
+
+    global _BOOT_WRITE_READY  # noqa: PLW0603 - module-level cache for idempotency
+
+    if _BOOT_WRITE_READY:
+        return
+
+    if not BOOT_DIR.exists():
+        return
+
+    try:
+        target.resolve().relative_to(BOOT_DIR.resolve())
+    except ValueError:
+        return
+
+    test_path = BOOT_DIR / ".sugarkube-boot-write-test"
+    try:
+        _try_boot_write(test_path)
+    except OSError as exc:
+        if exc.errno != errno.EROFS:
+            raise
+
+        result = subprocess.run(
+            ["mount", "-o", f"remount,rw", str(BOOT_DIR)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            stdout = result.stdout.strip()
+            details = stderr or stdout or "unknown error"
+            raise RuntimeError(f"unable to remount {BOOT_DIR} read-write: {details}") from exc
+
+        _try_boot_write(test_path)
+    finally:
+        test_path.unlink(missing_ok=True)
+
+    _BOOT_WRITE_READY = True
 
 
 def _notify_teams(event: str, status: str, lines: list[str], fields: dict[str, str]) -> None:
@@ -421,6 +473,7 @@ def _write_verifier_stderr(path: Path, stderr: str) -> None:
         if path.exists():
             path.unlink()
         return
+    _ensure_boot_writable(path)
     path.write_text(stderr + "\n")
 
 
@@ -438,6 +491,7 @@ def main() -> int:
     fail_marker = Path(os.environ.get("FIRST_BOOT_FAIL_MARKER", state_dir / "first-boot.failed"))
     expand_marker = Path(os.environ.get("FIRST_BOOT_EXPAND_MARKER", state_dir / "rootfs-expanded"))
 
+    _ensure_boot_writable(report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
     state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -468,6 +522,7 @@ def main() -> int:
 
     log_exit = 0
     if not skip_log:
+        _ensure_boot_writable(log_path)
         log_exit = _invoke_verifier_log(verifier, log_path)
 
     payload = _render_summary(result, metadata, cloud_init_text)
@@ -475,13 +530,18 @@ def main() -> int:
     summary_md = report_dir / "summary.md"
     summary_html = report_dir / "summary.html"
 
+    _ensure_boot_writable(summary_json)
     _write_json(summary_json, payload)
+    _ensure_boot_writable(summary_md)
     _write_markdown(summary_md, payload)
+    _ensure_boot_writable(summary_html)
     _write_html(summary_html, payload)
     _log(f"summary.json written to {summary_json}")
 
     if cloud_init_text is not None:
-        (report_dir / "cloud-init.log").write_text(cloud_init_text + "\n")
+        cloud_init_path = report_dir / "cloud-init.log"
+        _ensure_boot_writable(cloud_init_path)
+        cloud_init_path.write_text(cloud_init_text + "\n")
 
     summary_fields = {
         "Overall": payload.get("overall", "unknown").upper(),
