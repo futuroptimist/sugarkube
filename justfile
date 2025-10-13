@@ -55,10 +55,6 @@ teams_cmd := env_var_or_default(
     justfile_directory() + "/scripts/sugarkube_teams.py",
 )
 teams_args := env_var_or_default("TEAMS_ARGS", "")
-workflow_notify_cmd := env_var_or_default(
-    "WORKFLOW_NOTIFY_CMD",
-    justfile_directory() + "/scripts/workflow_artifact_notifier.py",
-)
 workflow_notify_args := env_var_or_default("WORKFLOW_NOTIFY_ARGS", "")
 badge_cmd := env_var_or_default(
     "BADGE_CMD",
@@ -195,7 +191,7 @@ notify-teams:
 # Watch a workflow run and raise desktop notifications when artifacts are ready
 # Usage: just notify-workflow WORKFLOW_NOTIFY_ARGS="--run-url https://github.com/..."
 notify-workflow:
-    "{{workflow_notify_cmd}}" {{workflow_notify_args}}
+    "{{sugarkube_cli}}" notify workflow {{workflow_notify_args}}
 
 # Update the hardware boot conformance badge JSON
 # Usage: just update-hardware-badge BADGE_ARGS="--status warn --notes 'pi-b'"

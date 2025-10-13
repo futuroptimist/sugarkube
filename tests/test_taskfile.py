@@ -29,6 +29,7 @@ def test_taskfile_exposes_cli_wrappers() -> None:
         "pi:rehearse": "{{.SUGARKUBE_CLI}} pi rehearse",
         "pi:support-bundle": "{{.SUGARKUBE_CLI}} pi support-bundle",
         "pi:cluster": "{{.SUGARKUBE_CLI}} pi cluster",
+        "notify:workflow": "{{.SUGARKUBE_CLI}} notify workflow",
         "mac:setup": "{{.PYTHON}} {{.MAC_SETUP_SCRIPT}}",
     }
 

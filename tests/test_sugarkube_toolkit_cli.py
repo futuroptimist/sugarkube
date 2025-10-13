@@ -788,6 +788,50 @@ def test_pi_cluster_invokes_bootstrap_helper(monkeypatch: pytest.MonkeyPatch) ->
     assert dry_run_flags == [False]
 
 
+def test_notify_workflow_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """notify workflow should wrap the notifier helper script."""
+
+    recorded: list[list[str]] = []
+    dry_run_flags: list[bool] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        dry_run_flags.append(dry_run)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(
+        [
+            "notify",
+            "workflow",
+            "--run-url",
+            "https://github.com/futuroptimist/sugarkube/actions/runs/123",
+        ]
+    )
+
+    expected_script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "workflow_artifact_notifier.py"
+    )
+
+    assert exit_code == 0
+    assert recorded == [
+        [
+            sys.executable,
+            str(expected_script),
+            "--run-url",
+            "https://github.com/futuroptimist/sugarkube/actions/runs/123",
+        ]
+    ]
+    assert dry_run_flags == [False]
+
+
 def test_pi_flash_reports_missing_script(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

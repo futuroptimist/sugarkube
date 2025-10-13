@@ -160,7 +160,7 @@ tasks:
       WORKFLOW_NOTIFY_ARGS: '{{default "" .WORKFLOW_NOTIFY_ARGS}}'
     cmds:
       - |
-        {{.PYTHON}} {{.SCRIPTS_DIR}}/workflow_artifact_notifier.py{{if ne .WORKFLOW_NOTIFY_ARGS ""}} {{.WORKFLOW_NOTIFY_ARGS}}{{end}}
+        {{.SUGARKUBE_CLI}} notify workflow{{if ne .WORKFLOW_NOTIFY_ARGS ""}} {{.WORKFLOW_NOTIFY_ARGS}}{{end}}
 
   notify:teams:
     desc: Send notifications through the sugarkube-teams helper.
