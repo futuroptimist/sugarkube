@@ -21,6 +21,21 @@ def _run_script(tmp_path, deploy, out_img, extra_env=None):
     )
 
 
+def _assert_checksum(out_img: Path) -> None:
+    checksum_path = out_img.with_suffix(out_img.suffix + ".sha256")
+    assert checksum_path.exists()
+    first_line = checksum_path.read_text(encoding="utf-8").splitlines()[0]
+    assert out_img.name in first_line
+    subprocess.run(
+        ["sha256sum", "-c", checksum_path.name],
+        check=True,
+        cwd=out_img.parent,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
 def test_handles_img_gz(tmp_path):
     deploy = tmp_path / "deploy"
     deploy.mkdir()
@@ -32,7 +47,7 @@ def test_handles_img_gz(tmp_path):
     result = _run_script(tmp_path, deploy, out_img)
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
-    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    _assert_checksum(out_img)
 
 
 def test_errors_when_deploy_missing(tmp_path):
@@ -105,7 +120,7 @@ def test_handles_zip_with_img(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
-    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    _assert_checksum(out_img)
     with lzma.open(out_img, "rb") as f:
         assert f.read() == b"data"
 
@@ -121,6 +136,7 @@ def test_handles_zip_with_unzip_fallback(tmp_path):
     result = _run_script(tmp_path, deploy, out_img)
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
+    _assert_checksum(out_img)
     with lzma.open(out_img, "rb") as f:
         assert f.read() == b"data"
 
@@ -146,7 +162,7 @@ def test_handles_raw_img(tmp_path):
     result = _run_script(tmp_path, deploy, out_img)
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
-    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    _assert_checksum(out_img)
     with lzma.open(out_img, "rb") as f:
         assert f.read() == b"data"
 
@@ -161,7 +177,7 @@ def test_handles_img_xz(tmp_path):
     result = _run_script(tmp_path, deploy, out_img)
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
-    assert (out_img.with_suffix(out_img.suffix + ".sha256")).exists()
+    _assert_checksum(out_img)
     assert out_img.read_text() == "original"
 
 
@@ -176,6 +192,7 @@ def test_prefers_img_xz_over_raw(tmp_path):
     out_img = tmp_path / "out.img.xz"
     result = _run_script(tmp_path, deploy, out_img)
     assert result.returncode == 0, result.stderr
+    _assert_checksum(out_img)
     assert out_img.read_text() == "compressed"
 
 
