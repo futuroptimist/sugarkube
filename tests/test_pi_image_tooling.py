@@ -104,7 +104,7 @@ def test_pi_image_workflow_checks_for_just_log():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     assert "grep -FH 'just command verified'" in content
-    assert "find deploy -maxdepth 3 -name '*.build.log'" in content
+    assert "find deploy -maxdepth 6 -name '*.build.log'" in content
 
 
 def test_pi_image_workflow_preserves_node_runtime():
@@ -243,3 +243,11 @@ def test_pi_image_workflow_upload_artifact_refs_exist_upstream():
             timeout=30,
         )
         assert result.stdout.strip(), f"actions/upload-artifact tag {ref} missing upstream"
+
+
+def test_collect_pi_image_scan_depth_configurable():
+    script_path = Path("scripts/collect_pi_image.sh")
+    script_text = script_path.read_text()
+
+    assert 'MAX_SCAN_DEPTH="${MAX_SCAN_DEPTH:-6}"' in script_text
+    assert 'find "${DEPLOY_ROOT}" -maxdepth "${MAX_SCAN_DEPTH}"' in script_text
