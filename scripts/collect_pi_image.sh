@@ -113,7 +113,10 @@ fi
 checksum_path="${OUTPUT_PATH}.sha256"
 rm -f "${checksum_path}"
 checksum_value="$(sha256sum "${OUTPUT_PATH}" | awk '{print $1}')"
-printf '%s  %s\n' "${checksum_value}" "$(basename "${OUTPUT_PATH}")" > "${checksum_path}"
+artifact_dir="$(cd "$(dirname "${OUTPUT_PATH}")" && pwd)"
+artifact_name="$(basename "${OUTPUT_PATH}")"
+artifact_path="${artifact_dir}/${artifact_name}"
+printf '%s  %s\n' "${checksum_value}" "${artifact_path}" > "${checksum_path}"
 
 echo "==> Wrote:"
 ls -lh "${OUTPUT_PATH}" "${checksum_path}"

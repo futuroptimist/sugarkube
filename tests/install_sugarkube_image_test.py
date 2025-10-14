@@ -207,7 +207,8 @@ done
 if [ -n "$output" ]; then
   mkdir -p "$(dirname "$output")"
   echo stub-image >"$output"
-  echo d41d8cd98f00b204e9800998ecf8427e  "$(basename "$output")" >"${{output}}.sha256"
+  abs_output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
+  echo d41d8cd98f00b204e9800998ecf8427e  "${{abs_output}}" >"${{output}}.sha256"
 fi
 """
     )
