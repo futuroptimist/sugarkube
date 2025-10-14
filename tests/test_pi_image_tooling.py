@@ -135,15 +135,14 @@ def _collect_action_refs(workflow_text: str, action: str) -> list[str]:
     return pattern.findall(workflow_text)
 
 
-def test_pi_image_workflow_pins_checkout_major_version():
+def test_pi_image_workflow_pins_checkout_version():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     refs = _collect_checkout_refs(content)
     assert refs, "No actions/checkout references found in pi-image workflow"
 
     for ref in refs:
-        major = ref.split(".", 1)[0]
-        assert major == "v4", f"Expected actions/checkout v4.*, found {ref}"
+        assert ref == "v4.3.0", f"Expected actions/checkout@v4.3.0, found {ref}"
 
 
 def test_pi_image_workflow_checkout_refs_exist_upstream():
