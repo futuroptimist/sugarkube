@@ -123,6 +123,7 @@ def test_pi_image_workflow_fixes_artifact_permissions():
     paths = _extract_pull_request_paths(content)
     assert "scripts/create_build_metadata.py" in paths
     assert "tests/create_build_metadata_e2e.sh" in paths
+    assert "scripts/fix_pi_image_permissions.sh" in paths
 
 
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
