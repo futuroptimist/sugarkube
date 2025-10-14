@@ -164,7 +164,7 @@ def test_pi_image_workflow_pins_checkout_version():
     assert refs, "No actions/checkout references found in pi-image workflow"
 
     for ref in refs:
-        assert ref == "v4.3.0", f"Expected actions/checkout@v4.3.0, found {ref}"
+        assert ref == "v5", f"Expected actions/checkout@v5, found {ref}"
 
 
 def test_pi_image_workflow_checkout_refs_exist_upstream():
