@@ -20,6 +20,8 @@ on:
   pull_request:
     paths:
       - 'scripts/collect_pi_image.sh'
+      - 'scripts/build_pi_image.sh'
+      - 'scripts/build_pi_image.ps1'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
 

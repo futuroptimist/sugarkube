@@ -9,6 +9,58 @@ from pathlib import Path
 from tests import build_pi_image_test as build_test
 
 
+def _extract_pull_request_paths(workflow_text: str) -> list[str]:
+    """Return the string globs under the pull_request.paths block."""
+
+    paths: list[str] = []
+    lines = workflow_text.splitlines()
+
+    in_pull_request = False
+    in_paths = False
+    pull_request_indent = 0
+    paths_indent = 0
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        if not in_pull_request:
+            if stripped.startswith("pull_request:"):
+                in_pull_request = True
+                pull_request_indent = indent
+            continue
+
+        if indent <= pull_request_indent and stripped:
+            # Finished reading the pull_request block.
+            break
+
+        if stripped.startswith("paths:"):
+            in_paths = True
+            paths_indent = indent
+            continue
+
+        if in_paths:
+            if not stripped:
+                continue
+            if indent <= paths_indent:
+                in_paths = False
+                if indent <= pull_request_indent and stripped:
+                    break
+                continue
+
+            if stripped.startswith("- "):
+                value = stripped[2:].strip()
+                if value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                elif value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                if value:
+                    paths.append(value)
+
+    return paths
+
+
 def _extract_work_dir(stdout: str) -> Path:
     match = re.search(r"leaving work dir: (?P<path>\S+)", stdout)
     assert match, stdout
@@ -53,6 +105,18 @@ def test_pi_image_workflow_checks_for_just_log():
     content = workflow_path.read_text()
     assert "grep -FH 'just command verified'" in content
     assert "find deploy -maxdepth 2 -name '*.build.log'" in content
+
+
+def test_pi_image_workflow_watches_build_scripts():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    paths = _extract_pull_request_paths(content)
+
+    assert paths, "pull_request.paths block missing in pi-image workflow"
+    assert "scripts/collect_pi_image.sh" in paths
+    assert "scripts/build_pi_image.sh" in paths
+    assert "scripts/build_pi_image.ps1" in paths
+    assert "tests/**" in paths
 
 
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
