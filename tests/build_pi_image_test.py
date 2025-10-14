@@ -405,6 +405,9 @@ fi
         "mkdir -p deploy\n"
         'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
+        "mkdir -p work/sugarkube\n"
+        "printf '✅ just command verified\\n[sugarkube] just version: stub\\n' > "
+        "work/sugarkube/build.log\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -596,6 +599,19 @@ def test_handles_precompressed_pi_gen_output(tmp_path):
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert (tmp_path / "sugarkube.img.xz").exists()
+
+
+def test_build_log_written_to_deploy(tmp_path):
+    env = _setup_build_env(tmp_path)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    deploy_log = tmp_path / "deploy" / "sugarkube.build.log"
+    assert deploy_log.exists()
+    log_text = deploy_log.read_text()
+    assert "✅ just command verified" in log_text
+    host_log = tmp_path / "sugarkube.build.log"
+    assert host_log.exists()
+    assert host_log.read_text() == log_text
 
 
 def test_installs_ssd_clone_service(tmp_path):
