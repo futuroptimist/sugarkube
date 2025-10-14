@@ -142,7 +142,7 @@ jobs:
           found=0
           for log in "${logs[@]}"; do
             echo "Checking ${log}"
-            if grep -FH '✅ just command verified' "${log}"; then
+            if grep -FH 'just command verified' "${log}"; then
               found=1
               grep -FH '[sugarkube] just version' "${log}" || true
             fi
