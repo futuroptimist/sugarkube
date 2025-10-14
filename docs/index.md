@@ -70,4 +70,7 @@ Start with the basics and progress toward a fully autonomous solar cube.
 - [prompts/codex/implement.md](prompts/codex/implement.md) — grow features with a tests-first workflow
 - [prompts/codex/elex.md](prompts/codex/elex.md) — keep electronics documentation current
 - [prompts/codex/observability.md](prompts/codex/observability.md) — expand monitoring and alerting
-- [archived/prompt-codex-tutorials.md](archived/prompt-codex-tutorials.md) — build the full interactive tutorial series (archived)
+- [prompts/codex/simplification.md](prompts/codex/simplification.md) — streamline workflows
+  without regressions
+- [prompts/codex/polish.md](prompts/codex/polish.md) — run the post-implementation polish pass
+- [prompts/codex/archived/tutorials.md](prompts/codex/archived/tutorials.md) — build the full interactive tutorial series (archived)
