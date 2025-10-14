@@ -133,17 +133,25 @@ jobs:
       - name: pi-image-verify-just
         if: always()
         run: |
-          log=$(find deploy -maxdepth 2 -name '*.build.log' -print -quit)
-          if [ -z "$log" ]; then
+          mapfile -t logs < <(find deploy -maxdepth 2 -name '*.build.log' -print | sort)
+          if [ "${#logs[@]}" -eq 0 ]; then
             echo "pi-gen build log missing" >&2
             exit 1
           fi
           echo '--- just verification ---'
-          if ! grep -F '✅ just command verified' "$log"; then
-            echo "just verification line missing" >&2
+          found=0
+          for log in "${logs[@]}"; do
+            echo "Checking ${log}"
+            if grep -FH '✅ just command verified' "${log}"; then
+              found=1
+              grep -FH '[sugarkube] just version' "${log}" || true
+            fi
+          done
+          if [ "${found}" -eq 0 ]; then
+            echo 'just verification line missing in logs:' >&2
+            printf '  %s\n' "${logs[@]}" >&2
             exit 1
           fi
-          grep -F '[sugarkube] just version' "$log" || true
 
       - name: Verify pi-gen Docker image
         run: |
