@@ -245,6 +245,20 @@ def test_pi_image_workflow_upload_artifact_refs_exist_upstream():
         assert result.stdout.strip(), f"actions/upload-artifact tag {ref} missing upstream"
 
 
+def test_pi_image_workflow_uses_cache_key_script():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    assert "scripts/compute_pi_gen_cache_key.sh" in content
+    assert "key=$(bash scripts/compute_pi_gen_cache_key.sh" in content
+
+
+def test_compute_pi_gen_cache_key_script_has_fallback():
+    script_path = Path("scripts/compute_pi_gen_cache_key.sh")
+    script_text = script_path.read_text()
+    assert "falling back to offline cache key" in script_text
+    assert "git ls-remote" in script_text
+
+
 def test_collect_pi_image_scan_depth_configurable():
     script_path = Path("scripts/collect_pi_image.sh")
     script_text = script_path.read_text()
