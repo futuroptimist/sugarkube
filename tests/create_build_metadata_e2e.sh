@@ -6,6 +6,8 @@ set -euo pipefail
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR_ROOT}"' EXIT
 
+export PYTHONWARNINGS="error::DeprecationWarning"
+
 RAW_IMAGE="${TMPDIR_ROOT}/image.raw"
 printf 'sugarkube-metadata-smoke-test' > "${RAW_IMAGE}"
 
