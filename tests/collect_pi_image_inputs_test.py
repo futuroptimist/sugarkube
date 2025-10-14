@@ -1,6 +1,7 @@
 import gzip
 import lzma
 import os
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -25,7 +26,9 @@ def _assert_checksum(out_img: Path) -> None:
     checksum_path = out_img.with_suffix(out_img.suffix + ".sha256")
     assert checksum_path.exists()
     first_line = checksum_path.read_text(encoding="utf-8").splitlines()[0]
-    assert out_img.name in first_line
+    assert first_line.endswith(f"  {out_img.name}")
+    recorded_name = first_line.split("  ", 1)[1]
+    assert os.path.sep not in recorded_name
     subprocess.run(
         ["sha256sum", "-c", checksum_path.name],
         check=True,
@@ -34,6 +37,23 @@ def _assert_checksum(out_img: Path) -> None:
         stderr=subprocess.PIPE,
         text=True,
     )
+    verify_dir = out_img.parent / "verify"
+    verify_dir.mkdir()
+    moved_img = verify_dir / out_img.name
+    moved_checksum = verify_dir / checksum_path.name
+    shutil.move(out_img, moved_img)
+    shutil.move(checksum_path, moved_checksum)
+    subprocess.run(
+        ["sha256sum", "-c", moved_checksum.name],
+        check=True,
+        cwd=verify_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    shutil.move(moved_img, out_img)
+    shutil.move(moved_checksum, checksum_path)
+    shutil.rmtree(verify_dir)
 
 
 def test_handles_img_gz(tmp_path):

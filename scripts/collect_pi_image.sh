@@ -112,11 +112,15 @@ fi
 # Remove any existing checksum file so read-only artifacts don't block new writes
 checksum_path="${OUTPUT_PATH}.sha256"
 rm -f "${checksum_path}"
-checksum_value="$(sha256sum "${OUTPUT_PATH}" | awk '{print $1}')"
-artifact_dir="$(cd "$(dirname "${OUTPUT_PATH}")" && pwd)"
+artifact_dir="$(dirname "${OUTPUT_PATH}")"
 artifact_name="$(basename "${OUTPUT_PATH}")"
-artifact_path="${artifact_dir}/${artifact_name}"
-printf '%s  %s\n' "${checksum_value}" "${artifact_path}" > "${checksum_path}"
+(
+  cd "${artifact_dir}" >/dev/null 2>&1 || {
+    echo "ERROR: failed to enter artifact directory '${artifact_dir}'" >&2
+    exit 1
+  }
+  sha256sum "${artifact_name}"
+) > "${checksum_path}"
 
 echo "==> Wrote:"
 ls -lh "${OUTPUT_PATH}" "${checksum_path}"
