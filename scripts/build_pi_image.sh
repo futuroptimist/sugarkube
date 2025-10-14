@@ -1022,31 +1022,56 @@ echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"
 
 BUILD_LOG_SEARCH_ROOT="${PI_GEN_DIR}/work/${IMG_NAME}"
 BUILD_LOG_SOURCE="${BUILD_LOG_SEARCH_ROOT}/build.log"
-if [ -f "${BUILD_LOG_SOURCE}" ]; then
-  {
-    printf '\n[sugarkube] --- pi-gen build.log ---\n'
-    cat "${BUILD_LOG_SOURCE}"
-  } >>"${BUILD_LOG}"
-  echo "[sugarkube] Build log appended from ${BUILD_LOG_SOURCE}"
-else
-  nested_logs=()
-  if [ -d "${BUILD_LOG_SEARCH_ROOT}" ]; then
-    while IFS= read -r -d '' candidate; do
-      nested_logs+=("${candidate}")
-    done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 2 -maxdepth 6 \
-      -type f -name 'build.log' -print0 | sort -z)
+append_pi_gen_log() {
+  local source_path="$1"
+  local header_suffix="$2"
+  if [ ! -f "${source_path}" ]; then
+    return 1
   fi
 
-  if [ "${#nested_logs[@]}" -gt 0 ]; then
-    for candidate in "${nested_logs[@]}"; do
-      {
-        printf '\n[sugarkube] --- pi-gen build.log --- (%s)\n' "${candidate}"
-        cat "${candidate}"
-      } >>"${BUILD_LOG}"
-      echo "[sugarkube] Build log appended from ${candidate}"
-    done
+  local header="[sugarkube] --- pi-gen build.log ---"
+  if [ -n "${header_suffix}" ]; then
+    header="${header} (${header_suffix})"
+  fi
+
+  if [[ "${source_path}" == *.xz ]]; then
+    if ! {
+      printf '\n%s\n' "${header}"
+      xz -dc "${source_path}"
+    } >>"${BUILD_LOG}"; then
+      echo "[sugarkube] Failed to append compressed log from ${source_path}" >&2
+      return 1
+    fi
   else
-    echo "[sugarkube] Build log not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+    if ! {
+      printf '\n%s\n' "${header}"
+      cat "${source_path}"
+    } >>"${BUILD_LOG}"; then
+      echo "[sugarkube] Failed to append log from ${source_path}" >&2
+      return 1
+    fi
+  fi
+
+  echo "[sugarkube] Build log appended from ${source_path}"
+}
+
+if ! append_pi_gen_log "${BUILD_LOG_SOURCE}" ""; then
+  if ! append_pi_gen_log "${BUILD_LOG_SOURCE}.xz" "${BUILD_LOG_SOURCE}.xz"; then
+    nested_logs=()
+    if [ -d "${BUILD_LOG_SEARCH_ROOT}" ]; then
+      while IFS= read -r -d '' candidate; do
+        nested_logs+=("${candidate}")
+      done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 2 -maxdepth 6 \
+        -type f \( -name 'build.log' -o -name 'build.log.xz' \) -print0 | sort -z)
+    fi
+
+    if [ "${#nested_logs[@]}" -gt 0 ]; then
+      for candidate in "${nested_logs[@]}"; do
+        append_pi_gen_log "${candidate}" "${candidate}" || true
+      done
+    else
+      echo "[sugarkube] Build log not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+    fi
   fi
 fi
 
