@@ -353,8 +353,9 @@ esac
 export PATH
 EOSH
 
-just_install_script="${PI_GEN_DIR}/stage2/01-sys-tweaks/03-run-chroot-just.sh"
-install -d "$(dirname "${just_install_script}")"
+just_install_dir="${PI_GEN_DIR}/stage2/01-sys-tweaks"
+install -d "${just_install_dir}"
+just_install_script="${just_install_dir}/03-run-chroot.sh"
 cat >"${just_install_script}" <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -454,6 +455,9 @@ if [ -f /opt/sugarkube/justfile ]; then
 fi
 EOSH
 chmod +x "${just_install_script}"
+
+# Provide a suffixed symlink for clarity and backward-compatible tests.
+ln -sf "03-run-chroot.sh" "${just_install_dir}/03-run-chroot-just.sh"
 
 # If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file
 if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TUNNEL_TOKEN:-}" ]; then
