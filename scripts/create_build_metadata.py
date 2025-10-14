@@ -22,6 +22,16 @@ from typing import Dict, Iterable, List, Tuple
 _STAGE_RE = re.compile(r"^\[(\d+):(\d+):(\d+)\]\s+(Begin|End)\s+([^/]+)$")
 
 
+def _now_utc_timestamp() -> str:
+    """Return an ISO-8601 timestamp with second precision in UTC."""
+
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    iso = now.isoformat()
+    if iso.endswith("+00:00"):
+        return iso[:-6] + "Z"
+    return iso
+
+
 @dataclasses.dataclass(frozen=True)
 class StageSpan:
     name: str
@@ -248,7 +258,7 @@ def _write_stage_summary(
         "observed_elapsed_seconds": int(round(timer.elapsed())),
         "stages": stage_entries,
         "incomplete_stages": incomplete_entries,
-        "generated_at": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "generated_at": _now_utc_timestamp(),
     }
     output_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -311,7 +321,7 @@ def main(argv: List[str]) -> int:
         },
         "options": options,
         "verifier": _load_verifier(args.verifier_json),
-        "generated_at": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "generated_at": _now_utc_timestamp(),
     }
 
     output_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")

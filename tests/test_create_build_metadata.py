@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import sys
@@ -117,6 +118,12 @@ def test_metadata_contains_stage_durations(tmp_path):
     assert data["options"]["clone_token_place"] is False
     assert data["verifier"]["status"] == "not_run"
 
+    generated_at = data["generated_at"]
+    assert generated_at.endswith("Z")
+    parsed = dt.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    assert parsed.tzinfo.utcoffset(parsed) == dt.timedelta(0)
+
 
 def test_stage_summary_outputs_timelines(tmp_path):
     summary_path = tmp_path / "stage-summary.json"
@@ -143,6 +150,12 @@ def test_stage_summary_outputs_timelines(tmp_path):
     assert stages[2]["start_offset_seconds"] == 66
     assert stages[2]["end_offset_seconds"] == 96
     assert summary["incomplete_stages"] == []
+
+    summary_generated_at = summary["generated_at"]
+    assert summary_generated_at.endswith("Z")
+    summary_parsed = dt.datetime.fromisoformat(summary_generated_at.replace("Z", "+00:00"))
+    assert summary_parsed.tzinfo is not None
+    assert summary_parsed.tzinfo.utcoffset(summary_parsed) == dt.timedelta(0)
 
 
 def test_stage_summary_incomplete_entries(tmp_path):
