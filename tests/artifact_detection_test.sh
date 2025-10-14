@@ -15,6 +15,25 @@ export XZ_OPT="-T0 -0"  # speed up compression during tests
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
+verify_checksum_relocation() {
+  local artifact="$1"
+  local checksum="${artifact}.sha256"
+  local dest
+  dest="$(mktemp -d "${tmp}/verify.XXXXXX")"
+  local artifact_name
+  artifact_name="$(basename "${artifact}")"
+  local checksum_name
+  checksum_name="$(basename "${checksum}")"
+  mv "${artifact}" "${dest}/${artifact_name}"
+  mv "${checksum}" "${dest}/${checksum_name}"
+  (
+    cd "${dest}" && sha256sum -c "${checksum_name}" >/dev/null
+  )
+  mv "${dest}/${artifact_name}" "${artifact}"
+  mv "${dest}/${checksum_name}" "${checksum}"
+  rmdir "${dest}"
+}
+
 # Case 1: nested pre-compressed .img.xz
 mkdir -p "${tmp}/deploy/nested"
 echo "hello-from-xz" > "${tmp}/deploy/nested/foo.img"
@@ -24,6 +43,7 @@ bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out1.img.xz"
 test -s "${tmp}/out1.img.xz"
 test -s "${tmp}/out1.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out1.img.xz").sha256" >/dev/null )
+verify_checksum_relocation "${tmp}/out1.img.xz"
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -38,6 +58,7 @@ bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out2.img.xz"
 test -s "${tmp}/out2.img.xz"
 test -s "${tmp}/out2.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out2.img.xz").sha256" >/dev/null )
+verify_checksum_relocation "${tmp}/out2.img.xz"
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -49,6 +70,7 @@ bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out3.img.xz"
 test -s "${tmp}/out3.img.xz"
 test -s "${tmp}/out3.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out3.img.xz").sha256" >/dev/null )
+verify_checksum_relocation "${tmp}/out3.img.xz"
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -62,6 +84,7 @@ bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out4.img.xz"
 test -s "${tmp}/out4.img.xz"
 test -s "${tmp}/out4.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out4.img.xz").sha256" >/dev/null )
+verify_checksum_relocation "${tmp}/out4.img.xz"
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -74,5 +97,6 @@ bash "${SCRIPT}" "${tmp}" "${tmp}/foo.img.xz"
 test -s "${tmp}/foo.img.xz"
 test -s "${tmp}/foo.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/foo.img.xz").sha256" >/dev/null )
+verify_checksum_relocation "${tmp}/foo.img.xz"
 
 echo "All artifact detection tests passed."
