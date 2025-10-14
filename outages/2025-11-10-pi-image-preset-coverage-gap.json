@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-10-pi-image-preset-coverage-gap",
+  "date": "2025-11-10",
+  "component": "pi-image workflow",
+  "rootCause": "Changes to scripts/download_pi_image.sh and scripts/render_pi_imager_preset.py did not trigger the pi-image unit job because the pull_request.paths filter omitted both files. The preset helper lost coverage, so a regression merged unnoticed and the next manual pi-image build failed when the preset renderer exited early.",
+  "resolution": "Expanded the pi-image workflow path filters to cover the download helper and preset renderer, and added a render_pi_imager_preset end-to-end test with workflow assertions to guarantee the coverage stays in place.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "scripts/render_pi_imager_preset.py",
+    "scripts/download_pi_image.sh",
+    "tests/render_pi_imager_preset_e2e.sh",
+    "tests/test_pi_image_tooling.py"
+  ]
+}
