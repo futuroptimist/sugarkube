@@ -4,6 +4,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def test_requires_curl(tmp_path):
     fake_bin = tmp_path / "bin"
@@ -743,6 +745,48 @@ def test_requires_cloud_init_file(tmp_path):
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode != 0
     assert "Cloud-init file not found" in result.stderr
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="requires root to exercise safe.directory handling")
+def test_marks_repo_safe_directory_for_root(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    gitconfig = tmp_path / "gitconfig"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    docker_stub = fake_bin / "docker"
+    docker_stub.write_text("#!/bin/sh\nexit 0\n")
+    docker_stub.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "GIT_CONFIG_SYSTEM": str(gitconfig),
+            "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig.global"),
+            "SKIP_BINFMT": "1",
+            "SKIP_URL_CHECK": "1",
+            "SKIP_CLOUD_INIT_VALIDATION": "1",
+            "SKIP_MIRROR_REWRITE": "1",
+            "CLOUD_INIT_PATH": str(tmp_path / "missing-user-data.yaml"),
+        }
+    )
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/build_pi_image.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Cloud-init file not found" in result.stderr
+
+    assert gitconfig.exists(), "git config --system should have written to the temp file"
+    config_text = gitconfig.read_text()
+    assert "[safe]" in config_text
+    assert f"directory = {repo_root}" in config_text
 
 
 def test_requires_stage_list(tmp_path):

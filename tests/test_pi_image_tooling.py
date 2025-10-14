@@ -97,6 +97,4 @@ def test_pi_image_workflow_checkout_refs_exist_upstream():
                 f"git ls-remote failed for actions/checkout tag {ref}: {exc.stderr}"
             ) from exc
 
-        assert (
-            result.stdout.strip()
-        ), f"actions/checkout tag {ref} missing upstream"
+        assert result.stdout.strip(), f"actions/checkout tag {ref} missing upstream"
