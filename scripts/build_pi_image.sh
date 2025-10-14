@@ -421,8 +421,11 @@ if ! command -v just >/dev/null 2>&1; then
 fi
 
 log_build() {
-  if [ -n "${BUILD_LOG:-}" ]; then
-    printf '%s\n' "$1" | tee -a "${BUILD_LOG}"
+  local log_target="${BUILD_LOG:-${LOG_FILE:-}}"
+  if [ -n "${log_target}" ] && [ -d "$(dirname "${log_target}")" ]; then
+    if ! printf '%s\n' "$1" | tee -a "${log_target}"; then
+      printf '%s\n' "$1"
+    fi
   else
     printf '%s\n' "$1"
   fi

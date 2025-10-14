@@ -79,6 +79,8 @@ def test_just_installation_script_includes_fallback(tmp_path):
     script_text = script_path.read_text()
 
     assert 'apt-get "${APT_OPTS[@]}" install -y --no-install-recommends just' in script_text
+    assert "${BUILD_LOG:-${LOG_FILE:-}}" in script_text
+    assert 'tee -a "${log_target}"' in script_text
     assert "https://just.systems/install.sh" in script_text
     assert "[sugarkube] just command verified" in script_text
     assert "just --version" in script_text
