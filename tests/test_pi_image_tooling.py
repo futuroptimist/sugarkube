@@ -115,9 +115,12 @@ def test_pi_image_workflow_preserves_node_runtime():
     assert "node --version" in content
 
 
-def test_pi_image_workflow_watches_metadata_artifacts():
+def test_pi_image_workflow_fixes_artifact_permissions():
     workflow_path = Path(".github/workflows/pi-image.yml")
-    paths = _extract_pull_request_paths(workflow_path.read_text())
+    content = workflow_path.read_text()
+    assert "fix_pi_image_permissions.sh" in content
+    assert 'TARGET_UID="$(id -u)" TARGET_GID="$(id -g)"' in content
+    paths = _extract_pull_request_paths(content)
     assert "scripts/create_build_metadata.py" in paths
     assert "tests/create_build_metadata_e2e.sh" in paths
 
