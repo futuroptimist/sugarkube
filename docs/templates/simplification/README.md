@@ -7,8 +7,9 @@ relevant proposal, retro, or documentation PR.
 
 - `onboarding-update.md` — summarize a change to the onboarding path before
   updating docs or automation.
-- `prompt-refresh.md` — capture prompt deltas, rationale, and coverage before
-  opening a PR that edits `docs/prompts/`.
+- [`docs/prompts/codex/templates/simplification/refresh.md`](../../prompts/codex/templates/simplification/refresh.md)
+  — capture prompt deltas, rationale, and coverage before opening a PR that edits
+  `docs/prompts/`.
 - `simplification-sprint.md` — scope and align a focused simplification push,
   including deliverables, staffing, and metrics.
 

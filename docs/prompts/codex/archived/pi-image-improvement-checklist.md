@@ -6,7 +6,7 @@ slug: 'prompt-pi-image-improvement-checklist'
 # Pi Image Improvement Checklist Implementation Prompt
 Type: evergreen
 
-Use this prompt to implement items from [`docs/pi_image_improvement_checklist.md`](./pi_image_improvement_checklist.md).
+Use this prompt to implement items from [`docs/pi_image_improvement_checklist.md`](../../../archived/pi_image_improvement_checklist.md).
 
 ```text
 SYSTEM:
@@ -16,12 +16,12 @@ PURPOSE:
 Ship incremental improvements from the Pi image UX & automation checklist.
 
 CONTEXT:
-- Review the checklist in [`docs/pi_image_improvement_checklist.md`](./pi_image_improvement_checklist.md)
+- Review the checklist in [`docs/pi_image_improvement_checklist.md`](../../../archived/pi_image_improvement_checklist.md)
   and pick one actionable item.
 - Inspect related guides and scripts such as
-  [`docs/pi_image_quickstart.md`](../pi_image_quickstart.md), [`scripts/`](../../scripts/), and the
-  root [`Makefile`](../../Makefile) to understand current behavior.
-- Follow [`AGENTS.md`](../../AGENTS.md) and repository conventions in [`README.md`](../../README.md).
+  [`docs/pi_image_quickstart.md`](../../../pi_image_quickstart.md), [`scripts/`](../../../../scripts/), and the
+  root [`Makefile`](../../../../Makefile) to understand current behavior.
+- Follow [`AGENTS.md`](../../../../AGENTS.md) and repository conventions in [`README.md`](../../../../README.md).
 - Before committing, run:
   - `pre-commit run --all-files`
   - `pyspelling -c .spellcheck.yaml`
@@ -57,15 +57,15 @@ You are an automated contributor for the sugarkube repository.
 
 PURPOSE:
 Improve the "Pi Image Improvement Checklist Implementation Prompt" so it reliably guides agents
-to ship unchecked items from [`docs/pi_image_improvement_checklist.md`](./pi_image_improvement_checklist.md).
+to ship unchecked items from [`docs/pi_image_improvement_checklist.md`](../../../archived/pi_image_improvement_checklist.md).
 
 CONTEXT:
 - Review the prompt text directly above this one and ensure it is accurate, actionable, and
   aligned with the checklist workflow.
 - Cross-check supporting docs and automation referenced in that prompt (for example,
-  [`docs/pi_image_quickstart.md`](../pi_image_quickstart.md), [`scripts/`](../../scripts/), and the root
-  [`Makefile`](../../Makefile)).
-- Follow [`AGENTS.md`](../../AGENTS.md) and repository conventions in [`README.md`](../../README.md).
+  [`docs/pi_image_quickstart.md`](../../../pi_image_quickstart.md), [`scripts/`](../../../../scripts/), and the root
+  [`Makefile`](../../../../Makefile)).
+- Follow [`AGENTS.md`](../../../../AGENTS.md) and repository conventions in [`README.md`](../../../../README.md).
 - Before committing, run:
   - `pre-commit run --all-files`
   - `pyspelling -c .spellcheck.yaml`

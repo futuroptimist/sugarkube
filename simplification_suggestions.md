@@ -2,7 +2,7 @@
 
 _Last reviewed: 2025-09-24_
 
-Use this backlog alongside [`docs/prompts/simplification.md`](docs/prompts/simplification.md)
+Use this backlog alongside [`docs/prompts/codex/simplification.md`](docs/prompts/codex/simplification.md)
 when you staff simplification-focused PRs. Every initiative keeps existing
 hardware and software workflows intact while removing friction for new
 contributors.
