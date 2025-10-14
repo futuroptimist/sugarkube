@@ -99,4 +99,49 @@ test -s "${tmp}/foo.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/foo.img.xz").sha256" >/dev/null )
 verify_checksum_relocation "${tmp}/foo.img.xz"
 
+# Case 6: pi-image workflow log verification handles nested logs
+rm -rf "${tmp}/deploy"
+mkdir -p "${tmp}/deploy/nested/logs"
+cat >"${tmp}/deploy/nested/logs/sugarkube.build.log" <<'EOF'
+[sugarkube] just command verified at /usr/bin/just
+[sugarkube] just version: stub
+EOF
+
+# Sanity check: the old maxdepth=2 search should fail so we know the regression is covered
+if ( cd "${tmp}" && bash -euo pipefail -c '
+  mapfile -t logs < <(find deploy -maxdepth 2 -name '\''*.build.log'\'' -print | sort)
+  [ "${#logs[@]}" -gt 0 ] && exit 0
+  exit 1
+' ); then
+  echo "maxdepth=2 unexpectedly found nested logs" >&2
+  exit 1
+fi
+
+verify_snippet="${tmp}/verify_just.sh"
+cat >"${verify_snippet}" <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+mapfile -t logs < <(find deploy -maxdepth 3 -name '*.build.log' -print | sort)
+if [ "${#logs[@]}" -eq 0 ]; then
+  echo "no build logs discovered" >&2
+  exit 1
+fi
+
+found=0
+for log in "${logs[@]}"; do
+  if grep -FH 'just command verified' "${log}" >/dev/null; then
+    found=1
+    grep -FH '[sugarkube] just version' "${log}" >/dev/null || true
+  fi
+done
+
+if [ "${found}" -eq 0 ]; then
+  echo "missing just verification log entry" >&2
+  exit 1
+fi
+EOSH
+chmod +x "${verify_snippet}"
+( cd "${tmp}" && bash "${verify_snippet}" )
+
 echo "All artifact detection tests passed."
