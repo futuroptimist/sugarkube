@@ -52,3 +52,9 @@ def test_pi_image_workflow_checks_for_just_log():
     content = workflow_path.read_text()
     assert "grep -FH 'just command verified'" in content
     assert "find deploy -maxdepth 2 -name '*.build.log'" in content
+
+
+def test_build_script_marks_git_safe_directory():
+    script = Path("scripts/build_pi_image.sh").read_text()
+    assert "safe.directory" in script
+    assert "ensure_git_safe_directory" in script
