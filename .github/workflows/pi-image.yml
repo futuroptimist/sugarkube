@@ -36,7 +36,7 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.3.0
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
       - name: Install collector dependencies
@@ -70,7 +70,7 @@ jobs:
       CLONE_TOKEN_PLACE: ${{ github.event.inputs.clone_token_place }}
       CLONE_DSPACE: ${{ github.event.inputs.clone_dspace }}
     steps:
-      - uses: actions/checkout@v4.3.0
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
