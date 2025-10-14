@@ -106,7 +106,7 @@ jobs:
 
       - name: Restore pi-gen Docker image
         id: cache-pigen
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: ~/cache/pi-gen.tar
           key: ${{ steps.pigen-key.outputs.key }}
@@ -190,7 +190,7 @@ jobs:
           docker image save pi-gen:latest -o ~/cache/pi-gen.tar
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sugarkube-img
           path: |
