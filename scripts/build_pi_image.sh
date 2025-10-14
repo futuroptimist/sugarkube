@@ -420,16 +420,24 @@ if ! command -v just >/dev/null 2>&1; then
   fi
 fi
 
+log_build() {
+  if [ -n "${BUILD_LOG:-}" ]; then
+    printf '%s\n' "$1" | tee -a "${BUILD_LOG}"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 just_path=$(command -v just || true)
 if [ -z "${just_path}" ]; then
   echo "just not found after installation attempts" >&2
   exit 1
 fi
 
-printf '[sugarkube] just command verified at %s\n' "${just_path}" | tee -a "${BUILD_LOG}"
+log_build "[sugarkube] just command verified at ${just_path}"
 just_version=$(just --version 2>&1 | head -n1 || true)
 if [ -n "${just_version}" ]; then
-  printf '[sugarkube] just version: %s\n' "${just_version}" | tee -a "${BUILD_LOG}"
+  log_build "[sugarkube] just version: ${just_version}"
 fi
 
 if [ -f /opt/sugarkube/justfile ]; then
