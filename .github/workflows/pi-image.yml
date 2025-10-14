@@ -57,6 +57,9 @@ jobs:
       - name: Run build metadata smoke test
         run: bash tests/create_build_metadata_e2e.sh
 
+      - name: Run pi-gen cache key e2e test
+        run: bash tests/compute_pi_gen_cache_key_e2e.sh
+
       - name: Run fix permissions e2e test
         run: bash tests/fix_pi_image_permissions_e2e.sh
 
@@ -114,10 +117,12 @@ jobs:
 
       - name: Compute pi-gen cache key
         id: pigen-key
+        env:
+          PI_GEN_BRANCH: bookworm
+          PI_GEN_REMOTE: https://github.com/RPi-Distro/pi-gen.git
         run: |
-          branch=bookworm
-          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/${branch}" | cut -f1)
-          echo "key=pigen-${RUNNER_OS}-${branch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
+          key=$(bash scripts/compute_pi_gen_cache_key.sh "${PI_GEN_BRANCH}" "${PI_GEN_REMOTE}")
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
 
       - name: Restore pi-gen Docker image
         id: cache-pigen
