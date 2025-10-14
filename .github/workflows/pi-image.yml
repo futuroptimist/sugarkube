@@ -66,10 +66,17 @@ jobs:
         run: |
           sudo apt-get clean
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache /usr/local/lib/node_modules \
-            /usr/local/share/boost
+            /usr/local/lib/node_modules /usr/local/share/boost
           docker system prune -af || true
           df -h
+
+      - name: Verify Node runtime availability
+        run: |
+          if ! command -v node >/dev/null 2>&1; then
+            echo "Node.js runtime missing after cleanup" >&2
+            exit 1
+          fi
+          node --version
 
       - name: Install pi-gen dependencies
         run: |

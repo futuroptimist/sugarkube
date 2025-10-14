@@ -55,6 +55,14 @@ def test_pi_image_workflow_checks_for_just_log():
     assert "find deploy -maxdepth 2 -name '*.build.log'" in content
 
 
+def test_pi_image_workflow_preserves_node_runtime():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    assert "/opt/hostedtoolcache" not in content
+    assert "Verify Node runtime availability" in content
+    assert "node --version" in content
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
