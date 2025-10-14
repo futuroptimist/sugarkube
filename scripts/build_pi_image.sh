@@ -1082,6 +1082,50 @@ if ! append_pi_gen_log "${BUILD_LOG_SOURCE}" ""; then
   fi
 fi
 
+recover_just_log_line() {
+  if grep -Fq '[sugarkube] just command verified' "${BUILD_LOG}"; then
+    return 0
+  fi
+
+  if [ ! -d "${BUILD_LOG_SEARCH_ROOT}" ]; then
+    echo "[sugarkube] Warning: just verification search root missing: ${BUILD_LOG_SEARCH_ROOT}" >&2
+    return 1
+  fi
+
+  local found=0
+  while IFS= read -r -d '' candidate; do
+    if [[ "${candidate}" == *.xz ]]; then
+      if xz -dc "${candidate}" 2>/dev/null | grep -Fq '[sugarkube] just command verified'; then
+        {
+          printf '\n[sugarkube] --- stage log appended (%s) ---\n' "${candidate}"
+          xz -dc "${candidate}" 2>/dev/null
+        } >>"${BUILD_LOG}"
+        echo "[sugarkube] Recovered just verification log from ${candidate}"
+        found=1
+        break
+      fi
+    else
+      if grep -Fq '[sugarkube] just command verified' "${candidate}"; then
+        {
+          printf '\n[sugarkube] --- stage log appended (%s) ---\n' "${candidate}"
+          cat "${candidate}"
+        } >>"${BUILD_LOG}"
+        echo "[sugarkube] Recovered just verification log from ${candidate}"
+        found=1
+        break
+      fi
+    fi
+  done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 1 -maxdepth 8 \
+    -type f \( -name '*.log' -o -name '*.log.xz' -o -name '*.txt' \) -print0 | sort -z)
+
+  if [ "${found}" -eq 0 ]; then
+    echo "[sugarkube] Warning: just verification log line not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+    return 1
+  fi
+}
+
+recover_just_log_line || true
+
 REPO_DEPLOY_DIR="${REPO_ROOT}/deploy"
 REPO_DEPLOY_LOG="${REPO_DEPLOY_DIR}/${IMG_NAME}.build.log"
 mkdir -p "${REPO_DEPLOY_DIR}"
