@@ -91,9 +91,20 @@ jobs:
       - name: Compute pi-gen cache key
         id: pigen-key
         run: |
-          branch=bookworm
-          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/${branch}" | cut -f1)
-          echo "key=pigen-${RUNNER_OS}-${branch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
+          tmp_output="$(mktemp)"
+          if ! bash scripts/compute_pi_gen_cache_key.sh >"${tmp_output}"; then
+            echo "::error::Failed to compute pi-gen cache key"
+            cat "${tmp_output}"
+            exit 1
+          fi
+          cat "${tmp_output}" >>"$GITHUB_OUTPUT"
+          if grep -q '^fallback=true$' "${tmp_output}"; then
+            echo "::warning::pi-gen ref lookup failed; using fallback cache key"
+          else
+            ref=$(grep '^ref=' "${tmp_output}" | cut -d'=' -f2-)
+            echo "Resolved pi-gen ref: ${ref}"
+          fi
+          rm -f "${tmp_output}"
 
       - name: Restore pi-gen Docker image
         id: cache-pigen
@@ -101,6 +112,8 @@ jobs:
         with:
           path: ~/cache/pi-gen.tar
           key: ${{ steps.pigen-key.outputs.key }}
+          restore-keys: |
+            ${{ steps.pigen-key.outputs.restore_prefix }}
 
       - name: Load cached pi-gen image
         if: steps.cache-pigen.outputs.cache-hit == 'true'

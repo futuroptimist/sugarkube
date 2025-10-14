@@ -52,3 +52,11 @@ def test_pi_image_workflow_checks_for_just_log():
     content = workflow_path.read_text()
     assert "grep -FH 'just command verified'" in content
     assert "find deploy -maxdepth 2 -name '*.build.log'" in content
+
+
+def test_pi_image_workflow_has_cache_fallback():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    assert "scripts/compute_pi_gen_cache_key.sh" in content
+    assert "restore-keys" in content
+    assert "steps.pigen-key.outputs.restore_prefix" in content

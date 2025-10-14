@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-14-pi-image-cache-key-fallback",
+  "date": "2025-10-14",
+  "component": "pi-image workflow",
+  "rootCause": "git ls-remote transiently failed so the pi-image workflow skipped the cache key and aborted early.",
+  "resolution": "Added compute_pi_gen_cache_key.sh to fall back to a stable key and feed restore keys to actions/cache.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "scripts/compute_pi_gen_cache_key.sh",
+    "tests/test_compute_pi_gen_cache_key.py",
+    "tests/test_pi_image_tooling.py"
+  ]
+}
