@@ -116,11 +116,16 @@ jobs:
             ${{ steps.pigen-key.outputs.restore_prefix }}
 
       - name: Load cached pi-gen image
-        if: steps.cache-pigen.outputs.cache-hit == 'true'
-        run: docker load -i ~/cache/pi-gen.tar
+        if: steps.cache-pigen.outputs.cache-hit == 'true' || steps.cache-pigen.outputs.cache-matched-key != ''
+        run: |
+          if [ ! -s "${HOME}/cache/pi-gen.tar" ]; then
+            echo "::error::Cached pi-gen tarball missing at ${HOME}/cache/pi-gen.tar"
+            exit 1
+          fi
+          docker load -i "${HOME}/cache/pi-gen.tar"
 
       - name: Build pi-gen Docker image
-        if: steps.cache-pigen.outputs.cache-hit != 'true'
+        if: steps.cache-pigen.outputs.cache-hit != 'true' && steps.cache-pigen.outputs.cache-matched-key == ''
         run: |
           git clone --depth=1 --branch bookworm https://github.com/RPi-Distro/pi-gen.git ~/pi-gen
           cd ~/pi-gen
@@ -188,7 +193,7 @@ jobs:
           bash scripts/collect_pi_image.sh . ./sugarkube.img.xz
 
       - name: Save pi-gen Docker image
-        if: steps.cache-pigen.outputs.cache-hit != 'true'
+        if: steps.cache-pigen.outputs.cache-hit != 'true' && steps.cache-pigen.outputs.cache-matched-key == ''
         run: |
           mkdir -p ~/cache
           docker image save pi-gen:latest -o ~/cache/pi-gen.tar
