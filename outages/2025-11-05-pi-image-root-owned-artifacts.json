@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-05-pi-image-root-owned-artifacts",
+  "date": "2025-11-05",
+  "component": "pi-image workflow",
+  "rootCause": "build_pi_image.sh runs under sudo and left the generated sugarkube.img.xz and checksum owned by root. The follow-up collect_pi_image.sh step executed as the runner user and failed to remove the root-owned checksum, so workflow_dispatch builds aborted before uploading artifacts.",
+  "resolution": "Introduced scripts/fix_pi_image_permissions.sh and call it from the pi-image workflow to chown deploy/ and the image artifacts back to the runner before collection. Added regression and e2e tests so the workflow keeps invoking the helper and to prove non-root callers can rerun collect_pi_image.sh after the ownership fix.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "scripts/fix_pi_image_permissions.sh",
+    "tests/test_pi_image_tooling.py",
+    "tests/test_fix_pi_image_permissions.py"
+  ]
+}

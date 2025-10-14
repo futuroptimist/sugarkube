@@ -179,6 +179,11 @@ jobs:
             echo "deploy directory not found"
           fi
 
+      - name: Fix permissions on pi-image artifacts
+        run: |
+          sudo TARGET_UID="$(id -u)" TARGET_GID="$(id -g)" \
+            bash scripts/fix_pi_image_permissions.sh
+
       - name: Collect image artifact
         run: |
           bash scripts/collect_pi_image.sh . ./sugarkube.img.xz

@@ -115,6 +115,13 @@ def test_pi_image_workflow_preserves_node_runtime():
     assert "node --version" in content
 
 
+def test_pi_image_workflow_fixes_artifact_permissions():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    assert "fix_pi_image_permissions.sh" in content
+    assert 'TARGET_UID="$(id -u)" TARGET_GID="$(id -g)"' in content
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
