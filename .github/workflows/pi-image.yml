@@ -22,6 +22,8 @@ on:
       - 'scripts/collect_pi_image.sh'
       - 'scripts/build_pi_image.sh'
       - 'scripts/build_pi_image.ps1'
+      - 'scripts/create_build_metadata.py'
+      - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
 
@@ -47,6 +49,9 @@ jobs:
             install -y --no-install-recommends libarchive-tools xz-utils
       - name: Run artifact detection unit tests
         run: bash tests/artifact_detection_test.sh
+
+      - name: Run build metadata smoke test
+        run: bash tests/create_build_metadata_e2e.sh
 
   build:
     # Only run the expensive image build when manually dispatched
