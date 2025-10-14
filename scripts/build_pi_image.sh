@@ -409,7 +409,7 @@ if [ -z "${just_path}" ]; then
   exit 1
 fi
 
-printf '✅ just command verified at %s\n' "${just_path}" | tee -a "${BUILD_LOG}"
+printf '[sugarkube] just command verified at %s\n' "${just_path}" | tee -a "${BUILD_LOG}"
 just_version=$(just --version 2>&1 | head -n1 || true)
 if [ -n "${just_version}" ]; then
   printf '[sugarkube] just version: %s\n' "${just_version}" | tee -a "${BUILD_LOG}"

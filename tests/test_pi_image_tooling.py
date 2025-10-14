@@ -27,7 +27,7 @@ def test_just_installation_script_includes_fallback(tmp_path):
 
     assert 'apt-get "${APT_OPTS[@]}" install -y --no-install-recommends just' in script_text
     assert "https://just.systems/install.sh" in script_text
-    assert "✅ just command verified" in script_text
+    assert "[sugarkube] just command verified" in script_text
     assert "just --version" in script_text
     assert "just --list" in script_text
 
@@ -45,3 +45,10 @@ def test_just_installation_script_includes_fallback(tmp_path):
     profile_text = profile_path.read_text()
     assert "/usr/local/bin" in profile_text
     assert "export PATH" in profile_text
+
+
+def test_pi_image_workflow_checks_for_just_log():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    assert "grep -FH 'just command verified'" in content
+    assert "find deploy -maxdepth 2 -name '*.build.log'" in content

@@ -406,7 +406,7 @@ fi
         'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
         "mkdir -p work/sugarkube\n"
-        "printf '✅ just command verified\\n[sugarkube] just version: stub\\n' > "
+        "printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
         "work/sugarkube/build.log\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
@@ -608,7 +608,7 @@ def test_build_log_written_to_deploy(tmp_path):
     deploy_log = tmp_path / "deploy" / "sugarkube.build.log"
     assert deploy_log.exists()
     log_text = deploy_log.read_text()
-    assert "✅ just command verified" in log_text
+    assert "[sugarkube] just command verified" in log_text
     host_log = tmp_path / "sugarkube.build.log"
     assert host_log.exists()
     assert host_log.read_text() == log_text
