@@ -22,6 +22,7 @@ on:
       - 'scripts/collect_pi_image.sh'
       - 'scripts/build_pi_image.sh'
       - 'scripts/build_pi_image.ps1'
+      - 'scripts/fix_pi_image_permissions.sh'
       - 'scripts/create_build_metadata.py'
       - 'scripts/fix_pi_image_permissions.sh'
       - 'tests/create_build_metadata_e2e.sh'
@@ -53,6 +54,9 @@ jobs:
 
       - name: Run build metadata smoke test
         run: bash tests/create_build_metadata_e2e.sh
+
+      - name: Run fix permissions e2e test
+        run: bash tests/fix_pi_image_permissions_e2e.sh
 
   build:
     # Only run the expensive image build when manually dispatched

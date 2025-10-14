@@ -18,17 +18,21 @@ if [ -z "${TARGET_UID}" ] || [ -z "${TARGET_GID}" ]; then
 fi
 
 declare -a paths=()
+declare -A parent_paths=()
 
 if [ -d deploy ]; then
   paths+=("deploy")
+  parent_paths["."]=1
 fi
 
 while IFS= read -r -d '' file; do
   # Strip leading ./ for nicer logs while keeping relative paths.
   if [[ "${file}" == ./* ]]; then
     paths+=("${file:2}")
+    parent_paths["."]=1
   else
     paths+=("${file}")
+    parent_paths["$(dirname "${file}")"]=1
   fi
 done < <(find . -maxdepth 1 -type f -name 'sugarkube*.img.xz*' -print0)
 
@@ -38,6 +42,15 @@ if [ "${#paths[@]}" -eq 0 ]; then
 fi
 
 printf 'Fixing ownership of:%s\n' "${paths[*]/#/ }"
+
+if [ "${#parent_paths[@]}" -gt 0 ]; then
+  # Ensure the directories containing the artifacts are writable by the caller
+  # so clean-up steps (like `rm -rf`) succeed after we fix the artifacts
+  # themselves.
+  while IFS= read -r parent; do
+    chown "${TARGET_UID}:${TARGET_GID}" "${parent}"
+  done < <(printf '%s\n' "${!parent_paths[@]}" | sort -u)
+fi
 
 if ! chown -R "${TARGET_UID}:${TARGET_GID}" "${paths[@]}" 2>/tmp/fix_pi_image_permissions.err; then
   cat /tmp/fix_pi_image_permissions.err >&2
