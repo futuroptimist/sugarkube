@@ -24,6 +24,7 @@ on:
       - 'scripts/build_pi_image.ps1'
       - 'scripts/fix_pi_image_permissions.sh'
       - 'scripts/create_build_metadata.py'
+      - 'scripts/fix_pi_image_permissions.sh'
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
