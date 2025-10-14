@@ -104,7 +104,7 @@ def test_pi_image_workflow_checks_for_just_log():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     assert "grep -FH 'just command verified'" in content
-    assert "find deploy -maxdepth 2 -name '*.build.log'" in content
+    assert "find deploy -maxdepth 3 -name '*.build.log'" in content
 
 
 def test_pi_image_workflow_preserves_node_runtime():

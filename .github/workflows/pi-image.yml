@@ -142,7 +142,7 @@ jobs:
       - name: pi-image-verify-just
         if: always()
         run: |
-          mapfile -t logs < <(find deploy -maxdepth 2 -name '*.build.log' -print | sort)
+          mapfile -t logs < <(find deploy -maxdepth 3 -name '*.build.log' -print | sort)
           if [ "${#logs[@]}" -eq 0 ]; then
             echo "pi-gen build log missing" >&2
             exit 1
