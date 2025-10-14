@@ -107,16 +107,12 @@ def test_pi_image_workflow_checks_for_just_log():
     assert "find deploy -maxdepth 2 -name '*.build.log'" in content
 
 
-def test_pi_image_workflow_watches_build_scripts():
+def test_pi_image_workflow_preserves_node_runtime():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
-    paths = _extract_pull_request_paths(content)
-
-    assert paths, "pull_request.paths block missing in pi-image workflow"
-    assert "scripts/collect_pi_image.sh" in paths
-    assert "scripts/build_pi_image.sh" in paths
-    assert "scripts/build_pi_image.ps1" in paths
-    assert "tests/**" in paths
+    assert "/opt/hostedtoolcache" not in content
+    assert "Verify Node runtime availability" in content
+    assert "node --version" in content
 
 
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
