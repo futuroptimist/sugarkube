@@ -1006,6 +1006,37 @@ else
   echo "[sugarkube] Build log not found at ${BUILD_LOG_SOURCE}" >&2
 fi
 
+JUST_LOG_MARKER='✅ just command verified'
+if ! grep -Fq "${JUST_LOG_MARKER}" "${BUILD_LOG}"; then
+  stage_work_dir="${PI_GEN_DIR}/work/${IMG_NAME}"
+  stage_logs=()
+  if [ -d "${stage_work_dir}" ]; then
+    while IFS= read -r log_path; do
+      stage_logs+=("${log_path}")
+    done < <(find "${stage_work_dir}" -type f -name '*.log' -print | sort)
+  fi
+
+  for stage_log in "${stage_logs[@]}"; do
+    if grep -Fq "${JUST_LOG_MARKER}" "${stage_log}"; then
+      stage_label="${stage_log#"${PI_GEN_DIR}/"}"
+      if [ "${stage_label}" = "${stage_log}" ]; then
+        stage_label="${stage_log}"
+      fi
+      echo "[sugarkube] Appending stage log ${stage_label} to capture just verification marker"
+      {
+        printf '\n[sugarkube] --- pi-gen stage log: %s ---\n' "${stage_label}"
+        cat "${stage_log}"
+      } >>"${BUILD_LOG}"
+      break
+    fi
+  done
+fi
+
+if ! grep -Fq "${JUST_LOG_MARKER}" "${BUILD_LOG}"; then
+  echo "[sugarkube] just verification marker missing from pi-gen logs" | tee -a "${BUILD_LOG}" >&2
+  exit 1
+fi
+
 REPO_DEPLOY_DIR="${REPO_ROOT}/deploy"
 REPO_DEPLOY_LOG="${REPO_DEPLOY_DIR}/${IMG_NAME}.build.log"
 mkdir -p "${REPO_DEPLOY_DIR}"

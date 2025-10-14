@@ -406,8 +406,21 @@ fi
         'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
         "mkdir -p work/sugarkube\n"
-        "printf '✅ just command verified\\n[sugarkube] just version: stub\\n' > "
-        "work/sugarkube/build.log\n"
+        "stage_log_dir=work/sugarkube/stage2/01-sys-tweaks/03-run-chroot-just\n"
+        "mkdir -p \"${stage_log_dir}\"\n"
+        "stage_log=\"${stage_log_dir}/00-run.log\"\n"
+        "if [ \"${SIMULATE_NO_JUST_LOG:-0}\" -eq 1 ]; then\n"
+        "  printf 'build log without marker\\n' > work/sugarkube/build.log\n"
+        "  printf 'stage log without marker\\n' > \"${stage_log}\"\n"
+        "elif [ \"${SIMULATE_STAGE_LOG_ONLY:-0}\" -eq 1 ]; then\n"
+        "  printf 'build log without marker\\n' > work/sugarkube/build.log\n"
+        "  printf '✅ just command verified\\n' > \"${stage_log}\"\n"
+        "  printf '[sugarkube] just version: stub\\n' >> \"${stage_log}\"\n"
+        "else\n"
+        "  printf '✅ just command verified\\n' > work/sugarkube/build.log\n"
+        "  printf '[sugarkube] just version: stub\\n' >> work/sugarkube/build.log\n"
+        "  : > \"${stage_log}\"\n"
+        "fi\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -612,6 +625,27 @@ def test_build_log_written_to_deploy(tmp_path):
     host_log = tmp_path / "sugarkube.build.log"
     assert host_log.exists()
     assert host_log.read_text() == log_text
+
+
+def test_stage_log_fallback_when_build_log_lacks_marker(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["SIMULATE_STAGE_LOG_ONLY"] = "1"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+
+    deploy_log = tmp_path / "deploy" / "sugarkube.build.log"
+    assert deploy_log.exists()
+    log_text = deploy_log.read_text()
+    assert "pi-gen stage log" in log_text
+    assert "✅ just command verified" in log_text
+
+
+def test_fails_when_just_marker_missing(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["SIMULATE_NO_JUST_LOG"] = "1"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "just verification marker missing" in result.stderr
 
 
 def test_installs_ssd_clone_service(tmp_path):
