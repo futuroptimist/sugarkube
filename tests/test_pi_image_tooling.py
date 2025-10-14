@@ -134,6 +134,17 @@ def test_pi_image_workflow_collects_from_deploy_root():
     assert "bash scripts/collect_pi_image.sh . ./sugarkube.img.xz" not in content
 
 
+def test_pi_image_workflow_covers_preset_and_download_scripts():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    paths = _extract_pull_request_paths(content)
+
+    assert "scripts/download_pi_image.sh" in paths
+    assert "scripts/render_pi_imager_preset.py" in paths
+    assert "tests/render_pi_imager_preset_e2e.sh" in content
+    assert "Run Pi Imager preset e2e test" in content
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
