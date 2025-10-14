@@ -13,11 +13,12 @@ trap cleanup_tmpdirs EXIT
 
 DEPLOY_ROOT="${1:-deploy}"
 OUTPUT_PATH="${2:-sugarkube.img.xz}"
+MAX_SCAN_DEPTH="${MAX_SCAN_DEPTH:-6}"
 
 # Log what's in deploy for debuggability
 echo "==> Scanning '${DEPLOY_ROOT}' for image artifacts"
 if [ -d "${DEPLOY_ROOT}" ]; then
-  find "${DEPLOY_ROOT}" -maxdepth 3 -type f -printf '%p\t%k KB\n' | sort || true
+  find "${DEPLOY_ROOT}" -maxdepth "${MAX_SCAN_DEPTH}" -type f -printf '%p\t%k KB\n' | sort || true
 else
   echo "ERROR: '${DEPLOY_ROOT}' does not exist" >&2
   exit 1
@@ -27,7 +28,7 @@ fi
 _find_first() {
   local pat="$1"
   # Prioritize shallower and lexicographically-stable paths
-  find "${DEPLOY_ROOT}" -maxdepth 3 -type f -name "${pat}" -printf '%d\t%p\n' \
+  find "${DEPLOY_ROOT}" -maxdepth "${MAX_SCAN_DEPTH}" -type f -name "${pat}" -printf '%d\t%p\n' \
     | sort -n | cut -f2 | head -n1
 }
 

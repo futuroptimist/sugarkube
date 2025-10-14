@@ -99,21 +99,31 @@ test -s "${tmp}/foo.img.xz.sha256"
 ( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/foo.img.xz").sha256" >/dev/null )
 verify_checksum_relocation "${tmp}/foo.img.xz"
 
-# Case 6: pi-image workflow log verification handles nested logs
+# Case 6: deeply nested artifact remains discoverable
 rm -rf "${tmp}/deploy"
-mkdir -p "${tmp}/deploy/nested/logs"
-cat >"${tmp}/deploy/nested/logs/sugarkube.build.log" <<'EOF'
+mkdir -p "${tmp}/deploy/depth1/depth2/depth3/depth4/depth5"
+dd if=/dev/zero of="${tmp}/deploy/depth1/depth2/depth3/depth4/depth5/deep.img" bs=1 count=32 status=none
+bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/deep.img.xz"
+test -s "${tmp}/deep.img.xz"
+test -s "${tmp}/deep.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/deep.img.xz").sha256" >/dev/null )
+verify_checksum_relocation "${tmp}/deep.img.xz"
+
+# Case 7: pi-image workflow log verification handles deeply nested logs
+rm -rf "${tmp}/deploy"
+mkdir -p "${tmp}/deploy/nested/extra/depth/more/logs"
+cat >"${tmp}/deploy/nested/extra/depth/more/logs/sugarkube.build.log" <<'EOF'
 [sugarkube] just command verified at /usr/bin/just
 [sugarkube] just version: stub
 EOF
 
-# Sanity check: the old maxdepth=2 search should fail so we know the regression is covered
+# Sanity check: the old maxdepth=5 search should fail so we know the regression is covered
 if ( cd "${tmp}" && bash -euo pipefail -c '
-  mapfile -t logs < <(find deploy -maxdepth 2 -name '\''*.build.log'\'' -print | sort)
+  mapfile -t logs < <(find deploy -maxdepth 5 -name '\''*.build.log'\'' -print | sort)
   [ "${#logs[@]}" -gt 0 ] && exit 0
   exit 1
 ' ); then
-  echo "maxdepth=2 unexpectedly found nested logs" >&2
+  echo "maxdepth=5 unexpectedly found nested logs" >&2
   exit 1
 fi
 
@@ -122,7 +132,7 @@ cat >"${verify_snippet}" <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-mapfile -t logs < <(find deploy -maxdepth 3 -name '*.build.log' -print | sort)
+mapfile -t logs < <(find deploy -maxdepth 6 -name '*.build.log' -print | sort)
 if [ "${#logs[@]}" -eq 0 ]; then
   echo "no build logs discovered" >&2
   exit 1
