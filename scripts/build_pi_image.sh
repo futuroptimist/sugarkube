@@ -103,6 +103,23 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ensure_git_safe_directory() {
+  local repo="$1"
+  # Running as root against a workspace owned by another user (like GitHub's runner)
+  # triggers Git's "dubious ownership" guard unless the path is marked safe.
+  if git config --system --add safe.directory "$repo" >/dev/null 2>&1; then
+    return 0
+  fi
+  if git config --global --add safe.directory "$repo" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+if [ "$(id -u)" -eq 0 ]; then
+  if ! ensure_git_safe_directory "${REPO_ROOT}"; then
+    echo "warning: failed to register ${REPO_ROOT} as a safe Git directory" >&2
+  fi
+fi
 REPO_COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
 REPO_REF="${GITHUB_REF:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || "unknown")}"
 RUNNER_OS_VALUE="${RUNNER_OS:-$(uname -s)}"
