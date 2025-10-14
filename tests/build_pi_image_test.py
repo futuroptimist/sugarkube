@@ -339,7 +339,9 @@ def test_fails_with_insufficient_disk_space(tmp_path):
     assert "Need at least" in result.stderr
 
 
-def _setup_build_env(tmp_path, precompressed: bool = False):
+def _setup_build_env(
+    tmp_path, precompressed: bool = False, nested_log: bool = False
+):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git_args.log"
@@ -407,9 +409,15 @@ fi
         "mkdir -p deploy\n"
         'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
-        "mkdir -p work/sugarkube\n"
-        "printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
+        "if [ \"${PI_GEN_NESTED_BUILD_LOG:-0}\" -eq 1 ]; then\n"
+        "  mkdir -p work/sugarkube/logs/2025-10-31\n"
+        "  printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
+        "work/sugarkube/logs/2025-10-31/build.log\n"
+        "else\n"
+        "  mkdir -p work/sugarkube\n"
+        "  printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
         "work/sugarkube/build.log\n"
+        "fi\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -438,6 +446,8 @@ fi
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["GIT_LOG"] = str(git_log)
+    if nested_log:
+        env["PI_GEN_NESTED_BUILD_LOG"] = "1"
     return env
 
 
@@ -611,6 +621,20 @@ def test_build_log_written_to_deploy(tmp_path):
     assert deploy_log.exists()
     log_text = deploy_log.read_text()
     assert "[sugarkube] just command verified" in log_text
+    host_log = tmp_path / "sugarkube.build.log"
+    assert host_log.exists()
+    assert host_log.read_text() == log_text
+
+
+def test_build_log_handles_nested_layout(tmp_path):
+    env = _setup_build_env(tmp_path, nested_log=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    deploy_log = tmp_path / "deploy" / "sugarkube.build.log"
+    assert deploy_log.exists()
+    log_text = deploy_log.read_text()
+    assert "[sugarkube] just command verified" in log_text
+    assert "logs/2025-10-31/build.log" in log_text
     host_log = tmp_path / "sugarkube.build.log"
     assert host_log.exists()
     assert host_log.read_text() == log_text
