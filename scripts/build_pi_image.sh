@@ -1012,7 +1012,8 @@ sha256sum "${OUT_IMG}" > "${sha256_file}"
 echo "[sugarkube] Image written to ${OUT_IMG}"
 echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"
 
-BUILD_LOG_SOURCE="${PI_GEN_DIR}/work/${IMG_NAME}/build.log"
+BUILD_LOG_SEARCH_ROOT="${PI_GEN_DIR}/work/${IMG_NAME}"
+BUILD_LOG_SOURCE="${BUILD_LOG_SEARCH_ROOT}/build.log"
 if [ -f "${BUILD_LOG_SOURCE}" ]; then
   {
     printf '\n[sugarkube] --- pi-gen build.log ---\n'
@@ -1020,7 +1021,25 @@ if [ -f "${BUILD_LOG_SOURCE}" ]; then
   } >>"${BUILD_LOG}"
   echo "[sugarkube] Build log appended from ${BUILD_LOG_SOURCE}"
 else
-  echo "[sugarkube] Build log not found at ${BUILD_LOG_SOURCE}" >&2
+  nested_logs=()
+  if [ -d "${BUILD_LOG_SEARCH_ROOT}" ]; then
+    while IFS= read -r -d '' candidate; do
+      nested_logs+=("${candidate}")
+    done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 2 -maxdepth 6 \
+      -type f -name 'build.log' -print0 | sort -z)
+  fi
+
+  if [ "${#nested_logs[@]}" -gt 0 ]; then
+    for candidate in "${nested_logs[@]}"; do
+      {
+        printf '\n[sugarkube] --- pi-gen build.log --- (%s)\n' "${candidate}"
+        cat "${candidate}"
+      } >>"${BUILD_LOG}"
+      echo "[sugarkube] Build log appended from ${candidate}"
+    done
+  else
+    echo "[sugarkube] Build log not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+  fi
 fi
 
 REPO_DEPLOY_DIR="${REPO_ROOT}/deploy"
