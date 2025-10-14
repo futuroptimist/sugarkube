@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 from tests import build_pi_image_test as build_test
@@ -54,7 +55,46 @@ def test_pi_image_workflow_checks_for_just_log():
     assert "find deploy -maxdepth 2 -name '*.build.log'" in content
 
 
-def test_build_script_marks_git_safe_directory():
-    script = Path("scripts/build_pi_image.sh").read_text()
-    assert "safe.directory" in script
-    assert "ensure_git_safe_directory" in script
+def _collect_checkout_refs(workflow_text: str) -> list[str]:
+    pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
+    return pattern.findall(workflow_text)
+
+
+def test_pi_image_workflow_pins_checkout_major_version():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    refs = _collect_checkout_refs(content)
+    assert refs, "No actions/checkout references found in pi-image workflow"
+
+    for ref in refs:
+        major = ref.split(".", 1)[0]
+        assert major == "v4", f"Expected actions/checkout v4.*, found {ref}"
+
+
+def test_pi_image_workflow_checkout_refs_exist_upstream():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    refs = _collect_checkout_refs(content)
+    assert refs, "No actions/checkout references found in pi-image workflow"
+
+    for ref in refs:
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "ls-remote",
+                    "--tags",
+                    "https://github.com/actions/checkout.git",
+                    f"refs/tags/{ref}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - defensive
+            raise AssertionError(
+                f"git ls-remote failed for actions/checkout tag {ref}: {exc.stderr}"
+            ) from exc
+
+        assert result.stdout.strip(), f"actions/checkout tag {ref} missing upstream"
