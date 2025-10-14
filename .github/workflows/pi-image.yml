@@ -196,7 +196,7 @@ jobs:
 
       - name: Collect image artifact
         run: |
-          bash scripts/collect_pi_image.sh . ./sugarkube.img.xz
+          bash scripts/collect_pi_image.sh deploy ./sugarkube.img.xz
 
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'

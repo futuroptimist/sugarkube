@@ -127,6 +127,13 @@ def test_pi_image_workflow_fixes_artifact_permissions():
     assert "Run fix permissions e2e test" in content
 
 
+def test_pi_image_workflow_collects_from_deploy_root():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    assert "bash scripts/collect_pi_image.sh deploy ./sugarkube.img.xz" in content
+    assert "bash scripts/collect_pi_image.sh . ./sugarkube.img.xz" not in content
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)

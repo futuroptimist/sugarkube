@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-09-pi-image-collect-root-scan",
+  "date": "2025-11-09",
+  "component": "pi-image workflow",
+  "rootCause": "The workflow invoked scripts/collect_pi_image.sh with '.' as the search root, so stray '*.img' or '*.img.xz' files outside deploy/ were discovered first. The collector then skipped the newly built image, uploading stale or incomplete artifacts and causing manual pi-image builds to fail validation downstream.",
+  "resolution": "Update the workflow to pass deploy/ to scripts/collect_pi_image.sh so only pi-gen outputs are considered, and extend artifact detection tests plus workflow regression checks to guard the behavior.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "tests/artifact_detection_test.sh",
+    "tests/test_pi_image_tooling.py"
+  ]
+}
