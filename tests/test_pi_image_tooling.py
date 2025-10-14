@@ -115,6 +115,13 @@ def test_pi_image_workflow_preserves_node_runtime():
     assert "node --version" in content
 
 
+def test_pi_image_workflow_watches_metadata_artifacts():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    paths = _extract_pull_request_paths(workflow_path.read_text())
+    assert "scripts/create_build_metadata.py" in paths
+    assert "tests/create_build_metadata_e2e.sh" in paths
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
