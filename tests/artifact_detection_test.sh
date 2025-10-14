@@ -144,4 +144,22 @@ EOSH
 chmod +x "${verify_snippet}"
 ( cd "${tmp}" && bash "${verify_snippet}" )
 
+# Case 7: stray artifacts outside deploy should be ignored when scanning deploy/
+rm -rf "${tmp}/deploy"
+mkdir -p "${tmp}/deploy/straycheck"
+printf 'from-deploy' > "${tmp}/deploy/straycheck/quux.img"
+xz -c ${XZ_OPT} "${tmp}/deploy/straycheck/quux.img" > "${tmp}/deploy/straycheck/quux.img.xz"
+rm -f "${tmp}/deploy/straycheck/quux.img"
+printf 'from-root' > "${tmp}/stray.img"
+xz -c ${XZ_OPT} "${tmp}/stray.img" > "${tmp}/stray.img.xz"
+rm -f "${tmp}/stray.img"
+bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out5.img.xz"
+test -s "${tmp}/out5.img.xz"
+test -s "${tmp}/out5.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out5.img.xz").sha256" >/dev/null )
+if [[ "$(xz -dc "${tmp}/out5.img.xz")" != "from-deploy" ]]; then
+  echo "collect_pi_image.sh ignored deploy artifact in favour of stray root artifact" >&2
+  exit 1
+fi
+
 echo "All artifact detection tests passed."
