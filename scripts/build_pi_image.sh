@@ -254,6 +254,8 @@ IMG_NAME="${IMG_NAME:-sugarkube}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}}"
 mkdir -p "${OUTPUT_DIR}"
 OUT_IMG="${OUTPUT_DIR}/${IMG_NAME}.img.xz"
+BUILD_LOG="${OUTPUT_DIR}/${IMG_NAME}.build.log"
+: >"${BUILD_LOG}"
 # Abort to avoid clobbering existing images unless FORCE_OVERWRITE=1
 if [ -e "${OUT_IMG}" ] && [ "${FORCE_OVERWRITE:-0}" -ne 1 ]; then
   echo "Output image already exists: ${OUT_IMG} (set FORCE_OVERWRITE=1 to overwrite)" >&2
@@ -407,10 +409,10 @@ if [ -z "${just_path}" ]; then
   exit 1
 fi
 
-printf '✅ just command verified at %s\n' "${just_path}"
+printf '✅ just command verified at %s\n' "${just_path}" | tee -a "${BUILD_LOG}"
 just_version=$(just --version 2>&1 | head -n1 || true)
 if [ -n "${just_version}" ]; then
-  printf '[sugarkube] just version: %s\n' "${just_version}"
+  printf '[sugarkube] just version: %s\n' "${just_version}" | tee -a "${BUILD_LOG}"
 fi
 
 if [ -f /opt/sugarkube/justfile ]; then
@@ -994,14 +996,23 @@ echo "[sugarkube] Image written to ${OUT_IMG}"
 echo "[sugarkube] SHA256 checksum stored in ${sha256_file}"
 
 BUILD_LOG_SOURCE="${PI_GEN_DIR}/work/${IMG_NAME}/build.log"
-OUT_LOG=""
 if [ -f "${BUILD_LOG_SOURCE}" ]; then
-  OUT_LOG="${OUTPUT_DIR}/${IMG_NAME}.build.log"
-  cp "${BUILD_LOG_SOURCE}" "${OUT_LOG}"
-  echo "[sugarkube] Build log copied to ${OUT_LOG}"
+  {
+    printf '\n[sugarkube] --- pi-gen build.log ---\n'
+    cat "${BUILD_LOG_SOURCE}"
+  } >>"${BUILD_LOG}"
+  echo "[sugarkube] Build log appended from ${BUILD_LOG_SOURCE}"
 else
   echo "[sugarkube] Build log not found at ${BUILD_LOG_SOURCE}" >&2
 fi
+
+REPO_DEPLOY_DIR="${REPO_ROOT}/deploy"
+REPO_DEPLOY_LOG="${REPO_DEPLOY_DIR}/${IMG_NAME}.build.log"
+mkdir -p "${REPO_DEPLOY_DIR}"
+if [ "${REPO_DEPLOY_LOG}" != "${BUILD_LOG}" ]; then
+  cp "${BUILD_LOG}" "${REPO_DEPLOY_LOG}"
+fi
+echo "[sugarkube] Build log available at ${REPO_DEPLOY_LOG}"
 
 METADATA_PATH="${OUT_IMG}.metadata.json"
 STAGE_SUMMARY_PATH="${OUT_IMG}.stage-summary.json"
@@ -1034,9 +1045,7 @@ fi
 if [ -n "${PI_GEN_SOURCE_DIR}" ]; then
   metadata_args+=(--option "pi_gen_source_dir=${PI_GEN_SOURCE_DIR}")
 fi
-if [ -n "${OUT_LOG}" ]; then
-  metadata_args+=(--build-log "${OUT_LOG}")
-fi
+metadata_args+=(--build-log "${BUILD_LOG}")
 metadata_args+=(--stage-summary "${STAGE_SUMMARY_PATH}")
 
 python3 "${REPO_ROOT}/scripts/create_build_metadata.py" "${metadata_args[@]}"
