@@ -340,7 +340,10 @@ def test_fails_with_insufficient_disk_space(tmp_path):
 
 
 def _setup_build_env(
-    tmp_path, precompressed: bool = False, nested_log: bool = False
+    tmp_path,
+    precompressed: bool = False,
+    nested_log: bool = False,
+    compressed_log: bool = False,
 ):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -352,8 +355,20 @@ def _setup_build_env(
     xz = fake_bin / "xz"
     xz.write_text(
         """#!/bin/sh
+set -e
 while [ "${1#-}" != "$1" ]; do shift; done
-cat "$1"
+case "$1" in
+  *.xz)
+    python3 - "$1" <<'PY'
+import lzma, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+sys.stdout.buffer.write(lzma.decompress(path.read_bytes()))
+PY
+    ;;
+  *)
+    cat "$1"
+    ;;
+esac
 """
     )
     xz.chmod(0o755)
@@ -413,10 +428,21 @@ fi
         "  mkdir -p work/sugarkube/logs/2025-10-31\n"
         "  printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
         "work/sugarkube/logs/2025-10-31/build.log\n"
+        "  build_log_path=work/sugarkube/logs/2025-10-31/build.log\n"
         "else\n"
         "  mkdir -p work/sugarkube\n"
         "  printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
         "work/sugarkube/build.log\n"
+        "  build_log_path=work/sugarkube/build.log\n"
+        "fi\n"
+        "if [ \"${PI_GEN_COMPRESSED_BUILD_LOG:-0}\" -eq 1 ]; then\n"
+        "  BUILD_LOG_PATH=\"$build_log_path\" python3 - <<'PY'\n"
+        "import lzma, os, pathlib\n"
+        "path = pathlib.Path(os.environ['BUILD_LOG_PATH'])\n"
+        "data = path.read_bytes()\n"
+        "path.unlink()\n"
+        "path.with_suffix(path.suffix + '.xz').write_bytes(lzma.compress(data))\n"
+        "PY\n"
         "fi\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
@@ -448,6 +474,8 @@ fi
     env["GIT_LOG"] = str(git_log)
     if nested_log:
         env["PI_GEN_NESTED_BUILD_LOG"] = "1"
+    if compressed_log:
+        env["PI_GEN_COMPRESSED_BUILD_LOG"] = "1"
     return env
 
 
@@ -635,6 +663,20 @@ def test_build_log_handles_nested_layout(tmp_path):
     log_text = deploy_log.read_text()
     assert "[sugarkube] just command verified" in log_text
     assert "logs/2025-10-31/build.log" in log_text
+    host_log = tmp_path / "sugarkube.build.log"
+    assert host_log.exists()
+    assert host_log.read_text() == log_text
+
+
+def test_build_log_handles_compressed_logs(tmp_path):
+    env = _setup_build_env(tmp_path, compressed_log=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    deploy_log = tmp_path / "deploy" / "sugarkube.build.log"
+    assert deploy_log.exists()
+    log_text = deploy_log.read_text()
+    assert "[sugarkube] just command verified" in log_text
+    assert "build.log.xz" in log_text
     host_log = tmp_path / "sugarkube.build.log"
     assert host_log.exists()
     assert host_log.read_text() == log_text
