@@ -23,6 +23,7 @@ rm -f "${tmp}/deploy/nested/foo.img"
 bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out1.img.xz"
 test -s "${tmp}/out1.img.xz"
 test -s "${tmp}/out1.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out1.img.xz").sha256" >/dev/null )
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -36,6 +37,7 @@ rm -f "${tmp}/deploy/zipcase/bar.img"
 bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out2.img.xz"
 test -s "${tmp}/out2.img.xz"
 test -s "${tmp}/out2.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out2.img.xz").sha256" >/dev/null )
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -46,6 +48,7 @@ dd if=/dev/zero of="${tmp}/deploy/rawcase/baz.img" bs=1 count=16 status=none
 bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out3.img.xz"
 test -s "${tmp}/out3.img.xz"
 test -s "${tmp}/out3.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out3.img.xz").sha256" >/dev/null )
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -58,6 +61,7 @@ rm -f "${tmp}/deploy/gzcase/qux.img"
 bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out4.img.xz"
 test -s "${tmp}/out4.img.xz"
 test -s "${tmp}/out4.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/out4.img.xz").sha256" >/dev/null )
 
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
@@ -69,5 +73,6 @@ rm -f "${tmp}/foo.img"
 bash "${SCRIPT}" "${tmp}" "${tmp}/foo.img.xz"
 test -s "${tmp}/foo.img.xz"
 test -s "${tmp}/foo.img.xz.sha256"
+( cd "${tmp}" && sha256sum -c "$(basename "${tmp}/foo.img.xz").sha256" >/dev/null )
 
 echo "All artifact detection tests passed."

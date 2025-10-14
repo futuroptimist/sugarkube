@@ -53,5 +53,13 @@ def test_collect_cleans_tmpdir(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert out_img.exists()
+    subprocess.run(
+        ["sha256sum", "-c", out_img.name + ".sha256"],
+        check=True,
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     # After the script completes, TMPDIR should be empty
     assert not any(tmpdir.iterdir())
