@@ -104,7 +104,7 @@ def test_pi_image_workflow_checks_for_just_log():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     assert "grep -FH 'just command verified'" in content
-    assert "find deploy -maxdepth 2 -name '*.build.log'" in content
+    assert "find deploy -maxdepth 3 -name '*.build.log'" in content
 
 
 def test_pi_image_workflow_preserves_node_runtime():
@@ -120,10 +120,18 @@ def test_pi_image_workflow_fixes_artifact_permissions():
     content = workflow_path.read_text()
     assert "fix_pi_image_permissions.sh" in content
     assert 'TARGET_UID="$(id -u)" TARGET_GID="$(id -g)"' in content
+    paths = _extract_pull_request_paths(content)
+    assert "scripts/create_build_metadata.py" in paths
+    assert "tests/create_build_metadata_e2e.sh" in paths
 
 
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
+    return pattern.findall(workflow_text)
+
+
+def _collect_action_refs(workflow_text: str, action: str) -> list[str]:
+    pattern = re.compile(rf"uses:\s*{re.escape(action)}@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
 
 
@@ -165,3 +173,65 @@ def test_pi_image_workflow_checkout_refs_exist_upstream():
             ) from exc
 
         assert result.stdout.strip(), f"actions/checkout tag {ref} missing upstream"
+
+
+def test_pi_image_workflow_pins_cache_action_version():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    refs = _collect_action_refs(content, "actions/cache")
+    assert refs, "actions/cache reference missing from pi-image workflow"
+    assert all(ref == "v4.3.0" for ref in refs), refs
+
+
+def test_pi_image_workflow_cache_refs_exist_upstream():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    refs = _collect_action_refs(content, "actions/cache")
+    assert refs, "actions/cache reference missing from pi-image workflow"
+
+    for ref in refs:
+        result = subprocess.run(
+            [
+                "git",
+                "ls-remote",
+                "--tags",
+                "https://github.com/actions/cache.git",
+                f"refs/tags/{ref}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.stdout.strip(), f"actions/cache tag {ref} missing upstream"
+
+
+def test_pi_image_workflow_pins_upload_artifact_version():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    refs = _collect_action_refs(content, "actions/upload-artifact")
+    assert refs, "actions/upload-artifact reference missing from pi-image workflow"
+    assert all(ref == "v4.6.2" for ref in refs), refs
+
+
+def test_pi_image_workflow_upload_artifact_refs_exist_upstream():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    refs = _collect_action_refs(content, "actions/upload-artifact")
+    assert refs, "actions/upload-artifact reference missing from pi-image workflow"
+
+    for ref in refs:
+        result = subprocess.run(
+            [
+                "git",
+                "ls-remote",
+                "--tags",
+                "https://github.com/actions/upload-artifact.git",
+                f"refs/tags/{ref}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.stdout.strip(), f"actions/upload-artifact tag {ref} missing upstream"

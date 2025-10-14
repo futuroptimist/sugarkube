@@ -22,6 +22,8 @@ on:
       - 'scripts/collect_pi_image.sh'
       - 'scripts/build_pi_image.sh'
       - 'scripts/build_pi_image.ps1'
+      - 'scripts/create_build_metadata.py'
+      - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
 
@@ -47,6 +49,9 @@ jobs:
             install -y --no-install-recommends libarchive-tools xz-utils
       - name: Run artifact detection unit tests
         run: bash tests/artifact_detection_test.sh
+
+      - name: Run build metadata smoke test
+        run: bash tests/create_build_metadata_e2e.sh
 
   build:
     # Only run the expensive image build when manually dispatched
@@ -106,7 +111,7 @@ jobs:
 
       - name: Restore pi-gen Docker image
         id: cache-pigen
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: ~/cache/pi-gen.tar
           key: ${{ steps.pigen-key.outputs.key }}
@@ -142,7 +147,7 @@ jobs:
       - name: pi-image-verify-just
         if: always()
         run: |
-          mapfile -t logs < <(find deploy -maxdepth 2 -name '*.build.log' -print | sort)
+          mapfile -t logs < <(find deploy -maxdepth 3 -name '*.build.log' -print | sort)
           if [ "${#logs[@]}" -eq 0 ]; then
             echo "pi-gen build log missing" >&2
             exit 1
@@ -195,7 +200,7 @@ jobs:
           docker image save pi-gen:latest -o ~/cache/pi-gen.tar
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sugarkube-img
           path: |
