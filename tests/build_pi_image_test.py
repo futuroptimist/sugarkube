@@ -694,6 +694,65 @@ def test_build_log_written_to_deploy(tmp_path):
     assert host_log.read_text() == log_text
 
 
+def test_build_copies_artifacts_to_deploy(tmp_path):
+    env = _setup_build_env(tmp_path)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+
+    deploy_dir = tmp_path / "deploy"
+    image_path = tmp_path / "sugarkube.img.xz"
+    deploy_image = deploy_dir / "sugarkube.img.xz"
+    assert deploy_image.exists()
+    assert image_path.exists()
+    assert deploy_image.read_bytes() == image_path.read_bytes()
+
+    checksum_path = tmp_path / "sugarkube.img.xz.sha256"
+    deploy_checksum = deploy_dir / "sugarkube.img.xz.sha256"
+    assert deploy_checksum.exists()
+    assert checksum_path.exists()
+    assert deploy_checksum.read_text() == checksum_path.read_text()
+
+    metadata_path = tmp_path / "sugarkube.img.xz.metadata.json"
+    stage_summary_path = tmp_path / "sugarkube.img.xz.stage-summary.json"
+    deploy_metadata = deploy_dir / "sugarkube.img.xz.metadata.json"
+    deploy_stage_summary = deploy_dir / "sugarkube.img.xz.stage-summary.json"
+
+    assert metadata_path.exists()
+    assert stage_summary_path.exists()
+    assert deploy_metadata.exists()
+    assert deploy_stage_summary.exists()
+    assert deploy_metadata.read_text() == metadata_path.read_text()
+    assert deploy_stage_summary.read_text() == stage_summary_path.read_text()
+
+
+def test_repo_collect_step_finds_deploy_artifacts(tmp_path):
+    env = _setup_build_env(tmp_path)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+
+    deploy_dir = tmp_path / "deploy"
+    assert (deploy_dir / "sugarkube.img.xz").exists()
+
+    # Remove the host copies to ensure collect_pi_image.sh relies on deploy/
+    (tmp_path / "sugarkube.img.xz").unlink()
+    (tmp_path / "sugarkube.img.xz.sha256").unlink()
+
+    collect_script = Path(__file__).resolve().parents[1] / "scripts" / "collect_pi_image.sh"
+    result = subprocess.run(
+        ["/bin/bash", str(collect_script), "deploy", "./sugarkube.img.xz"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"], "MAX_SCAN_DEPTH": "6"},
+    )
+    assert result.returncode == 0, result.stderr
+
+    rebuilt = tmp_path / "sugarkube.img.xz"
+    rebuilt_sha = tmp_path / "sugarkube.img.xz.sha256"
+    assert rebuilt.exists()
+    assert rebuilt_sha.exists()
+
+
 def test_build_log_handles_nested_layout(tmp_path):
     env = _setup_build_env(tmp_path, nested_log=True)
     result, _ = _run_build_script(tmp_path, env)
