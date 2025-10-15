@@ -14,18 +14,31 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 STATE_DIR = Path("/var/log/sugarkube")
 STATE_FILE = STATE_DIR / "ssd-clone.state.json"
 DONE_FILE = STATE_DIR / "ssd-clone.done"
+ERROR_LOG = STATE_DIR / "ssd-clone.error.log"
 MOUNT_ROOT = Path("/mnt/ssd-clone")
 ENV_TARGET = "SUGARKUBE_SSD_CLONE_TARGET"
 ENV_WAIT = "SUGARKUBE_SSD_CLONE_WAIT_SECS"
 ENV_POLL = "SUGARKUBE_SSD_CLONE_POLL_SECS"
 ENV_EXTRA_ARGS = "SUGARKUBE_SSD_CLONE_EXTRA_ARGS"
+ENV_BOOT_MOUNT = "SUGARKUBE_BOOT_MOUNT"
 DEFAULT_WAIT_SECS = 900
 DEFAULT_POLL_SECS = 10
+FAT_LABEL_MAX = 11
+EXT_LABEL_MAX = 16
+
+STEP_ORDER = [
+    "partition",
+    "format",
+    "sync_boot",
+    "sync_root",
+    "update_configs",
+    "finalize",
+]
 
 
 class CommandError(RuntimeError):
@@ -40,6 +53,15 @@ class CloneContext:
     dry_run: bool
     verbose: bool
     resume: bool
+    assume_yes: bool
+    skip_partition: bool
+    skip_format: bool
+    skip_to: Optional[str]
+    preserve_labels: bool
+    refresh_uuid: bool
+    boot_label: Optional[str]
+    root_label: Optional[str]
+    boot_mount: str
     state_file: Path = STATE_FILE
     state: Dict[str, object] = field(default_factory=dict)
     source_root: Optional[str] = None
@@ -47,10 +69,37 @@ class CloneContext:
     target_root: Optional[str] = None
     target_boot: Optional[str] = None
     mount_root: Optional[Path] = None
+    mounted_paths: List[Path] = field(default_factory=list)
+    start_time: float = field(default_factory=time.monotonic)
 
     def log(self, message: str) -> None:
         prefix = "[DRY-RUN] " if self.dry_run else ""
         print(f"{prefix}{message}")
+
+    def is_step_completed(self, name: str) -> bool:
+        completed = self.state.get("completed", {})
+        return bool(completed.get(name))
+
+    def mark_step_completed(self, name: str) -> None:
+        if self.dry_run:
+            return
+        completed = self.state.setdefault("completed", {})
+        completed[name] = True
+        save_state(self)
+
+    def register_mount(self, mountpoint: Path) -> None:
+        if self.dry_run:
+            return
+        if mountpoint not in self.mounted_paths:
+            self.mounted_paths.append(mountpoint)
+
+    def unregister_mount(self, mountpoint: Path) -> None:
+        if self.dry_run:
+            return
+        try:
+            self.mounted_paths.remove(mountpoint)
+        except ValueError:
+            pass
 
 
 @dataclass
@@ -59,17 +108,51 @@ class Step:
 
     name: str
     description: str
+    validator: Optional[Callable[[CloneContext], bool]] = None
 
     def run(self, ctx: CloneContext, func) -> None:
-        if ctx.state.get("completed", {}).get(self.name):
-            ctx.log(f"Skipping {self.name} (already completed).")
+        if should_skip_step(ctx, self.name):
+            ctx.log(f"Skipping {self.name} (requested).")
             return
+        if ctx.is_step_completed(self.name):
+            if self.validator and not self.validator(ctx):
+                ctx.log(
+                    f"State indicates {self.name} completed but verification failed; re-running."
+                )
+            else:
+                ctx.log(f"Skipping {self.name} (already completed).")
+                return
         ctx.log(f"==> {self.description}")
         func(ctx)
-        if not ctx.dry_run:
-            completed = ctx.state.setdefault("completed", {})
-            completed[self.name] = True
-            save_state(ctx)
+        ctx.mark_step_completed(self.name)
+
+
+def normalize_skip_to(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    mapping = {
+        "sync": "sync_boot",
+        "update": "update_configs",
+    }
+    normalized = mapping.get(value, value)
+    if normalized not in STEP_ORDER:
+        raise SystemExit(f"Unsupported --skip-to value: {value}")
+    return normalized
+
+
+def should_skip_step(ctx: CloneContext, step_name: str) -> bool:
+    if step_name == "partition" and ctx.skip_partition:
+        return True
+    if step_name == "format" and ctx.skip_format:
+        return True
+    if ctx.skip_to is None:
+        return False
+    try:
+        start_index = STEP_ORDER.index(ctx.skip_to)
+        step_index = STEP_ORDER.index(step_name)
+    except ValueError:
+        return False
+    return step_index < start_index
 
 
 def run_command(
@@ -143,6 +226,50 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=MOUNT_ROOT,
         help="Directory used to mount target partitions during sync (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--boot-mount",
+        help=(
+            "Source boot mountpoint. Overrides auto-detection and " f"{ENV_BOOT_MOUNT} if supplied."
+        ),
+    )
+    parser.add_argument(
+        "--boot-label",
+        help="Label applied to the FAT boot partition (defaults to derived value).",
+    )
+    parser.add_argument(
+        "--root-label",
+        help="Label applied to the root filesystem (defaults to source label).",
+    )
+    parser.add_argument(
+        "--skip-format",
+        action="store_true",
+        help="Skip formatting target partitions (expects existing filesystems).",
+    )
+    parser.add_argument(
+        "--skip-partition",
+        action="store_true",
+        help="Skip partition table replication and use the current target layout.",
+    )
+    parser.add_argument(
+        "--skip-to",
+        choices=["partition", "format", "sync", "sync_boot", "sync_root", "update", "finalize"],
+        help="Skip all steps prior to the chosen phase ('sync' starts at boot sync).",
+    )
+    parser.add_argument(
+        "--preserve-labels",
+        action="store_true",
+        help="Avoid rewriting filesystem labels when the target already matches.",
+    )
+    parser.add_argument(
+        "--refresh-uuid",
+        action="store_true",
+        help="Generate new disk identifiers and PARTUUIDs on the target device.",
+    )
+    parser.add_argument(
+        "--assume-yes",
+        action="store_true",
+        help="Bypass the destructive action confirmation prompt.",
     )
     parser.add_argument(
         "--verbose",
@@ -234,6 +361,29 @@ def resolve_env_target() -> Optional[str]:
             f"{ENV_TARGET} points at the source disk ({source_disk}); choose another device."
         )
     return target
+
+
+def determine_boot_mount(cli_value: Optional[str]) -> str:
+    if cli_value:
+        return cli_value
+    env_value = os.environ.get(ENV_BOOT_MOUNT)
+    if env_value:
+        return env_value
+    candidates = ["/boot/firmware", "/boot"]
+    for candidate in candidates:
+        result = subprocess.run(
+            ["findmnt", "-no", "TARGET", candidate],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        if os.path.ismount(candidate):
+            return candidate
+    raise SystemExit(
+        "Unable to determine the boot mountpoint. Specify --boot-mount or set " f"{ENV_BOOT_MOUNT}."
+    )
 
 
 def _pick_best_candidate(
@@ -333,6 +483,10 @@ def save_state(ctx: CloneContext) -> None:
 
 def ensure_state_ready(ctx: CloneContext) -> None:
     if ctx.resume:
+        if not ctx.state_file.exists():
+            print("Warning: resume unavailable (state file missing); continuing fresh.")
+            ctx.state = {}
+            return
         load_state(ctx)
         recorded_target = ctx.state.get("target")
         if recorded_target and recorded_target != ctx.target_disk:
@@ -420,13 +574,96 @@ def ensure_mount_point(path: Path) -> None:
 def mount_partition(ctx: CloneContext, device: str, mountpoint: Path) -> None:
     ensure_mount_point(mountpoint)
     run_command(ctx, ["mount", device, str(mountpoint)])
+    ctx.register_mount(mountpoint)
 
 
 def unmount_partition(ctx: CloneContext, mountpoint: Path) -> None:
-    run_command(ctx, ["umount", str(mountpoint)])
+    try:
+        run_command(ctx, ["umount", str(mountpoint)])
+    finally:
+        ctx.unregister_mount(mountpoint)
+
+
+def cleanup_mounts(ctx: Optional[CloneContext]) -> None:
+    if ctx is None:
+        return
+    for mountpoint in reversed(list(ctx.mounted_paths)):
+        subprocess.run(["umount", str(mountpoint)], check=False, capture_output=True)
+        ctx.unregister_mount(mountpoint)
+
+
+def partition_exists(device: str) -> bool:
+    return Path(device).exists()
+
+
+def canonical_fs(value: str) -> str:
+    normalized = value.lower()
+    if normalized in {"fat", "fat32"}:
+        return "vfat"
+    return normalized
+
+
+def filesystem_matches(device: str, expected_fs: str) -> bool:
+    if not partition_exists(device):
+        return False
+    result = subprocess.run(
+        ["lsblk", "-no", "FSTYPE", device],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    actual = (result.stdout or "").strip()
+    if not actual:
+        return False
+    return canonical_fs(actual) == canonical_fs(expected_fs)
+
+
+def read_label(device: str) -> Optional[str]:
+    if not partition_exists(device):
+        return None
+    result = subprocess.run(
+        ["blkid", "-s", "LABEL", "-o", "value", device],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    label = (result.stdout or "").strip()
+    return label or None
+
+
+def labels_match(device: str, expected: Optional[str], *, allow_missing: bool = False) -> bool:
+    if expected is None:
+        return True
+    actual = read_label(device)
+    if actual is None:
+        return allow_missing
+    return actual == expected
+
+
+def sanitize_fat_label(label: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9 _-]", "_", label or "")
+    cleaned = cleaned.upper().strip()
+    if len(cleaned) > FAT_LABEL_MAX:
+        cleaned = cleaned[:FAT_LABEL_MAX]
+    return cleaned or "SUGARKUBE"
+
+
+def clamp_ext_label(label: str) -> str:
+    if not label:
+        return "sugarkube-root"
+    if len(label) > EXT_LABEL_MAX:
+        return label[:EXT_LABEL_MAX]
+    return label
 
 
 def replicate_partition_table(ctx: CloneContext) -> None:
+    if ctx.skip_partition:
+        ctx.log("Partition replication skipped via --skip-partition.")
+        return
     source_disk = ctx.state["source_disk"]
     dump = subprocess.run(
         ["sfdisk", "--dump", source_disk],
@@ -439,7 +676,8 @@ def replicate_partition_table(ctx: CloneContext) -> None:
     ctx.log(f"Replicating partition table from {source_disk} to {ctx.target_disk}")
     run_command(ctx, ["sgdisk", "--zap-all", ctx.target_disk])
     run_command(ctx, ["sfdisk", ctx.target_disk], input_text=dump.stdout)
-    randomize_disk_identifiers(ctx)
+    if ctx.refresh_uuid:
+        randomize_disk_identifiers(ctx)
     run_command(ctx, ["partprobe", ctx.target_disk])
 
 
@@ -460,14 +698,51 @@ def format_partitions(ctx: CloneContext) -> None:
     root_fs = ctx.state["source_root_fs"].lower()
     boot_partition = compose_partition(ctx.target_disk, ctx.state["partition_suffix_boot"])
     root_partition = compose_partition(ctx.target_disk, ctx.state["partition_suffix_root"])
+    ctx.target_boot = boot_partition
+    ctx.target_root = root_partition
+    if ctx.skip_format:
+        ctx.log("Formatting skipped via --skip-format.")
+        return
     if boot_fs not in {"vfat", "fat32", "fat"}:
         raise SystemExit(f"Unsupported boot filesystem {boot_fs}")
     if root_fs not in {"ext4", "ext3", "ext2"}:
         raise SystemExit(f"Unsupported root filesystem {root_fs}")
-    run_command(ctx, ["mkfs.vfat", "-F", "32", "-n", "SUGARKUBE_BOOT", boot_partition])
-    run_command(ctx, ["mkfs.ext4", "-F", "-L", "sugarkube-root", root_partition])
-    ctx.target_boot = boot_partition
-    ctx.target_root = root_partition
+    existing_boot_label = read_label(boot_partition)
+    boot_ready = filesystem_matches(boot_partition, "vfat") and (
+        ctx.preserve_labels
+        or labels_match(
+            boot_partition,
+            ctx.boot_label or ctx.state.get("source_boot_label"),
+            allow_missing=True,
+        )
+    )
+    if boot_ready:
+        ctx.log("Boot partition already formatted with compatible filesystem; skipping mkfs.")
+        if existing_boot_label:
+            ctx.state["target_boot_label"] = existing_boot_label
+    else:
+        label = sanitize_fat_label(
+            ctx.boot_label or ctx.state.get("source_boot_label") or "SUGARKUBE"
+        )
+        if ctx.preserve_labels:
+            run_command(ctx, ["mkfs.vfat", "-F", "32", boot_partition])
+        else:
+            run_command(ctx, ["mkfs.vfat", "-F", "32", "-n", label, boot_partition])
+        ctx.state["target_boot_label"] = label
+    existing_root_label = read_label(root_partition)
+    target_root_label = clamp_ext_label(
+        ctx.root_label or ctx.state.get("source_root_label") or "sugarkube-root"
+    )
+    root_ready = filesystem_matches(root_partition, root_fs) and (
+        ctx.preserve_labels or labels_match(root_partition, target_root_label, allow_missing=True)
+    )
+    if root_ready:
+        ctx.log("Root partition already formatted with compatible filesystem; skipping mkfs.")
+        if existing_root_label:
+            ctx.state["target_root_label"] = existing_root_label
+        return
+    run_command(ctx, ["mkfs.ext4", "-F", "-L", target_root_label, root_partition])
+    ctx.state["target_root_label"] = target_root_label
 
 
 def sync_boot(ctx: CloneContext) -> None:
@@ -478,6 +753,9 @@ def sync_boot(ctx: CloneContext) -> None:
     ensure_mount_point(target_mount)
     mount_partition(ctx, boot_partition, target_mount)
     try:
+        source_boot = os.path.abspath(ctx.boot_mount)
+        if not source_boot.endswith("/"):
+            source_boot = f"{source_boot}/"
         rsync_args = [
             "rsync",
             "-aHAX",
@@ -485,7 +763,7 @@ def sync_boot(ctx: CloneContext) -> None:
             "--partial",
             "--delete",
             "--info=progress2",
-            "/boot/",
+            source_boot,
             f"{target_mount}/",
         ]
         if ctx.dry_run:
@@ -588,11 +866,12 @@ def finalize(ctx: CloneContext) -> None:
     ctx.state.setdefault("completed", {})
     ctx.state["completed"]["finalize"] = True
     save_state(ctx)
+    emit_summary(ctx)
 
 
 def gather_source_metadata(ctx: CloneContext) -> None:
     source_root = resolve_mount_device("/")
-    source_boot = resolve_mount_device("/boot")
+    source_boot = resolve_mount_device(ctx.boot_mount)
     ctx.source_root = source_root
     ctx.source_boot = source_boot
     source_disk = os.path.realpath(parent_disk(source_root))
@@ -608,10 +887,112 @@ def gather_source_metadata(ctx: CloneContext) -> None:
             "source_boot_partuuid": get_partuuid(source_boot),
             "source_boot_fs": detect_filesystem(source_boot),
             "source_root_fs": detect_filesystem(source_root),
+            "source_boot_label": read_label(source_boot),
+            "source_root_label": read_label(source_root),
+            "source_size_bytes": device_size_bytes(source_disk),
         }
     )
     if not ctx.dry_run:
         save_state(ctx)
+
+
+def prepare_labels(ctx: CloneContext) -> None:
+    desired_boot = ctx.boot_label or ctx.state.get("source_boot_label") or "SUGARKUBE"
+    sanitized_boot = sanitize_fat_label(desired_boot)
+    if sanitized_boot != desired_boot:
+        ctx.log(f"Boot label adjusted to {sanitized_boot} (from {desired_boot}).")
+    ctx.boot_label = sanitized_boot
+    desired_root = ctx.root_label or ctx.state.get("source_root_label") or "sugarkube-root"
+    clamped_root = clamp_ext_label(desired_root)
+    if clamped_root != desired_root:
+        ctx.log(f"Root label adjusted to {clamped_root} (from {desired_root}).")
+    ctx.root_label = clamped_root
+
+
+def confirm_destruction(ctx: CloneContext) -> None:
+    if ctx.dry_run:
+        return
+    if ctx.assume_yes:
+        ctx.log("Assuming confirmation due to --assume-yes.")
+        return
+    prompt = (
+        f"About to clone from {ctx.state.get('source_disk')} to {ctx.target_disk}. "
+        "All data on the target will be erased. Continue? [y/N]: "
+    )
+    try:
+        response = input(prompt)
+    except EOFError:
+        raise SystemExit("Clone aborted (no confirmation input).") from None
+    if response.strip().lower() not in {"y", "yes"}:
+        raise SystemExit("Clone aborted by user.")
+
+
+def validate_partitions_present(ctx: CloneContext) -> bool:
+    boot_partition = compose_partition(ctx.target_disk, ctx.state["partition_suffix_boot"])
+    root_partition = compose_partition(ctx.target_disk, ctx.state["partition_suffix_root"])
+    return partition_exists(boot_partition) and partition_exists(root_partition)
+
+
+def validate_format_matches(ctx: CloneContext) -> bool:
+    boot_partition = compose_partition(ctx.target_disk, ctx.state["partition_suffix_boot"])
+    root_partition = compose_partition(ctx.target_disk, ctx.state["partition_suffix_root"])
+    if not filesystem_matches(boot_partition, ctx.state["source_boot_fs"]):
+        return False
+    if not filesystem_matches(root_partition, ctx.state["source_root_fs"]):
+        return False
+    if ctx.preserve_labels:
+        return True
+    if not labels_match(boot_partition, ctx.boot_label, allow_missing=True):
+        return False
+    if not labels_match(root_partition, ctx.root_label, allow_missing=True):
+        return False
+    return True
+
+
+def emit_summary(ctx: CloneContext) -> None:
+    elapsed = time.monotonic() - ctx.start_time
+    size_bytes = ctx.state.get("source_size_bytes")
+    if size_bytes:
+        size_str = f"{size_bytes} bytes ({size_bytes / (1024**3):.2f} GiB)"
+    else:
+        size_str = "unknown"
+    ctx.log("Clone summary:")
+    ctx.log(f"  Source disk: {ctx.state.get('source_disk', 'unknown')}")
+    ctx.log(f"  Target disk: {ctx.target_disk}")
+    ctx.log(f"  Boot mount: {ctx.boot_mount}")
+    ctx.log(f"  Target mount root: {ctx.mount_root}")
+    ctx.log(f"  Copied size: {size_str}")
+    ctx.log(f"  Elapsed time: {elapsed:.1f} seconds")
+    boot_uuid = ctx.state.get("target_boot_partuuid")
+    root_uuid = ctx.state.get("target_root_partuuid")
+    if boot_uuid:
+        ctx.log(f"  Boot PARTUUID: {boot_uuid}")
+    if root_uuid:
+        ctx.log(f"  Root PARTUUID: {root_uuid}")
+    boot_label = ctx.state.get("target_boot_label") or ctx.boot_label
+    root_label = ctx.state.get("target_root_label") or ctx.root_label
+    if boot_label:
+        ctx.log(f"  Boot label: {boot_label}")
+    if root_label:
+        ctx.log(f"  Root label: {root_label}")
+
+
+def handle_failure(ctx: Optional[CloneContext], error: BaseException) -> None:
+    cleanup_mounts(ctx)
+    if ctx is None or ctx.dry_run:
+        return
+    if ctx.state_file.exists():
+        ctx.state_file.unlink(missing_ok=True)
+    if DONE_FILE.exists():
+        DONE_FILE.unlink(missing_ok=True)
+    ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S%z", time.localtime())
+    with ERROR_LOG.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{timestamp}] Clone failure: {error}\n")
+        handle.write(
+            "Hint: ensure target partitions are unmounted, then rerun with --resume or remove the "
+            "state file.\n"
+        )
 
 
 def main() -> None:
@@ -621,11 +1002,21 @@ def main() -> None:
         target_disk = auto_select_target()
     else:
         target_disk = args.target
+    boot_mount = determine_boot_mount(args.boot_mount)
     ctx = CloneContext(
         target_disk=os.path.realpath(target_disk),
         dry_run=args.dry_run,
         verbose=args.verbose,
         resume=args.resume,
+        assume_yes=args.assume_yes,
+        skip_partition=args.skip_partition,
+        skip_format=args.skip_format,
+        skip_to=normalize_skip_to(args.skip_to),
+        preserve_labels=args.preserve_labels,
+        refresh_uuid=args.refresh_uuid,
+        boot_label=args.boot_label,
+        root_label=args.root_label,
+        boot_mount=boot_mount,
         state_file=args.state_file,
     )
     ctx.mount_root = args.mount_root
@@ -634,6 +1025,12 @@ def main() -> None:
         raise SystemExit(f"Target device {ctx.target_disk} does not exist.")
     ensure_state_ready(ctx)
     gather_source_metadata(ctx)
+    prepare_labels(ctx)
+    confirm_destruction(ctx)
+    validators = {
+        "partition": validate_partitions_present,
+        "format": validate_format_matches,
+    }
     steps = {
         "partition": replicate_partition_table,
         "format": format_partitions,
@@ -642,21 +1039,28 @@ def main() -> None:
         "update_configs": update_configs,
         "finalize": finalize,
     }
-    for step in [
-        Step("partition", "Replicating partition table"),
-        Step("format", "Formatting target partitions"),
-        Step("sync_boot", "Synchronizing boot partition"),
-        Step("sync_root", "Synchronizing root filesystem"),
-        Step("update_configs", "Updating cmdline.txt and fstab"),
-        Step("finalize", "Writing completion marker"),
-    ]:
-        step.run(ctx, steps[step.name])
-    ctx.log("All steps complete. Reboot once validation succeeds.")
+    try:
+        for step in [
+            Step("partition", "Replicating partition table", validators.get("partition")),
+            Step("format", "Formatting target partitions", validators.get("format")),
+            Step("sync_boot", "Synchronizing boot partition"),
+            Step("sync_root", "Synchronizing root filesystem"),
+            Step("update_configs", "Updating cmdline.txt and fstab"),
+            Step("finalize", "Writing completion marker"),
+        ]:
+            step.run(ctx, steps[step.name])
+        ctx.log("All steps complete. Reboot once validation succeeds.")
+    except Exception as error:
+        handle_failure(ctx, error)
+        raise
 
 
 if __name__ == "__main__":
     try:
         main()
     except CommandError as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as error:  # pragma: no cover - defensive cleanup
         print(str(error), file=sys.stderr)
         raise SystemExit(1)

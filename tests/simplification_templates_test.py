@@ -8,7 +8,8 @@ def test_simplification_templates_exist():
     assert legacy_base.is_dir(), "docs/templates/simplification directory missing"
 
     prompt_templates = {
-        legacy_base / "onboarding-update.md": [
+        legacy_base
+        / "onboarding-update.md": [
             "# Onboarding Update Template",
             "## Goals",
             "## Required Artifacts",
@@ -26,7 +27,8 @@ def test_simplification_templates_exist():
             "## Proposed Changes",
             "## Verification",
         ],
-        legacy_base / "simplification-sprint.md": [
+        legacy_base
+        / "simplification-sprint.md": [
             "# Simplification Sprint Template",
             "## Scope",
             "## Constraints",
@@ -38,9 +40,7 @@ def test_simplification_templates_exist():
         assert path.is_file(), f"Missing simplification template: {path.name}"
         content = path.read_text(encoding="utf-8")
         for marker in markers:
-            assert (
-                marker in content
-            ), f"Template {path.name} missing section heading: {marker}"
+            assert marker in content, f"Template {path.name} missing section heading: {marker}"
 
     readme = legacy_base / "README.md"
     assert readme.is_file(), "Missing simplification templates README"
@@ -51,6 +51,4 @@ def test_simplification_templates_exist():
         "docs/prompts/codex/templates/simplification/refresh.md",
     }
     for expected in expected_references:
-        assert (
-            expected in readme_text
-        ), f"README missing reference to {expected}"
+        assert expected in readme_text, f"README missing reference to {expected}"

@@ -50,40 +50,40 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
             "flash-pi",
             "flash-pi: install-pi-image",
             [
-                '    if [ -z "{{ flash_device }}" ]; then echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2; exit 1; fi',
-                '    "{{ flash_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }}',
+                '    if [ -z "{{ flash_device }}" ]; then echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi." >&2; exit 1; fi',  # noqa: E501
+                '    "{{ flash_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }}',  # noqa: E501
             ],
         ),
         (
             "flash-pi-report",
             "flash-pi-report: install-pi-image",
             [
-                '    if [ -z "{{ flash_device }}" ]; then echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2; exit 1; fi',
-                '    "{{ flash_report_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }} {{ flash_report_args }}',
+                '    if [ -z "{{ flash_device }}" ]; then echo "Set FLASH_DEVICE to the target device (e.g. /dev/sdX) before running flash-pi-report." >&2; exit 1; fi',  # noqa: E501
+                '    "{{ flash_report_cmd }}" --image "{{ image_path }}" --device "{{ flash_device }}" {{ flash_args }} {{ flash_report_args }}',  # noqa: E501
             ],
         ),
         (
             "clone-ssd",
             "clone-ssd:",
             [
-                '    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi',
-                '    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}',
+                '    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi',  # noqa: E501
+                '    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}',  # noqa: E501
             ],
         ),
         (
             "qemu-smoke",
             "qemu-smoke:",
             [
-                '    if [ -z "{{ qemu_smoke_image }}" ]; then echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; exit 1; fi',
-                '    sudo "{{ qemu_smoke_cmd }}" --image "{{ qemu_smoke_image }}" --artifacts-dir "{{ qemu_smoke_artifacts }}" {{ qemu_smoke_args }}',
+                '    if [ -z "{{ qemu_smoke_image }}" ]; then echo "Set QEMU_SMOKE_IMAGE to the built image (sugarkube.img or .img.xz)." >&2; exit 1; fi',  # noqa: E501
+                '    sudo "{{ qemu_smoke_cmd }}" --image "{{ qemu_smoke_image }}" --artifacts-dir "{{ qemu_smoke_artifacts }}" {{ qemu_smoke_args }}',  # noqa: E501
             ],
         ),
         (
             "support-bundle",
             "support-bundle:",
             [
-                '    if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi',
-                '    "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}',
+                '    if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi',  # noqa: E501
+                '    "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}',  # noqa: E501
             ],
         ),
     ],

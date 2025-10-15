@@ -443,14 +443,14 @@ fi
         "mkdir -p deploy\n"
         'cp config "$OUTPUT_DIR/config.env"\n'
         f"{image_cmd}"
-        "if [ \"${PI_GEN_STAGE_JUST_LOG:-0}\" -eq 1 ]; then\n"
+        'if [ "${PI_GEN_STAGE_JUST_LOG:-0}" -eq 1 ]; then\n'
         "  mkdir -p work/sugarkube/logs/stage2/01-sys-tweaks\n"
         "  printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
         "work/sugarkube/logs/stage2/01-sys-tweaks/03-run-chroot.log\n"
         "  mkdir -p work/sugarkube\n"
         "  printf '[sugarkube] stage logs archived\\n' > work/sugarkube/build.log\n"
         "  build_log_path=work/sugarkube/build.log\n"
-        "elif [ \"${PI_GEN_NESTED_BUILD_LOG:-0}\" -eq 1 ]; then\n"
+        'elif [ "${PI_GEN_NESTED_BUILD_LOG:-0}" -eq 1 ]; then\n'
         "  mkdir -p work/sugarkube/logs/2025-10-31\n"
         "  printf '[sugarkube] just command verified\\n[sugarkube] just version: stub\\n' > "
         "work/sugarkube/logs/2025-10-31/build.log\n"
@@ -461,7 +461,7 @@ fi
         "work/sugarkube/build.log\n"
         "  build_log_path=work/sugarkube/build.log\n"
         "fi\n"
-        "if [ \"${PI_GEN_COMPRESSED_BUILD_LOG:-0}\" -eq 1 ]; then\n"
+        'if [ "${PI_GEN_COMPRESSED_BUILD_LOG:-0}" -eq 1 ]; then\n'
         "  BUILD_LOG_PATH=\"$build_log_path\" python3 - <<'PY'\n"
         "import lzma, os, pathlib\n"
         "path = pathlib.Path(os.environ['BUILD_LOG_PATH'])\n"
@@ -470,7 +470,7 @@ fi
         "path.with_suffix(path.suffix + '.xz').write_bytes(lzma.compress(data))\n"
         "PY\n"
         "fi\n"
-        "if [ \"${PI_GEN_GZIP_BUILD_LOG:-0}\" -eq 1 ]; then\n"
+        'if [ "${PI_GEN_GZIP_BUILD_LOG:-0}" -eq 1 ]; then\n'
         "  BUILD_LOG_PATH=\"$build_log_path\" python3 - <<'PY'\n"
         "import gzip, os, pathlib\n"
         "path = pathlib.Path(os.environ['BUILD_LOG_PATH'])\n"
