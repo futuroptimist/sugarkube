@@ -32,7 +32,7 @@ lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT
 sudo blkid
 ```
 Record:
-- Root partition (`/`) → `/dev/mmcblk0p2`  
+- Root partition (`/`) → `/dev/mmcblk0p2`
 - Boot partition → `/dev/mmcblk0p1`
 - Verify expected free space and correct mountpoints.
 - Note UUIDs for `/boot/firmware` and `/`.
@@ -103,12 +103,12 @@ Ensure expected repositories were cloned automatically or are present:
 ---
 
 ## 8. Next Steps (Post-Verification)
-1. **Shutdown**  
+1. **Shutdown**
    ```
    sudo poweroff
    ```
 2. **Attach SSD** via USB 3.0.
-3. **Boot and confirm SSD visibility:**  
+3. **Boot and confirm SSD visibility:**
    ```
    lsblk
    ```
@@ -123,10 +123,10 @@ Ensure expected repositories were cloned automatically or are present:
    sudo rpi-clone sda -f
    ```
    *(or run `just clone-ssd` if defined in your Justfile)*
-5. **Update UUIDs:**  
-   - `/boot/firmware/cmdline.txt`  
+5. **Update UUIDs:**
+   - `/boot/firmware/cmdline.txt`
    - `/etc/fstab`
-6. **Reboot → Verify:**  
+6. **Reboot → Verify:**
    ```
    df -h | grep '^/dev/sda'
    ```
@@ -134,5 +134,5 @@ Ensure expected repositories were cloned automatically or are present:
 
 ---
 
-**Result:**  
+**Result:**
 ✅ All baseline checks passed. The image is stable and ready for SSD cloning and k3s setup.

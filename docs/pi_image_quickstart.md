@@ -434,9 +434,12 @@ journalctl -u ssd-clone.service
 ```
 
 Override detection by exporting `SUGARKUBE_SSD_CLONE_TARGET=/dev/sdX` or extend the helper
-flags (for example, `--dry-run`) with `SUGARKUBE_SSD_CLONE_EXTRA_ARGS`. Both environment
-variables are respected by the systemd unit and by manual invocations of
-`scripts/ssd_clone.py --auto-target`, and automated coverage in
+flags (for example, `--dry-run`) with `SUGARKUBE_SSD_CLONE_EXTRA_ARGS`. Need to point the
+service at `/boot/firmware` on Bookworm or a custom mount? Set
+`SUGARKUBE_BOOT_MOUNT=/boot/firmware` (or pass `--boot-mount` when invoking the script
+directly) and the helper resolves the correct source. Both environment variables are
+respected by the systemd unit and by manual invocations of `scripts/ssd_clone.py
+--auto-target`, and automated coverage in
 `tests/ssd_clone_auto_target_test.py::test_parse_args_appends_extra_env` keeps the manual
 path honest. Adjust the discovery window with
 `SUGARKUBE_SSD_CLONE_WAIT_SECS` (default: 900 seconds) or poll frequency with
@@ -460,7 +463,13 @@ partition table, formats the target partitions, rsyncs `/boot` and `/`, updates
 `cmdline.txt`/`fstab` with the fresh PARTUUIDs, and records progress under
 `/var/log/sugarkube/ssd-clone.state.json`. If the process is interrupted, rerun
 with `--resume` to continue from the last completed step without repeating
-earlier work:
+earlier work. When the state file is missing, the helper now prints a "resume
+unavailable" reminder instead of failing, then restarts safely from the top.
+Finish any clone run with the summary printed at the end — it captures the new
+PARTUUIDs, filesystem labels, and elapsed time so you can update runbooks or
+issue trackers quickly. The clone also writes a
+`/var/log/sugarkube/ssd-clone.error.log` entry on failure with recovery hints
+and automatically removes partial state files.
 
 ```bash
 sudo ./scripts/ssd_clone.py --target /dev/sda --resume
@@ -483,6 +492,19 @@ sudo CLONE_TARGET=/dev/sda just clone-ssd CLONE_ARGS="--resume"
 Check `/var/log/sugarkube/ssd-clone.state.json` for step-level progress and
 `/var/log/sugarkube/ssd-clone.done` once the run completes. Continue with
 validation before rebooting into the SSD.
+
+> [!TIP]
+> Power users can fine-tune the clone with new flags:
+> - `--boot-label` / `--root-label` override the filesystem labels (FAT labels are
+>   automatically trimmed to 11 characters).
+> - `--skip-partition` and `--skip-format` reuse an existing layout — combine with
+>   `--skip-to sync` to jump straight to rsync.
+> - `--preserve-labels` leaves existing filesystem labels untouched, while
+>   `--refresh-uuid` forces new PARTUUIDs.
+> - `--boot-mount` (or `SUGARKUBE_BOOT_MOUNT`) tells the helper where the source
+>   boot partition is mounted when it is not at `/boot`.
+> - `--assume-yes` skips the destructive confirmation prompt after the helper
+>   prints the planned source/target pair.
 
 ### Validate SSD clones
 

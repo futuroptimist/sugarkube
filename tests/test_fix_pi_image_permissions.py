@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-import stat
 import pwd
 import shlex
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -27,9 +27,7 @@ def _run_as(
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
-@pytest.mark.skipif(
-    getattr(os, "geteuid", lambda: 0)() != 0, reason="requires root privileges"
-)
+@pytest.mark.skipif(getattr(os, "geteuid", lambda: 0)() != 0, reason="requires root privileges")
 def test_fix_permissions_allows_non_root_collect(tmp_path: Path) -> None:
     if shutil.which("runuser") is None and shutil.which("su") is None:
         pytest.skip("runuser/su utilities not available")
