@@ -1,6 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
-scripts_dir := justfile_directory() + "/scripts"
 
+scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
 image_name := env_var_or_default("IMAGE_NAME", "sugarkube.img")
 image_path := image_dir + "/" + image_name
@@ -141,30 +141,30 @@ migrate-to-nvme:
     artifacts_dir="{{ migrate_artifacts }}"
     mkdir -p "${artifacts_dir}"
     log_file="${artifacts_dir}/migrate.log"
-    {
-      set -o pipefail
-      run_step() {
-        local label="$1"
-        shift
-        printf '[migrate] >>> %s\n' "${label}"
-        "$@"
-      }
-      run_step spot-check "{{ spot_check_cmd }}" {{ spot_check_args }}
-      if [ "{{ migrate_skip_eeprom }}" != "1" ]; then
-        run_step eeprom "{{ eeprom_cmd }}" {{ eeprom_args }}
-      else
-        printf '[migrate] SKIP_EEPROM=1, skipping EEPROM update\n'
-      fi
-      run_step clone TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
-      if [ "{{ migrate_no_reboot }}" != "1" ]; then
-        printf '[migrate] Rebooting to complete migration\n'
-        sync
-        reboot
-      else
-        printf '[migrate] NO_REBOOT=1 set; not rebooting automatically\n'
-      fi
-      printf '[migrate] Log captured at %s\n' "${log_file}"
-    } | tee "${log_file}"
+    (
+    set -o pipefail
+    run_step() {
+    local label="$1"
+    shift
+    printf '[migrate] >>> %s\n' "${label}"
+    "$@"
+    }
+    run_step spot-check "{{ spot_check_cmd }}" {{ spot_check_args }}
+    if [ "{{ migrate_skip_eeprom }}" != "1" ]; then
+    run_step eeprom "{{ eeprom_cmd }}" {{ eeprom_args }}
+    else
+    printf '[migrate] SKIP_EEPROM=1, skipping EEPROM update\n'
+    fi
+    run_step clone env TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+    if [ "{{ migrate_no_reboot }}" != "1" ]; then
+    printf '[migrate] Rebooting to complete migration\n'
+    sync
+    reboot
+    else
+    printf '[migrate] NO_REBOOT=1 set; not rebooting automatically\n'
+    fi
+    printf '[migrate] Log captured at %s\n' "${log_file}"
+    ) | tee "${log_file}"
 
 # Post-migration verification ensuring both partitions boot from NVMe
 
