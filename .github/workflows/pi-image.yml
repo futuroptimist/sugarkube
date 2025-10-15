@@ -168,17 +168,41 @@ jobs:
             exit 1
           fi
           echo '--- just verification ---'
+          echo "Found ${#logs[@]} build log(s) in $(pwd)/deploy"
+          for log in "${logs[@]}"; do
+            if [ -f "${log}" ]; then
+              size=$(stat -c '%s' "${log}" 2>/dev/null || wc -c <"${log}")
+              echo "  • ${log} (${size} bytes)"
+            else
+              echo "  • ${log} (missing)"
+            fi
+          done
           found=0
           for log in "${logs[@]}"; do
-            echo "Checking ${log}"
+            echo "::group::Checking ${log}"
             if grep -FH 'just command verified' "${log}"; then
               found=1
               grep -FH '[sugarkube] just version' "${log}" || true
+            else
+              echo "[warn] 'just command verified' not present in ${log}"
+              echo '--- tail (40 lines) ---'
+              tail -n 40 "${log}" || true
             fi
+            echo "::endgroup::"
           done
           if [ "${found}" -eq 0 ]; then
             echo 'just verification line missing in logs:' >&2
             printf '  %s\n' "${logs[@]}" >&2
+            echo '--- grep just summary ---' >&2
+            for log in "${logs[@]}"; do
+              echo "::group::grep just ${log}"
+              if [ -f "${log}" ]; then
+                grep -n "just" "${log}" || true
+              else
+                echo "file missing"
+              fi
+              echo "::endgroup::"
+            done
             exit 1
           fi
 

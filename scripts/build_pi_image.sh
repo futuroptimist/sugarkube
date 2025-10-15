@@ -1041,43 +1041,48 @@ append_pi_gen_log() {
     header="${header} (${header_suffix})"
   fi
 
-  if [[ "${source_path}" == *.xz ]]; then
-    if ! {
-      printf '\n%s\n' "${header}"
-      xz -dc "${source_path}"
-    } >>"${BUILD_LOG}"; then
-      echo "[sugarkube] Failed to append compressed log from ${source_path}" >&2
-      return 1
-    fi
-  else
-    if ! {
-      printf '\n%s\n' "${header}"
-      cat "${source_path}"
-    } >>"${BUILD_LOG}"; then
-      echo "[sugarkube] Failed to append log from ${source_path}" >&2
-      return 1
-    fi
+  local decoder=(cat)
+  local compression="plain"
+  case "${source_path}" in
+    *.xz)
+      decoder=(xz -dc)
+      compression="xz"
+      ;;
+    *.gz)
+      decoder=(gzip -dc)
+      compression="gz"
+      ;;
+  esac
+
+  if ! {
+    printf '\n%s\n' "${header}"
+    "${decoder[@]}" "${source_path}"
+  } >>"${BUILD_LOG}"; then
+    echo "[sugarkube] Failed to append ${compression} log from ${source_path}" >&2
+    return 1
   fi
 
-  echo "[sugarkube] Build log appended from ${source_path}"
+  echo "[sugarkube] Build log appended from ${source_path} (${compression})"
 }
 
 if ! append_pi_gen_log "${BUILD_LOG_SOURCE}" ""; then
   if ! append_pi_gen_log "${BUILD_LOG_SOURCE}.xz" "${BUILD_LOG_SOURCE}.xz"; then
-    nested_logs=()
-    if [ -d "${BUILD_LOG_SEARCH_ROOT}" ]; then
-      while IFS= read -r -d '' candidate; do
-        nested_logs+=("${candidate}")
-      done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 2 -maxdepth 6 \
-        -type f \( -name 'build.log' -o -name 'build.log.xz' \) -print0 | sort -z)
-    fi
+    if ! append_pi_gen_log "${BUILD_LOG_SOURCE}.gz" "${BUILD_LOG_SOURCE}.gz"; then
+      nested_logs=()
+      if [ -d "${BUILD_LOG_SEARCH_ROOT}" ]; then
+        while IFS= read -r -d '' candidate; do
+          nested_logs+=("${candidate}")
+        done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 2 -maxdepth 6 \
+          -type f \( -name 'build.log' -o -name 'build.log.xz' -o -name 'build.log.gz' \) -print0 | sort -z)
+      fi
 
-    if [ "${#nested_logs[@]}" -gt 0 ]; then
-      for candidate in "${nested_logs[@]}"; do
-        append_pi_gen_log "${candidate}" "${candidate}" || true
-      done
-    else
-      echo "[sugarkube] Build log not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+      if [ "${#nested_logs[@]}" -gt 0 ]; then
+        for candidate in "${nested_logs[@]}"; do
+          append_pi_gen_log "${candidate}" "${candidate}" || true
+        done
+      else
+        echo "[sugarkube] Build log not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+      fi
     fi
   fi
 fi
@@ -1092,34 +1097,58 @@ recover_just_log_line() {
     return 1
   fi
 
+  echo "[sugarkube] Recovering just verification log entries from ${BUILD_LOG_SEARCH_ROOT}" >&2
+
   local found=0
+  local scanned=0
+  local candidates=()
   while IFS= read -r -d '' candidate; do
-    if [[ "${candidate}" == *.xz ]]; then
-      if xz -dc "${candidate}" 2>/dev/null | grep -Fq '[sugarkube] just command verified'; then
-        {
-          printf '\n[sugarkube] --- stage log appended (%s) ---\n' "${candidate}"
-          xz -dc "${candidate}" 2>/dev/null
-        } >>"${BUILD_LOG}"
-        echo "[sugarkube] Recovered just verification log from ${candidate}"
-        found=1
-        break
-      fi
-    else
+    candidates+=("${candidate}")
+  done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 1 \
+    -type f \( -name '*.log' -o -name '*.log.xz' -o -name '*.log.gz' -o -name '*.txt' \) -print0 | sort -z)
+
+  for candidate in "${candidates[@]}"; do
+    scanned=$((scanned + 1))
+    local compression="plain"
+    local decoder=(cat)
+    case "${candidate}" in
+      *.xz)
+        compression="xz"
+        decoder=(xz -dc)
+        ;;
+      *.gz)
+        compression="gz"
+        decoder=(gzip -dc)
+        ;;
+    esac
+
+    if [[ "${compression}" == "plain" ]]; then
       if grep -Fq '[sugarkube] just command verified' "${candidate}"; then
         {
           printf '\n[sugarkube] --- stage log appended (%s) ---\n' "${candidate}"
           cat "${candidate}"
         } >>"${BUILD_LOG}"
-        echo "[sugarkube] Recovered just verification log from ${candidate}"
+        echo "[sugarkube] Recovered just verification log from ${candidate} (${compression})"
+        found=1
+        break
+      fi
+    else
+      if "${decoder[@]}" "${candidate}" 2>/dev/null | grep -Fq '[sugarkube] just command verified'; then
+        {
+          printf '\n[sugarkube] --- stage log appended (%s) ---\n' "${candidate}"
+          "${decoder[@]}" "${candidate}" 2>/dev/null
+        } >>"${BUILD_LOG}"
+        echo "[sugarkube] Recovered just verification log from ${candidate} (${compression})"
         found=1
         break
       fi
     fi
-  done < <(find "${BUILD_LOG_SEARCH_ROOT}" -mindepth 1 -maxdepth 8 \
-    -type f \( -name '*.log' -o -name '*.log.xz' -o -name '*.txt' \) -print0 | sort -z)
+
+    echo "[sugarkube] Debug: just verification not found in ${candidate} (${compression})" >&2
+  done
 
   if [ "${found}" -eq 0 ]; then
-    echo "[sugarkube] Warning: just verification log line not found under ${BUILD_LOG_SEARCH_ROOT}" >&2
+    echo "[sugarkube] Warning: just verification log line not found under ${BUILD_LOG_SEARCH_ROOT} (scanned ${scanned} candidates)" >&2
     return 1
   fi
 }
