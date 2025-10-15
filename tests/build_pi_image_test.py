@@ -344,6 +344,7 @@ def _setup_build_env(
     precompressed: bool = False,
     nested_log: bool = False,
     compressed_log: bool = False,
+    gzip_log: bool = False,
     stage_log: bool = False,
 ):
     fake_bin = tmp_path / "bin"
@@ -373,6 +374,23 @@ esac
 """
     )
     xz.chmod(0o755)
+    gzip_bin = fake_bin / "gzip"
+    gzip_bin.write_text(
+        """#!/bin/sh
+set -e
+if [ "$1" = "-dc" ]; then
+  shift
+  python3 - "$1" <<'PY'
+import gzip, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+sys.stdout.buffer.write(gzip.decompress(path.read_bytes()))
+PY
+  exit 0
+fi
+exec /bin/gzip "$@"
+"""
+    )
+    gzip_bin.chmod(0o755)
     sha = fake_bin / "sha256sum"
     sha.write_text('#!/bin/sh\necho 0  "$1"\n')
     sha.chmod(0o755)
@@ -452,6 +470,16 @@ fi
         "path.with_suffix(path.suffix + '.xz').write_bytes(lzma.compress(data))\n"
         "PY\n"
         "fi\n"
+        "if [ \"${PI_GEN_GZIP_BUILD_LOG:-0}\" -eq 1 ]; then\n"
+        "  BUILD_LOG_PATH=\"$build_log_path\" python3 - <<'PY'\n"
+        "import gzip, os, pathlib\n"
+        "path = pathlib.Path(os.environ['BUILD_LOG_PATH'])\n"
+        "data = path.read_bytes()\n"
+        "path.unlink()\n"
+        "with gzip.open(path.with_suffix(path.suffix + '.gz'), 'wb') as fh:\n"
+        "    fh.write(data)\n"
+        "PY\n"
+        "fi\n"
         "EOF\n"
         'chmod +x "$target/build.sh"\n'
     )
@@ -484,6 +512,8 @@ fi
         env["PI_GEN_NESTED_BUILD_LOG"] = "1"
     if compressed_log:
         env["PI_GEN_COMPRESSED_BUILD_LOG"] = "1"
+    if gzip_log:
+        env["PI_GEN_GZIP_BUILD_LOG"] = "1"
     if stage_log:
         env["PI_GEN_STAGE_JUST_LOG"] = "1"
     return env
@@ -692,6 +722,20 @@ def test_build_log_handles_compressed_logs(tmp_path):
     assert host_log.read_text() == log_text
 
 
+def test_build_log_handles_gzip_logs(tmp_path):
+    env = _setup_build_env(tmp_path, gzip_log=True)
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode == 0
+    deploy_log = tmp_path / "deploy" / "sugarkube.build.log"
+    assert deploy_log.exists()
+    log_text = deploy_log.read_text()
+    assert "[sugarkube] just command verified" in log_text
+    assert "build.log.gz" in log_text
+    host_log = tmp_path / "sugarkube.build.log"
+    assert host_log.exists()
+    assert host_log.read_text() == log_text
+
+
 def test_build_log_recovers_stage_just_log(tmp_path):
     env = _setup_build_env(tmp_path, stage_log=True)
     result, _ = _run_build_script(tmp_path, env)
@@ -847,6 +891,9 @@ def test_marks_repo_safe_directory_for_root(tmp_path):
     docker_stub = fake_bin / "docker"
     docker_stub.write_text("#!/bin/sh\nexit 0\n")
     docker_stub.chmod(0o755)
+    bsdtar_stub = fake_bin / "bsdtar"
+    bsdtar_stub.write_text("#!/bin/sh\nexit 0\n")
+    bsdtar_stub.chmod(0o755)
 
     env = os.environ.copy()
     env.update(
