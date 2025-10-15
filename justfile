@@ -13,9 +13,22 @@ flash_report_args := env_var_or_default("FLASH_REPORT_ARGS", "")
 flash_device := env_var_or_default("FLASH_DEVICE", "")
 rollback_cmd := env_var_or_default("ROLLBACK_CMD", justfile_directory() + "/scripts/rollback_to_sd.sh")
 rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
-clone_cmd := env_var_or_default("CLONE_CMD", justfile_directory() + "/scripts/ssd_clone.py")
+clone_cmd := env_var_or_default("CLONE_CMD", justfile_directory() + "/scripts/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
-clone_target := env_var_or_default("CLONE_TARGET", "")
+clone_target := env_var_or_default(
+  "TARGET",
+  env_var_or_default("CLONE_TARGET", "")
+)
+clone_wipe := env_var_or_default("WIPE", "0")
+spot_check_cmd := env_var_or_default("SPOT_CHECK_CMD", justfile_directory() + "/scripts/spot_check.sh")
+eeprom_nvme_cmd := env_var_or_default("EEPROM_NVME_CMD", justfile_directory() + "/scripts/eeprom_nvme_first.sh")
+post_clone_verify_cmd := env_var_or_default(
+  "POST_CLONE_VERIFY_CMD",
+  justfile_directory() + "/scripts/post_clone_verify.sh"
+)
+k3s_preflight_cmd := env_var_or_default("K3S_PREFLIGHT_CMD", justfile_directory() + "/scripts/k3s_preflight.sh")
+skip_eeprom := env_var_or_default("SKIP_EEPROM", "0")
+no_reboot := env_var_or_default("NO_REBOOT", "0")
 validate_cmd := env_var_or_default("VALIDATE_CMD", justfile_directory() + "/scripts/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 qr_cmd := env_var_or_default("QR_CMD", justfile_directory() + "/scripts/generate_qr_codes.py")
@@ -105,15 +118,38 @@ start-here:
 rollback-to-sd:
     "{{ rollback_cmd }}" {{ rollback_args }}
 
-# Clone the active SD card to an attached SSD with resume/dry-run helpers
-# Usage: sudo just clone-ssd CLONE_TARGET=/dev/sda CLONE_ARGS="--dry-run"
-# Note: On Raspberry Pi OS Bookworm, /boot is mounted at /boot/firmware.
-#       Run this first to ensure compatibility:
+# Collect Pi 5 spot check diagnostics and exit non-zero on failure
 
-# sudo mkdir -p /boot && sudo mount --bind /boot/firmware /boot
+# Usage: just spot-check
+spot-check:
+    "{{ spot_check_cmd }}"
+
+# Ensure the EEPROM prefers NVMe boot without forcing an immediate reboot
+
+# Usage: sudo just eeprom-nvme-first
+eeprom-nvme-first:
+    "{{ eeprom_nvme_cmd }}"
+
+# Clone the active SD card to an attached NVMe/USB SSD with UUID fixups
+# Usage: sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
+# TARGET defaults to the first non-SD disk when unset.
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+
+# Rebooted on NVMe? Confirm root and boot partitions are mapped correctly
+
+# Usage: just post-clone-verify TARGET=/dev/nvme0n1
+post-clone-verify:
+    TARGET="{{ clone_target }}" "{{ post_clone_verify_cmd }}"
+
+# Happy path: spot check -> EEPROM NVMe preference -> clone -> reboot
+
+# Usage: sudo just migrate-to-nvme [SKIP_EEPROM=1] [NO_REBOOT=1]
+migrate-to-nvme:
+    just spot-check
+    if [ "{{ skip_eeprom }}" != "1" ]; then just eeprom-nvme-first; else echo "[migrate] SKIP_EEPROM=1 so skipping firmware update"; fi
+    just clone-ssd
+    if [ "{{ no_reboot }}" != "1" ]; then echo "[migrate] Rebooting to NVMe"; sudo reboot; else echo "[migrate] NO_REBOOT=1 so not rebooting"; fi
 
 # Run post-clone validation against the active root filesystem
 
@@ -126,6 +162,12 @@ validate-ssd-clone:
 # Usage: sudo just monitor-ssd-health HEALTH_ARGS="--tag weekly"
 monitor-ssd-health:
     "{{ health_cmd }}" {{ health_args }}
+
+# Prepare kernel toggles commonly needed by k3s before joining a cluster
+
+# Usage: sudo just k3s-preflight
+k3s-preflight:
+    "{{ k3s_preflight_cmd }}"
 
 # Run pi_node_verifier remotely over SSH
 

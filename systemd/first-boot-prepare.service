@@ -1,0 +1,15 @@
+# first-boot-prepare.service - Run NVMe preparation on the first boot.
+[Unit]
+Description=Run sugarkube first boot preparation
+ConditionPathExists=!/var/lib/sugarkube/first-boot-prepare.done
+After=network-online.target
+Wants=network-online.target
+Before=first-boot.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sugarkube/systemd/first-boot-prepare.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
