@@ -108,6 +108,9 @@ rollback-to-sd:
 # Clone the active SD card to an attached SSD with resume/dry-run helpers
 
 # Usage: sudo just clone-ssd CLONE_TARGET=/dev/sda CLONE_ARGS="--dry-run"
+# Note: On Raspberry Pi OS Bookworm, /boot is mounted at /boot/firmware.
+#       Run this first to ensure compatibility:
+#         sudo mkdir -p /boot && sudo mount --bind /boot/firmware /boot
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
     "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
