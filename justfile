@@ -1,23 +1,34 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
+scripts_dir := justfile_directory() + "/scripts"
 
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
 image_name := env_var_or_default("IMAGE_NAME", "sugarkube.img")
 image_path := image_dir + "/" + image_name
-install_cmd := env_var_or_default("INSTALL_CMD", justfile_directory() + "/scripts/install_sugarkube_image.sh")
-flash_cmd := env_var_or_default("FLASH_CMD", justfile_directory() + "/scripts/flash_pi_media.sh")
-flash_report_cmd := env_var_or_default("FLASH_REPORT_CMD", justfile_directory() + "/scripts/flash_pi_media_report.py")
-download_cmd := env_var_or_default("DOWNLOAD_CMD", justfile_directory() + "/scripts/download_pi_image.sh")
+install_cmd := env_var_or_default("INSTALL_CMD", scripts_dir + "/install_sugarkube_image.sh")
+flash_cmd := env_var_or_default("FLASH_CMD", scripts_dir + "/flash_pi_media.sh")
+flash_report_cmd := env_var_or_default("FLASH_REPORT_CMD", scripts_dir + "/flash_pi_media_report.py")
+download_cmd := env_var_or_default("DOWNLOAD_CMD", scripts_dir + "/download_pi_image.sh")
 download_args := env_var_or_default("DOWNLOAD_ARGS", "")
 flash_args := env_var_or_default("FLASH_ARGS", "--assume-yes")
 flash_report_args := env_var_or_default("FLASH_REPORT_ARGS", "")
 flash_device := env_var_or_default("FLASH_DEVICE", "")
-rollback_cmd := env_var_or_default("ROLLBACK_CMD", justfile_directory() + "/scripts/rollback_to_sd.sh")
+rollback_cmd := env_var_or_default("ROLLBACK_CMD", scripts_dir + "/rollback_to_sd.sh")
 rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
-clone_cmd := env_var_or_default("CLONE_CMD", justfile_directory() + "/scripts/ssd_clone.py")
+spot_check_cmd := env_var_or_default("SPOT_CHECK_CMD", scripts_dir + "/spot_check.sh")
+spot_check_args := env_var_or_default("SPOT_CHECK_ARGS", "")
+eeprom_cmd := env_var_or_default("EEPROM_CMD", scripts_dir + "/eeprom_nvme_first.sh")
+eeprom_args := env_var_or_default("EEPROM_ARGS", "")
+clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
-clone_target := env_var_or_default("CLONE_TARGET", "")
-validate_cmd := env_var_or_default("VALIDATE_CMD", justfile_directory() + "/scripts/ssd_post_clone_validate.py")
+clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
+clone_wipe := env_var_or_default("WIPE", "0")
+validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
+post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
+post_clone_args := env_var_or_default("POST_CLONE_ARGS", "")
+migrate_artifacts := env_var_or_default("MIGRATE_ARTIFACTS", justfile_directory() + "/artifacts/migrate-to-nvme")
+migrate_skip_eeprom := env_var_or_default("SKIP_EEPROM", "0")
+migrate_no_reboot := env_var_or_default("NO_REBOOT", "0")
 qr_cmd := env_var_or_default("QR_CMD", justfile_directory() + "/scripts/generate_qr_codes.py")
 qr_args := env_var_or_default("QR_ARGS", "")
 health_cmd := env_var_or_default("HEALTH_CMD", justfile_directory() + "/scripts/ssd_health_monitor.py")
@@ -105,15 +116,61 @@ start-here:
 rollback-to-sd:
     "{{ rollback_cmd }}" {{ rollback_args }}
 
-# Clone the active SD card to an attached SSD with resume/dry-run helpers
-# Usage: sudo just clone-ssd CLONE_TARGET=/dev/sda CLONE_ARGS="--dry-run"
-# Note: On Raspberry Pi OS Bookworm, /boot is mounted at /boot/firmware.
-#       Run this first to ensure compatibility:
+# Run the Raspberry Pi spot check and capture artifacts
 
-# sudo mkdir -p /boot && sudo mount --bind /boot/firmware /boot
+# Usage: sudo just spot-check
+spot-check:
+    "{{ spot_check_cmd }}" {{ spot_check_args }}
+
+# Update the EEPROM so NVMe ranks ahead of SD in the boot order
+
+# Usage: sudo just eeprom-nvme-first
+eeprom-nvme-first:
+    "{{ eeprom_cmd }}" {{ eeprom_args }}
+
+# Clone the active SD card to the preferred NVMe/USB target
+
+# Usage: sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+
+# One-command happy path: spot-check → EEPROM (optional) → clone → reboot
+
+# Usage: sudo just migrate-to-nvme SKIP_EEPROM=1 NO_REBOOT=1
+migrate-to-nvme:
+    artifacts_dir="{{ migrate_artifacts }}"
+    mkdir -p "${artifacts_dir}"
+    log_file="${artifacts_dir}/migrate.log"
+    {
+      set -o pipefail
+      run_step() {
+        local label="$1"
+        shift
+        printf '[migrate] >>> %s\n' "${label}"
+        "$@"
+      }
+      run_step spot-check "{{ spot_check_cmd }}" {{ spot_check_args }}
+      if [ "{{ migrate_skip_eeprom }}" != "1" ]; then
+        run_step eeprom "{{ eeprom_cmd }}" {{ eeprom_args }}
+      else
+        printf '[migrate] SKIP_EEPROM=1, skipping EEPROM update\n'
+      fi
+      run_step clone TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+      if [ "{{ migrate_no_reboot }}" != "1" ]; then
+        printf '[migrate] Rebooting to complete migration\n'
+        sync
+        reboot
+      else
+        printf '[migrate] NO_REBOOT=1 set; not rebooting automatically\n'
+      fi
+      printf '[migrate] Log captured at %s\n' "${log_file}"
+    } | tee "${log_file}"
+
+# Post-migration verification ensuring both partitions boot from NVMe
+
+# Usage: sudo just post-clone-verify
+post-clone-verify:
+    "{{ post_clone_cmd }}" {{ post_clone_args }}
 
 # Run post-clone validation against the active root filesystem
 

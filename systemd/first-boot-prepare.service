@@ -1,0 +1,15 @@
+# Purpose: Run first-boot-prepare.sh once to install NVMe migration tooling.
+[Unit]
+Description=Sugarkube first boot preparation
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/sugarkube/first-boot-prepare.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/first-boot-prepare.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
