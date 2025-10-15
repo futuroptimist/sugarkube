@@ -1,0 +1,14 @@
+# first-boot-prepare.service — run first-boot-prepare.sh once after initial boot.
+[Unit]
+Description=Prime NVMe migration tooling on first boot
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/sugarkube/first-boot-prepare.done
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sugarkube/systemd/first-boot-prepare.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

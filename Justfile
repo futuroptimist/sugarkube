@@ -1,3 +1,6 @@
+# sugarkube Justfile — convenience automation for Pi imaging, cloning, and ops workflows.
+# Usage: run `just` to list tasks. New Raspberry Pi 5 NVMe helpers live near the top.
+
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
@@ -55,11 +58,61 @@ sugarkube_cli := env_var_or_default("SUGARKUBE_CLI", justfile_directory() + "/sc
 docs_verify_args := env_var_or_default("DOCS_VERIFY_ARGS", "")
 simplify_docs_args := env_var_or_default("SIMPLIFY_DOCS_ARGS", "")
 
+# Pi 5 Bookworm + NVMe helpers
+spot_check_cmd := env_var_or_default("SPOT_CHECK_CMD", justfile_directory() + "/scripts/spot_check.sh")
+eeprom_nvme_cmd := env_var_or_default("EEPROM_NVME_CMD", justfile_directory() + "/scripts/eeprom_nvme_first.sh")
+clone_nvme_cmd := env_var_or_default("CLONE_NVME_CMD", justfile_directory() + "/scripts/clone_to_nvme.sh")
+post_clone_verify_cmd := env_var_or_default("POST_CLONE_VERIFY_CMD", justfile_directory() + "/scripts/post_clone_verify.sh")
+k3s_preflight_cmd := env_var_or_default("K3S_PREFLIGHT_CMD", justfile_directory() + "/scripts/k3s_preflight.sh")
+target_disk_override := env_var_or_default("TARGET", "")
+wipe_flag := env_var_or_default("WIPE", "0")
+skip_eeprom := env_var_or_default("SKIP_EEPROM", "0")
+no_reboot := env_var_or_default("NO_REBOOT", "0")
+
+
 _default:
     @just --list
 
 help:
     @just --list
+
+# Raspberry Pi 5 "happy path" tasks
+
+# Usage: just spot-check
+spot-check:
+    "{{ spot_check_cmd }}"
+
+# Usage: sudo just eeprom-nvme-first
+eeprom-nvme-first:
+    "{{ eeprom_nvme_cmd }}"
+
+# Usage: sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
+clone-ssd:
+    TARGET="{{ target_disk_override }}" WIPE="{{ wipe_flag }}" "{{ clone_nvme_cmd }}"
+
+# Usage: just migrate-to-nvme SKIP_EEPROM=1 NO_REBOOT=1
+migrate-to-nvme:
+    just spot-check
+    if [ "{{ skip_eeprom }}" != "1" ]; then
+        just eeprom-nvme-first
+    else
+        echo "SKIP_EEPROM=1 → skipping EEPROM update"
+    fi
+    TARGET="{{ target_disk_override }}" WIPE="{{ wipe_flag }}" just clone-ssd
+    if [ "{{ no_reboot }}" != "1" ]; then
+        echo "Rebooting into NVMe clone…"
+        sudo reboot
+    else
+        echo "NO_REBOOT=1 → skipping reboot"
+    fi
+
+# Usage: just post-clone-verify
+post-clone-verify:
+    "{{ post_clone_verify_cmd }}"
+
+# Usage: sudo just k3s-preflight
+k3s-preflight:
+    "{{ k3s_preflight_cmd }}"
 
 # Download the latest release or a specific asset into IMAGE_DIR
 
