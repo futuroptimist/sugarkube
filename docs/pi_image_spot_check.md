@@ -113,6 +113,12 @@ Ensure expected repositories were cloned automatically or are present:
    lsblk
    ```
 4. **Clone SD → SSD:**
+   > **Note:** Raspberry Pi OS Bookworm mounts the boot partition at `/boot/firmware`.
+   > Before running `just clone-ssd`, bind-mount it so the helper can find it:
+   > ```
+   > sudo mkdir -p /boot
+   > sudo mount --bind /boot/firmware /boot
+   > ```
    ```
    sudo rpi-clone sda -f
    ```
