@@ -1,0 +1,17 @@
+# first-boot-prepare.service - Run once to prepare NVMe migration tooling.
+# Installed on Raspberry Pi images to ensure firmware tools and rpi-clone are present.
+
+[Unit]
+Description=Prepare Sugarkube image for NVMe migration
+ConditionPathExists=!/var/lib/sugarkube/first-boot-prepare.done
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/first-boot-prepare.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

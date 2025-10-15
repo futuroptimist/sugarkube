@@ -332,7 +332,16 @@ USER_DATA="${PI_GEN_DIR}/stage2/01-sys-tweaks/user-data"
 cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
 
 ensure_packages "${PI_GEN_DIR}/stage2/01-sys-tweaks/00-packages" \
-  policykit-1
+  policykit-1 \
+  libraspberrypi-bin \
+  rpi-eeprom \
+  ethtool \
+  jq \
+  network-manager \
+  parted \
+  util-linux \
+  just \
+  curl
 
 just_path_profile="${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/profile.d/sugarkube-path.sh"
 install -d "$(dirname "${just_path_profile}")"
@@ -505,15 +514,47 @@ install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
 install -Dm755 "${REPO_ROOT}/scripts/sugarkube_teams.py" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/bin/sugarkube-teams"
 
+install -Dm755 "${REPO_ROOT}/scripts/spot_check.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/scripts/spot_check.sh"
+
+install -Dm755 "${REPO_ROOT}/scripts/detect_target_disk.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/scripts/detect_target_disk.sh"
+
+install -Dm755 "${REPO_ROOT}/scripts/eeprom_nvme_first.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/scripts/eeprom_nvme_first.sh"
+
+install -Dm755 "${REPO_ROOT}/scripts/clone_to_nvme.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/scripts/clone_to_nvme.sh"
+
+install -Dm755 "${REPO_ROOT}/scripts/post_clone_verify.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/scripts/post_clone_verify.sh"
+
+install -Dm755 "${REPO_ROOT}/scripts/k3s_preflight.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/scripts/k3s_preflight.sh"
+
+install -Dm644 "${REPO_ROOT}/justfile" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/Justfile"
+ln -sf Justfile \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/justfile"
+
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
 
 install -Dm644 "${REPO_ROOT}/scripts/systemd/ssd-clone.service" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/ssd-clone.service"
 
+install -Dm755 "${REPO_ROOT}/systemd/first-boot-prepare.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/first-boot-prepare.sh"
+
+install -Dm644 "${REPO_ROOT}/systemd/first-boot-prepare.service" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot-prepare.service"
+
 install -d "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
 ln -sf ../first-boot.service \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
+
+ln -sf ../first-boot-prepare.service \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot-prepare.service"
 
 
 install -Dm644 "${REPO_ROOT}/scripts/udev/99-sugarkube-ssd-clone.rules" \

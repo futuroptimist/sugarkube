@@ -1,3 +1,5 @@
+# justfile - Task automation for Sugarkube tooling.
+# Usage: run `just <task>` from the repository root or `/opt/sugarkube` on a Pi.
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
@@ -13,9 +15,15 @@ flash_report_args := env_var_or_default("FLASH_REPORT_ARGS", "")
 flash_device := env_var_or_default("FLASH_DEVICE", "")
 rollback_cmd := env_var_or_default("ROLLBACK_CMD", justfile_directory() + "/scripts/rollback_to_sd.sh")
 rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
-clone_cmd := env_var_or_default("CLONE_CMD", justfile_directory() + "/scripts/ssd_clone.py")
-clone_args := env_var_or_default("CLONE_ARGS", "")
+spot_check_cmd := env_var_or_default("SPOT_CHECK_CMD", justfile_directory() + "/scripts/spot_check.sh")
+eeprom_nvme_cmd := env_var_or_default("EEPROM_NVME_CMD", justfile_directory() + "/scripts/eeprom_nvme_first.sh")
+clone_nvme_cmd := env_var_or_default("CLONE_NVME_CMD", justfile_directory() + "/scripts/clone_to_nvme.sh")
 clone_target := env_var_or_default("CLONE_TARGET", "")
+clone_wipe := env_var_or_default("CLONE_WIPE", "0")
+post_clone_verify_cmd := env_var_or_default("POST_CLONE_VERIFY_CMD", justfile_directory() + "/scripts/post_clone_verify.sh")
+k3s_preflight_cmd := env_var_or_default("K3S_PREFLIGHT_CMD", justfile_directory() + "/scripts/k3s_preflight.sh")
+skip_eeprom := env_var_or_default("SKIP_EEPROM", "0")
+no_reboot := env_var_or_default("NO_REBOOT", "0")
 validate_cmd := env_var_or_default("VALIDATE_CMD", justfile_directory() + "/scripts/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 qr_cmd := env_var_or_default("QR_CMD", justfile_directory() + "/scripts/generate_qr_codes.py")
@@ -105,15 +113,47 @@ start-here:
 rollback-to-sd:
     "{{ rollback_cmd }}" {{ rollback_args }}
 
-# Clone the active SD card to an attached SSD with resume/dry-run helpers
-# Usage: sudo just clone-ssd CLONE_TARGET=/dev/sda CLONE_ARGS="--dry-run"
-# Note: On Raspberry Pi OS Bookworm, /boot is mounted at /boot/firmware.
-#       Run this first to ensure compatibility:
+# Run the Pi 5 Bookworm spot check with JSON + Markdown artifacts
+spot-check:
+    "{{ spot_check_cmd }}"
 
-# sudo mkdir -p /boot && sudo mount --bind /boot/firmware /boot
+# Update EEPROM so NVMe boot takes priority without rebooting automatically
+eeprom-nvme-first:
+    "{{ eeprom_nvme_cmd }}"
+
+# One-command migration pipeline: spot check → EEPROM update → clone → reboot
+# Usage: sudo just migrate-to-nvme [SKIP_EEPROM=1] [NO_REBOOT=1] [CLONE_TARGET=/dev/nvme0n1]
+migrate-to-nvme:
+    "{{ spot_check_cmd }}"
+    if [ "{{ skip_eeprom }}" != "1" ]; then "{{ eeprom_nvme_cmd }}"; else echo "[migrate] skipping EEPROM update"; fi
+    if [ -n "{{ clone_target }}" ]; then \
+        TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_nvme_cmd }}"; \
+    else \
+        WIPE="{{ clone_wipe }}" "{{ clone_nvme_cmd }}"; \
+    fi
+    if [ "{{ no_reboot }}" = "1" ]; then \
+        echo "[migrate] NO_REBOOT=1 set; skipping reboot"; \
+    else \
+        echo "[migrate] rebooting to complete migration"; \
+        reboot; \
+    fi
+
+# Confirm the system is booted from NVMe after migration
+post-clone-verify:
+    "{{ post_clone_verify_cmd }}"
+
+# Prepare kernel modules/sysctls for k3s (does not start k3s)
+k3s-preflight:
+    "{{ k3s_preflight_cmd }}"
+
+# Raspberry Pi 5 NVMe clone helper (auto-detects /dev/nvme0n1 when unset)
+# Usage: sudo just clone-ssd [CLONE_TARGET=/dev/nvme0n1] [CLONE_WIPE=1]
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    if [ -n "{{ clone_target }}" ]; then \
+        TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_nvme_cmd }}"; \
+    else \
+        WIPE="{{ clone_wipe }}" "{{ clone_nvme_cmd }}"; \
+    fi
 
 # Run post-clone validation against the active root filesystem
 
