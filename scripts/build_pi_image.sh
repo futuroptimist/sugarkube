@@ -456,7 +456,8 @@ fi
 EOSH
 chmod +x "${just_install_script}"
 
-# Provide a suffixed symlink for clarity and backward-compatible tests.
+# Provide compatibility symlinks for both historical paths and the canonical name.
+ln -sf "03-run-chroot.sh" "${just_install_dir}/03-run.sh"
 ln -sf "03-run-chroot.sh" "${just_install_dir}/03-run-chroot-just.sh"
 
 # If a TUNNEL_TOKEN_FILE is provided but TUNNEL_TOKEN is not, load it from file

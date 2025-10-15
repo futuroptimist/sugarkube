@@ -75,15 +75,22 @@ def test_just_installation_script_includes_fallback(tmp_path):
 
     work_dir = _extract_work_dir(result.stdout)
     script_dir = work_dir / "pi-gen" / "stage2" / "01-sys-tweaks"
-    script_path = script_dir / "03-run-chroot.sh"
+    canonical_script = script_dir / "03-run.sh"
+    run_chroot_script = script_dir / "03-run-chroot.sh"
     legacy_script = script_dir / "03-run-chroot-just.sh"
 
-    assert script_path.exists(), script_path
+    assert canonical_script.exists(), canonical_script
+    assert canonical_script.is_symlink(), canonical_script
+    assert canonical_script.readlink() == Path("03-run-chroot.sh")
+
+    assert run_chroot_script.exists(), run_chroot_script
+    assert run_chroot_script.is_file(), run_chroot_script
+
     if legacy_script.exists():
         assert legacy_script.is_symlink(), legacy_script
         assert legacy_script.readlink() == Path("03-run-chroot.sh")
 
-    script_text = script_path.read_text()
+    script_text = canonical_script.read_text()
 
     assert 'apt-get "${APT_OPTS[@]}" install -y --no-install-recommends just' in script_text
     assert "${BUILD_LOG:-${LOG_FILE:-}}" in script_text
