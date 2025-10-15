@@ -1162,6 +1162,17 @@ mkdir -p "${REPO_DEPLOY_DIR}"
 if [ "${REPO_DEPLOY_LOG}" != "${BUILD_LOG}" ]; then
   cp "${BUILD_LOG}" "${REPO_DEPLOY_LOG}"
 fi
+
+REPO_DEPLOY_IMAGE="${REPO_DEPLOY_DIR}/${IMG_NAME}.img.xz"
+if [ "${REPO_DEPLOY_IMAGE}" != "${OUT_IMG}" ]; then
+  cp "${OUT_IMG}" "${REPO_DEPLOY_IMAGE}"
+fi
+
+REPO_DEPLOY_SHA256="${REPO_DEPLOY_IMAGE}.sha256"
+if [ "${REPO_DEPLOY_SHA256}" != "${sha256_file}" ]; then
+  cp "${sha256_file}" "${REPO_DEPLOY_SHA256}"
+fi
+
 echo "[sugarkube] Build log available at ${REPO_DEPLOY_LOG}"
 
 METADATA_PATH="${OUT_IMG}.metadata.json"
@@ -1204,4 +1215,14 @@ if [ -s "${STAGE_SUMMARY_PATH}" ]; then
   echo "[sugarkube] Stage summary captured at ${STAGE_SUMMARY_PATH}"
 elif [ -e "${STAGE_SUMMARY_PATH}" ]; then
   echo "[sugarkube] Stage summary written to ${STAGE_SUMMARY_PATH} (no stage data)"
+fi
+
+REPO_DEPLOY_METADATA="${REPO_DEPLOY_DIR}/$(basename "${METADATA_PATH}")"
+if [ "${REPO_DEPLOY_METADATA}" != "${METADATA_PATH}" ] && [ -f "${METADATA_PATH}" ]; then
+  cp "${METADATA_PATH}" "${REPO_DEPLOY_METADATA}"
+fi
+
+REPO_DEPLOY_STAGE_SUMMARY="${REPO_DEPLOY_DIR}/$(basename "${STAGE_SUMMARY_PATH}")"
+if [ "${REPO_DEPLOY_STAGE_SUMMARY}" != "${STAGE_SUMMARY_PATH}" ] && [ -f "${STAGE_SUMMARY_PATH}" ]; then
+  cp "${STAGE_SUMMARY_PATH}" "${REPO_DEPLOY_STAGE_SUMMARY}"
 fi

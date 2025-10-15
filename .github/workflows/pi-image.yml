@@ -232,6 +232,21 @@ jobs:
         run: |
           bash scripts/collect_pi_image.sh deploy ./sugarkube.img.xz
 
+      - name: Verify image artifacts
+        run: |
+          set -euo pipefail
+          for path in \
+            ./sugarkube.img.xz \
+            ./sugarkube.img.xz.sha256 \
+            ./sugarkube.img.xz.metadata.json \
+            ./sugarkube.img.xz.stage-summary.json; do
+            if [ ! -s "$path" ]; then
+              echo "Missing or empty artifact: $path" >&2
+              exit 1
+            fi
+          done
+          sha256sum -c ./sugarkube.img.xz.sha256
+
       - name: Save pi-gen Docker image
         if: steps.cache-pigen.outputs.cache-hit != 'true'
         run: |
@@ -245,3 +260,5 @@ jobs:
           path: |
             ./sugarkube.img.xz
             ./sugarkube.img.xz.sha256
+            ./sugarkube.img.xz.metadata.json
+            ./sugarkube.img.xz.stage-summary.json
