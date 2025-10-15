@@ -80,15 +80,15 @@ def test_just_installation_script_includes_fallback(tmp_path):
     legacy_script = script_dir / "03-run-chroot-just.sh"
 
     assert canonical_script.exists(), canonical_script
-    assert canonical_script.is_file(), canonical_script
+    assert canonical_script.is_symlink(), canonical_script
+    assert canonical_script.readlink() == Path("03-run-chroot.sh")
 
     assert run_chroot_script.exists(), run_chroot_script
-    assert run_chroot_script.is_symlink(), run_chroot_script
-    assert run_chroot_script.readlink() == Path("03-run.sh")
+    assert run_chroot_script.is_file(), run_chroot_script
 
     if legacy_script.exists():
         assert legacy_script.is_symlink(), legacy_script
-        assert legacy_script.readlink() == Path("03-run.sh")
+        assert legacy_script.readlink() == Path("03-run-chroot.sh")
 
     script_text = canonical_script.read_text()
 
