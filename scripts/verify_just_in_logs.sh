@@ -47,22 +47,10 @@ if [ "${marker_found}" -eq 1 ]; then
   echo "Marker found in: ${marker_log}"
   version_lines=$(grep -Fh '[sugarkube] just version' "${logs[@]}" || true)
   if [ -n "${version_lines}" ]; then
-    echo "[sugarkube] just version lines:"
     printf '%s\n' "${version_lines}" | sort -u
-  else
-    echo "No [sugarkube] just version lines present in logs."
   fi
   exit 0
 fi
 
-echo "just command verified marker missing from logs" >&2
-echo "--- grep just summary ---" >&2
-for log in "${logs[@]}"; do
-  log_realpath=$(realpath "${log}")
-  echo "# ${log_realpath}" >&2
-  if ! grep -Fn 'just' "${log}" >&2; then
-    echo "(no matches)" >&2
-  fi
-  echo >&2
-done
+echo "just command verified marker missing from ${#logs[@]} log(s) under ${DEPLOY_REALPATH}" >&2
 exit 1
