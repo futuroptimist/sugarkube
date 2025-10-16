@@ -48,3 +48,9 @@ or A4 and keep near the build bench.
   `--dry-run` when you're ready to collect logs.
 - More guidance: [Pi Image Quickstart](./pi_image_quickstart.md) and
   [Pi Boot Troubleshooting](./pi_boot_troubleshooting.md).
+
+## Optional noise suppression
+- BlueZ may log SAP/vcp/mcp/bap plugin warnings on healthy systems. To quiet
+  them, create an override with `sudo systemctl edit bluetooth.service` and set
+  `ExecStart=/usr/lib/bluetooth/bluetoothd --noplugin=sap`, or add
+  `DisablePlugins = sap` under `[General]` in `/etc/bluetooth/main.conf`.
