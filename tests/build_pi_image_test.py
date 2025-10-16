@@ -615,6 +615,10 @@ def _run_build_script(tmp_path, env):
     shutil.copy(ssd_clone_service_src, script_dir / "ssd_clone_service.py")
     (script_dir / "ssd_clone_service.py").chmod(0o755)
 
+    spot_check_src = repo_root / "scripts" / "spot_check.sh"
+    shutil.copy(spot_check_src, script_dir / "spot_check.sh")
+    (script_dir / "spot_check.sh").chmod(0o755)
+
     teams_src = repo_root / "scripts" / "sugarkube_teams.py"
     shutil.copy(teams_src, script_dir / "sugarkube_teams.py")
     (script_dir / "sugarkube_teams.py").chmod(0o755)
@@ -622,6 +626,26 @@ def _run_build_script(tmp_path, env):
     token_place_replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
     shutil.copy(token_place_replay_src, script_dir / "token_place_replay_samples.py")
     (script_dir / "token_place_replay_samples.py").chmod(0o755)
+
+    detect_target_disk_src = repo_root / "scripts" / "detect_target_disk.sh"
+    shutil.copy(detect_target_disk_src, script_dir / "detect_target_disk.sh")
+    (script_dir / "detect_target_disk.sh").chmod(0o755)
+
+    eeprom_src = repo_root / "scripts" / "eeprom_nvme_first.sh"
+    shutil.copy(eeprom_src, script_dir / "eeprom_nvme_first.sh")
+    (script_dir / "eeprom_nvme_first.sh").chmod(0o755)
+
+    clone_src = repo_root / "scripts" / "clone_to_nvme.sh"
+    shutil.copy(clone_src, script_dir / "clone_to_nvme.sh")
+    (script_dir / "clone_to_nvme.sh").chmod(0o755)
+
+    post_clone_src = repo_root / "scripts" / "post_clone_verify.sh"
+    shutil.copy(post_clone_src, script_dir / "post_clone_verify.sh")
+    (script_dir / "post_clone_verify.sh").chmod(0o755)
+
+    k3s_preflight_src = repo_root / "scripts" / "k3s_preflight.sh"
+    shutil.copy(k3s_preflight_src, script_dir / "k3s_preflight.sh")
+    (script_dir / "k3s_preflight.sh").chmod(0o755)
 
     systemd_src = repo_root / "scripts" / "systemd" / "first-boot.service"
     systemd_dir = script_dir / "systemd"
@@ -635,6 +659,17 @@ def _run_build_script(tmp_path, env):
     udev_dir = script_dir / "udev"
     udev_dir.mkdir(exist_ok=True)
     shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
+
+    repo_systemd_dir = repo_root / "systemd"
+    systemd_repo_dir = tmp_path / "systemd"
+    systemd_repo_dir.mkdir(exist_ok=True)
+
+    first_boot_prepare_src = repo_systemd_dir / "first-boot-prepare.sh"
+    shutil.copy(first_boot_prepare_src, systemd_repo_dir / "first-boot-prepare.sh")
+    (systemd_repo_dir / "first-boot-prepare.sh").chmod(0o755)
+
+    first_boot_prepare_unit = repo_systemd_dir / "first-boot-prepare.service"
+    shutil.copy(first_boot_prepare_unit, systemd_repo_dir / "first-boot-prepare.service")
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
