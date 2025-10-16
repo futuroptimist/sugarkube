@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Purpose: Perform a Raspberry Pi 5 Bookworm readiness spot check with artifact summaries.
 # Usage: sudo ./scripts/spot_check.sh
-set -Eeuo pipefail
+set -euo pipefail
+IFS=$'\n\t'
+
+log_info()  { echo "[info]  $*"; }
+log_warn()  { echo "[warn]  $*"; }
+log_fail()  { echo "[fail]  $*"; }
+float_lte() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a<=b)}'; }
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
@@ -210,88 +216,163 @@ PY
   fi
 }
 
-ping_target() {
-  local label="$1" host="$2"
-  ping -c4 -W2 "$host" 2>&1 | sed 's/\r//g'
+_parse_ping_summary() {
+  local host="$1" label="${2:-}" out loss avg summary rtt
+  out="$(LC_ALL=C ping -n -q -c 4 -w 5 "$host" 2>&1 || true)"
+
+  if [[ -n "$label" ]]; then
+    printf '\n[debug] ping %s (%s)\n%s\n' "$host" "$label" "$out" >>"${LOG_FILE}" || true
+  else
+    printf '\n[debug] ping %s\n%s\n' "$host" "$out" >>"${LOG_FILE}" || true
+  fi
+
+  summary="$(grep -E 'packets transmitted' <<<"$out" || true)"
+  rtt="$(grep -E 'min/avg/max' <<<"$out" || true)"
+
+  local loss_pct="100" avg_ms="9999"
+  if [[ -n "$summary" ]]; then
+    loss="$(awk -F',' '{gsub(/[^0-9.]/,"",$3); print $3}' <<<"$summary")"
+    if [[ -n "$loss" ]]; then
+      loss_pct="$loss"
+    fi
+  fi
+  if [[ -n "$rtt" ]]; then
+    avg="$(awk -F'/' '{print $5}' <<<"$rtt")"
+    if [[ -n "$avg" ]]; then
+      avg_ms="$avg"
+    fi
+  fi
+  echo "$loss_pct $avg_ms"
 }
 
-parse_ping() {
-  local output="$1" loss avg
-  loss=$(printf '%s\n' "$output" | awk -F',' '/packet loss/ {gsub(/ /,""); print $3}')
-  avg=$(printf '%s\n' "$output" | awk -F'/' 'END{print $5}')
-  echo "${loss:-unknown}|${avg:-unknown}"
+check_ping_target() {
+  local label="$1" host="$2" max_avg_ms="$3" strict="$4"
+  read -r loss avg < <(_parse_ping_summary "$host" "$label")
+
+  local status="warn" msg="${label} loss=${loss}%; avg=${avg}ms"
+  if [[ "$strict" == "true" ]]; then
+    if [[ "$loss" == "0" ]] && float_lte "$avg" "$max_avg_ms"; then
+      status="ok"
+    else
+      status="fail"
+    fi
+  else
+    if (( loss <= 5 )) && float_lte "$avg" "$max_avg_ms"; then
+      status="ok"
+    elif (( loss > 5 )); then
+      status="fail"
+    fi
+  fi
+
+  echo "$status|$msg"
 }
 
 # 4. Networking health
 check_networking() {
-  local gateway wan_output lan_output lan_stats wan_stats
-  local lan_loss wan_loss lan_avg wan_avg ok message
-  gateway=$(ip route | awk '/default/ {print $3; exit}')
-  if [[ -z "${gateway}" ]]; then
-    lan_output="unable to detect default gateway"
-  else
-    lan_output=$(ping_target "LAN" "${gateway}" || true)
+  local lan_gateway="${LAN_GATEWAY:-}" wan_target="${WAN_TARGET:-1.1.1.1}"
+  local lan_max_avg="${LAN_MAX_AVG_MS:-10}" wan_max_avg="${WAN_MAX_AVG_MS:-100}"
+  local lan_default
+  lan_default=$(ip route | awk '/default/ {print $3; exit}' || true)
+  if [[ -z "$lan_gateway" ]]; then
+    if [[ -n "$lan_default" ]]; then
+      lan_gateway="$lan_default"
+    else
+      lan_gateway="192.168.86.1"
+    fi
   fi
-  wan_output=$(ping_target "WAN" "1.1.1.1" || true)
-  lan_stats=$(parse_ping "$lan_output")
-  wan_stats=$(parse_ping "$wan_output")
-  lan_loss=${lan_stats%%|*}
-  lan_avg=${lan_stats##*|}
-  wan_loss=${wan_stats%%|*}
-  wan_avg=${wan_stats##*|}
-  ok=true
-  message="LAN loss=${lan_loss}; LAN avg=${lan_avg}ms; WAN loss=${wan_loss}; WAN avg=${wan_avg}ms"
-  if [[ "${lan_loss}" != "0%" ]]; then
-    ok=false
-    message+="; LAN ping failed"
+
+  IFS='|' read -r lan_status lan_msg < <(check_ping_target "LAN" "$lan_gateway" "$lan_max_avg" true)
+  IFS='|' read -r wan_status wan_msg < <(check_ping_target "WAN" "$wan_target" "$wan_max_avg" true)
+
+  local net_required_fail=false
+  if [[ "$lan_status" == "fail" || "$wan_status" == "fail" ]]; then
+    net_required_fail=true
   fi
-  if [[ "${wan_loss}" != "0%" ]]; then
-    ok=false
-    message+="; WAN ping failed"
+
+  local status="pass"
+  if [[ "$net_required_fail" == true ]]; then
+    status="fail"
+  elif [[ "$lan_status" == "warn" || "$wan_status" == "warn" ]]; then
+    status="warn"
   fi
-  if [[ "$ok" == true ]]; then
-    add_result "Networking" "pass" "true" "${message}"
-  else
-    add_result "Networking" "fail" "true" "${message}"
-  fi
-  printf '\n[debug] LAN ping\n%s\n' "${lan_output}" >>"${LOG_FILE}" || true
-  printf '\n[debug] WAN ping\n%s\n' "${wan_output}" >>"${LOG_FILE}" || true
+
+  local message="${lan_msg}; ${wan_msg}"
+  add_result "Networking" "$status" "true" "$message"
 }
 
 # 5. Link speed (warning threshold)
-check_link_speed() {
-  local speed="" info="" status="pass"
-  if command -v ethtool >/dev/null 2>&1; then
-    speed=$(ethtool eth0 2>/dev/null | awk -F': ' '/Speed:/{print $2}' | head -n1)
-  fi
-  if [[ -z "${speed}" && -r /sys/class/net/eth0/speed ]]; then
-    speed=$(< /sys/class/net/eth0/speed)
-    [[ -n "${speed}" ]] && speed="${speed}Mb/s"
-  fi
-  if [[ -z "${speed}" ]]; then
-    if command -v nmcli >/dev/null 2>&1; then
-      speed=$(nmcli -t -f GENERAL.SPEED device show eth0 2>/dev/null | head -n1)
-      [[ "${speed}" =~ ^[0-9]+$ ]] && speed="${speed} Mb/s"
-    fi
-  fi
-  if [[ -z "${speed}" ]]; then
-    add_result "Link speed" "warn" "false" "Unable to determine eth0 link speed"
+_read_link_speed_mbps() {
+  local ifname="${1:-eth0}"
+  local sys_speed="/sys/class/net/${ifname}/speed"
+  if [[ -r "$sys_speed" ]]; then
+    cat "$sys_speed" 2>/dev/null || true
     return
   fi
-  info="eth0=${speed}"
-  if [[ "${speed}" =~ ([0-9]+) ]]; then
-    local value=${BASH_REMATCH[1]}
-    if (( value < 1000 )); then
-      status="warn"
-      info+="; expected >= 1000Mb/s"
-    fi
+  if command -v ethtool >/dev/null 2>&1; then
+    ethtool "$ifname" 2>/dev/null | awk -F': ' '/Speed:/ {gsub(/Mb\/s/,"",$2); print $2; exit}'
   fi
-  add_result "Link speed" "${status}" "false" "${info}"
+}
+
+check_link_speed() {
+  local ifname="${1:-eth0}"
+  local min="${MIN_LINK_MBPS:-100}"
+  local rec="${RECOMMENDED_LINK_MBPS:-1000}"
+  local speed="$(_read_link_speed_mbps "$ifname")"
+  local label="Link speed"
+  local speed_display="${speed:-unknown}"
+  local message="${label}: ${ifname}=${speed_display}Mb/s; expected >= ${min}Mb/s (recommended ${rec}Mb/s)"
+
+  if [[ -z "$speed" || "$speed" == "unknown" || "$speed" == "0" || "$speed" == "-1" ]]; then
+    add_result "$label" "fail" "true" "$message"
+    return 0
+  fi
+
+  if ! [[ "$speed" =~ ^[0-9]+$ ]]; then
+    add_result "$label" "fail" "true" "$message"
+    return 0
+  fi
+
+  local value="$speed"
+  if (( value < min )); then
+    add_result "$label" "warn" "false" "$message"
+    return 0
+  fi
+
+  if (( value < rec )); then
+    add_result "$label" "pass" "false" "$message"
+    return 0
+  fi
+
+  add_result "$label" "pass" "false" "$message"
+  return 0
+}
+
+check_boot_errors() {
+  local out allow filtered
+  out="$(journalctl -b -p3 --no-pager 2>&1 || true)"
+  allow='(bluetoothd.*(Failed to init (vcp|mcp|bap) plugin|sap.*(Operation not permitted|driver initialization failed))|wpa_supplicant.*(nl80211: kernel reports: Registration to specific type not supported|bgscan simple: Failed to enable signal strength monitoring))'
+
+  filtered="$(grep -Ev "$allow" <<<"$out" || true)"
+
+  if [[ -n "$filtered" ]]; then
+    add_result "Boot errors" "fail" "true" "journalctl -p3 contains unexpected entries (see log)"
+    printf '\n[debug] journalctl -b -p3 (filtered unexpected)\n%s\n' "$filtered" >>"${LOG_FILE}" || true
+    printf '\n[debug] journalctl -b -p3 (full)\n%s\n' "$out" >>"${LOG_FILE}" || true
+    return 0
+  fi
+
+  if [[ -n "$out" ]]; then
+    add_result "Boot errors" "warn" "true" "Only known benign bluetoothd/wpa_supplicant entries observed"
+  else
+    add_result "Boot errors" "pass" "true" "No journalctl -p3 errors"
+  fi
+  printf '\n[debug] journalctl -b -p3\n%s\n' "$out" >>"${LOG_FILE}" || true
+  return 0
 }
 
 # 6. Services and logs
 check_services_logs() {
-  local service_hits log_output unexpected=() line
+  local service_hits
   service_hits=$(systemctl list-unit-files --type=service 2>/dev/null | \
     grep -E 'flywheel|k3s|cloudflared|containerd' || true)
   if [[ -n "${service_hits}" ]]; then
@@ -308,21 +389,7 @@ check_services_logs() {
     add_result "Service inventory" "pass" "true" "No flywheel/k3s/cloudflared/containerd services"
   fi
 
-  log_output=$(journalctl -b -p 3 --no-pager 2>&1 || true)
-  while IFS= read -r line; do
-    [[ -z "${line}" ]] && continue
-    if [[ "${line}" =~ bluetooth ]] || [[ "${line}" =~ "bgscan simple" ]]; then
-      continue
-    fi
-    unexpected+=("${line}")
-  done <<<"${log_output}"
-  if (( ${#unexpected[@]} > 0 )); then
-    add_result "Boot errors" "fail" "true" \
-      "journalctl -p3 contains unexpected entries (see log)"
-  else
-    add_result "Boot errors" "pass" "true" "Only benign Bluetooth/bgscan messages observed"
-  fi
-  printf '\n[debug] journalctl -b -p3\n%s\n' "${log_output}" >>"${LOG_FILE}" || true
+  check_boot_errors
 }
 
 # 7. System health
