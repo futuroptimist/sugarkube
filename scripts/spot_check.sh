@@ -268,9 +268,11 @@ check_link_speed() {
     speed=$(< /sys/class/net/eth0/speed)
     [[ -n "${speed}" ]] && speed="${speed}Mb/s"
   fi
-  if [[ -z "${speed}" && command -v nmcli >/dev/null 2>&1 ]]; then
-    speed=$(nmcli -t -f GENERAL.SPEED device show eth0 2>/dev/null | head -n1)
-    [[ "${speed}" =~ ^[0-9]+$ ]] && speed="${speed} Mb/s"
+  if [[ -z "${speed}" ]]; then
+    if command -v nmcli >/dev/null 2>&1; then
+      speed=$(nmcli -t -f GENERAL.SPEED device show eth0 2>/dev/null | head -n1)
+      [[ "${speed}" =~ ^[0-9]+$ ]] && speed="${speed} Mb/s"
+    fi
   fi
   if [[ -z "${speed}" ]]; then
     add_result "Link speed" "warn" "false" "Unable to determine eth0 link speed"
