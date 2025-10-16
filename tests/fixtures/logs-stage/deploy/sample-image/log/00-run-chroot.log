@@ -1,0 +1,5 @@
+[2025-02-01T10:00:00Z] entering chroot for stage 2
+[sugarkube] installer starting
+just command verified
+[sugarkube] just version: just 1.13.0
+[2025-02-01T10:05:00Z] leaving chroot
