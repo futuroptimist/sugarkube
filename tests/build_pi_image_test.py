@@ -636,6 +636,28 @@ def _run_build_script(tmp_path, env):
     udev_dir.mkdir(exist_ok=True)
     shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
 
+    extra_files = [
+        ("scripts/spot_check.sh", 0o755),
+        ("scripts/detect_target_disk.sh", 0o755),
+        ("scripts/eeprom_nvme_first.sh", 0o755),
+        ("scripts/clone_to_nvme.sh", 0o755),
+        ("scripts/post_clone_verify.sh", 0o755),
+        ("scripts/k3s_preflight.sh", 0o755),
+        ("systemd/first-boot-prepare.sh", 0o755),
+        ("systemd/first-boot-prepare.service", 0o644),
+    ]
+    for rel_path, mode in extra_files:
+        src = repo_root / rel_path
+        dest = tmp_path / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, dest)
+        os.chmod(dest, mode)
+
+    token_samples_src = repo_root / "samples" / "token_place"
+    token_samples_dest = tmp_path / "samples" / "token_place"
+    if token_samples_src.exists():
+        shutil.copytree(token_samples_src, token_samples_dest, dirs_exist_ok=True)
+
     result = subprocess.run(
         ["/bin/bash", str(script)],
         env=env,
