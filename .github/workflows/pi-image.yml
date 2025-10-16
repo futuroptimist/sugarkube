@@ -66,6 +66,9 @@ jobs:
       - name: Run Pi Imager preset e2e test
         run: bash tests/render_pi_imager_preset_e2e.sh
 
+      - name: Run just log harvester unit test
+        run: bash tests/verify_just_in_logs_test.sh
+
   build:
     # Only run the expensive image build when manually dispatched
     if: github.event_name == 'workflow_dispatch'
@@ -162,49 +165,8 @@ jobs:
       - name: pi-image-verify-just
         if: always()
         run: |
-          mapfile -t logs < <(find deploy -maxdepth 6 -name '*.build.log' -print | sort)
-          if [ "${#logs[@]}" -eq 0 ]; then
-            echo "pi-gen build log missing" >&2
-            exit 1
-          fi
-          echo '--- just verification ---'
-          echo "Found ${#logs[@]} build log(s) in $(pwd)/deploy"
-          for log in "${logs[@]}"; do
-            if [ -f "${log}" ]; then
-              size=$(stat -c '%s' "${log}" 2>/dev/null || wc -c <"${log}")
-              echo "  • ${log} (${size} bytes)"
-            else
-              echo "  • ${log} (missing)"
-            fi
-          done
-          found=0
-          for log in "${logs[@]}"; do
-            echo "::group::Checking ${log}"
-            if grep -FH 'just command verified' "${log}"; then
-              found=1
-              grep -FH '[sugarkube] just version' "${log}" || true
-            else
-              echo "[warn] 'just command verified' not present in ${log}"
-              echo '--- tail (40 lines) ---'
-              tail -n 40 "${log}" || true
-            fi
-            echo "::endgroup::"
-          done
-          if [ "${found}" -eq 0 ]; then
-            echo 'just verification line missing in logs:' >&2
-            printf '  %s\n' "${logs[@]}" >&2
-            echo '--- grep just summary ---' >&2
-            for log in "${logs[@]}"; do
-              echo "::group::grep just ${log}"
-              if [ -f "${log}" ]; then
-                grep -n "just" "${log}" || true
-              else
-                echo "file missing"
-              fi
-              echo "::endgroup::"
-            done
-            exit 1
-          fi
+          # Search both aggregate and per-stage logs for the just marker.
+          bash scripts/verify_just_in_logs.sh deploy
 
       - name: Verify pi-gen Docker image
         run: |

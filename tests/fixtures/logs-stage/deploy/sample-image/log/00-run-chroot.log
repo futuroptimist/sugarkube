@@ -1,0 +1,4 @@
+[2024-11-01T12:00:00Z] Entering chroot
+[sugarkube] installing tools
+[sugarkube] just command verified at /usr/bin/just
+[sugarkube] just version: just 1.12.0

@@ -443,6 +443,7 @@ if [ -z "${just_path}" ]; then
   exit 1
 fi
 
+log_build 'just command verified'
 log_build "[sugarkube] just command verified at ${just_path}"
 just_version=$(just --version 2>&1 | head -n1 || true)
 if [ -n "${just_version}" ]; then
