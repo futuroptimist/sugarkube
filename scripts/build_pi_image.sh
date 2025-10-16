@@ -33,7 +33,11 @@ REQUIRED_SPACE_GB="${REQUIRED_SPACE_GB:-10}"
 check_space() {
   local dir="$1"
   local avail_kb required_kb avail_gb
-  avail_kb=$(df -Pk "$dir" | awk 'NR==2 {print $4}')
+  avail_kb=$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 {print $4}')
+  if ! [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+    echo "warning: unable to determine available disk space for $dir; skipping check" >&2
+    return 0
+  fi
   required_kb=$((REQUIRED_SPACE_GB * 1024 * 1024))
   if [ "$avail_kb" -lt "$required_kb" ]; then
     avail_gb=$(awk "BEGIN {printf \"%.2f\", $avail_kb/1024/1024}")
