@@ -231,7 +231,7 @@ _parse_ping_summary() {
 
   local loss_pct="100" avg_ms="9999"
   if [[ -n "$summary" ]]; then
-    loss="$(awk -F',' '{gsub(/%| /,"",$3); print $3}' <<<"$summary")"
+    loss="$(awk -F',' '{gsub(/[^0-9.]/,"",$3); print $3}' <<<"$summary")"
     if [[ -n "$loss" ]]; then
       loss_pct="$loss"
     fi
