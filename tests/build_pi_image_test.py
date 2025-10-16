@@ -548,6 +548,19 @@ def _run_build_script(tmp_path, env):
     verifier.write_text(verifier_src.read_text())
     verifier.chmod(0o755)
 
+    for script_name in [
+        "spot_check.sh",
+        "detect_target_disk.sh",
+        "eeprom_nvme_first.sh",
+        "clone_to_nvme.sh",
+        "post_clone_verify.sh",
+        "k3s_preflight.sh",
+    ]:
+        script_src = repo_root / "scripts" / script_name
+        script_dest = script_dir / script_name
+        shutil.copy(script_src, script_dest)
+        script_dest.chmod(0o755)
+
     ci_dir = script_dir / "cloud-init"
     ci_dir.mkdir(parents=True)
 
@@ -635,6 +648,21 @@ def _run_build_script(tmp_path, env):
     udev_dir = script_dir / "udev"
     udev_dir.mkdir(exist_ok=True)
     shutil.copy(udev_src, udev_dir / "99-sugarkube-ssd-clone.rules")
+
+    repo_systemd_dir = repo_root / "systemd"
+    systemd_root_dir = tmp_path / "systemd"
+    systemd_root_dir.mkdir(exist_ok=True)
+
+    first_boot_prepare_src = repo_systemd_dir / "first-boot-prepare.sh"
+    shutil.copy(first_boot_prepare_src, systemd_root_dir / "first-boot-prepare.sh")
+    (systemd_root_dir / "first-boot-prepare.sh").chmod(0o755)
+
+    first_boot_prepare_service_src = repo_systemd_dir / "first-boot-prepare.service"
+    shutil.copy(
+        first_boot_prepare_service_src,
+        systemd_root_dir / "first-boot-prepare.service",
+    )
+    (systemd_root_dir / "first-boot-prepare.service").chmod(0o644)
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
