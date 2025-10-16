@@ -619,6 +619,40 @@ def _run_build_script(tmp_path, env):
     shutil.copy(teams_src, script_dir / "sugarkube_teams.py")
     (script_dir / "sugarkube_teams.py").chmod(0o755)
 
+    spot_check_src = repo_root / "scripts" / "spot_check.sh"
+    shutil.copy(spot_check_src, script_dir / "spot_check.sh")
+    (script_dir / "spot_check.sh").chmod(0o755)
+
+    for name in [
+        "detect_target_disk.sh",
+        "eeprom_nvme_first.sh",
+        "clone_to_nvme.sh",
+        "post_clone_verify.sh",
+        "k3s_preflight.sh",
+        "token_place_replay_samples.py",
+    ]:
+        src = repo_root / "scripts" / name
+        dest = script_dir / name
+        shutil.copy(src, dest)
+        dest.chmod(0o755)
+
+    repo_systemd_dir = tmp_path / "systemd"
+    repo_systemd_dir.mkdir(exist_ok=True)
+    prepare_script = repo_root / "systemd" / "first-boot-prepare.sh"
+    prepare_service = repo_root / "systemd" / "first-boot-prepare.service"
+    shutil.copy(prepare_script, repo_systemd_dir / "first-boot-prepare.sh")
+    (repo_systemd_dir / "first-boot-prepare.sh").chmod(0o755)
+    shutil.copy(prepare_service, repo_systemd_dir / "first-boot-prepare.service")
+    (repo_systemd_dir / "first-boot-prepare.service").chmod(0o644)
+
+    samples_dir = tmp_path / "samples"
+    samples_dir.mkdir(exist_ok=True)
+    shutil.copytree(
+        repo_root / "samples" / "token_place",
+        samples_dir / "token_place",
+        dirs_exist_ok=True,
+    )
+
     token_place_replay_src = repo_root / "scripts" / "token_place_replay_samples.py"
     shutil.copy(token_place_replay_src, script_dir / "token_place_replay_samples.py")
     (script_dir / "token_place_replay_samples.py").chmod(0o755)

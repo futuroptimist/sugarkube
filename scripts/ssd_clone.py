@@ -53,15 +53,15 @@ class CloneContext:
     dry_run: bool
     verbose: bool
     resume: bool
-    assume_yes: bool
-    skip_partition: bool
-    skip_format: bool
-    skip_to: Optional[str]
-    preserve_labels: bool
-    refresh_uuid: bool
-    boot_label: Optional[str]
-    root_label: Optional[str]
-    boot_mount: str
+    assume_yes: bool = False
+    skip_partition: bool = False
+    skip_format: bool = False
+    skip_to: Optional[str] = None
+    preserve_labels: bool = False
+    refresh_uuid: bool = False
+    boot_label: Optional[str] = None
+    root_label: Optional[str] = None
+    boot_mount: str = "/boot"
     state_file: Path = STATE_FILE
     state: Dict[str, object] = field(default_factory=dict)
     source_root: Optional[str] = None
@@ -610,9 +610,7 @@ def _select_partition(
     expected_info = next((p for p in partitions if p.get("NAME") == expected_device), None)
     if label_candidates:
         label_matches = [
-            part
-            for part in partitions
-            if (part.get("LABEL") or "").casefold() in label_candidates
+            part for part in partitions if (part.get("LABEL") or "").casefold() in label_candidates
         ]
         if len(label_matches) == 1:
             return label_matches[0]["NAME"]
@@ -633,28 +631,38 @@ def _select_partition(
         if actual_fs == normalized_fs or not expected_info.get("FSTYPE"):
             return expected_device
     fs_matches = [
-        part
-        for part in partitions
-        if canonical_fs(part.get("FSTYPE", "")) == normalized_fs
+        part for part in partitions if canonical_fs(part.get("FSTYPE", "")) == normalized_fs
     ]
     if len(fs_matches) == 1:
         return fs_matches[0]["NAME"]
     if len(fs_matches) > 1:
         found = ", ".join(sorted(part.get("NAME", "") for part in fs_matches))
         raise SystemExit(
-            f"Multiple partitions on {ctx.target_disk} use filesystem {expected_fs}: {found}. "
-            "Label the desired partition or align numbering before using --skip-partition."
+            (
+                "Multiple partitions on "
+                f"{ctx.target_disk} use filesystem {expected_fs}: {found}. "
+                "Label the desired partition or align numbering before using --skip-partition."
+            )
         )
     if expected_info:
         actual_fs = expected_info.get("FSTYPE") or "unknown"
         raise SystemExit(
-            f"Target {kind} partition {expected_device} has filesystem {actual_fs}, expected {expected_fs}. "
-            "Do not use --skip-partition unless the target numbering matches the source."
+            (
+                f"Target {kind} partition {expected_device} has filesystem {actual_fs}, "
+                f"expected {expected_fs}. "
+                "Do not use --skip-partition unless the target numbering matches the source."
+            )
         )
-    raise SystemExit(
-        f"Unable to locate a {kind} partition on {ctx.target_disk} matching filesystem {expected_fs}. "
-        "Ensure the target layout matches the source or label the partition before using --skip-partition."
-    )
+    message_parts = [
+        "Unable to locate a ",
+        f"{kind} partition on {ctx.target_disk}",
+        f" matching filesystem {expected_fs}. ",
+        (
+            "Ensure the target layout matches the source or label the partition before using "
+            "--skip-partition."
+        ),
+    ]
+    raise SystemExit("".join(message_parts))
 
 
 def resolve_target_partitions(ctx: CloneContext) -> (str, str):
@@ -663,7 +671,9 @@ def resolve_target_partitions(ctx: CloneContext) -> (str, str):
     boot_suffix = ctx.state.get("partition_suffix_boot")
     root_suffix = ctx.state.get("partition_suffix_root")
     if boot_suffix is None or root_suffix is None:
-        raise SystemExit("Missing partition suffix metadata; gather_source_metadata must run first.")
+        raise SystemExit(
+            "Missing partition suffix metadata; gather_source_metadata must run first."
+        )
     boot_partition = compose_partition(ctx.target_disk, str(boot_suffix))
     root_partition = compose_partition(ctx.target_disk, str(root_suffix))
     if ctx.skip_partition:
@@ -703,14 +713,20 @@ def resolve_target_partitions(ctx: CloneContext) -> (str, str):
         changed = False
         if boot_selected != boot_partition:
             ctx.log(
-                f"Target boot partition numbering differs; using {boot_selected} instead of {boot_partition}."
+                (
+                    "Target boot partition numbering differs; using "
+                    f"{boot_selected} instead of {boot_partition}."
+                )
             )
             ctx.state["partition_suffix_boot"] = partition_suffix(boot_selected)
             boot_partition = boot_selected
             changed = True
         if root_selected != root_partition:
             ctx.log(
-                f"Target root partition numbering differs; using {root_selected} instead of {root_partition}."
+                (
+                    "Target root partition numbering differs; using "
+                    f"{root_selected} instead of {root_partition}."
+                )
             )
             ctx.state["partition_suffix_root"] = partition_suffix(root_selected)
             root_partition = root_selected
