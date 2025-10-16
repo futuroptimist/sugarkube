@@ -63,6 +63,12 @@ jobs:
       - name: Run verify just logs test
         run: bash tests/verify_just_in_logs_test.sh
 
+      - name: Run no libraspberrypi bin guard test
+        run: bash tests/no_libraspberrypi_bin_test.sh
+
+      - name: Run workflow verify step guard test
+        run: bash tests/workflow_verify_step_guard_test.sh
+
       - name: Run fix permissions e2e test
         run: bash tests/fix_pi_image_permissions_e2e.sh
 
@@ -163,10 +169,8 @@ jobs:
             ./scripts/build_pi_image.sh
 
       - name: pi-image-verify-just
-        if: always()
-        run: |
-          # Search both aggregate and per-stage logs for the just marker.
-          bash scripts/verify_just_in_logs.sh deploy
+        if: ${{ always() && !cancelled() && hashFiles('deploy/**') != '' }}
+        run: bash scripts/verify_just_in_logs.sh deploy
 
       - name: Verify pi-gen Docker image
         run: |
