@@ -22,13 +22,17 @@ require_command() {
 }
 
 run_rpi_eeprom_config() {
-  if rpi-eeprom-config "$@"; then
+  local -a args=("$@")
+
+  if rpi-eeprom-config "${args[@]}"; then
     return 0
   fi
+
   if [[ ${EUID:-} -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
-    sudo rpi-eeprom-config "$@"
+    sudo rpi-eeprom-config "${args[@]}"
     return 0
   fi
+
   return 1
 }
 
@@ -107,11 +111,7 @@ apply_boot_order() {
   fi
 
   echo "[boot-order] Applying BOOT_ORDER=${desired} (${human})."
-  if [[ ${EUID:-} -ne 0 ]]; then
-    sudo rpi-eeprom-config --apply "${target_cfg}"
-  else
-    rpi-eeprom-config --apply "${target_cfg}"
-  fi
+  run_rpi_eeprom_config --apply "${target_cfg}"
 
   print_current
 }
