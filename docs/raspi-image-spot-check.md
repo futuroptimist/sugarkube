@@ -69,7 +69,7 @@ With the SD image validated:
    sudo just clone-ssd
    ```
 3. Run the happy-path migration, which chains the above, reboots, and leaves a log in
-   `artifacts/migrate-to-nvme/`.
+   `artifacts/migrate-to-nvme/`. **If you already ran steps 1 and 2 successfully, skip this step.**
    ```bash
    sudo just migrate-to-nvme
    ```
