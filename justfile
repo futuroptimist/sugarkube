@@ -16,6 +16,8 @@ rollback_cmd := env_var_or_default("ROLLBACK_CMD", scripts_dir + "/rollback_to_s
 rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
 spot_check_cmd := env_var_or_default("SPOT_CHECK_CMD", scripts_dir + "/spot_check.sh")
 spot_check_args := env_var_or_default("SPOT_CHECK_ARGS", "")
+boot_order_cmd := env_var_or_default("BOOT_ORDER_CMD", scripts_dir + "/boot_order.sh")
+boot_order_args := env_var_or_default("BOOT_ORDER_ARGS", "")
 eeprom_cmd := env_var_or_default("EEPROM_CMD", scripts_dir + "/eeprom_nvme_first.sh")
 eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
@@ -122,10 +124,40 @@ rollback-to-sd:
 spot-check:
     "{{ spot_check_cmd }}" {{ spot_check_args }}
 
-# Update the EEPROM so NVMe ranks ahead of SD in the boot order
+# Configure Raspberry Pi EEPROM boot order presets
+
+# Usage: sudo just boot-order sd-nvme-usb
+#        sudo just boot-order nvme-first
+#        just boot-order print
+boot-order order:
+    case "{{ order }}" in \
+      sd-nvme-usb) \
+        hex="0xf461"; \
+        label="SD → NVMe → USB → repeat" \
+        ;; \
+      nvme-first) \
+        hex="0xf416"; \
+        label="NVMe → SD → USB → repeat" \
+        ;; \
+      print) \
+        echo "[boot-order] Displaying current EEPROM boot order"; \
+        "{{ boot_order_cmd }}" print; \
+        exit 0 \
+        ;; \
+      *) \
+        echo "Unknown boot-order preset: '{{ order }}'" >&2; \
+        exit 1 \
+        ;; \
+    esac
+    echo "[boot-order] Applying preset '{{ order }}' (BOOT_ORDER=${hex} - ${label})"
+    "{{ boot_order_cmd }}" {{ boot_order_args }} ensure_order "${hex}"
+
+# Deprecated alias for boot-order nvme-first (to be removed in a future release)
 
 # Usage: sudo just eeprom-nvme-first
 eeprom-nvme-first:
+    echo "[boot-order] WARNING: 'eeprom-nvme-first' is deprecated; use 'just boot-order nvme-first' instead." >&2
+    echo "[boot-order] Applying BOOT_ORDER=0xf416 (NVMe → SD → USB → repeat)."
     "{{ eeprom_cmd }}" {{ eeprom_args }}
 
 # Clone the active SD card to the preferred NVMe/USB target
@@ -151,7 +183,7 @@ migrate-to-nvme:
     }
     run_step spot-check "{{ spot_check_cmd }}" {{ spot_check_args }}
     if [ "{{ migrate_skip_eeprom }}" != "1" ]; then
-    run_step eeprom "{{ eeprom_cmd }}" {{ eeprom_args }}
+    run_step boot-order "{{ boot_order_cmd }}" {{ boot_order_args }} ensure_order "0xf416"
     else
     printf '[migrate] SKIP_EEPROM=1, skipping EEPROM update\n'
     fi
