@@ -10,7 +10,9 @@ LOG_FILE="${ARTIFACT_DIR}/clone-to-nvme.log"
 mkdir -p "${ARTIFACT_DIR}"
 exec > >(tee "${LOG_FILE}") 2>&1
 
-if [[ ${EUID} -ne 0 ]]; then
+# Allowlist for CI shims: ALLOW_NON_ROOT=1 skips sudo re-exec when tests stub privileged commands.
+ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+if [[ "${ALLOW_NON_ROOT}" != "1" && ${EUID} -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1; then
     exec sudo WIPE="${WIPE:-0}" TARGET="${TARGET:-}" "$0" "$@"
   fi
@@ -82,8 +84,13 @@ if [[ "${TARGET_BASENAME}" == mmcblk0* ]]; then
 fi
 
 if [[ ! -b "${TARGET_DEVICE}" ]]; then
-  echo "Target ${TARGET_DEVICE} is not a block device." >&2
-  exit 1
+  if [[ "${ALLOW_FAKE_BLOCK:-0}" == "1" ]]; then
+    # Used by CI stubs so we can exercise logic without privileged loop devices.
+    echo "[warn] Target ${TARGET_DEVICE} is not a block device, continuing due to ALLOW_FAKE_BLOCK=1" >&2
+  else
+    echo "Target ${TARGET_DEVICE} is not a block device." >&2
+    exit 1
+  fi
 fi
 
 ensure_rpi_clone() {
@@ -126,15 +133,94 @@ if [[ "${WIPE}" == "1" ]]; then
   wipefs --all --force "${TARGET_DEVICE}"
 fi
 
-echo "Running rpi-clone -f -u ${TARGET_DEVICE}"
-if ! rpi-clone -f -u "${TARGET_DEVICE}"; then
+run_rpi_clone() {
+  local target="$1" clone_tmp fallback_output retry_tmp retry_output
+  clone_tmp=$(mktemp)
+  retry_tmp=$(mktemp)
+  cleanup_tmp() {
+    rm -f "${clone_tmp}" "${retry_tmp}"
+  }
+  trap cleanup_tmp RETURN
+
+  echo "Running rpi-clone -f -u ${target}"
+  if rpi-clone -f -u "${target}" >"${clone_tmp}" 2>&1; then
+    cat "${clone_tmp}"
+    return 0
+  fi
+
+  fallback_output=$(<"${clone_tmp}")
+  printf '%s\n' "${fallback_output}"
+  if [[ "${fallback_output}" == *"Unattended -u option not allowed when initializing"* ]]; then
+    echo "rpi-clone reported unattended initialization restriction; retrying with -U"
+    if rpi-clone -f -U "${target}" >"${retry_tmp}" 2>&1; then
+      cat "${retry_tmp}"
+      return 0
+    fi
+    retry_output=$(<"${retry_tmp}")
+    printf '%s\n' "${retry_output}" >&2
+    echo "rpi-clone failed even after -U fallback" >&2
+    return 1
+  fi
+
   echo "rpi-clone failed" >&2
+  return 1
+}
+
+if ! run_rpi_clone "${TARGET_DEVICE}"; then
   exit 1
 fi
 
-CLONE_MOUNT="/mnt/clone"
-if [[ ! -d "${CLONE_MOUNT}" ]]; then
-  echo "Expected clone mount ${CLONE_MOUNT} missing." >&2
+# Allow overriding clone mount path in tests while defaulting to the system mountpoint.
+CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
+BOOT_MOUNT="${CLONE_MOUNT}/boot/firmware"
+mkdir -p "${CLONE_MOUNT}" "${BOOT_MOUNT}"
+
+ensure_mount() {
+  local mount_point="$1" source="$2"
+  if findmnt -rn -o TARGET "${mount_point}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -z "${source}" ]]; then
+    return 1
+  fi
+  if mount "${source}" "${mount_point}" 2>/dev/null; then
+    echo "Mounted ${source} to ${mount_point}"
+    return 0
+  fi
+  echo "Failed to mount ${source} to ${mount_point}" >&2
+  return 1
+}
+
+read_target_partitions() {
+  local path
+  mapfile -t _target_paths < <(lsblk -nr -o PATH "${TARGET_DEVICE}" 2>/dev/null || true)
+  TARGET_PARTITIONS=()
+  for path in "${_target_paths[@]:-}"; do
+    if [[ "${path}" != "${TARGET_DEVICE}" ]]; then
+      TARGET_PARTITIONS+=("${path}")
+    fi
+  done
+}
+
+TARGET_PARTITIONS=()
+read_target_partitions
+
+if ! findmnt -rn -o TARGET "${CLONE_MOUNT}" >/dev/null 2>&1; then
+  root_candidate="${TARGET_PARTITIONS[-1]:-}"
+  ensure_mount "${CLONE_MOUNT}" "${root_candidate:-}" || true
+fi
+
+if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
+  boot_candidate="${TARGET_PARTITIONS[0]:-}"
+  ensure_mount "${BOOT_MOUNT}" "${boot_candidate:-}" || true
+fi
+
+if ! findmnt -rn -o TARGET "${CLONE_MOUNT}" >/dev/null 2>&1; then
+  echo "Expected clone root mount ${CLONE_MOUNT} missing." >&2
+  exit 1
+fi
+if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
+  echo "Expected clone boot mount ${BOOT_MOUNT} missing." >&2
   exit 1
 fi
 
@@ -248,5 +334,5 @@ sync
 CLONED_BYTES=$(df -B1 --output=used "${CLONE_MOUNT}" | tail -n1)
 CLONED_BYTES=${CLONED_BYTES:-0}
 
-echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, \"
+echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, " \
      "boot=${BOOT_UUID:-${BOOT_PARTUUID}}, bytes=${CLONED_BYTES}"

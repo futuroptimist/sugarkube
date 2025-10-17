@@ -35,16 +35,39 @@ resolve_mount() {
 
 ROOT_DEV=$(resolve_mount /)
 BOOT_DEV=$(resolve_mount /boot/firmware)
-if [[ "${ROOT_DEV}" != /dev/nvme0n1p2 ]]; then
-  echo "❌ Root filesystem is on ${ROOT_DEV:-unknown}; expected /dev/nvme0n1p2." >&2
+if [[ -z "${ROOT_DEV}" || -z "${BOOT_DEV}" ]]; then
+  echo "❌ Unable to resolve root (${ROOT_DEV:-unknown}) or boot (${BOOT_DEV:-unknown}) devices." >&2
   exit 1
 fi
-if [[ "${BOOT_DEV}" != /dev/nvme0n1p1 ]]; then
-  echo "❌ Boot filesystem is on ${BOOT_DEV:-unknown}; expected /dev/nvme0n1p1." >&2
+
+resolve_parent() {
+  local dev="$1" real_dev parent
+  real_dev=$(readlink -f "${dev}" 2>/dev/null || true)
+  if [[ -z "${real_dev}" ]]; then
+    echo ""
+    return
+  fi
+  parent=$(lsblk -no PKNAME "${real_dev}" 2>/dev/null | head -n1 || true)
+  if [[ -n "${parent}" ]]; then
+    echo "${parent}"
+  fi
+}
+
+ROOT_PARENT=$(resolve_parent "${ROOT_DEV}")
+BOOT_PARENT=$(resolve_parent "${BOOT_DEV}")
+if [[ -z "${ROOT_PARENT}" || -z "${BOOT_PARENT}" ]]; then
+  echo "❌ Failed to resolve parent disks for root (${ROOT_DEV}) or boot (${BOOT_DEV})." >&2
+  exit 1
+fi
+if [[ "${ROOT_PARENT}" != nvme* || "${BOOT_PARENT}" != nvme* ]]; then
+  ROOT_UUID=$(blkid -s UUID -o value "${ROOT_DEV}" 2>/dev/null || true)
+  BOOT_UUID=$(blkid -s UUID -o value "${BOOT_DEV}" 2>/dev/null || true)
+  echo "❌ Expected NVMe parents but found root=${ROOT_DEV} (parent=${ROOT_PARENT}) [${ROOT_UUID:-no-uuid}]" >&2
+  echo "❌ Expected NVMe parents but found boot=${BOOT_DEV} (parent=${BOOT_PARENT}) [${BOOT_UUID:-no-uuid}]" >&2
   exit 1
 fi
 
 ROOT_UUID=$(blkid -s UUID -o value "${ROOT_DEV}" 2>/dev/null || true)
 BOOT_UUID=$(blkid -s UUID -o value "${BOOT_DEV}" 2>/dev/null || true)
 
-echo "✅ NVMe boot verified: /=${ROOT_DEV} (${ROOT_UUID}), /boot/firmware=${BOOT_DEV} (${BOOT_UUID})"
+echo "✅ NVMe boot verified: /=${ROOT_DEV} (${ROOT_UUID}) parent=${ROOT_PARENT}, /boot/firmware=${BOOT_DEV} (${BOOT_UUID}) parent=${BOOT_PARENT}"

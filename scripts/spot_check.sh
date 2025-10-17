@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Purpose: Perform a Raspberry Pi 5 Bookworm readiness spot check with artifact summaries.
 # Usage: sudo ./scripts/spot_check.sh
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 log_info()  { echo "[info]  $*"; }
@@ -11,16 +11,19 @@ float_lte() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a<=b)}'; }
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-ARTIFACT_DIR="${REPO_ROOT}/artifacts/spot-check"
-LOG_DIR="${ARTIFACT_DIR}"
-LOG_FILE="${LOG_DIR}/spot-check.log"
-JSON_FILE="${LOG_DIR}/summary.json"
-MD_FILE="${LOG_DIR}/summary.md"
+ARTIFACT_DIR="${ARTIFACT_DIR:-${REPO_ROOT}/artifacts/spot-check}"
+LOG_DIR="${LOG_DIR:-${ARTIFACT_DIR}}"
+LOG_FILE="${LOG_FILE:-${LOG_DIR}/spot-check.log}"
+JSON_FILE="${JSON_FILE:-${LOG_DIR}/summary.json}"
+MD_FILE="${MD_FILE:-${LOG_DIR}/summary.md}"
 mkdir -p "${LOG_DIR}"
 
-exec > >(tee "${LOG_FILE}") 2>&1
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  exec > >(tee "${LOG_FILE}") 2>&1
+fi
 
-if [[ ${EUID} -ne 0 ]]; then
+# Tests set SPOT_CHECK_ALLOW_NON_ROOT=1 so parser helpers can run without sudo.
+if [[ "${SPOT_CHECK_ALLOW_NON_ROOT:-0}" != "1" && ${EUID} -ne 0 ]]; then
   echo "Run this script with sudo so hardware and journal data are accessible." >&2
   exit 1
 fi
@@ -63,6 +66,8 @@ add_result() {
 }
 
 sanitize_for_log() {
+  # shellcheck disable=SC2001
+  # sed keeps intent clear for trimming trailing whitespace.
   sed -e 's/[[:space:]]\+$//' <<<"$1"
 }
 
@@ -137,7 +142,8 @@ check_time_locale() {
 
 # 3. Storage overview
 check_storage() {
-  local storage_json_path storage_vars root_device boot_device root_uuid boot_uuid message ok df_out
+  local storage_json_path storage_vars message ok df_out
+  local root_device_value="" boot_device_value="" root_uuid_value="" boot_uuid_value=""
   storage_json_path="${LOG_DIR}/storage.json"
   storage_vars=$(python3 - "${storage_json_path}" <<'PY'
 import json, subprocess, sys, re
@@ -193,19 +199,23 @@ print(f"TABLE_PATH={out_path}")
 PY
 )
   eval "${storage_vars}"
+  root_device_value="${ROOT_DEVICE:-}"
+  boot_device_value="${BOOT_DEVICE:-}"
+  root_uuid_value="${ROOT_UUID:-}"
+  boot_uuid_value="${BOOT_UUID:-}"
   df_out=$(df -h)
   printf '\n[debug] df -h\n%s\n' "${df_out}" >>"${LOG_FILE}" || true
   ok=true
-  message="/boot/firmware=${BOOT_DEVICE}; /=${ROOT_DEVICE}"
-  if [[ "${ROOT_DEVICE}" != "/dev/mmcblk0p2" ]]; then
+  message="/boot/firmware=${boot_device_value}; /=${root_device_value}"
+  if [[ "${root_device_value}" != "/dev/mmcblk0p2" ]]; then
     ok=false
     message+="; expected /dev/mmcblk0p2"
   fi
-  if [[ "${BOOT_DEVICE}" != "/dev/mmcblk0p1" ]]; then
+  if [[ "${boot_device_value}" != "/dev/mmcblk0p1" ]]; then
     ok=false
     message+="; expected /dev/mmcblk0p1"
   fi
-  if [[ -z "${BOOT_UUID}" || -z "${ROOT_UUID}" ]]; then
+  if [[ -z "${boot_uuid_value}" || -z "${root_uuid_value}" ]]; then
     ok=false
     message+="; UUID capture incomplete"
   fi
@@ -239,6 +249,7 @@ _parse_ping_summary() {
   if [[ -n "$rtt" ]]; then
     avg="$(awk -F'/' '{print $5}' <<<"$rtt")"
     if [[ -n "$avg" ]]; then
+      avg="${avg//,/.}"
       avg_ms="$avg"
     fi
   fi
@@ -247,6 +258,8 @@ _parse_ping_summary() {
 
 check_ping_target() {
   local label="$1" host="$2" max_avg_ms="$3" strict="$4"
+  local loss avg
+  local IFS=' '
   read -r loss avg < <(_parse_ping_summary "$host" "$label")
 
   local status="warn" msg="${label} loss=${loss}%; avg=${avg}ms"
@@ -301,6 +314,7 @@ check_networking() {
 }
 
 # 5. Link speed (warning threshold)
+# shellcheck disable=SC2120
 _read_link_speed_mbps() {
   local ifname="${1:-eth0}"
   local sys_speed="/sys/class/net/${ifname}/speed"
@@ -317,7 +331,8 @@ check_link_speed() {
   local ifname="${1:-eth0}"
   local min="${MIN_LINK_MBPS:-100}"
   local rec="${RECOMMENDED_LINK_MBPS:-1000}"
-  local speed="$(_read_link_speed_mbps "$ifname")"
+  local speed
+  speed="$(_read_link_speed_mbps "$ifname")"
   local label="Link speed"
   local speed_display="${speed:-unknown}"
   local message="${label}: ${ifname}=${speed_display}Mb/s; expected >= ${min}Mb/s (recommended ${rec}Mb/s)"
@@ -528,7 +543,7 @@ main() {
   check_time_locale
   check_storage
   check_networking
-  check_link_speed
+  check_link_speed ""
   check_services_logs
   check_health
   check_repo_sync
@@ -540,4 +555,6 @@ main() {
   printf '\n✅ Spot check complete. Artifacts: %s\n' "${ARTIFACT_DIR}"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
