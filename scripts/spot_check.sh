@@ -62,6 +62,7 @@ add_result() {
   printf '%s %s: %s\n' "$(status_emoji "$status")" "$name" "$details"
 }
 
+# shellcheck disable=SC2001
 sanitize_for_log() {
   sed -e 's/[[:space:]]\+$//' <<<"$1"
 }
@@ -137,7 +138,7 @@ check_time_locale() {
 
 # 3. Storage overview
 check_storage() {
-  local storage_json_path storage_vars root_device boot_device root_uuid boot_uuid message ok df_out
+  local storage_json_path storage_vars message ok df_out
   storage_json_path="${LOG_DIR}/storage.json"
   storage_vars=$(python3 - "${storage_json_path}" <<'PY'
 import json, subprocess, sys, re
@@ -196,7 +197,9 @@ PY
   df_out=$(df -h)
   printf '\n[debug] df -h\n%s\n' "${df_out}" >>"${LOG_FILE}" || true
   ok=true
-  message="/boot/firmware=${BOOT_DEVICE}; /=${ROOT_DEVICE}"
+  local boot_device_msg="${BOOT_DEVICE}"
+  local root_device_msg="${ROOT_DEVICE}"
+  message="/boot/firmware=${boot_device_msg}; /=${root_device_msg}"
   if [[ "${ROOT_DEVICE}" != "/dev/mmcblk0p2" ]]; then
     ok=false
     message+="; expected /dev/mmcblk0p2"
@@ -313,11 +316,13 @@ _read_link_speed_mbps() {
   fi
 }
 
+# shellcheck disable=SC2120
 check_link_speed() {
   local ifname="${1:-eth0}"
   local min="${MIN_LINK_MBPS:-100}"
   local rec="${RECOMMENDED_LINK_MBPS:-1000}"
-  local speed="$(_read_link_speed_mbps "$ifname")"
+  local speed
+  speed="$(_read_link_speed_mbps "$ifname")"
   local label="Link speed"
   local speed_display="${speed:-unknown}"
   local message="${label}: ${ifname}=${speed_display}Mb/s; expected >= ${min}Mb/s (recommended ${rec}Mb/s)"
@@ -539,5 +544,13 @@ main() {
   fi
   printf '\n✅ Spot check complete. Artifacts: %s\n' "${ARTIFACT_DIR}"
 }
+
+if [[ "${SPOT_CHECK_IMPORT:-0}" == "1" ]]; then
+  # Allow tests to source the script without executing the full spot check.
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+  fi
+  exit 0
+fi
 
 main "$@"

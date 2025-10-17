@@ -10,7 +10,7 @@ LOG_FILE="${ARTIFACT_DIR}/clone-to-nvme.log"
 mkdir -p "${ARTIFACT_DIR}"
 exec > >(tee "${LOG_FILE}") 2>&1
 
-if [[ ${EUID} -ne 0 ]]; then
+if [[ "${SKIP_ROOT_CHECK:-0}" != "1" && ${EUID} -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1; then
     exec sudo WIPE="${WIPE:-0}" TARGET="${TARGET:-}" "$0" "$@"
   fi
@@ -127,14 +127,70 @@ if [[ "${WIPE}" == "1" ]]; then
 fi
 
 echo "Running rpi-clone -f -u ${TARGET_DEVICE}"
-if ! rpi-clone -f -u "${TARGET_DEVICE}"; then
-  echo "rpi-clone failed" >&2
+CLONE_OUTPUT=""
+if ! CLONE_OUTPUT=$(rpi-clone -f -u "${TARGET_DEVICE}" 2>&1); then
+  printf '%s\n' "${CLONE_OUTPUT}"
+  if grep -Fq "Unattended -u option not allowed when initializing" <<<"${CLONE_OUTPUT}"; then
+    echo "rpi-clone reported unattended init restriction; retrying with -U." >&2
+    if ! CLONE_OUTPUT=$(rpi-clone -f -U "${TARGET_DEVICE}" 2>&1); then
+      printf '%s\n' "${CLONE_OUTPUT}"
+      echo "rpi-clone failed even with -U." >&2
+      exit 1
+    fi
+  else
+    echo "rpi-clone failed." >&2
+    exit 1
+  fi
+fi
+printf '%s\n' "${CLONE_OUTPUT}"
+
+CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
+if [[ ! -d "${CLONE_MOUNT}" ]]; then
+  echo "Expected clone mount ${CLONE_MOUNT} missing." >&2
   exit 1
 fi
 
-CLONE_MOUNT="/mnt/clone"
-if [[ ! -d "${CLONE_MOUNT}" ]]; then
-  echo "Expected clone mount ${CLONE_MOUNT} missing." >&2
+# If rpi-clone did not leave the clone mounted, attempt to mount the
+# partitions manually so post-processing can continue.
+if ! mountpoint -q "${CLONE_MOUNT}"; then
+  echo "Clone root is not mounted; attempting to mount target partitions."
+  mapfile -t target_parts < <(lsblk -nr -o NAME,TYPE "${TARGET_DEVICE}" | awk '$2=="part" {print $1}')
+  if (( ${#target_parts[@]} > 0 )); then
+    root_part="/dev/${target_parts[$(( ${#target_parts[@]} - 1 ))]}"
+    mkdir -p "${CLONE_MOUNT}"
+    if mount "${root_part}" "${CLONE_MOUNT}"; then
+      echo "Mounted clone root from ${root_part}."
+    else
+      echo "Failed to mount clone root from ${root_part}." >&2
+    fi
+  else
+    echo "No partitions detected on ${TARGET_DEVICE} to mount." >&2
+  fi
+fi
+
+if ! mountpoint -q "${CLONE_MOUNT}"; then
+  echo "Clone root is still not mounted at ${CLONE_MOUNT}." >&2
+  exit 1
+fi
+
+if ! mountpoint -q "${CLONE_MOUNT}/boot/firmware"; then
+  echo "Clone boot partition is not mounted; attempting manual mount."
+  mapfile -t target_parts < <(lsblk -nr -o NAME,TYPE "${TARGET_DEVICE}" | awk '$2=="part" {print $1}')
+  if (( ${#target_parts[@]} > 0 )); then
+    boot_part="/dev/${target_parts[0]}"
+    mkdir -p "${CLONE_MOUNT}/boot/firmware"
+    if mount "${boot_part}" "${CLONE_MOUNT}/boot/firmware"; then
+      echo "Mounted clone boot from ${boot_part}."
+    else
+      echo "Failed to mount clone boot from ${boot_part}." >&2
+    fi
+  else
+    echo "No partitions detected on ${TARGET_DEVICE} for boot mount." >&2
+  fi
+fi
+
+if ! mountpoint -q "${CLONE_MOUNT}/boot/firmware"; then
+  echo "Clone boot partition is still not mounted." >&2
   exit 1
 fi
 
@@ -248,5 +304,7 @@ sync
 CLONED_BYTES=$(df -B1 --output=used "${CLONE_MOUNT}" | tail -n1)
 CLONED_BYTES=${CLONED_BYTES:-0}
 
-echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, \"
-     "boot=${BOOT_UUID:-${BOOT_PARTUUID}}, bytes=${CLONED_BYTES}"
+ROOT_ID="${ROOT_UUID:-${ROOT_PARTUUID}}"
+BOOT_ID="${BOOT_UUID:-${BOOT_PARTUUID}}"
+printf '✅ Clone complete: target=%s, root=%s, boot=%s, bytes=%s\n' \
+  "${TARGET_DEVICE}" "${ROOT_ID}" "${BOOT_ID}" "${CLONED_BYTES}"
