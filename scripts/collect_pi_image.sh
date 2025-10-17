@@ -106,7 +106,7 @@ else
   # Compress; -e for better ratio, -T0 to use all cores on the runner
   : "${XZ_OPT:=-T0 -9e}"
   echo "==> Compressing to ${OUTPUT_PATH} (XZ_OPT='${XZ_OPT}')"
-  xz -c ${XZ_OPT} "${found}" > "${OUTPUT_PATH}"
+  XZ_OPT=${XZ_OPT} xz -c -- "${found}" > "${OUTPUT_PATH}"
 fi
 
 # Write checksum next to artifact

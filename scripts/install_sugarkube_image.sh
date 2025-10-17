@@ -149,15 +149,16 @@ install_gh() {
     if ! api_payload=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest); then
       die "Failed to determine latest GitHub CLI version"
     fi
-    gh_version="$(printf '%s' "$api_payload" | python3 - <<'PYCODE'
+    gh_version="$(
+      printf '%s' "$api_payload" | python3 -c '
 import json
 import sys
 
 payload = json.load(sys.stdin)
 tag = payload.get("tag_name") or ""
 print(tag.lstrip("v"))
-PYCODE
-)"
+'
+    )"
     if [ -z "$gh_version" ]; then
       die "Failed to parse GitHub CLI version from release payload"
     fi
@@ -358,7 +359,6 @@ while [ "$#" -gt 0 ]; do
       if [ "$#" -lt 2 ]; then
         die "--mode requires a value"
       fi
-      MODE_OVERRIDE="$2"
       DOWNLOAD_ARGS+=("--mode" "$2")
       shift 2
       ;;

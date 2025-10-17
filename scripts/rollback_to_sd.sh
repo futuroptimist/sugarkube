@@ -295,7 +295,7 @@ read -r -d '' REPORT <<EOF_REPORT || true
 
 Next steps:
 1. Reboot the Raspberry Pi.
-2. Confirm the system is running from the SD card with `findmnt /`.
+2. Confirm the system is running from the SD card with \$(findmnt /).
 3. Investigate SSD health before attempting another migration.
 EOF_REPORT
 
