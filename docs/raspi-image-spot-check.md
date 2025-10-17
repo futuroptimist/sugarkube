@@ -58,26 +58,65 @@ transparency.
 
 ## Next steps: clone to NVMe
 
-With the SD image validated:
+> [!TIP] Before you start
+> - Skip the boot-order step if `sudo rpi-eeprom-config | grep BOOT_ORDER` already shows `0xf461`.
+> - Skip to **Verification** if `lsblk` already lists NVMe boot and root partitions.
 
-1. Optional: update EEPROM + boot order for NVMe adapters.
-   ```bash
-   sudo just eeprom-nvme-first
-   ```
-2. Clone the SD card to the first non-SD disk (prefers `/dev/nvme0n1`).
-   ```bash
-   sudo just clone-ssd
-   ```
-3. Run the happy-path migration, which chains the above, reboots, and leaves a log in
-   `artifacts/migrate-to-nvme/`. **If you already ran steps 1 and 2 successfully, skip this step.**
-   ```bash
-   sudo just migrate-to-nvme
-   ```
-4. After the reboot, confirm the Pi is running from NVMe.
-   ```bash
-   sudo just post-clone-verify
-   ```
+### 1. Align the boot order (only if needed)
 
-A freshly built image ships with `first-boot-prepare.service`, ensuring `rpi-clone`,
-`rpi-eeprom`, `vcgencmd`, `ethtool`, `jq`, `parted`, `lsblk`, `wipefs`, and `just` are
-ready before you run these commands.
+Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
+
+```bash
+sudo just boot-order sd-nvme-usb
+```
+
+The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an adapter requires it:
+
+```bash
+sudo PCIE_PROBE=1 just boot-order nvme-first
+```
+
+### 2. Clone the SD card to NVMe
+
+Use `-U` once to create the NVMe partitions, then rerun without it for incremental clones.
+
+```bash
+sudo rpi-clone -f -U /dev/nvme0n1
+```
+
+`just clone-ssd` remains available for scripted prompts and artifact capture.
+
+### 3. Optional: one-command migration
+
+To chain the spot-check, boot-order alignment, clone, and reboot, use:
+
+```bash
+sudo just migrate-to-nvme
+```
+
+Check `artifacts/migrate-to-nvme/` for the run log if anything looks off.
+
+### One-time SD override
+
+Keep the NVMe plugged in while testing a fresh SD image by issuing a single-use boot override:
+
+```bash
+sudo rpi-eeprom-config --set 'set_reboot_order=0xf1'
+```
+
+The Pi will prefer the SD card for the next reboot only, then revert to the configured EEPROM order.
+
+> [!TIP] Troubleshooting
+> Mount the clone and inspect the boot files when something fails early:
+> ```bash
+> sudo mount /dev/nvme0n1p1 /mnt/clone
+> sudo sed -n '1,120p' /mnt/clone/cmdline.txt
+> sudo sed -n '1,120p' /mnt/clone/etc/fstab
+> sudo umount /mnt/clone
+> ```
+
+### Verification checklist
+
+- Booted from the expected device: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
+- `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe partitions
+- `sudo vclog -m tip | tail` shows a clean boot summary without boot-order overrides lingering

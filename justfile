@@ -17,6 +17,7 @@ rollback_args := env_var_or_default("ROLLBACK_ARGS", "")
 spot_check_cmd := env_var_or_default("SPOT_CHECK_CMD", scripts_dir + "/spot_check.sh")
 spot_check_args := env_var_or_default("SPOT_CHECK_ARGS", "")
 eeprom_cmd := env_var_or_default("EEPROM_CMD", scripts_dir + "/eeprom_nvme_first.sh")
+boot_order_cmd := env_var_or_default("BOOT_ORDER_CMD", scripts_dir + "/boot_order.sh")
 eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
@@ -122,11 +123,33 @@ rollback-to-sd:
 spot-check:
     "{{ spot_check_cmd }}" {{ spot_check_args }}
 
-# Update the EEPROM so NVMe ranks ahead of SD in the boot order
+# Inspect or align the EEPROM boot order
+# Usage: sudo just boot-order sd-nvme-usb
+boot-order preset:
+    case "{{ preset }}" in
+      sd-nvme-usb)
+        order="0xF461"
+        human="SD → NVMe → USB → repeat"
+        ;;
+      nvme-first)
+        order="0xF416"
+        human="NVMe → SD → USB → repeat"
+        ;;
+      *)
+        echo "Unknown boot-order preset '{{ preset }}'. Use sd-nvme-usb or nvme-first." >&2
+        exit 1
+        ;;
+    esac
+    echo "[boot-order] Target preset '{{ preset }}' => BOOT_ORDER=${order} (${human})."
+    "{{ boot_order_cmd }}" ensure_order "${order}"
 
+# Deprecated wrapper retained for one release; prefer `just boot-order nvme-first`
 # Usage: sudo just eeprom-nvme-first
 eeprom-nvme-first:
-    "{{ eeprom_cmd }}" {{ eeprom_args }}
+    @echo "[deprecated] 'just eeprom-nvme-first' will be removed in a future release." >&2
+    @echo "[deprecated] Use 'just boot-order nvme-first' next time." >&2
+    @echo "[deprecated] Applying BOOT_ORDER=0xF416 (NVMe → SD → USB → repeat)." >&2
+    just --justfile "{{ justfile_directory() }}/justfile" boot-order nvme-first
 
 # Clone the active SD card to the preferred NVMe/USB target
 
