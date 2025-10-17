@@ -124,26 +124,24 @@ spot-check:
     "{{ spot_check_cmd }}" {{ spot_check_args }}
 
 # Inspect or align the EEPROM boot order
+
 # Usage: sudo just boot-order sd-nvme-usb
 boot-order preset:
-    case "{{ preset }}" in
-      sd-nvme-usb)
-        order="0xF461"
-        human="SD → NVMe → USB → repeat"
-        ;;
-      nvme-first)
-        order="0xF416"
-        human="NVMe → SD → USB → repeat"
-        ;;
-      *)
-        echo "Unknown boot-order preset '{{ preset }}'. Use sd-nvme-usb or nvme-first." >&2
-        exit 1
-        ;;
-    esac
+    if [ "{{ preset }}" = "sd-nvme-usb" ]; then
+    order="0xF461"
+    human="SD → NVMe → USB → repeat"
+    elif [ "{{ preset }}" = "nvme-first" ]; then
+    order="0xF416"
+    human="NVMe → SD → USB → repeat"
+    else
+    echo "Unknown boot-order preset '{{ preset }}'. Use sd-nvme-usb or nvme-first." >&2
+    exit 1
+    fi
     echo "[boot-order] Target preset '{{ preset }}' => BOOT_ORDER=${order} (${human})."
     "{{ boot_order_cmd }}" ensure_order "${order}"
 
 # Deprecated wrapper retained for one release; prefer `just boot-order nvme-first`
+
 # Usage: sudo just eeprom-nvme-first
 eeprom-nvme-first:
     @echo "[deprecated] 'just eeprom-nvme-first' will be removed in a future release." >&2
