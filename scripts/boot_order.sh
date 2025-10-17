@@ -22,11 +22,11 @@ require_command() {
 }
 
 run_rpi_eeprom_config() {
-  if rpi-eeprom-config "$@"; then
+  if rpi-eeprom-config; then
     return 0
   fi
   if [[ ${EUID:-} -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
-    sudo rpi-eeprom-config "$@"
+    sudo rpi-eeprom-config
     return 0
   fi
   return 1
