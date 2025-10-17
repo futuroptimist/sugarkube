@@ -66,8 +66,14 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
             "clone-ssd",
             "clone-ssd:",
             [
-                '    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi',  # noqa: E501
-                '    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}',  # noqa: E501
+                '    TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}',  # noqa: E501
+            ],
+        ),
+        (
+            "boot-order preset",
+            "boot-order preset:",
+            [
+                '    "{{ scripts_dir }}/apply_boot_order_preset.sh" "{{ preset }}"',
             ],
         ),
         (
@@ -84,6 +90,13 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
             [
                 '    if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi',  # noqa: E501
                 '    "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}',  # noqa: E501
+            ],
+        ),
+        (
+            "install-rpi-clone",
+            "install-rpi-clone:",
+            [
+                '    "{{ scripts_dir }}/install_rpi_clone.sh"',
             ],
         ),
     ],

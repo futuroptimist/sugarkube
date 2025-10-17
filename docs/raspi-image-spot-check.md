@@ -79,6 +79,11 @@ sudo PCIE_PROBE=1 just boot-order nvme-first
 ### 2. Clone the SD card to NVMe
 
 Use `-U` once to create the NVMe partitions, then rerun without it for incremental clones.
+Install `rpi-clone` the first time you run this step:
+
+```bash
+sudo just install-rpi-clone
+```
 
 ```bash
 sudo rpi-clone -f -U /dev/nvme0n1

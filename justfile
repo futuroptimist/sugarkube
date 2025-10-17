@@ -127,18 +127,7 @@ spot-check:
 
 # Usage: sudo just boot-order sd-nvme-usb
 boot-order preset:
-    if [ "{{ preset }}" = "sd-nvme-usb" ]; then
-    order="0xF461"
-    human="SD → NVMe → USB → repeat"
-    elif [ "{{ preset }}" = "nvme-first" ]; then
-    order="0xF416"
-    human="NVMe → SD → USB → repeat"
-    else
-    echo "Unknown boot-order preset '{{ preset }}'. Use sd-nvme-usb or nvme-first." >&2
-    exit 1
-    fi
-    echo "[boot-order] Target preset '{{ preset }}' => BOOT_ORDER=${order} (${human})."
-    "{{ boot_order_cmd }}" ensure_order "${order}"
+    "{{ scripts_dir }}/apply_boot_order_preset.sh" "{{ preset }}"
 
 # Deprecated wrapper retained for one release; prefer `just boot-order nvme-first`
 
@@ -159,33 +148,21 @@ clone-ssd:
 
 # Usage: sudo just migrate-to-nvme SKIP_EEPROM=1 NO_REBOOT=1
 migrate-to-nvme:
-    artifacts_dir="{{ migrate_artifacts }}"
-    mkdir -p "${artifacts_dir}"
-    log_file="${artifacts_dir}/migrate.log"
-    (
-    set -o pipefail
-    run_step() {
-    local label="$1"
-    shift
-    printf '[migrate] >>> %s\n' "${label}"
-    "$@"
-    }
-    run_step spot-check "{{ spot_check_cmd }}" {{ spot_check_args }}
-    if [ "{{ migrate_skip_eeprom }}" != "1" ]; then
-    run_step eeprom "{{ eeprom_cmd }}" {{ eeprom_args }}
-    else
-    printf '[migrate] SKIP_EEPROM=1, skipping EEPROM update\n'
-    fi
-    run_step clone env TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
-    if [ "{{ migrate_no_reboot }}" != "1" ]; then
-    printf '[migrate] Rebooting to complete migration\n'
-    sync
-    reboot
-    else
-    printf '[migrate] NO_REBOOT=1 set; not rebooting automatically\n'
-    fi
-    printf '[migrate] Log captured at %s\n' "${log_file}"
-    ) | tee "${log_file}"
+    MIGRATE_ARTIFACTS="{{ migrate_artifacts }}" \
+    SPOT_CHECK_ARGS="{{ spot_check_args }}" \
+    EEPROM_ARGS="{{ eeprom_args }}" \
+    CLONE_ARGS="{{ clone_args }}" \
+    TARGET="{{ clone_target }}" \
+    WIPE="{{ clone_wipe }}" \
+    SKIP_EEPROM="{{ migrate_skip_eeprom }}" \
+    NO_REBOOT="{{ migrate_no_reboot }}" \
+    "{{ scripts_dir }}/migrate_to_nvme.sh"
+
+# Install or update rpi-clone utility
+
+# Usage: sudo just install-rpi-clone
+install-rpi-clone:
+    "{{ scripts_dir }}/install_rpi_clone.sh"
 
 # Post-migration verification ensuring both partitions boot from NVMe
 
