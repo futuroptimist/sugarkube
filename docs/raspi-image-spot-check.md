@@ -78,13 +78,19 @@ sudo PCIE_PROBE=1 just boot-order nvme-first
 
 ### 2. Clone the SD card to NVMe
 
-Use `-U` once to create the NVMe partitions, then rerun without it for incremental clones.
+The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures logs under
+`artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the
+target device explicitly during the first run so the script can initialise the NVMe layout:
 
 ```bash
-sudo rpi-clone -f -U /dev/nvme0n1
+sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
 ```
 
-`just clone-ssd` remains available for scripted prompts and artifact capture.
+Subsequent syncs only need the target argument:
+
+```bash
+sudo just clone-ssd TARGET=/dev/nvme0n1
+```
 
 ### 3. Optional: one-command migration
 

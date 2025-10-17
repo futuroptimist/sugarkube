@@ -10,6 +10,7 @@ Usage: ${SCRIPT_NAME} <command> [args]
 
 Commands:
   ensure_order <hex>  Ensure BOOT_ORDER matches the provided hex value.
+  preset <name>       Apply a predefined boot-order preset (sd-nvme-usb|nvme-first).
   print               Print current BOOT_ORDER and any PCIE_* keys.
 USAGE
 }
@@ -47,6 +48,35 @@ human_readable() {
   esac
 }
 
+resolve_preset() {
+  local preset=$1
+  case "${preset}" in
+    sd-nvme-usb)
+      echo "0xF461"
+      ;;
+    nvme-first)
+      echo "0xF416"
+      ;;
+    *)
+      echo "${SCRIPT_NAME}: Unknown boot-order preset '${preset}'." >&2
+      return 1
+      ;;
+  esac
+}
+
+apply_preset() {
+  local preset=$1
+  local desired
+  if ! desired=$(resolve_preset "${preset}"); then
+    exit 1
+  fi
+
+  local human
+  human=$(human_readable "${desired}")
+  echo "[boot-order] Target preset '${preset}' => BOOT_ORDER=${desired} (${human})."
+  apply_boot_order "${desired}"
+}
+
 print_current() {
   require_command rpi-eeprom-config
   echo "[boot-order] Current EEPROM boot configuration:"
@@ -67,7 +97,7 @@ apply_boot_order() {
 
   local tmp_dir
   tmp_dir=$(mktemp -d)
-  trap 'rm -rf "${tmp_dir}"' EXIT
+  trap '[[ -n "${tmp_dir:-}" ]] && rm -rf "${tmp_dir}"' EXIT
 
   local current_cfg="${tmp_dir}/current.conf"
   local target_cfg="${tmp_dir}/target.conf"
@@ -132,6 +162,13 @@ main() {
         exit 1
       fi
       apply_boot_order "$1"
+      ;;
+    preset)
+      if [[ $# -ne 1 ]]; then
+        usage
+        exit 1
+      fi
+      apply_preset "$1"
       ;;
     print)
       print_current
