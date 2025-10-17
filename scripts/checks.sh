@@ -140,13 +140,16 @@ has_pcbnew() {
 
 is_kicad_path() {
   case "$1" in
+    *.pretty/*.kicad_mod)
+      return 0
+      ;;
+    .kibot/*)
+      return 0
+      ;;
     *.kicad_pro|*.kicad_pcb|*.kicad_sch|*.kicad_sym|*.kicad_mod|*.kicad_prl|*.kicad_wks)
       return 0
       ;;
     *.sch|*.lib|*.dcm|*.kicad_dru|*.kicad_step|*.net|*.cmp|*.kicad_rename)
-      return 0
-      ;;
-    *.pretty/*.kicad_mod|.kibot/*)
       return 0
       ;;
   esac

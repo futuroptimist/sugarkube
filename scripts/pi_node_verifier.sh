@@ -19,7 +19,8 @@ DSPACE_HEALTH_INSECURE=${DSPACE_HEALTH_INSECURE:-false}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-5}
 
 set_skip_compose() {
-  local value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  local value
+  value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$value" in
     1|true|yes|on)
       SKIP_COMPOSE=true
@@ -147,10 +148,10 @@ append_report() {
   tmp=$(mktemp)
   {
     printf '## %s\n\n' "$timestamp"
-    printf '* Hostname: `%s`\n' "$host"
-    printf '* Kernel: `%s`\n' "$kernel"
+    printf "* Hostname: \`%s\`\n" "$host"
+    printf "* Kernel: \`%s\`\n" "$kernel"
     if [[ -n "$model" ]]; then
-      printf '* Hardware: `%s`\n' "$model"
+      printf "* Hardware: \`%s\`\n" "$model"
     fi
     printf '\n### Verifier Checks\n\n'
     printf '| Check | Status |\n'
