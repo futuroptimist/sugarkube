@@ -83,13 +83,13 @@ The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures log
 target device explicitly during the first run so the script can initialise the NVMe layout:
 
 ```bash
-sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
+TARGET=/dev/nvme0n1; WIPE=1; sudo just clone-ssd
 ```
 
 Subsequent syncs only need the target argument:
 
 ```bash
-sudo just clone-ssd TARGET=/dev/nvme0n1
+TARGET=/dev/nvme0n1; sudo just clone-ssd
 ```
 
 ### 3. Optional: one-command migration
