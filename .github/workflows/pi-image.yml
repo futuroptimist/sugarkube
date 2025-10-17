@@ -50,7 +50,19 @@ jobs:
           sudo apt-get -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
-            install -y --no-install-recommends libarchive-tools xz-utils
+            install -y --no-install-recommends libarchive-tools xz-utils shellcheck bats
+
+      - name: Run ShellCheck on scripts
+        run: shellcheck scripts/*.sh
+
+      - name: Verify rpi-clone unattended fallback guard
+        run: |
+          if grep -Fq 'rpi-clone -f -u "${TARGET_DEVICE}"' scripts/clone_to_nvme.sh; then
+            grep -Fq 'Unattended -u option not allowed when initializing' scripts/clone_to_nvme.sh
+          fi
+
+      - name: Run targeted Bats tests
+        run: sudo bats tests/spot_check_net_parsing.bats tests/rpi_clone_unattended_fallback.bats
       - name: Run artifact detection unit tests
         run: bash tests/artifact_detection_test.sh
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Purpose: Perform a Raspberry Pi 5 Bookworm readiness spot check with artifact summaries.
 # Usage: sudo ./scripts/spot_check.sh
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 log_info()  { echo "[info]  $*"; }
@@ -18,11 +18,16 @@ JSON_FILE="${LOG_DIR}/summary.json"
 MD_FILE="${LOG_DIR}/summary.md"
 mkdir -p "${LOG_DIR}"
 
-exec > >(tee "${LOG_FILE}") 2>&1
+if [[ "${SPOT_CHECK_LIB_ONLY:-0}" != "1" ]]; then
+  # When sourced for unit tests we skip log redirection and root checks.
+  exec > >(tee "${LOG_FILE}") 2>&1
+fi
 
-if [[ ${EUID} -ne 0 ]]; then
-  echo "Run this script with sudo so hardware and journal data are accessible." >&2
-  exit 1
+if [[ "${SPOT_CHECK_LIB_ONLY:-0}" != "1" ]]; then
+  if [[ ${EUID} -ne 0 ]]; then
+    echo "Run this script with sudo so hardware and journal data are accessible." >&2
+    exit 1
+  fi
 fi
 
 RESULT_DATA=()
@@ -63,6 +68,8 @@ add_result() {
 }
 
 sanitize_for_log() {
+  # shellcheck disable=SC2001
+  # Using sed keeps trailing whitespace trimming simple.
   sed -e 's/[[:space:]]\+$//' <<<"$1"
 }
 
@@ -137,7 +144,8 @@ check_time_locale() {
 
 # 3. Storage overview
 check_storage() {
-  local storage_json_path storage_vars root_device boot_device root_uuid boot_uuid message ok df_out
+  local storage_json_path storage_vars message ok df_out
+  local ROOT_DEVICE="" BOOT_DEVICE="" ROOT_UUID="" BOOT_UUID=""
   storage_json_path="${LOG_DIR}/storage.json"
   storage_vars=$(python3 - "${storage_json_path}" <<'PY'
 import json, subprocess, sys, re
@@ -317,7 +325,8 @@ check_link_speed() {
   local ifname="${1:-eth0}"
   local min="${MIN_LINK_MBPS:-100}"
   local rec="${RECOMMENDED_LINK_MBPS:-1000}"
-  local speed="$(_read_link_speed_mbps "$ifname")"
+  local speed
+  speed="$(_read_link_speed_mbps "$ifname")"
   local label="Link speed"
   local speed_display="${speed:-unknown}"
   local message="${label}: ${ifname}=${speed_display}Mb/s; expected >= ${min}Mb/s (recommended ${rec}Mb/s)"
@@ -528,7 +537,7 @@ main() {
   check_time_locale
   check_storage
   check_networking
-  check_link_speed
+  check_link_speed "${LINK_INTERFACE:-eth0}"
   check_services_logs
   check_health
   check_repo_sync
@@ -540,4 +549,6 @@ main() {
   printf '\n✅ Spot check complete. Artifacts: %s\n' "${ARTIFACT_DIR}"
 }
 
-main "$@"
+if [[ "${SPOT_CHECK_LIB_ONLY:-0}" != "1" ]]; then
+  main "$@"
+fi

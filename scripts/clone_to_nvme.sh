@@ -127,15 +127,56 @@ if [[ "${WIPE}" == "1" ]]; then
 fi
 
 echo "Running rpi-clone -f -u ${TARGET_DEVICE}"
-if ! rpi-clone -f -u "${TARGET_DEVICE}"; then
-  echo "rpi-clone failed" >&2
-  exit 1
+CLONE_OUTPUT=""
+if ! CLONE_OUTPUT=$(rpi-clone -f -u "${TARGET_DEVICE}" 2>&1); then
+  printf '%s\n' "${CLONE_OUTPUT}" || true
+  if grep -Fq 'Unattended -u option not allowed when initializing' <<<"${CLONE_OUTPUT}"; then
+    echo "rpi-clone rejected unattended mode; retrying with -U"
+    if ! CLONE_OUTPUT=$(rpi-clone -f -U "${TARGET_DEVICE}" 2>&1); then
+      printf '%s\n' "${CLONE_OUTPUT}" >&2 || true
+      echo "rpi-clone fallback with -U failed" >&2
+      exit 1
+    fi
+  else
+    echo "rpi-clone failed" >&2
+    exit 1
+  fi
 fi
+printf '%s\n' "${CLONE_OUTPUT}"
 
 CLONE_MOUNT="/mnt/clone"
-if [[ ! -d "${CLONE_MOUNT}" ]]; then
-  echo "Expected clone mount ${CLONE_MOUNT} missing." >&2
-  exit 1
+mkdir -p "${CLONE_MOUNT}/boot/firmware"
+
+mapfile -t target_partitions < <(lsblk -nr -o NAME -p "${TARGET_DEVICE}" | tail -n +2 || true)
+ROOT_PARTITION=""
+BOOT_PARTITION=""
+if (( ${#target_partitions[@]} > 0 )); then
+  ROOT_PARTITION="${target_partitions[$((${#target_partitions[@]} - 1))]}"
+  BOOT_PARTITION="${target_partitions[0]}"
+fi
+
+if ! mountpoint -q "${CLONE_MOUNT}"; then
+  if [[ -z "${ROOT_PARTITION}" ]]; then
+    echo "Unable to determine root partition for ${TARGET_DEVICE}" >&2
+    exit 1
+  fi
+  echo "Mounting ${ROOT_PARTITION} to ${CLONE_MOUNT}"
+  if ! mount "${ROOT_PARTITION}" "${CLONE_MOUNT}"; then
+    echo "Failed to mount ${ROOT_PARTITION} to ${CLONE_MOUNT}" >&2
+    exit 1
+  fi
+fi
+
+if ! mountpoint -q "${CLONE_MOUNT}/boot/firmware"; then
+  if [[ -z "${BOOT_PARTITION}" ]]; then
+    echo "Unable to determine boot partition for ${TARGET_DEVICE}" >&2
+    exit 1
+  fi
+  echo "Mounting ${BOOT_PARTITION} to ${CLONE_MOUNT}/boot/firmware"
+  if ! mount "${BOOT_PARTITION}" "${CLONE_MOUNT}/boot/firmware"; then
+    echo "Failed to mount ${BOOT_PARTITION} to ${CLONE_MOUNT}/boot/firmware" >&2
+    exit 1
+  fi
 fi
 
 resolve_mount_device() {
@@ -248,5 +289,4 @@ sync
 CLONED_BYTES=$(df -B1 --output=used "${CLONE_MOUNT}" | tail -n1)
 CLONED_BYTES=${CLONED_BYTES:-0}
 
-echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, \"
-     "boot=${BOOT_UUID:-${BOOT_PARTUUID}}, bytes=${CLONED_BYTES}"
+echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, boot=${BOOT_UUID:-${BOOT_PARTUUID}}, bytes=${CLONED_BYTES}"
