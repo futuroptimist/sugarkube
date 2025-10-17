@@ -83,13 +83,13 @@ The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures log
 target device explicitly during the first run so the script can initialise the NVMe layout:
 
 ```bash
-TARGET=/dev/nvme0n1; WIPE=1; sudo just clone-ssd
+sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 ```
 
 Subsequent syncs only need the target argument:
 
 ```bash
-TARGET=/dev/nvme0n1; sudo just clone-ssd
+sudo TARGET=/dev/nvme0n1 just clone-ssd
 ```
 
 ### 3. Optional: one-command migration
@@ -101,6 +101,9 @@ sudo just migrate-to-nvme
 ```
 
 Check `artifacts/migrate-to-nvme/` for the run log if anything looks off.
+
+> [!NOTE]
+> Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper handles both layouts.
 
 ### One-time SD override
 
