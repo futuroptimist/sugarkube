@@ -60,23 +60,52 @@ transparency.
 
 With the SD image validated:
 
-1. Optional: update EEPROM + boot order for NVMe adapters.
+> [!TIP] Before you start
+> - Run `sudo just boot-order print`. If it already shows `BOOT_ORDER=0xf461`, you can skip the Boot-Order step.
+> - Check the NVMe layout with `lsblk -o NAME,SIZE,TYPE,MOUNTPOINT /dev/nvme0n1`. If you already see boot (`p1`) and root (`p2`) partitions with recent timestamps, skip the initialization command and jump to the verification checklist.
+
+1. **Align the boot order (SD → NVMe → USB).** This keeps the SD card first for recovery but promotes NVMe for normal boots.
    ```bash
-   sudo just eeprom-nvme-first
+   sudo just boot-order sd-nvme-usb
    ```
-2. Clone the SD card to the first non-SD disk (prefers `/dev/nvme0n1`).
+   - Some USB-to-NVMe bridges require `PCIE_PROBE=1`; opt-in with `PCIE_PROBE=1 sudo just boot-order sd-nvme-usb` when needed.
+
+2. **Initialize and clone the NVMe drive.** `rpi-clone`'s `-U` flag is required the very first time to create the partition table and enable filesystem UUID swaps.
    ```bash
-   sudo just clone-ssd
+   sudo rpi-clone -f -U /dev/nvme0n1
    ```
-3. Run the happy-path migration, which chains the above, reboots, and leaves a log in
-   `artifacts/migrate-to-nvme/`. **If you already ran steps 1 and 2 successfully, skip this step.**
+   - After the first initialization, reruns are idempotent via `sudo just clone-ssd TARGET=/dev/nvme0n1` (add `WIPE=1` when you want a fresh copy).
+
+3. **Happy-path automation (optional).** `migrate-to-nvme` chains the spot check, boot-order preset, clone, and reboot.
    ```bash
    sudo just migrate-to-nvme
    ```
-4. After the reboot, confirm the Pi is running from NVMe.
+   - Set `SKIP_EEPROM=1` if you already set the boot order, and `NO_REBOOT=1` when you need to delay the reboot.
+
+4. **Post-clone validation.** Whether you used the manual or automated path, run the verification helper.
    ```bash
    sudo just post-clone-verify
    ```
+
+> [!TIP] Troubleshooting clone artifacts
+> - Create the mountpoints: `sudo mkdir -p /mnt/clone /mnt/clone/boot`.
+> - Mount the NVMe root and boot partitions: `sudo mount /dev/nvme0n1p2 /mnt/clone` and `sudo mount /dev/nvme0n1p1 /mnt/clone/boot`.
+> - Inspect `/mnt/clone/boot/cmdline.txt` and `/mnt/clone/etc/fstab` for the expected `PARTUUID`s.
+> - When finished, unmount with `sudo umount /mnt/clone/boot /mnt/clone`.
+
+To test a brand-new SD card while the NVMe remains attached, issue a one-time override:
+
+```bash
+sudo rpi-eeprom-config --set set_reboot_order=0xf1
+```
+
+The bootloader will prefer the SD card on the next reboot only and then fall back to the normal sequence.
+
+### Verification checklist
+
+- `findmnt /` shows the root filesystem on `/dev/nvme0n1p2` (or the NVMe `PARTUUID`).
+- `/boot/cmdline.txt` and `/etc/fstab` reference the NVMe `PARTUUID` values emitted by `sudo blkid /dev/nvme0n1p1 /dev/nvme0n1p2`.
+- `sudo vclog -m tip` (or `sudo vcgencmd bootloader_config`) reports the expected `BOOT_ORDER=0xf461` without bootloader warnings.
 
 A freshly built image ships with `first-boot-prepare.service`, ensuring `rpi-clone`,
 `rpi-eeprom`, `vcgencmd`, `ethtool`, `jq`, `parted`, `lsblk`, `wipefs`, and `just` are
