@@ -16,13 +16,14 @@ LOG_DIR="${ARTIFACT_DIR}"
 LOG_FILE="${LOG_DIR}/spot-check.log"
 JSON_FILE="${LOG_DIR}/summary.json"
 MD_FILE="${LOG_DIR}/summary.md"
-mkdir -p "${LOG_DIR}"
 
-exec > >(tee "${LOG_FILE}") 2>&1
-
-if [[ ${EUID} -ne 0 ]]; then
-  echo "Run this script with sudo so hardware and journal data are accessible." >&2
-  exit 1
+if [[ "${SKIP_SPOT_CHECK_MAIN:-0}" != "1" ]]; then
+  mkdir -p "${LOG_DIR}"
+  exec > >(tee "${LOG_FILE}") 2>&1
+  if [[ ${EUID} -ne 0 ]]; then
+    echo "Run this script with sudo so hardware and journal data are accessible." >&2
+    exit 1
+  fi
 fi
 
 RESULT_DATA=()
@@ -63,6 +64,8 @@ add_result() {
 }
 
 sanitize_for_log() {
+  # shellcheck disable=SC2001
+  # Trailing whitespace stripping is clearer with sed here.
   sed -e 's/[[:space:]]\+$//' <<<"$1"
 }
 
@@ -137,7 +140,7 @@ check_time_locale() {
 
 # 3. Storage overview
 check_storage() {
-  local storage_json_path storage_vars root_device boot_device root_uuid boot_uuid message ok df_out
+  local storage_json_path storage_vars message ok df_out
   storage_json_path="${LOG_DIR}/storage.json"
   storage_vars=$(python3 - "${storage_json_path}" <<'PY'
 import json, subprocess, sys, re
@@ -313,11 +316,14 @@ _read_link_speed_mbps() {
   fi
 }
 
+# shellcheck disable=SC2120
+# Optional interface argument defaults to eth0 when omitted.
 check_link_speed() {
   local ifname="${1:-eth0}"
   local min="${MIN_LINK_MBPS:-100}"
   local rec="${RECOMMENDED_LINK_MBPS:-1000}"
-  local speed="$(_read_link_speed_mbps "$ifname")"
+  local speed
+  speed="$(_read_link_speed_mbps "$ifname")"
   local label="Link speed"
   local speed_display="${speed:-unknown}"
   local message="${label}: ${ifname}=${speed_display}Mb/s; expected >= ${min}Mb/s (recommended ${rec}Mb/s)"
@@ -539,5 +545,12 @@ main() {
   fi
   printf '\n✅ Spot check complete. Artifacts: %s\n' "${ARTIFACT_DIR}"
 }
+
+if [[ "${SKIP_SPOT_CHECK_MAIN:-0}" == "1" ]]; then
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+  fi
+  exit 0
+fi
 
 main "$@"

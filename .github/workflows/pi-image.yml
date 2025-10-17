@@ -50,7 +50,17 @@ jobs:
           sudo apt-get -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
-            install -y --no-install-recommends libarchive-tools xz-utils
+            install -y --no-install-recommends libarchive-tools xz-utils shellcheck bats
+      - name: ShellCheck scripts
+        run: shellcheck scripts/*.sh
+      - name: Guard unattended clone fallback
+        run: |
+          if grep -F 'rpi-clone -f -u' scripts/clone_to_nvme.sh; then
+            echo "Direct unattended clone call detected without fallback" >&2
+            exit 1
+          fi
+      - name: Run unit bats tests
+        run: bats tests/spot_check_net_parsing.bats tests/rpi_clone_unattended_fallback.bats
       - name: Run artifact detection unit tests
         run: bash tests/artifact_detection_test.sh
 
@@ -74,6 +84,47 @@ jobs:
 
       - name: Run Pi Imager preset e2e test
         run: bash tests/render_pi_imager_preset_e2e.sh
+
+  qemu-smoke:
+    needs: unit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Install QEMU smoke dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends just qemu-system-arm qemu-efi-aarch64 qemu-utils
+      - name: Run QEMU smoke (skips if image missing)
+        env:
+          QEMU_SMOKE_ARTIFACTS: ${{ github.workspace }}/artifacts/qemu-smoke
+        run: |
+          shopt -s nullglob
+          images=(deploy/sugarkube.img deploy/sugarkube.img.xz)
+          if [ ${#images[@]} -eq 0 ]; then
+            echo "No built image found; skipping QEMU smoke test."
+            exit 0
+          fi
+          image_path="${images[0]}"
+          if [[ "${image_path}" == *.xz ]]; then
+            tmp_img="${image_path%.xz}"
+            xz -dk "${image_path}"
+            image_path="${tmp_img}"
+          fi
+          sudo just qemu-smoke QEMU_SMOKE_IMAGE="${image_path}"
+          sudo journalctl -p3 --no-pager || true
+          if [ -f "${QEMU_SMOKE_ARTIFACTS}/first-boot-report/spot-check.md" ]; then
+            echo "--- spot-check summary ---"
+            cat "${QEMU_SMOKE_ARTIFACTS}/first-boot-report/spot-check.md"
+          fi
 
   build:
     # Only run the expensive image build when manually dispatched

@@ -35,16 +35,21 @@ resolve_mount() {
 
 ROOT_DEV=$(resolve_mount /)
 BOOT_DEV=$(resolve_mount /boot/firmware)
-if [[ "${ROOT_DEV}" != /dev/nvme0n1p2 ]]; then
-  echo "❌ Root filesystem is on ${ROOT_DEV:-unknown}; expected /dev/nvme0n1p2." >&2
+if [[ -z "${ROOT_DEV}" || -z "${BOOT_DEV}" ]]; then
+  echo "❌ Unable to resolve mounted devices for / or /boot/firmware." >&2
   exit 1
 fi
-if [[ "${BOOT_DEV}" != /dev/nvme0n1p1 ]]; then
-  echo "❌ Boot filesystem is on ${BOOT_DEV:-unknown}; expected /dev/nvme0n1p1." >&2
-  exit 1
-fi
+
+ROOT_PARENT=$(lsblk -no PKNAME "$(readlink -f "${ROOT_DEV}")" 2>/dev/null || true)
+BOOT_PARENT=$(lsblk -no PKNAME "$(readlink -f "${BOOT_DEV}")" 2>/dev/null || true)
 
 ROOT_UUID=$(blkid -s UUID -o value "${ROOT_DEV}" 2>/dev/null || true)
 BOOT_UUID=$(blkid -s UUID -o value "${BOOT_DEV}" 2>/dev/null || true)
 
-echo "✅ NVMe boot verified: /=${ROOT_DEV} (${ROOT_UUID}), /boot/firmware=${BOOT_DEV} (${BOOT_UUID})"
+if [[ "${ROOT_PARENT}" == nvme* && "${BOOT_PARENT}" == nvme* ]]; then
+  echo "✅ NVMe boot verified: /=${ROOT_DEV} (${ROOT_UUID}) on ${ROOT_PARENT}; /boot/firmware=${BOOT_DEV} (${BOOT_UUID}) on ${BOOT_PARENT}"
+  exit 0
+fi
+
+echo "❌ Unexpected boot media detected. root=${ROOT_DEV} (${ROOT_UUID}) parent=${ROOT_PARENT:-unknown}; boot=${BOOT_DEV} (${BOOT_UUID}) parent=${BOOT_PARENT:-unknown}" >&2
+exit 1

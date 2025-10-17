@@ -7,6 +7,142 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 ARTIFACT_DIR="${REPO_ROOT}/artifacts"
 LOG_FILE="${ARTIFACT_DIR}/clone-to-nvme.log"
+
+resolve_device() {
+  local source="$1"
+  if [[ -z "${source}" ]]; then
+    echo "" && return
+  fi
+  if [[ "${source}" =~ ^/dev/ ]]; then
+    echo "${source}"
+  else
+    echo "/dev/${source}"
+  fi
+}
+
+run_rpi_clone_with_fallback() {
+  local target_device="$1"
+  local clone_tmp fallback_tmp status
+  local -a base_args=(-f)
+  local unattended_flag="-u"
+  local unattended_init_flag="-U"
+  clone_tmp=$(mktemp)
+  fallback_tmp=""
+
+  cleanup_clone_logs() {
+    local clone_path="${clone_tmp:-}"
+    local fallback_path="${fallback_tmp:-}"
+    rm -f "${clone_path}" "${fallback_path}" 2>/dev/null || true
+  }
+  trap cleanup_clone_logs RETURN
+
+  echo "Running rpi-clone unattended clone for ${target_device}"
+
+  set +e
+  rpi-clone "${base_args[@]}" "${unattended_flag}" "${target_device}" > >(tee "${clone_tmp}") 2>&1
+  status=$?
+  set -e
+
+  if [[ ${status} -eq 0 ]]; then
+    return 0
+  fi
+
+  if grep -Fq "Unattended -u option not allowed when initializing" "${clone_tmp}"; then
+    echo "rpi-clone refused unattended init; retrying with manual -U"
+    fallback_tmp=$(mktemp)
+    trap cleanup_clone_logs RETURN
+    set +e
+    rpi-clone "${base_args[@]}" "${unattended_init_flag}" "${target_device}" > >(tee "${fallback_tmp}") 2>&1
+    status=$?
+    set -e
+    if [[ ${status} -eq 0 ]]; then
+      return 0
+    fi
+  fi
+
+  echo "rpi-clone failed. Output:" >&2
+  cat "${clone_tmp}" >&2 || true
+  if [[ -n "${fallback_tmp}" ]]; then
+    cat "${fallback_tmp}" >&2 || true
+  fi
+  return 1
+}
+
+ensure_clone_mounts() {
+  local target_device="$1" clone_mount="$2"
+  if mountpoint -q "${clone_mount}"; then
+    return 0
+  fi
+
+  echo "Clone root not mounted at ${clone_mount}; attempting manual mount"
+  mkdir -p "${clone_mount}" "${clone_mount}/boot/firmware"
+
+  mapfile -t target_parts < <(
+    lsblk -nr -o NAME,TYPE "${target_device}" |
+      awk '$2=="part" {print $1}'
+  )
+
+  if (( ${#target_parts[@]} == 0 )); then
+    echo "No partitions detected on ${target_device} after clone." >&2
+    return 1
+  fi
+
+  local root_index=$(( ${#target_parts[@]} - 1 ))
+  local root_part="${target_parts[${root_index}]}"
+  local boot_part="${target_parts[0]}"
+
+  if ! mount "/dev/${root_part}" "${clone_mount}"; then
+    echo "Failed to mount cloned root /dev/${root_part} at ${clone_mount}" >&2
+    return 1
+  fi
+
+  if ! mountpoint -q "${clone_mount}/boot/firmware"; then
+    if [[ "${boot_part}" != "${root_part}" ]]; then
+      if ! mount "/dev/${boot_part}" "${clone_mount}/boot/firmware"; then
+        echo "Warning: unable to mount boot partition /dev/${boot_part}" >&2
+      fi
+    fi
+  fi
+}
+
+resolve_mount_device() {
+  local mount_point="$1"
+  local src
+  src=$(findmnt -no SOURCE "${mount_point}" 2>/dev/null || true)
+  if [[ -z "${src}" ]]; then
+    echo ""
+    return
+  fi
+  if [[ "${src}" =~ ^/dev/ ]]; then
+    echo "${src}"
+  elif [[ "${src}" =~ ^UUID= ]]; then
+    blkid -U "${src#UUID=}"
+  elif [[ "${src}" =~ ^PARTUUID= ]]; then
+    blkid -o device -t "PARTUUID=${src#PARTUUID=}"
+  else
+    echo ""
+  fi
+}
+
+ensure_rpi_clone() {
+  if command -v rpi-clone >/dev/null 2>&1; then
+    return
+  fi
+  local installer="https://raw.githubusercontent.com/geerlingguy/rpi-clone/master/install"
+  echo "Installing rpi-clone from geerlingguy/rpi-clone"
+  if ! curl -fsSL "${installer}" | bash; then
+    echo "Failed to install rpi-clone" >&2
+    exit 1
+  fi
+}
+
+if [[ "${SKIP_CLONE_TO_NVME_MAIN:-0}" == "1" ]]; then
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+  fi
+  exit 0
+fi
+
 mkdir -p "${ARTIFACT_DIR}"
 exec > >(tee "${LOG_FILE}") 2>&1
 
@@ -49,18 +185,6 @@ done
 TARGET_DEVICE="${TARGET_OVERRIDE:-${TARGET:-}}"
 DETECT_SCRIPT="${SCRIPT_DIR}/detect_target_disk.sh"
 
-resolve_device() {
-  local source="$1"
-  if [[ -z "${source}" ]]; then
-    echo "" && return
-  fi
-  if [[ "${source}" =~ ^/dev/ ]]; then
-    echo "${source}"
-  else
-    echo "/dev/${source}"
-  fi
-}
-
 if [[ -z "${TARGET_DEVICE}" ]]; then
   if [[ ! -x "${DETECT_SCRIPT}" ]]; then
     echo "Device detection helper missing: ${DETECT_SCRIPT}" >&2
@@ -85,18 +209,6 @@ if [[ ! -b "${TARGET_DEVICE}" ]]; then
   echo "Target ${TARGET_DEVICE} is not a block device." >&2
   exit 1
 fi
-
-ensure_rpi_clone() {
-  if command -v rpi-clone >/dev/null 2>&1; then
-    return
-  fi
-  local installer="https://raw.githubusercontent.com/geerlingguy/rpi-clone/master/install"
-  echo "Installing rpi-clone from geerlingguy/rpi-clone"
-  if ! curl -fsSL "${installer}" | bash; then
-    echo "Failed to install rpi-clone" >&2
-    exit 1
-  fi
-}
 
 ensure_rpi_clone
 
@@ -126,36 +238,21 @@ if [[ "${WIPE}" == "1" ]]; then
   wipefs --all --force "${TARGET_DEVICE}"
 fi
 
-echo "Running rpi-clone -f -u ${TARGET_DEVICE}"
-if ! rpi-clone -f -u "${TARGET_DEVICE}"; then
+if ! run_rpi_clone_with_fallback "${TARGET_DEVICE}"; then
   echo "rpi-clone failed" >&2
   exit 1
 fi
 
 CLONE_MOUNT="/mnt/clone"
-if [[ ! -d "${CLONE_MOUNT}" ]]; then
-  echo "Expected clone mount ${CLONE_MOUNT} missing." >&2
+if ! ensure_clone_mounts "${TARGET_DEVICE}" "${CLONE_MOUNT}"; then
+  echo "Unable to mount cloned root at ${CLONE_MOUNT}" >&2
   exit 1
 fi
 
-resolve_mount_device() {
-  local mount_point="$1"
-  local src
-  src=$(findmnt -no SOURCE "${mount_point}" 2>/dev/null || true)
-  if [[ -z "${src}" ]]; then
-    echo ""
-    return
-  fi
-  if [[ "${src}" =~ ^/dev/ ]]; then
-    echo "${src}"
-  elif [[ "${src}" =~ ^UUID= ]]; then
-    blkid -U "${src#UUID=}"
-  elif [[ "${src}" =~ ^PARTUUID= ]]; then
-    blkid -o device -t "PARTUUID=${src#PARTUUID=}"
-  else
-    echo ""
-  fi
-}
+if ! mountpoint -q "${CLONE_MOUNT}"; then
+  echo "Clone root is not mounted at ${CLONE_MOUNT}" >&2
+  exit 1
+fi
 
 CLONE_ROOT_DEV=$(resolve_mount_device "${CLONE_MOUNT}")
 CLONE_BOOT_DEV=$(resolve_mount_device "${CLONE_MOUNT}/boot/firmware")
@@ -248,5 +345,8 @@ sync
 CLONED_BYTES=$(df -B1 --output=used "${CLONE_MOUNT}" | tail -n1)
 CLONED_BYTES=${CLONED_BYTES:-0}
 
-echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, \"
-     "boot=${BOOT_UUID:-${BOOT_PARTUUID}}, bytes=${CLONED_BYTES}"
+ROOT_DISPLAY="${ROOT_UUID:-${ROOT_PARTUUID}}"
+BOOT_DISPLAY="${BOOT_UUID:-${BOOT_PARTUUID}}"
+
+printf '✅ Clone complete: target=%s, root=%s, boot=%s, bytes=%s\n' \
+  "${TARGET_DEVICE}" "${ROOT_DISPLAY}" "${BOOT_DISPLAY}" "${CLONED_BYTES}"
