@@ -170,10 +170,11 @@ if ! run_rpi_clone "${TARGET_DEVICE}"; then
   exit 1
 fi
 
+udevadm settle || sleep 2
+
 # Allow overriding clone mount path in tests while defaulting to the system mountpoint.
 CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
-BOOT_MOUNT="${CLONE_MOUNT}/boot/firmware"
-mkdir -p "${CLONE_MOUNT}" "${BOOT_MOUNT}"
+mkdir -p "${CLONE_MOUNT}"
 
 ensure_mount() {
   local mount_point="$1" source="$2"
@@ -210,17 +211,41 @@ if ! findmnt -rn -o TARGET "${CLONE_MOUNT}" >/dev/null 2>&1; then
   ensure_mount "${CLONE_MOUNT}" "${root_candidate:-}" || true
 fi
 
-if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
-  boot_candidate="${TARGET_PARTITIONS[0]:-}"
-  ensure_mount "${BOOT_MOUNT}" "${boot_candidate:-}" || true
-fi
-
 if ! findmnt -rn -o TARGET "${CLONE_MOUNT}" >/dev/null 2>&1; then
   echo "Expected clone root mount ${CLONE_MOUNT} missing." >&2
   exit 1
 fi
-if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
-  echo "Expected clone boot mount ${BOOT_MOUNT} missing." >&2
+
+existing_boot_dir=0
+existing_boot_firmware=0
+if [[ -d "${CLONE_MOUNT}/boot" ]]; then
+  existing_boot_dir=1
+fi
+if [[ -d "${CLONE_MOUNT}/boot/firmware" ]]; then
+  existing_boot_firmware=1
+fi
+
+mkdir -p "${CLONE_MOUNT}/boot" "${CLONE_MOUNT}/boot/firmware"
+
+BOOT_MOUNT_PATH="${CLONE_MOUNT}/boot/firmware"
+BOOT_MOUNT_POINT_INSIDE="/boot/firmware"
+if (( existing_boot_firmware == 0 )) && (( existing_boot_dir == 1 )); then
+  BOOT_MOUNT_PATH="${CLONE_MOUNT}/boot"
+  BOOT_MOUNT_POINT_INSIDE="/boot"
+fi
+
+if ! findmnt -rn -o TARGET "${BOOT_MOUNT_PATH}" >/dev/null 2>&1; then
+  boot_candidate="${TARGET_PARTITIONS[0]:-}"
+  if ! mount -t vfat "${boot_candidate:-}" "${BOOT_MOUNT_PATH}"; then
+    echo "Failed to mount ${boot_candidate:-} to ${BOOT_MOUNT_PATH}" >&2
+    mount -t vfat -v "${boot_candidate:-}" "${BOOT_MOUNT_PATH}" || true
+  else
+    echo "Mounted ${boot_candidate} to ${BOOT_MOUNT_PATH}"
+  fi
+fi
+
+if ! findmnt -rn -o TARGET "${BOOT_MOUNT_PATH}" >/dev/null 2>&1; then
+  echo "Expected clone boot mount ${BOOT_MOUNT_PATH} missing." >&2
   exit 1
 fi
 
@@ -244,7 +269,7 @@ resolve_mount_device() {
 }
 
 CLONE_ROOT_DEV=$(resolve_mount_device "${CLONE_MOUNT}")
-CLONE_BOOT_DEV=$(resolve_mount_device "${CLONE_MOUNT}/boot/firmware")
+CLONE_BOOT_DEV=$(resolve_mount_device "${BOOT_MOUNT_PATH}")
 if [[ -z "${CLONE_ROOT_DEV}" || -z "${CLONE_BOOT_DEV}" ]]; then
   echo "Unable to resolve cloned partition devices." >&2
   exit 1
@@ -255,10 +280,10 @@ ROOT_PARTUUID=$(blkid -s PARTUUID -o value "${CLONE_ROOT_DEV}" 2>/dev/null || tr
 BOOT_UUID=$(blkid -s UUID -o value "${CLONE_BOOT_DEV}" 2>/dev/null || true)
 BOOT_PARTUUID=$(blkid -s PARTUUID -o value "${CLONE_BOOT_DEV}" 2>/dev/null || true)
 
-CMDLINE_PATH="${CLONE_MOUNT}/boot/firmware/cmdline.txt"
+CMDLINE_PATH="${BOOT_MOUNT_PATH}/cmdline.txt"
 FSTAB_PATH="${CLONE_MOUNT}/etc/fstab"
 if [[ ! -f "${CMDLINE_PATH}" || ! -f "${FSTAB_PATH}" ]]; then
-  echo "Clone did not expose expected Bookworm paths." >&2
+  echo "Clone did not expose expected boot or fstab paths." >&2
   exit 1
 fi
 
@@ -290,9 +315,9 @@ with open(cmdline_path, "w", encoding="utf-8") as fh:
     fh.write(" ".join(parts) + "\n")
 PY
 
-python3 - "${FSTAB_PATH}" "${ROOT_UUID}" "${ROOT_PARTUUID}" "${BOOT_UUID}" "${BOOT_PARTUUID}" <<'PY'
+python3 - "${FSTAB_PATH}" "${ROOT_UUID}" "${ROOT_PARTUUID}" "${BOOT_UUID}" "${BOOT_PARTUUID}" "${BOOT_MOUNT_POINT_INSIDE}" <<'PY'
 import sys
-path, root_uuid, root_partuuid, boot_uuid, boot_partuuid = sys.argv[1:6]
+path, root_uuid, root_partuuid, boot_uuid, boot_partuuid, boot_mount = sys.argv[1:7]
 with open(path, "r", encoding="utf-8") as fh:
     lines = fh.readlines()
 
@@ -320,7 +345,7 @@ for line in lines:
     if mount == "/" and root_repl:
         parts[0] = root_repl
         updated.append("\t".join(parts) + "\n")
-    elif mount == "/boot/firmware" and boot_repl:
+    elif mount == boot_mount and boot_repl:
         parts[0] = boot_repl
         updated.append("\t".join(parts) + "\n")
     else:
