@@ -43,7 +43,12 @@ run_step() {
   "$@"
 }
 
-clone_step() {
+log_step() {
+  local label=$1
+  printf '[migrate] >>> %s\n' "${label}"
+}
+
+run_clone() {
   local -a env_vars=()
   if [[ -n "${CLONE_TARGET}" ]]; then
     env_vars+=("TARGET=${CLONE_TARGET}")
@@ -65,7 +70,8 @@ main() {
   else
     printf '[migrate] SKIP_EEPROM=1, skipping EEPROM update\n'
   fi
-  run_step clone clone_step
+  log_step clone
+  run_clone
   if [[ "${NO_REBOOT}" != "1" ]]; then
     printf '[migrate] Rebooting to complete migration\n'
     sync
