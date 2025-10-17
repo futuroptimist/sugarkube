@@ -26,6 +26,7 @@ validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clon
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
 post_clone_args := env_var_or_default("POST_CLONE_ARGS", "")
+boot_order_cmd := env_var_or_default("BOOT_ORDER_CMD", scripts_dir + "/boot_order.sh")
 migrate_artifacts := env_var_or_default("MIGRATE_ARTIFACTS", justfile_directory() + "/artifacts/migrate-to-nvme")
 migrate_skip_eeprom := env_var_or_default("SKIP_EEPROM", "0")
 migrate_no_reboot := env_var_or_default("NO_REBOOT", "0")
@@ -122,7 +123,43 @@ rollback-to-sd:
 spot-check:
     "{{ spot_check_cmd }}" {{ spot_check_args }}
 
-# Update the EEPROM so NVMe ranks ahead of SD in the boot order
+# Manage the EEPROM boot order presets
+
+# Usage: sudo just boot-order sd-nvme-usb
+boot-order order='':
+    if [ -z "{{ order }}" ]; then
+        echo "Usage: just boot-order {sd-nvme-usb|nvme-first|print}" >&2
+        exit 1
+    fi
+    case "{{ order }}" in
+        sd-nvme-usb)
+            "{{ boot_order_cmd }}" ensure_order 0xf461
+            ;;
+        nvme-first)
+            "{{ boot_order_cmd }}" ensure_order 0xf416
+            ;;
+        print)
+            "{{ boot_order_cmd }}" print
+            ;;
+        *)
+            echo "Unknown boot-order target '{{ order }}'. Expected sd-nvme-usb, nvme-first, or print." >&2
+            exit 1
+            ;;
+    esac
+
+# Set the EEPROM boot order to SD → NVMe → USB → repeat
+
+# Usage: sudo just boot-order sd-nvme-usb
+boot-order-sd-nvme-usb:
+    "{{ boot_order_cmd }}" ensure_order 0xf461
+
+# Set the EEPROM boot order to NVMe → SD → USB → repeat
+
+# Usage: sudo just boot-order nvme-first
+boot-order-nvme-first:
+    "{{ boot_order_cmd }}" ensure_order 0xf416
+
+# Deprecated shim; prefer `just boot-order nvme-first`
 
 # Usage: sudo just eeprom-nvme-first
 eeprom-nvme-first:
