@@ -83,17 +83,47 @@ The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures log
 target device explicitly during the first run so the script can initialise the NVMe layout:
 
 ```bash
-sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
+TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 ```
 
 Subsequent syncs only need the target argument:
 
 ```bash
-sudo TARGET=/dev/nvme0n1 just clone-ssd
+TARGET=/dev/nvme0n1 just clone-ssd
 ```
 
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
+
+#### Troubleshooting
+
+Detect existing clone mounts and partitions:
+
+```
+findmnt /mnt/clone
+mount | grep nvme0n1 || true
+```
+
+Clean up stale state before retrying:
+
+```
+sudo umount -R /mnt/clone || true
+for p in /dev/nvme0n1p*; do sudo umount "$p" 2>/dev/null || true; done
+sudo systemctl stop mnt-clone.mount mnt-clone.automount 2>/dev/null || true
+sudo udevadm settle
+```
+
+Run the recovery helper if the boot firmware missed the initial sync:
+
+```
+TARGET=/dev/nvme0n1 scripts/recover_clone_mount.sh
+```
+
+Re-run cloning with environment overrides preserved:
+
+```
+TARGET=/dev/nvme0n1 WIPE=1 sudo --preserve-env=TARGET,WIPE just clone-ssd
+```
 
 ### 3. Optional: one-command migration
 
@@ -114,15 +144,6 @@ sudo rpi-eeprom-config --set 'set_reboot_order=0xf1'
 ```
 
 The Pi will prefer the SD card for the next reboot only, then revert to the configured EEPROM order.
-
-> [!TIP] Troubleshooting
-> Mount the clone and inspect the boot files when something fails early:
-> ```bash
-> sudo mount /dev/nvme0n1p1 /mnt/clone
-> sudo sed -n '1,120p' /mnt/clone/cmdline.txt
-> sudo sed -n '1,120p' /mnt/clone/etc/fstab
-> sudo umount /mnt/clone
-> ```
 
 ### Verification checklist
 
