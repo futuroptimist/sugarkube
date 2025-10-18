@@ -22,11 +22,14 @@ def test_doc_sections_present(doc_text: str) -> None:
         "## Sample output",
         "## Known benign noise",
         "## Next steps: clone to NVMe",
-        "### 1. Align the boot order (only if needed)",
-        "### 2. Clone the SD card to NVMe",
-        "### 3. Optional: one-command migration",
-        "### One-time SD override",
-        "### Verification checklist",
+        "### Step 1. Align the boot order (if needed)",
+        "### Step 2. Clone the SD card to NVMe",
+        "### Step 3. Validate the clone while still on SD",
+        "## Optional helpers",
+        "### Automate the migration (optional)",
+        "### One-time SD override (optional)",
+        "### Troubleshooting the clone (optional)",
+        "## Finish: boot from NVMe",
     ]
     for heading in headings:
         assert heading in doc_text, f"Missing expected heading: {heading}"
@@ -40,6 +43,8 @@ def test_doc_command_blocks(doc_text: str) -> None:
         "sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd",
         "sudo TARGET=/dev/nvme0n1 just clone-ssd",
         "sudo just migrate-to-nvme",
+        "sudo shutdown -h now",
+        "findmnt -no SOURCE /",
     ]
     for command in commands:
         assert command in doc_text, f"Guide should reference '{command}'"
@@ -83,3 +88,7 @@ def test_doc_mentions_artifacts_paths(doc_text: str) -> None:
     ]
     for item in expected:
         assert item in doc_text, f"Expected '{item}' to be documented"
+
+
+def test_doc_links_to_k3s_next_steps(doc_text: str) -> None:
+    assert "raspi_cluster_setup.md" in doc_text

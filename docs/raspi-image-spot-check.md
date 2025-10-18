@@ -58,11 +58,13 @@ transparency.
 
 ## Next steps: clone to NVMe
 
+Follow these required steps immediately after the spot check to migrate the boot media.
+
 > [!TIP] Before you start
 > - Skip the boot-order step if `sudo rpi-eeprom-config | grep BOOT_ORDER` already shows `0xf461`.
-> - Skip to **Verification** if `lsblk` already lists NVMe boot and root partitions.
+> - Skip ahead to **Step 3** if `lsblk` already lists NVMe boot and root partitions.
 
-### 1. Align the boot order (only if needed)
+### Step 1. Align the boot order (if needed)
 
 Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
 
@@ -76,11 +78,11 @@ The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an a
 sudo PCIE_PROBE=1 just boot-order nvme-first
 ```
 
-### 2. Clone the SD card to NVMe
+### Step 2. Clone the SD card to NVMe
 
 The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures logs under
-`artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the
-target device explicitly during the first run so the script can initialise the NVMe layout:
+`artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the target
+device explicitly during the first run so the script can initialise the NVMe layout:
 
 ```bash
 sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
@@ -111,9 +113,19 @@ sudo TARGET=/dev/nvme0n1 just clone-ssd
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
 
-### 3. Optional: one-command migration
+### Step 3. Validate the clone while still on SD
 
-To chain the spot-check, boot-order alignment, clone, and reboot, use:
+- Confirm the expected block devices are present: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
+- Ensure `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe
+  partitions
+- Review `sudo vclog -m tip | tail` for a clean boot summary without lingering overrides
+- Check `artifacts/clone-to-nvme.log` for the final `rsync` summary and any warnings
+
+## Optional helpers
+
+### Automate the migration (optional)
+
+To chain the spot check, boot-order alignment, clone, and reboot, use:
 
 ```bash
 sudo just migrate-to-nvme
@@ -121,7 +133,7 @@ sudo just migrate-to-nvme
 
 Check `artifacts/migrate-to-nvme/` for the run log if anything looks off.
 
-### One-time SD override
+### One-time SD override (optional)
 
 Keep the NVMe plugged in while testing a fresh SD image by issuing a single-use boot override:
 
@@ -131,17 +143,32 @@ sudo rpi-eeprom-config --set 'set_reboot_order=0xf1'
 
 The Pi will prefer the SD card for the next reboot only, then revert to the configured EEPROM order.
 
-> [!TIP] Troubleshooting
-> Mount the clone and inspect the boot files when something fails early:
-> ```bash
-> sudo mount /dev/nvme0n1p1 /mnt/clone
-> sudo sed -n '1,120p' /mnt/clone/cmdline.txt
-> sudo sed -n '1,120p' /mnt/clone/etc/fstab
-> sudo umount /mnt/clone
-> ```
+### Troubleshooting the clone (optional)
 
-### Verification checklist
+Mount the clone and inspect the boot files when something fails early:
 
-- Booted from the expected device: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
-- `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe partitions
-- `sudo vclog -m tip | tail` shows a clean boot summary without boot-order overrides lingering
+```bash
+sudo mount /dev/nvme0n1p1 /mnt/clone
+sudo sed -n '1,120p' /mnt/clone/cmdline.txt
+sudo sed -n '1,120p' /mnt/clone/etc/fstab
+sudo umount /mnt/clone
+```
+
+## Finish: boot from NVMe
+
+1. Shut down cleanly to avoid filesystem damage:
+
+   ```bash
+   sudo shutdown -h now
+   ```
+
+2. Remove the SD card once the activity LED stops blinking.
+3. Power the Raspberry Pi back on so it boots from the cloned NVMe install.
+4. Verify the root filesystem now points to the NVMe device:
+
+   ```bash
+   findmnt -no SOURCE /
+   ```
+
+   Expect an `nvme0n1p2` (or similar) source.
+5. Continue with the [k3s cluster setup guide](./raspi_cluster_setup.md) to configure the node.
