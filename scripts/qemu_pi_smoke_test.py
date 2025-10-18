@@ -217,6 +217,7 @@ def _install_stub(root_dir: Path) -> None:
   {"name":"cloud_init","status":"pass"},
   {"name":"k3s_node_ready","status":"skip"},
   {"name":"projects_compose_active","status":"skip"},
+  {"name":"pi_home_repos","status":"skip"},
   {"name":"token_place_http","status":"skip"},
   {"name":"dspace_http","status":"skip"}
 ]}

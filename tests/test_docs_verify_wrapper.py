@@ -37,6 +37,9 @@ def test_docs_verify_wrappers_invoke_unified_cli() -> None:
     assert (
         '"{{sugarkube_cli}}" docs verify' in justfile_text
     ), "Just docs-verify recipe should call the CLI subcommand"
+    assert (
+        '"{{ sugarkube_cli }}" docs verify' not in justfile_text
+    ), "Whitespace inside moustache braces regressed the CLI wrapper"
 
 
 def test_docs_simplify_wrappers_invoke_unified_cli() -> None:
@@ -59,6 +62,9 @@ def test_docs_simplify_wrappers_invoke_unified_cli() -> None:
     assert (
         '"{{sugarkube_cli}}" docs simplify' in justfile_text
     ), "Just simplify-docs recipe should invoke the CLI subcommand"
+    assert (
+        '"{{ sugarkube_cli }}" docs simplify' not in justfile_text
+    ), "Strip whitespace around sugarkube_cli to preserve CLI detection"
 
 
 def test_make_docs_verify_runs_cli() -> None:

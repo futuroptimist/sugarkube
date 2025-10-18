@@ -310,6 +310,28 @@ def make_context(tmp_path, **overrides):
     return context
 
 
+def test_clone_context_defaults_cover_new_flags() -> None:
+    ctx = ssd_clone.CloneContext(target_disk="/dev/sdz")
+    assert ctx.dry_run is False
+    assert ctx.verbose is False
+    assert ctx.resume is False
+    assert ctx.assume_yes is False
+    assert ctx.skip_partition is False
+    assert ctx.skip_format is False
+    assert ctx.skip_to is None
+    assert ctx.preserve_labels is False
+    assert ctx.refresh_uuid is False
+    assert ctx.boot_label is None
+    assert ctx.root_label is None
+    assert ctx.boot_mount == "/boot"
+
+
+def test_clone_context_defaults_keep_state_file() -> None:
+    ctx = ssd_clone.CloneContext(target_disk="/dev/sdz")
+    assert ctx.state_file == ssd_clone.STATE_FILE
+    assert ctx.state == {}
+
+
 def test_save_state_writes_json(tmp_path):
     ctx = make_context(tmp_path)
     ctx.state = {"foo": "bar"}

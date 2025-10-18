@@ -145,8 +145,62 @@ EOF
   echo "$output" | grep "iptables_backend: fail"
   echo "$output" | grep "k3s_node_ready: fail"
   echo "$output" | grep "projects_compose_active: fail"
+  echo "$output" | grep "pi_home_repos: fail"
   echo "$output" | grep "token_place_http: fail"
   echo "$output" | grep "dspace_http: fail"
+}
+
+@test "pi_node_verifier reports pi_home_repos pass when repositories exist" {
+  if [ -e /home/pi ]; then
+    skip "/home/pi already exists"
+  fi
+
+  tmp="$(mktemp -d)"
+  PATH="$tmp:$PATH"
+
+  cat <<'EOF' > "$tmp/cloud-init"
+#!/usr/bin/env bash
+if [[ "$1" == "status" ]]; then
+  exit 0
+fi
+echo "status: done"
+exit 0
+EOF
+  chmod +x "$tmp/cloud-init"
+
+  cat <<'EOF' > "$tmp/timedatectl"
+#!/usr/bin/env bash
+if [[ "$1" == "show" ]]; then
+  echo "yes"
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$tmp/timedatectl"
+
+  cat <<'EOF' > "$tmp/iptables"
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+  echo "iptables v1.8.7 (nf_tables)"
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$tmp/iptables"
+
+  mkdir -p /home/pi/sugarkube/.git
+  mkdir -p /home/pi/token.place/.git
+  mkdir -p /home/pi/dspace/.git
+
+  trap 'rm -rf /home/pi' RETURN
+
+  TOKEN_PLACE_HEALTH_URL=skip \
+    DSPACE_HEALTH_URL=skip \
+    SKIP_COMPOSE=true \
+    run "$BATS_TEST_DIRNAME/../scripts/pi_node_verifier.sh" --no-log
+
+  [ "$status" -eq 0 ]
+  echo "$output" | grep "pi_home_repos: pass"
 }
 
 @test "pi_node_verifier --help shows usage" {

@@ -50,18 +50,18 @@ class CloneContext:
     """Context shared across clone steps."""
 
     target_disk: str
-    dry_run: bool
-    verbose: bool
-    resume: bool
-    assume_yes: bool
-    skip_partition: bool
-    skip_format: bool
-    skip_to: Optional[str]
-    preserve_labels: bool
-    refresh_uuid: bool
-    boot_label: Optional[str]
-    root_label: Optional[str]
-    boot_mount: str
+    dry_run: bool = False
+    verbose: bool = False
+    resume: bool = False
+    assume_yes: bool = False
+    skip_partition: bool = False
+    skip_format: bool = False
+    skip_to: Optional[str] = None
+    preserve_labels: bool = False
+    refresh_uuid: bool = False
+    boot_label: Optional[str] = None
+    root_label: Optional[str] = None
+    boot_mount: str = "/boot"
     state_file: Path = STATE_FILE
     state: Dict[str, object] = field(default_factory=dict)
     source_root: Optional[str] = None

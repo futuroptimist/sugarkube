@@ -163,6 +163,10 @@ if [[ -n "${current_root_dev}" ]]; then
   fi
 fi
 
+strip_ansi() {
+  sed -E $'s/\x1B\[[0-9;]*[[:alpha:]]//g'
+}
+
 ensure_rpi_clone() {
   if command -v rpi-clone >/dev/null 2>&1; then
     return
@@ -244,7 +248,8 @@ run_rpi_clone() {
 
   fallback_output=$(<"${clone_tmp}")
   printf '%s\n' "${fallback_output}"
-  if [[ "${fallback_output}" == *"Unattended -u option not allowed when initializing"* ]]; then
+  if printf '%s\n' "${fallback_output}" | strip_ansi | \
+      grep -Eq 'Unattended:?[[:space:]]*-u option not allowed'; then
     log "rpi-clone reported unattended initialization restriction; retrying with -U"
     if rpi-clone -f -U "${target}" >"${retry_tmp}" 2>&1; then
       cat "${retry_tmp}"
