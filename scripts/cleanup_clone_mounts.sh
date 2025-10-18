@@ -256,15 +256,17 @@ perform_cleanup() {
 # shellcheck disable=SC2317
 cleanup_handler() {
   local status=$?
-  if [ "$CLEANUP_DONE" -eq 1 ]; then
-    exit "$status"
+  local final_status=$status
+
+  if [ "$CLEANUP_DONE" -eq 0 ]; then
+    set +e
+    perform_cleanup
+    if [ "$CLEANUP_STATUS" -ne 0 ] && [ "$final_status" -eq 0 ]; then
+      final_status=$CLEANUP_STATUS
+    fi
   fi
-  set +e
-  perform_cleanup
-  if [ "$CLEANUP_STATUS" -ne 0 ] && [ "$status" -eq 0 ]; then
-    status=$CLEANUP_STATUS
-  fi
-  exit "$status"
+
+  exit "$final_status"
 }
 
 # shellcheck disable=SC2317
