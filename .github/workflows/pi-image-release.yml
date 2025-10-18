@@ -25,7 +25,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       BUILD_TIMEOUT: 7200
       RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'nightly' || 'stable' }}
-      CLONE_SUGARKUBE: false
+      CLONE_SUGARKUBE: true
       CLONE_TOKEN_PLACE: true
       CLONE_DSPACE: true
     steps:

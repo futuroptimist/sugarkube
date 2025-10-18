@@ -13,7 +13,7 @@ echo "$*" >>"${RPI_CLONE_CALL_LOG}"
 if [[ "$*" == *"-U"* ]]; then
   exit 0
 fi
-printf 'Unattended -u option not allowed when initializing\n' >&2
+printf '\033[31mUnattended: -u option not allowed when initializing\033[0m\n' >&2
 exit 1
 STUB
   chmod +x "${TEST_BIN}/rpi-clone"
@@ -88,11 +88,35 @@ STUB
 #!/usr/bin/env bash
 set -Eeuo pipefail
 state="${FINDMNT_STATE}"
-if [[ "$1" == "-o" ]]; then
-  shift 2
+
+while (($# > 0)); do
+  case "$1" in
+    -o)
+      shift 2
+      ;;
+    -t)
+      shift 2
+      ;;
+    --*)
+      shift
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if (($# < 2)); then
+  echo "mount stub received insufficient arguments" >&2
+  exit 1
 fi
+
 device="$1"
 mount_point="$2"
+
 mkdir -p "$mount_point"
 if [[ -f "$state" ]]; then
   grep -v "^${mount_point}|" "$state" >"${state}.tmp" || true

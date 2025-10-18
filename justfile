@@ -141,9 +141,10 @@ eeprom-nvme-first:
 
 # Clone the active SD card to the preferred NVMe/USB target
 
-# Usage: sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
+# Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 clone-ssd:
-    TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
+    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 # Clean up residual clone mounts and automounts.
 # Usage:

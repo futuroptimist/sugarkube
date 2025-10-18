@@ -120,6 +120,9 @@ def test_justfile_exposes_start_here_target() -> None:
         '"{{sugarkube_cli}}" docs start-here' in text
     ), "Just start-here recipe should invoke the sugarkube CLI subcommand"
     assert (
+        '"{{ sugarkube_cli }}" docs start-here' not in text
+    ), "Whitespace inside the moustache braces hides the CLI helper"
+    assert (
         "{{start_here_args}}" in text
     ), "The recipe should continue forwarding START_HERE_ARGS to the CLI"
 
