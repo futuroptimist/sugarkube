@@ -18,14 +18,14 @@ CLONE_SSD_EXPECTATIONS: list[tuple[str, list[str]]] = [
     (
         "docs/pi_image_quickstart.md",
         [
-            'sudo CLONE_TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"',
-            'sudo CLONE_TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd',
+            'sudo TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"',
+            'sudo TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd',
         ],
     ),
     (
         "docs/pi_carrier_field_guide.md",
         [
-            'sudo CLONE_TARGET=/dev/sdX CLONE_ARGS="--resume" just clone-ssd',
+            'sudo TARGET=/dev/sdX CLONE_ARGS="--resume" just clone-ssd',
         ],
     ),
 ]
