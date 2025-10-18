@@ -141,6 +141,7 @@ eeprom-nvme-first:
 # Clone the active SD card to the preferred NVMe/USB target
 # Usage:
 #   TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
+
 # Defaults: TARGET=/dev/nvme0n1, WIPE=0
 clone-ssd:
     TARGET_VAL="${TARGET:-{{ clone_target }}}"

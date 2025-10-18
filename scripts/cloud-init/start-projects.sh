@@ -2,7 +2,6 @@
 set -euo pipefail
 
 svc="projects-compose.service"
-compose_path="/opt/projects/docker-compose.yml"
 log_dir="/var/log/sugarkube"
 migration_log="${log_dir}/migrations.log"
 

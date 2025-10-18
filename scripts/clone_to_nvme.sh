@@ -193,8 +193,45 @@ CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
 BOOT_MOUNT="${CLONE_MOUNT}/boot/firmware"
 BOOT_MOUNTPOINT="/boot/firmware"
 BOOT_ALT_MOUNT="/boot"
-ROOT_PARTITION=$(derive_partition_path "${TARGET}" 2)
-BOOT_PARTITION=$(derive_partition_path "${TARGET}" 1)
+discover_target_partitions() {
+  local disk_path="$1" root_ref="$2" boot_ref="$3"
+  local boot_part="" root_part=""
+  local -a lsblk_parts=()
+
+  if [[ -n "${disk_path}" ]]; then
+    if mapfile -t lsblk_parts < <(lsblk -nr -o PATH,PARTN "${disk_path}" 2>/dev/null); then
+      local part_line part_path part_num
+      for part_line in "${lsblk_parts[@]}"; do
+        read -r part_path part_num <<<"${part_line}"
+        if [[ -z "${part_num}" ]]; then
+          continue
+        fi
+        case "${part_num}" in
+          1)
+            boot_part="${part_path}"
+            ;;
+          2)
+            root_part="${part_path}"
+            ;;
+        esac
+      done
+    fi
+  fi
+
+  if [[ -z "${boot_part}" ]]; then
+    boot_part=$(derive_partition_path "${disk_path}" 1)
+  fi
+  if [[ -z "${root_part}" ]]; then
+    root_part=$(derive_partition_path "${disk_path}" 2)
+  fi
+
+  printf -v "${root_ref}" '%s' "${root_part}"
+  printf -v "${boot_ref}" '%s' "${boot_part}"
+}
+
+ROOT_PARTITION=""
+BOOT_PARTITION=""
+discover_target_partitions "${TARGET}" ROOT_PARTITION BOOT_PARTITION
 
 if [[ -z "${ROOT_PARTITION}" || -z "${BOOT_PARTITION}" ]]; then
   fatal "Unable to derive partition paths for ${TARGET}"
