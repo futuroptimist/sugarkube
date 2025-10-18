@@ -21,9 +21,13 @@ boot_order_cmd := env_var_or_default("BOOT_ORDER_CMD", scripts_dir + "/boot_orde
 eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
-clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
+target_device := env_var_or_default("TARGET", "")
 clone_wipe := env_var_or_default("WIPE", "0")
+wipe_confirm := env_var_or_default("WIPE_CONFIRM", "0")
 clean_mounts_cmd := env_var_or_default("CLEAN_MOUNTS_CMD", scripts_dir + "/cleanup_clone_mounts.sh")
+preflight_cmd := env_var_or_default("PREFLIGHT_CMD", scripts_dir + "/preflight_clone.sh")
+verify_clone_cmd := env_var_or_default("VERIFY_CLONE_CMD", scripts_dir + "/verify_clone.sh")
+finalize_nvme_cmd := env_var_or_default("FINALIZE_NVME_CMD", scripts_dir + "/finalize_nvme.sh")
 validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
@@ -115,8 +119,9 @@ start-here:
 # Revert cmdline.txt and fstab entries back to the SD card defaults
 
 # Usage: sudo just rollback-to-sd
+# (prints actionable steps; run without --dry-run to apply changes)
 rollback-to-sd:
-    "{{ rollback_cmd }}" {{ rollback_args }}
+    "{{ rollback_cmd }}" --dry-run {{ rollback_args }}
 
 # Run the Raspberry Pi spot check and capture artifacts
 
@@ -143,9 +148,35 @@ eeprom-nvme-first:
 
 # Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
-    sudo --preserve-env=WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
-        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    if [ -z "{{ target_device }}" ]; then echo "Set TARGET to the clone device (e.g. /dev/nvme0n1) before running clone-ssd." >&2; exit 1; fi
+    sudo --preserve-env=WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK,TARGET \
+        "{{ clone_cmd }}" --target "{{ target_device }}" {{ clone_args }}
+
+# Display a snapshot of block devices and mountpoints
+show-disks:
+    lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+
+# Validate the target disk before cloning from SD
+preflight:
+    if [ -z "{{ target_device }}" ]; then echo "Set TARGET to the clone device (e.g. /dev/nvme0n1) before running preflight." >&2; exit 1; fi
+    sudo --preserve-env=TARGET,WIPE,WIPE_CONFIRM \
+      env TARGET={{ target_device }} \
+          WIPE={{ clone_wipe }} \
+          WIPE_CONFIRM={{ wipe_confirm }} \
+      "{{ preflight_cmd }}"
+
+# Mount the cloned disk read-only and ensure identifiers are aligned
+verify-clone:
+    if [ -z "{{ target_device }}" ]; then echo "Set TARGET to the clone device (e.g. /dev/nvme0n1) before running verify-clone." >&2; exit 1; fi
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+      env TARGET={{ target_device }} \
+          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+      "{{ verify_clone_cmd }}"
+
+# Review EEPROM boot order to prioritize NVMe/USB before SD
+finalize-nvme:
+    sudo --preserve-env=EDITOR,RECOMMENDED_BOOT_ORDER,SKIP_EDIT \
+      "{{ finalize_nvme_cmd }}"
 
 # Clean up residual clone mounts and automounts.
 # Usage:
@@ -162,6 +193,14 @@ clean-mounts args='':
       env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
           MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
       "{{ clean_mounts_cmd }}" {{ args }}
+
+# Aggressive cleanup that reports blockers and removes empty mount directories
+clean-mounts-hard:
+    sudo --preserve-env=TARGET,MOUNT_BASE,FORCE_LAZY \
+      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+          FORCE_LAZY=1 \
+      "{{ clean_mounts_cmd }}"
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
