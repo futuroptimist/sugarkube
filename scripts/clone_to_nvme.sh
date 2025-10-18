@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Purpose: Clone the active SD card to an attached NVMe/USB disk and fix Bookworm boot configs.
-# Usage: sudo WIPE=1 ./scripts/clone_to_nvme.sh
-set -Eeuo pipefail
+# Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 ./scripts/clone_to_nvme.sh
+set -euo pipefail
+IFS=$'\n\t'
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
@@ -10,86 +11,108 @@ LOG_FILE="${ARTIFACT_DIR}/clone-to-nvme.log"
 mkdir -p "${ARTIFACT_DIR}"
 exec > >(tee "${LOG_FILE}") 2>&1
 
-# Allowlist for CI shims: ALLOW_NON_ROOT=1 skips sudo re-exec when tests stub privileged commands.
+log() {
+  printf '[%s] %s\n' "$(date -Is)" "$*"
+}
+
+TARGET="${TARGET:-/dev/nvme0n1}"
+WIPE="${WIPE:-0}"
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+
 if [[ "${ALLOW_NON_ROOT}" != "1" && ${EUID} -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1; then
-    exec sudo WIPE="${WIPE:-0}" TARGET="${TARGET:-}" "$0" "$@"
+    exec sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT "$0" "$@"
   fi
   echo "This script requires root privileges." >&2
   exit 1
 fi
 
-TARGET_OVERRIDE=""
-WIPE="${WIPE:-0}"
-
-while [[ $# -gt 0 ]]; do
+if [[ $# -gt 0 ]]; then
   case "$1" in
-    --target)
-      TARGET_OVERRIDE="$2"
-      shift 2
-      ;;
-    --wipe)
-      WIPE=1
-      shift
-      ;;
     --help|-h)
       cat <<'USAGE'
-Usage: clone_to_nvme.sh [--target /dev/nvme0n1] [--wipe]
-  --target  Explicit target disk (defaults to first non-SD disk)
-  --wipe    Wipe filesystem signatures on target before cloning
+Usage: clone_to_nvme.sh
+  TARGET=/dev/nvme0n1 WIPE=1 ./scripts/clone_to_nvme.sh
+
+Environment variables:
+  TARGET  Block device to clone to (default: /dev/nvme0n1)
+  WIPE    Set to 1 to wipe filesystem signatures prior to cloning (default: 0)
 USAGE
       exit 0
       ;;
     *)
-      echo "Unknown argument: $1" >&2
+      echo "Unknown positional argument: $1" >&2
       exit 1
       ;;
   esac
-done
-
-TARGET_DEVICE="${TARGET_OVERRIDE:-${TARGET:-}}"
-DETECT_SCRIPT="${SCRIPT_DIR}/detect_target_disk.sh"
-
-resolve_device() {
-  local source="$1"
-  if [[ -z "${source}" ]]; then
-    echo "" && return
-  fi
-  if [[ "${source}" =~ ^/dev/ ]]; then
-    echo "${source}"
-  else
-    echo "/dev/${source}"
-  fi
-}
-
-if [[ -z "${TARGET_DEVICE}" ]]; then
-  if [[ ! -x "${DETECT_SCRIPT}" ]]; then
-    echo "Device detection helper missing: ${DETECT_SCRIPT}" >&2
-    exit 1
-  fi
-  TARGET_DEVICE=$("${DETECT_SCRIPT}")
 fi
 
-TARGET_DEVICE=$(resolve_device "${TARGET_DEVICE}")
-if [[ -z "${TARGET_DEVICE}" ]]; then
-  echo "Unable to resolve target device" >&2
+if [[ "${TARGET}" != /dev/* ]]; then
+  TARGET="/dev/${TARGET}"
+fi
+
+if [[ -z "${TARGET}" ]]; then
+  echo "TARGET device must be provided." >&2
   exit 1
 fi
 
-TARGET_BASENAME=${TARGET_DEVICE#/dev/}
-if [[ "${TARGET_BASENAME}" == mmcblk0* ]]; then
-  echo "Refusing to operate on the boot SD card (${TARGET_DEVICE})." >&2
+if [[ ! -e "${TARGET}" ]]; then
+  echo "TARGET ${TARGET} does not exist." >&2
   exit 1
 fi
 
-if [[ ! -b "${TARGET_DEVICE}" ]]; then
+IS_BLOCK=0
+if [[ -b "${TARGET}" ]]; then
+  IS_BLOCK=1
+fi
+
+if [[ "${IS_BLOCK}" -ne 1 ]]; then
   if [[ "${ALLOW_FAKE_BLOCK:-0}" == "1" ]]; then
-    # Used by CI stubs so we can exercise logic without privileged loop devices.
-    echo "[warn] Target ${TARGET_DEVICE} is not a block device, continuing due to ALLOW_FAKE_BLOCK=1" >&2
+    log "[warn] TARGET ${TARGET} is not a block device (ALLOW_FAKE_BLOCK=1)"
   else
-    echo "Target ${TARGET_DEVICE} is not a block device." >&2
+    echo "TARGET ${TARGET} is not a block device." >&2
     exit 1
+  fi
+fi
+
+target_base=$(basename "${TARGET}")
+root_source=$(findmnt -rn -o SOURCE / || true)
+root_base=""
+if [[ -n "${root_source}" ]]; then
+  if [[ "${root_source}" =~ ^/dev/ ]]; then
+    root_parent=$(lsblk -no PKNAME "${root_source}" 2>/dev/null || true)
+    if [[ -n "${root_parent}" ]]; then
+      root_base="${root_parent}"
+    else
+      root_base=$(basename "${root_source}")
+    fi
+  fi
+fi
+
+if [[ "${target_base}" == "${root_base}" ]]; then
+  echo "Refusing to operate on the current root device (${TARGET})." >&2
+  exit 1
+fi
+
+SCRIPT_CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
+BOOT_MOUNT="${SCRIPT_CLONE_MOUNT}/boot/firmware"
+shopt -s nullglob
+
+log "==> Pre-flight cleanup"
+sudo umount -R "${SCRIPT_CLONE_MOUNT}" 2>/dev/null || true
+for part in /dev/"${target_base}"p* /dev/"${target_base}"[0-9]*; do
+  [[ -e "${part}" ]] || continue
+  sudo umount "${part}" 2>/dev/null || true
+done
+sudo systemctl stop mnt-clone.mount mnt-clone.automount 2>/dev/null || true
+sudo mkdir -p "${BOOT_MOUNT}"
+
+if [[ "${WIPE}" == "1" ]]; then
+  log "==> Wiping existing signatures from ${TARGET}"
+  if [[ "${IS_BLOCK}" -eq 1 ]]; then
+    sudo wipefs -a "${TARGET}"
+  else
+    log "[warn] Skipping wipe; ${TARGET} is not a block device"
   fi
 fi
 
@@ -98,8 +121,8 @@ ensure_rpi_clone() {
     return
   fi
   local installer="https://raw.githubusercontent.com/geerlingguy/rpi-clone/master/install"
-  echo "Installing rpi-clone from geerlingguy/rpi-clone"
-  if ! curl -fsSL "${installer}" | bash; then
+  log "==> Installing rpi-clone"
+  if ! curl -fsSL "${installer}" | sudo bash; then
     echo "Failed to install rpi-clone" >&2
     exit 1
   fi
@@ -108,33 +131,18 @@ ensure_rpi_clone() {
 ensure_rpi_clone
 
 SOURCE_USED=$(df -B1 --output=used / | tail -n1)
-TARGET_SIZE=$(lsblk -nb -o SIZE "${TARGET_DEVICE}" | head -n1)
+TARGET_SIZE=$(lsblk -nb -o SIZE "${TARGET}" | head -n1)
 if [[ -z "${SOURCE_USED}" || -z "${TARGET_SIZE}" ]]; then
   echo "Unable to determine disk sizes." >&2
   exit 1
 fi
 if (( TARGET_SIZE <= SOURCE_USED )); then
-  echo "Target ${TARGET_DEVICE} is smaller than the used space on /." >&2
+  echo "Target ${TARGET} is smaller than the used space on /." >&2
   exit 1
-fi
-
-mapfile -t mounted_parts < <(
-  lsblk -nr -o NAME,MOUNTPOINT "${TARGET_DEVICE}" |
-    awk '$2!="" {print $1":"$2}'
-)
-if (( ${#mounted_parts[@]} > 0 )); then
-  echo "Refusing to clone: target partitions are mounted:" >&2
-  printf '  %s\n' "${mounted_parts[@]}" >&2
-  exit 1
-fi
-
-if [[ "${WIPE}" == "1" ]]; then
-  echo "Wiping existing signatures from ${TARGET_DEVICE}"
-  wipefs --all --force "${TARGET_DEVICE}"
 fi
 
 run_rpi_clone() {
-  local target="$1" clone_tmp fallback_output retry_tmp retry_output
+  local target="$1" clone_tmp retry_tmp fallback_output retry_output
   clone_tmp=$(mktemp)
   retry_tmp=$(mktemp)
   cleanup_tmp() {
@@ -142,7 +150,7 @@ run_rpi_clone() {
   }
   trap cleanup_tmp RETURN
 
-  echo "Running rpi-clone -f -u ${target}"
+  log "==> Running rpi-clone -f -u ${target}"
   if rpi-clone -f -u "${target}" >"${clone_tmp}" 2>&1; then
     cat "${clone_tmp}"
     return 0
@@ -151,14 +159,14 @@ run_rpi_clone() {
   fallback_output=$(<"${clone_tmp}")
   printf '%s\n' "${fallback_output}"
   if [[ "${fallback_output}" == *"Unattended -u option not allowed when initializing"* ]]; then
-    echo "rpi-clone reported unattended initialization restriction; retrying with -U"
+    log "==> Falling back to rpi-clone -f -U ${target}"
     if rpi-clone -f -U "${target}" >"${retry_tmp}" 2>&1; then
       cat "${retry_tmp}"
       return 0
     fi
     retry_output=$(<"${retry_tmp}")
     printf '%s\n' "${retry_output}" >&2
-    echo "rpi-clone failed even after -U fallback" >&2
+    echo "rpi-clone failed after -U fallback" >&2
     return 1
   fi
 
@@ -166,131 +174,110 @@ run_rpi_clone() {
   return 1
 }
 
-if ! run_rpi_clone "${TARGET_DEVICE}"; then
+if ! run_rpi_clone "${TARGET}"; then
   exit 1
 fi
 
-if command -v udevadm >/dev/null 2>&1; then
-  udevadm settle || sleep 2
-else
-  sleep 2
+if [[ "${IS_BLOCK}" -eq 1 ]]; then
+  log "==> Refreshing partition table"
+  if command -v partprobe >/dev/null 2>&1; then
+    sudo partprobe "${TARGET}" || true
+  fi
+  sudo udevadm settle
+  sleep 1
 fi
 
-# Allow overriding clone mount path in tests while defaulting to the system mountpoint.
-CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
-mkdir -p "${CLONE_MOUNT}"
+partition_list() {
+  lsblk -nr -o PATH,TYPE "${TARGET}" | awk '$2 == "part" {print $1}'
+}
 
-ensure_mount() {
-  local mount_point="$1" source="$2"
-  if findmnt -rn -o TARGET "${mount_point}" >/dev/null 2>&1; then
-    return 0
-  fi
-  if [[ -z "${source}" ]]; then
-    return 1
-  fi
-  if mount "${source}" "${mount_point}" 2>/dev/null; then
-    echo "Mounted ${source} to ${mount_point}"
-    return 0
-  fi
-  echo "Failed to mount ${source} to ${mount_point}" >&2
+mapfile -t TARGET_PARTS < <(partition_list)
+if (( ${#TARGET_PARTS[@]} < 2 )); then
+  log "Waiting for partitions on ${TARGET} to appear"
+  for _ in {1..5}; do
+    sleep 1
+    sudo udevadm settle
+    mapfile -t TARGET_PARTS < <(partition_list)
+    if (( ${#TARGET_PARTS[@]} >= 2 )); then
+      break
+    fi
+  done
+fi
+
+if (( ${#TARGET_PARTS[@]} < 2 )); then
+  echo "Expected boot and root partitions on ${TARGET}" >&2
+  exit 1
+fi
+
+BOOT_PART="${TARGET_PARTS[0]}"
+ROOT_PART="${TARGET_PARTS[-1]}"
+
+retry_mount() {
+  local dev="$1" mount_point="$2" tries="${3:-3}" delay="${4:-2}"
+  local attempt
+  for attempt in $(seq 1 "${tries}"); do
+    if sudo mount "${dev}" "${mount_point}"; then
+      return 0
+    fi
+    if (( attempt < tries )); then
+      log "Mount attempt ${attempt}/${tries} for ${dev} -> ${mount_point} failed; retrying in ${delay}s"
+      sleep "${delay}"
+      sudo udevadm settle
+    fi
+  done
+  sudo udevadm settle
   return 1
 }
 
-read_target_partitions() {
-  local path
-  mapfile -t _target_paths < <(lsblk -nr -o PATH "${TARGET_DEVICE}" 2>/dev/null || true)
-  TARGET_PARTITIONS=()
-  for path in "${_target_paths[@]:-}"; do
-    if [[ "${path}" != "${TARGET_DEVICE}" ]]; then
-      TARGET_PARTITIONS+=("${path}")
+log "==> Mounting cloned root ${ROOT_PART}"
+sudo mkdir -p "${SCRIPT_CLONE_MOUNT}"
+if ! retry_mount "${ROOT_PART}" "${SCRIPT_CLONE_MOUNT}" 5 3; then
+  echo "Unable to mount cloned root filesystem (${ROOT_PART})" >&2
+  exit 1
+fi
+
+log "==> Mounting cloned boot ${BOOT_PART}"
+if ! retry_mount "${BOOT_PART}" "${BOOT_MOUNT}" 5 3; then
+  log "Boot mount failed; attempting recovery"
+  sudo fsck.vfat -a "${BOOT_PART}" || true
+  sudo udevadm settle
+  if ! retry_mount "${BOOT_PART}" "${BOOT_MOUNT}" 5 3; then
+    log "Recreating boot filesystem on ${BOOT_PART}"
+    sudo mkfs.vfat -F 32 -n bootfs "${BOOT_PART}"
+    sudo udevadm settle
+    sleep 1
+    if ! retry_mount "${BOOT_PART}" "${BOOT_MOUNT}" 5 3; then
+      echo "Unable to mount cloned boot partition (${BOOT_PART})" >&2
+      exit 1
     fi
-  done
-}
-
-TARGET_PARTITIONS=()
-read_target_partitions
-
-if ! findmnt -rn -o TARGET "${CLONE_MOUNT}" >/dev/null 2>&1; then
-  root_candidate="${TARGET_PARTITIONS[-1]:-}"
-  ensure_mount "${CLONE_MOUNT}" "${root_candidate:-}" || true
-fi
-
-boot_firmware_preexisting=0
-boot_dir_preexisting=0
-if [[ -d "${CLONE_MOUNT}/boot/firmware" ]]; then
-  boot_firmware_preexisting=1
-fi
-if [[ -d "${CLONE_MOUNT}/boot" ]]; then
-  boot_dir_preexisting=1
-fi
-
-safe_mkdir() {
-  local dir="$1"
-  local parent
-
-  if [[ -L "${dir}" ]]; then
-    return 0
+    log "Resyncing /boot/firmware contents"
+    sudo rsync -aHAX /boot/firmware/ "${BOOT_MOUNT}/"
   fi
-
-  parent=$(dirname "${dir}")
-  if [[ -L "${parent}" ]]; then
-    return 0
-  fi
-
-  mkdir -p "${dir}"
-}
-
-safe_mkdir "${CLONE_MOUNT}/boot"
-safe_mkdir "${CLONE_MOUNT}/boot/firmware"
-
-BOOT_RELATIVE_PATH="boot/firmware"
-if (( boot_firmware_preexisting == 0 && boot_dir_preexisting == 1 )); then
-  BOOT_RELATIVE_PATH="boot"
-fi
-BOOT_MOUNT="${CLONE_MOUNT}/${BOOT_RELATIVE_PATH}"
-BOOT_MOUNTPOINT="/${BOOT_RELATIVE_PATH}"
-safe_mkdir "${BOOT_MOUNT}"
-
-if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
-  boot_candidate="${TARGET_PARTITIONS[0]:-}"
-  if ! mount -t vfat "${boot_candidate:-}" "${BOOT_MOUNT}"; then
-    echo "Failed to mount ${boot_candidate:-} to ${BOOT_MOUNT}" >&2
-    mount -t vfat -v "${boot_candidate:-}" "${BOOT_MOUNT}" || true
-  else
-    echo "Mounted ${boot_candidate} to ${BOOT_MOUNT}"
-  fi
-fi
-
-if ! findmnt -rn -o TARGET "${CLONE_MOUNT}" >/dev/null 2>&1; then
-  echo "Expected clone root mount ${CLONE_MOUNT} missing." >&2
-  exit 1
-fi
-if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
-  echo "Expected clone boot mount ${BOOT_MOUNT} missing." >&2
-  exit 1
 fi
 
 resolve_mount_device() {
-  local mount_point="$1"
-  local src
+  local mount_point="$1" src
   src=$(findmnt -no SOURCE "${mount_point}" 2>/dev/null || true)
   if [[ -z "${src}" ]]; then
-    echo ""
-    return
+    return 1
   fi
   if [[ "${src}" =~ ^/dev/ ]]; then
-    echo "${src}"
-  elif [[ "${src}" =~ ^UUID= ]]; then
-    blkid -U "${src#UUID=}"
-  elif [[ "${src}" =~ ^PARTUUID= ]]; then
-    blkid -o device -t "PARTUUID=${src#PARTUUID=}"
-  else
-    echo ""
+    printf '%s\n' "${src}"
+    return 0
   fi
+  if [[ "${src}" =~ ^UUID= ]]; then
+    blkid -U "${src#UUID=}"
+    return 0
+  fi
+  if [[ "${src}" =~ ^PARTUUID= ]]; then
+    blkid -o device -t "PARTUUID=${src#PARTUUID=}"
+    return 0
+  fi
+  return 1
 }
 
-CLONE_ROOT_DEV=$(resolve_mount_device "${CLONE_MOUNT}")
-CLONE_BOOT_DEV=$(resolve_mount_device "${BOOT_MOUNT}")
+CLONE_ROOT_DEV=$(resolve_mount_device "${SCRIPT_CLONE_MOUNT}" || true)
+CLONE_BOOT_DEV=$(resolve_mount_device "${BOOT_MOUNT}" || true)
 if [[ -z "${CLONE_ROOT_DEV}" || -z "${CLONE_BOOT_DEV}" ]]; then
   echo "Unable to resolve cloned partition devices." >&2
   exit 1
@@ -302,7 +289,7 @@ BOOT_UUID=$(blkid -s UUID -o value "${CLONE_BOOT_DEV}" 2>/dev/null || true)
 BOOT_PARTUUID=$(blkid -s PARTUUID -o value "${CLONE_BOOT_DEV}" 2>/dev/null || true)
 
 CMDLINE_PATH="${BOOT_MOUNT}/cmdline.txt"
-FSTAB_PATH="${CLONE_MOUNT}/etc/fstab"
+FSTAB_PATH="${SCRIPT_CLONE_MOUNT}/etc/fstab"
 if [[ ! -f "${CMDLINE_PATH}" || ! -f "${FSTAB_PATH}" ]]; then
   echo "Clone missing expected boot files (cmdline.txt or /etc/fstab)." >&2
   exit 1
@@ -336,14 +323,11 @@ with open(cmdline_path, "w", encoding="utf-8") as fh:
     fh.write(" ".join(parts) + "\n")
 PY
 
-python3 - "${FSTAB_PATH}" "${ROOT_UUID}" "${ROOT_PARTUUID}" "${BOOT_UUID}" "${BOOT_PARTUUID}" "${BOOT_MOUNTPOINT}" <<'PY'
+python3 - "${FSTAB_PATH}" "${ROOT_UUID}" "${ROOT_PARTUUID}" "${BOOT_UUID}" "${BOOT_PARTUUID}" <<'PY'
 import sys
-path, root_uuid, root_partuuid, boot_uuid, boot_partuuid, boot_mount = sys.argv[1:7]
+path, root_uuid, root_partuuid, boot_uuid, boot_partuuid = sys.argv[1:6]
 with open(path, "r", encoding="utf-8") as fh:
     lines = fh.readlines()
-
-def choose(preferred, fallback):
-    return preferred if preferred else fallback
 
 root_repl = None
 boot_repl = None
@@ -366,7 +350,7 @@ for line in lines:
     if mount == "/" and root_repl:
         parts[0] = root_repl
         updated.append("\t".join(parts) + "\n")
-    elif mount == boot_mount and boot_repl:
+    elif mount in ("/boot", "/boot/firmware") and boot_repl:
         parts[0] = boot_repl
         updated.append("\t".join(parts) + "\n")
     else:
@@ -375,10 +359,15 @@ with open(path, "w", encoding="utf-8") as fh:
     fh.writelines(updated)
 PY
 
-sync
-
-CLONED_BYTES=$(df -B1 --output=used "${CLONE_MOUNT}" | tail -n1)
+CLONED_BYTES=$(df -B1 --output=used "${SCRIPT_CLONE_MOUNT}" | tail -n1)
 CLONED_BYTES=${CLONED_BYTES:-0}
 
-echo "✅ Clone complete: target=${TARGET_DEVICE}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, " \
-     "boot=${BOOT_UUID:-${BOOT_PARTUUID}}, bytes=${CLONED_BYTES}"
+sync
+
+log "==> Cleaning up mounts"
+sudo umount "${BOOT_MOUNT}" || true
+sudo umount "${SCRIPT_CLONE_MOUNT}" || true
+rmdir "${BOOT_MOUNT}" 2>/dev/null || true
+rmdir "${SCRIPT_CLONE_MOUNT}" 2>/dev/null || true
+
+log "✅ Clone complete: target=${TARGET}, root=${ROOT_UUID:-${ROOT_PARTUUID}}, boot=${BOOT_UUID:-${BOOT_PARTUUID}}, used_bytes=${CLONED_BYTES}"
