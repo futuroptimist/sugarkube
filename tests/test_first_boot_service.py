@@ -163,6 +163,71 @@ def test_first_boot_service_success(monkeypatch, tmp_path):
     assert events == [("first-boot", "starting"), ("first-boot", "success")]
 
 
+def test_first_boot_service_records_pi_home_repo_failure(monkeypatch, tmp_path):
+    (
+        report_dir,
+        log_path,
+        state_dir,
+        verifier,
+        ok_marker,
+        fail_marker,
+        expand_marker,
+    ) = _configure_env(monkeypatch, tmp_path)
+
+    state_dir.mkdir(parents=True)
+    monkeypatch.setattr(MODULE.time, "sleep", lambda _secs: None)
+
+    raspi_config_path = tmp_path / "raspi-config"
+    cloud_init_path = tmp_path / "cloud-init"
+
+    def fake_which(cmd):
+        if cmd == "raspi-config":
+            return str(raspi_config_path)
+        if cmd == "cloud-init":
+            return str(cloud_init_path)
+        return None
+
+    monkeypatch.setattr(MODULE.shutil, "which", fake_which)
+
+    def fake_run(args, capture_output, text, check, timeout=None):  # noqa: ARG001
+        if args[0] == str(raspi_config_path):
+            return MODULE.subprocess.CompletedProcess(args, 0, "", "")
+        if args[0] == str(cloud_init_path):
+            return MODULE.subprocess.CompletedProcess(args, 0, "status: done", "")
+        if args[0] == str(verifier):
+            if "--json" in args:
+                payload = {
+                    "checks": [
+                        {"name": "cloud_init", "status": "pass"},
+                        {"name": "projects_compose_active", "status": "pass"},
+                        {"name": "pi_home_repos", "status": "fail"},
+                    ]
+                }
+                return MODULE.subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(payload),
+                    "",
+                )
+            if "--log" in args:
+                Path(args[-1]).write_text("failure log\n")
+                return MODULE.subprocess.CompletedProcess(args, 0, "", "")
+        raise AssertionError(f"Unexpected command: {args}")
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    result = MODULE.main()
+    assert result == 0
+
+    summary = json.loads((report_dir / "summary.json").read_text())
+    assert summary["summary"]["pi_home_repos"] == "fail"
+    assert summary["overall"] == "fail"
+    assert ok_marker.read_text().strip() == "ok"
+    assert fail_marker.exists() is False
+    assert log_path.exists()
+    assert expand_marker.exists()
+
+
 def test_first_boot_service_failure(monkeypatch, tmp_path):
     (
         report_dir,

@@ -161,7 +161,9 @@ def test_prepare_image_installs_stub_and_dropin(
     dropin = root_dir / "etc/systemd/system/first-boot.service.d" / MODULE.DROPIN_NAME
 
     assert stub.exists()
-    assert "Sugarkube smoke verifier" in stub.read_text()
+    stub_text = stub.read_text()
+    assert "Sugarkube smoke verifier" in stub_text
+    assert '"pi_home_repos"' in stub_text
     assert dropin.exists()
     dropin_text = dropin.read_text()
     assert f"Environment=FIRST_BOOT_VERIFIER={MODULE.STUB_VERIFIER_PATH}" in dropin_text
