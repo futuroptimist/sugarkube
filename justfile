@@ -1,5 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+CWD := justfile_directory()
 scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
 image_name := env_var_or_default("IMAGE_NAME", "sugarkube.img")
@@ -139,10 +140,13 @@ eeprom-nvme-first:
     just --justfile "{{ justfile_directory() }}/justfile" boot-order nvme-first
 
 # Clone the active SD card to the preferred NVMe/USB target
-
-# Usage: sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
+# Usage:
+#   TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
+# Defaults: TARGET=/dev/nvme0n1, WIPE=0
 clone-ssd:
-    TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+    TARGET ?= /dev/nvme0n1
+    WIPE ?= 0
+    sudo --preserve-env=TARGET,WIPE env TARGET=$(TARGET) WIPE=$(WIPE) "{{ CWD }}/scripts/clone_to_nvme.sh" {{ clone_args }}
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 

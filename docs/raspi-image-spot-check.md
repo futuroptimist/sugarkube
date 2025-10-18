@@ -95,6 +95,36 @@ sudo TARGET=/dev/nvme0n1 just clone-ssd
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
 
+#### Troubleshooting
+
+Detect any lingering mounts before retrying a clone:
+
+```
+findmnt /mnt/clone
+mount | grep nvme0n1 || true
+```
+
+Clean up stale mounts and automount units:
+
+```
+sudo umount -R /mnt/clone || true
+for p in /dev/nvme0n1p*; do sudo umount "$p" 2>/dev/null || true; done
+sudo systemctl stop mnt-clone.mount mnt-clone.automount 2>/dev/null || true
+sudo udevadm settle
+```
+
+If the boot volume was skipped during cloning, rerun the recovery helper and then clone again:
+
+```
+TARGET=/dev/nvme0n1 scripts/recover_clone_mount.sh
+```
+
+Re-run the clone with environment overrides preserved under sudo:
+
+```
+TARGET=/dev/nvme0n1 WIPE=1 sudo --preserve-env=TARGET,WIPE just clone-ssd
+```
+
 ### 3. Optional: one-command migration
 
 To chain the spot-check, boot-order alignment, clone, and reboot, use:
@@ -114,15 +144,6 @@ sudo rpi-eeprom-config --set 'set_reboot_order=0xf1'
 ```
 
 The Pi will prefer the SD card for the next reboot only, then revert to the configured EEPROM order.
-
-> [!TIP] Troubleshooting
-> Mount the clone and inspect the boot files when something fails early:
-> ```bash
-> sudo mount /dev/nvme0n1p1 /mnt/clone
-> sudo sed -n '1,120p' /mnt/clone/cmdline.txt
-> sudo sed -n '1,120p' /mnt/clone/etc/fstab
-> sudo umount /mnt/clone
-> ```
 
 ### Verification checklist
 
