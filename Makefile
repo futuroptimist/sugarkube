@@ -9,6 +9,15 @@ FLASH_REPORT_CMD ?= $(CURDIR)/scripts/flash_pi_media_report.py
 DOWNLOAD_CMD ?= $(CURDIR)/scripts/download_pi_image.sh
 ROLLBACK_CMD ?= $(CURDIR)/scripts/rollback_to_sd.sh
 CLONE_CMD ?= $(CURDIR)/scripts/ssd_clone.py
+TARGET ?=
+WIPE ?= 0
+WIPE_CONFIRM ?= 0
+MOUNT_BASE ?= /mnt/clone
+PREFLIGHT_CMD ?= $(CURDIR)/scripts/preflight_clone.sh
+VERIFY_CLONE_CMD ?= $(CURDIR)/scripts/verify_clone.sh
+FINALIZE_NVME_CMD ?= $(CURDIR)/scripts/finalize_nvme.sh
+CLEAN_MOUNTS_CMD ?= $(CURDIR)/scripts/cleanup_clone_mounts.sh
+CLEAN_MOUNTS_ARGS ?=
 DOWNLOAD_ARGS ?=
 FLASH_ARGS ?= --assume-yes
 FLASH_REPORT_ARGS ?=
@@ -53,7 +62,8 @@ DOCS_VERIFY_ARGS ?=
 DOCS_SIMPLIFY_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
-        clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
+        clone-ssd preflight verify-clone finalize-nvme show-disks clean-mounts clean-mounts-hard \
+        validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle mac-setup cluster-up cluster-bootstrap codespaces-bootstrap
 
@@ -84,17 +94,55 @@ start-here:
 	$(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
 
 rollback-to-sd:
-	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
+        $(ROLLBACK_CMD) --dry-run $(ROLLBACK_ARGS)
 
 clone-ssd:
-	@if [ -z "$(CLONE_TARGET)" ]; then \
-		echo "Set CLONE_TARGET to the target device (e.g. /dev/sda)." >&2; \
-		exit 1; \
-	fi
-	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
+        @if [ -z "$(TARGET)" ]; then \
+                echo "Set TARGET to the clone device (e.g. /dev/nvme0n1)." >&2; \
+                exit 1; \
+        fi
+        $(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
+
+show-disks:
+        lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+
+preflight:
+        @if [ -z "$(TARGET)" ]; then \
+                echo "Set TARGET to the clone device (e.g. /dev/nvme0n1)." >&2; \
+                exit 1; \
+        fi
+        sudo --preserve-env=TARGET,WIPE,WIPE_CONFIRM \
+                TARGET="$(TARGET)" \
+                WIPE="$(WIPE)" \
+                WIPE_CONFIRM="$(WIPE_CONFIRM)" \
+                $(PREFLIGHT_CMD)
+
+verify-clone:
+        @if [ -z "$(TARGET)" ]; then \
+                echo "Set TARGET to the clone device (e.g. /dev/nvme0n1)." >&2; \
+                exit 1; \
+        fi
+        sudo --preserve-env=TARGET,MOUNT_BASE \
+                TARGET="$(TARGET)" \
+                MOUNT_BASE="$(MOUNT_BASE)" \
+                $(VERIFY_CLONE_CMD)
+
+finalize-nvme:
+        sudo --preserve-env=EDITOR,RECOMMENDED_BOOT_ORDER,SKIP_EDIT \
+                $(FINALIZE_NVME_CMD)
+
+clean-mounts:
+        sudo --preserve-env=TARGET,MOUNT_BASE \
+                TARGET="$(TARGET)" MOUNT_BASE="$(MOUNT_BASE)" \
+                $(CLEAN_MOUNTS_CMD) $(CLEAN_MOUNTS_ARGS)
+
+clean-mounts-hard:
+        sudo --preserve-env=TARGET,MOUNT_BASE,FORCE_LAZY \
+                TARGET="$(TARGET)" MOUNT_BASE="$(MOUNT_BASE)" FORCE_LAZY=1 \
+                $(CLEAN_MOUNTS_CMD)
 
 validate-ssd-clone:
-	$(VALIDATE_CMD) $(VALIDATE_ARGS)
+        $(VALIDATE_CMD) $(VALIDATE_ARGS)
 
 docs-verify:
 	$(SUGARKUBE_CLI) docs verify $(DOCS_VERIFY_ARGS)
