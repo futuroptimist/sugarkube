@@ -22,11 +22,14 @@ def test_doc_sections_present(doc_text: str) -> None:
         "## Sample output",
         "## Known benign noise",
         "## Next steps: clone to NVMe",
-        "### 1. Align the boot order (only if needed)",
-        "### 2. Clone the SD card to NVMe",
-        "### 3. Optional: one-command migration",
-        "### One-time SD override",
-        "### Verification checklist",
+        "### Required flow",
+        "#### 1. Clone the SD card to NVMe",
+        "#### 2. Verification checklist",
+        "### Optional adjustments",
+        "#### Align the boot order (only if needed)",
+        "#### One-command migration",
+        "#### One-time SD override",
+        "## Transition to NVMe boot",
     ]
     for heading in headings:
         assert heading in doc_text, f"Missing expected heading: {heading}"
@@ -40,6 +43,8 @@ def test_doc_command_blocks(doc_text: str) -> None:
         "sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd",
         "sudo TARGET=/dev/nvme0n1 just clone-ssd",
         "sudo just migrate-to-nvme",
+        "sudo shutdown -h now",
+        "lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID",
     ]
     for command in commands:
         assert command in doc_text, f"Guide should reference '{command}'"
@@ -83,3 +88,16 @@ def test_doc_mentions_artifacts_paths(doc_text: str) -> None:
     ]
     for item in expected:
         assert item in doc_text, f"Expected '{item}' to be documented"
+
+
+def test_optional_sections_are_grouped(doc_text: str) -> None:
+    optional_section = "### Optional adjustments"
+    assert optional_section in doc_text
+    assert "#### Align the boot order (only if needed)" in doc_text
+    assert "#### One-command migration" in doc_text
+    assert "#### One-time SD override" in doc_text
+
+
+def test_transition_section_links_next_steps(doc_text: str) -> None:
+    assert "## Transition to NVMe boot" in doc_text
+    assert "raspi_cluster_setup.md" in doc_text

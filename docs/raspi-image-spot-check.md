@@ -62,21 +62,9 @@ transparency.
 > - Skip the boot-order step if `sudo rpi-eeprom-config | grep BOOT_ORDER` already shows `0xf461`.
 > - Skip to **Verification** if `lsblk` already lists NVMe boot and root partitions.
 
-### 1. Align the boot order (only if needed)
+### Required flow
 
-Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
-
-```bash
-sudo just boot-order sd-nvme-usb
-```
-
-The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an adapter requires it:
-
-```bash
-sudo PCIE_PROBE=1 just boot-order nvme-first
-```
-
-### 2. Clone the SD card to NVMe
+#### 1. Clone the SD card to NVMe
 
 The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures logs under
 `artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the
@@ -111,7 +99,29 @@ sudo TARGET=/dev/nvme0n1 just clone-ssd
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
 
-### 3. Optional: one-command migration
+#### 2. Verification checklist
+
+- Booted from the expected device: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
+- `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe partitions
+- `sudo vclog -m tip | tail` shows a clean boot summary without boot-order overrides lingering
+
+### Optional adjustments
+
+#### Align the boot order (only if needed)
+
+Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
+
+```bash
+sudo just boot-order sd-nvme-usb
+```
+
+The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an adapter requires it:
+
+```bash
+sudo PCIE_PROBE=1 just boot-order nvme-first
+```
+
+#### One-command migration
 
 To chain the spot-check, boot-order alignment, clone, and reboot, use:
 
@@ -121,7 +131,7 @@ sudo just migrate-to-nvme
 
 Check `artifacts/migrate-to-nvme/` for the run log if anything looks off.
 
-### One-time SD override
+#### One-time SD override
 
 Keep the NVMe plugged in while testing a fresh SD image by issuing a single-use boot override:
 
@@ -140,8 +150,20 @@ The Pi will prefer the SD card for the next reboot only, then revert to the conf
 > sudo umount /mnt/clone
 > ```
 
-### Verification checklist
+## Transition to NVMe boot
 
-- Booted from the expected device: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
-- `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe partitions
-- `sudo vclog -m tip | tail` shows a clean boot summary without boot-order overrides lingering
+Shut down cleanly before swapping boot media:
+
+```bash
+sudo shutdown -h now
+```
+
+Remove the SD card once the Pi powers off, keep the NVMe drive attached, and power the board back on
+to confirm it boots from the cloned SSD. After the system returns, verify the storage layout:
+
+```bash
+lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID
+```
+
+Continue with [raspi_cluster_setup.md](raspi_cluster_setup.md) to configure the k3s cluster once the
+clone checks out.
