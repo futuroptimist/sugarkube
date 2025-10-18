@@ -68,8 +68,10 @@ status=0
 
 trim() {
   local value="$1"
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
+  # shellcheck disable=SC2295
+  value="${value#${value%%[![:space:]]*}}"
+  # shellcheck disable=SC2295
+  value="${value%${value##*[![:space:]]}}"
   printf '%s' "$value"
 }
 
