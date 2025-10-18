@@ -103,6 +103,34 @@ ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART" 2>/dev/null || true)
 BOOT_LABEL=$(fatlabel "$BOOT_PART" 2>/dev/null || true)
 ROOT_LABEL=$(e2label "$ROOT_PART" 2>/dev/null || true)
 
+EXPECTED_BOOT_LABEL=${EXPECTED_BOOT_LABEL:-}
+STATE_FILE=${STATE_FILE:-/var/log/sugarkube/ssd-clone.state.json}
+if [ -z "$EXPECTED_BOOT_LABEL" ] && [ -f "$STATE_FILE" ] && command -v python3 >/dev/null 2>&1; then
+  if ! EXPECTED_BOOT_LABEL=$(
+    python3 - "$STATE_FILE" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        state = json.load(handle)
+except Exception:
+    raise SystemExit(1)
+
+label = state.get("target_boot_label") or state.get("source_boot_label") or ""
+print(label)
+PY
+  ); then
+    EXPECTED_BOOT_LABEL=
+  fi
+fi
+if [ -n "$EXPECTED_BOOT_LABEL" ]; then
+  EXPECTED_BOOT_LABEL=${EXPECTED_BOOT_LABEL^^}
+fi
+if [ -n "$BOOT_LABEL" ]; then
+  BOOT_LABEL=${BOOT_LABEL^^}
+fi
+
 RESULTS=()
 FAILURES=0
 
@@ -140,11 +168,20 @@ else
   fi
 fi
 
-if [ -n "$BOOT_LABEL" ] && [ "$BOOT_LABEL" = "${BOOT_LABEL^^}" ] && [ "$BOOT_LABEL" = "BOOTFS" ]; then
-  RESULTS+=("[ok] Boot partition label is BOOTFS")
+if [ -n "$EXPECTED_BOOT_LABEL" ]; then
+  if [ "$BOOT_LABEL" = "$EXPECTED_BOOT_LABEL" ]; then
+    RESULTS+=("[ok] Boot partition label matches expected ${EXPECTED_BOOT_LABEL}")
+  else
+    RESULTS+=("[fail] Boot partition label mismatch (expected ${EXPECTED_BOOT_LABEL}, saw ${BOOT_LABEL:-unset})")
+    FAILURES=$((FAILURES + 1))
+  fi
 else
-  RESULTS+=("[fail] Boot partition label must be BOOTFS (saw ${BOOT_LABEL:-unset})")
-  FAILURES=$((FAILURES + 1))
+  if [ -n "$BOOT_LABEL" ]; then
+    RESULTS+=("[ok] Boot partition label is ${BOOT_LABEL}")
+  else
+    RESULTS+=("[fail] Boot partition label is unset")
+    FAILURES=$((FAILURES + 1))
+  fi
 fi
 
 if [ "$ROOT_LABEL" = "rootfs" ]; then
@@ -157,7 +194,7 @@ fi
 printf '\n=== NVMe Clone Validation Report ===\n'
 for entry in "${RESULTS[@]}"; do
   printf '%s\n' "$entry"
-fi
+done
 printf '\nIdentifiers:\n'
 printf '  ROOT PARTUUID: %s\n' "$ROOT_PARTUUID"
 printf '  ROOT UUID    : %s\n' "${ROOT_UUID:-n/a}"
@@ -175,4 +212,8 @@ printf '\nAll checks passed.\n'
 printf 'Expected output:\n'
 printf '  [ok] cmdline.txt root PARTUUID\n'
 printf '  [ok] fstab boot/root PARTUUID entries\n'
-printf '  [ok] Labels: BOOTFS + rootfs\n'
+if [ -n "$EXPECTED_BOOT_LABEL" ]; then
+  printf '  [ok] Labels: %s + rootfs\n' "$EXPECTED_BOOT_LABEL"
+else
+  printf '  [ok] Labels: <boot label> + rootfs\n'
+fi

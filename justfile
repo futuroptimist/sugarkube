@@ -115,9 +115,7 @@ start-here:
     "{{ sugarkube_cli }}" docs start-here {{ start_here_args }}
 
 # Revert cmdline.txt and fstab entries back to the SD card defaults
-
 # Usage: sudo just rollback-to-sd
-
 # Run the Raspberry Pi spot check and capture artifacts
 
 # Usage: sudo just spot-check
