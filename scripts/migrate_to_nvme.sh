@@ -15,7 +15,7 @@ CLONE_ARGS=${CLONE_ARGS:-}
 MIGRATE_ARTIFACTS=${MIGRATE_ARTIFACTS:-"${REPO_ROOT}/artifacts/migrate-to-nvme"}
 SKIP_EEPROM=${SKIP_EEPROM:-0}
 NO_REBOOT=${NO_REBOOT:-0}
-CLONE_TARGET=${CLONE_TARGET:-${TARGET:-}}
+MIGRATE_TARGET=${TARGET:-}
 CLONE_WIPE=${CLONE_WIPE:-${WIPE:-}}
 
 mkdir -p "${MIGRATE_ARTIFACTS}"
@@ -50,8 +50,8 @@ log_step() {
 
 run_clone() {
   local -a env_vars=()
-  if [[ -n "${CLONE_TARGET}" ]]; then
-    env_vars+=("TARGET=${CLONE_TARGET}")
+  if [[ -n "${MIGRATE_TARGET}" ]]; then
+    env_vars+=("TARGET=${MIGRATE_TARGET}")
   fi
   if [[ -n "${CLONE_WIPE}" ]]; then
     env_vars+=("WIPE=${CLONE_WIPE}")

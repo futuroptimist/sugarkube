@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 DRY_RUN=0
@@ -8,6 +8,7 @@ FORCE=0
 KEEP_DIRS=0
 TARGET="${TARGET:-/dev/nvme0n1}"
 MOUNT_BASE="${MOUNT_BASE:-/mnt/clone}"
+TRAP_CLEANUP_DONE=0
 
 log() {
   local IFS=' '
@@ -19,6 +20,75 @@ vlog() {
     log "$@"
   fi
 }
+
+cleanup() {
+  local status=$?
+  if [ "$TRAP_CLEANUP_DONE" -eq 1 ]; then
+    exit "$status"
+  fi
+  TRAP_CLEANUP_DONE=1
+  set +e
+  set +u
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY-RUN: trap cleanup skipped."
+    log "Cleanup complete."
+    exit "$status"
+  fi
+
+  if command -v findmnt >/dev/null 2>&1 && \
+     findmnt -rn --submounts "$MOUNT_BASE" >/dev/null 2>&1; then
+    if umount -R "$MOUNT_BASE" 2>/dev/null; then
+      log "Trap cleanup: recursively unmounted residual mounts under $MOUNT_BASE"
+    else
+      log "Trap cleanup: umount -R $MOUNT_BASE failed"
+      if command -v fuser >/dev/null 2>&1; then
+        fuser -vm "$MOUNT_BASE" 2>/dev/null || true
+      fi
+      if umount -Rl "$MOUNT_BASE" 2>/dev/null; then
+        log "Trap cleanup: lazy unmounted $MOUNT_BASE; detaches once idle"
+      fi
+    fi
+  fi
+
+  if [ -e "$TARGET" ]; then
+    local -a trap_points=()
+    mapfile -t trap_points < <(findmnt -rn -o TARGET -S "${TARGET}p*" 2>/dev/null || true)
+    for point in "${trap_points[@]}"; do
+      if [ -z "$point" ]; then
+        continue
+      fi
+      if umount "$point" 2>/dev/null; then
+        log "Trap cleanup: unmounted residual target mount $point"
+        continue
+      fi
+      log "Trap cleanup: failed to unmount $point"
+      if command -v fuser >/dev/null 2>&1; then
+        fuser -vm "$point" 2>/dev/null || true
+      fi
+      if umount -l "$point" 2>/dev/null; then
+        log "Trap cleanup: lazy unmounted $point"
+      fi
+    done
+  fi
+
+  if [ "$KEEP_DIRS" -eq 0 ]; then
+    for dir in "$MOUNT_BASE/boot/firmware" "$MOUNT_BASE/boot" "$MOUNT_BASE"; do
+      if [ -d "$dir" ]; then
+        rmdir "$dir" 2>/dev/null || true
+      fi
+    done
+  fi
+
+  if [ "$status" -eq 0 ]; then
+    log "Cleanup complete."
+  else
+    log "Cleanup exited with status $status."
+  fi
+  exit "$status"
+}
+
+trap cleanup EXIT
 
 usage() {
   cat <<USAGE
@@ -461,23 +531,4 @@ else
   vlog "udevadm not available; skipping device settle."
 fi
 
-if [ "$KEEP_DIRS" -eq 0 ]; then
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "DRY-RUN: find $MOUNT_BASE -mindepth 1 -type d -empty -delete"
-  else
-    if [ -d "$MOUNT_BASE" ]; then
-      find "$MOUNT_BASE" -mindepth 1 -type d -empty -delete 2>/dev/null || true
-    fi
-  fi
-else
-  vlog "Preserving empty mount directories as requested."
-fi
-
-if [ "$DRY_RUN" -eq 1 ]; then
-  log "DRY-RUN: mkdir -p $MOUNT_BASE/boot/firmware"
-else
-  run_cmd mkdir -p "$MOUNT_BASE/boot/firmware"
-fi
-
-log "Cleanup complete."
 exit 0
