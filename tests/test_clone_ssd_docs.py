@@ -11,21 +11,21 @@ CLONE_SSD_EXPECTATIONS: list[tuple[str, list[str]]] = [
     (
         "docs/raspi-image-spot-check.md",
         [
-            "sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1",
-            "sudo just clone-ssd TARGET=/dev/nvme0n1",
+            "sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd",
+            "sudo TARGET=/dev/nvme0n1 just clone-ssd",
         ],
     ),
     (
         "docs/pi_image_quickstart.md",
         [
             'sudo CLONE_TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"',
-            'sudo CLONE_TARGET=/dev/sda just clone-ssd CLONE_ARGS="--resume"',
+            'sudo CLONE_TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd',
         ],
     ),
     (
         "docs/pi_carrier_field_guide.md",
         [
-            'sudo CLONE_TARGET=/dev/sdX just clone-ssd CLONE_ARGS="--resume"',
+            'sudo CLONE_TARGET=/dev/sdX CLONE_ARGS="--resume" just clone-ssd',
         ],
     ),
 ]

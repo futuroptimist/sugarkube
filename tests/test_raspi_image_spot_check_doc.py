@@ -37,8 +37,8 @@ def test_doc_command_blocks(doc_text: str) -> None:
         "sudo just spot-check",
         "sudo just boot-order sd-nvme-usb",
         "sudo PCIE_PROBE=1 just boot-order nvme-first",
-        "sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1",
-        "sudo just clone-ssd TARGET=/dev/nvme0n1",
+        "sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd",
+        "sudo TARGET=/dev/nvme0n1 just clone-ssd",
         "sudo just migrate-to-nvme",
     ]
     for command in commands:
@@ -46,7 +46,9 @@ def test_doc_command_blocks(doc_text: str) -> None:
 
 
 def test_clone_commands_do_not_use_shell_semicolon_assignment(doc_text: str) -> None:
-    bad_pattern = re.compile(r"TARGET=/dev[^\n]*;|WIPE=1;[ ]*sudo just clone-ssd")
+    bad_pattern = re.compile(
+        r"TARGET=/dev[^\n]*;|WIPE=1;[ ]*sudo [^\n]*just clone-ssd"
+    )
     assert not bad_pattern.search(
         doc_text
     ), "Commands should export variables inline instead of using ';' separators"
