@@ -1,0 +1,10 @@
+{
+  "id": "2025-10-18-verify-justfile-unstable-flag",
+  "date": "2025-10-18",
+  "component": "Verify Justfile formatting workflow",
+  "rootCause": "The workflow invoked `just --fmt --unstable --check`, but `just` expects global flags before the subcommand. The incorrect order made the formatter exit immediately with a CLI usage error, so the formatting check failed every run.",
+  "resolution": "Reordered the invocation to `just --unstable --fmt --check` so the unstable flag is applied before the formatter executes, allowing the check to run normally.",
+  "references": [
+    ".github/workflows/verify-justfile.yml"
+  ]
+}
