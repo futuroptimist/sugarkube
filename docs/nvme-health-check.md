@@ -69,6 +69,9 @@ data_units_written=$(get_field "data_units_written")
 media_errors=$(get_field "media_errors")
 unsafe_shutdowns=$(get_field "unsafe_shutdowns")
 
+# Remove trailing percent sign before numeric comparison.
+percentage_used="${percentage_used%\%}"
+
 # Convert DUW (512,000-byte units) to terabytes.
 tbw=$(awk -v duw="$data_units_written" 'BEGIN { printf "%.2f", duw * 512000 / 1e12 }')
 
