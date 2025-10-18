@@ -22,10 +22,12 @@ def test_doc_sections_present(doc_text: str) -> None:
         "## Sample output",
         "## Known benign noise",
         "## Next steps: clone to NVMe",
-        "### 1. Align the boot order (only if needed)",
-        "### 2. Clone the SD card to NVMe",
-        "### 3. Optional: one-command migration",
-        "### One-time SD override",
+        "### Required step: Clone the SD card to NVMe",
+        "### Optional preparations",
+        "#### Align the boot order (run only if needed)",
+        "#### One-command migration",
+        "#### One-time SD override",
+        "### Finalize the NVMe boot",
         "### Verification checklist",
     ]
     for heading in headings:
@@ -40,6 +42,10 @@ def test_doc_command_blocks(doc_text: str) -> None:
         "sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd",
         "sudo TARGET=/dev/nvme0n1 just clone-ssd",
         "sudo just migrate-to-nvme",
+        "sudo just clean-mounts -- --verbose",
+        "sudo TARGET=/dev/nvme1n1 MOUNT_BASE=/media/clone just clean-mounts",
+        "sudo poweroff",
+        "lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID",
     ]
     for command in commands:
         assert command in doc_text, f"Guide should reference '{command}'"
@@ -83,3 +89,8 @@ def test_doc_mentions_artifacts_paths(doc_text: str) -> None:
     ]
     for item in expected:
         assert item in doc_text, f"Expected '{item}' to be documented"
+
+
+def test_finalize_section_links_next_steps(doc_text: str) -> None:
+    assert "### Finalize the NVMe boot" in doc_text
+    assert "[Raspberry Pi cluster setup guide](./raspi_cluster_setup.md)" in doc_text

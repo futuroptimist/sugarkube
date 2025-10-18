@@ -59,24 +59,10 @@ transparency.
 ## Next steps: clone to NVMe
 
 > [!TIP] Before you start
-> - Skip the boot-order step if `sudo rpi-eeprom-config | grep BOOT_ORDER` already shows `0xf461`.
-> - Skip to **Verification** if `lsblk` already lists NVMe boot and root partitions.
+> - Skip the boot-order helper if `sudo rpi-eeprom-config | grep BOOT_ORDER` already shows `0xf461`.
+> - Skip ahead to **Finalize the NVMe boot** if `lsblk` already lists NVMe boot and root partitions.
 
-### 1. Align the boot order (only if needed)
-
-Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
-
-```bash
-sudo just boot-order sd-nvme-usb
-```
-
-The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an adapter requires it:
-
-```bash
-sudo PCIE_PROBE=1 just boot-order nvme-first
-```
-
-### 2. Clone the SD card to NVMe
+### Required step: Clone the SD card to NVMe
 
 The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures logs under
 `artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the
@@ -111,7 +97,23 @@ sudo TARGET=/dev/nvme0n1 just clone-ssd
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
 
-### 3. Optional: one-command migration
+### Optional preparations
+
+#### Align the boot order (run only if needed)
+
+Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
+
+```bash
+sudo just boot-order sd-nvme-usb
+```
+
+The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an adapter requires it:
+
+```bash
+sudo PCIE_PROBE=1 just boot-order nvme-first
+```
+
+#### One-command migration
 
 To chain the spot-check, boot-order alignment, clone, and reboot, use:
 
@@ -121,7 +123,7 @@ sudo just migrate-to-nvme
 
 Check `artifacts/migrate-to-nvme/` for the run log if anything looks off.
 
-### One-time SD override
+#### One-time SD override
 
 Keep the NVMe plugged in while testing a fresh SD image by issuing a single-use boot override:
 
@@ -139,6 +141,25 @@ The Pi will prefer the SD card for the next reboot only, then revert to the conf
 > sudo sed -n '1,120p' /mnt/clone/etc/fstab
 > sudo umount /mnt/clone
 > ```
+
+### Finalize the NVMe boot
+
+1. Shut down cleanly once the clone completes:
+
+   ```bash
+   sudo poweroff
+   ```
+
+2. Remove the SD card after the Pi powers off, keep the NVMe drive connected, and power the system
+   back on.
+3. Verify the NVMe boot by confirming the root filesystem lives on the NVMe device:
+
+   ```bash
+   lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID
+   ```
+
+4. Continue with cluster bring-up by following the [Raspberry Pi cluster setup guide](./raspi_cluster_setup.md)
+   to configure k3s services.
 
 ### Verification checklist
 
