@@ -144,6 +144,22 @@ eeprom-nvme-first:
 clone-ssd:
     TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
 
+# Clean up residual clone mounts and automounts.
+# Usage:
+#   just clean-mounts
+#   TARGET=/dev/nvme1n1 MOUNT_BASE=/mnt/clone just clean-mounts
+#   just clean-mounts -- --verbose --dry-run
+#
+# Notes:
+# - Pass additional flags after `--`.
+# - Defaults: TARGET=/dev/nvme0n1, MOUNT_BASE=/mnt/clone
+clean-mounts args='':
+    TARGET ?= /dev/nvme0n1
+    MOUNT_BASE ?= /mnt/clone
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+      env TARGET={{TARGET}} MOUNT_BASE={{MOUNT_BASE}} \
+      "{{justfile_directory()}}/scripts/cleanup_clone_mounts.sh" {{args}}
+
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
 # Usage: sudo just migrate-to-nvme SKIP_EEPROM=1 NO_REBOOT=1

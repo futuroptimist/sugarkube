@@ -82,6 +82,14 @@ The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures log
 `artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the
 target device explicitly during the first run so the script can initialise the NVMe layout:
 
+If a prior run left mounts behind, run:
+
+```bash
+just clean-mounts -- --verbose
+```
+
+Then retry the clone.
+
 ```bash
 sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 ```
