@@ -58,11 +58,16 @@ transparency.
 
 ## Next steps: clone to NVMe
 
-> [!TIP] Before you start
-> - Skip the boot-order step if `sudo rpi-eeprom-config | grep BOOT_ORDER` already shows `0xf461`.
-> - Skip to **Verification** if `lsblk` already lists NVMe boot and root partitions.
+This flow keeps the must-do actions separate from helpful extras. Follow the **core workflow**
+first, then pick any optional helpers that match your scenario.
 
-### 1. Align the boot order (only if needed)
+### Core workflow
+
+> [!IMPORTANT]
+> Skip Step&nbsp;1 if `sudo rpi-eeprom-config | grep BOOT_ORDER` already returns `0xf461`.
+> Skip directly to **Step&nbsp;3 (Verification)** if `lsblk` already shows NVMe boot and root partitions.
+
+#### Step 1. Align the boot order (only if needed)
 
 Prefer **SD → NVMe → USB → repeat** so the SD card remains your fallback.
 
@@ -76,31 +81,18 @@ The helper prints the resulting EEPROM state. Pass `PCIE_PROBE=1` only when an a
 sudo PCIE_PROBE=1 just boot-order nvme-first
 ```
 
-### 2. Clone the SD card to NVMe
+#### Step 2. Clone the SD card to NVMe
 
 The `clone-ssd` helper wraps `rpi-clone`, installs it on first use, captures logs under
-`artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the
-target device explicitly during the first run so the script can initialise the NVMe layout:
+`artifacts/clone-to-nvme.log`, and fixes the cloned `cmdline.txt`/`fstab` entries. Pass the target
+device explicitly during the first run so the script can initialise the NVMe layout:
 
 ```bash
 sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 ```
 
-If a prior run left mounts behind, clean them up before retrying:
-
-```bash
-sudo just clean-mounts -- --verbose
-```
-
-> [!TIP]
-> The `clean-mounts` recipe unmounts any leftover clone targets and removes the automount
-> directories (`/mnt/clone` by default). Override `TARGET` or `MOUNT_BASE` if your layout differs:
->
-> ```bash
-> sudo TARGET=/dev/nvme1n1 MOUNT_BASE=/media/clone just clean-mounts
-> ```
->
-> Re-run `clone-ssd` once the cleanup completes.
+If the script warns about leftover mounts, see **Optional: reset mounts before cloning** before
+retrying.
 
 Subsequent syncs only need the target argument:
 
@@ -111,7 +103,33 @@ sudo TARGET=/dev/nvme0n1 just clone-ssd
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
 
-### 3. Optional: one-command migration
+#### Step 3. Verification checklist
+
+- Booted from the expected device: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
+- `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe partitions
+- `sudo vclog -m tip | tail` shows a clean boot summary without boot-order overrides lingering
+
+### Optional helpers and automations
+
+#### Optional: reset mounts before cloning
+
+> [!TIP]
+> The `clean-mounts` recipe unmounts any leftover clone targets and removes the automount
+> directories (`/mnt/clone` by default).
+>
+> ```bash
+> sudo just clean-mounts -- --verbose
+> ```
+>
+> Override `TARGET` or `MOUNT_BASE` if your layout differs:
+>
+> ```bash
+> sudo TARGET=/dev/nvme1n1 MOUNT_BASE=/media/clone just clean-mounts
+> ```
+>
+> Re-run `clone-ssd` once the cleanup completes.
+
+#### Optional: one-command migration
 
 To chain the spot-check, boot-order alignment, clone, and reboot, use:
 
@@ -121,7 +139,7 @@ sudo just migrate-to-nvme
 
 Check `artifacts/migrate-to-nvme/` for the run log if anything looks off.
 
-### One-time SD override
+#### Optional: one-time SD override
 
 Keep the NVMe plugged in while testing a fresh SD image by issuing a single-use boot override:
 
@@ -131,17 +149,33 @@ sudo rpi-eeprom-config --set 'set_reboot_order=0xf1'
 
 The Pi will prefer the SD card for the next reboot only, then revert to the configured EEPROM order.
 
-> [!TIP] Troubleshooting
-> Mount the clone and inspect the boot files when something fails early:
-> ```bash
-> sudo mount /dev/nvme0n1p1 /mnt/clone
-> sudo sed -n '1,120p' /mnt/clone/cmdline.txt
-> sudo sed -n '1,120p' /mnt/clone/etc/fstab
-> sudo umount /mnt/clone
-> ```
+#### Optional: troubleshoot an early failure
 
-### Verification checklist
+Mount the clone and inspect the boot files when something fails early:
 
-- Booted from the expected device: `lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID`
-- `PARTUUID` entries in `/boot/firmware/cmdline.txt` and `/etc/fstab` point to the NVMe partitions
-- `sudo vclog -m tip | tail` shows a clean boot summary without boot-order overrides lingering
+```bash
+sudo mount /dev/nvme0n1p1 /mnt/clone
+sudo sed -n '1,120p' /mnt/clone/cmdline.txt
+sudo sed -n '1,120p' /mnt/clone/etc/fstab
+sudo umount /mnt/clone
+```
+
+## Finalize and continue to k3s setup
+
+1. Shut down safely so the clone is flushed to disk:
+
+   ```bash
+   sudo shutdown now
+   ```
+
+2. Disconnect power, remove the SD card, and leave the NVMe SSD installed.
+3. Power the Raspberry Pi back on so it boots directly from the NVMe clone.
+4. Confirm the system is running from NVMe:
+
+   ```bash
+   lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID
+   ```
+
+   Ensure `/` maps to `/dev/nvme0n1p2` (or your NVMe device) and `/boot/firmware` maps to the NVMe
+   boot partition.
+5. Continue with the [k3s cluster setup](./raspi_cluster_setup.md) to finish provisioning.

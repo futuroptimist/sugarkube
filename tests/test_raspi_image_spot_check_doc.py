@@ -22,11 +22,16 @@ def test_doc_sections_present(doc_text: str) -> None:
         "## Sample output",
         "## Known benign noise",
         "## Next steps: clone to NVMe",
-        "### 1. Align the boot order (only if needed)",
-        "### 2. Clone the SD card to NVMe",
-        "### 3. Optional: one-command migration",
-        "### One-time SD override",
-        "### Verification checklist",
+        "### Core workflow",
+        "#### Step 1. Align the boot order (only if needed)",
+        "#### Step 2. Clone the SD card to NVMe",
+        "#### Step 3. Verification checklist",
+        "### Optional helpers and automations",
+        "#### Optional: reset mounts before cloning",
+        "#### Optional: one-command migration",
+        "#### Optional: one-time SD override",
+        "#### Optional: troubleshoot an early failure",
+        "## Finalize and continue to k3s setup",
     ]
     for heading in headings:
         assert heading in doc_text, f"Missing expected heading: {heading}"
@@ -39,7 +44,11 @@ def test_doc_command_blocks(doc_text: str) -> None:
         "sudo PCIE_PROBE=1 just boot-order nvme-first",
         "sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd",
         "sudo TARGET=/dev/nvme0n1 just clone-ssd",
+        "sudo just clean-mounts -- --verbose",
         "sudo just migrate-to-nvme",
+        "sudo rpi-eeprom-config --set 'set_reboot_order=0xf1'",
+        "sudo shutdown now",
+        "lsblk -o NAME,MOUNTPOINT,SIZE,PARTUUID",
     ]
     for command in commands:
         assert command in doc_text, f"Guide should reference '{command}'"
@@ -83,3 +92,7 @@ def test_doc_mentions_artifacts_paths(doc_text: str) -> None:
     ]
     for item in expected:
         assert item in doc_text, f"Expected '{item}' to be documented"
+
+
+def test_doc_links_to_cluster_setup(doc_text: str) -> None:
+    assert "[k3s cluster setup](./raspi_cluster_setup.md)" in doc_text
