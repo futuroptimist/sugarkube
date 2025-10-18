@@ -14,7 +14,13 @@ exec > >(tee "${LOG_FILE}") 2>&1
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 if [[ "${ALLOW_NON_ROOT}" != "1" && ${EUID} -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1; then
-    exec sudo WIPE="${WIPE:-0}" TARGET="${TARGET:-}" "$0" "$@"
+    exec sudo \
+      WIPE="${WIPE:-0}" \
+      TARGET="${TARGET:-}" \
+      ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}" \
+      ALLOW_FAKE_BLOCK="${ALLOW_FAKE_BLOCK:-0}" \
+      CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}" \
+      "$0" "$@"
   fi
   echo "This script requires root privileges." >&2
   exit 1
