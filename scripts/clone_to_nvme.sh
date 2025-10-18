@@ -224,7 +224,24 @@ if [[ -d "${CLONE_MOUNT}/boot" ]]; then
   boot_dir_preexisting=1
 fi
 
-mkdir -p "${CLONE_MOUNT}/boot" "${CLONE_MOUNT}/boot/firmware"
+safe_mkdir() {
+  local dir="$1"
+  local parent
+
+  if [[ -L "${dir}" ]]; then
+    return 0
+  fi
+
+  parent=$(dirname "${dir}")
+  if [[ -L "${parent}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${dir}"
+}
+
+safe_mkdir "${CLONE_MOUNT}/boot"
+safe_mkdir "${CLONE_MOUNT}/boot/firmware"
 
 BOOT_RELATIVE_PATH="boot/firmware"
 if (( boot_firmware_preexisting == 0 && boot_dir_preexisting == 1 )); then
@@ -232,7 +249,7 @@ if (( boot_firmware_preexisting == 0 && boot_dir_preexisting == 1 )); then
 fi
 BOOT_MOUNT="${CLONE_MOUNT}/${BOOT_RELATIVE_PATH}"
 BOOT_MOUNTPOINT="/${BOOT_RELATIVE_PATH}"
-mkdir -p "${BOOT_MOUNT}"
+safe_mkdir "${BOOT_MOUNT}"
 
 if ! findmnt -rn -o TARGET "${BOOT_MOUNT}" >/dev/null 2>&1; then
   boot_candidate="${TARGET_PARTITIONS[0]:-}"
