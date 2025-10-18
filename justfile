@@ -108,7 +108,7 @@ doctor:
 
 # Usage: just start-here START_HERE_ARGS="--path-only"
 start-here:
-    "{{sugarkube_cli}}" docs start-here {{start_here_args}}
+    "{{ sugarkube_cli }}" docs start-here {{ start_here_args }}
 
 # Revert cmdline.txt and fstab entries back to the SD card defaults
 
@@ -246,13 +246,13 @@ codespaces-bootstrap:
 
 # Usage: just docs-verify
 docs-verify:
-    "{{sugarkube_cli}}" docs verify {{docs_verify_args}}
+    "{{ sugarkube_cli }}" docs verify {{ docs_verify_args }}
 
 # Install documentation prerequisites and run spell/link checks without touching
 
 # code linters. Usage: just simplify-docs (forwards to sugarkube docs simplify)
 simplify-docs:
-    "{{sugarkube_cli}}" docs simplify {{simplify_docs_args}}
+    "{{ sugarkube_cli }}" docs simplify {{ simplify_docs_args }}
 
 # Generate printable QR codes that link to the quickstart and troubleshooting docs
 
@@ -264,7 +264,7 @@ qr-codes:
 
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
-    "{{sugarkube_cli}}" token-place samples {{token_place_sample_args}}
+    "{{ sugarkube_cli }}" token-place samples {{ token_place_sample_args }}
 
 # Run the macOS setup wizard to install brew formulas and scaffold directories
 
