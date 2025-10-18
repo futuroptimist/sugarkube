@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -42,6 +43,13 @@ def test_doc_command_blocks(doc_text: str) -> None:
     ]
     for command in commands:
         assert command in doc_text, f"Guide should reference '{command}'"
+
+
+def test_clone_commands_do_not_use_shell_semicolon_assignment(doc_text: str) -> None:
+    bad_pattern = re.compile(r"TARGET=/dev[^\n]*;|WIPE=1;[ ]*sudo just clone-ssd")
+    assert not bad_pattern.search(
+        doc_text
+    ), "Commands should export variables inline instead of using ';' separators"
 
 
 def test_boot_order_recipe_uses_preset() -> None:

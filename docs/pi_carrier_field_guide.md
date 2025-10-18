@@ -18,8 +18,8 @@ or A4 and keep near the build bench.
    into a steady heartbeat (~1 Hz) after the first minute.
 4. Verify: `ssh pi@pi.local sudo /usr/local/bin/pi_node_verifier.sh --json`. The
    `status` field should be `ok` and include `k3s_ready=true`.
-5. Snapshot: Run `just clone-ssd CLONE_TARGET=/dev/sdX --resume` once an SSD is
-   attached. Expect a final `Clone complete` message.
+5. Snapshot: Run `sudo CLONE_TARGET=/dev/sdX just clone-ssd CLONE_ARGS="--resume"`
+   once an SSD is attached. Expect a final `Clone complete` message.
 
 ## Command Outputs
 - `curl http://pi.local:12345/metrics` → HTTP 200 with Prometheus metrics lines
