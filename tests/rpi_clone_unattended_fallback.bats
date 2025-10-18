@@ -13,7 +13,7 @@ echo "$*" >>"${RPI_CLONE_CALL_LOG}"
 if [[ "$*" == *"-U"* ]]; then
   exit 0
 fi
-printf 'Unattended -u option not allowed when initializing\n' >&2
+printf '\033[31mUnattended: -u option not allowed when initializing\033[0m\n' >&2
 exit 1
 STUB
   chmod +x "${TEST_BIN}/rpi-clone"
