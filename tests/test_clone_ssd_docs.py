@@ -45,7 +45,13 @@ def test_docs_document_expected_clone_wrappers(
 @pytest.mark.parametrize("doc_path", [item[0] for item in CLONE_SSD_EXPECTATIONS])
 def test_clone_wrappers_do_not_use_semicolon_assignments(doc_path: str) -> None:
     doc_text = (REPO_ROOT / doc_path).read_text(encoding="utf-8")
-    bad_pattern = re.compile(r"just clone-ssd[^\n]*;")
-    assert not bad_pattern.search(
+    semicolon_pattern = re.compile(r"just clone-ssd[^\n]*;")
+    assignment_after_recipe = re.compile(r"just clone-ssd[^`\n]*\b[A-Z][A-Z0-9_]*=")
+    assert not semicolon_pattern.search(
         doc_text
     ), f"{doc_path} should not rely on ';' to pass environment variables"
+    assert not assignment_after_recipe.search(
+        doc_text
+    ), (
+        f"{doc_path} should export environment variables before invoking 'just clone-ssd'"
+    )

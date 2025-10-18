@@ -46,12 +46,16 @@ def test_doc_command_blocks(doc_text: str) -> None:
 
 
 def test_clone_commands_do_not_use_shell_semicolon_assignment(doc_text: str) -> None:
-    bad_pattern = re.compile(
+    semicolon_pattern = re.compile(
         r"TARGET=/dev[^\n]*;|WIPE=1;[ ]*sudo [^\n]*just clone-ssd"
     )
-    assert not bad_pattern.search(
+    assignment_after_recipe = re.compile(r"just clone-ssd[^`\n]*\b[A-Z][A-Z0-9_]*=")
+    assert not semicolon_pattern.search(
         doc_text
     ), "Commands should export variables inline instead of using ';' separators"
+    assert not assignment_after_recipe.search(
+        doc_text
+    ), "Commands should export variables before invoking 'just clone-ssd'"
 
 
 def test_boot_order_recipe_uses_preset() -> None:
