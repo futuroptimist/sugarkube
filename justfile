@@ -156,11 +156,10 @@ clone-ssd:
 # - Defaults: TARGET=/dev/nvme0n1, MOUNT_BASE=/mnt/clone
 
 clean-mounts args='':
-    TARGET := env_var_or_default("TARGET", "/dev/nvme0n1")
-    MOUNT_BASE := env_var_or_default("MOUNT_BASE", "/mnt/clone")
     sudo --preserve-env=TARGET,MOUNT_BASE \
-      env TARGET={{TARGET}} MOUNT_BASE={{MOUNT_BASE}} \
-      "{{ clean_mounts_cmd }}" {{args}}
+      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+      "{{ clean_mounts_cmd }}" {{ args }}
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
