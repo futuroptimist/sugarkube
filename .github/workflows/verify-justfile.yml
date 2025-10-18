@@ -20,4 +20,4 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y just
       - name: Check Justfile formatting
-        run: just --fmt --unstable --check
+        run: just --unstable --fmt --check
