@@ -433,7 +433,7 @@ fresh hot-plug. Inspect the journal to monitor progress:
 journalctl -u ssd-clone.service
 ```
 
-Override detection by exporting `SUGARKUBE_SSD_CLONE_TARGET=/dev/sdX` or extend the helper
+Override detection by exporting `TARGET=/dev/sdX` or extend the helper
 flags (for example, `--dry-run`) with `SUGARKUBE_SSD_CLONE_EXTRA_ARGS`. Need to point the
 service at `/boot/firmware` on Bookworm or a custom mount? Set
 `SUGARKUBE_BOOT_MOUNT=/boot/firmware` (or pass `--boot-mount` when invoking the script
@@ -482,11 +482,11 @@ sudo ./scripts/ssd_clone.py --auto-target --dry-run
 ```
 
 Prefer wrappers? Run the equivalent Makefile or justfile recipes, passing the
-target device via `CLONE_TARGET` and additional flags through `CLONE_ARGS`:
+target device via `TARGET` and additional flags through `CLONE_ARGS`:
 
 ```bash
-sudo CLONE_TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"
-sudo CLONE_TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd
+sudo TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"
+sudo TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd
 ```
 
 Check `/var/log/sugarkube/ssd-clone.state.json` for step-level progress and

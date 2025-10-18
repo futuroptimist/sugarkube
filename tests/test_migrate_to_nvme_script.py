@@ -85,7 +85,7 @@ def stubbed_commands(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
             "EEPROM_CMD": str(bin_dir / "eeprom.sh"),
             "CLONE_CMD": str(bin_dir / "clone_stub.sh"),
             "MIGRATE_ARTIFACTS": str(tmp_path / "artifacts"),
-            "CLONE_TARGET": "/dev/nvme0n1",
+            "TARGET": "/dev/nvme0n1",
             "CLONE_WIPE": "1",
         }
     )
