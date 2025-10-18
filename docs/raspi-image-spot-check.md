@@ -86,13 +86,21 @@ target device explicitly during the first run so the script can initialise the N
 sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 ```
 
-If a prior run left mounts behind, run:
+If a prior run left mounts behind, clean them up before retrying:
 
 ```bash
-just clean-mounts -- --verbose
+sudo just clean-mounts -- --verbose
 ```
 
-Then retry the clone.
+> [!TIP]
+> The `clean-mounts` recipe unmounts any leftover clone targets and removes the automount
+> directories (`/mnt/clone` by default). Override `TARGET` or `MOUNT_BASE` if your layout differs:
+>
+> ```bash
+> sudo TARGET=/dev/nvme1n1 MOUNT_BASE=/media/clone just clean-mounts
+> ```
+>
+> Re-run `clone-ssd` once the cleanup completes.
 
 Subsequent syncs only need the target argument:
 
