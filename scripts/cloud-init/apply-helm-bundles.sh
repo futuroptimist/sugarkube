@@ -68,7 +68,9 @@ status=0
 
 trim() {
   local value="$1"
+  # shellcheck disable=SC2295
   value="${value#${value%%[![:space:]]*}}"
+  # shellcheck disable=SC2295
   value="${value%${value##*[![:space:]]}}"
   printf '%s' "$value"
 }

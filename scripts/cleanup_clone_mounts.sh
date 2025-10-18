@@ -399,7 +399,7 @@ if [ "${#BASE_POINTS[@]}" -gt 0 ]; then
         log "$MOUNT_BASE remains busy after recursive unmount attempt:"
         printf '%s\n' "$BLOCKER_OUTPUT"
       fi
-      local fallback_required=0
+      fallback_required=0
       if [ "$FORCE" -eq 1 ]; then
         fallback_required=1
       elif ! command -v findmnt >/dev/null 2>&1; then
