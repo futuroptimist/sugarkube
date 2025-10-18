@@ -22,6 +22,7 @@ eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
 clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
+clone_allow_auto_detect := env_var_or_default("CLONE_ALLOW_AUTO_DETECT", env_var_or_default("ALLOW_CLONE_AUTO_DETECT", "0"))
 validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
@@ -140,8 +141,17 @@ eeprom-nvme-first:
 # Clone the active SD card to the preferred NVMe/USB target
 
 # Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
+#        sudo CLONE_ALLOW_AUTO_DETECT=1 just clone-ssd
 clone-ssd:
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    if [ -z "{{ clone_target }}" ]; then \
+        if [ "{{ clone_allow_auto_detect }}" != "1" ]; then \
+            echo "Set TARGET or CLONE_TARGET before running clone-ssd, or export CLONE_ALLOW_AUTO_DETECT=1 to allow auto-detection." >&2; \
+            exit 1; \
+        fi; \
+        "{{ clone_cmd }}" {{ clone_args }}; \
+    else \
+        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}; \
+    fi
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
