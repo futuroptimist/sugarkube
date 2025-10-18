@@ -482,11 +482,11 @@ sudo ./scripts/ssd_clone.py --auto-target --dry-run
 ```
 
 Prefer wrappers? Run the equivalent Makefile or justfile recipes, passing the
-target device via `CLONE_TARGET` and additional flags through `CLONE_ARGS`:
+target device via `TARGET` and additional flags through `CLONE_ARGS`:
 
 ```bash
-sudo CLONE_TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"
-sudo CLONE_TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd
+sudo TARGET=/dev/sda make clone-ssd CLONE_ARGS="--dry-run"
+sudo TARGET=/dev/sda CLONE_ARGS="--resume" just clone-ssd
 ```
 
 Check `/var/log/sugarkube/ssd-clone.state.json` for step-level progress and

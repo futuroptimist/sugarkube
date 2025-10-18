@@ -21,13 +21,17 @@ boot_order_cmd := env_var_or_default("BOOT_ORDER_CMD", scripts_dir + "/boot_orde
 eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
-clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
+clone_target := env_var_or_default("TARGET", "")
 clone_wipe := env_var_or_default("WIPE", "0")
 clean_mounts_cmd := env_var_or_default("CLEAN_MOUNTS_CMD", scripts_dir + "/cleanup_clone_mounts.sh")
 validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
 post_clone_args := env_var_or_default("POST_CLONE_ARGS", "")
+preflight_cmd := env_var_or_default("PREFLIGHT_CMD", scripts_dir + "/preflight_clone.sh")
+verify_clone_cmd := env_var_or_default("VERIFY_CLONE_CMD", scripts_dir + "/verify_clone.sh")
+finalize_nvme_cmd := env_var_or_default("FINALIZE_NVME_CMD", scripts_dir + "/finalize_nvme.sh")
+rollback_helper_cmd := env_var_or_default("ROLLBACK_HELPER_CMD", scripts_dir + "/rollback_to_sd_helper.sh")
 migrate_artifacts := env_var_or_default("MIGRATE_ARTIFACTS", justfile_directory() + "/artifacts/migrate-to-nvme")
 migrate_skip_eeprom := env_var_or_default("SKIP_EEPROM", "0")
 migrate_no_reboot := env_var_or_default("NO_REBOOT", "0")
@@ -112,11 +116,15 @@ doctor:
 start-here:
     "{{ sugarkube_cli }}" docs start-here {{ start_here_args }}
 
+# Usage: just show-disks
+show-disks:
+    lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+
 # Revert cmdline.txt and fstab entries back to the SD card defaults
 
 # Usage: sudo just rollback-to-sd
 rollback-to-sd:
-    "{{ rollback_cmd }}" {{ rollback_args }}
+    "{{ rollback_helper_cmd }}"
 
 # Run the Raspberry Pi spot check and capture artifacts
 
@@ -139,13 +147,28 @@ eeprom-nvme-first:
     @echo "[deprecated] Applying BOOT_ORDER=0xF416 (NVMe → SD → USB → repeat)." >&2
     just --justfile "{{ justfile_directory() }}/justfile" boot-order nvme-first
 
+# Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just preflight
+preflight:
+    sudo --preserve-env=TARGET,WIPE,MOUNT_BASE \
+        "{{ preflight_cmd }}"
+
+# Usage: sudo TARGET=/dev/nvme0n1 MOUNT_BASE=/mnt/clone just verify-clone
+verify-clone:
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+        "{{ verify_clone_cmd }}"
+
 # Clone the active SD card to the preferred NVMe/USB target
 
 # Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
-    sudo --preserve-env=WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
+    if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
+    sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
         "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+
+# Usage: sudo just finalize-nvme
+finalize-nvme:
+    sudo --preserve-env=EDITOR \
+        "{{ finalize_nvme_cmd }}"
 
 # Clean up residual clone mounts and automounts.
 # Usage:
@@ -162,6 +185,13 @@ clean-mounts args='':
       env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
           MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
       "{{ clean_mounts_cmd }}" {{ args }}
+
+# Usage: sudo TARGET=/dev/nvme0n1 MOUNT_BASE=/mnt/clone just clean-mounts-hard
+clean-mounts-hard args='':
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+      "{{ clean_mounts_cmd }}" --force {{ args }}
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 

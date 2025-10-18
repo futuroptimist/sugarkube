@@ -8,12 +8,14 @@ FLASH_CMD ?= $(CURDIR)/scripts/flash_pi_media.sh
 FLASH_REPORT_CMD ?= $(CURDIR)/scripts/flash_pi_media_report.py
 DOWNLOAD_CMD ?= $(CURDIR)/scripts/download_pi_image.sh
 ROLLBACK_CMD ?= $(CURDIR)/scripts/rollback_to_sd.sh
+ROLLBACK_HELPER_CMD ?= $(CURDIR)/scripts/rollback_to_sd_helper.sh
 CLONE_CMD ?= $(CURDIR)/scripts/ssd_clone.py
 DOWNLOAD_ARGS ?=
 FLASH_ARGS ?= --assume-yes
 FLASH_REPORT_ARGS ?=
 ROLLBACK_ARGS ?=
 CLONE_ARGS ?=
+TARGET ?=
 VALIDATE_CMD ?= $(CURDIR)/scripts/ssd_post_clone_validate.py
 VALIDATE_ARGS ?=
 QR_CMD ?= $(CURDIR)/scripts/generate_qr_codes.py
@@ -84,14 +86,14 @@ start-here:
 	$(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
 
 rollback-to-sd:
-	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
+        $(ROLLBACK_HELPER_CMD)
 
 clone-ssd:
-	@if [ -z "$(CLONE_TARGET)" ]; then \
-		echo "Set CLONE_TARGET to the target device (e.g. /dev/sda)." >&2; \
-		exit 1; \
-	fi
-	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
+        @if [ -z "$(TARGET)" ]; then \
+                echo "Set TARGET to the target device (e.g. /dev/sda)." >&2; \
+                exit 1; \
+        fi
+        $(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
 
 validate-ssd-clone:
 	$(VALIDATE_CMD) $(VALIDATE_ARGS)

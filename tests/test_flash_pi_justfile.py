@@ -66,8 +66,8 @@ def test_justfile_has_no_tabs_or_trailing_whitespace() -> None:
             "clone-ssd",
             "clone-ssd:",
             [
-                '    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi',  # noqa: E501
-                '    sudo --preserve-env=WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \\',  # noqa: E501
+                '    if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi',  # noqa: E501
+                '    sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \\',  # noqa: E501
                 '        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}',  # noqa: E501
             ],
         ),
