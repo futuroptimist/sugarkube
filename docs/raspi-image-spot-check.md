@@ -92,6 +92,14 @@ Subsequent syncs only need the target argument:
 sudo TARGET=/dev/nvme0n1 just clone-ssd
 ```
 
+If a prior run left mounts behind, run:
+
+```bash
+just clean-mounts -- --verbose
+```
+
+Then retry the clone.
+
 Bookworm mounts the boot FAT volume at `/boot/firmware`; older images may use `/boot`. The helper
 handles both.
 
