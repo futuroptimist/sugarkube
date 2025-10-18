@@ -114,17 +114,18 @@ handles both.
 #### Optional: reset mounts before cloning
 
 > [!TIP]
-> The `clean-mounts` recipe unmounts any leftover clone targets and removes the automount
+> Use `clean-mounts` for a quick reset or `clean-mounts-hard` for an aggressive
+> cleanup that tears down recursive mounts, reports busy PIDs, and removes empty
 > directories (`/mnt/clone` by default).
 >
 > ```bash
-> sudo just clean-mounts -- --verbose
+> sudo just clean-mounts-hard
 > ```
 >
 > Override `TARGET` or `MOUNT_BASE` if your layout differs:
 >
 > ```bash
-> sudo TARGET=/dev/nvme1n1 MOUNT_BASE=/media/clone just clean-mounts
+> sudo TARGET=/dev/nvme1n1 MOUNT_BASE=/media/clone just clean-mounts-hard
 > ```
 >
 > Re-run `clone-ssd` once the cleanup completes.
