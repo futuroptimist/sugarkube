@@ -105,8 +105,34 @@ ROOT_LABEL=$(e2label "$ROOT_PART" 2>/dev/null || true)
 
 EXPECTED_BOOT_LABEL=${EXPECTED_BOOT_LABEL:-}
 STATE_FILE=${STATE_FILE:-/var/log/sugarkube/ssd-clone.state.json}
-if [ -z "$EXPECTED_BOOT_LABEL" ] && [ -f "$STATE_FILE" ] && command -v python3 >/dev/null 2>&1; then
-  if ! EXPECTED_BOOT_LABEL=$(
+
+trim_label() {
+  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+join_with() {
+  local sep=$1
+  shift || true
+  local IFS=$sep
+  printf '%s' "$*"
+}
+
+add_expected_label() {
+  local candidate=${1:-}
+  candidate=$(printf '%s' "$candidate" | trim_label)
+  if [ -z "$candidate" ]; then
+    return
+  fi
+  candidate=${candidate^^}
+  if [ -z "${EXPECTED_LABEL_SET[$candidate]:-}" ]; then
+    EXPECTED_LABEL_SET[$candidate]=1
+    EXPECTED_LABELS+=("$candidate")
+  fi
+}
+
+declare -a STATE_LABELS=()
+if [ -f "$STATE_FILE" ] && command -v python3 >/dev/null 2>&1; then
+  if ! mapfile -t STATE_LABELS < <(
     python3 - "$STATE_FILE" <<'PY' 2>/dev/null
 import json
 import sys
@@ -117,18 +143,35 @@ try:
 except Exception:
     raise SystemExit(1)
 
-label = state.get("target_boot_label") or state.get("source_boot_label") or ""
-print(label)
+labels = []
+for key in ("target_boot_label", "source_boot_label"):
+    value = state.get(key)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped:
+            labels.append(stripped)
+
+if labels:
+    sys.stdout.write("\n".join(labels))
 PY
   ); then
-    EXPECTED_BOOT_LABEL=
+    STATE_LABELS=()
   fi
 fi
-if [ -n "$EXPECTED_BOOT_LABEL" ]; then
-  EXPECTED_BOOT_LABEL=${EXPECTED_BOOT_LABEL^^}
-fi
+
+declare -a EXPECTED_LABELS=()
+declare -A EXPECTED_LABEL_SET=()
+
+add_expected_label "$EXPECTED_BOOT_LABEL"
+for label in "${STATE_LABELS[@]}"; do
+  add_expected_label "$label"
+done
+
 if [ -n "$BOOT_LABEL" ]; then
-  BOOT_LABEL=${BOOT_LABEL^^}
+  BOOT_LABEL=$(printf '%s' "$BOOT_LABEL" | trim_label)
+  if [ -n "$BOOT_LABEL" ]; then
+    BOOT_LABEL=${BOOT_LABEL^^}
+  fi
 fi
 
 RESULTS=()
@@ -168,11 +211,12 @@ else
   fi
 fi
 
-if [ -n "$EXPECTED_BOOT_LABEL" ]; then
-  if [ "$BOOT_LABEL" = "$EXPECTED_BOOT_LABEL" ]; then
-    RESULTS+=("[ok] Boot partition label matches expected ${EXPECTED_BOOT_LABEL}")
+if [ "${#EXPECTED_LABELS[@]}" -gt 0 ]; then
+  if [ -n "$BOOT_LABEL" ] && [ -n "${EXPECTED_LABEL_SET[$BOOT_LABEL]:-}" ]; then
+    RESULTS+=("[ok] Boot partition label matches allowed value ${BOOT_LABEL}")
   else
-    RESULTS+=("[fail] Boot partition label mismatch (expected ${EXPECTED_BOOT_LABEL}, saw ${BOOT_LABEL:-unset})")
+    joined=$(join_with ', ' "${EXPECTED_LABELS[@]}")
+    RESULTS+=("[fail] Boot partition label mismatch (allowed: ${joined}, saw ${BOOT_LABEL:-unset})")
     FAILURES=$((FAILURES + 1))
   fi
 else
@@ -212,8 +256,8 @@ printf '\nAll checks passed.\n'
 printf 'Expected output:\n'
 printf '  [ok] cmdline.txt root PARTUUID\n'
 printf '  [ok] fstab boot/root PARTUUID entries\n'
-if [ -n "$EXPECTED_BOOT_LABEL" ]; then
-  printf '  [ok] Labels: %s + rootfs\n' "$EXPECTED_BOOT_LABEL"
+if [ "${#EXPECTED_LABELS[@]}" -gt 0 ]; then
+  printf '  [ok] Labels: %s + rootfs\n' "$(join_with ' or ' "${EXPECTED_LABELS[@]}")"
 else
   printf '  [ok] Labels: <boot label> + rootfs\n'
 fi

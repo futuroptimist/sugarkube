@@ -253,20 +253,22 @@ perform_cleanup() {
   fi
 }
 
+# shellcheck disable=SC2317
 cleanup_handler() {
   local status=$?
   if [ "$CLEANUP_DONE" -eq 1 ]; then
-    exit $status
+    exit "$status"
   fi
   set +e
   perform_cleanup
   if [ "$CLEANUP_STATUS" -ne 0 ] && [ "$status" -eq 0 ]; then
     status=$CLEANUP_STATUS
   fi
-  exit $status
+  exit "$status"
 }
 
+# shellcheck disable=SC2317
 trap cleanup_handler EXIT
 
 perform_cleanup
-exit $CLEANUP_STATUS
+exit "$CLEANUP_STATUS"

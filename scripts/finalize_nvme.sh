@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-SCRIPT_NAME=$(basename "$0")
 RECOMMENDED_ORDER=0xF416
 FINALIZE_NVME_EDIT=${FINALIZE_NVME_EDIT:-1}
 EDITOR_CMD=${EDITOR:-nano}
