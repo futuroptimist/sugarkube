@@ -22,7 +22,6 @@ eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
 clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
-clone_wipe := env_var_or_default("WIPE", "0")
 validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
@@ -142,7 +141,8 @@ eeprom-nvme-first:
 
 # Usage: sudo just clone-ssd TARGET=/dev/nvme0n1 WIPE=1
 clone-ssd:
-    TARGET="{{ clone_target }}" WIPE="{{ clone_wipe }}" "{{ clone_cmd }}" {{ clone_args }}
+    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
+    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 

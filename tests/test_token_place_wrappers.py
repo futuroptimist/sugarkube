@@ -19,6 +19,9 @@ def test_justfile_token_place_samples_invokes_cli() -> None:
     assert (
         '"{{sugarkube_cli}}" token-place samples' in justfile_text
     ), "Just token-place-samples recipe should use the CLI subcommand"
+    assert (
+        '"{{ sugarkube_cli }}" token-place samples' not in justfile_text
+    ), "Whitespace around sugarkube_cli should be stripped to aid detection"
 
 
 def test_taskfile_token_place_samples_invokes_cli() -> None:
