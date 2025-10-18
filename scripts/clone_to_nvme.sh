@@ -129,10 +129,25 @@ if [[ ! -b "${TARGET}" ]]; then
   fi
 fi
 
+TARGET=$(readlink -f "${TARGET}" 2>/dev/null || echo "${TARGET}")
+
 TARGET_BASENAME=${TARGET#/dev/}
 if [[ "${TARGET_BASENAME}" == mmcblk0* ]]; then
   fatal "Refusing to operate on the boot SD card (${TARGET})."
 fi
+
+derive_partition_path() {
+  local disk_path="$1" part_index="$2"
+  if [[ -z "${disk_path}" || -z "${part_index}" ]]; then
+    echo ""
+    return
+  fi
+  if [[ "${disk_path}" =~ [0-9]$ ]]; then
+    printf '%sp%s\n' "${disk_path}" "${part_index}"
+  else
+    printf '%s%s\n' "${disk_path}" "${part_index}"
+  fi
+}
 
 current_root_src=$(findmnt -n -o SOURCE / 2>/dev/null || true)
 current_root_dev=$(resolve_mount_source "${current_root_src}")
@@ -174,16 +189,20 @@ CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
 BOOT_MOUNT="${CLONE_MOUNT}/boot/firmware"
 BOOT_MOUNTPOINT="/boot/firmware"
 BOOT_ALT_MOUNT="/boot"
-ROOT_PARTITION="${TARGET}p2"
-BOOT_PARTITION="${TARGET}p1"
+ROOT_PARTITION=$(derive_partition_path "${TARGET}" 2)
+BOOT_PARTITION=$(derive_partition_path "${TARGET}" 1)
+
+if [[ -z "${ROOT_PARTITION}" || -z "${BOOT_PARTITION}" ]]; then
+  fatal "Unable to derive partition paths for ${TARGET}"
+fi
 
 log "Pre-flight cleanup for ${TARGET}"
 run_sudo umount -R "${CLONE_MOUNT}" 2>/dev/null || true
-shopt -s nullglob
-for p in /dev/"${TARGET_BASENAME}"p*; do
-  run_sudo umount "$p" 2>/dev/null || true
-done
-shopt -u nullglob
+if mapfile -t TARGET_PARTITIONS < <(lsblk -nr -o PATH "${TARGET}" 2>/dev/null | tail -n +2); then
+  for p in "${TARGET_PARTITIONS[@]}"; do
+    run_sudo umount "${p}" 2>/dev/null || true
+  done
+fi
 run_sudo systemctl stop mnt-clone.mount mnt-clone.automount 2>/dev/null || true
 run_sudo mkdir -p "${BOOT_MOUNT}"
 
