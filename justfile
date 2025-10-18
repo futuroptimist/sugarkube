@@ -1,6 +1,8 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 scripts_dir := justfile_directory() + "/scripts"
+legacy_target := env_var_or_default("CLONE_TARGET", "")
+target_device := env_var_or_default("TARGET", legacy_target)
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
 image_name := env_var_or_default("IMAGE_NAME", "sugarkube.img")
 image_path := image_dir + "/" + image_name
@@ -21,8 +23,11 @@ boot_order_cmd := env_var_or_default("BOOT_ORDER_CMD", scripts_dir + "/boot_orde
 eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
-clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
 clone_wipe := env_var_or_default("WIPE", "0")
+preflight_cmd := env_var_or_default("PREFLIGHT_CMD", scripts_dir + "/preflight_clone.sh")
+verify_clone_cmd := env_var_or_default("VERIFY_CLONE_CMD", scripts_dir + "/verify_clone.sh")
+finalize_nvme_cmd := env_var_or_default("FINALIZE_NVME_CMD", scripts_dir + "/finalize_nvme_boot.sh")
+rollback_plan_cmd := env_var_or_default("ROLLBACK_PLAN_CMD", scripts_dir + "/rollback_to_sd_plan.sh")
 clean_mounts_cmd := env_var_or_default("CLEAN_MOUNTS_CMD", scripts_dir + "/cleanup_clone_mounts.sh")
 validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
@@ -74,6 +79,34 @@ _default:
 help:
     @just --list
 
+# Snapshot block devices and mountpoints.
+show-disks:
+    lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+
+# Validate the target disk before cloning.
+preflight:
+    if [ -z "{{ target_device }}" ]; then echo "Set TARGET to the block device (e.g. /dev/nvme0n1) before running preflight." >&2; exit 1; fi
+    WIPE_CONFIRM_VALUE="${WIPE:-0}"
+    sudo --preserve-env=TARGET,WIPE \
+      env TARGET="{{ target_device }}" WIPE="${WIPE:-0}" WIPE_CONFIRM="${WIPE_CONFIRM_VALUE}" \
+      "{{ preflight_cmd }}"
+
+# Mount and validate the cloned NVMe.
+verify-clone:
+    if [ -z "{{ target_device }}" ]; then echo "Set TARGET to the cloned block device (e.g. /dev/nvme0n1) before running verify-clone." >&2; exit 1; fi
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+      env TARGET="{{ target_device }}" MOUNT_BASE="{{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }}" \
+      "{{ verify_clone_cmd }}"
+
+# Inspect EEPROM boot order and offer an interactive edit.
+finalize-nvme:
+    sudo --preserve-env=EDITOR \
+      "{{ finalize_nvme_cmd }}"
+
+# Provide reversible steps to prefer the SD card on next boot.
+rollback-to-sd:
+    "{{ rollback_plan_cmd }}"
+
 # Download the latest release or a specific asset into IMAGE_DIR
 
 # Usage: just download-pi-image DOWNLOAD_ARGS="--release v1.2.3"
@@ -112,12 +145,6 @@ doctor:
 start-here:
     "{{ sugarkube_cli }}" docs start-here {{ start_here_args }}
 
-# Revert cmdline.txt and fstab entries back to the SD card defaults
-
-# Usage: sudo just rollback-to-sd
-rollback-to-sd:
-    "{{ rollback_cmd }}" {{ rollback_args }}
-
 # Run the Raspberry Pi spot check and capture artifacts
 
 # Usage: sudo just spot-check
@@ -143,9 +170,9 @@ eeprom-nvme-first:
 
 # Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 clone-ssd:
-    if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
+    if [ -z "{{ target_device }}" ]; then echo "Set TARGET to the target device (e.g. /dev/nvme0n1) before running clone-ssd." >&2; exit 1; fi
     sudo --preserve-env=WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
-        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+        "{{ clone_cmd }}" --target "{{ target_device }}" {{ clone_args }}
 
 # Clean up residual clone mounts and automounts.
 # Usage:
@@ -162,6 +189,12 @@ clean-mounts args='':
       env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
           MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
       "{{ clean_mounts_cmd }}" {{ args }}
+
+clean-mounts-hard:
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+      "{{ clean_mounts_cmd }}" --force --verbose
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 

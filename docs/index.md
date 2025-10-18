@@ -34,6 +34,7 @@ Review the safety notes before working with power components.
   notifications for first boot and SSD cloning
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
 - [archived/pi_image_improvement_checklist.md](archived/pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
+- [storage/sd-to-nvme.md](storage/sd-to-nvme.md) — safe SD → NVMe cloning and validation workflow
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo

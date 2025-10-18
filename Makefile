@@ -87,11 +87,11 @@ rollback-to-sd:
 	$(ROLLBACK_CMD) $(ROLLBACK_ARGS)
 
 clone-ssd:
-	@if [ -z "$(CLONE_TARGET)" ]; then \
-		echo "Set CLONE_TARGET to the target device (e.g. /dev/sda)." >&2; \
-		exit 1; \
-	fi
-	$(CLONE_CMD) --target "$(CLONE_TARGET)" $(CLONE_ARGS)
+        @if [ -z "$(TARGET)" ]; then \
+                echo "Set TARGET to the target device (e.g. /dev/nvme0n1)." >&2; \
+                exit 1; \
+        fi
+        $(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
 
 validate-ssd-clone:
 	$(VALIDATE_CMD) $(VALIDATE_ARGS)
