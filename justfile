@@ -22,6 +22,8 @@ eeprom_args := env_var_or_default("EEPROM_ARGS", "")
 clone_cmd := env_var_or_default("CLONE_CMD", scripts_dir + "/clone_to_nvme.sh")
 clone_args := env_var_or_default("CLONE_ARGS", "")
 clone_target := env_var_or_default("TARGET", env_var_or_default("CLONE_TARGET", ""))
+clone_wipe := env_var_or_default("WIPE", "0")
+clean_mounts_cmd := env_var_or_default("CLEAN_MOUNTS_CMD", scripts_dir + "/cleanup_clone_mounts.sh")
 validate_cmd := env_var_or_default("VALIDATE_CMD", scripts_dir + "/ssd_post_clone_validate.py")
 validate_args := env_var_or_default("VALIDATE_ARGS", "")
 post_clone_cmd := env_var_or_default("POST_CLONE_CMD", scripts_dir + "/post_clone_verify.sh")
@@ -143,6 +145,22 @@ eeprom-nvme-first:
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
     "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+
+# Clean up residual clone mounts and automounts.
+# Usage:
+#   just clean-mounts
+#   TARGET=/dev/nvme1n1 MOUNT_BASE=/mnt/clone just clean-mounts
+#   just clean-mounts -- --verbose --dry-run
+#
+# Notes:
+# - Pass additional flags after `--`.
+# - Defaults: TARGET=/dev/nvme0n1, MOUNT_BASE=/mnt/clone
+
+clean-mounts args='':
+    sudo --preserve-env=TARGET,MOUNT_BASE \
+      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+      "{{ clean_mounts_cmd }}" {{ args }}
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
