@@ -137,16 +137,41 @@ if [[ "${TARGET_BASENAME}" == mmcblk0* ]]; then
 fi
 
 derive_partition_path() {
-  local disk_path="$1" part_index="$2"
+  local disk_path="$1" part_index="$2" candidate="" resolved=""
   if [[ -z "${disk_path}" || -z "${part_index}" ]]; then
     echo ""
-    return
+    return 1
   fi
+
+  if command -v lsblk >/dev/null 2>&1; then
+    while read -r path type partn; do
+      if [[ "${type}" == "part" && "${partn}" == "${part_index}" ]]; then
+        candidate="${path}"
+        break
+      fi
+    done < <(lsblk -nr -o PATH,TYPE,PARTN "${disk_path}" 2>/dev/null || true)
+
+    if [[ -n "${candidate}" ]]; then
+      resolved=$(readlink -f "${candidate}" 2>/dev/null || echo "${candidate}")
+      echo "${resolved}"
+      return 0
+    fi
+  fi
+
   if [[ "${disk_path}" =~ [0-9]$ ]]; then
-    printf '%sp%s\n' "${disk_path}" "${part_index}"
+    candidate="${disk_path}p${part_index}"
   else
-    printf '%s%s\n' "${disk_path}" "${part_index}"
+    candidate="${disk_path}${part_index}"
   fi
+
+  if [[ -b "${candidate}" ]]; then
+    resolved=$(readlink -f "${candidate}" 2>/dev/null || echo "${candidate}")
+    echo "${resolved}"
+    return 0
+  fi
+
+  echo ""
+  return 1
 }
 
 current_root_src=$(findmnt -n -o SOURCE / 2>/dev/null || true)
@@ -193,6 +218,7 @@ CLONE_MOUNT="${CLONE_MOUNT:-/mnt/clone}"
 BOOT_MOUNT="${CLONE_MOUNT}/boot/firmware"
 BOOT_MOUNTPOINT="/boot/firmware"
 BOOT_ALT_MOUNT="/boot"
+
 discover_target_partitions() {
   local disk_path="$1" root_ref="$2" boot_ref="$3"
   local boot_part="" root_part=""
@@ -306,6 +332,15 @@ if ! run_rpi_clone "${TARGET}"; then
 fi
 
 post_partition_sync
+
+ROOT_PARTITION=$(derive_partition_path "${TARGET}" 2)
+BOOT_PARTITION=$(derive_partition_path "${TARGET}" 1)
+
+if [[ -z "${ROOT_PARTITION}" || -z "${BOOT_PARTITION}" ]]; then
+  fatal "Unable to derive partition paths for ${TARGET}"
+fi
+
+log "Detected partitions: root=${ROOT_PARTITION}, boot=${BOOT_PARTITION}"
 
 retry_mount() {
   local dev="$1" mp="$2" tries="${3:-3}" delay="${4:-2}"

@@ -86,6 +86,14 @@ target device explicitly during the first run so the script can initialise the N
 TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 ```
 
+If a prior run left mounts behind, run:
+
+```bash
+just clean-mounts -- --verbose
+```
+
+Then retry the clone.
+
 Subsequent syncs only need the target argument:
 
 ```bash
