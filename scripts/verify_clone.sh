@@ -236,9 +236,7 @@ else
 fi
 
 printf '\n=== NVMe Clone Validation Report ===\n'
-for entry in "${RESULTS[@]}"; do
-  printf '%s\n' "$entry"
-done
+printf '%s\n' "${RESULTS[@]}"
 printf '\nIdentifiers:\n'
 printf '  ROOT PARTUUID: %s\n' "$ROOT_PARTUUID"
 printf '  ROOT UUID    : %s\n' "${ROOT_UUID:-n/a}"
