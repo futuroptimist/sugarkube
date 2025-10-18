@@ -142,7 +142,7 @@ eeprom-nvme-first:
 # Usage: sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set CLONE_TARGET to the target device (e.g. /dev/sda) before running clone-ssd." >&2; exit 1; fi
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    sudo "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
