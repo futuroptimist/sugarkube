@@ -150,7 +150,7 @@ run_rpi_clone() {
 
   fallback_output=$(<"${clone_tmp}")
   printf '%s\n' "${fallback_output}"
-  if [[ "${fallback_output}" == *"Unattended -u option not allowed when initializing"* ]]; then
+  if grep -Eq 'Unattended[[:space:]]+-u option not allowed' <<<"${fallback_output}"; then
     echo "rpi-clone reported unattended initialization restriction; retrying with -U"
     if rpi-clone -f -U "${target}" >"${retry_tmp}" 2>&1; then
       cat "${retry_tmp}"
