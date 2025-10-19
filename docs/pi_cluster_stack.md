@@ -6,8 +6,8 @@ personas:
   - cad
 owners:
   - futuroptimist
-status: draft
-last_updated: 2025-02-13
+status: published
+last_updated: 2025-11-12
 ---
 
 # Stacked Pi Carrier v2
@@ -21,10 +21,68 @@ This document specifies a stackable Raspberry Pi carrier system that reuses the 
    oriented perpendicular to the carrier plates.
 3. Print-friendly geometry for **FDM/PLA**, with all parts printable on common beds.
 
-The design integrates with this repository’s OpenSCAD layout and documentation workflow. It is
-intended to be implemented as new `.scad` modules under `cad/pi_cluster/` and companion
-documentation under `docs/`. The base triple-Pi carrier already exists as
+The design integrates with this repository’s OpenSCAD layout and documentation workflow. It now
+ships with fabrication guidance so builders can move from CAD to a working cluster without
+referencing side-channel notes. The base triple-Pi carrier already exists as
 `cad/pi_cluster/pi_carrier.scad`; we import and reuse it rather than reimplementing its details.
+
+---
+
+## Bill of materials
+
+| Item | Qty | Notes |
+| --- | ---: | --- |
+| `pi_carrier.scad` plates | 3 | Print one plate per level; choose the `standoff_mode` (`heatset`, `through`, or `nut`) that matches your fasteners. |
+| Column set (`pi_carrier_stack` columns) | 4 | Print four identical columns; each column spans all levels and accepts radial heat-set inserts or brass standoffs. |
+| Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
+| Raspberry Pi 5 boards | 9 | Three per level. |
+| M2.5 × 22 mm screws | 12 | Primary fasteners that tie the carriers to the columns. |
+| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 12 | Seat into the column pockets when using the printed-column mode. |
+| Brass spacers, M2.5 female–female, 11 mm | 12 | Maintains separation between each Pi and the carrier plate. |
+| PC fan (80/92/120 mm) | 1 | Match the fan size to the selected `fan_size` parameter. |
+| M3 × 16 mm screws | 4 | Secure the fan to the wall bosses. |
+| M3 heat-set inserts (5 mm OD × 4 mm) | 4 | Install in the fan wall bosses. |
+| Cable ties or hook-and-loop straps | 6 | Optional strain relief for USB and Ethernet harnesses. |
+
+### Print preparation
+
+- Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
+  [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
+- Print columns upright with three perimeter walls and 40 % gyroid infill. Pause after the first
+  2 mm to insert heat-set brass hardware if you prefer captive nuts.
+- Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
+  supports or paint-on supports for the boss overhangs if your slicer requires it.
+- `openscad` examples:
+
+  ```bash
+  # Generate STL assets
+  openscad -o stl/pi_carrier_stack_columns.stl cad/pi_cluster/pi_carrier_stack.scad \
+    -D export_part="columns"
+  openscad -o stl/pi_carrier_stack_fan_wall.stl cad/pi_cluster/pi_carrier_stack.scad \
+    -D export_part="fan_wall"
+  ```
+
+---
+
+## Assembly sequence
+
+1. **Prep the carriers.** Follow the insert installation guidance in
+   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to seat M2.5 brass inserts or chase printed
+   threads. Install the brass spacers so they are ready for board mounting.
+2. **Install column hardware.** Heat the M2.5 inserts and press them into the column pockets at each
+   level. For brass-chain builds, thread female–female standoffs together outside the column and
+   slide the assembly into place once cool.
+3. **Stack the carriers.** Start with the lowest carrier, align a column at each corner, and fasten
+   it with an M2.5 screw. Repeat for the remaining levels, ensuring the cable cut-outs line up.
+4. **Mount the fan wall.** Align the wall bosses with the column tabs and secure them using the same
+   M2.5 screws. Attach the PC fan using the installed M3 inserts and screws, pointing airflow toward
+   the Pis.
+5. **Cable and verify.** Route power and Ethernet leads down the rear spine, using cable ties for
+   strain relief. Power on each Pi sequentially and confirm airflow keeps PoE HAT temperatures below
+   60 °C at idle.
+
+Once assembled, the stack occupies a 220 mm × 220 mm footprint with a fan wall offset 15 mm from the
+columns. Leave at least 50 mm clearance behind the fan for optimal exhaust flow.
 
 ---
 
@@ -47,7 +105,7 @@ documentation under `docs/`. The base triple-Pi carrier already exists as
 
 ---
 
-## 2. Files to add
+## 2. Repository layout
 
 ```
 cad/pi_cluster/
@@ -56,11 +114,11 @@ cad/pi_cluster/
   pi_carrier_column.scad   # vertical columns (printed or brass-chain)
   pi_carrier_stack.scad    # top-level assembly (stack + fan wall)
 docs/
-  pi_cluster_stack.md      # this design + future assembly/BOM guide
+  pi_cluster_stack.md      # design + fabrication guide (this document)
 ```
 
-The CI already renders all `.scad` files into `stl/` via `scripts/openscad_render.sh`. Existing
-regression tests under `tests/cad_regress_test.py` automatically pick up new modules.
+The CI renders all `.scad` files into `stl/` via `scripts/openscad_render.sh`. Existing regression
+tests under `tests/cad_regress_test.py` automatically exercise the new modules.
 
 ---
 
@@ -250,8 +308,9 @@ pi_carrier_stack();
 - Default printed-hole clearances: Ø3.2 mm for M3, Ø2.8 mm for M2.5; heat-set pockets undersized by
   0.2 mm relative to insert OD.
 - Add minimal `echo()` summaries to assist CI diagnostics.
-- Create a companion `docs/pi_cluster_stack.md` assembly/BOM guide (future work) mirroring the tone of
-  `docs/pi_cluster_carrier.md` once the design is implemented.
+- Keep the Bill of materials and Assembly sequence sections current as tolerances or hardware
+  recommendations change; mirror tone with [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md).
+  Regression coverage: `tests/test_pi_cluster_stack_doc.py`.
 
 ---
 
