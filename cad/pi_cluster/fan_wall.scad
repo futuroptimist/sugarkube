@@ -26,7 +26,10 @@ module _fan_mount(x, z) {
     if (include_bosses) {
         translate([x, fan_plate_t / 2, z])
             rotate([90, 0, 0])
-                cylinder(h = boss_height, r = boss_radius, $fn = 50);
+                difference() {
+                    cylinder(h = boss_height, r = boss_radius, $fn = 50);
+                    cylinder(h = boss_height + 0.4, r = fan_insert_od / 2, $fn = 40);
+                }
     }
 }
 
