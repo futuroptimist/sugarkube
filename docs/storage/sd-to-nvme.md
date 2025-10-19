@@ -30,6 +30,10 @@ Expected output:
 - `[ok]` Optional wipe completed when `WIPE=1`.
 - `[ok]` Target capacity exceeds the used space on `/`.
 
+> Regression coverage: `tests/test_preflight_clone.py::test_preflight_unmounts_mounted_partitions`
+> confirms the helper automatically unmounts lingering partitions before
+> continuing.
+
 ### 2. Clone the active SD card
 
 Run the unattended clone. Keep `WIPE=1` set the first time you prepare a fresh
