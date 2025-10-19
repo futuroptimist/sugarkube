@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import stat
 import subprocess
 from pathlib import Path
 
@@ -25,7 +24,31 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
     umount_log = tmp_path / "umount.log"
 
     target_device = tmp_path / "fake-target"
-    os.mknod(target_device, 0o600 | stat.S_IFBLK, os.makedev(7, 0))
+    target_device.touch()
+
+    bash_env = tmp_path / "bypass-block-check.sh"
+    bash_env.write_text(
+        "function [ {\n"
+        "  local args=(\"$@\")\n"
+        "  local last_index=$((${#args[@]} - 1))\n"
+        "  if [[ ${args[$last_index]} == ']' ]]; then\n"
+        "    unset 'args[$last_index]'\n"
+        "  fi\n"
+        "  if [[ ${args[0]} == '!' ]]; then\n"
+        "    if [[ ${args[1]} == '-b' && ${args[2]} == \"$TARGET\" ]]; then\n"
+        "      return 1\n"
+        "    fi\n"
+        "    builtin test \"${args[@]}\"\n"
+        "    return $?\n"
+        "  fi\n"
+        "  if [[ ${args[0]} == '-b' && ${args[1]} == \"$TARGET\" ]]; then\n"
+        "    return 0\n"
+        "  fi\n"
+        "  builtin test \"${args[@]}\"\n"
+        "  return $?\n"
+        "}\n",
+        encoding="utf-8",
+    )
 
     # Stub `findmnt` to report a safe root device path.
     _write_executable(
@@ -153,6 +176,7 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
     env["STUB_MOUNT_STATE"] = str(mount_state)
     env["STUB_UMOUNT_LOG"] = str(umount_log)
     env["STUB_TARGET"] = str(target_device)
+    env["BASH_ENV"] = str(bash_env)
 
     script_path = Path(__file__).resolve().parents[1] / "scripts" / "preflight_clone.sh"
     result = subprocess.run(
