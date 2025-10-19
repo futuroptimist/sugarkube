@@ -3,9 +3,11 @@
 // "printed" → simple through-hole
 // "nut"     → through-hole with hex recess
 standoff_mode = "heatset";
-variation = standoff_mode == "printed" ? "through"
-          : standoff_mode == "heatset" ? "blind"
-          : standoff_mode;
+
+function _standoff_variation(mode) =
+    mode == "printed" ? "through"
+  : mode == "heatset" ? "blind"
+  : mode;
 
 pi_positions = [[0,0], [1,0], [0,1]]; // layout as [x,y] offsets
 board_len = 85;
@@ -72,8 +74,9 @@ function rot2d(v, ang) = [
 ];
 
 // ---------- Standoff with variant features ----------
-module standoff(pos=[0,0])
+module standoff(pos=[0,0], standoff_mode = standoff_mode)
 {
+    variation = _standoff_variation(standoff_mode);
     translate([pos[0], pos[1], plate_thickness])
     difference()
     {
@@ -101,8 +104,9 @@ module standoff(pos=[0,0])
 }
 
 // ---------- Base plate ----------
-module base_plate()
+module base_plate(standoff_mode = standoff_mode)
 {
+    variation = _standoff_variation(standoff_mode);
     difference()
     {
         linear_extrude(height=plate_thickness)
@@ -133,9 +137,9 @@ module base_plate()
 }
 
 // ---------- Assembly ----------
-module pi_carrier()
+module pi_carrier(standoff_mode = standoff_mode)
 {
-    base_plate();
+    base_plate(standoff_mode = standoff_mode);
 
     for (pos = pi_positions) {
         pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
@@ -143,7 +147,7 @@ module pi_carrier()
         for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
         for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
             vec = rot2d([dx,dy], board_angle);
-            standoff([pcb_cx+vec[0], pcb_cy+vec[1]]);
+            standoff([pcb_cx+vec[0], pcb_cy+vec[1]], standoff_mode = standoff_mode);
         }
     }
 
@@ -152,7 +156,7 @@ module pi_carrier()
         lcd_cy = edge_margin + port_clearance + rotY/2 + board_spacing_y;
         for (dx = [-lcd_hole_spacing_x/2, lcd_hole_spacing_x/2])
         for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
-            standoff([lcd_cx+dx, lcd_cy+dy]);
+            standoff([lcd_cx+dx, lcd_cy+dy], standoff_mode = standoff_mode);
     }
 }
 

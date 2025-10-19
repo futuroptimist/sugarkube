@@ -34,8 +34,9 @@ echo(str(
 module _carrier(level) {
     translate([0, 0, level * z_gap_clear])
         translate([-plate_len / 2, -plate_wid / 2, -plate_thickness / 2])
-            let(standoff_mode = _column_mode_to_standoff(column_mode))
-                pi_carrier();
+            pi_carrier(
+                standoff_mode = _column_mode_to_standoff(column_mode)
+            );
 }
 
 module _columns() {
