@@ -56,9 +56,10 @@ START_HERE_ARGS ?=
 SUGARKUBE_CLI ?= $(CURDIR)/scripts/sugarkube
 DOCS_VERIFY_ARGS ?=
 DOCS_SIMPLIFY_ARGS ?=
+NVME_HEALTH_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
-        clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
+        clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health nvme-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle mac-setup cluster-up cluster-bootstrap codespaces-bootstrap \
         show-disks preflight verify-clone finalize-nvme clean-mounts-hard
@@ -140,10 +141,13 @@ qr-codes:
 	$(QR_CMD) $(QR_ARGS)
 
 monitor-ssd-health:
-	$(HEALTH_CMD) $(HEALTH_ARGS)
+        $(HEALTH_CMD) $(HEALTH_ARGS)
+
+nvme-health:
+        $(SUGARKUBE_CLI) nvme health $(NVME_HEALTH_ARGS)
 
 smoke-test-pi:
-	$(SMOKE_CMD) $(SMOKE_ARGS)
+        $(SMOKE_CMD) $(SMOKE_ARGS)
 
 qemu-smoke:
 	@if [ -z "$(QEMU_SMOKE_IMAGE)" ]; then \

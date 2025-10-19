@@ -39,84 +39,39 @@ print(f"{tbw:.2f} TB written")
 ```
 
 ## Automation
-Add the following script as `nvme-health-check.sh` to gather SMART metrics, convert DUW to TB,
-compare against thresholds, and emit syslog alerts. The script exits non-zero when thresholds
-are exceeded so cron or systemd can notify operators.
+Sugarkube now ships `scripts/nvme_health_check.sh`, a Bash helper that gathers SMART metrics,
+converts DUW to terabytes, and emits syslog-friendly messages. Configure thresholds via these
+environment variables (or matching CLI flags):
+
+- `NVME_DEVICE` (default: `/dev/nvme0n1`)
+- `NVME_PCT_THRESH` (default: `80`)
+- `NVME_TBW_LIMIT_TB` (default: `300`)
+- `NVME_MEDIA_ERR_THRESH` (default: `0`)
+- `NVME_UNSAFE_SHUT_THRESH` (default: `5`)
+- `NVME_LOGGER_TAG` (default: `nvme-health`)
+
+Run the helper directly or through the unified CLI wrappers (for example,
+`sugarkube nvme health` via the bundled Python entry point):
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-DEVICE="${NVME_DEVICE:-/dev/nvme0n1}"
-PCT_THRESH="${NVME_PCT_THRESH:-80}"
-TBW_LIMIT="${NVME_TBW_LIMIT_TB:-300}"
-MEDIA_ERR_THRESH="${NVME_MEDIA_ERR_THRESH:-0}"
-UNSAFE_SHUT_THRESH="${NVME_UNSAFE_SHUT_THRESH:-5}"
-LOGGER_TAG="nvme-health"
-
-log() {
-  logger -t "$LOGGER_TAG" "$1"
-}
-
-smart_json=$(nvme smart-log "$DEVICE" | tr -d '\r')
-get_field() {
-  echo "$smart_json" | awk -F ':' -v key="$1" '$1 ~ key { gsub(/ /, "", $2); print $2 }'
-}
-
-critical_warning=$(get_field "critical_warning")
-percentage_used=$(get_field "percentage_used")
-data_units_written=$(get_field "data_units_written")
-media_errors=$(get_field "media_errors")
-unsafe_shutdowns=$(get_field "unsafe_shutdowns")
-
-# Remove trailing percent sign before numeric comparison.
-percentage_used="${percentage_used%\%}"
-
-# Convert DUW (512,000-byte units) to terabytes.
-tbw=$(awk -v duw="$data_units_written" 'BEGIN { printf "%.2f", duw * 512000 / 1e12 }')
-
-status=0
-message="NVMe health check: pct=${percentage_used}%"
-message+="; tbw=${tbw}TB, warnings=${critical_warning}"
-message+="; media=${media_errors}, unsafe=${unsafe_shutdowns}"
-
-if [[ "$critical_warning" != "0x00" ]]; then
-  log "CRITICAL warning flag set: $critical_warning"
-  status=1
-fi
-
-if (( percentage_used >= PCT_THRESH )); then
-  log "Wear level ${percentage_used}% exceeds threshold ${PCT_THRESH}%"
-  status=1
-fi
-
-if (( $(echo "$tbw >= $TBW_LIMIT" | bc -l) )); then
-  log "Total bytes written ${tbw}TB exceeds ${TBW_LIMIT}TB"
-  status=1
-fi
-
-if (( media_errors > MEDIA_ERR_THRESH )); then
-  log "Media errors ${media_errors} exceed ${MEDIA_ERR_THRESH}"
-  status=1
-fi
-
-if (( unsafe_shutdowns > UNSAFE_SHUT_THRESH )); then
-  log "Unsafe shutdowns ${unsafe_shutdowns} exceed ${UNSAFE_SHUT_THRESH}"
-  status=1
-fi
-
-log "$message"
-exit $status
+sudo ./scripts/nvme_health_check.sh
+sudo sugarkube nvme health
+sudo just nvme-health NVME_HEALTH_ARGS="--device /dev/nvme1n1"
+task nvme:health NVME_HEALTH_ARGS="--dry-run"
 ```
+
+Regression coverage: `tests/test_sugarkube_toolkit_cli.py::test_nvme_health_invokes_helper`
+and `tests/test_nvme_health_workflow.py` keep the CLI, Make, Just, and Task wrappers aligned
+with this guide.
 
 ## Deployment
 1. Install dependencies:
    ```bash
    sudo apt update && sudo apt install -y nvme-cli smartmontools bc
    ```
-2. Save the script, then make it executable:
+2. Install the shipped helper so cron/systemd can call it:
    ```bash
-   sudo install -m 0755 nvme-health-check.sh /usr/local/sbin/
+   sudo install -m 0755 scripts/nvme_health_check.sh /usr/local/sbin/nvme-health-check.sh
    ```
 3. Add a root cron job to run every six hours:
    ```bash
@@ -161,5 +116,5 @@ exit $status
 ## Future Enhancements
 - Export SMART metrics as JSON (for example, via `nvme smart-log --json`) so a k3s scraper can
   publish them as Prometheus metrics.
-- Integrate the workflow with `just nvme-health` for ad-hoc checks and `just nvme-alerts` for
-  alerting pipelines in the sugarkube toolkit.
+- Feed the helper output into the existing telemetry pipelines (for example, forward syslog
+  entries to a Sugarkube alerting workflow) so persistent degradations raise proactive tickets.
