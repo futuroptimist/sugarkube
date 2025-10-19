@@ -59,7 +59,15 @@ module pi_carrier_stack_assembly() {
     _fan_wall();
 }
 
-echo("pi_carrier_stack", levels = levels, fan_size = fan_size, column_mode = column_mode);
+echo(
+    "pi_carrier_stack",
+    levels = levels,
+    fan_size = fan_size,
+    column_mode = column_mode,
+    z_gap_clear = z_gap_clear,
+    column_spacing = column_spacing,
+    fan_offset_from_stack = fan_offset_from_stack
+);
 
 if (export_part == "columns") {
     pi_carrier_column(
