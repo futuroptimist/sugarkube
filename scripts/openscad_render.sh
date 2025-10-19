@@ -60,4 +60,13 @@ if [ -n "$standoff_mode" ]; then
   cmd+=(-D "standoff_mode=\"${standoff_mode}\"")
 fi
 cmd+=(-- "$FILE")
-"${cmd[@]}"
+if output=$("${cmd[@]}" 2>&1); then
+  printf '%s\n' "$output"
+else
+  printf '%s\n' "$output" >&2
+  if printf '%s\n' "$output" | grep -q "Current top level object is empty."; then
+    echo "Skipping STL export for empty model: $FILE" >&2
+    exit 0
+  fi
+  exit 1
+fi
