@@ -7,7 +7,7 @@ TARGET=${TARGET:-}
 WIPE=${WIPE:-0}
 
 cleanup() {
-  # Placeholder for future resource cleanup; ensures traps never swallow SIGINT.
+  # Keep EXIT traps from swallowing SIGINT if extended in the future.
   :
 }
 trap cleanup EXIT
@@ -108,11 +108,32 @@ fi
 
 mapfile -t mounted_parts < <(lsblk -nr -o NAME,MOUNTPOINT "$target_real" | awk '$2 != "" {print "/dev/" $1 " -> " $2}')
 if [ "${#mounted_parts[@]}" -gt 0 ]; then
-  printf '%s\n' "${SCRIPT_NAME}: Refusing to continue; target partitions are mounted:" >&2
-  printf '  %s\n' "${mounted_parts[@]}" >&2
-  printf 'Suggest running: just clean-mounts-hard TARGET=%s\n' "$TARGET" >&2
-  exit 1
+  log "Unmounting ${#mounted_parts[@]} mounted partition(s) on $TARGET"
+  for entry in "${mounted_parts[@]}"; do
+    part_device=${entry%% -> *}
+    mount_point=${entry#* -> }
+    if [ -z "$mount_point" ]; then
+      continue
+    fi
+    if umount "$mount_point"; then
+      log "[ok] Unmounted $part_device from $mount_point"
+    else
+      printf '%s: Failed to unmount %s (%s)\n' "$SCRIPT_NAME" "$part_device" "$mount_point" >&2
+      printf 'Suggest running: just clean-mounts-hard TARGET=%s\n' "$TARGET" >&2
+      exit 1
+    fi
+  done
+
+  mapfile -t mounted_parts < <(lsblk -nr -o NAME,MOUNTPOINT "$target_real" | awk '$2 != "" {print "/dev/" $1 " -> " $2}')
+  if [ "${#mounted_parts[@]}" -gt 0 ]; then
+    printf '%s\n' "${SCRIPT_NAME}: Refusing to continue; target partitions are mounted:" >&2
+    printf '  %s\n' "${mounted_parts[@]}" >&2
+    printf 'Suggest running: just clean-mounts-hard TARGET=%s\n' "$TARGET" >&2
+    exit 1
+  fi
 fi
+
+printf '[ok] Target partitions unmounted\n'
 
 check_signatures() {
   local device=$1
