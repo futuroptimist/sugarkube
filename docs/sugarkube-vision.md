@@ -230,4 +230,3 @@ remote.example.tld      -> cloudflared (Region C)
 - KubeFed — <https://github.com/kubernetes-sigs/kubefed>
 - WireGuard — <https://www.wireguard.com>
 - ActivityPub — <https://www.w3.org/TR/activitypub/>
-

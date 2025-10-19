@@ -63,6 +63,8 @@ max_y = max([for(p=pi_positions) p[1]]);
 plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*edge_margin;
 plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*edge_margin + 2*port_clearance;
 
+function pi_carrier_plate_size() = [plate_len, plate_wid, plate_thickness];
+
 // ---------- Helper functions ----------
 function rot2d(v, ang) = [
     v[0]*cos(ang) - v[1]*sin(ang),
