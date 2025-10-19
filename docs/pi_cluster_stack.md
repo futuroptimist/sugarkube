@@ -211,20 +211,22 @@ Four columns align with the Pi mounting hole rectangle and carry loads through t
 Top-level assembly that imports existing modules and composes the stack:
 
 ```scad
-use <pi_carrier.scad>
-use <fan_patterns.scad>
-include <pi_carrier_column.scad>
-include <fan_wall.scad>
+_pi_carrier_auto_render = false;
+include <pi_carrier.scad>
+use <pi_carrier_column.scad>
+use <fan_wall.scad>
 
-module pi_carrier_level(z = 0) {
-  translate([0, 0, z]) pi_carrier();
+module pi_carrier_level(z = 0, standoff_mode = "heatset") {
+  translate([-plate_len / 2, -plate_wid / 2, z])
+    let(standoff_mode = standoff_mode) pi_carrier();
 }
 
-module pi_carrier_stack(levels = 3, z_gap_clear = 32, fan_size = 120) {
+module pi_carrier_stack(levels = 3, z_gap_clear = 32, fan_size = 120, standoff_mode = "heatset") {
   columns(levels, z_gap_clear);
   for (i = [0 : levels - 1])
-    pi_carrier_level(i * z_gap_clear);
-  fan_wall_attach(fan_size, levels, z_gap_clear);
+    pi_carrier_level(i * z_gap_clear, standoff_mode);
+  fan_wall(fan_size = fan_size, levels = levels, z_gap_clear = z_gap_clear);
+  echo("pi_carrier_stack", levels = levels, fan_size = fan_size, column_mode = column_mode);
 }
 
 pi_carrier_stack();
@@ -235,6 +237,8 @@ pi_carrier_stack();
 - **Fan wall:** Attach using `fan_offset_from_stack` to set the lateral gap. Provide parameters for
   shroud depth and mounting orientation.
 - **Echo diagnostics:** Emit key parameters (`levels`, `fan_size`, `column_mode`) to simplify CI logs.
+  Regression coverage: `tests/test_pi_carrier_stack_scad.py::test_pi_carrier_stack_imports_pi_carrier_module`
+  ensures the assembly reuses `pi_carrier()` instead of placeholder cubes.
 
 ---
 
@@ -373,7 +377,8 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
 ## 12. Deliverables checklist (for future implementation)
 
 - [ ] Add `fan_patterns.scad`, `fan_wall.scad`, `pi_carrier_column.scad`, `pi_carrier_stack.scad`.
-- [ ] Ensure `pi_carrier_stack.scad` imports `pi_carrier.scad` instead of duplicating parameters.
+- [x] Ensure `pi_carrier_stack.scad` imports `pi_carrier.scad` instead of duplicating parameters.
+      (Regression coverage: `tests/test_pi_carrier_stack_scad.py`.)
 - [ ] Render six STL variants (columns: `printed`, `brass_chain`; fan sizes: 80/92/120) via CI.
 - [ ] Create user-facing assembly/BOM documentation once the physical prototype is validated.
 - [ ] Verify column alignment with the 58 mm × 49 mm hole rectangle and fan wall spacing within

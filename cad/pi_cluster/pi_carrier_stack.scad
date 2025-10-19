@@ -1,3 +1,5 @@
+_pi_carrier_auto_render = false;
+include <pi_carrier.scad>;
 use <pi_carrier_column.scad>;
 use <fan_wall.scad>;
 
@@ -15,14 +17,11 @@ fan_insert_L = is_undef(fan_insert_L) ? 4.0 : fan_insert_L;
 fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_stack;
 column_spacing = is_undef(column_spacing) ? [58, 49] : column_spacing;
 export_part = is_undef(export_part) ? "assembly" : export_part;
-
-plate_len = column_spacing[0] + 80;
-plate_wid = column_spacing[1] + 90;
-plate_thickness = 4;
+stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 
 module _carrier(level) {
-    translate([0, 0, level * z_gap_clear])
-        cube([plate_len, plate_wid, plate_thickness], center = true);
+    translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
+        let(standoff_mode = stack_standoff_mode) pi_carrier();
 }
 
 module _columns() {
@@ -59,6 +58,8 @@ module pi_carrier_stack_assembly() {
         _carrier(level);
     _fan_wall();
 }
+
+echo("pi_carrier_stack", levels = levels, fan_size = fan_size, column_mode = column_mode);
 
 if (export_part == "columns") {
     pi_carrier_column(
