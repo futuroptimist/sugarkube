@@ -56,9 +56,10 @@ START_HERE_ARGS ?=
 SUGARKUBE_CLI ?= $(CURDIR)/scripts/sugarkube
 DOCS_VERIFY_ARGS ?=
 DOCS_SIMPLIFY_ARGS ?=
+NVME_HEALTH_ARGS ?=
 
 .PHONY: install-pi-image download-pi-image flash-pi flash-pi-report doctor start-here rollback-to-sd \
-        clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health smoke-test-pi qemu-smoke field-guide \
+        clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health nvme-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle mac-setup cluster-up cluster-bootstrap codespaces-bootstrap \
         show-disks preflight verify-clone finalize-nvme clean-mounts-hard
@@ -90,37 +91,37 @@ start-here:
 	$(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
 
 rollback-to-sd:
-        $(ROLLBACK_HELPER_CMD)
+	$(ROLLBACK_HELPER_CMD)
 
 clone-ssd:
-        @if [ -z "$(TARGET)" ]; then \
-                echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
-                exit 1; \
-        fi
-        $(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
+	@if [ -z "$(TARGET)" ]; then \
+		echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
+		exit 1; \
+	fi
+	$(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
 
 show-disks:
-        lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+	lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
 
 preflight:
-        @if [ -z "$(TARGET)" ]; then \
-                echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
-                exit 1; \
-        fi
-        sudo --preserve-env=TARGET,WIPE $(PREFLIGHT_CMD)
+	@if [ -z "$(TARGET)" ]; then \
+		echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
+		exit 1; \
+	fi
+	sudo --preserve-env=TARGET,WIPE $(PREFLIGHT_CMD)
 
 verify-clone:
-        @if [ -z "$(TARGET)" ]; then \
-                echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
-                exit 1; \
-        fi
-        sudo --preserve-env=TARGET,MOUNT_BASE env MOUNT_BASE=$(MOUNT_BASE) $(VERIFY_CLONE_CMD)
+	@if [ -z "$(TARGET)" ]; then \
+		echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
+		exit 1; \
+	fi
+	sudo --preserve-env=TARGET,MOUNT_BASE env MOUNT_BASE=$(MOUNT_BASE) $(VERIFY_CLONE_CMD)
 
 finalize-nvme:
-        sudo --preserve-env=EDITOR,FINALIZE_NVME_EDIT $(FINALIZE_NVME_CMD)
+	sudo --preserve-env=EDITOR,FINALIZE_NVME_EDIT $(FINALIZE_NVME_CMD)
 
 clean-mounts-hard:
-        sudo --preserve-env=TARGET,MOUNT_BASE env TARGET=$(if $(TARGET),$(TARGET),/dev/nvme0n1) MOUNT_BASE=$(MOUNT_BASE) $(CLEAN_MOUNTS_CMD) --force
+	sudo --preserve-env=TARGET,MOUNT_BASE env TARGET=$(if $(TARGET),$(TARGET),/dev/nvme0n1) MOUNT_BASE=$(MOUNT_BASE) $(CLEAN_MOUNTS_CMD) --force
 
 validate-ssd-clone:
 	$(VALIDATE_CMD) $(VALIDATE_ARGS)
@@ -141,6 +142,9 @@ qr-codes:
 
 monitor-ssd-health:
 	$(HEALTH_CMD) $(HEALTH_ARGS)
+
+nvme-health:
+	$(SUGARKUBE_CLI) nvme health $(NVME_HEALTH_ARGS)
 
 smoke-test-pi:
 	$(SMOKE_CMD) $(SMOKE_ARGS)

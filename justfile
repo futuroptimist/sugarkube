@@ -69,6 +69,7 @@ start_here_args := env_var_or_default("START_HERE_ARGS", "")
 sugarkube_cli := env_var_or_default("SUGARKUBE_CLI", justfile_directory() + "/scripts/sugarkube")
 docs_verify_args := env_var_or_default("DOCS_VERIFY_ARGS", "")
 simplify_docs_args := env_var_or_default("SIMPLIFY_DOCS_ARGS", "")
+nvme_health_args := env_var_or_default("NVME_HEALTH_ARGS", "")
 
 _default:
     @just --list
@@ -211,6 +212,13 @@ validate-ssd-clone:
 # Usage: sudo just monitor-ssd-health HEALTH_ARGS="--tag weekly"
 monitor-ssd-health:
     "{{ health_cmd }}" {{ health_args }}
+
+# Invoke the NVMe health helper shipped with the repository.
+#
+
+# Usage: sudo NVME_HEALTH_ARGS="--device /dev/nvme1n1" just nvme-health
+nvme-health:
+    "{{ sugarkube_cli }}" nvme health {{ nvme_health_args }}
 
 # Run pi_node_verifier remotely over SSH
 

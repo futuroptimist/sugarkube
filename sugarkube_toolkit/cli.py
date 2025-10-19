@@ -21,6 +21,7 @@ PI_SMOKE_TEST_SCRIPT = SCRIPTS_DIR / "pi_smoke_test.py"
 PI_JOIN_REHEARSAL_SCRIPT = SCRIPTS_DIR / "pi_multi_node_join_rehearsal.py"
 CLUSTER_BOOTSTRAP_SCRIPT = SCRIPTS_DIR / "pi_cluster_bootstrap.py"
 COLLECT_SUPPORT_BUNDLE_SCRIPT = SCRIPTS_DIR / "collect_support_bundle.py"
+NVME_HEALTH_CHECK_SCRIPT = SCRIPTS_DIR / "nvme_health_check.sh"
 START_HERE_DOC = REPO_ROOT / "docs" / "start-here.md"
 TOKEN_PLACE_SAMPLES_SCRIPT = SCRIPTS_DIR / "token_place_replay_samples.py"
 WORKFLOW_NOTIFY_SCRIPT = SCRIPTS_DIR / "workflow_artifact_notifier.py"
@@ -176,6 +177,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the support bundle helper invocation without executing it.",
     )
     support_bundle_parser.set_defaults(handler=_handle_pi_support_bundle)
+
+    nvme_parser = subparsers.add_parser(
+        "nvme",
+        help="NVMe health monitoring workflows.",
+    )
+    nvme_subparsers = nvme_parser.add_subparsers(dest="command")
+
+    nvme_health_parser = nvme_subparsers.add_parser(
+        "health",
+        help="Collect NVMe SMART metrics via scripts/nvme_health_check.sh.",
+    )
+    nvme_health_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the helper invocation without executing it.",
+    )
+    nvme_health_parser.set_defaults(handler=_handle_nvme_health)
 
     token_place_parser = subparsers.add_parser(
         "token-place",
@@ -479,6 +497,20 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_nvme_health(args: argparse.Namespace) -> int:
+    return _forward_to_helper(
+        script=NVME_HEALTH_CHECK_SCRIPT,
+        args=args,
+        interpreter="bash",
+        missing_hint=(
+            "scripts/nvme_health_check.sh is missing. "
+            "Run from the repository root or reinstall the tooling."
+        ),
+        auto_dry_run=False,
+        always_execute=False,
+    )
+
+
 def _handle_token_place_samples(args: argparse.Namespace) -> int:
     return _forward_to_helper(
         script=TOKEN_PLACE_SAMPLES_SCRIPT,
@@ -550,6 +582,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _handle_pi_smoke,
         _handle_pi_rehearse,
         _handle_pi_support_bundle,
+        _handle_nvme_health,
         _handle_token_place_samples,
         _handle_pi_cluster,
         _handle_notify_workflow,

@@ -223,6 +223,54 @@ def test_doctor_surfaces_failures(
     assert "boom" in captured.err
 
 
+def test_nvme_health_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """nvme health should proxy through the documented helper script."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(
+        commands: list[list[str]],
+        *,
+        dry_run: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> None:
+        recorded.extend(commands)
+        assert cwd == cli.REPO_ROOT
+
+    monkeypatch.setattr(runner, "run_commands", fake_run)
+
+    exit_code = cli.main(["nvme", "health"])
+
+    expected_script = Path(__file__).resolve().parents[1] / "scripts" / "nvme_health_check.sh"
+    assert exit_code == 0
+    assert recorded == [["bash", str(expected_script)]]
+
+
+def test_nvme_health_supports_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
+    """Dry-run mode should surface the forwarded NVMe helper invocation."""
+
+    exit_code = cli.main(["nvme", "health", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "nvme_health_check.sh" in captured.out
+
+
+def test_nvme_health_reports_missing_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Missing NVMe helper scripts should yield a clear error."""
+
+    monkeypatch.setattr(cli, "NVME_HEALTH_CHECK_SCRIPT", Path("/nonexistent/nvme_health_check.sh"))
+
+    exit_code = cli.main(["nvme", "health"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "scripts/nvme_health_check.sh is missing" in captured.err
+
+
 def test_docs_start_here_prints_path_only(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

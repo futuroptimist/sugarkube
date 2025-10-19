@@ -260,6 +260,15 @@ tasks:
       - |
         {{.PYTHON}} {{.SCRIPTS_DIR}}/ssd_health_monitor.py{{if ne .SSD_MONITOR_ARGS ""}} {{.SSD_MONITOR_ARGS}}{{end}}
 
+  nvme:health:
+    desc: Run the NVMe SMART helper through the unified CLI.
+    dir: '{{.REPO_ROOT}}'
+    vars:
+      NVME_HEALTH_ARGS: '{{default "" .NVME_HEALTH_ARGS}}'
+    cmds:
+      - |
+        {{.SUGARKUBE_CLI}} nvme health{{if ne .NVME_HEALTH_ARGS ""}} {{.NVME_HEALTH_ARGS}}{{end}}
+
   ssd:rollback:
     desc: Restore /boot and /etc/fstab after SSD rollback.
     dir: '{{.REPO_ROOT}}'
