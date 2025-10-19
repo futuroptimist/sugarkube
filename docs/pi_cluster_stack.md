@@ -250,8 +250,68 @@ pi_carrier_stack();
 - Default printed-hole clearances: Ø3.2 mm for M3, Ø2.8 mm for M2.5; heat-set pockets undersized by
   0.2 mm relative to insert OD.
 - Add minimal `echo()` summaries to assist CI diagnostics.
-- Create a companion `docs/pi_cluster_stack.md` assembly/BOM guide (future work) mirroring the tone of
-  `docs/pi_cluster_carrier.md` once the design is implemented.
+- Create and maintain an assembly/BOM guide below once the design is implemented.
+
+---
+
+## Assembly guide
+
+Follow these steps to turn printed or machined parts into a working stack. The walkthrough mirrors
+the cadence of [`docs/pi_cluster_carrier.md`](./pi_cluster_carrier.md) so returning contributors can
+reuse their muscle memory (regression coverage: `tests/test_pi_cluster_stack_doc.py`).
+
+### Prepare the carriers
+
+1. Print three copies of `pi_carrier.scad` using `standoff_mode = "heatset"` unless brass hardware is
+   preferred.
+2. Dry-fit Raspberry Pis and PoE HATs to confirm clearances before committing inserts.
+3. Install M2.5 heat-set inserts from the underside of each carrier, checking that the bosses stay
+   perpendicular so the columns register cleanly.
+4. Flash the latest Sugarkube image to storage with `sugarkube pi flash --device /dev/sdX` and place
+   the cards aside for final assembly.
+
+### Install the columns
+
+1. Print the four column variants required for your build (`column_mode = "printed"`) or stage the
+   brass standoff chain if using `"brass_chain"` mode.
+2. Starting at the base carrier, anchor each column with M2.5 × 8 screws and confirm that inserts
+   seat flush.
+3. Stack the remaining carriers, securing each level before moving on to the next. Verify that
+   wiring channels align and leave enough clearance for PoE HAT cables.
+4. Route USB-C or barrel power leads along the columns, using zip ties or clips to keep them clear of
+   the future fan wall airflow.
+
+### Mount the fan wall
+
+1. Print `fan_wall.scad` with the correct `fan_size` parameter. Pause after the first 1–2 mm to press
+   M3 inserts if your printer supports insert pauses, or heat-set them manually once the plate
+   cools.
+2. Attach the fan to the wall using M3 × 12 screws. Confirm that wires exit toward the carrier stack
+   for tidy strain relief.
+3. Position the wall so the fan pulls across the PoE HAT intakes, then secure it to the columns with
+   M3 × 8 screws.
+4. Install flashed storage, boot each Pi, and run `sugarkube pi smoke` to validate networking and PoE
+   budgets before placing the stack into service.
+
+---
+
+## Bill of materials
+
+| Quantity | Item | Notes |
+| ---: | --- | --- |
+| 9 | Raspberry Pi 5 (or 4) | One per carrier slot; PoE HAT recommended |
+| 9 | PoE or PoE+ HAT | Height informs `poe_hat_height` parameter |
+| 9 | microSD or NVMe storage | Flash via `sugarkube pi flash` prior to assembly |
+| 36 | M2.5 heat-set inserts | Four per Pi × nine positions |
+| 36 | M2.5 × 8 screws | Carrier-to-column hardware |
+| 12 | Columns | Printed columns or brass standoff chains |
+| 1 | 80/92/120 mm fan | Select size to match thermal target |
+| 4 | M3 heat-set inserts | Fan wall bosses |
+| 4 | M3 × 12 screws | Fan to wall |
+| 4 | M3 × 8 screws | Fan wall to columns |
+| 4 | Zip ties or cable clips | Keep wiring clear of airflow |
+
+Add power distribution, PoE switches, and mounting trays according to your deployment environment.
 
 ---
 
