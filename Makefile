@@ -91,37 +91,37 @@ start-here:
 	$(SUGARKUBE_CLI) docs start-here $(START_HERE_ARGS)
 
 rollback-to-sd:
-        $(ROLLBACK_HELPER_CMD)
+	$(ROLLBACK_HELPER_CMD)
 
 clone-ssd:
-        @if [ -z "$(TARGET)" ]; then \
-                echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
-                exit 1; \
-        fi
-        $(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
+	@if [ -z "$(TARGET)" ]; then \
+		echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
+		exit 1; \
+	fi
+	$(CLONE_CMD) --target "$(TARGET)" $(CLONE_ARGS)
 
 show-disks:
-        lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+	lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
 
 preflight:
-        @if [ -z "$(TARGET)" ]; then \
-                echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
-                exit 1; \
-        fi
-        sudo --preserve-env=TARGET,WIPE $(PREFLIGHT_CMD)
+	@if [ -z "$(TARGET)" ]; then \
+		echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
+		exit 1; \
+	fi
+	sudo --preserve-env=TARGET,WIPE $(PREFLIGHT_CMD)
 
 verify-clone:
-        @if [ -z "$(TARGET)" ]; then \
-                echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
-                exit 1; \
-        fi
-        sudo --preserve-env=TARGET,MOUNT_BASE env MOUNT_BASE=$(MOUNT_BASE) $(VERIFY_CLONE_CMD)
+	@if [ -z "$(TARGET)" ]; then \
+		echo "Set TARGET to the destination device (e.g. /dev/nvme0n1)." >&2; \
+		exit 1; \
+	fi
+	sudo --preserve-env=TARGET,MOUNT_BASE env MOUNT_BASE=$(MOUNT_BASE) $(VERIFY_CLONE_CMD)
 
 finalize-nvme:
-        sudo --preserve-env=EDITOR,FINALIZE_NVME_EDIT $(FINALIZE_NVME_CMD)
+	sudo --preserve-env=EDITOR,FINALIZE_NVME_EDIT $(FINALIZE_NVME_CMD)
 
 clean-mounts-hard:
-        sudo --preserve-env=TARGET,MOUNT_BASE env TARGET=$(if $(TARGET),$(TARGET),/dev/nvme0n1) MOUNT_BASE=$(MOUNT_BASE) $(CLEAN_MOUNTS_CMD) --force
+	sudo --preserve-env=TARGET,MOUNT_BASE env TARGET=$(if $(TARGET),$(TARGET),/dev/nvme0n1) MOUNT_BASE=$(MOUNT_BASE) $(CLEAN_MOUNTS_CMD) --force
 
 validate-ssd-clone:
 	$(VALIDATE_CMD) $(VALIDATE_ARGS)
