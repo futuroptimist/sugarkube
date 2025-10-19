@@ -2,7 +2,7 @@
 // "heatset" → blind hole sized for brass insert
 // "printed" → simple through-hole
 // "nut"     → through-hole with hex recess
-standoff_mode = "heatset";
+standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 variation = standoff_mode == "printed" ? "through"
           : standoff_mode == "heatset" ? "blind"
           : standoff_mode;
@@ -154,4 +154,6 @@ module pi_carrier()
     }
 }
 
-pi_carrier();
+if (is_undef(_pi_carrier_auto_render) ? true : _pi_carrier_auto_render) {
+    pi_carrier();
+}
