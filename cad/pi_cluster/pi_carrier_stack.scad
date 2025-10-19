@@ -18,6 +18,8 @@ fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_s
 column_spacing = is_undef(column_spacing) ? [58, 49] : column_spacing;
 export_part = is_undef(export_part) ? "assembly" : export_part;
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
+emit_dimension_report =
+    is_undef(emit_dimension_report) ? false : emit_dimension_report;
 
 module _carrier(level) {
     translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
@@ -35,7 +37,8 @@ module _columns() {
                     column_od = column_od,
                     column_wall = column_wall,
                     carrier_insert_od = carrier_insert_od,
-                    carrier_insert_L = carrier_insert_L
+                    carrier_insert_L = carrier_insert_L,
+                    emit_dimension_report = emit_dimension_report
                 );
 }
 
@@ -48,7 +51,8 @@ module _fan_wall() {
             fan_insert_L = fan_insert_L,
             levels = levels,
             z_gap_clear = z_gap_clear,
-            column_spacing = column_spacing
+            column_spacing = column_spacing,
+            emit_dimension_report = emit_dimension_report
         );
 }
 
@@ -59,7 +63,18 @@ module pi_carrier_stack_assembly() {
     _fan_wall();
 }
 
-echo("pi_carrier_stack", levels = levels, fan_size = fan_size, column_mode = column_mode);
+if (emit_dimension_report) {
+    stack_height = levels * z_gap_clear;
+    echo(
+        "pi_carrier_stack",
+        levels = levels,
+        fan_size = fan_size,
+        column_mode = column_mode,
+        column_spacing = column_spacing,
+        stack_height = stack_height,
+        export_part = export_part
+    );
+}
 
 if (export_part == "columns") {
     pi_carrier_column(
@@ -69,7 +84,8 @@ if (export_part == "columns") {
         column_od = column_od,
         column_wall = column_wall,
         carrier_insert_od = carrier_insert_od,
-        carrier_insert_L = carrier_insert_L
+        carrier_insert_L = carrier_insert_L,
+        emit_dimension_report = emit_dimension_report
     );
 } else if (export_part == "fan_wall") {
     fan_wall(
@@ -79,7 +95,8 @@ if (export_part == "columns") {
         fan_insert_L = fan_insert_L,
         levels = levels,
         z_gap_clear = z_gap_clear,
-        column_spacing = column_spacing
+        column_spacing = column_spacing,
+        emit_dimension_report = emit_dimension_report
     );
 } else {
     pi_carrier_stack_assembly();

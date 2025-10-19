@@ -376,14 +376,18 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
 
 ## 12. Deliverables checklist (for future implementation)
 
-- [ ] Add `fan_patterns.scad`, `fan_wall.scad`, `pi_carrier_column.scad`, `pi_carrier_stack.scad`.
+- [x] Add `fan_patterns.scad`, `fan_wall.scad`, `pi_carrier_column.scad`, `pi_carrier_stack.scad`
+      under `cad/pi_cluster/`.
 - [x] Ensure `pi_carrier_stack.scad` imports `pi_carrier.scad` instead of duplicating parameters.
       (Regression coverage: `tests/test_pi_carrier_stack_scad.py`.)
 - [ ] Render six STL variants (columns: `printed`, `brass_chain`; fan sizes: 80/92/120) via CI.
 - [ ] Create user-facing assembly/BOM documentation once the physical prototype is validated.
 - [ ] Verify column alignment with the 58 mm × 49 mm hole rectangle and fan wall spacing within
       ±0.2 mm.
-- [ ] Add optional OpenSCAD tests (e.g., `echo()` dimension checks) to aid regression testing.
+- [x] Add optional OpenSCAD tests (e.g., `echo()` dimension checks) to aid regression
+      testing. (Regression coverage:
+      `tests/test_pi_cluster_dimension_reports.py::test_dimension_report_echo_is_declared`,
+      `tests/test_pi_cluster_dimension_reports.py::test_dimension_report_echo_outputs_expected_keys`.)
 
 ---
 

@@ -8,6 +8,8 @@ carrier_insert_L = is_undef(carrier_insert_L) ? 4.0 : carrier_insert_L;
 foot_diameter = is_undef(foot_diameter) ? 22 : foot_diameter;
 foot_height = is_undef(foot_height) ? 3 : foot_height;
 cap_height = is_undef(cap_height) ? 3 : cap_height;
+emit_dimension_report =
+    is_undef(emit_dimension_report) ? false : emit_dimension_report;
 
 column_radius = column_od / 2;
 inner_radius = column_radius - column_wall;
@@ -47,7 +49,8 @@ module pi_carrier_column(
     column_od = column_od,
     column_wall = column_wall,
     carrier_insert_od = carrier_insert_od,
-    carrier_insert_L = carrier_insert_L
+    carrier_insert_L = carrier_insert_L,
+    emit_dimension_report = emit_dimension_report
 ) {
     difference() {
         _column_shell();
@@ -60,6 +63,19 @@ module pi_carrier_column(
     // Add a locating chamfer on top for easier carrier placement.
     translate([0, 0, foot_height + column_height - 1])
         cylinder(h = 1.2, r1 = column_radius - 0.6, r2 = column_radius, $fn = 60);
+
+    if (emit_dimension_report) {
+        echo(
+            "pi_carrier_column",
+            levels = levels,
+            z_gap_clear = z_gap_clear,
+            column_height = column_height,
+            column_od = column_od,
+            column_wall = column_wall,
+            foot_diameter = foot_diameter,
+            column_mode = column_mode
+        );
+    }
 }
 
 pi_carrier_column();

@@ -11,6 +11,8 @@ column_tab_width = is_undef(column_tab_width) ? 12 : column_tab_width;
 column_tab_thickness = is_undef(column_tab_thickness) ? 6 : column_tab_thickness;
 column_tab_offset = is_undef(column_tab_offset) ? 6 : column_tab_offset;
 include_bosses = is_undef(include_bosses) ? true : include_bosses;
+emit_dimension_report =
+    is_undef(emit_dimension_report) ? false : emit_dimension_report;
 
 fan_clearance_radius = fan_mount_clearance(fan_size) / 2;
 boss_radius = fan_insert_od / 2 + 1.2;
@@ -40,7 +42,8 @@ module fan_wall(
     fan_insert_L = fan_insert_L,
     levels = levels,
     z_gap_clear = z_gap_clear,
-    column_spacing = column_spacing
+    column_spacing = column_spacing,
+    emit_dimension_report = emit_dimension_report
 ) {
     difference() {
         translate([-wall_width / 2, -fan_plate_t / 2, 0])
@@ -74,6 +77,18 @@ module fan_wall(
                         cylinder(h = tab_depth + 0.4, r = 1.6, $fn = 30);
             }
         }
+    }
+
+    if (emit_dimension_report) {
+        echo(
+            "fan_wall",
+            fan_size = fan_size,
+            hole_spacing = hole_spacing,
+            column_spacing = column_spacing,
+            levels = levels,
+            z_gap_clear = z_gap_clear,
+            include_bosses = include_bosses
+        );
     }
 }
 
