@@ -141,13 +141,13 @@ qr-codes:
 	$(QR_CMD) $(QR_ARGS)
 
 monitor-ssd-health:
-        $(HEALTH_CMD) $(HEALTH_ARGS)
+	$(HEALTH_CMD) $(HEALTH_ARGS)
 
 nvme-health:
-        $(SUGARKUBE_CLI) nvme health $(NVME_HEALTH_ARGS)
+	$(SUGARKUBE_CLI) nvme health $(NVME_HEALTH_ARGS)
 
 smoke-test-pi:
-        $(SMOKE_CMD) $(SMOKE_ARGS)
+	$(SMOKE_CMD) $(SMOKE_ARGS)
 
 qemu-smoke:
 	@if [ -z "$(QEMU_SMOKE_IMAGE)" ]; then \
