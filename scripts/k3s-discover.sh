@@ -200,6 +200,7 @@ claim_bootstrap_leadership() {
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
+      log "Bootstrap leadership attempt ${attempt}/15: no candidates discovered"
     else
       leader="$(printf '%s\n' "${candidates[@]}" | sort | head -n1)"
       if [ "${leader}" = "${MDNS_HOST}" ]; then
