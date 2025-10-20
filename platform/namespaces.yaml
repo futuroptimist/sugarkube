@@ -1,21 +1,51 @@
 apiVersion: v1
-kind: List
+kind: Namespace
 metadata:
-  name: platform-namespaces
-items:
-  - apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: cert-manager
-  - apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: cloudflared
-  - apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: longhorn-system
-  - apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: monitoring
+  name: cert-manager
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: cert-manager
+imagePullSecrets:
+  - name: ghcr-pull-secret
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudflared
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: cloudflared
+imagePullSecrets:
+  - name: ghcr-pull-secret
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: longhorn-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: longhorn-system
+imagePullSecrets:
+  - name: ghcr-pull-secret
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: monitoring
+imagePullSecrets:
+  - name: ghcr-pull-secret
