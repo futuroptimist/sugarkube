@@ -380,7 +380,9 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
       under `cad/pi_cluster/`.
 - [x] Ensure `pi_carrier_stack.scad` imports `pi_carrier.scad` instead of duplicating parameters.
       (Regression coverage: `tests/test_pi_carrier_stack_scad.py`.)
-- [ ] Render six STL variants (columns: `printed`, `brass_chain`; fan sizes: 80/92/120) via CI.
+- [x] Render six STL variants (columns: `printed`, `brass_chain`; fan sizes: 80/92/120) via CI.
+      (`scripts/render_pi_cluster_variants.py`, exercised by
+      `tests/test_pi_cluster_stl_variants.py`, ensures the matrix renders in automation.)
 - [ ] Create user-facing assembly/BOM documentation once the physical prototype is validated.
 - [x] Verify column alignment with the 58 mm × 49 mm hole rectangle and fan wall spacing within
       ±0.2 mm. (Regression coverage: `tests/test_pi_cluster_alignment_guards.py`.)

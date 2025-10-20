@@ -194,9 +194,9 @@ publish_bootstrap_service() {
 claim_bootstrap_leadership() {
   publish_bootstrap_service
   sleep 2
-  local attempt consecutive leader candidates
+  local consecutive leader candidates
   consecutive=0
-  for attempt in $(seq 1 15); do
+  for _ in $(seq 1 15); do
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
