@@ -16,6 +16,10 @@ up env='dev': prereqs
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
     sudo -E bash scripts/k3s-discover.sh
 
+platform-bootstrap env='dev' git_url='' branch='main' path_root='./clusters':
+    if [ -z "{{ git_url }}" ]; then echo "Set git_url to your GitOps repository" >&2; exit 1; fi
+    scripts/flux-bootstrap.sh --cluster "{{ env }}" --git-url "{{ git_url }}" --branch "{{ branch }}" --path-root "{{ path_root }}"
+
 prereqs:
     sudo apt-get update
     sudo apt-get install -y avahi-daemon avahi-utils libnss-mdns curl jq

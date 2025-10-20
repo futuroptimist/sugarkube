@@ -1,0 +1,47 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: 58.0.2
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  values:
+    fullnameOverride: sugarkube-monitoring
+    kubelet:
+      enabled: true
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+    kubeEtcd:
+      enabled: false
+    alertmanager:
+      alertmanagerSpec:
+        replicas: 1
+    grafana:
+      adminExistingSecret: grafana-admin
+      additionalDataSources: []
+      grafana.ini:
+        server:
+          root_url: https://grafana.dev.sugarkube.cloud
+      ingress:
+        enabled: false
+    prometheus:
+      prometheusSpec:
+        replicas: 1
+        retention: 24h
+        retentionSize: 10GiB
+        scrapeInterval: 30s
+    defaultRules:
+      create: true
+      rules:
+        kubeApiserver: true
+        kubeProxy: false

@@ -1,0 +1,11 @@
+creation_rules:
+  - paths:
+      - secrets/**/*.yaml
+      - secrets/**/*.enc.yaml
+      - clusters/**/*.enc.yaml
+    key_groups:
+      - age:
+          - age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqs0p0s
+    encrypted_regex: '^(data|stringData)$'
+    shamir_threshold: 1
+    mac: true

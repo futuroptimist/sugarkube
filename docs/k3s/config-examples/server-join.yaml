@@ -1,0 +1,21 @@
+# Sample /etc/rancher/k3s/config.yaml for subsequent control-plane nodes.
+token: ${K3S_TOKEN}
+server: https://10.0.0.40:6443  # kube-vip virtual IP
+write-kubeconfig-mode: "0644"
+tls-san:
+  - api.sugarkube.dev.local
+  - 10.0.0.40
+node-label:
+  - "topology.kubernetes.io/zone=rack-b"
+node-taint:
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+disable:
+  - servicelb
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5
+etcd-s3: true
+etcd-s3-endpoint: ${ETCD_S3_ENDPOINT}
+etcd-s3-bucket: ${ETCD_S3_BUCKET}
+etcd-s3-access-key: ${ETCD_S3_ACCESS_KEY}
+etcd-s3-secret-key: ${ETCD_S3_SECRET_KEY}
+flannel-backend: "vxlan"
