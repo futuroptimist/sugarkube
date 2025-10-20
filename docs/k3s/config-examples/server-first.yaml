@@ -1,0 +1,26 @@
+# /etc/rancher/k3s/config.yaml for the first control-plane node
+# This node bootstraps embedded etcd and advertises the kube-vip virtual IP.
+# Populate ${K3S_TOKEN} via a secure channel before provisioning.
+token: ${K3S_TOKEN}
+write-kubeconfig-mode: "0644"
+tls-san:
+  - api.sugarkube.dev.local
+  - 10.0.0.40
+cluster-init: true
+disable:
+  - servicelb
+# Traefik remains enabled; toggle only if you plan to replace ingress.
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5
+etcd-expose-metrics: true
+node-taint:
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+# Optional S3 offload; referenced secret is managed by SOPS/Flux.
+# etcd-s3: true
+# etcd-s3-endpoint: s3.dev.sugarkube.example
+# etcd-s3-bucket: dev-k3s-etcd
+# etcd-s3-access-key: ${S3_ACCESS}
+# etcd-s3-secret-key: ${S3_SECRET}
+# Advertise the kube-vip virtual IP so agents join via a stable address.
+server: https://10.0.0.40:6443
+# Kube-vip static pod manifest is delivered by Flux after bootstrap.

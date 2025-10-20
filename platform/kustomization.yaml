@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces/cert-manager.yaml
+  - namespaces/cloudflared.yaml
+  - namespaces/ingress.yaml
+  - namespaces/longhorn.yaml
+  - namespaces/monitoring.yaml
+  - networking/kube-vip/helmrelease.yaml
+  - networking/cloudflared/helmrelease.yaml
+  - ingress/cert-manager/kustomization.yaml
+  - storage/base/kustomization.yaml
+  - observability/kustomization.yaml
+  - network-policies/kustomization.yaml
