@@ -13,6 +13,11 @@ column_tab_offset = is_undef(column_tab_offset) ? 6 : column_tab_offset;
 include_bosses = is_undef(include_bosses) ? true : include_bosses;
 emit_dimension_report =
     is_undef(emit_dimension_report) ? false : emit_dimension_report;
+alignment_guard_enabled =
+    is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
+column_alignment_tolerance =
+    is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
+expected_column_spacing = [58, 49];
 
 fan_clearance_radius = fan_mount_clearance(fan_size) / 2;
 boss_radius = fan_insert_od / 2 + 1.2;
@@ -64,6 +69,26 @@ module fan_wall(
             _fan_mount(dx, fan_center_z + dz);
 
     // Column interface tabs with M2.5 pass-through holes
+    if (alignment_guard_enabled) {
+        assert(
+            abs(column_spacing[0] - expected_column_spacing[0]) <=
+                column_alignment_tolerance,
+            str(
+                "column_spacing[0] out of tolerance (",
+                column_spacing[0],
+                " mm)"
+            )
+        );
+        assert(
+            abs(column_spacing[1] - expected_column_spacing[1]) <=
+                column_alignment_tolerance,
+            str(
+                "column_spacing[1] out of tolerance (",
+                column_spacing[1],
+                " mm)"
+            )
+        );
+    }
     tab_depth = fan_plate_t + column_tab_thickness;
     for (cx = [-column_spacing[0] / 2, column_spacing[0] / 2]) {
         for (level = [0 : levels - 1]) {
