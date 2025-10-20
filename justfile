@@ -25,15 +25,66 @@ prereqs:
 status:
     sudo k3s kubectl get nodes -o wide
 
-kubeconfig:
+kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
     sudo chown "$USER":"$USER" ~/.kube/config
+    env_name="${SUGARKUBE_ENV:-{{env}}}"
+    python3 - "${HOME}/.kube/config" "sugar-${env_name}" <<'PY'
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+target = sys.argv[2]
+lines = config_path.read_text().splitlines()
+section = None
+
+def replace_line(idx: int, key: str, value: str) -> None:
+    prefix = lines[idx].split(f"{key}:")[0]
+    lines[idx] = f"{prefix}{key}: {value}"
+
+for idx, line in enumerate(lines):
+    stripped = line.strip()
+    if not stripped:
+        continue
+    if stripped.startswith("clusters:"):
+        section = "clusters"
+        continue
+    if stripped.startswith("contexts:"):
+        section = "contexts"
+        continue
+    if stripped.startswith("users:"):
+        section = "users"
+        continue
+    if stripped.startswith("current-context:"):
+        replace_line(idx, "current-context", target)
+        continue
+    if not line.startswith(" ") and not line.startswith("-"):
+        section = None
+
+    name_in_section = stripped.startswith("name:") or stripped.startswith("- name:")
+
+    if section == "clusters" and name_in_section:
+        replace_line(idx, "name", target)
+    elif section == "contexts":
+        if name_in_section:
+            replace_line(idx, "name", target)
+        elif stripped.startswith("cluster:"):
+            replace_line(idx, "cluster", target)
+        elif stripped.startswith("user:"):
+            replace_line(idx, "user", target)
+    elif section == "users" and name_in_section:
+        replace_line(idx, "name", target)
+
+config_path.write_text("\n".join(lines) + "\n")
+PY
 
 wipe:
     if command -v k3s-uninstall.sh >/dev/null; then sudo k3s-uninstall.sh; fi
     if command -v k3s-agent-uninstall.sh >/dev/null; then sudo k3s-agent-uninstall.sh; fi
-    sudo rm -f /etc/avahi/services/k3s-https.service || true
+    cluster="${SUGARKUBE_CLUSTER:-sugar}"
+    env="${SUGARKUBE_ENV:-dev}"
+    sudo rm -f "/etc/avahi/services/k3s-${cluster}-${env}.service" || true
     sudo systemctl restart avahi-daemon || true
 
 scripts_dir := justfile_directory() + "/scripts"
