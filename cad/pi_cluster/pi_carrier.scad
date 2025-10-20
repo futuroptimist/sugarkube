@@ -2,6 +2,7 @@
 // "heatset" → blind hole sized for brass insert
 // "printed" → simple through-hole
 // "nut"     → through-hole with hex recess
+include <pi_dimensions.scad>;
 standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 variation = standoff_mode == "printed" ? "through"
           : standoff_mode == "heatset" ? "blind"
@@ -10,8 +11,9 @@ variation = standoff_mode == "printed" ? "through"
 pi_positions = [[0,0], [1,0], [0,1]]; // layout as [x,y] offsets
 board_len = 85;
 board_wid = 56;
-hole_spacing_x = 58;
-hole_spacing_y = 49;
+hole_spacing = is_undef(hole_spacing) ? pi_hole_spacing : hole_spacing;
+hole_spacing_x = hole_spacing[0];
+hole_spacing_y = hole_spacing[1];
 
 plate_thickness = 2.0;
 corner_radius   = 5.0;  // round base corners to avoid sharp edges
