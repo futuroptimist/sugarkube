@@ -26,6 +26,7 @@ cleanup_avahi_bootstrap() {
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
     sudo rm -f "${AVAHI_SERVICE_FILE}" || true
     sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+    AVAHI_ROLE=""
   fi
 }
 
@@ -35,45 +36,98 @@ log() {
   echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
 }
 
+run_avahi_query() {
+  local mode="$1"
+  python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+import subprocess
+import sys
+
+mode, cluster, environment = sys.argv[1:4]
+
+try:
+    output = subprocess.check_output(
+        [
+            "avahi-browse",
+            "--parsable",
+            "--terminate",
+            "_https._tcp",
+        ],
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+except (FileNotFoundError, subprocess.CalledProcessError):
+    output = ""
+
+records = []
+for line in output.splitlines():
+    if not line or line[0] not in {"=", "+", "@"}:
+        continue
+    parts = line.split(";")
+    if len(parts) < 9:
+        continue
+    host = parts[7]
+    port = parts[8]
+    if port != "6443":
+        continue
+    txt = {}
+    for field in parts[9:]:
+        if field.startswith("txt="):
+            payload = field[4:]
+            if "=" in payload:
+                key, value = payload.split("=", 1)
+                txt[key] = value
+    if txt.get("k3s") != "1":
+        continue
+    if txt.get("cluster") != cluster:
+        continue
+    if txt.get("env") != environment:
+        continue
+    records.append((host, txt))
+
+if mode == "server-first":
+    for host, txt in records:
+        if txt.get("role") == "server":
+            print(host)
+            break
+elif mode == "server-count":
+    count = sum(1 for _, txt in records if txt.get("role") == "server")
+    print(count)
+elif mode == "bootstrap-hosts":
+    seen = set()
+    for host, txt in records:
+        if txt.get("role") == "bootstrap" and host not in seen:
+            seen.add(host)
+            print(host)
+elif mode == "bootstrap-leaders":
+    seen = set()
+    for host, txt in records:
+        if txt.get("role") == "bootstrap":
+            leader = txt.get("leader", host)
+            if leader not in seen:
+                seen.add(leader)
+                print(leader)
+PY
+}
+
 discover_server_host() {
-  avahi-browse -rt _https._tcp 2>/dev/null \
-    | awk -F';' '/;_https._tcp;/{print}' \
-    | while IFS=';' read -r _ _ _ _ _ _ _ host _ port txt; do
-        if [ "${port}" = "6443" ] \
-          && echo "${txt}" | grep -q 'k3s=1' \
-          && echo "${txt}" | grep -q "cluster=${CLUSTER}" \
-          && echo "${txt}" | grep -q "env=${ENVIRONMENT}" \
-          && echo "${txt}" | grep -q 'role=server'; then
-          echo "${host}"
-          break
-        fi
-      done \
-    | head -n1
+  run_avahi_query server-first | head -n1
 }
 
 discover_bootstrap_hosts() {
-  avahi-browse -rt _https._tcp 2>/dev/null \
-    | awk -F';' '/;_https._tcp;/{print}' \
-    | while IFS=';' read -r _ _ _ _ _ _ _ host _ port txt; do
-        if [ "${port}" = "6443" ] \
-          && echo "${txt}" | grep -q 'k3s=1' \
-          && echo "${txt}" | grep -q "cluster=${CLUSTER}" \
-          && echo "${txt}" | grep -q "env=${ENVIRONMENT}" \
-          && echo "${txt}" | grep -q 'role=bootstrap'; then
-          echo "${host}"
-        fi
-      done \
-    | sort -u
+  run_avahi_query bootstrap-hosts | sort -u
+}
+
+discover_bootstrap_leaders() {
+  run_avahi_query bootstrap-leaders | sort -u
 }
 
 count_servers() {
-  avahi-browse -rt _https._tcp 2>/dev/null \
-    | awk -F';' '/;_https._tcp;/{print}' \
-    | grep ';6443;' \
-    | grep 'k3s=1' \
-    | grep "cluster=${CLUSTER}" \
-    | grep "env=${ENVIRONMENT}" \
-    | grep -c 'role=server'
+  local count
+  count="$(run_avahi_query server-count | head -n1)"
+  if [ -z "${count}" ]; then
+    count=0
+  fi
+  echo "${count}"
 }
 
 wait_for_bootstrap_activity() {
@@ -98,7 +152,12 @@ wait_for_bootstrap_activity() {
 
 publish_avahi_service() {
   local role="$1"
-  local port="${2:-6443}"
+  shift
+  local port="6443"
+  if [ "$#" -gt 0 ]; then
+    port="$1"
+    shift
+  fi
   sudo install -d -m 755 /etc/avahi/services
   sudo rm -f /etc/avahi/services/k3s-https.service || true
   sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
@@ -113,6 +172,13 @@ publish_avahi_service() {
     <txt-record>cluster=${CLUSTER}</txt-record>
     <txt-record>env=${ENVIRONMENT}</txt-record>
     <txt-record>role=${role}</txt-record>
+EOF_AVAHI
+  for record in "$@"; do
+    if [ -n "${record}" ]; then
+      printf '    <txt-record>%s</txt-record>\n' "${record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
+    fi
+  done
+  sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI'
   </service>
 </service-group>
 EOF_AVAHI
@@ -122,7 +188,36 @@ EOF_AVAHI
 
 publish_bootstrap_service() {
   log "Advertising bootstrap attempt for ${CLUSTER}/${ENVIRONMENT} via Avahi"
-  publish_avahi_service bootstrap 6443
+  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST}" "state=pending"
+}
+
+claim_bootstrap_leadership() {
+  publish_bootstrap_service
+  sleep 2
+  local attempt consecutive leader candidates
+  consecutive=0
+  for attempt in $(seq 1 15); do
+    mapfile -t candidates < <(discover_bootstrap_leaders || true)
+    if [ "${#candidates[@]}" -eq 0 ]; then
+      consecutive=0
+    else
+      leader="$(printf '%s\n' "${candidates[@]}" | sort | head -n1)"
+      if [ "${leader}" = "${MDNS_HOST}" ]; then
+        consecutive=$((consecutive + 1))
+        if [ "${consecutive}" -ge 3 ]; then
+          log "Confirmed bootstrap leadership as ${MDNS_HOST}"
+          return 0
+        fi
+      else
+        log "Bootstrap leader ${leader} detected; deferring cluster initialization"
+        cleanup_avahi_bootstrap
+        return 1
+      fi
+    fi
+    sleep 2
+  done
+  log "No stable bootstrap leader observed; proceeding as ${MDNS_HOST}"
+  return 0
 }
 
 install_server_single() {
@@ -137,7 +232,7 @@ install_server_single() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  publish_avahi_service server
+  publish_avahi_service server 6443 "leader=${MDNS_HOST}"
 }
 
 install_server_cluster_init() {
@@ -153,7 +248,7 @@ install_server_cluster_init() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  publish_avahi_service server
+  publish_avahi_service server 6443 "leader=${MDNS_HOST}"
 }
 
 install_server_join() {
@@ -171,7 +266,7 @@ install_server_join() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  publish_avahi_service server
+  publish_avahi_service server 6443 "leader=${MDNS_HOST}"
 }
 
 install_agent() {
@@ -209,8 +304,16 @@ if [ -z "${server_host:-}" ]; then
   fi
 fi
 
+bootstrap_selected="false"
 if [ -z "${server_host:-}" ]; then
-  publish_bootstrap_service
+  if claim_bootstrap_leadership; then
+    bootstrap_selected="true"
+  else
+    server_host="$(wait_for_bootstrap_activity || true)"
+  fi
+fi
+
+if [ "${bootstrap_selected}" = "true" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     install_server_single
   else
@@ -219,8 +322,27 @@ if [ -z "${server_host:-}" ]; then
 else
   servers_now="$(count_servers)"
   if [ "${servers_now}" -lt "${SERVERS_DESIRED}" ]; then
-    install_server_join "${server_host}"
+    if [ -z "${server_host:-}" ]; then
+      server_host="$(discover_server_host || true)"
+    fi
+    if [ -z "${server_host:-}" ]; then
+      log "No servers discovered after waiting; proceeding with bootstrap fallback"
+      if [ "${SERVERS_DESIRED}" = "1" ]; then
+        install_server_single
+      else
+        install_server_cluster_init
+      fi
+    else
+      install_server_join "${server_host}"
+    fi
   else
+    if [ -z "${server_host:-}" ]; then
+      server_host="$(discover_server_host || true)"
+    fi
+    if [ -z "${server_host:-}" ]; then
+      log "Unable to discover an API server to join as agent; exiting"
+      exit 1
+    fi
     install_agent "${server_host}"
   fi
 fi
