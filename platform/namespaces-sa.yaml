@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: List
+metadata:
+  name: platform-namespace-default-serviceaccounts
+items:
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: default
+      namespace: cert-manager
+    imagePullSecrets:
+      - name: ghcr-pull-secret
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: default
+      namespace: cloudflared
+    imagePullSecrets:
+      - name: ghcr-pull-secret
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: default
+      namespace: longhorn-system
+    imagePullSecrets:
+      - name: ghcr-pull-secret
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: default
+      namespace: monitoring
+    imagePullSecrets:
+      - name: ghcr-pull-secret
