@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-prometheus-stack-values
+  namespace: monitoring
+data:
+  values.yaml: |
+    fullnameOverride: kube-prometheus-stack
+    prometheus:
+      prometheusSpec:
+        retention: 15d
+        replicas: 1
+        enableAdminAPI: false
+        externalLabels:
+          cluster: sugarkube-int
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 75Gi
+              storageClassName: longhorn
+    grafana:
+      admin:
+        existingSecret: grafana-admin-credentials
+      ingress:
+        enabled: false
+      serviceMonitor:
+        selfMonitor: true
+    alertmanager:
+      config:
+        global:
+          resolve_timeout: 5m
+        route:
+          receiver: null-receiver
+          group_by: [cluster, service]
+        receivers:
+          - name: null-receiver
+    kubeEtcd:
+      enabled: true
+    kubeControllerManager:
+      enabled: true
+    kubeScheduler:
+      enabled: true

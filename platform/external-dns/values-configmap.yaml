@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: external-dns-values
+  namespace: kube-system
+data:
+  values.yaml: |
+    provider: cloudflare
+    logLevel: info
+    policy: sync
+    domainFilters: []
+    txtOwnerId: sugarkube
+    image:
+      repository: bitnami/external-dns
+      tag: 0.14.2
+    sources:
+      - service
+      - ingress
+    cloudflare:
+      apiTokenSecretRef:
+        name: cloudflare-api-token
+        key: api-token
+    metrics:
+      enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: monitoring
+      additionalLabels:
+        release: kube-prometheus-stack
