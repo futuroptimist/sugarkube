@@ -49,6 +49,8 @@ environment variables (or matching CLI flags):
 - `NVME_MEDIA_ERR_THRESH` (default: `0`)
 - `NVME_UNSAFE_SHUT_THRESH` (default: `5`)
 - `NVME_LOGGER_TAG` (default: `nvme-health`)
+- `NVME_JSON_PATH` (default: unset) — write the raw `nvme smart-log --output-format=json`
+  payload to the specified path for downstream scrapers.
 
 Run the helper directly or through the unified CLI wrappers (for example,
 `sugarkube nvme health` via the bundled Python entry point):
@@ -58,11 +60,16 @@ sudo ./scripts/nvme_health_check.sh
 sudo sugarkube nvme health
 sudo just nvme-health NVME_HEALTH_ARGS="--device /dev/nvme1n1"
 task nvme:health NVME_HEALTH_ARGS="--dry-run"
+sudo NVME_JSON_PATH=/var/log/sugarkube/nvme-smart.json ./scripts/nvme_health_check.sh
+sudo sugarkube nvme health --json-path /var/log/sugarkube/nvme-smart.json
 ```
 
-Regression coverage: `tests/test_sugarkube_toolkit_cli.py::test_nvme_health_invokes_helper`
-and `tests/test_nvme_health_workflow.py` keep the CLI, Make, Just, and Task wrappers aligned
-with this guide.
+Regression coverage: `tests/test_sugarkube_toolkit_cli.py::test_nvme_health_invokes_helper`,
+`tests/test_nvme_health_workflow.py`, and
+`tests/nvme_health_check_test.py::test_nvme_health_writes_json_snapshot` keep the CLI, Make,
+Just, and Task wrappers aligned with this guide. The error path is covered by
+`tests/nvme_health_check_test.py::test_nvme_health_json_export_failure` so failed exports do
+not go unnoticed.
 
 ## Deployment
 1. Install dependencies:
@@ -114,7 +121,5 @@ with this guide.
 - Keep a pre-imaged spare NVMe drive so replacement is a quick swap when wear thresholds are met.
 
 ## Future Enhancements
-- Export SMART metrics as JSON (for example, via `nvme smart-log --json`) so a k3s scraper can
-  publish them as Prometheus metrics.
 - Feed the helper output into the existing telemetry pipelines (for example, forward syslog
   entries to a Sugarkube alerting workflow) so persistent degradations raise proactive tickets.

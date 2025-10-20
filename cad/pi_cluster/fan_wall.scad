@@ -1,4 +1,5 @@
 include <fan_patterns.scad>;
+include <pi_dimensions.scad>;
 
 fan_size = is_undef(fan_size) ? 120 : fan_size;
 fan_plate_t = is_undef(fan_plate_t) ? 4 : fan_plate_t;
@@ -6,7 +7,7 @@ fan_insert_od = is_undef(fan_insert_od) ? 5.0 : fan_insert_od;
 fan_insert_L = is_undef(fan_insert_L) ? 4.0 : fan_insert_L;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
-column_spacing = is_undef(column_spacing) ? [58, 49] : column_spacing;
+column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
 column_tab_width = is_undef(column_tab_width) ? 12 : column_tab_width;
 column_tab_thickness = is_undef(column_tab_thickness) ? 6 : column_tab_thickness;
 column_tab_offset = is_undef(column_tab_offset) ? 6 : column_tab_offset;
