@@ -384,8 +384,9 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
       (`scripts/render_pi_cluster_variants.py`, exercised by
       `tests/test_pi_cluster_stl_variants.py`, ensures the matrix renders in automation.)
 - [ ] Create user-facing assembly/BOM documentation once the physical prototype is validated.
-- [ ] Verify column alignment with the 58 mm × 49 mm hole rectangle and fan wall spacing within
-      ±0.2 mm.
+- [x] Verify column alignment with the 58 mm × 49 mm hole rectangle and fan wall spacing within
+      ±0.2 mm. (Regression coverage:
+      `tests/test_pi_carrier_stack_scad.py::test_pi_carrier_stack_column_spacing_uses_shared_constant`.)
 - [x] Add optional OpenSCAD tests (e.g., `echo()` dimension checks) to aid regression
       testing. (Regression coverage:
       `tests/test_pi_cluster_dimension_reports.py::test_dimension_report_echo_is_declared`,
