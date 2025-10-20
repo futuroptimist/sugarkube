@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - repositories.yaml
+  - secrets
+  - kube-vip/helmrelease.yaml
+  - cert-manager/helmrelease.yaml
+  - issuers/clusterissuers.yaml
+  - cloudflared/helmrelease.yaml
+  - storage/longhorn/helmrelease.yaml
+  - observability/kube-prometheus-stack/helmrelease.yaml
+  - observability/loki/helmrelease.yaml
+  - network-policies

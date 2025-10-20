@@ -1,0 +1,41 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 30m
+  releaseName: external-dns
+  chart:
+    spec:
+      chart: external-dns
+      version: 1.14.4
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+        namespace: flux-system
+  install:
+    createNamespace: true
+  upgrade:
+    remediation:
+      retries: 3
+  valuesFrom:
+    - kind: ConfigMap
+      name: external-dns-settings
+      valuesKey: values.yaml
+      optional: true
+  values:
+    provider: cloudflare
+    policy: sync
+    sources:
+      - service
+      - ingress
+    txtOwnerId: sugarkube
+    domainFilters:
+      - sugarkube.example
+    extraEnv:
+      - name: CF_API_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: cloudflare-api-token
+            key: api-token

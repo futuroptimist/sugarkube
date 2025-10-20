@@ -1,0 +1,8 @@
+creation_rules:
+  - path_regex: platform/secrets/.*\.enc\.ya?ml
+    age:
+      - age1w3q0u5l2d9k3ym8n0exampleexampleexampleexampleexamplex
+      - age1k3sopsrecipientexampleexampleexampleexampleexamplehq
+  - path_regex: flux/secrets/.*\.enc\.ya?ml
+    age:
+      - age1w3q0u5l2d9k3ym8n0exampleexampleexampleexampleexamplex

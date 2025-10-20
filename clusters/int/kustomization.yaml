@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../platform/overlays/storage-nfs
+patchesStrategicMerge:
+  - patches/kube-vip.yaml
+  - patches/issuers.yaml
+configMapGenerator:
+  - name: cloudflared-settings
+    namespace: cloudflared
+    behavior: replace
+    files:
+      - values.yaml=config/cloudflared-values.yaml
+  - name: nfs-provisioner-settings
+    namespace: nfs-provisioner
+    behavior: replace
+    files:
+      - values.yaml=config/nfs-values.yaml

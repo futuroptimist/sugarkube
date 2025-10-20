@@ -315,6 +315,11 @@ cluster-up:
 cluster-bootstrap:
     "{{ sugarkube_cli }}" pi cluster {{ cluster_bootstrap_args }}
 
+# Bootstrap Flux and reconcile the shared platform stack for the selected environment.
+# Usage: just platform-bootstrap ENVIRONMENT
+platform-bootstrap env='dev':
+    scripts/flux-bootstrap.sh {{ env }}
+
 # Install CLI dependencies inside GitHub Codespaces or fresh containers
 
 # Usage: just codespaces-bootstrap
