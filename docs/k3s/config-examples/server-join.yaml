@@ -1,0 +1,21 @@
+# /etc/rancher/k3s/config.yaml for subsequent control-plane nodes
+# Join the remaining two Raspberry Pi 5 servers against the kube-vip IP.
+token: ${K3S_TOKEN}
+write-kubeconfig-mode: "0644"
+tls-san:
+  - api.sugarkube.dev.local
+  - 10.0.0.40
+server: https://10.0.0.40:6443
+node-taint:
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+disable:
+  - servicelb
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5
+etcd-expose-metrics: true
+# Optional S3 offload matches the first server configuration.
+# etcd-s3: true
+# etcd-s3-endpoint: s3.dev.sugarkube.example
+# etcd-s3-bucket: dev-k3s-etcd
+# etcd-s3-access-key: ${S3_ACCESS}
+# etcd-s3-secret-key: ${S3_SECRET}

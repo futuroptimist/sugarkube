@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../platform
+  - secrets/cloudflare-api-token.enc.yaml
+  - secrets/cloudflared-tunnel.enc.yaml
+  - secrets/ghcr-read-secret.enc.yaml
+  - secrets/s3-etcd-offload.enc.yaml
+  - secrets/longhorn-backup-target.enc.yaml
+patchesStrategicMerge:
+  - overlays/platform-patches.yaml
+# Optional components:
+# components:
+#   - ../../platform/networking/external-dns
+#   - ../../platform/storage/components/nfs

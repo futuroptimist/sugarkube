@@ -1,0 +1,44 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: cloudflare
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://cloudflare.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  interval: 30m
+  install:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: cloudflared
+      sourceRef:
+        kind: HelmRepository
+        name: cloudflare
+        namespace: flux-system
+      version: ">=2.0.0"
+  values:
+    image:
+      repository: cloudflare/cloudflared
+    secretName: cloudflared-tunnel-credentials
+    tunnelName: dev-sugarkube
+    ingress:
+      - hostname: "*.dev.sugarkube.example.com"
+        service: http://traefik.ingress-system.svc.cluster.local:80
+      - service: http_status:404
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+        operator: Exists

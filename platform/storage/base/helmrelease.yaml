@@ -1,0 +1,43 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: longhorn
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.longhorn.io
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+spec:
+  interval: 30m
+  install:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: longhorn
+      sourceRef:
+        kind: HelmRepository
+        name: longhorn
+        namespace: flux-system
+      version: ">=1.5.3"
+  values:
+    preUpgradeChecker:
+      jobEnabled: false
+    persistence:
+      defaultClass: true
+      defaultClassReplicaCount: 3
+    defaultSettings:
+      defaultDataPath: /var/lib/longhorn
+      backupTarget: s3://sugarkube-longhorn
+      backupTargetCredentialSecret: longhorn-backup-target
+      createDefaultDiskLabeledNodes: true
+    longhornManager:
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule

@@ -1,0 +1,10 @@
+creation_rules:
+  - path_regex: secrets/.*\.enc\.yaml$
+    age: |
+      age1zdug0ycgysmxszysd9m3jdln5eu4jqk9hwaxz6c0er42m67h50ssgk9s0y
+  - path_regex: clusters/.*/secrets/.*\.enc\.yaml$
+    age: |
+      age1zdug0ycgysmxszysd9m3jdln5eu4jqk9hwaxz6c0er42m67h50ssgk9s0y
+  - path_regex: platform/.*/secrets/.*\.enc\.yaml$
+    age: |
+      age1zdug0ycgysmxszysd9m3jdln5eu4jqk9hwaxz6c0er42m67h50ssgk9s0y

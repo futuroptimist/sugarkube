@@ -117,6 +117,10 @@ _default:
 help:
     @just --list
 
+flux-bootstrap env='dev':
+    export FLUX_CLUSTER_PATH="clusters/{{ env }}"
+    scripts/flux-bootstrap.sh
+
 # Download the latest release or a specific asset into IMAGE_DIR
 
 # Usage: just download-pi-image DOWNLOAD_ARGS="--release v1.2.3"
