@@ -48,6 +48,9 @@ If any required check fails, the script exits non-zero and prints the artifact p
 deeper investigation. Capture `artifacts/spot-check/` in the build report before moving
 on.
 
+> [!TIP]
+> Next step: [Bring up the cluster with `just up <env>`](raspi_cluster_setup.md).
+
 ## Known benign noise
 
 * `bluetoothd` plugin initialization failures when the radio is disabled.
