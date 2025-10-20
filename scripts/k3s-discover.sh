@@ -196,7 +196,7 @@ claim_bootstrap_leadership() {
   sleep 2
   local consecutive leader candidates
   consecutive=0
-  for _ in $(seq 1 15); do
+  for attempt in $(seq 1 15); do
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
