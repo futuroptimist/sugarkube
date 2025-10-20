@@ -34,6 +34,11 @@ jobs:
             find cad -name '*.scad' -print0 | xargs -0 -I{} bash scripts/openscad_render.sh "{}"
           done
 
+      - name: Render pi_carrier_stack fan/column matrix
+        run: |
+          set -e
+          python scripts/render_pi_cluster_variants.py --output-dir stl/pi_cluster
+
       - name: Upload STL artifacts
         uses: actions/upload-artifact@v4
         with:
