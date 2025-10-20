@@ -48,6 +48,13 @@ If any required check fails, the script exits non-zero and prints the artifact p
 deeper investigation. Capture `artifacts/spot-check/` in the build report before moving
 on.
 
+## Next step: cluster bring-up
+
+Ready to form the cluster? Jump to the streamlined
+[Raspberry Pi Cluster Setup quick start](raspi_cluster_setup.md) and run `just up <env>` on
+each node. The detailed manual procedure now lives in
+[raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
+
 ## Known benign noise
 
 * `bluetoothd` plugin initialization failures when the radio is disabled.
