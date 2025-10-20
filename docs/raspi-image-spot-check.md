@@ -48,6 +48,12 @@ If any required check fails, the script exits non-zero and prints the artifact p
 deeper investigation. Capture `artifacts/spot-check/` in the build report before moving
 on.
 
+## Next step: cluster bring-up
+
+Spot check complete? Jump to the streamlined
+[`raspi_cluster_setup.md`](raspi_cluster_setup.md) guide for the mDNS-enabled
+`just up <env>` workflow.
+
 ## Known benign noise
 
 * `bluetoothd` plugin initialization failures when the radio is disabled.
@@ -65,7 +71,8 @@ first, then pick any optional helpers that match your scenario.
 
 > [!IMPORTANT]
 > Skip Step&nbsp;1 if `sudo rpi-eeprom-config | grep BOOT_ORDER` already returns `0xf461`.
-> Skip directly to **Step&nbsp;3 (Verification)** if `lsblk` already shows NVMe boot and root partitions.
+> Skip directly to **Step&nbsp;3 (Verification)** if `lsblk` already shows NVMe
+> boot and root partitions.
 
 #### Step 1. Align the boot order (only if needed)
 
