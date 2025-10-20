@@ -24,7 +24,7 @@ fi
 
 shopt -s nullglob
 for secret in "${SECRET_DIR}"/*.enc.yaml; do
-  echo ":: Updating recipients for ${secret##${REPO_ROOT}/}" >&2
+  echo ":: Updating recipients for ${secret##"${REPO_ROOT}/"}" >&2
   sops updatekeys "${secret}"
 done
 shopt -u nullglob
