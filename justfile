@@ -1,4 +1,9 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
+set export
+
+export SUGARKUBE_CLUSTER := env('SUGARKUBE_CLUSTER', 'sugar')
+export SUGARKUBE_SERVERS := env('SUGARKUBE_SERVERS', '1')
+export K3S_CHANNEL := env('K3S_CHANNEL', 'stable')
 
 scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
@@ -71,8 +76,35 @@ docs_verify_args := env_var_or_default("DOCS_VERIFY_ARGS", "")
 simplify_docs_args := env_var_or_default("SIMPLIFY_DOCS_ARGS", "")
 nvme_health_args := env_var_or_default("NVME_HEALTH_ARGS", "")
 
-_default:
-    @just --list
+default: up
+
+prereqs:
+    sudo apt-get update
+    sudo apt-get install -y avahi-daemon avahi-utils libnss-mdns curl jq
+    sudo systemctl enable --now avahi-daemon
+    if ! grep -q 'mdns4_minimal' /etc/nsswitch.conf; then sudo sed -i 's/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf; fi
+
+up env='dev': prereqs
+    if [ "{{env}}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="${SUGARKUBE_TOKEN_DEV}"; fi
+    if [ "{{env}}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="${SUGARKUBE_TOKEN_INT}"; fi
+    if [ "{{env}}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="${SUGARKUBE_TOKEN_PROD}"; fi
+    export SUGARKUBE_ENV="{{env}}"
+    export SUGARKUBE_SERVERS="{{SUGARKUBE_SERVERS}}"
+    sudo -E bash scripts/k3s-discover.sh
+
+status:
+    sudo k3s kubectl get nodes -o wide
+
+kubeconfig:
+    mkdir -p ~/.kube
+    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+    sudo chown "$USER":"$USER" ~/.kube/config
+
+wipe:
+    if command -v k3s-uninstall.sh >/dev/null; then sudo k3s-uninstall.sh; fi
+    if command -v k3s-agent-uninstall.sh >/dev/null; then sudo k3s-agent-uninstall.sh; fi
+    sudo rm -f /etc/avahi/services/k3s-https.service || true
+    sudo systemctl restart avahi-daemon || true
 
 help:
     @just --list
