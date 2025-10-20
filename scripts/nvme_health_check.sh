@@ -16,6 +16,7 @@ TBW_LIMIT=${NVME_TBW_LIMIT_TB:-300}
 MEDIA_ERR_THRESH=${NVME_MEDIA_ERR_THRESH:-0}
 UNSAFE_SHUT_THRESH=${NVME_UNSAFE_SHUT_THRESH:-5}
 LOGGER_TAG=${NVME_LOGGER_TAG:-nvme-health}
+JSON_PATH=${NVME_JSON_PATH:-}
 
 usage() {
   cat <<'USAGE'
@@ -28,6 +29,7 @@ Options override the matching environment variables:
   --media-errors VALUE          Media error threshold (default: 0)
   --unsafe-shutdowns VALUE      Unsafe shutdown threshold (default: 5)
   --logger-tag TAG              Custom syslog tag (default: nvme-health)
+  --json-path PATH              Write nvme smart-log JSON output to PATH
   -h, --help                    Show this help text and exit
 
 Environment variables mirror the flag names (NVME_DEVICE, NVME_PCT_THRESH, ...).
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --logger-tag)
       LOGGER_TAG="$2"
+      shift 2
+      ;;
+    --json-path)
+      JSON_PATH="$2"
       shift 2
       ;;
     -h|--help)
@@ -95,6 +101,26 @@ log() {
 }
 
 smart_json=$(nvme smart-log "$DEVICE" | tr -d '\r')
+
+if [[ -n "$JSON_PATH" ]]; then
+  if ! json_export=$(nvme smart-log "$DEVICE" --output-format=json | tr -d '\r'); then
+    log "Failed to export NVMe SMART JSON for $DEVICE"
+    exit 1
+  fi
+
+  json_dir=$(dirname -- "$JSON_PATH")
+  if ! mkdir -p "$json_dir"; then
+    log "Failed to create directory for $JSON_PATH"
+    exit 1
+  fi
+
+  if ! printf '%s\n' "$json_export" > "$JSON_PATH"; then
+    log "Failed to write NVMe SMART JSON to $JSON_PATH"
+    exit 1
+  fi
+
+  log "Wrote NVMe SMART JSON to $JSON_PATH"
+fi
 
 get_field() {
   local key="$1"
