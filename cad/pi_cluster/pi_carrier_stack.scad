@@ -20,6 +20,32 @@ export_part = is_undef(export_part) ? "assembly" : export_part;
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 emit_dimension_report =
     is_undef(emit_dimension_report) ? false : emit_dimension_report;
+alignment_guard_enabled =
+    is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
+column_alignment_tolerance =
+    is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
+expected_column_spacing = [58, 49];
+
+if (alignment_guard_enabled) {
+    assert(
+        abs(column_spacing[0] - expected_column_spacing[0]) <=
+            column_alignment_tolerance,
+        str(
+            "column_spacing[0] out of tolerance (",
+            column_spacing[0],
+            " mm)"
+        )
+    );
+    assert(
+        abs(column_spacing[1] - expected_column_spacing[1]) <=
+            column_alignment_tolerance,
+        str(
+            "column_spacing[1] out of tolerance (",
+            column_spacing[1],
+            " mm)"
+        )
+    );
+}
 
 module _carrier(level) {
     translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
