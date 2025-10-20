@@ -5,7 +5,12 @@ set -euo pipefail
 # The script is idempotent: rerunning it updates Flux components and syncs Git state.
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-CLUSTER_ENV="${1:-dev}"
+
+if [[ $# -gt 0 ]]; then
+  CLUSTER_ENV="$1"
+else
+  : "${CLUSTER_ENV:=prod}"
+fi
 
 if ! command -v flux >/dev/null 2>&1; then
   echo "flux CLI is required. Install from https://fluxcd.io/flux/ before running." >&2
@@ -38,15 +43,15 @@ if [ ! -d "$KUSTOMIZE_ENV_PATH" ]; then
   exit 1
 fi
 
-export CLUSTER_ENV
-TMP_SYNC="$(mktemp)"
-trap 'rm -f "${TMP_SYNC}"' EXIT
-envsubst <"${REPO_ROOT}/flux/gotk-sync.yaml" >"${TMP_SYNC}"
-
-kubectl apply -f "${TMP_SYNC}" \
+kubectl apply -f "${REPO_ROOT}/flux/gotk-sync.yaml" \
   --server-side --force-conflicts
 kubectl apply -f "${REPO_ROOT}/flux/gotk-components.yaml" \
   --server-side --force-conflicts
+
+kubectl -n flux-system wait --for=condition=Established \
+  crd/kustomizations.kustomize.toolkit.fluxcd.io --timeout=60s || true
+kubectl -n flux-system patch kustomization flux-system --type=merge -p \
+  "{\"spec\":{\"path\":\"./clusters/${CLUSTER_ENV}\"}}"
 
 if kubectl get secret -n flux-system sops-age >/dev/null 2>&1; then
   echo ":: sops-age secret already present"
