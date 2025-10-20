@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-vip-values
+  namespace: kube-system
+data:
+  values.yaml: |
+    config:
+      address: 10.30.30.30
+      enableARP: true
+      interface: eth0
+      lbClass: kube-vip.io/kube-system
+    env:
+      vip_interface: eth0
+      port: "6443"
+    rbac:
+      create: true
+    taint: control-plane

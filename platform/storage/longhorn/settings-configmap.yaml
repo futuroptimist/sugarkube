@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-values
+  namespace: longhorn-system
+data:
+  values.yaml: |
+    persistence:
+      defaultClassReplicaCount: 2
+    defaultSettings:
+      backupTargetCredentialSecret: longhorn-backup-credentials
+      defaultDataPath: /var/lib/longhorn
+      defaultLonghornStaticStorageClass: longhorn
+      defaultReplicaCount: 2
+      nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+      nodeDrainPolicy: block-automatic-replacement
+      replicaSoftAntiAffinity: true
+    metrics:
+      serviceMonitor:
+        enabled: true
+        additionalLabels:
+          release: kube-prometheus-stack

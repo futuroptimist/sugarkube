@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: List
+metadata:
+  name: platform-namespaces
+items:
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: cert-manager
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: cloudflared
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: longhorn-system
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: monitoring

@@ -1,0 +1,33 @@
+# First server bootstrap configuration for k3s with embedded etcd and kube-vip
+# Copy to /etc/rancher/k3s/config.yaml and update the placeholders.
+token: ${K3S_TOKEN}
+cluster-init: true
+write-kubeconfig-mode: "0644"
+tls-san:
+  - api.sugarkube.prod.local
+  - 10.30.30.30  # kube-vip virtual IP for the API server
+node-taint:
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+server: https://127.0.0.1:6443
+disable:
+  - servicelb
+  - local-storage
+# Traefik remains enabled so that Flux can manage ingress configuration
+node-label:
+  - "node.kubernetes.io/role=control-plane"
+  - "topology.kubernetes.io/zone=pi5-rack"
+write-kubeconfig: /etc/rancher/k3s/k3s.yaml
+kube-apiserver-arg:
+  - "feature-gates=MixedProtocolLBService=true"
+  - "etcd-servers=https://127.0.0.1:2379"
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5
+etcd-s3: true
+etcd-s3-bucket: k3s-etcd-prod
+etcd-s3-endpoint: s3-compatible.example.com
+etcd-s3-access-key: ${S3_ACCESS_KEY}
+etcd-s3-secret-key: ${S3_SECRET_KEY}
+flannel-backend: vxlan
+kube-controller-manager-arg:
+  - "node-monitor-period=5s"
+  - "node-monitor-grace-period=40s"

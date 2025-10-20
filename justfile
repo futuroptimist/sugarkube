@@ -370,3 +370,7 @@ mac-setup:
 support-bundle:
     if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi
     "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}
+
+# Bootstrap Flux and the platform stack for a given environment
+platform-bootstrap env='dev':
+    "{{ justfile_directory() }}/scripts/flux-bootstrap.sh" "{{ env }}"

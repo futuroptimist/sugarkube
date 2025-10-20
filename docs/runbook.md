@@ -1,0 +1,132 @@
+# Sugarkube Platform Runbook
+
+This runbook documents the expected flow for bringing a three-node Raspberry Pi 5 k3s cluster
+online, keeping it healthy, and restoring service after failures. All commands assume an
+operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs installed.
+
+## 1. Bootstrap the first server
+
+1. Flash the sugarkube OS image to the NVMe module or SD card as described in
+   `docs/network_setup.md`.
+2. Copy `docs/k3s/config-examples/server-first.yaml` to `/etc/rancher/k3s/config.yaml` and
+   replace the placeholder values:
+   - `token`: shared bootstrap token for all servers.
+   - `tls-san`: include the kube-vip IP and any management hostnames.
+   - `etcd-s3-*`: update with the S3-compatible endpoint, bucket, and credentials if the
+     off-cluster snapshot archive is required from day one.
+3. Start k3s on the first control-plane:
+
+   ```bash
+   sudo systemctl enable --now k3s
+   sudo k3s kubectl get nodes -o wide
+   ```
+
+4. Confirm the embedded etcd cluster is healthy:
+
+   ```bash
+   sudo k3s etcdctl endpoint status --cluster --write-out=table
+   ```
+
+## 2. Deploy kube-vip and verify the virtual IP
+
+1. Apply the `kube-vip` manifest once the first node is up so that the virtual IP is available
+   before joining additional servers:
+
+   ```bash
+   sudo k3s kubectl apply -k platform/kube-vip
+   ```
+
+2. Ping the VIP from your workstation and verify ARP resolution points to the active control
+   plane.
+
+## 3. Join the remaining servers
+
+1. Copy `docs/k3s/config-examples/server-join.yaml` to the remaining nodes and update the shared
+   token and VIP fields.
+2. Start k3s on each server and confirm all three nodes reach `Ready`.
+3. Optionally taint the control-plane nodes as shown in
+   `docs/k3s/config-examples/server-taints.md` to keep general workloads off the control plane.
+
+## 4. Bootstrap Flux and secrets
+
+### High-level command
+
+Run the high-level Just recipe to install Flux, apply Git sources, and reconcile the platform.
+
+```bash
+just platform-bootstrap env=dev
+```
+
+Replace `dev` with `int` or `prod` for the target environment. The recipe wraps
+`scripts/flux-bootstrap.sh` and is safe to run multiple times.
+
+### Low-level equivalent
+
+If you prefer to execute each step manually, follow the procedure in
+`scripts/flux-bootstrap.sh`:
+
+1. Create the `flux-system` namespace.
+2. Export and apply the Flux controllers using `flux install --export`.
+3. Apply `flux/gotk-sync.yaml` and `flux/gotk-components.yaml` with server-side apply.
+4. Create (or rotate) the `sops-age` secret containing the private age key.
+5. Reconcile the `flux-system` Git source and the `platform` Kustomization.
+
+## 5. Platform reconciliation checklist
+
+After Flux begins reconciling, verify the critical components:
+
+- `kube-vip` DaemonSet pods are running on all control-plane nodes.
+- `cert-manager` and the `letsencrypt-*` issuers show `Ready` status.
+- `cloudflared` Deployments report a connected tunnel for each hostname.
+- `longhorn` UI is reachable via the kube-vip VIP and the default StorageClass is `longhorn`.
+- `kube-prometheus-stack`, `loki`, and `promtail` pods are healthy in the `monitoring` namespace.
+
+## 6. Backups and restore procedures
+
+### Scheduled snapshots
+
+Etcd snapshots are scheduled via the k3s configuration (`0 */12 * * *`) and retained for five
+iterations. Longhorn additionally manages volume snapshots according to application policies.
+
+### Off-cluster archive
+
+1. Populate the `longhorn-backup-credentials` secrets (per environment) with real access keys using
+   `sops`.
+2. Update the S3 bucket and endpoint patches under `clusters/*/patches/longhorn-values.yaml` if the
+   defaults change.
+3. Validate connectivity:
+
+   ```bash
+   kubectl -n longhorn-system exec deploy/longhorn-driver-deployer -- longhorn manager backup ls
+   ```
+
+### Restoring etcd from snapshots
+
+1. Stop k3s on all control-plane nodes.
+2. Copy the desired snapshot from `/var/lib/rancher/k3s/server/db/snapshots` or download it from the
+   remote S3 bucket.
+3. Restore the snapshot on a single control-plane node:
+
+   ```bash
+   sudo k3s server \
+     --cluster-init \
+     --cluster-reset \
+     --cluster-reset-restore-path /var/lib/rancher/k3s/server/db/snapshots/<snapshot>
+   ```
+
+4. Remove the reset flags from `/etc/rancher/k3s/config.yaml`, restart k3s on the remaining nodes,
+   and confirm the etcd members rejoin.
+
+## 7. Promotion flow
+
+1. Pin container images in the `clusters/int` overlay with immutable digests.
+2. After validation, cherry-pick or merge the digest updates into `clusters/prod`.
+3. Flux automatically reconciles the changes in production; monitor Grafana dashboards and Loki logs
+   to confirm stability.
+
+## 8. Maintenance tasks
+
+- Rotate age keys by updating `.sops.yaml` and re-encrypting secrets with `sops updatekeys`.
+- Keep `scripts/flux-bootstrap.sh` executable and rerun it after Flux upgrades.
+- If MetalLB is introduced, leave the `servicelb` component disabled in all k3s configs to avoid
+  IP conflicts.
