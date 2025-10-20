@@ -55,6 +55,11 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 
 ## 4. Bootstrap Flux and secrets
 
+`scripts/flux-bootstrap.sh` defaults the `flux-system` Kustomization to the production overlay
+(`./clusters/prod`). Pass an environment argument (for example `./scripts/flux-bootstrap.sh dev`)
+or export `CLUSTER_ENV=dev` before running the script to patch Flux so it syncs a different
+overlay.
+
 ### High-level command
 
 Run the high-level Just recipe to install Flux, apply Git sources, and reconcile the platform.
@@ -65,9 +70,9 @@ just platform-apply env=dev
 ```
 
 Replace `dev` with `int` or `prod` for the target environment. `flux-bootstrap` wraps
-`scripts/flux-bootstrap.sh` (safe to run multiple times) and templates the Flux `Kustomization`
-path with the selected environment before applying it. `platform-apply` requests an immediate Flux
-reconciliation of the platform stack.
+`scripts/flux-bootstrap.sh` (safe to run multiple times) and patches the Flux `Kustomization`
+path with the selected environment after the controllers and CRDs are installed. `platform-apply`
+requests an immediate Flux reconciliation of the platform stack.
 
 To rotate age keys or rewrap secrets after editing them with `sops`, run:
 
@@ -85,12 +90,16 @@ If you prefer to execute each step manually, follow the procedure in
 
 1. Create the `flux-system` namespace.
 2. Export and apply the Flux controllers using `flux install --export`.
-3. Template and apply `flux/gotk-sync.yaml` so that the `spec.path` resolves to the desired
-   environment, then apply `flux/gotk-components.yaml` with server-side apply:
+3. Apply `flux/gotk-sync.yaml` and `flux/gotk-components.yaml` with server-side apply, then patch the
+   `flux-system` Kustomization path once the CRD is established:
 
    ```bash
-   CLUSTER_ENV=dev envsubst < flux/gotk-sync.yaml | kubectl apply -f - --server-side --force-conflicts
+   kubectl apply -f flux/gotk-sync.yaml --server-side --force-conflicts
    kubectl apply -f flux/gotk-components.yaml --server-side --force-conflicts
+   kubectl -n flux-system wait --for=condition=Established \
+     crd/kustomizations.kustomize.toolkit.fluxcd.io --timeout=60s || true
+   kubectl -n flux-system patch kustomization flux-system --type=merge -p \
+     '{"spec":{"path":"./clusters/dev"}}'
    ```
 4. Create (or rotate) the `sops-age` secret containing the private age key.
 5. Reconcile the `flux-system` Git source and the `platform` Kustomization.
