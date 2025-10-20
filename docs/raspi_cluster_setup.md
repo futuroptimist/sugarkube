@@ -15,6 +15,8 @@ Linux command line.
 - 3 × Raspberry Pi 5 (8 GB recommended)
 - 3 × official Raspberry Pi M.2 HAT with NVMe SSDs
 - 1 × triple Pi carrier plate (see [pi_cluster_carrier.md](pi_cluster_carrier.md))
+- Active airflow. If you skip the carrier stack's built-in fan, position a small desk fan so the
+  boards stay below 60 °C—thermal throttling starts at 80 °C and spot-checks fail above 60 °C.
 - Power supplies, standoffs, and required cables
 - MicroSD card for each node (8 GB minimum)
 - Optional KVM for shared keyboard, video, and mouse access
