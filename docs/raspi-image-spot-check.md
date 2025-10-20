@@ -12,6 +12,8 @@ sudo just spot-check
 The console output lists each section with ✅/⚠️/❌ markers; the same information is
 mirrored in `artifacts/spot-check/summary.{json,md}` for archival.
 
+> Next step: [cluster bring-up](raspi_cluster_setup.md)
+
 ## Required success criteria
 
 | Area | Expectation |
