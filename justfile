@@ -371,6 +371,20 @@ support-bundle:
     if [ -z "{{ support_bundle_host }}" ]; then echo "Set SUPPORT_BUNDLE_HOST to the target host before running support-bundle." >&2; exit 1; fi
     "{{ support_bundle_cmd }}" "{{ support_bundle_host }}" {{ support_bundle_args }}
 
-# Bootstrap Flux and the platform stack for a given environment
+# Bootstrap Flux controllers and sync manifests for an environment
+flux-bootstrap env='dev':
+    "{{ scripts_dir }}/flux-bootstrap.sh" "{{ env }}"
+
+# Reconcile the platform Kustomization via Flux
+platform-apply env='dev':
+    flux reconcile kustomization platform \
+        --namespace flux-system \
+        --with-source
+
+# Reseal SOPS secrets for an environment
+seal-secrets env='dev':
+    "{{ scripts_dir }}/seal-secrets.sh" "{{ env }}"
+
+# Backwards-compatible alias that calls flux-bootstrap
 platform-bootstrap env='dev':
-    "{{ justfile_directory() }}/scripts/flux-bootstrap.sh" "{{ env }}"
+    just flux-bootstrap env={{ env }}

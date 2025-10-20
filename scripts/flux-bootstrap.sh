@@ -32,14 +32,18 @@ kubectl apply -f "${REPO_ROOT}/flux/tmp-install.yaml"
 rm -f "${REPO_ROOT}/flux/tmp-install.yaml"
 
 echo ":: Applying repository and kustomization manifests"
-KUSTOMIZE_PATH="${REPO_ROOT}/flux"
 KUSTOMIZE_ENV_PATH="${REPO_ROOT}/clusters/${CLUSTER_ENV}"
 if [ ! -d "$KUSTOMIZE_ENV_PATH" ]; then
   echo "environment '${CLUSTER_ENV}' not found under clusters/." >&2
   exit 1
 fi
 
-kubectl apply -f "${REPO_ROOT}/flux/gotk-sync.yaml" \
+export CLUSTER_ENV
+TMP_SYNC="$(mktemp)"
+trap 'rm -f "${TMP_SYNC}"' EXIT
+envsubst <"${REPO_ROOT}/flux/gotk-sync.yaml" >"${TMP_SYNC}"
+
+kubectl apply -f "${TMP_SYNC}" \
   --server-side --force-conflicts
 kubectl apply -f "${REPO_ROOT}/flux/gotk-components.yaml" \
   --server-side --force-conflicts

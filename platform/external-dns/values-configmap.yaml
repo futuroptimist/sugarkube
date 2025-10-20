@@ -10,6 +10,9 @@ data:
     policy: sync
     domainFilters: []
     txtOwnerId: sugarkube
+    image:
+      repository: bitnami/external-dns
+      tag: 0.14.2
     sources:
       - service
       - ingress

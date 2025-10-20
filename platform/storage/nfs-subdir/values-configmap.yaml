@@ -8,6 +8,9 @@ data:
     nfs:
       server: 10.0.0.10
       path: /srv/nfs/k3s
+    image:
+      repository: registry.k8s.io/sig-storage/nfs-subdir-external-provisioner
+      tag: v4.0.2
     storageClass:
       create: true
       defaultClass: true

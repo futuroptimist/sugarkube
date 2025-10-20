@@ -10,6 +10,9 @@ data:
       enableARP: true
       interface: eth0
       lbClass: kube-vip.io/kube-system
+    image:
+      repository: ghcr.io/kube-vip/kube-vip
+      tag: v0.6.3
     env:
       vip_interface: eth0
       port: "6443"

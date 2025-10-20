@@ -1,15 +1,17 @@
 # Joining servers connect to the kube-vip virtual IP exposed by kube-vip.
 # Copy to /etc/rancher/k3s/config.yaml on each additional control-plane node.
 token: ${K3S_TOKEN}
-server: https://10.30.30.30:6443
+server: https://10.10.10.30:6443  # Match clusters/<env>/patches/kube-vip-values.yaml
 write-kubeconfig-mode: "0644"
 tls-san:
-  - api.sugarkube.prod.local
-  - 10.30.30.30
+  - api.sugarkube.dev.local
+  - 10.10.10.30
 node-taint:
   - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+# Leave ServiceLB enabled unless MetalLB replaces it. Uncomment to disable when that happens.
+# disable:
+#   - servicelb
 disable:
-  - servicelb
   - local-storage
 node-label:
   - "node.kubernetes.io/role=control-plane"
