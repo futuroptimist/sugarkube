@@ -23,8 +23,8 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  # The bootstrap script templates this manifest with envsubst before apply.
-  path: ./clusters/${CLUSTER_ENV}
+  # The bootstrap script patches this path per-environment after bootstrap.
+  path: ./clusters/prod
   decryption:
     provider: sops
     secretRef:
