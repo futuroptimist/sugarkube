@@ -1,0 +1,42 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: kube-vip
+  namespace: kube-system
+spec:
+  interval: 30m
+  releaseName: kube-vip
+  chart:
+    spec:
+      chart: kube-vip
+      version: 0.5.12
+      sourceRef:
+        kind: HelmRepository
+        name: kube-vip
+        namespace: flux-system
+  values:
+    config:
+      address: 0.0.0.0
+      interface: eth0
+      vip_leadership: true
+      arp: true
+    image:
+      pullPolicy: IfNotPresent
+    env:
+      - name: vip_interface
+        value: eth0
+      - name: address
+        value: 0.0.0.0
+      - name: lb_enable
+        value: "false"
+    nodeSelector:
+      kubernetes.io/os: linux
+      node-role.kubernetes.io/control-plane: "true"
+    tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1

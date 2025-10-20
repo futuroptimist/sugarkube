@@ -1,0 +1,10 @@
+cloudflared:
+  tunnelName: sugarkube-prod
+  metrics:
+    enabled: true
+ingress:
+  - hostname: traefik.prod.sugarkube.ops.example.com
+    service: https://traefik.kube-system.svc.cluster.local:443
+    originRequest:
+      originServerName: traefik.prod.sugarkube.internal
+  - service: http_status:404

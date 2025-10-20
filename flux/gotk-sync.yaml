@@ -1,0 +1,32 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: sugarkube
+  namespace: flux-system
+spec:
+  interval: 1m
+  ref:
+    branch: main
+  url: ssh://git@github.com/example/sugarkube.git
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sugarkube-cluster
+  namespace: flux-system
+spec:
+  interval: 5m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: sugarkube
+  path: ./clusters/dev
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: flux-system
+      namespace: flux-system

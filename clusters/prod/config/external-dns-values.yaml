@@ -1,0 +1,9 @@
+provider: cloudflare
+policy: sync
+domainFilters:
+  - prod.sugarkube.ops.example.com
+txtOwnerId: sugarkube-prod
+sources:
+  - service
+  - ingress
+interval: 1m

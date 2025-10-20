@@ -1,0 +1,16 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: kube-vip
+  namespace: kube-system
+spec:
+  values:
+    config:
+      address: 10.30.0.40
+    env:
+      - name: vip_interface
+        value: eth0
+      - name: address
+        value: 10.30.0.40
+      - name: lb_enable
+        value: "false"

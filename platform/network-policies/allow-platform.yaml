@@ -1,0 +1,106 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-traffic
+  namespace: kube-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-traffic
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-traffic
+  namespace: cloudflared
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-traffic
+  namespace: longhorn-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              sugarkube.io/network: platform
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

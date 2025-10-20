@@ -1,0 +1,23 @@
+# Configuration for subsequent k3s server nodes joining the HA control plane.
+# Ensure the first server is online and kube-vip is serving the VIP before running k3s.
+# Provide the shared bootstrap token via a file mounted at this path.
+token-file: /etc/rancher/k3s/token
+server: https://10.10.0.40:6443  # VIP served by kube-vip
+write-kubeconfig-mode: "0644"
+tls-san:
+  - api.dev.sugarkube.internal
+  - api.int.sugarkube.internal
+  - api.prod.sugarkube.internal
+  - 10.10.0.40
+  - 10.20.0.40
+  - 10.30.0.40
+disable:
+  - servicelb
+node-taint:
+  - "CriticalAddonsOnly=true:NoExecute"
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+node-label:
+  - "node-role.kubernetes.io/control-plane=true"
+# Keep snapshots aligned across servers for consistent retention windows.
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5

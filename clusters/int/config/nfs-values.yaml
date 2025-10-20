@@ -1,0 +1,7 @@
+nfs:
+  server: 10.20.0.50
+  path: /export/sugarkube-int
+storageClass:
+  name: nfs-client
+  defaultClass: true
+  reclaimPolicy: Delete
