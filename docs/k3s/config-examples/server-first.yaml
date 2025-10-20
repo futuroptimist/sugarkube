@@ -1,0 +1,27 @@
+# Sample /etc/rancher/k3s/config.yaml for the first control-plane node in a Pi 5 trio.
+# Replace placeholder values before use.
+token: ${K3S_TOKEN}
+write-kubeconfig-mode: "0644"
+tls-san:
+  - api.sugarkube.dev.local
+  - 10.0.0.40  # kube-vip virtual IP
+cluster-init: true
+node-label:
+  - "topology.kubernetes.io/zone=rack-a"
+node-taint:
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+disable:
+  - servicelb        # prepare for MetalLB
+  # keep traefik enabled for ingress
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5
+etcd-s3: true
+etcd-s3-endpoint: ${ETCD_S3_ENDPOINT}
+etcd-s3-bucket: ${ETCD_S3_BUCKET}
+etcd-s3-access-key: ${ETCD_S3_ACCESS_KEY}
+etcd-s3-secret-key: ${ETCD_S3_SECRET_KEY}
+# Optional: pin cluster DNS or enable secrets encryption
+# cluster-dns: 10.43.0.10
+# secrets-encryption: true
+flannel-backend: "vxlan"
+write-kubeconfig: /etc/rancher/k3s/k3s.yaml
