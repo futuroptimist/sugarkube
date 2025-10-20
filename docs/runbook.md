@@ -57,8 +57,8 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 
 Flux bootstrapping defaults to the production overlay. Pass `env=<env>` to the Just recipes or set
 `CLUSTER_ENV=<env>` when calling `scripts/flux-bootstrap.sh` to target a different cluster. The
-bootstrap script applies the manifests with the production path and immediately patches the
-`Kustomization` to `./clusters/<env>` so no templating is required.
+bootstrap script applies `flux/gotk-sync.yaml` and `flux/gotk-components.yaml` as-is, then patches
+the Flux `Kustomization` path to `./clusters/<env>`.
 
 ### High-level command
 
