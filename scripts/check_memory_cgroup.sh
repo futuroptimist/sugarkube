@@ -83,17 +83,50 @@ ensure_kernel_params() {
   local want1="cgroup_memory=1"
   local want2="cgroup_enable=memory"
   local line changed=0
+  local -a tokens=()
+  local -a keep=()
+  local -a added=()
+  local -a removed=()
 
   # Read single-line cmdline, preserve other args
   line="$(tr -d '\n' <"$f")"
 
-  if ! printf '%s\n' "$line" | grep -qw "$want1"; then
-    line="$line $want1"; changed=1
-  fi
-  if ! printf '%s\n' "$line" | grep -qw "$want2"; then
-    line="$line $want2"; changed=1
+  if [ -n "$line" ]; then
+    read -r -a tokens <<<"$line"
   fi
 
+  for token in "${tokens[@]}"; do
+    case "$token" in
+      cgroup_disable=memory|cgroup_disable=memory,*)
+        removed+=("$token")
+        changed=1
+        continue
+        ;;
+    esac
+    keep+=("$token")
+  done
+
+  tokens=()
+  if [ "${#keep[@]}" -gt 0 ]; then
+    tokens=("${keep[@]}")
+  fi
+
+  for want in "$want1" "$want2"; do
+    local found=0
+    for token in "${tokens[@]}"; do
+      if [ "$token" = "$want" ]; then
+        found=1
+        break
+      fi
+    done
+    if [ "$found" -eq 0 ]; then
+      tokens+=("$want")
+      added+=("$want")
+      changed=1
+    fi
+  done
+
+  line="${tokens[*]}"
   # Normalize whitespace and trim
   line="$(printf '%s' "$line" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
 
@@ -101,7 +134,25 @@ ensure_kernel_params() {
     backup_file "$f"
     printf '%s\n' "$line" >"$f"
     sync
-    log "Updated $(realpath "$f") with: $want1 $want2" >&2
+    local msg="Updated $(realpath "$f")"
+    local -a parts=()
+    if [ "${#added[@]}" -gt 0 ]; then
+      parts+=("added: ${added[*]}")
+    fi
+    if [ "${#removed[@]}" -gt 0 ]; then
+      parts+=("removed: ${removed[*]}")
+    fi
+    if [ "${#parts[@]}" -gt 0 ]; then
+      local summary="${parts[0]}"
+      local idx
+      for idx in "${!parts[@]}"; do
+        if [ "$idx" -ne 0 ]; then
+          summary="$summary; ${parts[$idx]}"
+        fi
+      done
+      msg="$msg ($summary)"
+    fi
+    log "$msg" >&2
   fi
 
   printf '%s' "$changed"
