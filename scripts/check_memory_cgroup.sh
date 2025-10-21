@@ -5,6 +5,7 @@ set -Eeuo pipefail
 STATE_DIR="${SUGARKUBE_STATE_DIR:-/etc/sugarkube}"
 ENV_FILE="${STATE_DIR}/env"
 SYSTEMD_DIR="${SUGARKUBE_SYSTEMD_DIR:-/etc/systemd/system}"
+PROC_CMDLINE_PATH="${SUGARKUBE_PROC_CMDLINE_PATH:-/proc/cmdline}"
 
 log() { printf '[sugarkube] %s\n' "$*"; }
 
@@ -75,6 +76,22 @@ cmdline_path() {
 backup_file() {
   local f="$1"
   cp -a -- "$f" "${f}.bak.$(date +%Y%m%d%H%M%S)"
+}
+
+runtime_cmdline() {
+  cat "$PROC_CMDLINE_PATH" 2>/dev/null || true
+}
+
+runtime_cmdline_has_mem_disable() {
+  local line
+  line="$(runtime_cmdline)"
+  if [ -z "$line" ]; then
+    return 1
+  fi
+  if printf '%s\n' "$line" | grep -Eq '(^|[[:space:]])cgroup_disable=memory($|[[:space:],])'; then
+    return 0
+  fi
+  return 1
 }
 
 ensure_kernel_params() {
@@ -232,7 +249,19 @@ main() {
   local changed
   changed="$(ensure_kernel_params || echo 0)"
 
+  local needs_reboot="0"
   if [ "$changed" = "1" ]; then
+    needs_reboot="1"
+  fi
+
+  if runtime_cmdline_has_mem_disable; then
+    if [ "$changed" != "1" ]; then
+      log "Running kernel booted with cgroup_disable=memory; reboot required to pick up new parameters."
+    fi
+    needs_reboot="1"
+  fi
+
+  if [ "$needs_reboot" = "1" ]; then
     persist_env || true
     install_resume_service || true
     log "Rebooting now to apply kernel parameters…"
@@ -244,7 +273,7 @@ main() {
   # Parameters are present but controller still inactive; provide diagnostics.
   log "Required kernel parameters are already present but memory cgroup is still inactive."
   log "Diagnostics:"
-  log "  /proc/cmdline: $(cat /proc/cmdline 2>/dev/null || true)"
+  log "  ${PROC_CMDLINE_PATH}: $(runtime_cmdline)"
   if [ "$(cgroup_mode)" = v2 ]; then
     log "  cgroup v2 controllers: $(cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null || true)"
   else

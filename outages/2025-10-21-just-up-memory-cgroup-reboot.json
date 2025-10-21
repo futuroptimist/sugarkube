@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-21-just-up-memory-cgroup-reboot",
+  "date": "2025-10-21",
+  "component": "just up dev / check_memory_cgroup.sh",
+  "rootCause": "Pi reboot skipped after removing cgroup_disable=memory, leaving the runtime kernel without the memory controller and causing k3s to abort.",
+  "resolution": "Detect cgroup_disable=memory in the active kernel cmdline, persist env, trigger a managed reboot, and add regression tests to ensure the bootstrap resumes automatically.",
+  "references": [
+    "scripts/check_memory_cgroup.sh",
+    "tests/test_check_memory_cgroup.py"
+  ]
+}
