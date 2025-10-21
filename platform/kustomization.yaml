@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - namespaces.yaml
   - namespaces-sa.yaml
+  - pdbs.yaml
   - repos.yaml
   - kube-vip/
   - cert-manager/

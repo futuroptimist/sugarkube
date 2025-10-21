@@ -33,3 +33,24 @@ spec:
     substituteFrom:
       - kind: Secret
         name: platform-settings
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: traefik
+      namespace: kube-system
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cloudflared
+      namespace: cloudflared
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: prometheus-kube-prometheus-stack-prometheus
+      namespace: monitoring
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: alertmanager-kube-prometheus-stack-alertmanager
+      namespace: monitoring
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: longhorn-driver-deployer
+      namespace: longhorn-system
