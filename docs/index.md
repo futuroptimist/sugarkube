@@ -19,6 +19,7 @@ Review the safety notes before working with power components.
 - [SAFETY.md](SAFETY.md) — wiring and battery safety guidelines
 - [build_guide.md](build_guide.md) — step-by-step assembly instructions
 - [pi_cluster_carrier.md](pi_cluster_carrier.md) — details on the Raspberry Pi mounting plate
+- [pi_cluster_stack_assembly.md](pi_cluster_stack_assembly.md) — assemble the stacked carrier and fan wall
 - [lcd_mount.md](lcd_mount.md) — optional 1602 LCD placement
 - [insert_basics.md](insert_basics.md) — heat-set inserts and printed threads
 - [network_setup.md](network_setup.md) — connect the cluster to your network

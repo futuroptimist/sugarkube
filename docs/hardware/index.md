@@ -21,6 +21,7 @@ you touch in PRs so hardware and documentation stay in sync.
 ## Build Guides and Fixtures
 - [build_guide.md](../build_guide.md) — step-by-step frame assembly and wiring.
 - [pi_cluster_carrier.md](../pi_cluster_carrier.md) — Raspberry Pi carrier plate.
+- [Stacked carrier guide](../pi_cluster_stack_assembly.md) — assembly checklist.
 - [lcd_mount.md](../lcd_mount.md) — optional 1602 LCD placement.
 - [mac_mini_station.md](../mac_mini_station.md) — keyboard station for the lab bench.
 - [insert_basics.md](../insert_basics.md) — heat-set insert techniques used across

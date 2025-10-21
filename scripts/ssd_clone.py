@@ -648,12 +648,19 @@ def _select_partition(
     if expected_info:
         actual_fs = expected_info.get("FSTYPE") or "unknown"
         raise SystemExit(
-            f"Target {kind} partition {expected_device} has filesystem {actual_fs}, expected {expected_fs}. "
-            "Do not use --skip-partition unless the target numbering matches the source."
+            (
+                f"Target {kind} partition {expected_device} has filesystem {actual_fs}, "
+                f"expected {expected_fs}. "
+                "Do not use --skip-partition unless the target numbering matches the source."
+            )
         )
     raise SystemExit(
-        f"Unable to locate a {kind} partition on {ctx.target_disk} matching filesystem {expected_fs}. "
-        "Ensure the target layout matches the source or label the partition before using --skip-partition."
+        (
+            "Unable to locate a "
+            f"{kind} partition on {ctx.target_disk} matching filesystem {expected_fs}. "
+            "Ensure the target layout matches the source or label the partition "
+            "before using --skip-partition."
+        )
     )
 
 
@@ -663,7 +670,9 @@ def resolve_target_partitions(ctx: CloneContext) -> (str, str):
     boot_suffix = ctx.state.get("partition_suffix_boot")
     root_suffix = ctx.state.get("partition_suffix_root")
     if boot_suffix is None or root_suffix is None:
-        raise SystemExit("Missing partition suffix metadata; gather_source_metadata must run first.")
+        raise SystemExit(
+            "Missing partition suffix metadata; gather_source_metadata must run first."
+        )
     boot_partition = compose_partition(ctx.target_disk, str(boot_suffix))
     root_partition = compose_partition(ctx.target_disk, str(root_suffix))
     if ctx.skip_partition:
@@ -703,14 +712,20 @@ def resolve_target_partitions(ctx: CloneContext) -> (str, str):
         changed = False
         if boot_selected != boot_partition:
             ctx.log(
-                f"Target boot partition numbering differs; using {boot_selected} instead of {boot_partition}."
+                (
+                    "Target boot partition numbering differs; using "
+                    f"{boot_selected} instead of {boot_partition}."
+                )
             )
             ctx.state["partition_suffix_boot"] = partition_suffix(boot_selected)
             boot_partition = boot_selected
             changed = True
         if root_selected != root_partition:
             ctx.log(
-                f"Target root partition numbering differs; using {root_selected} instead of {root_partition}."
+                (
+                    "Target root partition numbering differs; using "
+                    f"{root_selected} instead of {root_partition}."
+                )
             )
             ctx.state["partition_suffix_root"] = partition_suffix(root_selected)
             root_partition = root_selected
