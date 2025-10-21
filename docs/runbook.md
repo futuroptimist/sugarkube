@@ -115,6 +115,36 @@ After Flux begins reconciling, verify the critical components:
 - `kube-prometheus-stack`, `loki`, and `promtail` pods are healthy in the `monitoring` namespace and
   scrape Traefik through the dedicated `ServiceMonitor`.
 
+### Cloudflare tunnel on Kubernetes
+
+- Helm values for the tunnel live in `platform/cloudflared/configmap.yaml` with
+  environment-specific patches under `clusters/<env>/patches/cloudflared-values.yaml`.
+- The tunnel terminates HTTPS at Cloudflare and forwards traffic to Traefik, so no inbound ports
+  are opened on the home network.
+- Rotate tunnel credentials with SOPS by updating the encrypted secrets under
+  `clusters/<env>/secrets/cloudflared-tunnel.enc.yaml`.
+
+### DNS automation and external-dns overlay
+
+- Cloudflare API tokens should be scoped to the specific zone with `Zone:Read` and `DNS:Edit`
+  permissions and stored as SOPS-encrypted secrets named `external-dns-cloudflare` in the
+  `external-dns` namespace (for example,
+  `clusters/<env>/secrets/external-dns-cloudflare.enc.yaml`).
+- Enable `external-dns` only when required by adding `../../platform/overlays/external-dns` to the
+  `resources` list in `clusters/<env>/kustomization.yaml`; omit it to keep DNS changes manual.
+- The overlay configures TXT record ownership (`txtOwnerId: sugarkube`)—avoid running multiple
+  external-dns controllers against the same zone or the TXT records will flap.
+
+### Quick validation commands
+
+Run a fast health check after Flux reconciliation completes:
+
+```bash
+kubectl -n traefik get deploy && kubectl -n cloudflared get deploy
+kubectl -n monitoring get servicemonitors,prometheusrules
+kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | grep ServiceMonitorTargetDown
+```
+
 ## 6. Backups and restore procedures
 
 ### Scheduled snapshots
@@ -153,6 +183,9 @@ policies.
    and confirm the etcd members rejoin.
 
 ## 7. Promotion flow
+
+Recap: stage image digest updates in `clusters/int`, validate them in-cluster, and promote by
+syncing the same digests into `clusters/prod` once confidence is high.
 
 1. Pin container images in the `clusters/int` overlay with immutable digests.
 2. After validation, cherry-pick or merge the digest updates into `clusters/prod`.
