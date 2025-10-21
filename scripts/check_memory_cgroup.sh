@@ -2,7 +2,16 @@
 # scripts/check_memory_cgroup.sh
 set -Eeuo pipefail
 
+STATE_DIR="${SUGARKUBE_STATE_DIR:-/etc/sugarkube}"
+ENV_FILE="${STATE_DIR}/env"
+SYSTEMD_DIR="${SUGARKUBE_SYSTEMD_DIR:-/etc/systemd/system}"
+
 log() { printf '[sugarkube] %s\n' "$*"; }
+
+if [ "$(uname -s)" != "Linux" ]; then
+  log "Non-Linux host detected; skipping memory cgroup configuration."
+  exit 0
+fi
 
 ensure_root() {
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -29,10 +38,24 @@ memctrl_active_v1() {
 }
 
 memctrl_active() {
+  if [ -n "${SUGARKUBE_MEMCTRL_FORCE-}" ]; then
+    case "${SUGARKUBE_MEMCTRL_FORCE}" in
+      active) return 0 ;;
+      inactive) return 1 ;;
+    esac
+  fi
   if [ "$(cgroup_mode)" = v2 ]; then memctrl_active_v2; else memctrl_active_v1; fi
 }
 
 cmdline_path() {
+  if [ -n "${SUGARKUBE_CMDLINE_PATH-}" ]; then
+    if [ -f "${SUGARKUBE_CMDLINE_PATH}" ]; then
+      printf %s "${SUGARKUBE_CMDLINE_PATH}"
+      return 0
+    fi
+    log "ERROR: Cannot locate overridden cmdline.txt at ${SUGARKUBE_CMDLINE_PATH}"
+    return 1
+  fi
   if [ -f /boot/firmware/cmdline.txt ]; then
     printf %s /boot/firmware/cmdline.txt
     return 0
@@ -78,32 +101,31 @@ ensure_kernel_params() {
     backup_file "$f"
     printf '%s\n' "$line" >"$f"
     sync
-    log "Updated $(realpath "$f") with: $want1 $want2"
+    log "Updated $(realpath "$f") with: $want1 $want2" >&2
   fi
 
   printf '%s' "$changed"
 }
 
 persist_env() {
-  install -d -m 0755 -o root -g root /etc/sugarkube
-  local envfile="/etc/sugarkube/env"
-  : >"$envfile"
-  chmod 0640 "$envfile"
-  chown root:root "$envfile"
+  install -d -m 0755 -o root -g root "$STATE_DIR"
+  : >"$ENV_FILE"
+  chmod 0640 "$ENV_FILE"
+  chown root:root "$ENV_FILE"
 
   # Persist the variables most likely needed by the bootstrap
   for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_INT SUGARKUBE_TOKEN_PROD; do
     if [ -n "${!n-}" ]; then
-      printf '%s=%q\n' "$n" "${!n}" >>"$envfile"
+      printf '%s=%q\n' "$n" "${!n}" >>"$ENV_FILE"
     fi
   done
 
   # If SUGARKUBE_TOKEN not set but an env-specific token is, derive it now
   if [ -z "${SUGARKUBE_TOKEN-}" ] && [ -n "${SUGARKUBE_ENV-}" ]; then
     case "${SUGARKUBE_ENV}" in
-      dev)  [ -n "${SUGARKUBE_TOKEN_DEV-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_DEV}"  >>"$envfile" ;;
-      int)  [ -n "${SUGARKUBE_TOKEN_INT-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_INT}"  >>"$envfile" ;;
-      prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_PROD}" >>"$envfile" ;;
+      dev)  [ -n "${SUGARKUBE_TOKEN_DEV-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_DEV}"  >>"$ENV_FILE" ;;
+      int)  [ -n "${SUGARKUBE_TOKEN_INT-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_INT}"  >>"$ENV_FILE" ;;
+      prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_PROD}" >>"$ENV_FILE" ;;
     esac
   fi
 }
@@ -114,7 +136,9 @@ install_resume_service() {
   local home="/home/$user"
   local wd="$home/sugarkube"
 
-  cat >/etc/systemd/system/$svc <<EOF
+  install -d -m 0755 -o root -g root "$SYSTEMD_DIR"
+
+  cat >"$SYSTEMD_DIR/$svc" <<EOF
 [Unit]
 Description=Resume Sugarkube bootstrap after cgroup change
 After=network-online.target
@@ -125,7 +149,7 @@ Type=oneshot
 User=$user
 Group=$user
 Environment=HOME=$home
-EnvironmentFile=/etc/sugarkube/env
+EnvironmentFile=$ENV_FILE
 WorkingDirectory=$wd
 ExecStart=/usr/bin/just up dev
 ExecStartPost=/bin/systemctl disable --now $svc
