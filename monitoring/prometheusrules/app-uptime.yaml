@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app-uptime-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: app-availability
+      rules:
+        - alert: ServiceMonitorTargetDown
+          expr: max_over_time(up{job=~".*traefik.*|.*cloudflared.*"}[5m]) < 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Targets down for ingress/tunnel"
+            description: "No scraped targets for Traefik or Cloudflared for 10m."

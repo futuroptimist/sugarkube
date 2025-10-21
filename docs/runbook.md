@@ -115,6 +115,40 @@ After Flux begins reconciling, verify the critical components:
 - `kube-prometheus-stack`, `loki`, and `promtail` pods are healthy in the `monitoring` namespace and
   scrape Traefik through the dedicated `ServiceMonitor`.
 
+Flux waits for these components to report healthy rollouts via the health checks declared in
+`flux/gotk-sync.yaml` (traefik, cloudflared, Prometheus, Alertmanager, and Longhorn).
+
+### Cloudflare tunnel and DNS guidance
+
+- `cloudflared` Helm values live at `platform/cloudflared/configmap.yaml`. The tunnel fronts all
+  ingress traffic through Cloudflare so no inbound ports are opened to the cluster. Update the
+  ConfigMap with additional hostnames as needed and keep the SOPS-encrypted tunnel credential under
+  `clusters/<env>/secrets/cloudflared-tunnel.enc.yaml`.
+- The Cloudflare DNS API token should be scoped to the specific zone with `Zone:Read` and
+  `DNS:Edit`. Store the token encrypted in `platform/overlays/external-dns/secrets/` (or the
+  existing per-environment secret for cert-manager) so Flux can decrypt it at runtime.
+
+### Optional external-dns overlay
+
+- The overlay at `platform/overlays/external-dns/` enables the Bitnami chart with the Cloudflare
+  provider, references the SOPS-encrypted API token, and runs in the `external-dns` namespace.
+- To activate it for an environment, add `- ../../platform/overlays/external-dns` to the
+  `resources:` list in `clusters/<env>/kustomization.yaml` and reconcile Flux. This unsuspends the
+  HelmRelease and applies the namespace, ServiceAccount, and Secret.
+- Ensure no other automation manages the same DNS zones. `external-dns` asserts TXT ownership
+  records and will update or delete records it believes it owns; audit the target zone before
+  enabling it in production.
+
+### Quick validation commands
+
+Run these commands after a reconciliation to validate controller health and alert coverage:
+
+```bash
+kubectl -n kube-system get deploy traefik && kubectl -n cloudflared get deploy
+kubectl -n monitoring get servicemonitors,prometheusrules
+kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | grep ServiceMonitorTargetDown
+```
+
 ## 6. Backups and restore procedures
 
 ### Scheduled snapshots
