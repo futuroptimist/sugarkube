@@ -1,5 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set export := true
+set recipe-indent-alternatives := ["    ", "\t", "        "]
 
 export SUGARKUBE_CLUSTER := env('SUGARKUBE_CLUSTER', 'sugar')
 export SUGARKUBE_SERVERS := env('SUGARKUBE_SERVERS', '1')
