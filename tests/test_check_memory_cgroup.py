@@ -89,7 +89,10 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
     cmdline = tmp_path / "boot" / "firmware" / "cmdline.txt"
     cmdline.parent.mkdir(parents=True)
     cmdline.write_text(
-        "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 fsck.repair=yes rootwait\n",
+        (
+            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
+            "fsck.repair=yes rootwait cgroup_disable=memory\n"
+        ),
         encoding="utf-8",
     )
 
@@ -124,6 +127,7 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
     updated = cmdline.read_text(encoding="utf-8").strip()
     assert "cgroup_memory=1" in updated
     assert "cgroup_enable=memory" in updated
+    assert "cgroup_disable=memory" not in updated
     assert updated.count("cgroup_memory=1") == 1
     assert updated.count("cgroup_enable=memory") == 1
 
@@ -154,3 +158,4 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
         "systemctl:reboot",
     ]
 
+    assert "removed: cgroup_disable=memory" in completed.stderr
