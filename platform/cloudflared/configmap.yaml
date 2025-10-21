@@ -18,7 +18,7 @@ data:
         release: kube-prometheus-stack
     ingress:
       - hostname: apps.sugarkube.dev
-        service: http://traefik.kube-system.svc.cluster.local:80
+        service: http://traefik.traefik.svc.cluster.local:80
       - service: http_status:404
     metrics:
       enabled: true

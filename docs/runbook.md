@@ -114,6 +114,41 @@ After Flux begins reconciling, verify the critical components:
 - `longhorn` UI is reachable via the kube-vip VIP and the default StorageClass is `longhorn`.
 - `kube-prometheus-stack`, `loki`, and `promtail` pods are healthy in the `monitoring` namespace and
   scrape Traefik through the dedicated `ServiceMonitor`.
+- Flux waits for Traefik, cloudflared, kube-prometheus-stack, and Longhorn to report healthy
+  Deployments/StatefulSets before marking the platform reconciliation complete.
+
+### Cloudflare tunnel (cloudflared)
+
+The shared Helm values for the Cloudflare Tunnel live in `platform/cloudflared/configmap.yaml`.
+Patches under `clusters/*/patches/cloudflared-values.yaml` set per-environment hostnames while
+preserving the shared service mapping to the Traefik `IngressController` in the `traefik`
+namespace. The tunnel provides the public entrypoint for the cluster without opening inbound ports
+on the network perimeter.
+
+### Cloudflare DNS API tokens
+
+Create a dedicated Cloudflare API Token per environment with the minimal scopes required for DNS
+automation: `Zone:Read` and `DNS:Edit` on the specific zone(s) you intend to manage. Store the
+token as `external-dns-cloudflare` in each `clusters/<env>/secrets/` directory using `sops` so Flux
+can decrypt it at reconciliation time.
+
+### Optional external-dns overlay
+
+The overlay at `platform/overlays/external-dns` enables the Bitnami `external-dns` chart with the
+Cloudflare provider. Add the overlay to an environment by extending
+`clusters/<env>/kustomization.yaml` with `../../platform/overlays/external-dns` and supplying the
+`external-dns-cloudflare` secret referenced above. Enabling the overlay delegates DNS record
+management to Kubernetes; ensure only the intended zone(s) are listed in `domainFilters`, and
+confirm that no other automation manages the same records because TXT ownership records are used to
+prevent drift.
+
+### Quick validation commands
+
+```bash
+kubectl -n traefik get deploy && kubectl -n cloudflared get deploy
+kubectl -n monitoring get servicemonitors,prometheusrules
+kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | grep ServiceMonitorTargetDown
+```
 
 ## 6. Backups and restore procedures
 
@@ -158,6 +193,13 @@ policies.
 2. After validation, cherry-pick or merge the digest updates into `clusters/prod`.
 3. Flux automatically reconciles the changes in production; monitor Grafana dashboards and Loki logs
    to confirm stability.
+
+Immediately after promoting, request a reconciliation and confirm the built-in health checks pass:
+
+```bash
+flux reconcile kustomization platform --with-source
+flux get kustomizations -A
+```
 
 To temporarily switch to the NFS provisioner, build the storage overlay and include
 `platform/storage/overlays/nfs/longhorn-suspend.yaml` so that Longhorn is paused while the external
