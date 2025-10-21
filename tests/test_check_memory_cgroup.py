@@ -96,6 +96,10 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    runtime_cmdline = tmp_path / "proc" / "cmdline"
+    runtime_cmdline.parent.mkdir(parents=True)
+    runtime_cmdline.write_text("console=tty1 cgroup_disable=memory\n", encoding="utf-8")
+
     env = os.environ.copy()
     env.update(
         {
@@ -106,6 +110,7 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
             "SUGARKUBE_CMDLINE_PATH": str(cmdline),
             "SUGARKUBE_STATE_DIR": str(state_dir),
             "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
+            "SUGARKUBE_PROC_CMDLINE_PATH": str(runtime_cmdline),
             "SUDO_USER": "pi",
             "SUGARKUBE_ENV": "dev",
             "SUGARKUBE_SERVERS": "pi-cluster",
@@ -154,6 +159,7 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
         "sync",
         "systemctl:daemon-reload",
         "systemctl:enable sugarkube-post-reboot.service",
+        "sync",
         "sleep:2",
         "systemctl:reboot",
     ]
