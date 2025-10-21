@@ -7,4 +7,3 @@ resources:
   - loki.yaml
   - promtail-values.yaml
   - promtail.yaml
-  - traefik-servicemonitor.yaml

@@ -2,24 +2,25 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: external-dns-values
-  namespace: kube-system
+  namespace: external-dns
 data:
   values.yaml: |
     provider: cloudflare
     logLevel: info
-    policy: sync
+    policy: upsert-only
     domainFilters: []
     txtOwnerId: sugarkube
     image:
       repository: bitnami/external-dns
       tag: 0.14.2
     sources:
-      - service
       - ingress
-    cloudflare:
-      apiTokenSecretRef:
-        name: cloudflare-api-token
-        key: api-token
+    extraEnvVars:
+      - name: CF_API_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-cloudflare
+            key: api-token
     metrics:
       enabled: true
     serviceMonitor:

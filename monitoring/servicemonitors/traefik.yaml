@@ -8,6 +8,7 @@ metadata:
 spec:
   namespaceSelector:
     matchNames:
+      - traefik
       - kube-system
   selector:
     matchLabels:
