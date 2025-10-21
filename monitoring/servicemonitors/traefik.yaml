@@ -8,7 +8,7 @@ metadata:
 spec:
   namespaceSelector:
     matchNames:
-      - kube-system
+      - traefik
   selector:
     matchLabels:
       app.kubernetes.io/name: traefik
