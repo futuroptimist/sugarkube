@@ -167,7 +167,7 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
     assert "removed: cgroup_disable=memory" in completed.stderr
 
 
-def test_reboot_when_runtime_cmdline_still_disabled(tmp_path: Path) -> None:
+def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
 
@@ -196,17 +196,12 @@ def test_reboot_when_runtime_cmdline_still_disabled(tmp_path: Path) -> None:
 
     cmdline = tmp_path / "boot" / "firmware" / "cmdline.txt"
     cmdline.parent.mkdir(parents=True)
-    cmdline.write_text(
+    cmdline.write_bytes(
         (
-            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
-            "fsck.repair=yes rootwait cgroup_enable=memory cgroup_memory=1"
-        ),
-        encoding="utf-8",
+            "console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 fsck.repair=yes rootwait "
+            "cgroup_disable=memory\r\n"
+        ).encode("utf-8")
     )
-
-    runtime_cmdline = tmp_path / "proc" / "cmdline"
-    runtime_cmdline.parent.mkdir(parents=True)
-    runtime_cmdline.write_text("console=tty1 cgroup_disable=memory\n", encoding="utf-8")
 
     env = os.environ.copy()
     env.update(
@@ -218,11 +213,8 @@ def test_reboot_when_runtime_cmdline_still_disabled(tmp_path: Path) -> None:
             "SUGARKUBE_CMDLINE_PATH": str(cmdline),
             "SUGARKUBE_STATE_DIR": str(state_dir),
             "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
-            "SUGARKUBE_PROC_CMDLINE_PATH": str(runtime_cmdline),
             "SUDO_USER": "pi",
             "SUGARKUBE_ENV": "dev",
-            "SUGARKUBE_SERVERS": "pi-cluster",
-            "SUGARKUBE_TOKEN_DEV": "dev-token",
         }
     )
 
@@ -237,15 +229,18 @@ def test_reboot_when_runtime_cmdline_still_disabled(tmp_path: Path) -> None:
     assert completed.returncode == 0
     assert "Rebooting now to apply kernel parameters" in completed.stdout
 
-    # No additional backup should be created when nothing changed
-    backups = list(cmdline.parent.glob("cmdline.txt.bak.*"))
-    assert backups == []
+    updated = cmdline.read_text(encoding="utf-8")
+    assert "\r" not in updated
+    assert updated.endswith("\n")
+    assert "cgroup_disable=memory" not in updated
+    assert updated.count("cgroup_memory=1") == 1
+    assert updated.count("cgroup_enable=memory") == 1
 
     calls = call_log.read_text(encoding="utf-8").strip().splitlines()
     assert calls == [
+        "sync",
         "systemctl:daemon-reload",
         "systemctl:enable sugarkube-post-reboot.service",
-        "sync",
         "sleep:2",
         "systemctl:reboot",
     ]

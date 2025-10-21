@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-12-memory-cgroup-crlf",
+  "date": "2025-11-12",
+  "component": "just up / check_memory_cgroup.sh",
+  "rootCause": "cmdline.txt used CRLF endings, leaving cgroup_disable=memory intact so k3s exited.",
+  "resolution": "Strip carriage returns before filtering cmdline tokens and cover CRLF in tests.",
+  "references": [
+    "scripts/check_memory_cgroup.sh",
+    "tests/test_check_memory_cgroup.py"
+  ]
+}
