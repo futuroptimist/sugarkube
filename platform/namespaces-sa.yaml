@@ -14,6 +14,13 @@ items:
     kind: ServiceAccount
     metadata:
       name: default
+      namespace: traefik
+    imagePullSecrets:
+      - name: ghcr-pull-secret
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: default
       namespace: cloudflared
     imagePullSecrets:
       - name: ghcr-pull-secret

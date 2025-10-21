@@ -4,10 +4,10 @@ resources:
   - namespaces.yaml
   - namespaces-sa.yaml
   - repos.yaml
+  - pdbs.yaml
   - kube-vip/
   - cert-manager/
   - cloudflared/
-  - external-dns/
   - storage/
   - observability/
   - networking/

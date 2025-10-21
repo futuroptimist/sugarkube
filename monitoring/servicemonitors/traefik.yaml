@@ -8,10 +8,11 @@ metadata:
 spec:
   namespaceSelector:
     matchNames:
-      - kube-system
+      - traefik
   selector:
     matchLabels:
       app.kubernetes.io/name: traefik
   endpoints:
     - port: metrics
+      path: /metrics
       interval: 30s
