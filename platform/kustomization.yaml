@@ -7,7 +7,7 @@ resources:
   - kube-vip/
   - cert-manager/
   - cloudflared/
-  - external-dns/
   - storage/
   - observability/
   - networking/
+  - pdbs.yaml

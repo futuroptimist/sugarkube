@@ -13,9 +13,7 @@ data:
       name: sugarkube-shared
       secretName: cloudflared-tunnel-credentials
     serviceMonitor:
-      enabled: true
-      additionalLabels:
-        release: kube-prometheus-stack
+      enabled: false
     ingress:
       - hostname: apps.sugarkube.dev
         service: http://traefik.kube-system.svc.cluster.local:80

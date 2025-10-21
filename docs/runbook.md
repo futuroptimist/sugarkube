@@ -115,6 +115,45 @@ After Flux begins reconciling, verify the critical components:
 - `kube-prometheus-stack`, `loki`, and `promtail` pods are healthy in the `monitoring` namespace and
   scrape Traefik through the dedicated `ServiceMonitor`.
 
+### Cloudflare Tunnel on Kubernetes
+
+`platform/cloudflared/configmap.yaml` owns the shared Helm values for the Cloudflare Tunnel chart.
+Per-environment overrides live under `clusters/<env>/patches/cloudflared-values.yaml` so each
+cluster can publish its own hostname set while keeping the base tuned for arm64. The tunnel fronts
+Traefik, meaning ingress traffic exits the cluster outbound only—no inbound ports are opened on the
+Pi hosts. Flux health checks now gate reconciliation on the `cloudflared` Deployment so tunnels must
+be healthy before promotions continue.
+
+### Cloudflare DNS token scope
+
+Provision a Cloudflare **API Token** that is restricted to the specific zone used by the cluster.
+Grant `Zone:Read` and `DNS:Edit` only. Store the token in the new `external-dns-cloudflare`
+secrets under `clusters/*/secrets/` (SOPS encrypted), which are referenced when the optional
+`external-dns` overlay is enabled. Rotate the token by updating the encrypted secret and running
+`just seal-secrets env=<env>` to rewrap it for Flux.
+
+### Optional external-dns overlay
+
+The repository keeps ExternalDNS disabled by default. To enable it, add
+`../../platform/overlays/external-dns` to the `resources` block in
+`clusters/<env>/kustomization.yaml`. The overlay creates the `external-dns` namespace, attaches the
+`ghcr-pull-secret` image pull credentials, unsuspends the HelmRelease, and passes the Cloudflare
+token via the `CF_API_TOKEN` environment variable. Review Cloudflare for TXT ownership records
+(`external-dns` claims each hostname) and ensure the ingress resources you expect to publish carry
+stable hostnames to avoid churn.
+
+### Validation commands
+
+Run the following after each reconciliation to confirm the new hardening landed:
+
+```bash
+kubectl -n kube-system get deploy traefik
+kubectl -n cloudflared get deploy
+kubectl -n monitoring get servicemonitors,prometheusrules
+kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | \
+  grep ServiceMonitorTargetDown
+```
+
 ## 6. Backups and restore procedures
 
 ### Scheduled snapshots
@@ -165,6 +204,8 @@ provisioner becomes the default StorageClass.
 
 ## 8. Maintenance tasks
 
-- Rotate age keys by updating `.sops.yaml` and re-encrypting secrets with `just seal-secrets env=<env>`.
-- Keep `scripts/flux-bootstrap.sh` executable and rerun `just flux-bootstrap env=<env>` after Flux upgrades.
+- Rotate age keys by updating `.sops.yaml` and re-encrypting secrets with
+  `just seal-secrets env=<env>`.
+- Keep `scripts/flux-bootstrap.sh` executable and rerun `just flux-bootstrap env=<env>` after Flux
+  upgrades.
 - If MetalLB is introduced, follow the comments in the k3s config examples to disable `servicelb`.
