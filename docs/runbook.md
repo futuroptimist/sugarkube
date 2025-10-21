@@ -136,7 +136,8 @@ secrets under `clusters/*/secrets/` (SOPS encrypted), which are referenced when 
 
 The repository keeps ExternalDNS disabled by default. To enable it, add
 `../../platform/overlays/external-dns` to the `resources` block in
-`clusters/<env>/kustomization.yaml`. The overlay creates the `external-dns` namespace, attaches the
+`clusters/<env>/kustomization.yaml`. The base platform now provisions the `external-dns` namespace so
+the SOPS secret can reconcile even when the overlay is disabled. The overlay attaches the
 `ghcr-pull-secret` image pull credentials, unsuspends the HelmRelease, and passes the Cloudflare
 token via the `CF_API_TOKEN` environment variable. Review Cloudflare for TXT ownership records
 (`external-dns` claims each hostname) and ensure the ingress resources you expect to publish carry
