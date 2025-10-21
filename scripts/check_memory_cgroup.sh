@@ -134,7 +134,8 @@ ensure_kernel_params() {
     backup_file "$f"
     printf '%s\n' "$line" >"$f"
     sync
-    local msg="Updated $(realpath "$f")"
+    local msg
+    msg="Updated $(realpath "$f")"
     local -a parts=()
     if [ "${#added[@]}" -gt 0 ]; then
       parts+=("added: ${added[*]}")
