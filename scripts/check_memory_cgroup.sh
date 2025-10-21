@@ -163,7 +163,7 @@ EOF
 }
 
 main() {
-  ensure_root
+  ensure_root "$@"
 
   if memctrl_active; then
     log "Memory cgroup controller is active; nothing to do."
