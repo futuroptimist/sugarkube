@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-13-just-up-runtime-memory-disable",
+  "date": "2025-11-13",
+  "component": "just up dev / check_memory_cgroup.sh",
+  "rootCause": "Reboot helper skipped reboot once cmdline.txt was fixed, so the Pi stayed on a kernel with cgroup_disable=memory and k3s could not launch.",
+  "resolution": "Detect runtime cgroup_disable=memory, queue a reboot after fixing cmdline.txt, and add regression tests.",
+  "references": [
+    "scripts/check_memory_cgroup.sh",
+    "tests/test_check_memory_cgroup.py"
+  ]
+}

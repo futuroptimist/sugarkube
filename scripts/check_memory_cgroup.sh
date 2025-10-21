@@ -79,7 +79,12 @@ backup_file() {
 
 ensure_kernel_params() {
   # Adds required params if missing; echoes 1 if changed, 0 if not
-  local f; f="$(cmdline_path)"
+  local f
+  if [ -n "${1-}" ]; then
+    f="$1"
+  else
+    f="$(cmdline_path)"
+  fi
   local want1="cgroup_memory=1"
   local want2="cgroup_enable=memory"
   local line changed=0
@@ -159,6 +164,57 @@ ensure_kernel_params() {
   printf '%s' "$changed"
 }
 
+cmdline_runtime_path() {
+  if [ -n "${SUGARKUBE_PROC_CMDLINE_PATH-}" ]; then
+    if [ -f "${SUGARKUBE_PROC_CMDLINE_PATH}" ]; then
+      printf %s "${SUGARKUBE_PROC_CMDLINE_PATH}"
+      return 0
+    fi
+    log "ERROR: Cannot locate overridden proc cmdline at ${SUGARKUBE_PROC_CMDLINE_PATH}"
+    return 1
+  fi
+  printf %s /proc/cmdline
+}
+
+CMDLINE_HAS_DISABLE=0
+CMDLINE_HAS_ENABLE=0
+CMDLINE_HAS_MEMORY=0
+
+analyze_cmdline_tokens() {
+  local f="$1"
+  local line=""
+  local -a tokens=()
+  CMDLINE_HAS_DISABLE=0
+  CMDLINE_HAS_ENABLE=0
+  CMDLINE_HAS_MEMORY=0
+
+  if [ ! -f "$f" ]; then
+    return 1
+  fi
+
+  line="$(tr -d '\n' <"$f" | tr -d '\r')"
+
+  if [ -n "$line" ]; then
+    read -r -a tokens <<<"$line"
+  fi
+
+  for token in "${tokens[@]}"; do
+    case "$token" in
+      cgroup_disable=memory|cgroup_disable=memory,*)
+        CMDLINE_HAS_DISABLE=1
+        ;;
+      cgroup_enable=memory)
+        CMDLINE_HAS_ENABLE=1
+        ;;
+      cgroup_memory=1)
+        CMDLINE_HAS_MEMORY=1
+        ;;
+    esac
+  done
+
+  return 0
+}
+
 persist_env() {
   install -d -m 0755 -o root -g root "$STATE_DIR"
   : >"$ENV_FILE"
@@ -223,12 +279,55 @@ main() {
   fi
 
   log "k3s requires the Linux memory cgroup controller, but it is not active."
-  local changed
-  changed="$(ensure_kernel_params || echo 0)"
 
-  if [ "$changed" = "1" ]; then
+  local cmdline_file
+  cmdline_file="$(cmdline_path)"
+
+  local changed
+  changed="$(ensure_kernel_params "$cmdline_file" || echo 0)"
+
+  if ! analyze_cmdline_tokens "$cmdline_file"; then
+    log "ERROR: Unable to inspect $(realpath "$cmdline_file")"
+    exit 1
+  fi
+
+  if [ "$CMDLINE_HAS_DISABLE" -eq 1 ]; then
+    log "$(realpath "$cmdline_file") still contains cgroup_disable=memory; aborting."
+    exit 1
+  fi
+
+  if [ "$CMDLINE_HAS_ENABLE" -eq 0 ] || [ "$CMDLINE_HAS_MEMORY" -eq 0 ]; then
+    log "$(realpath "$cmdline_file") is missing required cgroup parameters; aborting."
+    exit 1
+  fi
+
+  local runtime_disable=0
+  local runtime_enable=0
+  local runtime_memory=0
+  local runtime_path
+  if ! runtime_path="$(cmdline_runtime_path)"; then
+    exit 1
+  fi
+
+  if grep -qw 'cgroup_disable=memory' "$runtime_path" 2>/dev/null; then
+    runtime_disable=1
+  fi
+  if grep -qw 'cgroup_enable=memory' "$runtime_path" 2>/dev/null; then
+    runtime_enable=1
+  fi
+  if grep -qw 'cgroup_memory=1' "$runtime_path" 2>/dev/null; then
+    runtime_memory=1
+  fi
+
+  local needs_reboot="$changed"
+  if [ "$runtime_disable" -eq 1 ] || [ "$runtime_enable" -eq 0 ] || [ "$runtime_memory" -eq 0 ]; then
+    needs_reboot=1
+  fi
+
+  if [ "$needs_reboot" = "1" ]; then
     persist_env || true
     install_resume_service || true
+    sync || true
     log "Rebooting now to apply kernel parameters…"
     sleep 2
     systemctl reboot
@@ -238,7 +337,7 @@ main() {
   # Parameters are present but controller still inactive; provide diagnostics.
   log "Required kernel parameters are already present but memory cgroup is still inactive."
   log "Diagnostics:"
-  log "  /proc/cmdline: $(cat /proc/cmdline 2>/dev/null || true)"
+  log "  runtime cmdline (${runtime_path}): $(cat "$runtime_path" 2>/dev/null || true)"
   if [ "$(cgroup_mode)" = v2 ]; then
     log "  cgroup v2 controllers: $(cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null || true)"
   else
