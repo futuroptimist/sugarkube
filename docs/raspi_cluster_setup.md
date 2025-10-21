@@ -12,7 +12,7 @@ personas:
 
 ## Conceptual Overview
 
-K3s, the lightweight Kubernetes used by Sugarkube, organizes nodes into **servers** (control-plane) and **agents** (workers).  
+K3s, the lightweight Kubernetes used by Sugarkube, organizes nodes into **servers** (control-plane) and **agents** (workers).
 Each cluster environment (like `dev`, `int`, or `prod`) needs a **join token** that authorizes new nodes to join its control-plane.
 
 When the first node starts `k3s` as a server, it automatically creates a secret file at:
@@ -36,6 +36,26 @@ The pattern is:
 
 ## Quick Start (same subnet, DHCP friendly)
 
+### Before you begin: enable memory cgroups
+
+`k3s` expects the Linux memory cgroup controller to be active. Raspberry Pi OS disables it by
+default, so update the boot configuration once per device before running `just up`:
+
+```bash
+if [[ -f /boot/firmware/cmdline.txt ]]; then
+  sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
+else
+  sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/cmdline.txt
+fi
+sudo reboot
+```
+
+After the reboot, rerun the helper to confirm the controller is available:
+
+```bash
+./scripts/check_memory_cgroup.sh || true
+```
+
 1. **Ensure network reachability**
 
    - All Pis must be on the same L2 subnet with multicast (UDP 5353) allowed.
@@ -49,8 +69,8 @@ The pattern is:
    just up dev
    ```
 
-   This installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as  
-   `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,  
+   This installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as
+   `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,
    and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
 
    When it finishes, capture its join token:
@@ -127,28 +147,28 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 ## Networking Notes
 
-- **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`) and `libnss-mdns` enable `.local` hostname resolution.  
-  The `prereqs` recipe ensures `/etc/nsswitch.conf` includes  
+- **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`) and `libnss-mdns` enable `.local` hostname resolution.
+  The `prereqs` recipe ensures `/etc/nsswitch.conf` includes
   `mdns4_minimal [NOTFOUND=return] dns mdns4`.
 
-- **Service advertisement**:  
-  Servers broadcast the Kubernetes API as `_https._tcp` on port `6443` with TXT records tagging cluster (`cluster=<name>`), environment (`env=<env>`), and role (`role=server`).  
+- **Service advertisement**:
+  Servers broadcast the Kubernetes API as `_https._tcp` on port `6443` with TXT records tagging cluster (`cluster=<name>`), environment (`env=<env>`), and role (`role=server`).
   Agents use these `.local` hostnames to locate the control-plane automatically.
 
-- **Multicast**:  
+- **Multicast**:
   Keep UDP 5353 open within the subnet. `.local` is reserved for link-local mDNS per [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762).
 
 ---
 
 ## Typical Topologies
 
-- **Single-server (default)** —  
-  The first node bootstraps k3s with the built-in SQLite datastore.  
+- **Single-server (default)** —
+  The first node bootstraps k3s with the built-in SQLite datastore.
   Agents join it directly and workloads run on agents.
 
-- **High-availability (HA)** —  
-  Set `SUGARKUBE_SERVERS>=3` before bring-up.  
-  The first server starts etcd with `--cluster-init`; subsequent servers detect peers via mDNS and join over `https://<peer>:6443`.  
+- **High-availability (HA)** —
+  Set `SUGARKUBE_SERVERS>=3` before bring-up.
+  The first server starts etcd with `--cluster-init`; subsequent servers detect peers via mDNS and join over `https://<peer>:6443`.
   Use NVMe or SSD storage for HA; SD cards aren’t durable enough for etcd writes.
 
 ---
@@ -157,7 +177,7 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 - **Error: `SUGARKUBE_TOKEN (or per-env variant) required`**
 
-  You tried to run `just up` on a node without exporting the token.  
+  You tried to run `just up` on a node without exporting the token.
   Retrieve it from the control-plane (`/var/lib/rancher/k3s/server/node-token`) and set the appropriate environment variable before retrying.
 
 - **Cluster discovery fails**
@@ -177,7 +197,7 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 Once all three default nodes for an environment report `Ready`, proceed to the deployment playbooks (`token.place`, `dspace`, etc.) as usual.
 
-> For a step-by-step deep dive, see  
+> For a step-by-step deep dive, see
 > [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
 
 ---

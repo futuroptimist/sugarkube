@@ -37,7 +37,22 @@ if [[ -r /proc/cmdline ]]; then
 fi
 
 if ((${#missing_flags[@]})); then
-  err "Add the following kernel parameters to /boot/firmware/cmdline.txt: ${missing_flags[*]}"
+  cmdline_hint="/boot/firmware/cmdline.txt"
+  example_target=""
+  if [[ -e /boot/firmware/cmdline.txt ]]; then
+    example_target="/boot/firmware/cmdline.txt"
+  elif [[ -e /boot/cmdline.txt ]]; then
+    cmdline_hint="/boot/cmdline.txt"
+    example_target="/boot/cmdline.txt"
+  else
+    cmdline_hint="/boot/firmware/cmdline.txt or /boot/cmdline.txt"
+  fi
+
+  err "Add the following kernel parameters to ${cmdline_hint}: ${missing_flags[*]}"
+  if [[ -n "${example_target}" ]]; then
+    err "Example (append while keeping the file on a single line):"
+    err "  sudo sed -i 's/$/ ${missing_flags[*]}/' ${example_target}"
+  fi
 else
   err "Enable the memory controller in your boot configuration and reboot the node."
 fi
