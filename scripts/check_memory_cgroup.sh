@@ -95,7 +95,13 @@ ensure_kernel_params() {
     read -r -a tokens <<<"$line"
   fi
 
+  local token clean
   for token in "${tokens[@]}"; do
+    clean="${token//$'\r'/}"
+    if [ "$clean" != "$token" ]; then
+      changed=1
+    fi
+    token="$clean"
     case "$token" in
       cgroup_disable=memory|cgroup_disable=memory,*)
         removed+=("$token")
