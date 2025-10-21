@@ -194,7 +194,7 @@ eeprom-nvme-first:
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running clone-ssd." >&2; exit 1; fi
     sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
-        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 show-disks:
     lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
@@ -202,17 +202,17 @@ show-disks:
 preflight:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running preflight." >&2; exit 1; fi
     sudo --preserve-env=TARGET,WIPE \
-        "{{ preflight_cmd }}"
+    "{{ preflight_cmd }}"
 
 verify-clone:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running verify-clone." >&2; exit 1; fi
     sudo --preserve-env=TARGET,MOUNT_BASE \
-        env MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
-        "{{ verify_clone_cmd }}"
+    env MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+    "{{ verify_clone_cmd }}"
 
 finalize-nvme:
     sudo --preserve-env=EDITOR,FINALIZE_NVME_EDIT \
-        "{{ finalize_nvme_cmd }}"
+    "{{ finalize_nvme_cmd }}"
 
 rollback-to-sd:
     "{{ rollback_helper_cmd }}"
@@ -229,15 +229,15 @@ rollback-to-sd:
 
 clean-mounts args='':
     sudo --preserve-env=TARGET,MOUNT_BASE \
-      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
-          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
-      "{{ clean_mounts_cmd }}" {{ args }}
+    env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+    MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+    "{{ clean_mounts_cmd }}" {{ args }}
 
 clean-mounts-hard:
     sudo --preserve-env=TARGET,MOUNT_BASE \
-      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
-          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
-      "{{ clean_mounts_cmd }}" --force
+    env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+    MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+    "{{ clean_mounts_cmd }}" --force
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
@@ -331,17 +331,17 @@ cluster-bootstrap:
 codespaces-bootstrap:
     sudo apt-get update
     sudo apt-get install -y \
-        aspell \
-        aspell-en \
-        curl \
-        gh \
-        jq \
-        pv \
-        python3 \
-        python3-pip \
-        python3-venv \
-        unzip \
-        xz-utils
+    aspell \
+    aspell-en \
+    curl \
+    gh \
+    jq \
+    pv \
+    python3 \
+    python3-pip \
+    python3-venv \
+    unzip \
+    xz-utils
     python3 -m pip install --user --upgrade pip pre-commit pyspelling linkchecker
 
 # Run spellcheck and linkcheck to keep docs automation aligned
@@ -388,8 +388,8 @@ flux-bootstrap env='dev':
 # Reconcile the platform Kustomization via Flux
 platform-apply env='dev':
     flux reconcile kustomization platform \
-        --namespace flux-system \
-        --with-source
+    --namespace flux-system \
+    --with-source
 
 # Reseal SOPS secrets for an environment
 seal-secrets env='dev':
