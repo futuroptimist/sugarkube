@@ -96,6 +96,16 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    proc_cmdline = tmp_path / "proc" / "cmdline"
+    proc_cmdline.parent.mkdir(parents=True)
+    proc_cmdline.write_text(
+        (
+            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
+            "fsck.repair=yes rootwait cgroup_disable=memory"
+        ),
+        encoding="utf-8",
+    )
+
     env = os.environ.copy()
     env.update(
         {
@@ -104,6 +114,7 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
             "EUID": "0",
             "SUGARKUBE_MEMCTRL_FORCE": "inactive",
             "SUGARKUBE_CMDLINE_PATH": str(cmdline),
+            "SUGARKUBE_PROC_CMDLINE_PATH": str(proc_cmdline),
             "SUGARKUBE_STATE_DIR": str(state_dir),
             "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
             "SUDO_USER": "pi",
@@ -197,6 +208,16 @@ def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
         ).encode("utf-8")
     )
 
+    proc_cmdline = tmp_path / "proc" / "cmdline"
+    proc_cmdline.parent.mkdir(parents=True)
+    proc_cmdline.write_text(
+        (
+            "console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 fsck.repair=yes rootwait "
+            "cgroup_disable=memory"
+        ),
+        encoding="utf-8",
+    )
+
     env = os.environ.copy()
     env.update(
         {
@@ -205,6 +226,7 @@ def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
             "EUID": "0",
             "SUGARKUBE_MEMCTRL_FORCE": "inactive",
             "SUGARKUBE_CMDLINE_PATH": str(cmdline),
+            "SUGARKUBE_PROC_CMDLINE_PATH": str(proc_cmdline),
             "SUGARKUBE_STATE_DIR": str(state_dir),
             "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
             "SUDO_USER": "pi",
@@ -233,6 +255,97 @@ def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
     calls = call_log.read_text(encoding="utf-8").strip().splitlines()
     assert calls == [
         "sync",
+        "systemctl:daemon-reload",
+        "systemctl:enable sugarkube-post-reboot.service",
+        "sleep:2",
+        "systemctl:reboot",
+    ]
+
+
+def test_reboots_when_runtime_cmdline_still_disables_memory(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    call_log = tmp_path / "calls.log"
+    call_log.write_text("", encoding="utf-8")
+
+    def make_stub(name: str, body: str) -> None:
+        _make_executable(
+            bin_dir / name,
+            textwrap.dedent(
+                f"""
+                #!/usr/bin/env bash
+                {body}
+                """
+            ),
+        )
+
+    make_stub("uname", "echo Linux")
+    make_stub("systemctl", "echo \"systemctl:$*\" >>\"${CALL_LOG}\"")
+    make_stub("sleep", "echo \"sleep:$*\" >>\"${CALL_LOG}\"")
+
+    state_dir = tmp_path / "state"
+    systemd_dir = tmp_path / "systemd"
+    systemd_dir.mkdir(parents=True)
+
+    cmdline = tmp_path / "boot" / "firmware" / "cmdline.txt"
+    cmdline.parent.mkdir(parents=True)
+    cmdline.write_text(
+        (
+            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
+            "fsck.repair=yes rootwait cgroup_memory=1 cgroup_enable=memory\n"
+        ),
+        encoding="utf-8",
+    )
+
+    proc_cmdline = tmp_path / "proc" / "cmdline"
+    proc_cmdline.parent.mkdir(parents=True)
+    proc_cmdline.write_text(
+        (
+            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
+            "fsck.repair=yes rootwait cgroup_disable=memory"
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "CALL_LOG": str(call_log),
+            "EUID": "0",
+            "SUGARKUBE_MEMCTRL_FORCE": "inactive",
+            "SUGARKUBE_CMDLINE_PATH": str(cmdline),
+            "SUGARKUBE_PROC_CMDLINE_PATH": str(proc_cmdline),
+            "SUGARKUBE_STATE_DIR": str(state_dir),
+            "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
+            "SUDO_USER": "pi",
+            "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_SERVERS": "pi-cluster",
+        }
+    )
+
+    completed = subprocess.run(
+        [str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert "Running kernel booted with cgroup_disable=memory" in completed.stdout
+    assert "Rebooting now to apply kernel parameters" in completed.stdout
+
+    assert cmdline.read_text(encoding="utf-8").endswith("\n")
+    backups = list(cmdline.parent.glob("cmdline.txt.bak.*"))
+    assert backups == []
+
+    env_file = state_dir / "env"
+    assert env_file.exists()
+
+    calls = call_log.read_text(encoding="utf-8").strip().splitlines()
+    assert calls == [
         "systemctl:daemon-reload",
         "systemctl:enable sugarkube-post-reboot.service",
         "sleep:2",
