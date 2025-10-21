@@ -19,8 +19,8 @@ up env='dev': prereqs
 
     # --- FIX: bootstrap if no existing token ---
     if [ ! -f /var/lib/rancher/k3s/server/node-token ]; then
-        echo "[sugarkube] No existing cluster detected — bootstrapping k3s server..."
-        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --cluster-init" sh -
+    echo "[sugarkube] No existing cluster detected — bootstrapping k3s server..."
+    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --cluster-init" sh -
     fi
 
     # Proceed with discovery/join for subsequent nodes
