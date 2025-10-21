@@ -17,6 +17,8 @@ up env='dev': prereqs
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
+    "{{ scripts_dir }}/check_memory_cgroup.sh"
+
     # --- FIX: bootstrap if no existing token ---
     if [ ! -f /var/lib/rancher/k3s/server/node-token ]; then \
         echo "[sugarkube] No existing cluster detected — bootstrapping k3s server..."; \
