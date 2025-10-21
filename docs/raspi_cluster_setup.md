@@ -6,93 +6,178 @@ personas:
 
 # Raspberry Pi Cluster Setup (Quick Start)
 
-`sugarkube` now promises "syntactic sugar" for Raspberry Pi clusters: once your Pis boot
-the standard image and share the same LAN, you can form per-environment k3s clusters with a
-single command per node.
+`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
 
-## Quick start (same subnet, DHCP friendly)
+---
 
-1. Make sure each Pi is on the same L2 subnet with multicast allowed (UDP 5353 for mDNS) and can
-   reach the internet.
-2. On the first Pi for an environment (defaults to `dev`), run:
+## Conceptual Overview
+
+K3s, the lightweight Kubernetes used by Sugarkube, organizes nodes into **servers** (control-plane) and **agents** (workers).  
+Each cluster environment (like `dev`, `int`, or `prod`) needs a **join token** that authorizes new nodes to join its control-plane.
+
+When the first node starts `k3s` as a server, it automatically creates a secret file at:
+
+```
+/var/lib/rancher/k3s/server/node-token
+```
+
+That token is what other nodes must present to join. Sugarkube never invents its own tokens—it just expects you to export them before you run `just up`.
+
+The pattern is:
+
+| Environment | Env var read by `just up` | Example |
+|--------------|---------------------------|----------|
+| dev | `SUGARKUBE_TOKEN_DEV` | export SUGARKUBE_TOKEN_DEV="K10abcdef…" |
+| int | `SUGARKUBE_TOKEN_INT` | export SUGARKUBE_TOKEN_INT="K10ghijk…" |
+| prod | `SUGARKUBE_TOKEN_PROD` | export SUGARKUBE_TOKEN_PROD="K10lmno…" |
+| fallback | `SUGARKUBE_TOKEN` | used if no env-specific token is set |
+
+---
+
+## Quick Start (same subnet, DHCP friendly)
+
+1. **Ensure network reachability**
+
+   - All Pis must be on the same L2 subnet with multicast (UDP 5353) allowed.
+   - Each Pi should be able to reach the internet.
+
+2. **Bootstrap the first control-plane node**
+
+   On the first Pi for an environment (defaults to `dev`):
+
    ```bash
    just up dev
    ```
-   The node installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as
-   `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and taints
-   itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
-3. Repeat `just up dev` on two more Pis to add agents. They discover the control-plane via mDNS,
-   join using the `SUGARKUBE_TOKEN_DEV` token, and let k3s' embedded client load balancer discover
-   additional servers automatically.
-4. Switch environments by changing the recipe argument:
+
+   This installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as  
+   `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,  
+   and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
+
+   When it finishes, capture its join token:
+
+   ```bash
+   sudo cat /var/lib/rancher/k3s/server/node-token
+   ```
+
+   Copy that long `K10…` string somewhere safe.
+
+3. **Join worker or additional server nodes**
+
+   On each additional Pi you want in the same environment, export the token you copied:
+
+   ```bash
+   export SUGARKUBE_TOKEN_DEV="K10abc123..."
+   just up dev
+   ```
+
+   These nodes discover the control-plane over mDNS, join using that token, and then rely on k3s’ built-in load balancer for ongoing discovery.
+
+4. **Switch environments easily**
+
+   Each environment (`dev`, `int`, `prod`) maintains its own token and mDNS advertisement:
+
    ```bash
    just up int
    just up prod
    ```
-   Each environment has its own join token and DNS-SD advertisement, so dev/int/prod clusters can
-   coexist on the same network without IP gymnastics.
-5. On any server node, export kubeconfig for a workstation:
-   ```bash
-   just kubeconfig
-   ```
-   The file ends up in `~/.kube/config` with the server's `.local` hostname already present in the
-   TLS SAN list, so DHCP IP churn is safe.
-6. Inspect the cluster at any time:
-   ```bash
-   just status
-   ```
-7. Need a clean slate? Use:
-   ```bash
-   just wipe
-   ```
-   The helper runs the official uninstall scripts, drops the Avahi service file, and restarts the
-   daemon.
 
-Once the three default nodes per environment are `Ready`, follow the deployment playbooks (token.place
-and friends) exactly as before.
+   You can even run multiple environments on the same LAN simultaneously as long as they use different tokens.
 
-> Want the detailed manual process? Head over to
-> [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
+5. **Manage and inspect**
 
-## Configuration knobs
+   - Export kubeconfig for a workstation:
+     ```bash
+     just kubeconfig
+     ```
+     The file is written to `~/.kube/config` and already includes the `.local` hostname in the TLS SAN, so DHCP IP churn is safe.
 
-These environment variables tweak the automation. Set them inline (`SUGARKUBE_SERVERS=3 just up prod`)
-or export them in your shell profile.
+   - Check cluster status:
+     ```bash
+     just status
+     ```
+
+   - Wipe a node clean:
+     ```bash
+     just wipe
+     ```
+     This runs the official uninstall scripts, drops its Avahi service file, and restarts the daemon.
+
+---
+
+## Configuration Knobs
+
+You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or export them in your shell profile.
 
 | Variable | Default | Purpose |
-| --- | --- | --- |
-| `SUGARKUBE_CLUSTER` | `sugar` | Logical cluster prefix advertised over mDNS |
+|-----------|----------|----------|
+| `SUGARKUBE_CLUSTER` | `sugar` | Logical cluster prefix advertised via mDNS |
 | `SUGARKUBE_SERVERS` | `1` | Desired control-plane count per environment |
-| `K3S_CHANNEL` | `stable` | Channel passed to the official k3s install script |
-| `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Preferred per-environment join tokens |
-| `SUGARKUBE_TOKEN` | _none_ | Fallback token when an env-specific variant is absent |
+| `K3S_CHANNEL` | `stable` | Channel for the official k3s install script |
+| `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Environment-specific join tokens (see above) |
+| `SUGARKUBE_TOKEN` | _none_ | Fallback token if no per-env variant is set |
 
-Tokens gate node registration. Generate separate values per environment (e.g. from
-`/var/lib/rancher/k3s/server/node-token` on the first server) and export them before running `just up`.
+### Generating Tokens Manually
+If you ever need to regenerate a token, run this on a control-plane node:
+```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+or, if that file is missing, reinstall the server (`just up dev` on a fresh node) and grab the new token.
 
-## Networking notes
+---
 
-- Avahi (`avahi-daemon` + `avahi-utils`) and `libnss-mdns` enable `.local` resolution via multicast
-  DNS. The `prereqs` recipe installs them and ensures `/etc/nsswitch.conf` includes
-  `mdns4_minimal [NOTFOUND=return] dns mdns4` so host lookups prefer mDNS on the LAN.
-- Servers advertise the Kubernetes API as `_https._tcp` on port `6443` with Bonjour TXT records that
-  tag the Sugarkube cluster (`cluster=<name>`), environment (`env=<env>`), and role (`role=server`).
-  Agents use the `.local` hostname exposed over mDNS to join. After the first registration they
-  rely on the embedded client-side load balancer built into k3s to discover/fail over to other
-  servers, so IP address changes via DHCP are tolerated.
-- Keep UDP 5353 (multicast) open across the subnet. `.local` is reserved for link-local mDNS by
-  [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762).
+## Networking Notes
 
-## Topologies
+- **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`) and `libnss-mdns` enable `.local` hostname resolution.  
+  The `prereqs` recipe ensures `/etc/nsswitch.conf` includes  
+  `mdns4_minimal [NOTFOUND=return] dns mdns4`.
 
-- **Default single server (`SUGARKUBE_SERVERS=1`)** – The first node per environment bootstraps k3s
-  with the default SQLite datastore (no `--cluster-init`). Agents join against its `.local` name,
-  inherit taints/labels, and the server keeps workloads off itself by default.
-- **High-availability control plane (`SUGARKUBE_SERVERS>=3`)** – The first `just up <env>` run uses
-  `--cluster-init` to start embedded etcd. Subsequent server nodes detect the desired count over mDNS
-  and join via `--server https://<peer>:6443`. Use NVMe/SSD storage on Pis when running etcd; SD cards
-  are not durable enough for the write profile.
+- **Service advertisement**:  
+  Servers broadcast the Kubernetes API as `_https._tcp` on port `6443` with TXT records tagging cluster (`cluster=<name>`), environment (`env=<env>`), and role (`role=server`).  
+  Agents use these `.local` hostnames to locate the control-plane automatically.
 
-Optional enhancements like a dedicated registration VIP or external load balancer remain compatible—
-point `SUGARKUBE_TOKEN_*` clients at the chosen endpoint and keep the `.local` advertisements for LAN
-peers.
+- **Multicast**:  
+  Keep UDP 5353 open within the subnet. `.local` is reserved for link-local mDNS per [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762).
+
+---
+
+## Typical Topologies
+
+- **Single-server (default)** —  
+  The first node bootstraps k3s with the built-in SQLite datastore.  
+  Agents join it directly and workloads run on agents.
+
+- **High-availability (HA)** —  
+  Set `SUGARKUBE_SERVERS>=3` before bring-up.  
+  The first server starts etcd with `--cluster-init`; subsequent servers detect peers via mDNS and join over `https://<peer>:6443`.  
+  Use NVMe or SSD storage for HA; SD cards aren’t durable enough for etcd writes.
+
+---
+
+## Troubleshooting
+
+- **Error: `SUGARKUBE_TOKEN (or per-env variant) required`**
+
+  You tried to run `just up` on a node without exporting the token.  
+  Retrieve it from the control-plane (`/var/lib/rancher/k3s/server/node-token`) and set the appropriate environment variable before retrying.
+
+- **Cluster discovery fails**
+
+  - Confirm multicast (UDP 5353) is allowed.
+  - Verify `avahi-daemon` is running (`sudo systemctl status avahi-daemon`).
+  - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`.
+
+- **Reset everything**
+
+  ```bash
+  just wipe
+  sudo reboot
+  ```
+
+---
+
+Once all three default nodes for an environment report `Ready`, proceed to the deployment playbooks (`token.place`, `dspace`, etc.) as usual.
+
+> For a step-by-step deep dive, see  
+> [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
+
+---
