@@ -159,3 +159,82 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
     ]
 
     assert "removed: cgroup_disable=memory" in completed.stderr
+
+
+def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    call_log = tmp_path / "calls.log"
+    call_log.write_text("", encoding="utf-8")
+
+    def make_stub(name: str, body: str) -> None:
+        _make_executable(
+            bin_dir / name,
+            textwrap.dedent(
+                f"""
+                #!/usr/bin/env bash
+                {body}
+                """
+            ),
+        )
+
+    make_stub("uname", "echo Linux")
+    make_stub("systemctl", "echo \"systemctl:$*\" >>\"${CALL_LOG}\"")
+    make_stub("sleep", "echo \"sleep:$*\" >>\"${CALL_LOG}\"")
+    make_stub("sync", "echo sync >>\"${CALL_LOG}\"")
+
+    state_dir = tmp_path / "state"
+    systemd_dir = tmp_path / "systemd"
+    systemd_dir.mkdir(parents=True)
+
+    cmdline = tmp_path / "boot" / "firmware" / "cmdline.txt"
+    cmdline.parent.mkdir(parents=True)
+    cmdline.write_bytes(
+        (
+            "console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 fsck.repair=yes rootwait "
+            "cgroup_disable=memory\r\n"
+        ).encode("utf-8")
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "CALL_LOG": str(call_log),
+            "EUID": "0",
+            "SUGARKUBE_MEMCTRL_FORCE": "inactive",
+            "SUGARKUBE_CMDLINE_PATH": str(cmdline),
+            "SUGARKUBE_STATE_DIR": str(state_dir),
+            "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
+            "SUDO_USER": "pi",
+            "SUGARKUBE_ENV": "dev",
+        }
+    )
+
+    completed = subprocess.run(
+        [str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert "Rebooting now to apply kernel parameters" in completed.stdout
+
+    updated = cmdline.read_text(encoding="utf-8")
+    assert "\r" not in updated
+    assert updated.endswith("\n")
+    assert "cgroup_disable=memory" not in updated
+    assert updated.count("cgroup_memory=1") == 1
+    assert updated.count("cgroup_enable=memory") == 1
+
+    calls = call_log.read_text(encoding="utf-8").strip().splitlines()
+    assert calls == [
+        "sync",
+        "systemctl:daemon-reload",
+        "systemctl:enable sugarkube-post-reboot.service",
+        "sleep:2",
+        "systemctl:reboot",
+    ]
