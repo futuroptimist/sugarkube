@@ -177,8 +177,10 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 - **Error: `SUGARKUBE_TOKEN (or per-env variant) required`**
 
-  You tried to run `just up` on a node without exporting the token.
-  Retrieve it from the control-plane (`/var/lib/rancher/k3s/server/node-token`) and set the appropriate environment variable before retrying.
+  `just up` now reads the generated token from `/var/lib/rancher/k3s/server/node-token`
+  (or `/boot/sugarkube-node-token`) when bootstrapping a single-server cluster, so you
+  should only see this error when orchestrating multi-server or agent joins. Export the
+  appropriate environment variable with the control-plane token before retrying.
 
 - **Cluster discovery fails**
 

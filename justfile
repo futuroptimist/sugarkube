@@ -19,12 +19,6 @@ up env='dev': prereqs
 
     "{{ scripts_dir }}/check_memory_cgroup.sh"
 
-    # --- FIX: bootstrap if no existing token ---
-    if [ ! -f /var/lib/rancher/k3s/server/node-token ]; then \
-        echo "[sugarkube] No existing cluster detected — bootstrapping k3s server..."; \
-        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --cluster-init" sh -; \
-    fi
-
     # Proceed with discovery/join for subsequent nodes
     sudo -E bash scripts/k3s-discover.sh
 

@@ -4,6 +4,47 @@ set -euo pipefail
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
+NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
+BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
+
+PRINT_TOKEN_ONLY=0
+CHECK_TOKEN_ONLY=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --print-resolved-token)
+      PRINT_TOKEN_ONLY=1
+      ;;
+    --check-token-only)
+      CHECK_TOKEN_ONLY=1
+      ;;
+    --help)
+      cat <<'EOF_HELP'
+Usage: k3s-discover.sh [--print-resolved-token] [--check-token-only]
+
+  --print-resolved-token  Resolve the effective join token using the
+                          standard environment and file fallbacks, print it,
+                          then exit.
+  --check-token-only      Resolve the token and validate whether discovery
+                          can proceed. No network or installer actions are
+                          executed.
+EOF_HELP
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -* )
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    * )
+      break
+      ;;
+  esac
+  shift
+done
 
 case "${ENVIRONMENT}" in
   dev) TOKEN="${SUGARKUBE_TOKEN_DEV:-${SUGARKUBE_TOKEN:-}}" ;;
@@ -12,9 +53,60 @@ case "${ENVIRONMENT}" in
   *) TOKEN="${SUGARKUBE_TOKEN:-}" ;;
 esac
 
-if [ -z "${TOKEN:-}" ]; then
+RESOLVED_TOKEN_SOURCE=""
+
+resolve_local_token() {
+  if [ -n "${TOKEN:-}" ]; then
+    return 0
+  fi
+
+  if [ -s "${NODE_TOKEN_PATH}" ]; then
+    TOKEN="$(tr -d '\n' <"${NODE_TOKEN_PATH}")"
+    RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+    return 0
+  fi
+
+  if [ -s "${BOOT_TOKEN_PATH}" ]; then
+    local line
+    line="$(grep -m1 '^NODE_TOKEN=' "${BOOT_TOKEN_PATH}" 2>/dev/null || true)"
+    if [ -n "${line}" ]; then
+      TOKEN="${line#NODE_TOKEN=}"
+      TOKEN="${TOKEN%$'\r'}"
+      TOKEN="${TOKEN%$'\n'}"
+      RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+resolve_local_token || true
+
+ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
+if [ -z "${TOKEN:-}" ] && [ "${SERVERS_DESIRED}" = "1" ]; then
+  ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+fi
+
+if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
+  if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
+    echo "SUGARKUBE_TOKEN (or per-env variant) required" >&2
+    exit 1
+  fi
   echo "SUGARKUBE_TOKEN (or per-env variant) required"
   exit 1
+fi
+
+if [ "${PRINT_TOKEN_ONLY}" -eq 1 ]; then
+  printf '%s\n' "${TOKEN:-}"
+  if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
+    >&2 printf 'token-source=%s\n' "${RESOLVED_TOKEN_SOURCE}"
+  fi
+  exit 0
+fi
+
+if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
+  exit 0
 fi
 
 HN="$(hostname -s)"
@@ -221,11 +313,20 @@ claim_bootstrap_leadership() {
   return 0
 }
 
+build_install_env() {
+  local -n _target=$1
+  _target=("INSTALL_K3S_CHANNEL=${K3S_CHANNEL:-stable}")
+  if [ -n "${TOKEN:-}" ]; then
+    _target+=("K3S_TOKEN=${TOKEN}")
+  fi
+}
+
 install_server_single() {
   log "Bootstrapping single-server (SQLite) ${CLUSTER}/${ENVIRONMENT} on ${MDNS_HOST}"
+  local env_assignments
+  build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | INSTALL_K3S_CHANNEL="${K3S_CHANNEL:-stable}" \
-      K3S_TOKEN="${TOKEN}" \
+    | "${env_assignments[@]}" \
       sh -s - server \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -238,9 +339,10 @@ install_server_single() {
 
 install_server_cluster_init() {
   log "Bootstrapping first HA server (embedded etcd) ${CLUSTER}/${ENVIRONMENT} on ${MDNS_HOST}"
+  local env_assignments
+  build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | INSTALL_K3S_CHANNEL="${K3S_CHANNEL:-stable}" \
-      K3S_TOKEN="${TOKEN}" \
+    | "${env_assignments[@]}" \
       sh -s - server \
       --cluster-init \
       --tls-san "${MDNS_HOST}" \
@@ -254,10 +356,15 @@ install_server_cluster_init() {
 
 install_server_join() {
   local server="$1"
+  if [ -z "${TOKEN:-}" ]; then
+    log "Join token missing; cannot join existing HA server"
+    exit 1
+  fi
   log "Joining as additional HA server via https://${server}:6443 (desired servers=${SERVERS_DESIRED})"
+  local env_assignments
+  build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | INSTALL_K3S_CHANNEL="${K3S_CHANNEL:-stable}" \
-      K3S_TOKEN="${TOKEN}" \
+    | "${env_assignments[@]}" \
       sh -s - server \
       --server "https://${server}:6443" \
       --tls-san "${server}" \
@@ -272,11 +379,16 @@ install_server_join() {
 
 install_agent() {
   local server="$1"
+  if [ -z "${TOKEN:-}" ]; then
+    log "Join token missing; cannot join agent to existing server"
+    exit 1
+  fi
   log "Joining as agent via https://${server}:6443"
+  local env_assignments
+  build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | INSTALL_K3S_CHANNEL="${K3S_CHANNEL:-stable}" \
+    | "${env_assignments[@]}" \
       K3S_URL="https://${server}:6443" \
-      K3S_TOKEN="${TOKEN}" \
       sh -s - agent \
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
@@ -352,4 +464,3 @@ if [ -f /etc/rancher/k3s/k3s.yaml ]; then
   sudo mkdir -p /root/.kube
   sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
 fi
-
