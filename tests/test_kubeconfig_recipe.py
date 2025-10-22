@@ -86,6 +86,9 @@ users:
             "HOME": str(home),
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
             "TEST_K3S_SOURCE": str(source_config),
+            # GitHub's macOS runners use BSD sed (different flags) and mount the
+            # workspace with special permissions, so chown/chmod behave oddly.
+            # The shim skips chown to keep the recipe portable across CI.
             "TEST_SKIP_CHOWN": "1",
         }
     )
