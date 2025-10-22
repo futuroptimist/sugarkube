@@ -10,6 +10,9 @@ BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
+NODE_TOKEN_PRESENT=0
+BOOT_TOKEN_PRESENT=0
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --print-resolved-token)
@@ -60,21 +63,31 @@ resolve_local_token() {
     return 0
   fi
 
+  local candidate=""
+  local line=""
+
   if [ -s "${NODE_TOKEN_PATH}" ]; then
-    TOKEN="$(tr -d '\n' <"${NODE_TOKEN_PATH}")"
-    RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
-    return 0
+    NODE_TOKEN_PRESENT=1
+    candidate="$(tr -d '\n' <"${NODE_TOKEN_PATH}")"
+    if [ -n "${candidate}" ]; then
+      TOKEN="${candidate}"
+      RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+      return 0
+    fi
   fi
 
   if [ -s "${BOOT_TOKEN_PATH}" ]; then
-    local line
     line="$(grep -m1 '^NODE_TOKEN=' "${BOOT_TOKEN_PATH}" 2>/dev/null || true)"
     if [ -n "${line}" ]; then
-      TOKEN="${line#NODE_TOKEN=}"
-      TOKEN="${TOKEN%$'\r'}"
-      TOKEN="${TOKEN%$'\n'}"
-      RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
-      return 0
+      BOOT_TOKEN_PRESENT=1
+      candidate="${line#NODE_TOKEN=}"
+      candidate="${candidate%$'\r'}"
+      candidate="${candidate%$'\n'}"
+      if [ -n "${candidate}" ]; then
+        TOKEN="${candidate}"
+        RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+        return 0
+      fi
     fi
   fi
 
@@ -87,7 +100,7 @@ ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
 if [ -z "${TOKEN:-}" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
-  elif [ ! -s "${NODE_TOKEN_PATH}" ] && [ ! -s "${BOOT_TOKEN_PATH}" ]; then
+  elif [ "${NODE_TOKEN_PRESENT}" -eq 0 ] && [ "${BOOT_TOKEN_PRESENT}" -eq 0 ]; then
     # No join token was provided and nothing has been written locally yet.
     # Allow the first HA control-plane node to bootstrap without a token so
     # it can generate one for subsequent peers.
