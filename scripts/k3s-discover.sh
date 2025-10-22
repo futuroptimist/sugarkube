@@ -209,15 +209,17 @@ def debug(message: str) -> None:
 
 def run_avahi() -> str:
     try:
+        command = [
+            "avahi-browse",
+            "--parsable",
+            "--terminate",
+            "--resolve",  # required for host/port/TXT fields
+        ]
+        if mode in {"server-first", "server-count"}:
+            command.append("--ignore-local")  # skip local adverts when only remote servers matter
+        command.append("_https._tcp")
         return subprocess.check_output(
-            [
-                "avahi-browse",
-                "--parsable",
-                "--terminate",
-                "--resolve",  # required for host/port/TXT fields
-                "--ignore-local",  # avoid matching our own bootstrap adverts
-                "_https._tcp",
-            ],
+            command,
             stderr=subprocess.DEVNULL,
             text=True,
         )
