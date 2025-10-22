@@ -196,6 +196,30 @@ print(html.escape(sys.argv[1]))
 PY
 }
 
+format_url_host() {
+  local host="$1"
+  if [ -z "${host}" ]; then
+    return
+  fi
+
+  if [[ "${host}" == *:* ]]; then
+    local escaped="${host}"
+    if [[ "${escaped}" == *%* ]]; then
+      local placeholder=$'\001'
+      escaped="${escaped//%25/${placeholder}}"
+      escaped="${escaped//%/%25}"
+      escaped="${escaped//${placeholder}/%25}"
+    fi
+    if [[ "${escaped}" == \[* ]]; then
+      printf '%s\n' "${escaped}"
+    else
+      printf '[%s]\n' "${escaped}"
+    fi
+  else
+    printf '%s\n' "${host}"
+  fi
+}
+
 run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
@@ -452,17 +476,19 @@ install_server_cluster_init() {
 
 install_server_join() {
   local server="$1"
+  local server_url_host
+  server_url_host="$(format_url_host "${server}")"
   if [ -z "${TOKEN:-}" ]; then
     log "Join token missing; cannot join existing HA server"
     exit 1
   fi
-  log "Joining as additional HA server via https://${server}:6443 (desired servers=${SERVERS_DESIRED})"
+  log "Joining as additional HA server via https://${server_url_host}:6443 (desired servers=${SERVERS_DESIRED})"
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
     | env "${env_assignments[@]}" \
       sh -s - server \
-      --server "https://${server}:6443" \
+      --server "https://${server_url_host}:6443" \
       --tls-san "${server}" \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -475,14 +501,16 @@ install_server_join() {
 
 install_agent() {
   local server="$1"
+  local server_url_host
+  server_url_host="$(format_url_host "${server}")"
   if [ -z "${TOKEN:-}" ]; then
     log "Join token missing; cannot join agent to existing server"
     exit 1
   fi
-  log "Joining as agent via https://${server}:6443"
+  log "Joining as agent via https://${server_url_host}:6443"
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:6443")
+  env_assignments+=("K3S_URL=https://${server_url_host}:6443")
   curl -sfL https://get.k3s.io \
     | env "${env_assignments[@]}" \
       sh -s - agent \
