@@ -180,6 +180,18 @@ The pattern is:
   ```bash
   just wipe
   ```
+  This runs the official uninstall scripts, drops its Avahi service file, and restarts the daemon.
+
+### Verify discovery
+
+Run this from any Pi to confirm the Kubernetes API is being advertised via mDNS:
+
+```bash
+avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+```
+
+The output should include port `6443` and TXT records for `k3s=1`, `cluster=<name>`,
+`env=<env>`, and `role=server`.
 
 Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
 
@@ -249,12 +261,22 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
   - Verify `avahi-daemon` is running (`sudo systemctl status avahi-daemon`).
   - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`.
 
+- **Verify mDNS discoverability**
+
+  ```bash
+  avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+  # Expect: port 6443 and TXT: k3s=1, cluster=<name>, env=<env>, role=server
+  ```
+
 - **Reset everything**
 
   ```bash
   just wipe
   sudo reboot
   ```
+
+  `just wipe` now wraps `scripts/wipe_node.sh` so repeated runs safely clear k3s
+  state and Avahi advertisements for the selected cluster/environment.
 
 ---
 

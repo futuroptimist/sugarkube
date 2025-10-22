@@ -126,6 +126,10 @@ handles both.
 > directories (`/mnt/clone` by default).
 >
 > ```bash
+> sudo just clean-mounts -- --verbose
+> ```
+>
+> ```bash
 > sudo just clean-mounts-hard
 > ```
 >

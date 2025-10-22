@@ -7,6 +7,16 @@ SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
 
+DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-9}"
+DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-15}"
+
+case "${DISCOVERY_WAIT_SECS}" in
+  ''|*[!0-9]*) DISCOVERY_WAIT_SECS=9 ;;
+esac
+case "${DISCOVERY_ATTEMPTS}" in
+  ''|*[!0-9]*) DISCOVERY_ATTEMPTS=15 ;;
+esac
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
@@ -167,6 +177,36 @@ log() {
   echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
 }
 
+wait_for_api() {
+  local attempt=0
+  local max_attempts=60
+  while [ "${attempt}" -lt "${max_attempts}" ]; do
+    if command -v ss >/dev/null 2>&1; then
+      if ss -ltn '( sport = :6443 )' 2>/dev/null | grep -q LISTEN; then
+        return 0
+      fi
+    fi
+    if command -v timeout >/dev/null 2>&1; then
+      if timeout 1 bash -c '>/dev/tcp/127.0.0.1/6443' >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      if bash -c '>/dev/tcp/127.0.0.1/6443' >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+sleep_for_discovery() {
+  if [ "${DISCOVERY_WAIT_SECS}" -gt 0 ]; then
+    sleep "${DISCOVERY_WAIT_SECS}"
+  fi
+}
+
 xml_escape() {
   python3 - "$1" <<'PY'
 import html
@@ -176,12 +216,76 @@ print(html.escape(sys.argv[1], quote=True))
 PY
 }
 
+publish_api_service() {
+  local port="6443"
+  if [ "$#" -gt 0 ] && [ -n "${1:-}" ]; then
+    port="$1"
+    shift
+  fi
+
+  if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
+    cleanup_avahi_bootstrap
+  fi
+
+  sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
+
+  local xml_service_name xml_port xml_cluster xml_env
+  xml_service_name="$(xml_escape "k3s API ${CLUSTER}/${ENVIRONMENT} on %h")"
+  xml_port="$(xml_escape "${port}")"
+  xml_cluster="$(xml_escape "${CLUSTER}")"
+  xml_env="$(xml_escape "${ENVIRONMENT}")"
+
+  sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI_API
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">${xml_service_name}</name>
+  <service>
+    <type>_https._tcp</type>
+    <port>${xml_port}</port>
+    <txt-record>k3s=1</txt-record>
+    <txt-record>cluster=${xml_cluster}</txt-record>
+    <txt-record>env=${xml_env}</txt-record>
+    <txt-record>role=server</txt-record>
+EOF_AVAHI_API
+
+  local record
+  for record in "$@"; do
+    if [ -n "${record}" ]; then
+      local escaped_record
+      escaped_record="$(xml_escape "${record}")"
+      printf '    <txt-record>%s</txt-record>\n' "${escaped_record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
+    fi
+  done
+
+  sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI_API'
+  </service>
+</service-group>
+EOF_AVAHI_API
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+  fi
+
+  AVAHI_ROLE="server"
+}
+
+advertise_server_api() {
+  if wait_for_api; then
+    publish_api_service 6443 "leader=${MDNS_HOST}"
+  else
+    log "Timed out waiting for k3s API on ${MDNS_HOST}; Avahi service not published"
+  fi
+}
+
 run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
 import subprocess
 import sys
+
+from scripts.mdns_parser import parse_avahi_output
 
 mode, cluster, environment = sys.argv[1:4]
 
@@ -198,9 +302,8 @@ try:
             "avahi-browse",
             "--parsable",
             "--terminate",
-            "--resolve",
-            # Do not add --ignore-local here; bootstrap leader election relies
-            # on observing the local node's advertisement.
+            "--resolve",  # required for host/port/TXT details
+            "--ignore-local",  # avoid matching local bootstrap adverts
             "_https._tcp",
         ],
         stderr=subprocess.DEVNULL,
@@ -209,55 +312,36 @@ try:
 except (FileNotFoundError, subprocess.CalledProcessError):
     output = ""
 
-records = []
-for line in output.splitlines():
-    if not line or line[0] not in {"=", "+", "@"}:
-        continue
-    parts = line.split(";")
-    if len(parts) < 9:
-        debug(f"Skipping mDNS record with insufficient fields: {line}")
-        continue
-    if len(parts) >= 10:
-        host = parts[6]
-    else:
-        host = parts[7]
-    port = parts[8]
-    if port != "6443":
-        continue
-    txt = {}
-    for field in parts[9:]:
-        if field.startswith("txt="):
-            payload = field[4:]
-            if "=" in payload:
-                key, value = payload.split("=", 1)
-                txt[key] = value
-    if txt.get("k3s") != "1":
-        continue
-    if txt.get("cluster") != cluster:
-        continue
-    if txt.get("env") != environment:
-        continue
-    records.append((host, txt))
+records, resolved_lines = parse_avahi_output(output, cluster, environment)
+
+if debug_enabled and not records and resolved_lines:
+    debug("No matching mDNS candidates; writing browse dump to /tmp/sugarkube-mdns.txt")
+    try:
+        with open("/tmp/sugarkube-mdns.txt", "a", encoding="utf-8") as handle:
+            handle.write("\n".join(resolved_lines))
+            handle.write("\n")
+    except OSError:
+        debug("Failed to write /tmp/sugarkube-mdns.txt")
 
 if mode == "server-first":
-    for host, txt in records:
-        if txt.get("role") == "server":
-            print(host)
+    for record in records:
+        if record.txt.get("role") == "server":
+            print(record.hostname)
             break
 elif mode == "server-count":
-    count = sum(1 for _, txt in records if txt.get("role") == "server")
+    count = sum(1 for record in records if record.txt.get("role") == "server")
     print(count)
 elif mode == "bootstrap-hosts":
     seen = set()
-    for host, txt in records:
-        if txt.get("role") == "bootstrap" and host not in seen:
-            seen.add(host)
-            print(host)
+    for record in records:
+        if record.txt.get("role") == "bootstrap" and record.hostname not in seen:
+            seen.add(record.hostname)
+            print(record.hostname)
 elif mode == "bootstrap-leaders":
     seen = set()
-    for host, txt in records:
-        if txt.get("role") == "bootstrap":
-            leader = txt.get("leader", host)
+    for record in records:
+        if record.txt.get("role") == "bootstrap":
+            leader = record.txt.get("leader", record.hostname)
             if leader not in seen:
                 seen.add(leader)
                 print(leader)
@@ -301,7 +385,7 @@ wait_for_bootstrap_activity() {
     fi
 
     log "Bootstrap in progress on ${bootstrap//$'\n'/, }; waiting for server advertisement..."
-    sleep 5
+    sleep_for_discovery
   done
 }
 
@@ -313,6 +397,12 @@ publish_avahi_service() {
     port="$1"
     shift
   fi
+
+  if [ "${role}" = "server" ]; then
+    publish_api_service "${port}" "$@"
+    return 0
+  fi
+
   sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
   sudo rm -f "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
   local service_name
@@ -335,7 +425,6 @@ publish_avahi_service() {
     <txt-record>cluster=${xml_cluster}</txt-record>
     <txt-record>env=${xml_env}</txt-record>
     <txt-record>role=${xml_role}</txt-record>
-    <!-- optional -->
 EOF_AVAHI
   local record
   for record in "$@"; do
@@ -360,14 +449,18 @@ publish_bootstrap_service() {
 
 claim_bootstrap_leadership() {
   publish_bootstrap_service
-  sleep 2
-  local consecutive leader candidates
+  sleep_for_discovery
+  local consecutive leader candidates total_attempts
   consecutive=0
-  for attempt in $(seq 1 15); do
+  total_attempts="${DISCOVERY_ATTEMPTS}"
+  if [ "${total_attempts}" -lt 1 ]; then
+    total_attempts=1
+  fi
+  for attempt in $(seq 1 "${total_attempts}"); do
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
-      log "Bootstrap leadership attempt ${attempt}/15: no candidates discovered"
+      log "Bootstrap leadership attempt ${attempt}/${total_attempts}: no candidates discovered"
     else
       leader="$(printf '%s\n' "${candidates[@]}" | sort | head -n1)"
       if [ "${leader}" = "${MDNS_HOST}" ]; then
@@ -382,9 +475,9 @@ claim_bootstrap_leadership() {
         return 1
       fi
     fi
-    sleep 2
+    sleep_for_discovery
   done
-  log "No stable bootstrap leader observed; proceeding as ${MDNS_HOST}"
+  log "No stable bootstrap leader observed after ${total_attempts} attempts; proceeding as ${MDNS_HOST}"
   return 0
 }
 
@@ -409,7 +502,7 @@ install_server_single() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  publish_avahi_service server 6443 "leader=${MDNS_HOST}"
+  advertise_server_api
 }
 
 install_server_cluster_init() {
@@ -426,7 +519,7 @@ install_server_cluster_init() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  publish_avahi_service server 6443 "leader=${MDNS_HOST}"
+  advertise_server_api
 }
 
 install_server_join() {
@@ -449,7 +542,7 @@ install_server_join() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-  publish_avahi_service server 6443 "leader=${MDNS_HOST}"
+  advertise_server_api
 }
 
 install_agent() {
@@ -494,9 +587,16 @@ if [ -z "${server_host:-}" ]; then
 fi
 
 if [ -z "${server_host:-}" ]; then
-  jitter=$((RANDOM % 11 + 5))
-  log "No servers discovered yet; waiting ${jitter}s before attempting bootstrap..."
-  sleep "${jitter}"
+  jitter="${DISCOVERY_WAIT_SECS}"
+  if [ "${jitter}" -gt 1 ]; then
+    jitter=$((RANDOM % jitter + 1))
+  fi
+  if [ "${jitter}" -gt 0 ]; then
+    log "No servers discovered yet; waiting ${jitter}s before attempting bootstrap..."
+    sleep "${jitter}"
+  else
+    log "No servers discovered yet; retrying bootstrap discovery immediately..."
+  fi
   server_host="$(discover_server_host || true)"
   if [ -z "${server_host:-}" ]; then
     wait_result="$(wait_for_bootstrap_activity || true)"

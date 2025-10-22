@@ -18,7 +18,7 @@ alignment_guard_enabled =
     is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
 column_alignment_tolerance =
     is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
-expected_column_spacing = [58, 49];
+expected_column_spacing = [58,49];
 
 mount_hole_diameter = include_bosses
     ? fan_mount_clearance(fan_size)
