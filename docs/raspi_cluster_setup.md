@@ -10,6 +10,52 @@ personas:
 
 ---
 
+## Happy Path: 3-server `dev` cluster in two runs
+
+Every Raspberry Pi follows the same rhythm:
+
+```bash
+export SUGARKUBE_SERVERS=3
+just up dev              # 1st run patches memory cgroups and reboots
+
+# after the Pi comes back and you SSH in again
+export SUGARKUBE_SERVERS=3
+just up dev              # 2nd run bootstraps or joins k3s
+```
+
+- **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
+- **HA by default.** Exporting `SUGARKUBE_SERVERS=3` before each run tells `just up` to form an embedded-etcd quorum. Keep it at an odd number (3, 5, …) for resilient control planes.
+
+### First control-plane node (e.g., `sugarkube0`)
+
+After the second `just up dev` finishes, capture the join token that future nodes will need:
+
+```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+
+Copy the long `K10…` string to a safe place—you will export it on every joining node.
+
+### Remaining control-plane peers or agents
+
+Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the saved token before the second run so it can join the cluster:
+
+```bash
+export SUGARKUBE_SERVERS=3
+export SUGARKUBE_TOKEN_DEV="K10abc123..."  # token from the first server
+just up dev
+```
+
+When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
+
+### Switch environments as needed
+
+`just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.
+
+Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
+
+---
+
 ## Conceptual Overview
 
 K3s, the lightweight Kubernetes used by Sugarkube, organizes nodes into **servers** (control-plane) and **agents** (workers).
@@ -34,70 +80,25 @@ The pattern is:
 
 ---
 
-## Quick Start (same subnet, DHCP friendly)
-
-### Before you begin: enable memory cgroups
-
-`k3s` expects the Linux memory cgroup controller to be active. Raspberry Pi OS disables it by
-default, so update the boot configuration once per device before running `just up`:
-
-```bash
-if [[ -f /boot/firmware/cmdline.txt ]]; then
-  sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
-else
-  sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/cmdline.txt
-fi
-sudo reboot
-```
-
-After the reboot, rerun the helper to confirm the controller is available:
-
-```bash
-./scripts/check_memory_cgroup.sh || true
-```
+## Detailed Walkthrough (same subnet, DHCP friendly)
 
 1. **Ensure network reachability**
 
    - All Pis must be on the same L2 subnet with multicast (UDP 5353) allowed.
    - Each Pi should be able to reach the internet.
 
-2. **Bootstrap the first control-plane node**
+2. **Run `just up dev` twice on the first control-plane node**
 
-   On the first Pi for an environment (for example `sugarkube0.local`):
-
-   ```bash
-   just up dev
-   ```
-
-   This installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as
-   `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,
-   and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
+   The first run modifies memory cgroup settings if needed and reboots automatically. The second run installs Avahi/libnss-mdns, bootstraps k3s as an HA server, publishes the API as `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
 
    > **HA choice**
    >
-   > - `SUGARKUBE_SERVERS=1` (default) keeps the first server on SQLite. Later nodes join as agents unless you promote them manually.
+   > - `SUGARKUBE_SERVERS=1` keeps the first server on SQLite. Later nodes join as agents unless you promote them manually.
    > - `SUGARKUBE_SERVERS>=3` (recommended for HA) makes the first server initialise embedded etcd with `--cluster-init` and advertise itself via mDNS for other **servers** to join.
-   >
-   > Export `SUGARKUBE_SERVERS=3` (or another odd number) **before** the very first `just up <env>` so discovery advertises the correct role from the start.
-
-   When it finishes, capture its join token:
-
-   ```bash
-   sudo cat /var/lib/rancher/k3s/server/node-token
-   ```
-
-   Copy that long `K10…` string somewhere safe.
 
 3. **Join worker or additional server nodes**
 
-   Give the remaining Pis distinct hostnames such as `sugarkube1` and `sugarkube2` so their `.local` records resolve over the same L2 subnet. On each node:
-
-   ```bash
-   export SUGARKUBE_TOKEN_DEV="K10abc123..."  # token gathered from sugarkube0
-   just up dev
-   ```
-
-   With `SUGARKUBE_SERVERS=1`, these nodes join as agents. When `SUGARKUBE_SERVERS>=3`, they discover the first server over mDNS and join the embedded etcd quorum as control-plane peers.
+   Give the remaining Pis distinct hostnames such as `sugarkube1` and `sugarkube2` so their `.local` records resolve over the same L2 subnet. Each node runs `just up dev` twice, exporting both `SUGARKUBE_SERVERS` and the appropriate token before the second invocation.
 
 4. **Switch environments easily**
 
