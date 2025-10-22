@@ -28,13 +28,13 @@ def _run_avahi_browse() -> List[str]:
     """Execute avahi-browse with the required flags and capture its output."""
 
     # --resolve ensures we receive the host, IP, and TXT payloads.
-    # --ignore-local avoids matching our own bootstrap adverts.
+    # We intentionally include local adverts so bootstrap arbitration can
+    # observe every candidate, including the caller.
     command = [
         "avahi-browse",
         "--parsable",
         "--terminate",
         "--resolve",
-        "--ignore-local",
         "_https._tcp",
     ]
     try:
