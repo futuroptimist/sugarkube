@@ -84,8 +84,15 @@ resolve_local_token() {
 resolve_local_token || true
 
 ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
-if [ -z "${TOKEN:-}" ] && [ "${SERVERS_DESIRED}" = "1" ]; then
-  ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+if [ -z "${TOKEN:-}" ]; then
+  if [ "${SERVERS_DESIRED}" = "1" ]; then
+    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+  elif [ ! -s "${NODE_TOKEN_PATH}" ] && [ ! -s "${BOOT_TOKEN_PATH}" ]; then
+    # No join token was provided and nothing has been written locally yet.
+    # Allow the first HA control-plane node to bootstrap without a token so
+    # it can generate one for subsequent peers.
+    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+  fi
 fi
 
 if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then

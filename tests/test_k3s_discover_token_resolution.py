@@ -82,9 +82,25 @@ def test_missing_token_allowed_for_single_server(default_env):
     assert result.stdout == ""
 
 
-def test_missing_token_rejected_for_multi_server(default_env):
+def test_missing_token_allowed_for_multi_server_first_bootstrap(default_env):
     env = dict(default_env)
     env["SUGARKUBE_SERVERS"] = "3"
+
+    result = run_discover(["--check-token-only"], env)
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_missing_token_rejected_for_multi_server_when_token_file_present(
+    default_env, tmp_path
+):
+    boot_token_path = tmp_path / "boot-token"
+    boot_token_path.write_text("NODE_TOKEN=\n", encoding="utf-8")
+
+    env = dict(default_env)
+    env["SUGARKUBE_SERVERS"] = "3"
+    env["SUGARKUBE_BOOT_TOKEN_PATH"] = str(boot_token_path)
 
     result = run_discover(["--check-token-only"], env)
 

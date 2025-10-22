@@ -36,6 +36,11 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 
 Copy the long `K10…` string to a safe place—you will export it on every joining node.
 
+> **Note**
+> The first HA server does **not** need a token pre-exported. Sugarkube now allows
+> the initial control-plane bootstrap to run without one so it can mint the token
+> above for the rest of the cluster.
+
 ### Remaining control-plane peers or agents
 
 Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the saved token before the second run so it can join the cluster:
