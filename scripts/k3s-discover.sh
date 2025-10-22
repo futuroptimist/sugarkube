@@ -108,7 +108,9 @@ for line in output.splitlines():
                 file=sys.stderr,
             )
         continue
-    host = parts[7]
+    service_host = parts[6]
+    resolved_address = parts[7]
+    host = service_host or resolved_address
     port = parts[8]
     if port != "6443":
         continue
@@ -171,6 +173,27 @@ count_servers() {
     count=0
   fi
   echo "${count}"
+}
+
+format_url_host() {
+  local host="${1-}"
+  if [ -z "${host}" ]; then
+    return 0
+  fi
+
+  if [[ "${host}" == \[* ]]; then
+    printf '%s\n' "${host}"
+    return 0
+  fi
+
+  if [[ "${host}" == *:* ]]; then
+    local encoded
+    encoded="${host//%/%25}"
+    printf '[%s]\n' "${encoded}"
+    return 0
+  fi
+
+  printf '%s\n' "${host}"
 }
 
 wait_for_bootstrap_activity() {
@@ -333,13 +356,15 @@ install_server_join() {
     log "Join token missing; cannot join existing HA server"
     exit 1
   fi
-  log "Joining as additional HA server via https://${server}:6443 (desired servers=${SERVERS_DESIRED})"
+  local server_url_host
+  server_url_host="$(format_url_host "${server}")"
+  log "Joining as additional HA server via https://${server_url_host}:6443 (desired servers=${SERVERS_DESIRED})"
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
     | env "${env_assignments[@]}" \
       sh -s - server \
-      --server "https://${server}:6443" \
+      --server "https://${server_url_host}:6443" \
       --tls-san "${server}" \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -356,10 +381,12 @@ install_agent() {
     log "Join token missing; cannot join agent to existing server"
     exit 1
   fi
-  log "Joining as agent via https://${server}:6443"
+  local server_url_host
+  server_url_host="$(format_url_host "${server}")"
+  log "Joining as agent via https://${server_url_host}:6443"
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:6443")
+  env_assignments+=("K3S_URL=https://${server_url_host}:6443")
   curl -sfL https://get.k3s.io \
     | env "${env_assignments[@]}" \
       sh -s - agent \

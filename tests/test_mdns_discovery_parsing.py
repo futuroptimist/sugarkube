@@ -53,7 +53,7 @@ def _call_function(function: str, env: dict[str, str]) -> subprocess.CompletedPr
 
 def test_server_first_returns_primary_host(mdns_env: dict[str, str]) -> None:
     result = _call_function("run_avahi_query server-first", mdns_env)
-    assert result.stdout.strip() == "192.168.1.10"
+    assert result.stdout.strip() == "pi1.local"
 
 
 def test_server_count_reports_one(mdns_env: dict[str, str]) -> None:
@@ -67,3 +67,8 @@ def test_bootstrap_queries_empty_when_only_server(mdns_env: dict[str, str]) -> N
 
     result_leaders = _call_function("run_avahi_query bootstrap-leaders", mdns_env)
     assert result_leaders.stdout.strip() == ""
+
+
+def test_format_url_host_brackets_scoped_ipv6(mdns_env: dict[str, str]) -> None:
+    result = _call_function("format_url_host fe80::1%eth0", mdns_env)
+    assert result.stdout.strip() == "[fe80::1%25eth0]"
