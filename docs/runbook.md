@@ -53,6 +53,19 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 3. Optionally taint the control-plane nodes as shown in
    `docs/k3s/config-examples/server-taints.md` to keep general workloads off the control plane.
 
+## Node recovery (mis-bootstrap)
+
+1. Run the safe reset: `just wipe`.
+2. Re-export `SUGARKUBE_ENV`, `SUGARKUBE_SERVERS`, and any per-environment token
+   (`SUGARKUBE_TOKEN_*`).
+3. Rerun `just up <env>` with the corrected settings.
+
+Verify discovery (mDNS):
+
+```bash
+avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+```
+
 ## 4. Bootstrap Flux and secrets
 
 Flux bootstrapping defaults to the production overlay. Pass `env=<env>` to the Just recipes or set
