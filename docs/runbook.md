@@ -145,15 +145,16 @@ stable hostnames to avoid churn.
 
 ### Validation commands
 
-Run the following after each reconciliation to confirm the new hardening landed:
+Mirror the quick start checks to confirm the control plane is healthy, then drill down as needed:
 
 ```bash
-kubectl -n kube-system get deploy traefik
-kubectl -n cloudflared get deploy
-kubectl -n monitoring get servicemonitors,prometheusrules
-kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | \
-  grep ServiceMonitorTargetDown
+just status
+sudo k3s kubectl get nodes -o wide
+sudo k3s kubectl -n kube-system get svc kube-vip
+sudo k3s kubectl -n kube-system get deploy traefik
 ```
+
+Once the basics are solid, layer on environment-specific checks (Flux reconciliations, monitoring rules, etc.).
 
 ## 6. Backups and restore procedures
 
