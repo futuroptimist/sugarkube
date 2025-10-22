@@ -137,6 +137,17 @@ The pattern is:
   ```
   This runs the official uninstall scripts, drops its Avahi service file, and restarts the daemon.
 
+### Verify discovery
+
+Run this from any Pi to confirm the Kubernetes API is being advertised via mDNS:
+
+```bash
+avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+```
+
+The output should include port `6443` and TXT records for `k3s=1`, `cluster=<name>`, and
+`env=<env>`.
+
 Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
 
 ---
