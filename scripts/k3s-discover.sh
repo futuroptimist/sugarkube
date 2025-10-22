@@ -199,7 +199,8 @@ try:
             "--parsable",
             "--terminate",
             "--resolve",
-            "--ignore-local",
+            # Do not add --ignore-local here; bootstrap leader election relies
+            # on observing the local node's advertisement.
             "_https._tcp",
         ],
         stderr=subprocess.DEVNULL,
