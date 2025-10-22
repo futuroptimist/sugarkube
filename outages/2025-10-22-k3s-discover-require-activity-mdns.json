@@ -1,0 +1,10 @@
+{
+  "id": "2025-10-22-k3s-discover-require-activity-mdns",
+  "date": "2025-10-22",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "wait_for_bootstrap_activity --require-activity returned after its first polling cycle when no bootstrap adverts were present, so Avahi never had time to surface already broadcasting k3s servers and discovery fell back to bootstrap incorrectly.",
+  "resolution": "Send discovery logs to stderr and add a short grace period before --require-activity exits so Avahi can emit existing server adverts while still avoiding multi-minute waits when no bootstrap is happening.",
+  "references": [
+    "scripts/k3s-discover.sh"
+  ]
+}

@@ -173,7 +173,7 @@ cleanup_avahi_bootstrap() {
 trap cleanup_avahi_bootstrap EXIT
 
 log() {
-  echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
+  >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
 xml_escape() {
@@ -284,27 +284,80 @@ count_servers() {
 }
 
 wait_for_bootstrap_activity() {
-  local attempt
-  for attempt in $(seq 1 "${DISCOVERY_ATTEMPTS}"); do
+  local require_activity=0
+  local attempts="${DISCOVERY_ATTEMPTS}"
+  local wait_secs="${DISCOVERY_WAIT_SECS}"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --require-activity)
+        require_activity=1
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  local attempt observed_activity=0
+  local no_activity_streak=0
+  local activity_grace_attempts=0
+  if [ "${require_activity}" -eq 1 ]; then
+    activity_grace_attempts=2
+    if [ "${attempts}" -lt "${activity_grace_attempts}" ]; then
+      activity_grace_attempts="${attempts}"
+    fi
+  fi
+  for attempt in $(seq 1 "${attempts}"); do
     local server
     server="$(discover_server_host || true)"
     if [ -n "${server}" ]; then
-      echo "${server}"
+      log "Discovered API server advertisement from ${server} (attempt ${attempt}/${attempts})"
+      printf '%s\n' "${server}"
       return 0
     fi
 
     local bootstrap
     bootstrap="$(discover_bootstrap_hosts || true)"
-    if [ -z "${bootstrap}" ]; then
-      if [ "${attempt}" -ge "${DISCOVERY_ATTEMPTS}" ]; then
-        return 1
-      fi
+    if [ -n "${bootstrap}" ]; then
+      observed_activity=1
+      no_activity_streak=0
+      local bootstrap_hosts
+      bootstrap_hosts="${bootstrap//$'\n'/, }"
+      log "Bootstrap advertisement(s) detected from ${bootstrap_hosts} (attempt ${attempt}/${attempts}); waiting for server advertisement..."
     else
-      log "Bootstrap in progress on ${bootstrap//$'\n'/, }; waiting for server advertisement..."
+      if [ "${require_activity}" -eq 1 ]; then
+        no_activity_streak=$((no_activity_streak + 1))
+        if [ "${activity_grace_attempts}" -gt 0 ] && [ "${no_activity_streak}" -ge "${activity_grace_attempts}" ]; then
+          log "No bootstrap advertisements detected (attempt ${attempt}/${attempts}); exiting discovery wait."
+          return 1
+        fi
+        log "No bootstrap activity detected yet (attempt ${attempt}/${attempts}); will retry before giving up."
+      elif [ "${observed_activity}" -eq 0 ]; then
+        log "No bootstrap activity detected yet (attempt ${attempt}/${attempts})."
+      else
+        log "Bootstrap activity previously detected; continuing to wait (attempt ${attempt}/${attempts})."
+      fi
     fi
 
-    sleep "${DISCOVERY_WAIT_SECS}"
+    if [ "${attempt}" -lt "${attempts}" ]; then
+      local next_attempt
+      next_attempt=$((attempt + 1))
+      log "Sleeping ${wait_secs}s before retry ${next_attempt}/${attempts}."
+      sleep "${wait_secs}"
+    fi
   done
+
+  if [ "${observed_activity}" -eq 1 ]; then
+    log "Bootstrap advertisements did not yield a server after ${attempts} attempts."
+  else
+    log "No bootstrap activity observed after ${attempts} attempts."
+  fi
   return 1
 }
 
@@ -564,7 +617,7 @@ log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
 server_host="$(discover_server_host || true)"
 
 if [ -z "${server_host:-}" ]; then
-  wait_result="$(wait_for_bootstrap_activity || true)"
+  wait_result="$(wait_for_bootstrap_activity --require-activity || true)"
   if [ -n "${wait_result:-}" ]; then
     server_host="${wait_result}"
   fi
@@ -576,7 +629,7 @@ if [ -z "${server_host:-}" ]; then
   sleep "${jitter}"
   server_host="$(discover_server_host || true)"
   if [ -z "${server_host:-}" ]; then
-    wait_result="$(wait_for_bootstrap_activity || true)"
+    wait_result="$(wait_for_bootstrap_activity --require-activity || true)"
     if [ -n "${wait_result:-}" ]; then
       server_host="${wait_result}"
     fi
