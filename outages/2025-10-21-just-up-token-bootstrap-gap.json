@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-21-just-up-token-bootstrap-gap",
+  "date": "2025-10-21",
+  "component": "just up dev / k3s-discover.sh",
+  "rootCause": "k3s-discover.sh required a pre-seeded SUGARKUBE_TOKEN even when bootstrapping the first server, so `just up dev` aborted after installing k3s on a fresh Pi without surfacing the newly generated token.",
+  "resolution": "Teach k3s-discover.sh to resolve the token from local sources, permit single-server installs without a preset value, and add targeted regression tests to prevent the fallback from regressing.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "tests/test_k3s_discover_token_resolution.py"
+  ]
+}
