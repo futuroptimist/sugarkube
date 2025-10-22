@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-15-just-up-token-autodiscovery",
+  "date": "2025-11-15",
+  "component": "just up dev / k3s-discover.sh",
+  "rootCause": "`k3s-discover.sh` exited before bootstrap because it demanded an exported SUGARKUBE_TOKEN even when the freshly installed server had already written `/var/lib/rancher/k3s/server/node-token`.",
+  "resolution": "Teach the helper to read existing node-token locations (and the k3s.service.env file) automatically, allow the Avahi directory to be overridden for tests, and add regression tests that confirm the install script receives the derived token.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "tests/test_k3s_discover.py",
+    "docs/raspi_cluster_setup.md"
+  ]
+}

@@ -18,6 +18,7 @@
 * pi_carrier: standoff length increased from 20 mm to 22 mm (flush fit with PoE HAT)
 * panel_bracket: add chamfers to printed mounting hole for easier screw insertion
 * lint workflow test now uses `actions/checkout@v4` to avoid Node 16 deprecation warnings
+* just up: automatically fall back to the local k3s `node-token` so the first server boots without exporting secrets
 
 ### Ergonomics
 * Track ergonomics-focused updates directly in the changelog and guard the section with
