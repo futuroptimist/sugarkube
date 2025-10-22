@@ -13,48 +13,7 @@ CHECK_TOKEN_ONLY=0
 NODE_TOKEN_PRESENT=0
 BOOT_TOKEN_PRESENT=0
 
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --print-resolved-token)
-      PRINT_TOKEN_ONLY=1
-      ;;
-    --check-token-only)
-      CHECK_TOKEN_ONLY=1
-      ;;
-    --help)
-      cat <<'EOF_HELP'
-Usage: k3s-discover.sh [--print-resolved-token] [--check-token-only]
-
-  --print-resolved-token  Resolve the effective join token using the
-                          standard environment and file fallbacks, print it,
-                          then exit.
-  --check-token-only      Resolve the token and validate whether discovery
-                          can proceed. No network or installer actions are
-                          executed.
-EOF_HELP
-      exit 0
-      ;;
-    --)
-      shift
-      break
-      ;;
-    -* )
-      echo "Unknown option: $1" >&2
-      exit 2
-      ;;
-    * )
-      break
-      ;;
-  esac
-  shift
-done
-
-case "${ENVIRONMENT}" in
-  dev) TOKEN="${SUGARKUBE_TOKEN_DEV:-${SUGARKUBE_TOKEN:-}}" ;;
-  int) TOKEN="${SUGARKUBE_TOKEN_INT:-${SUGARKUBE_TOKEN:-}}" ;;
-  prod) TOKEN="${SUGARKUBE_TOKEN_PROD:-${SUGARKUBE_TOKEN:-}}" ;;
-  *) TOKEN="${SUGARKUBE_TOKEN:-}" ;;
-esac
+TOKEN="${SUGARKUBE_TOKEN:-}"
 
 RESOLVED_TOKEN_SOURCE=""
 
@@ -94,41 +53,6 @@ resolve_local_token() {
   return 1
 }
 
-resolve_local_token || true
-
-ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
-if [ -z "${TOKEN:-}" ]; then
-  if [ "${SERVERS_DESIRED}" = "1" ]; then
-    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
-  elif [ "${NODE_TOKEN_PRESENT}" -eq 0 ] && [ "${BOOT_TOKEN_PRESENT}" -eq 0 ]; then
-    # No join token was provided and nothing has been written locally yet.
-    # Allow the first HA control-plane node to bootstrap without a token so
-    # it can generate one for subsequent peers.
-    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
-  fi
-fi
-
-if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
-  if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
-    echo "SUGARKUBE_TOKEN (or per-env variant) required" >&2
-    exit 1
-  fi
-  echo "SUGARKUBE_TOKEN (or per-env variant) required"
-  exit 1
-fi
-
-if [ "${PRINT_TOKEN_ONLY}" -eq 1 ]; then
-  printf '%s\n' "${TOKEN:-}"
-  if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
-    >&2 printf 'token-source=%s\n' "${RESOLVED_TOKEN_SOURCE}"
-  fi
-  exit 0
-fi
-
-if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
-  exit 0
-fi
-
 HN="$(hostname -s)"
 MDNS_HOST="${HN}.local"
 AVAHI_SERVICE_FILE="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
@@ -142,8 +66,6 @@ cleanup_avahi_bootstrap() {
   fi
 }
 
-trap cleanup_avahi_bootstrap EXIT
-
 log() {
   echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
 }
@@ -151,10 +73,12 @@ log() {
 run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+import os
 import subprocess
 import sys
 
 mode, cluster, environment = sys.argv[1:4]
+debug_enabled = bool(os.environ.get("SUGARKUBE_DEBUG"))
 
 try:
     output = subprocess.check_output(
@@ -162,6 +86,8 @@ try:
             "avahi-browse",
             "--parsable",
             "--terminate",
+            "--resolve",
+            "--ignore-local",
             "_https._tcp",
         ],
         stderr=subprocess.DEVNULL,
@@ -176,8 +102,15 @@ for line in output.splitlines():
         continue
     parts = line.split(";")
     if len(parts) < 9:
+        if debug_enabled:
+            print(
+                f"Skipping avahi record with insufficient fields ({len(parts)}): {line}",
+                file=sys.stderr,
+            )
         continue
-    host = parts[7]
+    service_host = parts[6]
+    resolved_address = parts[7]
+    host = service_host or resolved_address
     port = parts[8]
     if port != "6443":
         continue
@@ -242,6 +175,27 @@ count_servers() {
   echo "${count}"
 }
 
+format_url_host() {
+  local host="${1-}"
+  if [ -z "${host}" ]; then
+    return 0
+  fi
+
+  if [[ "${host}" == \[* ]]; then
+    printf '%s\n' "${host}"
+    return 0
+  fi
+
+  if [[ "${host}" == *:* ]]; then
+    local encoded
+    encoded="${host//%/%25}"
+    printf '[%s]\n' "${encoded}"
+    return 0
+  fi
+
+  printf '%s\n' "${host}"
+}
+
 wait_for_bootstrap_activity() {
   while true; do
     local server
@@ -262,6 +216,16 @@ wait_for_bootstrap_activity() {
   done
 }
 
+xml_escape() {
+  local input="${1:-}"
+  input="${input//&/&amp;}"
+  input="${input//</&lt;}"
+  input="${input//>/&gt;}"
+  input="${input//\"/&quot;}"
+  input="${input//\'/&apos;}"
+  printf '%s' "${input}"
+}
+
 publish_avahi_service() {
   local role="$1"
   shift
@@ -270,24 +234,36 @@ publish_avahi_service() {
     port="$1"
     shift
   fi
-  sudo install -d -m 755 /etc/avahi/services
-  sudo rm -f /etc/avahi/services/k3s-https.service || true
+  local service_dir
+  service_dir="$(dirname "${AVAHI_SERVICE_FILE}")"
+  sudo install -d -m 755 "${service_dir}"
+  sudo rm -f "${service_dir}/k3s-https.service" || true
+
+  local escaped_cluster escaped_environment escaped_role escaped_name
+  escaped_cluster="$(xml_escape "${CLUSTER}")"
+  escaped_environment="$(xml_escape "${ENVIRONMENT}")"
+  escaped_role="$(xml_escape "${role}")"
+  escaped_name="$(xml_escape "k3s API ${CLUSTER}/${ENVIRONMENT} on %h")"
+
   sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
-  <name replace-wildcards="yes">k3s API ${CLUSTER}/${ENVIRONMENT} on %h</name>
+  <name replace-wildcards="yes">${escaped_name}</name>
   <service>
     <type>_https._tcp</type>
     <port>${port}</port>
     <txt-record>k3s=1</txt-record>
-    <txt-record>cluster=${CLUSTER}</txt-record>
-    <txt-record>env=${ENVIRONMENT}</txt-record>
-    <txt-record>role=${role}</txt-record>
+    <txt-record>cluster=${escaped_cluster}</txt-record>
+    <txt-record>env=${escaped_environment}</txt-record>
+    <txt-record>role=${escaped_role}</txt-record>
+    <!-- optional -->
 EOF_AVAHI
   for record in "$@"; do
     if [ -n "${record}" ]; then
-      printf '    <txt-record>%s</txt-record>\n' "${record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
+      local escaped_record
+      escaped_record="$(xml_escape "${record}")"
+      printf '    <txt-record>%s</txt-record>\n' "${escaped_record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
     fi
   done
   sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI'
@@ -380,13 +356,15 @@ install_server_join() {
     log "Join token missing; cannot join existing HA server"
     exit 1
   fi
-  log "Joining as additional HA server via https://${server}:6443 (desired servers=${SERVERS_DESIRED})"
+  local server_url_host
+  server_url_host="$(format_url_host "${server}")"
+  log "Joining as additional HA server via https://${server_url_host}:6443 (desired servers=${SERVERS_DESIRED})"
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
     | env "${env_assignments[@]}" \
       sh -s - server \
-      --server "https://${server}:6443" \
+      --server "https://${server_url_host}:6443" \
       --tls-san "${server}" \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -403,10 +381,12 @@ install_agent() {
     log "Join token missing; cannot join agent to existing server"
     exit 1
   fi
-  log "Joining as agent via https://${server}:6443"
+  local server_url_host
+  server_url_host="$(format_url_host "${server}")"
+  log "Joining as agent via https://${server_url_host}:6443"
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:6443")
+  env_assignments+=("K3S_URL=https://${server_url_host}:6443")
   curl -sfL https://get.k3s.io \
     | env "${env_assignments[@]}" \
       sh -s - agent \
@@ -414,73 +394,179 @@ install_agent() {
       --node-label "sugarkube.env=${ENVIRONMENT}"
 }
 
-log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
-server_host="$(discover_server_host || true)"
+main() {
+  PRINT_TOKEN_ONLY=0
+  CHECK_TOKEN_ONLY=0
+  NODE_TOKEN_PRESENT=0
+  BOOT_TOKEN_PRESENT=0
 
-if [ -z "${server_host:-}" ]; then
-  wait_result="$(wait_for_bootstrap_activity || true)"
-  if [ -n "${wait_result:-}" ]; then
-    server_host="${wait_result}"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --print-resolved-token)
+        PRINT_TOKEN_ONLY=1
+        ;;
+      --check-token-only)
+        CHECK_TOKEN_ONLY=1
+        ;;
+      --help)
+        cat <<'EOF_HELP'
+Usage: k3s-discover.sh [--print-resolved-token] [--check-token-only]
+
+  --print-resolved-token  Resolve the effective join token using the
+                          standard environment and file fallbacks, print it,
+                          then exit.
+  --check-token-only      Resolve the token and validate whether discovery
+                          can proceed. No network or installer actions are
+                          executed.
+EOF_HELP
+        return 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -* )
+        echo "Unknown option: $1" >&2
+        return 2
+        ;;
+      * )
+        break
+        ;;
+    esac
+    shift
+  done
+
+  case "${ENVIRONMENT}" in
+    dev) TOKEN="${SUGARKUBE_TOKEN_DEV:-${SUGARKUBE_TOKEN:-}}" ;;
+    int) TOKEN="${SUGARKUBE_TOKEN_INT:-${SUGARKUBE_TOKEN:-}}" ;;
+    prod) TOKEN="${SUGARKUBE_TOKEN_PROD:-${SUGARKUBE_TOKEN:-}}" ;;
+    *) TOKEN="${SUGARKUBE_TOKEN:-}" ;;
+  esac
+
+  RESOLVED_TOKEN_SOURCE=""
+  resolve_local_token || true
+
+  local allow_bootstrap_without_token=0
+  if [ -z "${TOKEN:-}" ]; then
+    if [ "${SERVERS_DESIRED}" = "1" ]; then
+      allow_bootstrap_without_token=1
+    elif [ "${NODE_TOKEN_PRESENT}" -eq 0 ] && [ "${BOOT_TOKEN_PRESENT}" -eq 0 ]; then
+      allow_bootstrap_without_token=1
+    fi
   fi
-fi
 
-if [ -z "${server_host:-}" ]; then
-  jitter=$((RANDOM % 11 + 5))
-  log "No servers discovered yet; waiting ${jitter}s before attempting bootstrap..."
-  sleep "${jitter}"
+  if [ -z "${TOKEN:-}" ] && [ "${allow_bootstrap_without_token}" -ne 1 ]; then
+    if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
+      echo "SUGARKUBE_TOKEN (or per-env variant) required" >&2
+      return 1
+    fi
+    echo "SUGARKUBE_TOKEN (or per-env variant) required"
+    return 1
+  fi
+
+  if [ "${PRINT_TOKEN_ONLY}" -eq 1 ]; then
+    printf '%s\n' "${TOKEN:-}"
+    if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
+      >&2 printf 'token-source=%s\n' "${RESOLVED_TOKEN_SOURCE}"
+    fi
+    return 0
+  fi
+
+  if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
+    return 0
+  fi
+
+  HN="$(hostname -s)"
+  MDNS_HOST="${HN}.local"
+  AVAHI_SERVICE_FILE="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
+  AVAHI_ROLE=""
+
+  trap cleanup_avahi_bootstrap EXIT
+
+  log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
+  local server_host
   server_host="$(discover_server_host || true)"
+
   if [ -z "${server_host:-}" ]; then
+    local wait_result
     wait_result="$(wait_for_bootstrap_activity || true)"
     if [ -n "${wait_result:-}" ]; then
       server_host="${wait_result}"
     fi
   fi
-fi
 
-bootstrap_selected="false"
-if [ -z "${server_host:-}" ]; then
-  if claim_bootstrap_leadership; then
-    bootstrap_selected="true"
-  else
-    server_host="$(wait_for_bootstrap_activity || true)"
-  fi
-fi
-
-if [ "${bootstrap_selected}" = "true" ]; then
-  if [ "${SERVERS_DESIRED}" = "1" ]; then
-    install_server_single
-  else
-    install_server_cluster_init
-  fi
-else
-  servers_now="$(count_servers)"
-  if [ "${servers_now}" -lt "${SERVERS_DESIRED}" ]; then
+  if [ -z "${server_host:-}" ]; then
+    local jitter
+    jitter=$((RANDOM % 11 + 5))
+    log "No servers discovered yet; waiting ${jitter}s before attempting bootstrap..."
+    sleep "${jitter}"
+    server_host="$(discover_server_host || true)"
     if [ -z "${server_host:-}" ]; then
-      server_host="$(discover_server_host || true)"
+      local wait_result
+      wait_result="$(wait_for_bootstrap_activity || true)"
+      if [ -n "${wait_result:-}" ]; then
+        server_host="${wait_result}"
+      fi
     fi
-    if [ -z "${server_host:-}" ]; then
-      log "No servers discovered after waiting; proceeding with bootstrap fallback"
-      if [ "${SERVERS_DESIRED}" = "1" ]; then
-        install_server_single
+  fi
+
+  local bootstrap_selected="false"
+  if [ -z "${server_host:-}" ]; then
+    if claim_bootstrap_leadership; then
+      bootstrap_selected="true"
+    else
+      local wait_result
+      wait_result="$(wait_for_bootstrap_activity || true)"
+      if [ -n "${wait_result:-}" ]; then
+        server_host="${wait_result}"
+      fi
+    fi
+  fi
+
+  if [ "${bootstrap_selected}" = "true" ]; then
+    if [ "${SERVERS_DESIRED}" = "1" ]; then
+      install_server_single
+    else
+      install_server_cluster_init
+    fi
+  else
+    local servers_now
+    servers_now="$(count_servers)"
+    if [ "${servers_now}" -lt "${SERVERS_DESIRED}" ]; then
+      if [ -z "${server_host:-}" ]; then
+        server_host="$(discover_server_host || true)"
+      fi
+      if [ -z "${server_host:-}" ]; then
+        log "No servers discovered after waiting; proceeding with bootstrap fallback"
+        if [ "${SERVERS_DESIRED}" = "1" ]; then
+          install_server_single
+        else
+          install_server_cluster_init
+        fi
       else
-        install_server_cluster_init
+        install_server_join "${server_host}"
       fi
     else
-      install_server_join "${server_host}"
+      if [ -z "${server_host:-}" ]; then
+        server_host="$(discover_server_host || true)"
+      fi
+      if [ -z "${server_host:-}" ]; then
+        log "Unable to discover an API server to join as agent; exiting"
+        return 1
+      fi
+      install_agent "${server_host}"
     fi
-  else
-    if [ -z "${server_host:-}" ]; then
-      server_host="$(discover_server_host || true)"
-    fi
-    if [ -z "${server_host:-}" ]; then
-      log "Unable to discover an API server to join as agent; exiting"
-      exit 1
-    fi
-    install_agent "${server_host}"
   fi
+
+  if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+    sudo mkdir -p /root/.kube
+    sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+  fi
+
+  return 0
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
 fi
 
-if [ -f /etc/rancher/k3s/k3s.yaml ]; then
-  sudo mkdir -p /root/.kube
-  sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
-fi
