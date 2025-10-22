@@ -3,6 +3,7 @@
 * pi_carrier: rounded base corners via new `corner_radius` parameter
 * panel_bracket: parameterise screw size via `screw_nominal`
 * panel_bracket: add `nut` standoff_mode for captive hex recess
+* tests: add kubeconfig recipe smoke coverage to guard context rewrites
 
 ### Changed
 * panel_bracket: increase default edge radius to 4 mm for smoother corners
@@ -13,6 +14,7 @@
 * panel_bracket: enlarge insert to 6.3 mm OD for common M5 heat‑set hardware
 * CI: upgrade GitHub-hosted actions to Node 22-compatible majors (`actions/checkout@v5`,
   `actions/setup-python@v6`)
+* docs: streamline Raspberry Pi bootstrap quick start and cross-link the runbook/Flux bootstrap
 
 ### Fixed
 * pi_carrier: standoff length increased from 20 mm to 22 mm (flush fit with PoE HAT)
