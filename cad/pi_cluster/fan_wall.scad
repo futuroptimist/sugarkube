@@ -20,7 +20,10 @@ column_alignment_tolerance =
     is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
 expected_column_spacing = [58,49];
 
-fan_clearance_radius = fan_mount_clearance(fan_size) / 2;
+mount_hole_diameter = include_bosses
+    ? fan_mount_clearance(fan_size)
+    : fan_hole_circle_d(fan_size);
+fan_clearance_radius = mount_hole_diameter / 2;
 boss_radius = fan_insert_od / 2 + 1.2;
 boss_height = fan_insert_L + 0.8;
 wall_width = fan_face_extent(fan_size);

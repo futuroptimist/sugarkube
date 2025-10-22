@@ -172,6 +172,9 @@ function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 s
 Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards). Add an
 optional helper for square patterns if future fans require it.
 
+Regression coverage: `tests/test_fan_patterns_scad.py` ensures the helper stays defined and
+continues returning the documented diameters.
+
 ### 4.2 `fan_wall.scad`
 
 The fan wall is a separate part printed on its side so the screw loads act across layers.

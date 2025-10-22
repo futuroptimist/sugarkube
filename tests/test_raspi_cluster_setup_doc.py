@@ -43,3 +43,11 @@ def test_manual_cmdline_edits_removed(doc_text: str) -> None:
 
 def test_token_export_is_documented(doc_text: str) -> None:
     assert "export SUGARKUBE_TOKEN_DEV" in doc_text
+
+
+def test_recovery_wipe_block_present(doc_text: str) -> None:
+    assert "```bash\njust wipe\n```" in doc_text
+
+
+def test_recovery_mdns_command_present(doc_text: str) -> None:
+    assert "avahi-browse --all --resolve --terminate" in doc_text

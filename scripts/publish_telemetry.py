@@ -200,6 +200,26 @@ def _markdown_summary(payload: Mapping[str, object]) -> str:
         lines.append("")
         lines.append("- None")
         lines.append("")
+    nvme = payload.get("nvme")
+    if isinstance(nvme, Mapping) and nvme:
+        lines.append("## NVMe Health")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| ------ | ----- |")
+        metrics = [
+            ("critical_warning", "Critical warning"),
+            ("percentage_used", "Percentage used (%)"),
+            ("terabytes_written", "Total written (TB)"),
+            ("data_units_written", "Data units written"),
+            ("media_errors", "Media errors"),
+            ("unsafe_shutdowns", "Unsafe shutdowns"),
+        ]
+        for key, label in metrics:
+            value = nvme.get(key)
+            if value is None:
+                continue
+            lines.append(f"| {label} | {value} |")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -327,6 +347,7 @@ def build_payload(
     env_snapshot: Mapping[str, object],
     errors: Sequence[str],
     tags: Sequence[str],
+    nvme: Mapping[str, object] | None = None,
 ) -> MutableMapping[str, object]:
     timestamp = _dt.datetime.now(tz=_dt.timezone.utc).isoformat()
     summary = summarise_checks(checks)
@@ -344,7 +365,86 @@ def build_payload(
         payload["errors"] = list(errors)
     if tags:
         payload["tags"] = list(tags)
+    if nvme:
+        payload["nvme"] = dict(nvme)
     return payload
+
+
+def _coerce_int(value: object, *, field: str, path: Path) -> int:
+    if isinstance(value, bool):
+        value = int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise TelemetryError(
+                f"NVMe SMART JSON field '{field}' was empty at {path}"
+            )
+        base = 16 if text.lower().startswith("0x") else 10
+        try:
+            return int(text, base)
+        except ValueError as exc:
+            raise TelemetryError(
+                f"NVMe SMART JSON field '{field}' was not a number at {path}"
+            ) from exc
+    raise TelemetryError(
+        f"NVMe SMART JSON field '{field}' had unexpected type at {path}"
+    )
+
+
+def parse_nvme_smart_log(path: os.PathLike[str] | str) -> MutableMapping[str, object]:
+    target = Path(path)
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise TelemetryError(
+            f"failed to read NVMe SMART JSON at {target}: {exc}"
+        ) from exc
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise TelemetryError(f"invalid NVMe SMART JSON at {target}") from exc
+
+    required = {
+        "critical_warning",
+        "percentage_used",
+        "data_units_written",
+        "media_errors",
+        "unsafe_shutdowns",
+    }
+    missing = [field for field in required if field not in payload]
+    if missing:
+        joined = ", ".join(sorted(missing))
+        raise TelemetryError(
+            f"NVMe SMART JSON missing {joined} at {target}"
+        )
+
+    critical_warning = _coerce_int(
+        payload["critical_warning"], field="critical_warning", path=target
+    )
+    percentage_used = _coerce_int(
+        payload["percentage_used"], field="percentage_used", path=target
+    )
+    data_units_written = _coerce_int(
+        payload["data_units_written"], field="data_units_written", path=target
+    )
+    media_errors = _coerce_int(
+        payload["media_errors"], field="media_errors", path=target
+    )
+    unsafe_shutdowns = _coerce_int(
+        payload["unsafe_shutdowns"], field="unsafe_shutdowns", path=target
+    )
+    tbw = round(data_units_written * 512000 / 1e12, 2)
+
+    return {
+        "critical_warning": f"0x{critical_warning:02x}",
+        "percentage_used": percentage_used,
+        "data_units_written": data_units_written,
+        "terabytes_written": tbw,
+        "media_errors": media_errors,
+        "unsafe_shutdowns": unsafe_shutdowns,
+    }
 
 
 def discover_verifier_path(explicit: str | None) -> str | None:
@@ -491,6 +591,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Directory to write a Markdown snapshot of the telemetry payload",
         default=os.environ.get(DEFAULT_MARKDOWN_DIR_ENV, ""),
     )
+    parser.add_argument(
+        "--nvme-json",
+        help="Path to nvme_health_check --json-path output for telemetry enrichment",
+        default=os.environ.get("SUGARKUBE_TELEMETRY_NVME_JSON", ""),
+    )
     args = parser.parse_args(argv)
     args.timeout = coerce_timeout(
         args.timeout,
@@ -522,12 +627,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     identifier = hashed_identifier(salt=args.salt)
     env_snapshot = collect_environment()
     tags = parse_tags(args.tags)
+    nvme_summary = None
+    nvme_raw = getattr(args, "nvme_json", "")
+    if isinstance(nvme_raw, str) and nvme_raw.strip():
+        nvme_summary = parse_nvme_smart_log(Path(nvme_raw.strip()))
     payload = build_payload(
         checks=checks,
         identifier=identifier,
         env_snapshot=env_snapshot,
         errors=errors,
         tags=tags,
+        nvme=nvme_summary,
     )
     if snapshot_requested:
         try:

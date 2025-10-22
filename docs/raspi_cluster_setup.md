@@ -61,6 +61,50 @@ Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md)
 
 ---
 
+## Recover from a failed bootstrap/join
+
+If a node accidentally **self-bootstrapped** (started its own embedded etcd) or joined the wrong
+cluster, reset it and try again:
+
+Safe, idempotent cleanup:
+
+```bash
+just wipe
+```
+
+What `just wipe` does:
+
+- Runs the official uninstallers (`/usr/local/bin/k3s-uninstall.sh` and, if present,
+  `k3s-agent-uninstall.sh`) to stop K3s and remove the local datastore and node config.
+- Removes the mDNS/DNS-SD service file for the current cluster/env from `/etc/avahi/services/` and
+  restarts Avahi so stale advertisements disappear.
+
+After wiping, re-export the desired environment variables (and token if used) before retrying:
+
+```bash
+export SUGARKUBE_SERVERS=3
+export SUGARKUBE_ENV=dev
+# Optional: set SUGARKUBE_TOKEN_DEV to the leader's
+# /var/lib/rancher/k3s/server/node-token
+just up dev
+```
+
+### Verify discovery (mDNS)
+
+To confirm the control plane is being advertised and discoverable before re-running `just up` on
+other nodes:
+
+```bash
+avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+# Look for port 6443 and TXT like: k3s=1, cluster=<name>, env=<env>, role=server
+```
+
+> **Note**
+> mDNS/DNS-SD service files live in `/etc/avahi/services/`. Removing the relevant
+> `k3s-*.service` file and reloading Avahi clears stale adverts.
+
+---
+
 ## Conceptual Overview
 
 K3s, the lightweight Kubernetes used by Sugarkube, organizes nodes into **servers** (control-plane) and **agents** (workers).
@@ -131,7 +175,8 @@ The pattern is:
 
 - To manage the cluster from your workstation, copy that kubeconfig and adjust credentials as outlined in [Manage from a workstation](./network_setup.md#manage-from-a-workstation).
 
-- When you need to reset a node, run:
+- Need a clean slate? Use: [`just wipe`](#recover-from-a-failed-bootstrapjoin) for the full
+  recovery flow.
   ```bash
   just wipe
   ```
