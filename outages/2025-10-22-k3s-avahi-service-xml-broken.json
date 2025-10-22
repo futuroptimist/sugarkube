@@ -1,0 +1,8 @@
+{
+  "id": "2025-10-22-k3s-avahi-service-xml-broken",
+  "date": "2025-10-22",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Invalid or incomplete Avahi service XML prevented k3s bootstrap and server adverts from being published, so avahi-browse discovered nothing and multiple nodes self-initialized (split-brain).",
+  "resolution": "Introduce render_avahi_service_xml() to generate valid Avahi XML, update publishers to write the file and reload avahi-daemon, and delay API advert until the port is listening.",
+  "references": ["scripts/k3s-discover.sh", "scripts/k3s_mdns_parser.py"]
+}
