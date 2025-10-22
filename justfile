@@ -29,13 +29,7 @@ prereqs:
     if ! grep -q 'mdns4_minimal' /etc/nsswitch.conf; then sudo sed -i 's/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf; fi
 
 status:
-    if ! command -v k3s >/dev/null 2>&1; then
-        printf '%s\n' \
-            'k3s is not installed yet.' \
-            'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' \
-            'Follow the instructions in that guide before rerunning this command.'
-        exit 0
-    fi
+    if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
 
 kubeconfig env='dev':
