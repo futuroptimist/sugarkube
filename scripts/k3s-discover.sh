@@ -173,7 +173,7 @@ cleanup_avahi_bootstrap() {
 trap cleanup_avahi_bootstrap EXIT
 
 log() {
-  echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
+  >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
 xml_escape() {
@@ -305,6 +305,14 @@ wait_for_bootstrap_activity() {
   done
 
   local attempt observed_activity=0
+  local no_activity_streak=0
+  local activity_grace_attempts=0
+  if [ "${require_activity}" -eq 1 ]; then
+    activity_grace_attempts=2
+    if [ "${attempts}" -lt "${activity_grace_attempts}" ]; then
+      activity_grace_attempts="${attempts}"
+    fi
+  fi
   for attempt in $(seq 1 "${attempts}"); do
     local server
     server="$(discover_server_host || true)"
@@ -318,15 +326,19 @@ wait_for_bootstrap_activity() {
     bootstrap="$(discover_bootstrap_hosts || true)"
     if [ -n "${bootstrap}" ]; then
       observed_activity=1
+      no_activity_streak=0
       local bootstrap_hosts
       bootstrap_hosts="${bootstrap//$'\n'/, }"
       log "Bootstrap advertisement(s) detected from ${bootstrap_hosts} (attempt ${attempt}/${attempts}); waiting for server advertisement..."
     else
-      if [ "${require_activity}" -eq 1 ] && [ "${observed_activity}" -eq 0 ]; then
-        log "No bootstrap advertisements detected (attempt ${attempt}/${attempts}); exiting discovery wait."
-        return 1
-      fi
-      if [ "${observed_activity}" -eq 0 ]; then
+      if [ "${require_activity}" -eq 1 ]; then
+        no_activity_streak=$((no_activity_streak + 1))
+        if [ "${activity_grace_attempts}" -gt 0 ] && [ "${no_activity_streak}" -ge "${activity_grace_attempts}" ]; then
+          log "No bootstrap advertisements detected (attempt ${attempt}/${attempts}); exiting discovery wait."
+          return 1
+        fi
+        log "No bootstrap activity detected yet (attempt ${attempt}/${attempts}); will retry before giving up."
+      elif [ "${observed_activity}" -eq 0 ]; then
         log "No bootstrap activity detected yet (attempt ${attempt}/${attempts})."
       else
         log "Bootstrap activity previously detected; continuing to wait (attempt ${attempt}/${attempts})."
