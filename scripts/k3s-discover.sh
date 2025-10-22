@@ -5,22 +5,136 @@ CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 
+log() {
+  echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
+}
+
+AVAHI_SERVICES_DIR="${SUGARKUBE_AVAHI_SERVICES_DIR:-/etc/avahi/services}"
+AVAHI_DEFAULT_SERVICE="${AVAHI_SERVICES_DIR}/k3s-https.service"
+AVAHI_SERVICE_FILE="${AVAHI_SERVICES_DIR}/k3s-${CLUSTER}-${ENVIRONMENT}.service"
+AVAHI_ROLE=""
+
+TOKEN_SOURCE=""
+TOKEN=""
+
+resolve_token_from_files() {
+  local -a candidates
+  local hints="${SUGARKUBE_TOKEN_PATH_HINTS:-}"
+
+  if [ -n "${hints}" ]; then
+    IFS=: read -r -a hint_array <<<"${hints}"
+    for path in "${hint_array[@]}"; do
+      if [ -n "${path}" ]; then
+        candidates+=("${path}")
+      fi
+    done
+  fi
+
+  candidates+=(
+    "/var/lib/rancher/k3s/server/node-token"
+    "/var/lib/rancher/k3s/server/token"
+    "/var/lib/rancher/k3s/server/agent-token"
+    "/var/lib/rancher/k3s/agent/node-token"
+    "/var/lib/rancher/k3s/agent/token"
+    "/run/k3s/token"
+  )
+
+  local candidate raw trimmed
+  for candidate in "${candidates[@]}"; do
+    if [ -r "${candidate}" ]; then
+      raw="$(head -n1 "${candidate}" 2>/dev/null || true)"
+      trimmed="$(printf '%s' "${raw}" | tr -d '[:space:]')"
+      if [ -n "${trimmed}" ]; then
+        TOKEN="${trimmed}"
+        TOKEN_SOURCE="${candidate}"
+        return 0
+      fi
+    fi
+  done
+
+  local env_path="${SUGARKUBE_K3S_SERVICE_ENV:-/etc/systemd/system/k3s.service.env}"
+  if [ -r "${env_path}" ]; then
+    local env_token
+    env_token="$(python3 - "${env_path}" <<'PY' 2>/dev/null
+import sys
+
+path = sys.argv[1]
+token = None
+try:
+    with open(path, 'r', encoding='utf-8') as handle:
+        for line in handle:
+            if line.startswith('K3S_TOKEN='):
+                token = line.split('=', 1)[1].strip()
+                break
+except FileNotFoundError:
+    token = None
+
+if token:
+    if token[0] in {'"', "'"} and token[-1] == token[0]:
+        token = token[1:-1]
+    print(token)
+PY
+)"
+    env_token="$(printf '%s' "${env_token}" | tr -d '[:space:]')"
+    if [ -n "${env_token}" ]; then
+      TOKEN="${env_token}"
+      TOKEN_SOURCE="${env_path}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 case "${ENVIRONMENT}" in
-  dev) TOKEN="${SUGARKUBE_TOKEN_DEV:-${SUGARKUBE_TOKEN:-}}" ;;
-  int) TOKEN="${SUGARKUBE_TOKEN_INT:-${SUGARKUBE_TOKEN:-}}" ;;
-  prod) TOKEN="${SUGARKUBE_TOKEN_PROD:-${SUGARKUBE_TOKEN:-}}" ;;
-  *) TOKEN="${SUGARKUBE_TOKEN:-}" ;;
+  dev)
+    if [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_DEV}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN_DEV"
+    elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN"
+    fi
+    ;;
+  int)
+    if [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_INT}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN_INT"
+    elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN"
+    fi
+    ;;
+  prod)
+    if [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_PROD}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN_PROD"
+    elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN"
+    fi
+    ;;
+  *)
+    if [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE="environment variable SUGARKUBE_TOKEN"
+    fi
+    ;;
 esac
 
-if [ -z "${TOKEN:-}" ]; then
+if [ -z "${TOKEN:-}" ] && ! resolve_token_from_files; then
   echo "SUGARKUBE_TOKEN (or per-env variant) required"
   exit 1
 fi
 
+if [ -z "${TOKEN_SOURCE}" ]; then
+  TOKEN_SOURCE="automatically discovered token"
+fi
+
+log "Using join token from ${TOKEN_SOURCE}"
+
 HN="$(hostname -s)"
 MDNS_HOST="${HN}.local"
-AVAHI_SERVICE_FILE="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
-AVAHI_ROLE=""
 
 cleanup_avahi_bootstrap() {
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
@@ -31,10 +145,6 @@ cleanup_avahi_bootstrap() {
 }
 
 trap cleanup_avahi_bootstrap EXIT
-
-log() {
-  echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
-}
 
 run_avahi_query() {
   local mode="$1"
@@ -158,8 +268,8 @@ publish_avahi_service() {
     port="$1"
     shift
   fi
-  sudo install -d -m 755 /etc/avahi/services
-  sudo rm -f /etc/avahi/services/k3s-https.service || true
+  sudo install -d -m 755 "${AVAHI_SERVICES_DIR}"
+  sudo rm -f "${AVAHI_DEFAULT_SERVICE}" || true
   sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
@@ -352,4 +462,3 @@ if [ -f /etc/rancher/k3s/k3s.yaml ]; then
   sudo mkdir -p /root/.kube
   sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
 fi
-

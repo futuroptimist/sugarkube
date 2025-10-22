@@ -21,7 +21,10 @@ When the first node starts `k3s` as a server, it automatically creates a secret 
 /var/lib/rancher/k3s/server/node-token
 ```
 
-That token is what other nodes must present to join. Sugarkube never invents its own tokens—it just expects you to export them before you run `just up`.
+That token is what other nodes must present to join. The `k3s-discover.sh` helper now
+automatically reads the local copy when it exists, so the very first server for an
+environment can run `just up` with zero additional setup. Additional servers or agents
+still need the token exported before they attempt to join.
 
 The pattern is:
 
@@ -69,7 +72,8 @@ After the reboot, rerun the helper to confirm the controller is available:
    just up dev
    ```
 
-   This installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as
+   This installs Avahi/libnss-mdns, bootstraps a k3s server (automatically reading the
+   freshly-created `/var/lib/rancher/k3s/server/node-token`), publishes the API as
    `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,
    and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
 
@@ -177,8 +181,9 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 - **Error: `SUGARKUBE_TOKEN (or per-env variant) required`**
 
-  You tried to run `just up` on a node without exporting the token.
-  Retrieve it from the control-plane (`/var/lib/rancher/k3s/server/node-token`) and set the appropriate environment variable before retrying.
+  You ran `just up` without a readable token.
+  On additional nodes, export the token (or set the right `SUGARKUBE_TOKEN_*` variable) before retrying.
+  On the very first server, rerun the command once the bootstrap finishes—`k3s-discover.sh` reads `/var/lib/rancher/k3s/server/node-token` automatically when the file is present.
 
 - **Cluster discovery fails**
 
