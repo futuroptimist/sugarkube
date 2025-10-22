@@ -129,6 +129,14 @@ The pattern is:
   ```
   The file lands in `~/.kube/config` with the context renamed to `sugar-dev` and the `.local` hostname preserved for TLS.
 
+#### Verify discovery
+
+```bash
+avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+```
+
+Confirm the output advertises port `6443` alongside `TXT` records for `k3s=1`, `cluster=<name>`, and `env=<env>`.
+
 - To manage the cluster from your workstation, copy that kubeconfig and adjust credentials as outlined in [Manage from a workstation](./network_setup.md#manage-from-a-workstation).
 
 - When you need to reset a node, run:
