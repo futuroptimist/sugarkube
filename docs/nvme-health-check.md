@@ -71,6 +71,29 @@ Just, and Task wrappers aligned with this guide. The error path is covered by
 `tests/nvme_health_check_test.py::test_nvme_health_json_export_failure` so failed exports do
 not go unnoticed.
 
+## Telemetry integration
+
+`scripts/nvme_health_check.sh` already exports raw SMART data when you pass
+`--json-path`. Feed that output into `scripts/publish_telemetry.py` so the NVMe
+metrics travel alongside verifier summaries and environment snapshots:
+
+```bash
+sudo ./scripts/nvme_health_check.sh --json-path /var/log/sugarkube/nvme-smart.json
+python scripts/publish_telemetry.py \
+  --nvme-json /var/log/sugarkube/nvme-smart.json \
+  --markdown-dir docs/status/metrics \
+  --dry-run
+```
+
+Set `SUGARKUBE_TELEMETRY_NVME_JSON` when you prefer an environment variable over
+the explicit flag. Markdown snapshots now include an “NVMe Health” table that
+highlights the critical warning bitfield, wear percentage, terabytes written,
+media error count, and unsafe shutdown total. Regression coverage lives in
+`tests/test_publish_telemetry.py::test_parse_nvme_smart_log_extracts_summary`,
+`tests/test_publish_telemetry.py::test_main_includes_nvme_payload`, and
+`tests/test_publish_telemetry.py::test_markdown_summary_includes_nvme_section` so
+the telemetry enrichment stays aligned with this guide.
+
 ## Deployment
 1. Install dependencies:
    ```bash
@@ -119,7 +142,3 @@ not go unnoticed.
 - Ensure adequate cooling for the Pi and the NVMe enclosure to avoid thermal throttling.
 - Forward syslog entries to Prometheus, Loki, or a central syslog server for fleet monitoring.
 - Keep a pre-imaged spare NVMe drive so replacement is a quick swap when wear thresholds are met.
-
-## Future Enhancements
-- Feed the helper output into the existing telemetry pipelines (for example, forward syslog
-  entries to a Sugarkube alerting workflow) so persistent degradations raise proactive tickets.

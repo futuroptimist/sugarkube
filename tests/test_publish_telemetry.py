@@ -116,6 +116,44 @@ def test_build_payload_includes_summary_and_tags():
     assert summary["failed_checks"] == ["projects"]
 
 
+def test_parse_nvme_smart_log_extracts_summary(tmp_path):
+    smart_log = {
+        "critical_warning": 0,
+        "percentage_used": 12,
+        "data_units_written": 12345,
+        "media_errors": 1,
+        "unsafe_shutdowns": 2,
+    }
+    path = tmp_path / "smart.json"
+    path.write_text(json.dumps(smart_log), encoding="utf-8")
+
+    summary = MODULE.parse_nvme_smart_log(path)
+
+    assert summary["critical_warning"] == "0x00"
+    assert summary["percentage_used"] == 12
+    assert summary["data_units_written"] == 12345
+    assert summary["terabytes_written"] == pytest.approx(0.01)
+    assert summary["media_errors"] == 1
+    assert summary["unsafe_shutdowns"] == 2
+
+
+@pytest.mark.parametrize("payload", [{}, {"percentage_used": 5}])
+def test_parse_nvme_smart_log_requires_expected_fields(tmp_path, payload):
+    path = tmp_path / "smart.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(MODULE.TelemetryError, match="NVMe SMART JSON"):
+        MODULE.parse_nvme_smart_log(path)
+
+
+def test_parse_nvme_smart_log_rejects_invalid_json(tmp_path):
+    path = tmp_path / "smart.json"
+    path.write_text("{not json}", encoding="utf-8")
+
+    with pytest.raises(MODULE.TelemetryError, match="invalid NVMe"):
+        MODULE.parse_nvme_smart_log(path)
+
+
 def test_read_text_trims_and_handles_errors(tmp_path, monkeypatch):
     sample = tmp_path / "sample.txt"
     sample.write_text(" value \n", encoding="utf-8")
@@ -511,6 +549,60 @@ def test_main_uploads_payload_and_prints(monkeypatch, capsys):
     assert '"warn"' in captured.out
 
 
+def test_main_includes_nvme_payload(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
+    monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
+    monkeypatch.setattr(
+        MODULE,
+        "run_verifier",
+        lambda path, timeout: ([{"name": "ready", "status": "pass"}], []),
+    )
+    monkeypatch.setattr(MODULE, "hashed_identifier", lambda **_: "id")
+    monkeypatch.setattr(MODULE, "collect_environment", lambda: {"kernel": "Linux"})
+    monkeypatch.setattr(MODULE, "parse_tags", lambda raw: [])
+
+    captured: dict[str, object] = {}
+
+    def fake_send(payload, **kwargs):  # noqa: ANN001, ANN002
+        captured["payload"] = payload
+
+    monkeypatch.setattr(MODULE, "send_payload", fake_send)
+
+    nvme_path = tmp_path / "smart.json"
+    nvme_path.write_text("{}", encoding="utf-8")
+
+    nvme_summary = {
+        "critical_warning": "0x00",
+        "percentage_used": 10,
+        "data_units_written": 5000,
+        "terabytes_written": 2.56,
+        "media_errors": 0,
+        "unsafe_shutdowns": 1,
+    }
+
+    recorded_path: list[Path] = []
+
+    def fake_parse(path):  # noqa: ANN001
+        recorded_path.append(Path(path))
+        return nvme_summary
+
+    monkeypatch.setattr(MODULE, "parse_nvme_smart_log", fake_parse)
+
+    exit_code = MODULE.main(
+        [
+            "--endpoint",
+            "https://example",
+            "--nvme-json",
+            str(nvme_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorded_path and recorded_path[0] == nvme_path
+    assert "payload" in captured
+    assert captured["payload"]["nvme"] == nvme_summary
+
+
 def test_main_requires_endpoint_when_not_dry_run(monkeypatch):
     monkeypatch.setenv("SUGARKUBE_TELEMETRY_ENABLE", "true")
     monkeypatch.setattr(MODULE, "discover_verifier_path", lambda value: "verifier")
@@ -658,6 +750,25 @@ def test_markdown_summary_lists_none_when_no_errors():
     }
     summary = MODULE._markdown_summary(payload)
     assert "- None" in summary
+
+
+def test_markdown_summary_includes_nvme_section():
+    payload = {
+        "instance": {"id": "node"},
+        "verifier": {"summary": {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "other": 0}},
+        "nvme": {
+            "critical_warning": "0x01",
+            "percentage_used": 55,
+            "terabytes_written": 1.23,
+            "data_units_written": 2400000,
+            "media_errors": 0,
+            "unsafe_shutdowns": 0,
+        },
+    }
+    summary = MODULE._markdown_summary(payload)
+    assert "## NVMe Health" in summary
+    assert "| Percentage used (%) | 55 |" in summary
+    assert "| Total written (TB) | 1.23 |" in summary
 
 
 def test_markdown_summary_handles_missing_instance():
