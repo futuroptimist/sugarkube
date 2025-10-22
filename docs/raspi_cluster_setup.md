@@ -199,6 +199,17 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
   should only see this error when orchestrating multi-server or agent joins. Export the
   appropriate environment variable with the control-plane token before retrying.
 
+### Verify discovery
+
+Run this on any node to confirm that the control-plane API is visible over mDNS:
+
+```bash
+avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+```
+
+The output must list port `6443` with TXT records `k3s=1`, `cluster=<name>`, and
+`env=<env>` for your target environment.
+
 - **Cluster discovery fails**
 
   - Confirm multicast (UDP 5353) is allowed.

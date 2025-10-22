@@ -7,8 +7,29 @@ SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
 
+if [ "${SUGARKUBE_SUDO+x}" != "x" ]; then
+  SUGARKUBE_SUDO="sudo"
+fi
+
+sugarkube_run_as_root() {
+  if [ -z "${SUGARKUBE_SUDO}" ]; then
+    "$@"
+    return
+  fi
+
+  local -a sudo_cmd
+  read -r -a sudo_cmd <<<"${SUGARKUBE_SUDO}"
+  if [ "${#sudo_cmd[@]}" -eq 0 ]; then
+    "$@"
+  else
+    "${sudo_cmd[@]}" "$@"
+  fi
+}
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
+RUN_AVAHI_QUERY_MODE=""
+PUBLISH_AVAHI_ROLE=""
 
 NODE_TOKEN_PRESENT=0
 BOOT_TOKEN_PRESENT=0
@@ -20,6 +41,22 @@ while [ "$#" -gt 0 ]; do
       ;;
     --check-token-only)
       CHECK_TOKEN_ONLY=1
+      ;;
+    --run-avahi-query)
+      if [ "$#" -lt 2 ]; then
+        echo "--run-avahi-query requires a mode" >&2
+        exit 2
+      fi
+      RUN_AVAHI_QUERY_MODE="$2"
+      shift
+      ;;
+    --publish-avahi-service)
+      if [ "$#" -lt 2 ]; then
+        echo "--publish-avahi-service requires a role" >&2
+        exit 2
+      fi
+      PUBLISH_AVAHI_ROLE="$2"
+      shift
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -108,7 +145,8 @@ if [ -z "${TOKEN:-}" ]; then
   fi
 fi
 
-if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
+if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ] \
+  && [ -z "${RUN_AVAHI_QUERY_MODE}" ] && [ -z "${PUBLISH_AVAHI_ROLE}" ]; then
   if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
     echo "SUGARKUBE_TOKEN (or per-env variant) required" >&2
     exit 1
@@ -131,13 +169,14 @@ fi
 
 HN="$(hostname -s)"
 MDNS_HOST="${HN}.local"
-AVAHI_SERVICE_FILE="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
+AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service}"
 AVAHI_ROLE=""
 
 cleanup_avahi_bootstrap() {
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
-    sudo rm -f "${AVAHI_SERVICE_FILE}" || true
-    sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+    sugarkube_run_as_root rm -f "${AVAHI_SERVICE_FILE}" || true
+    sugarkube_run_as_root systemctl reload avahi-daemon || \
+      sugarkube_run_as_root systemctl restart avahi-daemon
     AVAHI_ROLE=""
   fi
 }
@@ -148,13 +187,24 @@ log() {
   echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
 }
 
+xml_escape() {
+  python3 - "$1" <<'PY'
+import html
+import sys
+
+print(html.escape(sys.argv[1]))
+PY
+}
+
 run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import subprocess
 import sys
+import os
 
 mode, cluster, environment = sys.argv[1:4]
+debug = os.environ.get("SUGARKUBE_DEBUG")
 
 try:
     output = subprocess.check_output(
@@ -162,6 +212,8 @@ try:
             "avahi-browse",
             "--parsable",
             "--terminate",
+            "--resolve",
+            "--ignore-local",
             "_https._tcp",
         ],
         stderr=subprocess.DEVNULL,
@@ -176,6 +228,8 @@ for line in output.splitlines():
         continue
     parts = line.split(";")
     if len(parts) < 9:
+        if debug:
+            print(f"[sugarkube-debug] skipping short avahi record: {line}", file=sys.stderr)
         continue
     host = parts[7]
     port = parts[8]
@@ -270,31 +324,53 @@ publish_avahi_service() {
     port="$1"
     shift
   fi
-  sudo install -d -m 755 /etc/avahi/services
-  sudo rm -f /etc/avahi/services/k3s-https.service || true
-  sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
+  local avahi_dir
+  avahi_dir="$(dirname "${AVAHI_SERVICE_FILE}")"
+  sugarkube_run_as_root install -d -m 755 "${avahi_dir}"
+  sugarkube_run_as_root rm -f "${avahi_dir}/k3s-https.service" || true
+
+  local service_name
+  service_name="k3s API ${CLUSTER}/${ENVIRONMENT} on %h"
+  local escaped_service_name escaped_cluster escaped_env escaped_role
+  escaped_service_name="$(xml_escape "${service_name}")"
+  escaped_cluster="$(xml_escape "${CLUSTER}")"
+  escaped_env="$(xml_escape "${ENVIRONMENT}")"
+  escaped_role="$(xml_escape "${role}")"
+
+  local -a escaped_records=()
+  local record
+  for record in "$@"; do
+    if [ -n "${record}" ]; then
+      escaped_records+=("$(xml_escape "${record}")")
+    fi
+  done
+
+  sugarkube_run_as_root tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
-  <name replace-wildcards="yes">k3s API ${CLUSTER}/${ENVIRONMENT} on %h</name>
+  <name replace-wildcards="yes">${escaped_service_name}</name>
   <service>
     <type>_https._tcp</type>
     <port>${port}</port>
     <txt-record>k3s=1</txt-record>
-    <txt-record>cluster=${CLUSTER}</txt-record>
-    <txt-record>env=${ENVIRONMENT}</txt-record>
-    <txt-record>role=${role}</txt-record>
+    <txt-record>cluster=${escaped_cluster}</txt-record>
+    <txt-record>env=${escaped_env}</txt-record>
+    <txt-record>role=${escaped_role}</txt-record>
+    <!-- optional -->
 EOF_AVAHI
-  for record in "$@"; do
-    if [ -n "${record}" ]; then
-      printf '    <txt-record>%s</txt-record>\n' "${record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
-    fi
+
+  for record in "${escaped_records[@]}"; do
+    printf '    <txt-record>%s</txt-record>\n' "${record}" \
+      | sugarkube_run_as_root tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
   done
-  sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI'
+
+  sugarkube_run_as_root tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI'
   </service>
 </service-group>
 EOF_AVAHI
-  sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+  sugarkube_run_as_root systemctl reload avahi-daemon || \
+    sugarkube_run_as_root systemctl restart avahi-daemon
   AVAHI_ROLE="${role}"
 }
 
@@ -414,6 +490,16 @@ install_agent() {
       --node-label "sugarkube.env=${ENVIRONMENT}"
 }
 
+if [ -n "${RUN_AVAHI_QUERY_MODE}" ]; then
+  run_avahi_query "${RUN_AVAHI_QUERY_MODE}"
+  exit 0
+fi
+
+if [ -n "${PUBLISH_AVAHI_ROLE}" ]; then
+  publish_avahi_service "${PUBLISH_AVAHI_ROLE}"
+  exit 0
+fi
+
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
 server_host="$(discover_server_host || true)"
 
@@ -481,6 +567,6 @@ else
 fi
 
 if [ -f /etc/rancher/k3s/k3s.yaml ]; then
-  sudo mkdir -p /root/.kube
-  sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+  sugarkube_run_as_root mkdir -p /root/.kube
+  sugarkube_run_as_root cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
 fi
