@@ -63,7 +63,7 @@ After the reboot, rerun the helper to confirm the controller is available:
 
 2. **Bootstrap the first control-plane node**
 
-   On the first Pi for an environment (defaults to `dev`):
+   On `sugarkube0` (the first Pi for an environment, defaults to `dev`):
 
    ```bash
    just up dev
@@ -73,7 +73,16 @@ After the reboot, rerun the helper to confirm the controller is available:
    `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,
    and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
 
-   When it finishes, capture its join token:
+   > **HA choice**
+   > - `SUGARKUBE_SERVERS=1` (default) keeps the datastore on SQLite.
+   >   Later nodes join as agents unless you promote them manually.
+   > - `SUGARKUBE_SERVERS>=3` enables embedded etcd with `--cluster-init`.
+   >   Each additional server finds `sugarkube0.local` via mDNS and forms quorum.
+   >
+   > Set `export SUGARKUBE_SERVERS=3` **before** the very first `just up <env>`
+   > if you want high availability.
+
+   When `just up` finishes, capture the join token so other nodes can enroll:
 
    ```bash
    sudo cat /var/lib/rancher/k3s/server/node-token
@@ -83,14 +92,18 @@ After the reboot, rerun the helper to confirm the controller is available:
 
 3. **Join worker or additional server nodes**
 
-   On each additional Pi you want in the same environment, export the token you copied:
+   Keep every Pi on the same multicast-friendly subnet and give them predictable hostnames
+   such as `sugarkube1` and `sugarkube2` so `.local` lookups stay obvious.
+   On each additional node for the same environment:
 
    ```bash
-   export SUGARKUBE_TOKEN_DEV="K10abc123..."
+   export SUGARKUBE_TOKEN_DEV="K10abc123..."  # token gathered from sugarkube0
    just up dev
    ```
 
-   These nodes discover the control-plane over mDNS, join using that token, and then rely on k3s’ built-in load balancer for ongoing discovery.
+   Each node discovers `sugarkube0.local` (and, for HA, its peer servers) over mDNS,
+   joins using the exported token, and then relies on the built-in k3s load balancer
+   for ongoing discovery.
 
 4. **Switch environments easily**
 
@@ -105,22 +118,32 @@ After the reboot, rerun the helper to confirm the controller is available:
 
 5. **Manage and inspect**
 
-   - Export kubeconfig for a workstation:
-     ```bash
-     just kubeconfig
-     ```
-     The file is written to `~/.kube/config` and already includes the `.local` hostname in the TLS SAN, so DHCP IP churn is safe.
-
-   - Check cluster status:
-     ```bash
-     just status
-     ```
-
    - Wipe a node clean:
      ```bash
      just wipe
      ```
      This runs the official uninstall scripts, drops its Avahi service file, and restarts the daemon.
+
+### After bootstrap
+
+- Confirm the control plane sees every node:
+  ```bash
+  just status
+  ```
+- Export kubeconfig on any cluster node (creates an env-scoped context like `sugar-dev`):
+  ```bash
+  just kubeconfig
+  ```
+  The file lands in `~/.kube/config` and includes the `.local` server SAN so DHCP IP churn is safe.
+- Optionally copy the kubeconfig to your workstation. Follow
+  [Manage from a workstation](./network_setup.md#manage-from-a-workstation) for the
+  secure scp variant.
+
+Need deeper operational steps or recovery patterns? Jump to the
+[runbook](./runbook.md#validation-commands) for validation commands, restores, and
+troubleshooting. When you are ready to hand control to GitOps, use
+[`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh)
+(also wrapped by `just flux-bootstrap`).
 
 ---
 
