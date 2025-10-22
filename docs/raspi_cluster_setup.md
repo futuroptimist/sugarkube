@@ -63,7 +63,7 @@ After the reboot, rerun the helper to confirm the controller is available:
 
 2. **Bootstrap the first control-plane node**
 
-   On the first Pi for an environment (defaults to `dev`):
+   On the first Pi for an environment (for example `sugarkube0.local`):
 
    ```bash
    just up dev
@@ -72,6 +72,13 @@ After the reboot, rerun the helper to confirm the controller is available:
    This installs Avahi/libnss-mdns, bootstraps a k3s server, publishes the API as
    `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records,
    and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
+
+   > **HA choice**
+   >
+   > - `SUGARKUBE_SERVERS=1` (default) keeps the first server on SQLite. Later nodes join as agents unless you promote them manually.
+   > - `SUGARKUBE_SERVERS>=3` (recommended for HA) makes the first server initialise embedded etcd with `--cluster-init` and advertise itself via mDNS for other **servers** to join.
+   >
+   > Export `SUGARKUBE_SERVERS=3` (or another odd number) **before** the very first `just up <env>` so discovery advertises the correct role from the start.
 
    When it finishes, capture its join token:
 
@@ -83,14 +90,14 @@ After the reboot, rerun the helper to confirm the controller is available:
 
 3. **Join worker or additional server nodes**
 
-   On each additional Pi you want in the same environment, export the token you copied:
+   Give the remaining Pis distinct hostnames such as `sugarkube1` and `sugarkube2` so their `.local` records resolve over the same L2 subnet. On each node:
 
    ```bash
-   export SUGARKUBE_TOKEN_DEV="K10abc123..."
+   export SUGARKUBE_TOKEN_DEV="K10abc123..."  # token gathered from sugarkube0
    just up dev
    ```
 
-   These nodes discover the control-plane over mDNS, join using that token, and then rely on k3s’ built-in load balancer for ongoing discovery.
+   With `SUGARKUBE_SERVERS=1`, these nodes join as agents. When `SUGARKUBE_SERVERS>=3`, they discover the first server over mDNS and join the embedded etcd quorum as control-plane peers.
 
 4. **Switch environments easily**
 
@@ -103,24 +110,28 @@ After the reboot, rerun the helper to confirm the controller is available:
 
    You can even run multiple environments on the same LAN simultaneously as long as they use different tokens.
 
-5. **Manage and inspect**
+### After bootstrap
 
-   - Export kubeconfig for a workstation:
-     ```bash
-     just kubeconfig
-     ```
-     The file is written to `~/.kube/config` and already includes the `.local` hostname in the TLS SAN, so DHCP IP churn is safe.
+- Check node readiness from any cluster member:
+  ```bash
+  just status
+  ```
 
-   - Check cluster status:
-     ```bash
-     just status
-     ```
+- Export an environment-scoped kubeconfig locally:
+  ```bash
+  just kubeconfig env=dev
+  ```
+  The file lands in `~/.kube/config` with the context renamed to `sugar-dev` and the `.local` hostname preserved for TLS.
 
-   - Wipe a node clean:
-     ```bash
-     just wipe
-     ```
-     This runs the official uninstall scripts, drops its Avahi service file, and restarts the daemon.
+- To manage the cluster from your workstation, copy that kubeconfig and adjust credentials as outlined in [Manage from a workstation](./network_setup.md#manage-from-a-workstation).
+
+- When you need to reset a node, run:
+  ```bash
+  just wipe
+  ```
+  This runs the official uninstall scripts, drops its Avahi service file, and restarts the daemon.
+
+Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
 
 ---
 
