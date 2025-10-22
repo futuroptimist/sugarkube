@@ -13,6 +13,10 @@ CHECK_TOKEN_ONLY=0
 NODE_TOKEN_PRESENT=0
 BOOT_TOKEN_PRESENT=0
 
+TEST_RUN_AVAHI=""
+TEST_RENDER_SERVICE=0
+declare -a TEST_RENDER_ARGS=()
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --print-resolved-token)
@@ -20,6 +24,20 @@ while [ "$#" -gt 0 ]; do
       ;;
     --check-token-only)
       CHECK_TOKEN_ONLY=1
+      ;;
+    --run-avahi-query)
+      if [ "$#" -lt 2 ]; then
+        echo "--run-avahi-query requires a mode" >&2
+        exit 2
+      fi
+      TEST_RUN_AVAHI="$2"
+      shift
+      ;;
+    --render-avahi-service)
+      TEST_RENDER_SERVICE=1
+      shift
+      TEST_RENDER_ARGS=("$@")
+      break
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -131,7 +149,8 @@ fi
 
 HN="$(hostname -s)"
 MDNS_HOST="${HN}.local"
-AVAHI_SERVICE_FILE="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
+AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
+AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${CLUSTER}-${ENVIRONMENT}.service}"
 AVAHI_ROLE=""
 
 cleanup_avahi_bootstrap() {
@@ -148,13 +167,30 @@ log() {
   echo "[sugarkube ${CLUSTER}/${ENVIRONMENT}] $*"
 }
 
+xml_escape() {
+  python3 - "$1" <<'PY'
+import html
+import sys
+
+print(html.escape(sys.argv[1], quote=True))
+PY
+}
+
 run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+import os
 import subprocess
 import sys
 
 mode, cluster, environment = sys.argv[1:4]
+
+debug_enabled = bool(os.environ.get("SUGARKUBE_DEBUG"))
+
+
+def debug(message: str) -> None:
+    if debug_enabled:
+        print(f"[k3s-discover mdns] {message}", file=sys.stderr)
 
 try:
     output = subprocess.check_output(
@@ -162,6 +198,8 @@ try:
             "avahi-browse",
             "--parsable",
             "--terminate",
+            "--resolve",
+            "--ignore-local",
             "_https._tcp",
         ],
         stderr=subprocess.DEVNULL,
@@ -176,8 +214,12 @@ for line in output.splitlines():
         continue
     parts = line.split(";")
     if len(parts) < 9:
+        debug(f"Skipping mDNS record with insufficient fields: {line}")
         continue
-    host = parts[7]
+    if len(parts) >= 10:
+        host = parts[6]
+    else:
+        host = parts[7]
     port = parts[8]
     if port != "6443":
         continue
@@ -270,24 +312,36 @@ publish_avahi_service() {
     port="$1"
     shift
   fi
-  sudo install -d -m 755 /etc/avahi/services
-  sudo rm -f /etc/avahi/services/k3s-https.service || true
+  sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
+  sudo rm -f "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  local service_name
+  service_name="k3s API ${CLUSTER}/${ENVIRONMENT} on %h"
+  local xml_service_name xml_port xml_cluster xml_env xml_role
+  xml_service_name="$(xml_escape "${service_name}")"
+  xml_port="$(xml_escape "${port}")"
+  xml_cluster="$(xml_escape "${CLUSTER}")"
+  xml_env="$(xml_escape "${ENVIRONMENT}")"
+  xml_role="$(xml_escape "${role}")"
   sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
-  <name replace-wildcards="yes">k3s API ${CLUSTER}/${ENVIRONMENT} on %h</name>
+  <name replace-wildcards="yes">${xml_service_name}</name>
   <service>
     <type>_https._tcp</type>
-    <port>${port}</port>
+    <port>${xml_port}</port>
     <txt-record>k3s=1</txt-record>
-    <txt-record>cluster=${CLUSTER}</txt-record>
-    <txt-record>env=${ENVIRONMENT}</txt-record>
-    <txt-record>role=${role}</txt-record>
+    <txt-record>cluster=${xml_cluster}</txt-record>
+    <txt-record>env=${xml_env}</txt-record>
+    <txt-record>role=${xml_role}</txt-record>
+    <!-- optional -->
 EOF_AVAHI
+  local record
   for record in "$@"; do
     if [ -n "${record}" ]; then
-      printf '    <txt-record>%s</txt-record>\n' "${record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
+      local escaped_record
+      escaped_record="$(xml_escape "${record}")"
+      printf '    <txt-record>%s</txt-record>\n' "${escaped_record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
     fi
   done
   sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI'
@@ -413,6 +467,20 @@ install_agent() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
 }
+
+if [ -n "${TEST_RUN_AVAHI:-}" ]; then
+  run_avahi_query "${TEST_RUN_AVAHI}"
+  exit 0
+fi
+
+if [ "${TEST_RENDER_SERVICE}" -eq 1 ]; then
+  if [ "${#TEST_RENDER_ARGS[@]}" -eq 0 ]; then
+    echo "--render-avahi-service requires a role argument" >&2
+    exit 2
+  fi
+  publish_avahi_service "${TEST_RENDER_ARGS[@]}"
+  exit 0
+fi
 
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
 server_host="$(discover_server_host || true)"
