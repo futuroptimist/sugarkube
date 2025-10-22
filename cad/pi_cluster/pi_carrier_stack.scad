@@ -24,7 +24,12 @@ alignment_guard_enabled =
     is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
 column_alignment_tolerance =
     is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
-expected_column_spacing = [58, 49];
+expected_column_spacing = [58,49];
+assert(
+    expected_column_spacing[0] == pi_hole_spacing[0] &&
+        expected_column_spacing[1] == pi_hole_spacing[1],
+    "expected_column_spacing should mirror pi_hole_spacing"
+);
 
 if (alignment_guard_enabled) {
     assert(

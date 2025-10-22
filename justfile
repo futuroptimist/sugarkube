@@ -39,12 +39,7 @@ kubeconfig env='dev':
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 wipe:
-    if command -v k3s-uninstall.sh >/dev/null; then sudo k3s-uninstall.sh; fi
-    if command -v k3s-agent-uninstall.sh >/dev/null; then sudo k3s-agent-uninstall.sh; fi
-    cluster="${SUGARKUBE_CLUSTER:-sugar}"
-    env="${SUGARKUBE_ENV:-dev}"
-    sudo rm -f "/etc/avahi/services/k3s-${cluster}-${env}.service" || true
-    sudo systemctl restart avahi-daemon || true
+    @sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
 
 scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
