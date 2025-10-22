@@ -326,7 +326,7 @@ install_server_single() {
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | "${env_assignments[@]}" \
+    | env "${env_assignments[@]}" \
       sh -s - server \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -342,7 +342,7 @@ install_server_cluster_init() {
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | "${env_assignments[@]}" \
+    | env "${env_assignments[@]}" \
       sh -s - server \
       --cluster-init \
       --tls-san "${MDNS_HOST}" \
@@ -364,7 +364,7 @@ install_server_join() {
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
-    | "${env_assignments[@]}" \
+    | env "${env_assignments[@]}" \
       sh -s - server \
       --server "https://${server}:6443" \
       --tls-san "${server}" \
@@ -386,9 +386,9 @@ install_agent() {
   log "Joining as agent via https://${server}:6443"
   local env_assignments
   build_install_env env_assignments
+  env_assignments+=("K3S_URL=https://${server}:6443")
   curl -sfL https://get.k3s.io \
-    | "${env_assignments[@]}" \
-      K3S_URL="https://${server}:6443" \
+    | env "${env_assignments[@]}" \
       sh -s - agent \
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
