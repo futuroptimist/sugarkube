@@ -145,15 +145,18 @@ stable hostnames to avoid churn.
 
 ### Validation commands
 
-Run the following after each reconciliation to confirm the new hardening landed:
+Use these quick checks after bootstrap or recovery (run the first two directly on a control-plane node, then use your kubeconfig for the Kubernetes queries):
 
 ```bash
+just status
+sudo k3s kubectl get nodes -o wide
+kubectl -n kube-system get daemonset kube-vip
 kubectl -n kube-system get deploy traefik
-kubectl -n cloudflared get deploy
-kubectl -n monitoring get servicemonitors,prometheusrules
-kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | \
-  grep ServiceMonitorTargetDown
+# Optional: confirm the VIP responds
+ping -c3 <kube-vip-address-from-clusters/dev/patches/kube-vip-values.yaml>
 ```
+
+Swap `dev` for `int` or `prod` when targeting other environments and substitute the VIP defined in the corresponding overlay.
 
 ## 6. Backups and restore procedures
 
