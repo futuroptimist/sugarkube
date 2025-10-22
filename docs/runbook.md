@@ -145,15 +145,17 @@ stable hostnames to avoid churn.
 
 ### Validation commands
 
-Run the following after each reconciliation to confirm the new hardening landed:
+Run these checks after bootstrap or Flux reconciliation to confirm the control plane is healthy:
 
 ```bash
+just status
+kubectl get nodes -o wide
+kubectl -n kube-system get daemonset kube-vip
 kubectl -n kube-system get deploy traefik
-kubectl -n cloudflared get deploy
-kubectl -n monitoring get servicemonitors,prometheusrules
-kubectl -n monitoring get prometheusrules app-uptime-rules -o yaml | \
-  grep ServiceMonitorTargetDown
 ```
+
+Optionally confirm the VIP or ingress wiring with `kubectl -n kube-system get svc kube-vip` and
+`kubectl -n kube-system get svc traefik -o wide`.
 
 ## 6. Backups and restore procedures
 

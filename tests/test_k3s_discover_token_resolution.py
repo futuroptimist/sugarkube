@@ -46,6 +46,16 @@ def test_prefers_env_specific_token(default_env):
     assert result.stdout.strip() == "dev-specific-token"
 
 
+def test_falls_back_to_generic_token(default_env):
+    env = dict(default_env)
+    env["SUGARKUBE_TOKEN"] = "generic-token"
+
+    result = run_discover(["--print-resolved-token"], env)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "generic-token"
+
+
 def test_reads_node_token_file(default_env, tmp_path):
     node_token_path = tmp_path / "node-token"
     node_token_path.write_text("K10node::server:abc123\n", encoding="utf-8")
