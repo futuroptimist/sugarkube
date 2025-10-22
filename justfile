@@ -35,8 +35,7 @@ kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
     sudo chown "$USER":"$USER" ~/.kube/config
-    env_name="${SUGARKUBE_ENV:-{{ env }}}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-${env_name}"
+    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 wipe:
     if command -v k3s-uninstall.sh >/dev/null; then sudo k3s-uninstall.sh; fi
