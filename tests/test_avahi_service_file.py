@@ -58,10 +58,7 @@ def test_publish_avahi_service_creates_valid_xml(avahi_env):
 
     assert result.returncode == 0, result.stderr
 
-    service_dir = Path(env["SUGARKUBE_AVAHI_SERVICE_DIR"])
-    service_file = service_dir / "k3s-sugar-dev.service"
-
-    xml_text = service_file.read_text(encoding="utf-8")
+    xml_text = result.stdout
     assert "<?xml version=\"1.0\"" in xml_text
     assert "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">" in xml_text
 

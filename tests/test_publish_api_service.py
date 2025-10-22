@@ -40,8 +40,7 @@ def test_render_api_service_generates_expected_xml(tmp_path):
 
     assert result.returncode == 0, result.stderr
 
-    service_file = service_dir / "k3s-sugar-dev.service"
-    xml_text = service_file.read_text(encoding="utf-8")
+    xml_text = result.stdout
     root = ET.fromstring(xml_text)
 
     name = root.find("name")

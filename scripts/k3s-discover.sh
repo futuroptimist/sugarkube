@@ -24,6 +24,7 @@ BOOT_TOKEN_PRESENT=0
 
 TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
+TEST_WAIT_LOOP=0
 declare -a TEST_RENDER_ARGS=()
 
 while [ "$#" -gt 0 ]; do
@@ -47,6 +48,9 @@ while [ "$#" -gt 0 ]; do
       shift
       TEST_RENDER_ARGS=("$@")
       break
+      ;;
+    --test-wait-loop-only)
+      TEST_WAIT_LOOP=1
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -185,6 +189,44 @@ print(html.escape(sys.argv[1], quote=True))
 PY
 }
 
+render_avahi_service_xml() {
+  local role="$1"; shift
+  local port="${1:-6443}"; shift
+  local service_name="k3s API ${CLUSTER}/${ENVIRONMENT} on %h"
+
+  # Escape user-provided bits to keep valid XML
+  local xml_service_name xml_port xml_cluster xml_env xml_role
+  xml_service_name="$(xml_escape "${service_name}")"
+  xml_port="$(xml_escape "${port}")"
+  xml_cluster="$(xml_escape "${CLUSTER}")"
+  xml_env="$(xml_escape "${ENVIRONMENT}")"
+  xml_role="$(xml_escape "${role}")"
+
+  # Optional TXT extras
+  local extra=""
+  local item
+  for item in "$@"; do
+    [ -n "${item}" ] || continue
+    extra+=$'\n    <txt-record>'"$(xml_escape "${item}")"'</txt-record>'
+  done
+
+  cat <<EOF
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">${xml_service_name}</name>
+  <service>
+    <type>_https._tcp</type>
+    <port>${xml_port}</port>
+    <txt-record>k3s=1</txt-record>
+    <txt-record>cluster=${xml_cluster}</txt-record>
+    <txt-record>env=${xml_env}</txt-record>
+    <txt-record>role=${xml_role}</txt-record>${extra}
+  </service>
+</service-group>
+EOF
+}
+
 run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
@@ -197,6 +239,8 @@ from k3s_mdns_parser import parse_mdns_records
 
 
 mode, cluster, environment = sys.argv[1:4]
+
+fixture_path = os.environ.get("SUGARKUBE_MDNS_FIXTURE_FILE")
 
 debug_enabled = bool(os.environ.get("SUGARKUBE_DEBUG"))
 dump_path = Path("/tmp/sugarkube-mdns.txt")
@@ -227,7 +271,13 @@ def run_avahi() -> str:
         return ""
 
 
-output = run_avahi()
+if fixture_path:
+    try:
+        output = Path(fixture_path).read_text(encoding="utf-8")
+    except OSError:
+        output = ""
+else:
+    output = run_avahi()
 lines = [line for line in output.splitlines() if line]
 records = parse_mdns_records(lines, cluster, environment)
 
@@ -313,11 +363,15 @@ wait_for_bootstrap_activity() {
       activity_grace_attempts="${attempts}"
     fi
   fi
+  local effective_attempts="${attempts}"
+  if [ "${require_activity}" -eq 1 ]; then
+    effective_attempts="${activity_grace_attempts}"
+  fi
   for attempt in $(seq 1 "${attempts}"); do
     local server
     server="$(discover_server_host || true)"
     if [ -n "${server}" ]; then
-      log "Discovered API server advertisement from ${server} (attempt ${attempt}/${attempts})"
+      log "Discovered API server advertisement from ${server} (attempt ${attempt}/${effective_attempts})"
       printf '%s\n' "${server}"
       return 0
     fi
@@ -329,26 +383,26 @@ wait_for_bootstrap_activity() {
       no_activity_streak=0
       local bootstrap_hosts
       bootstrap_hosts="${bootstrap//$'\n'/, }"
-      log "Bootstrap advertisement(s) detected from ${bootstrap_hosts} (attempt ${attempt}/${attempts}); waiting for server advertisement..."
+      log "Bootstrap advertisement(s) detected from ${bootstrap_hosts} (attempt ${attempt}/${effective_attempts}); waiting for server advertisement..."
     else
       if [ "${require_activity}" -eq 1 ]; then
         no_activity_streak=$((no_activity_streak + 1))
         if [ "${activity_grace_attempts}" -gt 0 ] && [ "${no_activity_streak}" -ge "${activity_grace_attempts}" ]; then
-          log "No bootstrap advertisements detected (attempt ${attempt}/${attempts}); exiting discovery wait."
+          log "No bootstrap advertisements detected (attempt ${attempt}/${effective_attempts}); exiting discovery wait."
           return 1
         fi
-        log "No bootstrap activity detected yet (attempt ${attempt}/${attempts}); will retry before giving up."
+        log "No bootstrap activity detected yet (attempt ${attempt}/${effective_attempts}); will retry before giving up."
       elif [ "${observed_activity}" -eq 0 ]; then
-        log "No bootstrap activity detected yet (attempt ${attempt}/${attempts})."
+        log "No bootstrap activity detected yet (attempt ${attempt}/${effective_attempts})."
       else
-        log "Bootstrap activity previously detected; continuing to wait (attempt ${attempt}/${attempts})."
+        log "Bootstrap activity previously detected; continuing to wait (attempt ${attempt}/${effective_attempts})."
       fi
     fi
 
     if [ "${attempt}" -lt "${attempts}" ]; then
       local next_attempt
       next_attempt=$((attempt + 1))
-      log "Sleeping ${wait_secs}s before retry ${next_attempt}/${attempts}."
+      log "Sleeping ${wait_secs}s before retry ${next_attempt}/${effective_attempts}."
       sleep "${wait_secs}"
     fi
   done
@@ -391,76 +445,31 @@ wait_for_api() {
 }
 
 publish_avahi_service() {
-  local role="$1"
-  shift
+  local role="$1"; shift
   local port="6443"
-  if [ "$#" -gt 0 ]; then
-    port="$1"
-    shift
-  fi
+  if [ "$#" -gt 0 ]; then port="$1"; shift; fi
+
   sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
   sudo rm -f "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
-  local service_name
-  service_name="k3s API ${CLUSTER}/${ENVIRONMENT} on %h"
-  local xml_service_name xml_port xml_cluster xml_env xml_role
-  xml_service_name="$(xml_escape "${service_name}")"
-  xml_port="$(xml_escape "${port}")"
-  xml_cluster="$(xml_escape "${CLUSTER}")"
-  xml_env="$(xml_escape "${ENVIRONMENT}")"
-  xml_role="$(xml_escape "${role}")"
-  sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
-<?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">${xml_service_name}</name>
-  <service>
-    <type>_https._tcp</type>
-    <port>${xml_port}</port>
-    <txt-record>k3s=1</txt-record>
-    <txt-record>cluster=${xml_cluster}</txt-record>
-    <txt-record>env=${xml_env}</txt-record>
-    <txt-record>role=${xml_role}</txt-record>
-    <!-- optional -->
-EOF_AVAHI
-  local record
-  for record in "$@"; do
-    if [ -n "${record}" ]; then
-      local escaped_record
-      escaped_record="$(xml_escape "${record}")"
-      printf '    <txt-record>%s</txt-record>\n' "${escaped_record}" | sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null
-    fi
-  done
-  sudo tee -a "${AVAHI_SERVICE_FILE}" >/dev/null <<'EOF_AVAHI'
-  </service>
-</service-group>
-EOF_AVAHI
-  sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+
+  local xml
+  xml="$(render_avahi_service_xml "${role}" "${port}" "$@")"
+  printf '%s\n' "${xml}" | sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+  fi
   AVAHI_ROLE="${role}"
 }
 
 publish_api_service() {
   sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
   sudo rm -f "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
-  local service_name xml_service_name xml_cluster xml_env
-  service_name="k3s API ${CLUSTER}/${ENVIRONMENT} on %h"
-  xml_service_name="$(xml_escape "${service_name}")"
-  xml_cluster="$(xml_escape "${CLUSTER}")"
-  xml_env="$(xml_escape "${ENVIRONMENT}")"
-  sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null <<EOF_AVAHI
-<?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">${xml_service_name}</name>
-  <service>
-    <type>_https._tcp</type>
-    <port>6443</port>
-    <txt-record>k3s=1</txt-record>
-    <txt-record>cluster=${xml_cluster}</txt-record>
-    <txt-record>env=${xml_env}</txt-record>
-    <txt-record>role=server</txt-record>
-  </service>
-</service-group>
-EOF_AVAHI
+
+  local xml
+  xml="$(render_avahi_service_xml server 6443)"
+  printf '%s\n' "${xml}" | sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null
+
   if command -v systemctl >/dev/null 2>&1; then
     sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
   fi
@@ -606,10 +615,16 @@ if [ "${TEST_RENDER_SERVICE}" -eq 1 ]; then
     exit 2
   fi
   if [ "${TEST_RENDER_ARGS[0]}" = "api" ]; then
-    publish_api_service
+    render_avahi_service_xml server 6443
   else
-    publish_avahi_service "${TEST_RENDER_ARGS[@]}"
+    render_avahi_service_xml "${TEST_RENDER_ARGS[@]}"
   fi
+  exit 0
+fi
+
+if [ "${TEST_WAIT_LOOP:-0}" -eq 1 ]; then
+  # fast path for tests
+  wait_for_bootstrap_activity --require-activity
   exit 0
 fi
 
