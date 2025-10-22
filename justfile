@@ -39,12 +39,7 @@ kubeconfig env='dev':
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 wipe:
-    if command -v k3s-uninstall.sh >/dev/null; then sudo k3s-uninstall.sh; fi
-    if command -v k3s-agent-uninstall.sh >/dev/null; then sudo k3s-agent-uninstall.sh; fi
-    cluster="${SUGARKUBE_CLUSTER:-sugar}"
-    env="${SUGARKUBE_ENV:-dev}"
-    sudo rm -f "/etc/avahi/services/k3s-${cluster}-${env}.service" || true
-    sudo systemctl restart avahi-daemon || true
+    @sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
 
 scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
@@ -159,7 +154,7 @@ doctor:
 
 # Usage: just start-here START_HERE_ARGS="--path-only"
 start-here:
-    "{{ sugarkube_cli }}" docs start-here {{ start_here_args }}
+    "{{sugarkube_cli}}" docs start-here {{start_here_args}}
 
 # Revert cmdline.txt and fstab entries back to the SD card defaults
 # Usage: sudo just rollback-to-sd
@@ -264,7 +259,7 @@ monitor-ssd-health:
 
 # Usage: sudo NVME_HEALTH_ARGS="--device /dev/nvme1n1" just nvme-health
 nvme-health:
-    "{{ sugarkube_cli }}" nvme health {{ nvme_health_args }}
+    "{{sugarkube_cli}}" nvme health {{nvme_health_args}}
 
 # Run pi_node_verifier remotely over SSH
 
@@ -344,13 +339,13 @@ codespaces-bootstrap:
 
 # Usage: just docs-verify
 docs-verify:
-    "{{ sugarkube_cli }}" docs verify {{ docs_verify_args }}
+    "{{sugarkube_cli}}" docs verify {{docs_verify_args}}
 
 # Install documentation prerequisites and run spell/link checks without touching
 
 # code linters. Usage: just simplify-docs (forwards to sugarkube docs simplify)
 simplify-docs:
-    "{{ sugarkube_cli }}" docs simplify {{ simplify_docs_args }}
+    "{{sugarkube_cli}}" docs simplify {{simplify_docs_args}}
 
 # Generate printable QR codes that link to the quickstart and troubleshooting docs
 
@@ -362,7 +357,7 @@ qr-codes:
 
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
-    "{{ sugarkube_cli }}" token-place samples {{ token_place_sample_args }}
+    "{{sugarkube_cli}}" token-place samples {{token_place_sample_args}}
 
 # Run the macOS setup wizard to install brew formulas and scaffold directories
 

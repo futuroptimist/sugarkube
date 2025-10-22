@@ -216,12 +216,24 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
   - Verify `avahi-daemon` is running (`sudo systemctl status avahi-daemon`).
   - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`.
 
+- **Verify mDNS discoverability**
+
+  ```bash
+  avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
+  ```
+
+  Expect the API advert (`port 6443`) with TXT records `k3s=1`,
+  `cluster=<name>`, `env=<env>`, `role=server`.
+
 - **Reset everything**
 
   ```bash
   just wipe
   sudo reboot
   ```
+
+  `just wipe` now wraps `scripts/wipe_node.sh`, making the cleanup idempotent and safe
+  to rerun.
 
 ---
 
