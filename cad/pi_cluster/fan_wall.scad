@@ -18,7 +18,7 @@ alignment_guard_enabled =
     is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
 column_alignment_tolerance =
     is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
-expected_column_spacing = [58, 49];
+expected_column_spacing = [58,49];
 
 fan_clearance_radius = fan_mount_clearance(fan_size) / 2;
 boss_radius = fan_insert_od / 2 + 1.2;
