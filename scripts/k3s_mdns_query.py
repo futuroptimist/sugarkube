@@ -6,13 +6,26 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from k3s_mdns_parser import MdnsRecord, parse_mdns_records
+from mdns_helpers import _norm_host
 
 DebugFn = Optional[Callable[[str], None]]
 
 _DUMP_PATH = Path("/tmp/sugarkube-mdns.txt")
 
 
-def _build_command(mode: str) -> List[str]:
+def _service_type(cluster: str, environment: str) -> str:
+    return f"_k3s-{cluster}-{environment}._tcp"
+
+
+def _service_types(cluster: str, environment: str) -> List[str]:
+    types = [_service_type(cluster, environment)]
+    legacy = "_https._tcp"
+    if legacy not in types:
+        types.append(legacy)
+    return types
+
+
+def _build_command(mode: str, service_type: str) -> List[str]:
     command = [
         "avahi-browse",
         "--parsable",
@@ -21,16 +34,17 @@ def _build_command(mode: str) -> List[str]:
     ]
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
-    command.append("_https._tcp")
+    command.append(service_type)
     return command
 
 
 def _invoke_avahi(
     mode: str,
+    service_type: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
 ) -> subprocess.CompletedProcess[str]:
-    command = _build_command(mode)
+    command = _build_command(mode, service_type)
     try:
         result = runner(
             command,
@@ -68,17 +82,22 @@ def _load_lines_from_fixture(fixture_path: str) -> Iterable[str]:
 
 def _load_lines_from_avahi(
     mode: str,
+    cluster: str,
+    environment: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
 ) -> Iterable[str]:
-    result = _invoke_avahi(mode, runner, debug)
-    lines = [line for line in result.stdout.splitlines() if line]
-    if debug is not None and not lines and result.stdout:
-        try:
-            _DUMP_PATH.write_text(result.stdout, encoding="utf-8")
-            debug(f"Wrote browse dump to {_DUMP_PATH}")
-        except OSError:
-            debug("Unable to write browse dump to /tmp")
+    lines: List[str] = []
+    for service_type in _service_types(cluster, environment):
+        result = _invoke_avahi(mode, service_type, runner, debug)
+        new_lines = [line for line in result.stdout.splitlines() if line]
+        if debug is not None and not new_lines and result.stdout:
+            try:
+                _DUMP_PATH.write_text(result.stdout, encoding="utf-8")
+                debug(f"Wrote browse dump to {_DUMP_PATH}")
+            except OSError:
+                debug("Unable to write browse dump to /tmp")
+        lines.extend(new_lines)
     return lines
 
 
@@ -99,9 +118,10 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
         for record in records:
             if record.txt.get("role") != "bootstrap":
                 continue
-            if record.host in seen:
+            host_key = _norm_host(record.host)
+            if host_key in seen:
                 continue
-            seen.add(record.host)
+            seen.add(host_key)
             outputs.append(record.host)
         return outputs
 
@@ -111,9 +131,10 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
         for record in records:
             if record.txt.get("role") != "server":
                 continue
-            if record.host in seen:
+            host_key = _norm_host(record.host)
+            if host_key in seen:
                 continue
-            seen.add(record.host)
+            seen.add(host_key)
             outputs.append(record.host)
         return outputs
 
@@ -124,9 +145,10 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
             if record.txt.get("role") != "bootstrap":
                 continue
             leader = record.txt.get("leader", record.host)
-            if leader in seen:
+            leader_key = _norm_host(leader)
+            if leader_key in seen:
                 continue
-            seen.add(leader)
+            seen.add(leader_key)
             outputs.append(leader)
         return outputs
 
@@ -150,7 +172,7 @@ def query_mdns(
     if fixture_path:
         lines = _load_lines_from_fixture(fixture_path)
     else:
-        lines = _load_lines_from_avahi(mode, runner, debug)
+        lines = _load_lines_from_avahi(mode, cluster, environment, runner, debug)
 
     records = parse_mdns_records(lines, cluster, environment)
 

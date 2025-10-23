@@ -9,7 +9,7 @@ from k3s_mdns_query import query_mdns  # noqa: E402
 
 def _sample_server_stdout() -> str:
     return (
-        "=;eth0;IPv4;k3s API sugar/dev [server] on host0;_https._tcp;local;host0.local;"
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;"
         "192.168.1.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
     )
 
@@ -17,14 +17,24 @@ def _sample_server_stdout() -> str:
 def test_query_mdns_keeps_output_when_avahi_errors():
     messages = []
 
+    calls = []
+
     def runner(command, capture_output, text, check):
         assert command[0] == "avahi-browse"
         assert capture_output and text and not check
+        calls.append(command[-1])
+        if command[-1] == "_k3s-sugar-dev._tcp":
+            return subprocess.CompletedProcess(
+                command,
+                returncode=255,
+                stdout=_sample_server_stdout(),
+                stderr="Failed to resolve",
+            )
         return subprocess.CompletedProcess(
             command,
-            returncode=255,
-            stdout=_sample_server_stdout(),
-            stderr="Failed to resolve",
+            returncode=0,
+            stdout="",
+            stderr="",
         )
 
     results = query_mdns(
@@ -37,18 +47,56 @@ def test_query_mdns_keeps_output_when_avahi_errors():
 
     assert results == ["host0.local"]
     assert any("255" in msg for msg in messages)
+    assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
+
+
+def test_query_mdns_queries_legacy_service_type_when_needed():
+    legacy_stdout = (
+        "=;eth0;IPv4;k3s API sugar/dev [server] on host0;_https._tcp;local;host0.local;"
+        "192.168.1.50;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+    )
+
+    calls = []
+
+    def runner(command, capture_output, text, check):
+        assert command[0] == "avahi-browse"
+        assert capture_output and text and not check
+        calls.append(command[-1])
+        if command[-1] == "_https._tcp":
+            return subprocess.CompletedProcess(
+                command,
+                returncode=0,
+                stdout=legacy_stdout,
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    results = query_mdns(
+        "server-first",
+        "sugar",
+        "dev",
+        runner=runner,
+    )
+
+    assert results == ["host0.local"]
+    assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
 
 
 def test_query_mdns_bootstrap_leaders_uses_txt_leader(tmp_path):
     fixture = tmp_path / "mdns.txt"
     fixture.write_text(
         (
-            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host1;_https._tcp;local;host1.local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host1 (bootstrap);_k3s-sugar-dev._tcp;local;host1.local;"
             "192.168.1.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
-            "txt=role=bootstrap;txt=leader=leader0.local\n"
-            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host2;_https._tcp;local;host2.local;"
+            "txt=role=bootstrap;txt=phase=bootstrap;txt=leader=leader0.local\n"
+            "=;eth0;IPv4;k3s-sugar-dev@host2 (bootstrap);_k3s-sugar-dev._tcp;local;host2.local;"
             "192.168.1.12;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
-            "txt=role=bootstrap\n"
+            "txt=role=bootstrap;txt=phase=bootstrap\n"
         ),
         encoding="utf-8",
     )
@@ -66,7 +114,7 @@ def test_query_mdns_bootstrap_leaders_uses_txt_leader(tmp_path):
 def test_query_mdns_uses_service_name_when_unresolved(tmp_path):
     fixture = tmp_path / "mdns.txt"
     fixture.write_text(
-        "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host3;_https._tcp;local\n",
+        "+;eth0;IPv4;k3s-sugar-dev@host3 (bootstrap);_k3s-sugar-dev._tcp;local\n",
         encoding="utf-8",
     )
 
@@ -102,13 +150,13 @@ def test_query_mdns_server_hosts_returns_unique_hosts(tmp_path):
     fixture = tmp_path / "servers.txt"
     fixture.write_text(
         (
-            "=;eth0;IPv4;k3s API sugar/dev on host0;_https._tcp;local;host0.local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;"
             "192.168.1.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
-            "=;eth0;IPv6;k3s API sugar/dev on host0;_https._tcp;local;host0.local;"
+            "=;eth0;IPv6;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;"
             "fe80::1;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
-            "=;eth0;IPv4;k3s API sugar/dev on host1;_https._tcp;local;host1.local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host1 (server);_k3s-sugar-dev._tcp;local;host1.local;"
             "192.168.1.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
-            "=;eth0;IPv4;k3s API sugar/dev on host2;_https._tcp;local;host2.local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host2 (bootstrap);_k3s-sugar-dev._tcp;local;host2.local;"
             "192.168.1.12;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap\n"
         ),
         encoding="utf-8",
