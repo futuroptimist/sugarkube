@@ -17,16 +17,27 @@ up env='dev': prereqs
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
+    restore_wlan() {
+      if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && [ "${WLAN_DISABLED:-0}" = "1" ]; then
+        sudo -E bash scripts/toggle_wlan.sh --restore || true
+        WLAN_DISABLED=0
+      fi
+    }
+    trap restore_wlan EXIT
+
     "{{ scripts_dir }}/check_memory_cgroup.sh"
 
     # Preflight network/mDNS configuration
     if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then sudo -E bash scripts/configure_avahi.sh; fi
-    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --down; fi
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then
+      WLAN_DISABLED=1
+      sudo -E bash scripts/toggle_wlan.sh --down
+    fi
     if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then sudo -E bash scripts/configure_k3s_node_ip.sh; fi
 
     # Proceed with discovery/join for subsequent nodes
     sudo -E bash scripts/k3s-discover.sh
-    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --restore || true; fi
+    restore_wlan
 
 prereqs:
     sudo apt-get update
