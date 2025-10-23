@@ -105,6 +105,18 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
             outputs.append(record.host)
         return outputs
 
+    if mode == "server-hosts":
+        seen = set()
+        outputs: List[str] = []
+        for record in records:
+            if record.txt.get("role") != "server":
+                continue
+            if record.host in seen:
+                continue
+            seen.add(record.host)
+            outputs.append(record.host)
+        return outputs
+
     if mode == "bootstrap-leaders":
         seen = set()
         outputs: List[str] = []
