@@ -3,6 +3,7 @@ set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 current_uid="${EUID:-0}"
 if [ "${ALLOW_NON_ROOT}" != "1" ] && [ "${current_uid}" -ne 0 ]; then
@@ -74,10 +75,40 @@ remove_file() {
       rm -f "${target}" || true
       append_summary "removed:${target}"
     fi
-  }
+}
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+cleanup_dynamic_mdns() {
+  local helper="${SCRIPT_DIR}/cleanup_mdns_publishers.sh"
+  local svc="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+
+  if [ ! -x "${helper}" ]; then
+    printf 'Cleanup helper %s missing or not executable; skipping dynamic publisher cleanup\n' "${helper}"
+    append_summary "cleanup-mdns:missing"
+    return 0
+  fi
+
+  if [ "${DRY_RUN}" = "1" ]; then
+    printf 'DRY_RUN=1: would run %s\n' "${helper}"
+    printf 'removed-dynamic: %s\n' "${svc}"
+    append_summary "cleanup-mdns:dry-run"
+    append_summary "removed-dynamic:${svc}"
+    return 0
+  fi
+
+  if SUGARKUBE_CLUSTER="${CLUSTER}" SUGARKUBE_ENV="${ENVIRONMENT}" \
+     SUGARKUBE_RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-}" bash "${helper}"; then
+    append_summary "cleanup-mdns:executed"
+  else
+    append_summary "cleanup-mdns:failed"
+  fi
+  printf 'removed-dynamic: %s\n' "${svc}"
+  append_summary "removed-dynamic:${svc}"
+}
+
+cleanup_dynamic_mdns
 
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then

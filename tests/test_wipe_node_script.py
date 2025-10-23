@@ -11,6 +11,8 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "wipe_node.sh"
 @pytest.mark.parametrize("cluster, env", [("sweet", "test")])
 def test_wipe_dry_run_reports_actions(tmp_path, cluster, env):
     env_vars = os.environ.copy()
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir()
     env_vars.update(
         {
             "ALLOW_NON_ROOT": "1",
@@ -18,6 +20,7 @@ def test_wipe_dry_run_reports_actions(tmp_path, cluster, env):
             "SUGARKUBE_CLUSTER": cluster,
             "SUGARKUBE_ENV": env,
             "PATH": env_vars.get("PATH", ""),
+            "SUGARKUBE_RUNTIME_DIR": str(runtime_dir),
         }
     )
 
@@ -36,12 +39,16 @@ def test_wipe_dry_run_reports_actions(tmp_path, cluster, env):
     assert "k3s-uninstall.sh" in stdout or "Skipping k3s-uninstall.sh" in stdout
     assert "k3s-agent-uninstall.sh" in stdout or "Skipping k3s-agent-uninstall.sh" in stdout
     assert "/etc/avahi/services/k3s-" in stdout
+    assert "cleanup_mdns_publishers.sh" in stdout
+    assert f"removed-dynamic: _k3s-{cluster}-{env}._tcp" in stdout
 
 
 def test_wipe_invokes_uninstallers_when_available(tmp_path):
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
     log_file = tmp_path / "calls.log"
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir()
 
     sudo_stub = fakebin / "sudo"
     sudo_stub.write_text(
@@ -73,6 +80,7 @@ def test_wipe_invokes_uninstallers_when_available(tmp_path):
             "SUGARKUBE_CLUSTER": "sugar",
             "SUGARKUBE_ENV": "dev",
             "PATH": f"{fakebin}:{env_vars.get('PATH', '')}",
+            "SUGARKUBE_RUNTIME_DIR": str(runtime_dir),
         }
     )
 
@@ -85,6 +93,7 @@ def test_wipe_invokes_uninstallers_when_available(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
+    assert "removed-dynamic: _k3s-sugar-dev._tcp" in result.stdout
     logged = log_file.read_text(encoding="utf-8").splitlines()
     for expected in (
         "k3s-killall.sh",
