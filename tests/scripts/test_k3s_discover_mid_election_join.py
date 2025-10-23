@@ -22,6 +22,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     state_file = tmp_path / "mdns-state.txt"
     sh_log = tmp_path / "sh.log"
     publish_log = tmp_path / "publish.log"
+    server_flag = tmp_path / "server-published"
 
     # Stub sleep to avoid delays in the control-flow.
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
@@ -41,6 +42,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo START:\"$@\" >> '{publish_log}'\n"
+        f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{server_flag}'; fi\n"
         "trap 'echo TERM >> \"" + str(publish_log) + "\"; exit 0' TERM INT\n"
         "while true; do read -r -t 1 _ || true; done\n",
     )
@@ -76,6 +78,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         'state="${SUGARKUBE_TEST_STATE}"\n'
         'threshold="${SUGARKUBE_TEST_SERVER_THRESHOLD:-9}"\n'
         "mode='bootstrap'\n"
+        f"flag='{server_flag}'\n"
         "for arg in \"$@\"; do\n"
         "  if [ \"$arg\" = '--ignore-local' ]; then\n"
         "    mode='server'\n"
@@ -91,11 +94,18 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         "    cat <<'EOF'\n"
         "=;eth0;IPv4;k3s API sugar/dev on sugarkube0;_https._tcp;local;"
         "sugarkube0.local;192.168.50.10;6443;txt=k3s=1;txt=cluster=sugar;"
-        "txt=env=dev;txt=role=server\n"
+        "txt=env=dev;txt=role=server;txt=leader=sugarkube0.local;txt=phase=server\n"
         "EOF\n"
         "  fi\n"
         "else\n"
         "  bootstrap_count=$((bootstrap_count + 1))\n"
+        "fi\n"
+        "local_host=$(hostname -s)\n"
+        "if [ -f \"$flag\" ]; then\n"
+        "  cat <<EOF\n"
+        "=;eth0;IPv4;k3s-sugar-dev@${local_host}.local (server);_k3s-sugar-dev._tcp;local;${local_host}.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader=${local_host}.local;txt=phase=server\n"
+        "EOF\n"
         "fi\n"
         "printf '%s %s\n' \"$server_count\" \"$bootstrap_count\" >\"$state\"\n"
         "exit 0\n",
@@ -128,7 +138,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "deferring bootstrap" in result.stderr
+    assert "server advertisement confirmed" in result.stderr
     assert "Joining as additional HA server via https://sugarkube0.local:6443" in result.stderr
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")

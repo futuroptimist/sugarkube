@@ -32,8 +32,10 @@ def test_render_bootstrap_xml_has_required_txt_records():
         assert expected in txts
 
 
-def test_render_server_xml_has_role_server():
+def test_render_server_xml_has_role_and_phase():
     root = _render("api")  # alias prints role=server XML
     svc = root.find("./service")
     txts = [e.text for e in svc.findall("./txt-record")]
     assert "role=server" in txts
+    assert "phase=server" in txts
+    assert "leader=%h.local" in txts

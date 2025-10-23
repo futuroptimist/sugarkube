@@ -41,6 +41,10 @@ DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-15}"
 MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-5}"
 MDNS_SELF_CHECK_DELAY="${SUGARKUBE_MDNS_SELF_CHECK_DELAY:-1}"
 SKIP_MDNS_SELF_CHECK="${SUGARKUBE_SKIP_MDNS_SELF_CHECK:-0}"
+SUGARKUBE_MDNS_BOOT_RETRIES="${SUGARKUBE_MDNS_BOOT_RETRIES:-${MDNS_SELF_CHECK_ATTEMPTS}}"
+SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}}"
+SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-60}"
+SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-1}"
 
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
@@ -52,6 +56,7 @@ TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
 TEST_PUBLISH_BOOTSTRAP=0
+TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
 declare -a TEST_RENDER_ARGS=()
 
@@ -82,6 +87,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-bootstrap-publish)
       TEST_PUBLISH_BOOTSTRAP=1
+      ;;
+    --test-bootstrap-server-flow)
+      TEST_BOOTSTRAP_SERVER_FLOW=1
       ;;
     --test-claim-bootstrap)
       TEST_CLAIM_BOOTSTRAP=1
@@ -207,6 +215,9 @@ AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${C
 AVAHI_ROLE=""
 BOOTSTRAP_PUBLISH_PID=""
 BOOTSTRAP_PUBLISH_LOG=""
+SERVER_PUBLISH_PID=""
+SERVER_PUBLISH_LOG=""
+MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 
 run_privileged() {
@@ -256,7 +267,19 @@ stop_bootstrap_publisher() {
   fi
 }
 
-cleanup_avahi_bootstrap() {
+stop_server_publisher() {
+  if [ -n "${SERVER_PUBLISH_PID:-}" ]; then
+    if kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
+      kill "${SERVER_PUBLISH_PID}" >/dev/null 2>&1 || true
+    fi
+    wait "${SERVER_PUBLISH_PID}" >/dev/null 2>&1 || true
+    SERVER_PUBLISH_PID=""
+    SERVER_PUBLISH_LOG=""
+  fi
+}
+
+cleanup_avahi_publishers() {
+  stop_server_publisher
   stop_bootstrap_publisher
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
     remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
@@ -265,7 +288,7 @@ cleanup_avahi_bootstrap() {
   fi
 }
 
-trap cleanup_avahi_bootstrap EXIT
+trap cleanup_avahi_publishers EXIT
 
 norm_host() {
   local host="${1:-}"
@@ -309,7 +332,7 @@ start_bootstrap_publisher() {
   local publish_name
   publish_name="$(service_instance_name bootstrap "${MDNS_HOST_RAW}")"
 
-  BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish.log"
+  BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish-bootstrap.log"
   : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
 
   avahi-publish-service \
@@ -340,6 +363,51 @@ start_bootstrap_publisher() {
   fi
 
   log "avahi-publish-service advertising bootstrap as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${BOOTSTRAP_PUBLISH_PID})"
+  return 0
+}
+
+start_server_publisher() {
+  if ! command -v avahi-publish-service >/dev/null 2>&1; then
+    log "avahi-publish-service not available; relying on Avahi service file"
+    return 1
+  fi
+  if [ -n "${SERVER_PUBLISH_PID:-}" ] && kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local publish_name
+  publish_name="$(service_instance_name server "${MDNS_HOST_RAW}")"
+
+  SERVER_PUBLISH_LOG="/tmp/sugar-publish-server.log"
+  : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
+
+  avahi-publish-service \
+    -H "${MDNS_HOST_RAW}" \
+    "${publish_name}" \
+    "${MDNS_SERVICE_TYPE}" \
+    6443 \
+    "k3s=1" \
+    "cluster=${CLUSTER}" \
+    "env=${ENVIRONMENT}" \
+    "role=server" \
+    "leader=${MDNS_HOST_RAW}" \
+    "phase=server" \
+    >"${SERVER_PUBLISH_LOG}" 2>&1 &
+  SERVER_PUBLISH_PID=$!
+
+  sleep 1
+  if ! kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
+    if [ -s "${SERVER_PUBLISH_LOG}" ]; then
+      while IFS= read -r line; do
+        log "server publisher error: ${line}"
+      done <"${SERVER_PUBLISH_LOG}"
+    fi
+    SERVER_PUBLISH_PID=""
+    SERVER_PUBLISH_LOG=""
+    return 1
+  fi
+
+  log "avahi-publish-service advertising server as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${SERVER_PUBLISH_PID})"
   return 0
 }
 
@@ -450,44 +518,42 @@ discover_bootstrap_leaders() {
 ensure_self_mdns_advertisement() {
   local role="$1"
   if [ "${SKIP_MDNS_SELF_CHECK}" = "1" ]; then
+    MDNS_LAST_OBSERVED="${MDNS_HOST_RAW}"
     return 0
   fi
 
-  local query_mode=""
+  local require_phase retries delay
   case "${role}" in
     bootstrap)
-      query_mode="bootstrap-hosts"
+      require_phase="bootstrap"
+      retries="${SUGARKUBE_MDNS_BOOT_RETRIES}"
+      delay="${SUGARKUBE_MDNS_BOOT_DELAY}"
       ;;
     server)
-      query_mode="server-hosts"
+      require_phase="server"
+      retries="${SUGARKUBE_MDNS_SERVER_RETRIES}"
+      delay="${SUGARKUBE_MDNS_SERVER_DELAY}"
       ;;
     *)
       return 0
       ;;
   esac
 
-  local attempts="${MDNS_SELF_CHECK_ATTEMPTS}"
-  local delay="${MDNS_SELF_CHECK_DELAY}"
-  local attempt
-  for attempt in $(seq 1 "${attempts}"); do
-    mapfile -t hosts < <(run_avahi_query "${query_mode}" || true)
-    if [ "${#hosts[@]}" -gt 0 ]; then
-      local observed=""
-      for observed in "${hosts[@]}"; do
-        if same_host "${observed}" "${MDNS_HOST_RAW}"; then
-          log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed} attempt=${attempt}/${attempts}; advertisement confirmed."
-          return 0
-        fi
-      done
-    fi
+  MDNS_LAST_OBSERVED=""
+  local observed=""
+  if observed="$(
+    python3 "${SCRIPT_DIR}/mdns_helpers.py" \
+      --expect-host "${MDNS_HOST_RAW}" \
+      --cluster "${CLUSTER}" \
+      --env "${ENVIRONMENT}" \
+      --require-phase "${require_phase}" \
+      --retries "${retries}" \
+      --delay "${delay}"
+  )"; then
+    MDNS_LAST_OBSERVED="${observed}"
+    return 0
+  fi
 
-    if [ "${attempt}" -lt "${attempts}" ]; then
-      log "phase=self-check host=${MDNS_HOST_RAW} attempt=${attempt}/${attempts}; retrying in ${delay}s."
-      sleep "${delay}"
-    fi
-  done
-
-  log "phase=self-check host=${MDNS_HOST_RAW} attempts=${attempts}; advertisement not reported."
   return 1
 }
 
@@ -616,10 +682,6 @@ publish_avahi_service() {
   local port="6443"
   if [ "$#" -gt 0 ]; then port="$1"; shift; fi
 
-  if [ "${role}" != "bootstrap" ]; then
-    stop_bootstrap_publisher
-  fi
-
   run_privileged install -d -m 755 "${AVAHI_SERVICE_DIR}"
   if [ -f "${AVAHI_SERVICE_DIR}/k3s-https.service" ]; then
     remove_privileged_file "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
@@ -634,18 +696,22 @@ publish_avahi_service() {
 }
 
 publish_api_service() {
-  run_privileged install -d -m 755 "${AVAHI_SERVICE_DIR}"
-  if [ -f "${AVAHI_SERVICE_DIR}/k3s-https.service" ]; then
-    remove_privileged_file "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  start_server_publisher || true
+  publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
+
+  if ensure_self_mdns_advertisement server; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed."
+    stop_bootstrap_publisher
+    return 0
   fi
 
-  local xml
-  xml="$(render_avahi_service_xml server 6443)"
-  printf '%s\n' "${xml}" | write_privileged_file "${AVAHI_SERVICE_FILE}"
-
-  reload_avahi_daemon || true
-  AVAHI_ROLE="server"
-  ensure_self_mdns_advertisement server
+  log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
+  pgrep -a avahi-publish || true
+  sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
+  sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
+  return 1
 }
 
 publish_bootstrap_service() {
@@ -653,12 +719,19 @@ publish_bootstrap_service() {
   start_bootstrap_publisher || true
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
   sleep 1
-  ensure_self_mdns_advertisement bootstrap
+  if ensure_self_mdns_advertisement bootstrap; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
+    return 0
+  fi
+
+  log "Unable to confirm bootstrap advertisement for ${MDNS_HOST_RAW}; aborting to avoid split brain"
+  return 1
 }
 
 claim_bootstrap_leadership() {
   if ! publish_bootstrap_service; then
-    log "Unable to confirm bootstrap advertisement for ${MDNS_HOST_RAW}; aborting to avoid split brain"
     exit 1
   fi
   sleep "${DISCOVERY_WAIT_SECS}"
@@ -669,7 +742,7 @@ claim_bootstrap_leadership() {
     if [ -n "${server}" ]; then
       log "Server advertisement from ${server} observed during bootstrap election; deferring bootstrap."
       CLAIMED_SERVER_HOST="${server}"
-      cleanup_avahi_bootstrap
+      cleanup_avahi_publishers
       return 2
     fi
 
@@ -687,7 +760,7 @@ claim_bootstrap_leadership() {
         fi
       else
         log "Bootstrap leader ${leader} detected; deferring cluster initialization"
-        cleanup_avahi_bootstrap
+        cleanup_avahi_publishers
         return 1
       fi
     fi
@@ -810,7 +883,7 @@ if [ "${TEST_RENDER_SERVICE}" -eq 1 ]; then
     exit 2
   fi
   if [ "${TEST_RENDER_ARGS[0]}" = "api" ]; then
-    render_avahi_service_xml server 6443
+    render_avahi_service_xml server 6443 "leader=%h.local" "phase=server"
   else
     render_avahi_service_xml "${TEST_RENDER_ARGS[@]}"
   fi
@@ -825,6 +898,13 @@ fi
 
 if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
   if publish_bootstrap_service; then
+    exit 0
+  fi
+  exit 1
+fi
+
+if [ "${TEST_BOOTSTRAP_SERVER_FLOW:-0}" -eq 1 ]; then
+  if publish_bootstrap_service && publish_api_service; then
     exit 0
   fi
   exit 1
