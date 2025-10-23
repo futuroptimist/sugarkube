@@ -1,8 +1,0 @@
-{
-  "id": "npm-scripts-missing",
-  "date": "2025-08-29",
-  "component": "npm",
-  "rootCause": "package.json missing; cannot run npm scripts",
-  "resolution": "Repository uses Python; no npm scripts to run",
-  "references": []
-}

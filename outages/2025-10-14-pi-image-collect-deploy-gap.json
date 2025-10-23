@@ -1,0 +1,10 @@
+{
+  "id": "2025-10-15-pi-image-collect-deploy-gap",
+  "date": "2025-10-14",
+  "component": "pi-image workflow",
+  "rootCause": "scripts/build_pi_image.sh only normalized the pi-gen image into the repository root. The manual workflow's follow-up collect step searched deploy/ for artifacts and failed when no .img.xz remained there, aborting the run after just verification succeeded.",
+  "resolution": "Replicate the normalized image, checksum, metadata, and stage summary into deploy/ during build_pi_image.sh so the follow-up collector can always find fresh artifacts. Added regression tests that ensure deploy/ contains the normalized files and that collect_pi_image.sh succeeds when invoked from the repository root. Tightened the workflow to verify artifact integrity before upload and include metadata in the artifact payload.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-02-pi-image-metadata-tests-missing",
+  "date": "2025-10-13",
+  "component": "pi-image workflow",
+  "rootCause": "Changes to scripts/create_build_metadata.py were not covered by the pi-image unit job. The workflow only executed tests/artifact_detection_test.sh, so a metadata regression merged on a pull request and the next manual pi-image build failed when create_build_metadata.py crashed.",
+  "resolution": "Add a fast smoke test that exercises scripts/create_build_metadata.py alongside the existing artifact detection checks and ensure the workflow watches the metadata entrypoints so the unit job runs on relevant pull requests.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "tests/create_build_metadata_e2e.sh",
+    "tests/test_pi_image_tooling.py"
+  ]
+}

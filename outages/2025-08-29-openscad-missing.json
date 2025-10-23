@@ -1,8 +1,0 @@
-{
-  "id": "openscad-missing",
-  "date": "2025-08-29",
-  "component": "openscad_render.sh",
-  "rootCause": "OpenSCAD not found in PATH",
-  "resolution": "Installed openscad via apt-get",
-  "references": []
-}
