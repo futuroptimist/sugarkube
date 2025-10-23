@@ -1,12 +1,65 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 SCRIPT = str(Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh")
+CLEANUP = Path(__file__).resolve().parents[2] / "scripts" / "cleanup_mdns_publishers.sh"
+
+
+def _pid_path(cluster: str, env: str, phase: str) -> Path:
+    return Path(f"/run/sugarkube/mdns-{cluster}-{env}-{phase}.pid")
+
+
+def _wait_for_live_pid(path: Path, timeout: float = 10.0) -> int:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if path.exists():
+            pid_text = path.read_text(encoding="utf-8").strip()
+            if pid_text:
+                try:
+                    pid = int(pid_text)
+                except ValueError:
+                    time.sleep(0.1)
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    time.sleep(0.1)
+                    continue
+                else:
+                    return pid
+        time.sleep(0.1)
+    raise AssertionError(f"Timed out waiting for live PID file {path}")
 
 
 def _hostname_short() -> str:
     return subprocess.check_output(["hostname", "-s"], text=True).strip()
+
+
+def _wait_for_pid_exit(pid: int, timeout: float = 10.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"Process {pid} still running after {timeout}s")
+
+
+def _wait_for_pattern_absence(pattern: str, timeout: float = 10.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = subprocess.run(
+            ["pgrep", "-af", pattern],
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"Processes matching '{pattern}' still running after {timeout}s")
 
 
 def test_bootstrap_publish_uses_avahi_publish(tmp_path):
@@ -53,13 +106,32 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
     })
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         ["bash", SCRIPT, "--test-bootstrap-publish"],
         env=env,
         text=True,
-        capture_output=True,
-        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
+
+    bootstrap_pid_path = _pid_path("sugar", "dev", "bootstrap")
+    stdout = ""
+    stderr = ""
+    cleanup_env = env.copy()
+    try:
+        _wait_for_live_pid(bootstrap_pid_path)
+        stdout, stderr = proc.communicate(timeout=20)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        subprocess.run(["bash", str(CLEANUP)], env=cleanup_env, check=False, text=True)
+
+    assert proc.returncode == 0
 
     # Ensure the helper logged its launch and termination
     log_contents = log_path.read_text(encoding="utf-8")
@@ -79,13 +151,15 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     assert not service_file.exists()
 
+    assert not bootstrap_pid_path.exists()
+
     # stderr should mention that avahi-publish-service is advertising the bootstrap role
-    assert "avahi-publish-service advertising bootstrap" in result.stderr
+    assert "avahi-publish-service advertising bootstrap" in stderr
     expected = (
         f"phase=self-check host={hostname}.local observed={hostname}.local; "
         "bootstrap advertisement confirmed."
     )
-    assert expected in result.stderr
+    assert expected in stderr
 
 
 def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
@@ -296,35 +370,86 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "SUGARKUBE_MDNS_SERVER_DELAY": "0",
     })
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         ["bash", SCRIPT, "--test-bootstrap-server-flow"],
         env=env,
         text=True,
-        capture_output=True,
-        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
+    bootstrap_pid_path = _pid_path("sugar", "dev", "bootstrap")
+    server_pid_path = _pid_path("sugar", "dev", "server")
+    cleanup_env = env.copy()
+    stdout = ""
+    stderr = ""
+    cleanup_result = None
+    server_pid = None
+    try:
+        _wait_for_live_pid(bootstrap_pid_path)
+        _wait_for_live_pid(server_pid_path)
+        stdout, stderr = proc.communicate(timeout=40)
+        assert proc.returncode == 0
+
+        assert not bootstrap_pid_path.exists()
+        assert server_pid_path.exists()
+        server_pid_text = server_pid_path.read_text(encoding="utf-8").strip()
+        assert server_pid_text
+        server_pid = int(server_pid_text)
+        os.kill(server_pid, 0)
+
+        assert flag_path.exists()
+
+        bootstrap_msg = (
+            f"phase=self-check host={hostname}.local observed={hostname}.local; "
+            "bootstrap advertisement confirmed."
+        )
+        server_msg = (
+            f"phase=self-check host={hostname}.local observed={hostname}.local; "
+            "server advertisement confirmed."
+        )
+        assert bootstrap_msg in stderr
+        assert server_msg in stderr
+        assert stderr.find(bootstrap_msg) < stderr.find(server_msg)
+
+        browse_calls = int(count_path.read_text(encoding="utf-8").strip())
+        assert browse_calls >= 2
+
+        cleanup_result = subprocess.run(
+            ["bash", str(CLEANUP)],
+            env=cleanup_env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        subprocess.run(["bash", str(CLEANUP)], env=cleanup_env, check=False, text=True)
+
+    assert cleanup_result is not None
+    assert cleanup_result.returncode == 0
+    assert not server_pid_path.exists()
+
+    time.sleep(0.5)
+
+    if server_pid is not None:
+        try:
+            _wait_for_pid_exit(server_pid)
+        except AssertionError:
+            _wait_for_pattern_absence("avahi-publish-service.*_k3s-sugar-dev")
+
+    _wait_for_pattern_absence("avahi-publish-service.*_k3s-sugar-dev")
     log_contents = log_path.read_text(encoding="utf-8")
     assert log_contents.count("START:") >= 2
-    assert log_contents.count("TERM") >= 2
+    assert log_contents.count("TERM") >= 1
     assert "phase=bootstrap" in log_contents
     assert "phase=server" in log_contents
-    assert flag_path.exists()
-
-    bootstrap_msg = (
-        f"phase=self-check host={hostname}.local observed={hostname}.local; "
-        "bootstrap advertisement confirmed."
-    )
-    server_msg = (
-        f"phase=self-check host={hostname}.local observed={hostname}.local; "
-        "server advertisement confirmed."
-    )
-    assert bootstrap_msg in result.stderr
-    assert server_msg in result.stderr
-    assert result.stderr.find(bootstrap_msg) < result.stderr.find(server_msg)
-
-    browse_calls = int(count_path.read_text(encoding="utf-8").strip())
-    assert browse_calls >= 2
 
 def test_bootstrap_publish_fails_without_mdns(tmp_path):
     hostname = _hostname_short()
