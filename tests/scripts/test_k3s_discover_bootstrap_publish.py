@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 SCRIPT = str(Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh")
@@ -31,6 +32,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         (
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
+            "sleep 1\n"
             "cat <<'EOF'\n"
             f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
             "192.0.2.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
@@ -41,6 +43,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     )
     browse.chmod(0o755)
 
+    runtime_dir = tmp_path / "run"
     env = os.environ.copy()
     env.update({
         "PATH": f"{bin_dir}:{env.get('PATH', '')}",
@@ -51,15 +54,32 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "SUGARKUBE_TOKEN": "dummy",  # bypass token requirement
         "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "1",
         "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(runtime_dir),
     })
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         ["bash", SCRIPT, "--test-bootstrap-publish"],
         env=env,
         text=True,
-        capture_output=True,
-        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
+
+    pid_file = runtime_dir / "mdns-sugar-dev-bootstrap.pid"
+    for _ in range(50):
+        if pid_file.exists():
+            break
+        time.sleep(0.1)
+
+    assert pid_file.exists(), "bootstrap pid file should be created while publishing"
+    pid_value = int(pid_file.read_text(encoding="utf-8").strip())
+    assert pid_value > 0
+    os.kill(pid_value, 0)
+
+    stdout, stderr = proc.communicate(timeout=15)
+    assert proc.returncode == 0, stderr
+
+    assert not pid_file.exists(), "bootstrap pid file should be removed after cleanup"
 
     # Ensure the helper logged its launch and termination
     log_contents = log_path.read_text(encoding="utf-8")
@@ -80,8 +100,8 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     assert not service_file.exists()
 
     # stderr should mention that avahi-publish-service is advertising the bootstrap role
-    assert "avahi-publish-service advertising bootstrap" in result.stderr
-    assert "phase=self-check host=" in result.stderr
+    assert "avahi-publish-service advertising bootstrap" in stderr
+    assert "phase=self-check host=" in stderr
 
 
 def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
@@ -127,6 +147,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "SUGARKUBE_TOKEN": "dummy",
         "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "1",
         "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(
@@ -190,6 +211,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "1",
         "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
         "SUGARKUBE_MDNS_HOST": "HostMixed.LOCAL.",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(

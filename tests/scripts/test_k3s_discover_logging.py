@@ -17,6 +17,7 @@ def test_require_activity_logs_use_effective_attempts(tmp_path):
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(fixture),
         # Speed up the path: prevent random jitter pause by skipping to election quickly
         "SUGARKUBE_TOKEN": "dummy",  # unblock token check
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     }
 
     # Run just the wait-loop via test mode you added
