@@ -63,6 +63,34 @@ def test_query_mdns_bootstrap_leaders_uses_txt_leader(tmp_path):
     assert results == ["leader0.local", "host2.local"]
 
 
+def test_query_mdns_strips_trailing_dot_hosts(tmp_path):
+    fixture = tmp_path / "mdns.txt"
+    fixture.write_text(
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host3;_https._tcp;local;host3.local.;"
+            "192.168.1.13;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+            "txt=role=bootstrap;txt=leader=host3.local.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    hosts = query_mdns(
+        "bootstrap-hosts",
+        "sugar",
+        "dev",
+        fixture_path=str(fixture),
+    )
+    leaders = query_mdns(
+        "bootstrap-leaders",
+        "sugar",
+        "dev",
+        fixture_path=str(fixture),
+    )
+
+    assert hosts == ["host3.local"]
+    assert leaders == ["host3.local"]
+
+
 def test_query_mdns_uses_service_name_when_unresolved(tmp_path):
     fixture = tmp_path / "mdns.txt"
     fixture.write_text(
