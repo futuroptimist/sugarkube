@@ -19,7 +19,7 @@ up env='dev': prereqs
 
     # Restore WLAN on exit iff we actually disabled it (guard file written by toggle_wlan.sh)
     trap 'if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
-             [ -f "${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}/wlan-disabled" ]; then \
+             [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then \
              sudo -E bash scripts/toggle_wlan.sh --restore || true; \
            fi' EXIT INT TERM
 
