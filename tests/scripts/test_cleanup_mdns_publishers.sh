@@ -35,6 +35,29 @@ echo "${SERVER_PID}" >"${SERVER_FILE}"
   export SUGARKUBE_CLUSTER="${CLUSTER}"
   export SUGARKUBE_ENV="${ENVIRONMENT}"
   export SUGARKUBE_RUNTIME_DIR="${RUN_DIR}"
+  export DRY_RUN=1
+  bash "${CLEANUP_SCRIPT}"
+)
+
+if ! kill -0 "${BOOT_PID}" 2>/dev/null; then
+  echo "bootstrap publisher stopped during dry run" >&2
+  exit 1
+fi
+
+if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+  echo "server publisher stopped during dry run" >&2
+  exit 1
+fi
+
+if [ ! -e "${BOOT_FILE}" ] || [ ! -e "${SERVER_FILE}" ]; then
+  echo "pid files removed during dry run" >&2
+  exit 1
+fi
+
+(
+  export SUGARKUBE_CLUSTER="${CLUSTER}"
+  export SUGARKUBE_ENV="${ENVIRONMENT}"
+  export SUGARKUBE_RUNTIME_DIR="${RUN_DIR}"
   bash "${CLEANUP_SCRIPT}"
 )
 
@@ -68,6 +91,24 @@ chmod +x "${FAKE_PUBLISHER}"
 "${FAKE_PUBLISHER}" "_k3s-${CLUSTER}-${ENVIRONMENT}._tcp" &
 FALLBACK_PID=$!
 sleep 0.1
+
+(
+  export SUGARKUBE_CLUSTER="${CLUSTER}"
+  export SUGARKUBE_ENV="${ENVIRONMENT}"
+  export SUGARKUBE_RUNTIME_DIR="${RUN_DIR}"
+  export DRY_RUN=1
+  bash "${CLEANUP_SCRIPT}"
+)
+
+if ! kill -0 "${FALLBACK_PID}" 2>/dev/null; then
+  echo "fallback publisher stopped during dry run" >&2
+  exit 1
+fi
+
+if [ ! -e "${BOOT_FILE}" ]; then
+  echo "orphan bootstrap pid file removed during dry run" >&2
+  exit 1
+fi
 
 (
   export SUGARKUBE_CLUSTER="${CLUSTER}"
