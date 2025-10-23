@@ -104,6 +104,7 @@ def ensure_self_ad_is_visible(
     retries: int = 5,
     delay: float = 1.0,
     require_phase: Optional[str] = None,
+    expect_addr: Optional[str] = None,
     runner: Optional[Runner] = None,
     sleep: SleepFn = time.sleep,
 ) -> Optional[str]:
@@ -119,16 +120,29 @@ def ensure_self_ad_is_visible(
     if runner is None:
         runner = subprocess.run  # type: ignore[assignment]
 
+    expected_addr = expect_addr.strip() if expect_addr else None
+
     for attempt in range(1, attempts + 1):
         records = _collect_mdns_records(cluster, env, runner)
         for record in records:
             txt = record.txt
             if require_phase is not None and txt.get("phase") != require_phase:
                 continue
-            if _same_host(record.host, expected_norm) or _same_host(
-                txt.get("leader", ""), expected_norm
-            ):
-                return record.host
+            host_match = _same_host(record.host, expected_norm)
+            leader_match = _same_host(txt.get("leader", ""), expected_norm)
+            if not (host_match or leader_match):
+                continue
+
+            if expected_addr:
+                candidate_addr = record.address.strip()
+                if not candidate_addr:
+                    candidate_addr = (txt.get("a") or "").strip()
+                if not candidate_addr:
+                    candidate_addr = (txt.get("addr") or "").strip()
+                if candidate_addr != expected_addr:
+                    continue
+
+            return record.host
         if attempt < attempts and delay > 0:
             sleep(delay)
     return None
@@ -142,6 +156,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require-phase", choices=["bootstrap", "server"], default=None)
     parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("--delay", type=float, default=1.0)
+    parser.add_argument("--expect-addr", default=None)
     return parser
 
 
@@ -156,6 +171,7 @@ def _main() -> int:
         retries=args.retries,
         delay=args.delay,
         require_phase=args.require_phase,
+        expect_addr=args.expect_addr,
     )
     if observed:
         print(observed)
