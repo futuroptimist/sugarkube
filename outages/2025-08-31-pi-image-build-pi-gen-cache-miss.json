@@ -1,0 +1,10 @@
+{
+  "id": "pi-image-build-pi-gen-cache-miss",
+  "date": "2025-08-31",
+  "component": "pi-image GitHub workflow",
+  "rootCause": "pi-image build failed when the pi-gen Docker image was missing and not rebuilt",
+  "resolution": "workflow now builds the pi-gen image when the cache is cold before verification",
+  "references": [
+    ".github/workflows/pi-image.yml"
+  ]
+}

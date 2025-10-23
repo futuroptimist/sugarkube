@@ -1,0 +1,10 @@
+{
+  "id": "pi-image-collect-sha256-permission",
+  "date": "2025-08-30",
+  "component": "pi-image collect script",
+  "rootCause": "collect_pi_image.sh failed to write checksum when existing file lacked write permission",
+  "resolution": "script now removes any existing .sha256 file before writing",
+  "references": [
+    "scripts/collect_pi_image.sh"
+  ]
+}

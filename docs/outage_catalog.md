@@ -18,4 +18,13 @@ Validate new entries against the schema before committing:
 python -m jsonschema -i outages/<file>.json outages/schema.json
 ```
 
+Always source the timestamp from a trusted clock:
+
+1. Attempt to fetch `https://worldtimeapi.org/api/timezone/Etc/UTC` and parse the
+   `utc_datetime` field.
+2. Fall back to `date -u +"%Y-%m-%d"` when the network is unreachable.
+
+Use that value for both the filename prefix and the JSON `date` property, then run
+`pytest tests/test_outage_dates.py` to ensure no record slips into the future.
+
 Agents can parse these files to learn from previous incidents.
