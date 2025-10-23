@@ -202,12 +202,33 @@ if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
   exit 0
 fi
 
-HN="$(hostname -s)"
-MDNS_HOST_RAW="${SUGARKUBE_MDNS_HOST:-${HN}.local}"
+MDNS_IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
+
+if [ -n "${SUGARKUBE_MDNS_HOST:-}" ]; then
+  MDNS_HOST_RAW="${SUGARKUBE_MDNS_HOST}"
+else
+  HN="$(hostname -s 2>/dev/null || hostname)"
+  case "${HN}" in
+    *.local)
+      MDNS_HOST_RAW="${HN}"
+      ;;
+    *)
+      MDNS_HOST_RAW="${HN}.local"
+      ;;
+  esac
+fi
 while [[ "${MDNS_HOST_RAW}" == *"." ]]; do
   MDNS_HOST_RAW="${MDNS_HOST_RAW%.}"
 done
 MDNS_HOST="${MDNS_HOST_RAW,,}"
+
+MDNS_ADDR_V4="${SUGARKUBE_MDNS_PUBLISH_ADDR:-$(
+  ip -4 -o addr show "${MDNS_IFACE}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1
+)}"
+if [ -z "${MDNS_ADDR_V4}" ]; then
+  >&2 printf '[sugarkube %s/%s] WARN: no IPv4 found on %s; publishing without -a\n' \
+    "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_IFACE}"
+fi
 MDNS_SERVICE_NAME="k3s-${CLUSTER}-${ENVIRONMENT}"
 MDNS_SERVICE_TYPE="_${MDNS_SERVICE_NAME}._tcp"
 AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
@@ -365,19 +386,29 @@ start_bootstrap_publisher() {
   BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish-bootstrap.log"
   : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
 
-  avahi-publish-service \
-    -H "${MDNS_HOST_RAW}" \
-    "${publish_name}" \
-    "${MDNS_SERVICE_TYPE}" \
-    6443 \
-    "k3s=1" \
-    "cluster=${CLUSTER}" \
-    "env=${ENVIRONMENT}" \
-    "role=bootstrap" \
-    "leader=${MDNS_HOST_RAW}" \
-    "phase=bootstrap" \
-    "state=pending" \
-    >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
+  log "publishing bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+
+  local publish_cmd=(
+    avahi-publish-service
+    -H "${MDNS_HOST_RAW}"
+  )
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    publish_cmd+=(-a "${MDNS_ADDR_V4}")
+  fi
+  publish_cmd+=(
+    "${publish_name}"
+    "${MDNS_SERVICE_TYPE}"
+    6443
+    "k3s=1"
+    "cluster=${CLUSTER}"
+    "env=${ENVIRONMENT}"
+    "role=bootstrap"
+    "leader=${MDNS_HOST_RAW}"
+    "phase=bootstrap"
+    "state=pending"
+  )
+
+  "${publish_cmd[@]}" >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
 
   sleep 1
@@ -412,18 +443,28 @@ start_server_publisher() {
   SERVER_PUBLISH_LOG="/tmp/sugar-publish-server.log"
   : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
 
-  avahi-publish-service \
-    -H "${MDNS_HOST_RAW}" \
-    "${publish_name}" \
-    "${MDNS_SERVICE_TYPE}" \
-    6443 \
-    "k3s=1" \
-    "cluster=${CLUSTER}" \
-    "env=${ENVIRONMENT}" \
-    "role=server" \
-    "leader=${MDNS_HOST_RAW}" \
-    "phase=server" \
-    >"${SERVER_PUBLISH_LOG}" 2>&1 &
+  log "publishing server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+
+  local publish_cmd=(
+    avahi-publish-service
+    -H "${MDNS_HOST_RAW}"
+  )
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    publish_cmd+=(-a "${MDNS_ADDR_V4}")
+  fi
+  publish_cmd+=(
+    "${publish_name}"
+    "${MDNS_SERVICE_TYPE}"
+    6443
+    "k3s=1"
+    "cluster=${CLUSTER}"
+    "env=${ENVIRONMENT}"
+    "role=server"
+    "leader=${MDNS_HOST_RAW}"
+    "phase=server"
+  )
+
+  "${publish_cmd[@]}" >"${SERVER_PUBLISH_LOG}" 2>&1 &
   SERVER_PUBLISH_PID=$!
 
   sleep 1
@@ -573,15 +614,20 @@ ensure_self_mdns_advertisement() {
 
   MDNS_LAST_OBSERVED=""
   local observed=""
-  if observed="$(
-    python3 "${SCRIPT_DIR}/mdns_helpers.py" \
-      --expect-host "${MDNS_HOST_RAW}" \
-      --cluster "${CLUSTER}" \
-      --env "${ENVIRONMENT}" \
-      --require-phase "${require_phase}" \
-      --retries "${retries}" \
-      --delay "${delay}"
-  )"; then
+  local cmd=(
+    python3 "${SCRIPT_DIR}/mdns_helpers.py"
+    --expect-host "${MDNS_HOST_RAW}"
+    --cluster "${CLUSTER}"
+    --env "${ENVIRONMENT}"
+    --require-phase "${require_phase}"
+    --retries "${retries}"
+    --delay "${delay}"
+  )
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    cmd+=(--expect-addr "${MDNS_ADDR_V4}")
+  fi
+
+  if observed="$("${cmd[@]}")"; then
     MDNS_LAST_OBSERVED="${observed}"
     return 0
   fi
