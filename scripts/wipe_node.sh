@@ -3,6 +3,7 @@ set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 current_uid="${EUID:-0}"
 if [ "${ALLOW_NON_ROOT}" != "1" ] && [ "${current_uid}" -ne 0 ]; then
@@ -78,6 +79,26 @@ remove_file() {
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+cleanup_dynamic_publishers() {
+  local svc
+  svc="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+  if DRY_RUN="${DRY_RUN}" \
+    SUGARKUBE_CLUSTER="${CLUSTER}" \
+    SUGARKUBE_ENV="${ENVIRONMENT}" \
+    bash "${SCRIPT_DIR}/cleanup_mdns_publishers.sh"; then
+    if [ "${DRY_RUN}" = "1" ]; then
+      append_summary "removed-dynamic:${svc}:dry-run"
+    else
+      append_summary "removed-dynamic:${svc}"
+    fi
+  else
+    printf 'Failed to clean dynamic publishers for %s\n' "${svc}" >&2
+    append_summary "removed-dynamic:${svc}:error"
+  fi
+}
+
+cleanup_dynamic_publishers
 
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then
