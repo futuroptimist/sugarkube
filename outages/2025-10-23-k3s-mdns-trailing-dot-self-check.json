@@ -3,7 +3,7 @@
   "date": "2025-10-23",
   "component": "scripts/k3s_mdns_parser.py",
   "rootCause": "The Avahi parser left trailing dots on hostnames and TXT leader values when avahi-browse emitted a domain of 'local.', so the mDNS self-check never matched the bootstrap advertisement for the local node.",
-  "resolution": "Trim trailing dots, normalise case, and reuse the hostname normaliser for both resolved hosts and TXT leader fields so bootstrap self-checks accept Avahi responses with domain suffixes.",
+  "resolution": "Trim trailing dots, normalise case, and reuse the hostname normaliser for both resolved hosts and TXT leader fields so bootstrap self-checks accept Avahi responses with domain suffixes.\n\n2025-10-29 follow-up:\n  Symptom: publisher PID logged but no _k3s-sugar-dev._tcp advert visible via avahi-browse.\n  Fix: bind avahi-publish-service with -H <FQDN>, wait 1s before browsing, and capture output in /tmp/sugar-publish.log.\n  Quick triage:\n    avahi-browse -rt _k3s-sugar-dev._tcp --parsable\n    pgrep -a avahi-publish || true\n    sed -n '1,120p' /tmp/sugar-publish.log || true",
   "references": [
     "scripts/k3s_mdns_parser.py",
     "tests/scripts/test_k3s_discover_bootstrap_publish.py",

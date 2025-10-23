@@ -26,15 +26,15 @@ def _normalize_host(host: str, domain: str) -> str:
         return ""
 
     domain_lower = domain.lower()
-    host_compare = host.lower()
+    host_lower = host.lower()
 
-    if domain_lower and not host_compare.endswith(f".{domain_lower}"):
+    if domain_lower and not host_lower.endswith(f".{domain_lower}"):
         try:
-            ipaddress.ip_address(host)
+            ipaddress.ip_address(host_lower)
         except ValueError:
-            host = f"{host}.{domain_lower}" if domain_lower else host
+            host_lower = f"{host_lower}.{domain_lower}" if domain_lower else host_lower
 
-    return host
+    return host_lower
 
 
 def _parse_service_name(service_name: str, domain: str) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
