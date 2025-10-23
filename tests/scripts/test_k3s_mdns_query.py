@@ -61,3 +61,21 @@ def test_query_mdns_bootstrap_leaders_uses_txt_leader(tmp_path):
     )
 
     assert results == ["leader0.local", "host2.local"]
+
+
+def test_query_mdns_handles_missing_avahi():
+    messages = []
+
+    def runner(command, capture_output, text, check):
+        raise FileNotFoundError("avahi-browse missing")
+
+    results = query_mdns(
+        "server-first",
+        "sugar",
+        "dev",
+        runner=runner,
+        debug=messages.append,
+    )
+
+    assert results == []
+    assert any("not found" in message for message in messages)

@@ -31,12 +31,24 @@ def _invoke_avahi(
     debug: DebugFn,
 ) -> subprocess.CompletedProcess[str]:
     command = _build_command(mode)
-    result = runner(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = runner(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        if debug is not None:
+            debug(
+                "avahi-browse executable not found; continuing without mDNS results"
+            )
+        return subprocess.CompletedProcess(
+            command,
+            returncode=127,
+            stdout="",
+            stderr="",
+        )
     if result.returncode != 0 and debug is not None:
         debug(
             f"avahi-browse exited with {result.returncode}; continuing with available data"
