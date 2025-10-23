@@ -1,5 +1,5 @@
 {
-  "id": "pyspelling-missing-20250831",
+  "id": "2025-08-31-pyspelling-missing",
   "date": "2025-08-31",
   "component": "pyspelling",
   "rootCause": "`pyspelling` was not installed in the environment, preventing spell checks.",

@@ -1,0 +1,11 @@
+{
+  "id": "2025-08-31-pigen-zip-only-export",
+  "date": "2025-08-31",
+  "component": "pi-gen export-image artifact handling",
+  "rootCause": "pi-gen sometimes produces only a .zip in deploy/ without a top-level .img, causing our collector to 'cp' an empty path and fail.",
+  "resolution": "Updated build script to detect .zip-only output and stream-extract the first .img from the zip to /out/IMG_NAME.img using bsdtar.",
+  "references": [
+    "scripts/build_pi_image.ps1",
+    "build logs showing 'cp: cannot stat '' : No such file or directory'"
+  ]
+}

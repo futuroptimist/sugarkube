@@ -1,5 +1,5 @@
 {
-  "id": "pi-image-build-git-missing",
+  "id": "2025-08-23-pi-image-build-git-missing",
   "date": "2025-08-23",
   "component": "pi-image build script",
   "rootCause": "build_pi_image.sh failed when git was absent but did not check for it",

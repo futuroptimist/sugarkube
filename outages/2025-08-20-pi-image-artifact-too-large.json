@@ -1,5 +1,5 @@
 {
-  "id": "pi-image-artifact-too-large",
+  "id": "2025-08-20-pi-image-artifact-too-large",
   "date": "2025-08-20",
   "component": "pi-image workflow",
   "rootCause": "Uncompressed Raspberry Pi image exceeded GitHub Actions artifact limit, blocking uploads.",

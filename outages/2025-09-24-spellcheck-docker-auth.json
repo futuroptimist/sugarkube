@@ -1,5 +1,5 @@
 {
-  "id": "spellcheck-docker-auth-required",
+  "id": "2025-09-24-spellcheck-docker-auth",
   "date": "2025-09-24",
   "component": "spellcheck workflow",
   "rootCause": "rojopolis/spellcheck-github-actions used a Docker Hub image that now needs authentication.",

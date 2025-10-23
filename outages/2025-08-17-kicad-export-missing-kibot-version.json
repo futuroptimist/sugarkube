@@ -1,5 +1,5 @@
 {
-  "id": "kicad-export-missing-kibot-version",
+  "id": "2025-08-17-kicad-export-missing-kibot-version",
   "date": "2025-08-17",
   "component": "kicad-export workflow",
   "rootCause": "KiBot config lacked required kibot.version field, causing export to abort.",

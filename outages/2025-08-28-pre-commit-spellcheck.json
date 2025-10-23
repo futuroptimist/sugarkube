@@ -1,0 +1,10 @@
+{
+  "id": "2025-08-28-pre-commit-spellcheck",
+  "date": "2025-08-28",
+  "component": "pre-commit",
+  "rootCause": "pyspelling flagged missing words in docs/raspi_cluster_setup.md",
+  "resolution": "Add spelling exceptions to .wordlist.txt or fix documentation",
+  "references": [
+    "pre-commit run --all-files"
+  ]
+}

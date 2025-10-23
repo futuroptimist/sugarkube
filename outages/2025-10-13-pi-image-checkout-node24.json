@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-13-pi-image-checkout-node24",
+  "date": "2025-10-13",
+  "component": "pi-image GitHub workflow",
+  "rootCause": "checkout@v5 crashed under forced Node24, so checkout never cloned the repo.",
+  "resolution": "Pinned pi-image to actions/checkout@v4.2.2 and added tests guarding major/tag.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "tests/test_pi_image_tooling.py"
+  ]
+}

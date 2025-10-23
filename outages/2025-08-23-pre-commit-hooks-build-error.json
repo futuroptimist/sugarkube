@@ -1,5 +1,5 @@
 {
-  "id": "pre-commit-hooks-build-error",
+  "id": "2025-08-23-pre-commit-hooks-build-error",
   "date": "2025-08-23",
   "component": "pre-commit",
   "rootCause": "pre-commit failed to build pre-commit-hooks dependency due to missing setuptools/install_layout issue",
