@@ -204,10 +204,12 @@ fi
 
 MDNS_IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
 
+HN="$(hostname -s 2>/dev/null || hostname)"
+
 if [ -n "${SUGARKUBE_MDNS_HOST:-}" ]; then
   MDNS_HOST_RAW="${SUGARKUBE_MDNS_HOST}"
 else
-  _short_host="$(hostname -s 2>/dev/null || hostname)"
+  _short_host="${HN}"
   case "${_short_host}" in
     *.local)
       MDNS_HOST_RAW="${_short_host}"
