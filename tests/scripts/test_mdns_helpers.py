@@ -15,6 +15,10 @@ def _make_runner(stdout_by_service):
     return _runner
 
 
+def _record(*parts: str) -> str:
+    return "".join(parts)
+
+
 def test_same_host_normalises_case_and_trailing_dots():
     assert _same_host("Host.LOCAL.", "host.local")
     assert _same_host("host.local", "HOST")
@@ -22,13 +26,17 @@ def test_same_host_normalises_case_and_trailing_dots():
 
 
 def test_ensure_self_ad_is_visible_filters_by_phase():
-    bootstrap_record = (
-        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local;host0.local;192.0.2.10;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local;txt=phase=bootstrap\n"
+    bootstrap_record = _record(
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);",
+        "_k3s-sugar-dev._tcp;local;host0.local;192.0.2.10;6443;",
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;",
+        "txt=leader=host0.local;txt=phase=bootstrap\n",
     )
-    server_record = (
-        "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;192.0.2.10;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader=host0.local;txt=phase=server\n"
+    server_record = _record(
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (server);",
+        "_k3s-sugar-dev._tcp;local;host0.local;192.0.2.10;6443;",
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;",
+        "txt=leader=host0.local;txt=phase=server\n",
     )
 
     runner = _make_runner({
@@ -71,3 +79,49 @@ def test_ensure_self_ad_is_visible_filters_by_phase():
         sleep=lambda _: None,
     )
     assert missing_server is None
+
+
+def test_ensure_self_ad_is_visible_matches_expected_address():
+    bootstrap_addr_mismatch = _record(
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);",
+        "_k3s-sugar-dev._tcp;local;host0.local;198.51.100.10;6443;",
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;",
+        "txt=leader=host0.local;txt=phase=bootstrap\n",
+    )
+    bootstrap_addr_match = _record(
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);",
+        "_k3s-sugar-dev._tcp;local;host0.local;192.0.2.10;6443;",
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;",
+        "txt=leader=host0.local;txt=phase=bootstrap;txt=addr=192.0.2.10\n",
+    )
+
+    runner = _make_runner({
+        "_k3s-sugar-dev._tcp": bootstrap_addr_mismatch + bootstrap_addr_match,
+        "_https._tcp": "",
+    })
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        expect_addr="192.0.2.10",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+    assert observed == "host0.local"
+
+    missing = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        expect_addr="203.0.113.55",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+    assert missing is None

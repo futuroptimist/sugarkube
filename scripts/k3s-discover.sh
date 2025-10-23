@@ -202,12 +202,41 @@ if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
   exit 0
 fi
 
-HN="$(hostname -s)"
-MDNS_HOST_RAW="${SUGARKUBE_MDNS_HOST:-${HN}.local}"
+MDNS_IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
+
+HN="$(hostname -s 2>/dev/null || hostname)"
+if [ -n "${SUGARKUBE_MDNS_HOST:-}" ]; then
+  MDNS_HOST_RAW="${SUGARKUBE_MDNS_HOST}"
+else
+  case "${HN}" in
+    *.local)
+      MDNS_HOST_RAW="${HN}"
+      ;;
+    *)
+      MDNS_HOST_RAW="${HN}.local"
+      ;;
+  esac
+fi
 while [[ "${MDNS_HOST_RAW}" == *"." ]]; do
   MDNS_HOST_RAW="${MDNS_HOST_RAW%.}"
 done
 MDNS_HOST="${MDNS_HOST_RAW,,}"
+
+if [ -n "${SUGARKUBE_MDNS_PUBLISH_ADDR:-}" ]; then
+  MDNS_ADDR_V4="${SUGARKUBE_MDNS_PUBLISH_ADDR}"
+else
+  if command -v ip >/dev/null 2>&1; then
+    MDNS_ADDR_V4="$(
+      ip -4 -o addr show "${MDNS_IFACE}" 2>/dev/null \
+        | awk '{print $4}' \
+        | cut -d/ -f1 \
+        | head -n1
+    )"
+  else
+    MDNS_ADDR_V4=""
+  fi
+fi
+MDNS_ADDR_V4="${MDNS_ADDR_V4:-}"
 MDNS_SERVICE_NAME="k3s-${CLUSTER}-${ENVIRONMENT}"
 MDNS_SERVICE_TYPE="_${MDNS_SERVICE_NAME}._tcp"
 AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
@@ -350,6 +379,12 @@ log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
+if [ -n "${MDNS_ADDR_V4}" ]; then
+  log "mDNS host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4} iface=${MDNS_IFACE}"
+else
+  log "mDNS host=${MDNS_HOST_RAW} addr=auto iface=${MDNS_IFACE} (Avahi chooses IPv4)"
+fi
+
 start_bootstrap_publisher() {
   if ! command -v avahi-publish-service >/dev/null 2>&1; then
     log "avahi-publish-service not available; relying on Avahi service file"
@@ -365,19 +400,37 @@ start_bootstrap_publisher() {
   BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish-bootstrap.log"
   : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
 
-  avahi-publish-service \
-    -H "${MDNS_HOST_RAW}" \
-    "${publish_name}" \
-    "${MDNS_SERVICE_TYPE}" \
-    6443 \
-    "k3s=1" \
-    "cluster=${CLUSTER}" \
-    "env=${ENVIRONMENT}" \
-    "role=bootstrap" \
-    "leader=${MDNS_HOST_RAW}" \
-    "phase=bootstrap" \
-    "state=pending" \
-    >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
+  log "Publish bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    avahi-publish-service \
+      -H "${MDNS_HOST_RAW}" \
+      -a "${MDNS_ADDR_V4}" \
+      "${publish_name}" \
+      "${MDNS_SERVICE_TYPE}" \
+      6443 \
+      "k3s=1" \
+      "cluster=${CLUSTER}" \
+      "env=${ENVIRONMENT}" \
+      "role=bootstrap" \
+      "leader=${MDNS_HOST_RAW}" \
+      "phase=bootstrap" \
+      "state=pending" \
+      >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
+  else
+    avahi-publish-service \
+      -H "${MDNS_HOST_RAW}" \
+      "${publish_name}" \
+      "${MDNS_SERVICE_TYPE}" \
+      6443 \
+      "k3s=1" \
+      "cluster=${CLUSTER}" \
+      "env=${ENVIRONMENT}" \
+      "role=bootstrap" \
+      "leader=${MDNS_HOST_RAW}" \
+      "phase=bootstrap" \
+      "state=pending" \
+      >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
+  fi
   BOOTSTRAP_PUBLISH_PID=$!
 
   sleep 1
@@ -392,7 +445,7 @@ start_bootstrap_publisher() {
     return 1
   fi
 
-  log "avahi-publish-service advertising bootstrap as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${BOOTSTRAP_PUBLISH_PID})"
+  log "avahi bootstrap host=${MDNS_HOST_RAW} ip=${MDNS_ADDR_V4:-auto} pid=${BOOTSTRAP_PUBLISH_PID}"
   printf '%s\n' "${BOOTSTRAP_PUBLISH_PID}" | write_privileged_file "${BOOTSTRAP_PID_FILE}"
   return 0
 }
@@ -412,18 +465,35 @@ start_server_publisher() {
   SERVER_PUBLISH_LOG="/tmp/sugar-publish-server.log"
   : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
 
-  avahi-publish-service \
-    -H "${MDNS_HOST_RAW}" \
-    "${publish_name}" \
-    "${MDNS_SERVICE_TYPE}" \
-    6443 \
-    "k3s=1" \
-    "cluster=${CLUSTER}" \
-    "env=${ENVIRONMENT}" \
-    "role=server" \
-    "leader=${MDNS_HOST_RAW}" \
-    "phase=server" \
-    >"${SERVER_PUBLISH_LOG}" 2>&1 &
+  log "Publish server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    avahi-publish-service \
+      -H "${MDNS_HOST_RAW}" \
+      -a "${MDNS_ADDR_V4}" \
+      "${publish_name}" \
+      "${MDNS_SERVICE_TYPE}" \
+      6443 \
+      "k3s=1" \
+      "cluster=${CLUSTER}" \
+      "env=${ENVIRONMENT}" \
+      "role=server" \
+      "leader=${MDNS_HOST_RAW}" \
+      "phase=server" \
+      >"${SERVER_PUBLISH_LOG}" 2>&1 &
+  else
+    avahi-publish-service \
+      -H "${MDNS_HOST_RAW}" \
+      "${publish_name}" \
+      "${MDNS_SERVICE_TYPE}" \
+      6443 \
+      "k3s=1" \
+      "cluster=${CLUSTER}" \
+      "env=${ENVIRONMENT}" \
+      "role=server" \
+      "leader=${MDNS_HOST_RAW}" \
+      "phase=server" \
+      >"${SERVER_PUBLISH_LOG}" 2>&1 &
+  fi
   SERVER_PUBLISH_PID=$!
 
   sleep 1
@@ -438,7 +508,7 @@ start_server_publisher() {
     return 1
   fi
 
-  log "avahi-publish-service advertising server as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${SERVER_PUBLISH_PID})"
+  log "avahi server host=${MDNS_HOST_RAW} ip=${MDNS_ADDR_V4:-auto} pid=${SERVER_PUBLISH_PID}"
   printf '%s\n' "${SERVER_PUBLISH_PID}" | write_privileged_file "${SERVER_PID_FILE}"
   return 0
 }
@@ -573,6 +643,10 @@ ensure_self_mdns_advertisement() {
 
   MDNS_LAST_OBSERVED=""
   local observed=""
+  local -a extra_args=()
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    extra_args+=(--expect-addr "${MDNS_ADDR_V4}")
+  fi
   if observed="$(
     python3 "${SCRIPT_DIR}/mdns_helpers.py" \
       --expect-host "${MDNS_HOST_RAW}" \
@@ -580,7 +654,8 @@ ensure_self_mdns_advertisement() {
       --env "${ENVIRONMENT}" \
       --require-phase "${require_phase}" \
       --retries "${retries}" \
-      --delay "${delay}"
+      --delay "${delay}" \
+      "${extra_args[@]}"
   )"; then
     MDNS_LAST_OBSERVED="${observed}"
     return 0
