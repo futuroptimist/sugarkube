@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-19-k3s-mdns-trailing-dot",
+  "date": "2025-11-19",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "avahi-browse returned sugarkube0.local. so bootstrap aborted early.",
+  "resolution": "Trim trailing dots in mDNS parsing and add parser/bootstrap regression tests.",
+  "references": [
+    "scripts/k3s_mdns_parser.py",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_mdns_query.py",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py"
+  ]
+}

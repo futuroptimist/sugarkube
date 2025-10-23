@@ -19,12 +19,22 @@ def _normalize_role(role: Optional[str]) -> Optional[str]:
 
 
 def _normalize_host(host: str, domain: str) -> str:
-    host = host.strip()
+    host = host.strip().rstrip(".")
+    domain = domain.strip().rstrip(".")
+
     if not host:
         return ""
-    if domain and not host.endswith(f".{domain}"):
-        return f"{host}.{domain}"
-    return host
+
+    host_lower = host.lower()
+    domain_lower = domain.lower()
+
+    if not domain_lower:
+        return host_lower
+
+    if "." in host_lower or ":" in host_lower:
+        return host_lower
+
+    return f"{host_lower}.{domain_lower}"
 
 
 def _parse_service_name(service_name: str, domain: str) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
@@ -115,13 +125,15 @@ def parse_mdns_records(
         if service_type != "_https._tcp":
             continue
 
-        domain = fields[5] if len(fields) > 5 else ""
+        domain = fields[5].strip() if len(fields) > 5 else ""
         service_cluster, service_env, service_role, service_host = _parse_service_name(
             fields[3] if len(fields) > 3 else "",
             domain,
         )
 
         txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
+        if "leader" in txt:
+            txt["leader"] = _normalize_host(txt["leader"], domain)
         if txt.get("k3s") != "1" and not service_cluster:
             continue
 
@@ -132,7 +144,7 @@ def parse_mdns_records(
 
         host = ""
         if len(fields) > 6 and fields[6]:
-            host = fields[6]
+            host = _normalize_host(fields[6], domain)
         elif service_host:
             host = service_host
         if not host:

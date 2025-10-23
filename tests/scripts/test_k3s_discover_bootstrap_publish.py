@@ -129,3 +129,69 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
 
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     assert not service_file.exists()
+
+
+def test_bootstrap_publish_accepts_trailing_dot_mdns(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+
+    publisher = bin_dir / "avahi-publish-service"
+    publisher.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"START:$*\" >> '{log_path}'\n"
+        "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    publisher.chmod(0o755)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"cat <<'EOF'\n"
+        f"=;eth0;IPv4;k3s API sugar/dev on {hostname};_https._tcp;local;{hostname}.local.;"
+        f"192.0.2.15;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+        f"txt=role=bootstrap;txt=leader={hostname}.local.;txt=state=pending\n"
+        "EOF\n",
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    systemctl.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+            "ALLOW_NON_ROOT": "1",
+            "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+            "SUGARKUBE_TOKEN": "dummy",
+            "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "2",
+            "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "avahi-publish-service advertising bootstrap" in result.stderr
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "START:" in log_contents
+    assert "TERM" in log_contents
+
+    service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
+    assert not service_file.exists()
