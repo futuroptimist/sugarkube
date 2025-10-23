@@ -38,6 +38,9 @@ NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-t
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
 DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-9}"
 DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-15}"
+MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-5}"
+MDNS_SELF_CHECK_DELAY="${SUGARKUBE_MDNS_SELF_CHECK_DELAY:-1}"
+SKIP_MDNS_SELF_CHECK="${SUGARKUBE_SKIP_MDNS_SELF_CHECK:-0}"
 
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
@@ -402,6 +405,47 @@ discover_bootstrap_leaders() {
   run_avahi_query bootstrap-leaders | sort -u
 }
 
+ensure_self_mdns_advertisement() {
+  local role="$1"
+  if [ "${SKIP_MDNS_SELF_CHECK}" = "1" ]; then
+    return 0
+  fi
+
+  local query_mode=""
+  case "${role}" in
+    bootstrap)
+      query_mode="bootstrap-hosts"
+      ;;
+    server)
+      query_mode="server-hosts"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  local attempts="${MDNS_SELF_CHECK_ATTEMPTS}"
+  local delay="${MDNS_SELF_CHECK_DELAY}"
+  local attempt
+  for attempt in $(seq 1 "${attempts}"); do
+    mapfile -t hosts < <(run_avahi_query "${query_mode}" || true)
+    if [ "${#hosts[@]}" -gt 0 ]; then
+      if printf '%s\n' "${hosts[@]}" | grep -Fxq "${MDNS_HOST}"; then
+        log "Confirmed Avahi reports ${role} advertisement for ${MDNS_HOST} (attempt ${attempt}/${attempts})."
+        return 0
+      fi
+    fi
+
+    if [ "${attempt}" -lt "${attempts}" ]; then
+      log "Avahi has not reported ${role} advertisement for ${MDNS_HOST} yet (attempt ${attempt}/${attempts}); retrying in ${delay}s."
+      sleep "${delay}"
+    fi
+  done
+
+  log "Avahi did not report ${role} advertisement for ${MDNS_HOST} after ${attempts} attempts."
+  return 1
+}
+
 count_servers() {
   local count
   count="$(run_avahi_query server-count | head -n1)"
@@ -556,16 +600,21 @@ publish_api_service() {
 
   reload_avahi_daemon || true
   AVAHI_ROLE="server"
+  ensure_self_mdns_advertisement server
 }
 
 publish_bootstrap_service() {
   log "Advertising bootstrap attempt for ${CLUSTER}/${ENVIRONMENT} via Avahi"
   start_bootstrap_publisher || true
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST}" "state=pending"
+  ensure_self_mdns_advertisement bootstrap
 }
 
 claim_bootstrap_leadership() {
-  publish_bootstrap_service
+  if ! publish_bootstrap_service; then
+    log "Unable to confirm bootstrap advertisement for ${MDNS_HOST}; aborting to avoid split brain"
+    exit 1
+  fi
   sleep "${DISCOVERY_WAIT_SECS}"
   local consecutive leader candidates
   consecutive=0
@@ -616,7 +665,10 @@ install_server_single() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
-    publish_api_service
+    if ! publish_api_service; then
+      log "Failed to confirm Avahi server advertisement for ${MDNS_HOST}; aborting"
+      exit 1
+    fi
   else
     log "k3s API did not become ready within 60s; skipping Avahi publish"
   fi
@@ -637,7 +689,10 @@ install_server_cluster_init() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
-    publish_api_service
+    if ! publish_api_service; then
+      log "Failed to confirm Avahi server advertisement for ${MDNS_HOST}; aborting"
+      exit 1
+    fi
   else
     log "k3s API did not become ready within 60s; skipping Avahi publish"
   fi
@@ -664,7 +719,10 @@ install_server_join() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
-    publish_api_service
+    if ! publish_api_service; then
+      log "Failed to confirm Avahi server advertisement for ${MDNS_HOST}; aborting"
+      exit 1
+    fi
   else
     log "k3s API did not become ready within 60s; skipping Avahi publish"
   fi
@@ -712,8 +770,10 @@ if [ "${TEST_WAIT_LOOP:-0}" -eq 1 ]; then
 fi
 
 if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
-  publish_bootstrap_service
-  exit 0
+  if publish_bootstrap_service; then
+    exit 0
+  fi
+  exit 1
 fi
 
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."

@@ -79,3 +79,29 @@ def test_query_mdns_handles_missing_avahi():
 
     assert results == []
     assert any("not found" in message for message in messages)
+
+
+def test_query_mdns_server_hosts_returns_unique_hosts(tmp_path):
+    fixture = tmp_path / "servers.txt"
+    fixture.write_text(
+        (
+            "=;eth0;IPv4;k3s API sugar/dev on host0;_https._tcp;local;host0.local;"
+            "192.168.1.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+            "=;eth0;IPv6;k3s API sugar/dev on host0;_https._tcp;local;host0.local;"
+            "fe80::1;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+            "=;eth0;IPv4;k3s API sugar/dev on host1;_https._tcp;local;host1.local;"
+            "192.168.1.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+            "=;eth0;IPv4;k3s API sugar/dev on host2;_https._tcp;local;host2.local;"
+            "192.168.1.12;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap\n"
+        ),
+        encoding="utf-8",
+    )
+
+    results = query_mdns(
+        "server-hosts",
+        "sugar",
+        "dev",
+        fixture_path=str(fixture),
+    )
+
+    assert results == ["host0.local", "host1.local"]
