@@ -1,6 +1,7 @@
 """Helpers for parsing resolved Avahi browse output for k3s services."""
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -19,12 +20,21 @@ def _normalize_role(role: Optional[str]) -> Optional[str]:
 
 
 def _normalize_host(host: str, domain: str) -> str:
-    host = host.strip()
+    host = host.strip().rstrip(".")
+    domain = domain.strip().rstrip(".")
     if not host:
         return ""
-    if domain and not host.endswith(f".{domain}"):
-        return f"{host}.{domain}"
-    return host
+
+    host_lower = host.lower()
+    domain_lower = domain.lower()
+
+    if domain_lower and not host_lower.endswith(f".{domain_lower}"):
+        try:
+            ipaddress.ip_address(host_lower)
+        except ValueError:
+            host_lower = f"{host_lower}.{domain_lower}"
+
+    return host_lower
 
 
 def _parse_service_name(service_name: str, domain: str) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
@@ -122,6 +132,8 @@ def parse_mdns_records(
         )
 
         txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
+        if "leader" in txt:
+            txt["leader"] = _normalize_host(txt["leader"], domain)
         if txt.get("k3s") != "1" and not service_cluster:
             continue
 
@@ -132,7 +144,7 @@ def parse_mdns_records(
 
         host = ""
         if len(fields) > 6 and fields[6]:
-            host = fields[6]
+            host = _normalize_host(fields[6], domain)
         elif service_host:
             host = service_host
         if not host:

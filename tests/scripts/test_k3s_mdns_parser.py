@@ -39,6 +39,23 @@ def test_parse_unresolved_bootstrap_uses_service_name():
     assert record.port == 6443
 
 
+def test_parse_trims_trailing_dots_from_host_fields():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host6.local.;_https._tcp;local.;"
+            "host6.local.;192.0.2.16;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "txt=leader=host6.local."
+        )
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.host == "host6.local"
+    assert record.txt.get("leader") == "host6.local"
+
+
 def test_resolved_record_replaces_unresolved_placeholder():
     lines = [
         "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local",
