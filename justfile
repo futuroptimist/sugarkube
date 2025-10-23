@@ -17,13 +17,8 @@ up env='dev': prereqs
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
-    restore_wlan() {
-      if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && [ "${WLAN_DISABLED:-0}" = "1" ]; then
-        sudo -E bash scripts/toggle_wlan.sh --restore || true
-        WLAN_DISABLED=0
-      fi
-    }
-    trap restore_wlan EXIT
+    WLAN_DISABLED=0
+    trap $'if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && [ "$WLAN_DISABLED" = "1" ]; then\n  sudo -E bash scripts/toggle_wlan.sh --restore || true\n  WLAN_DISABLED=0\nfi' EXIT INT TERM
 
     "{{ scripts_dir }}/check_memory_cgroup.sh"
 
@@ -37,7 +32,10 @@ up env='dev': prereqs
 
     # Proceed with discovery/join for subsequent nodes
     sudo -E bash scripts/k3s-discover.sh
-    restore_wlan
+    if [ "$WLAN_DISABLED" = "1" ]; then
+      sudo -E bash scripts/toggle_wlan.sh --restore || true
+      WLAN_DISABLED=0
+    fi
 
 prereqs:
     sudo apt-get update
