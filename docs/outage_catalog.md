@@ -18,4 +18,18 @@ Validate new entries against the schema before committing:
 python -m jsonschema -i outages/<file>.json outages/schema.json
 ```
 
+### Record accurate dates
+
+- Fetch the current UTC date from a trusted source before drafting the file:
+
+  ```sh
+  curl -fsS https://worldtimeapi.org/api/timezone/Etc/UTC | jq -r '.utc_datetime'
+  # fallback when offline
+  date -u +%F
+  ```
+
+- Stamp the outage `date` field and filename prefix with that value.
+- After writing the entry, run `git blame` on the `"date"` line to confirm the
+  metadata matches what Git recorded.
+
 Agents can parse these files to learn from previous incidents.

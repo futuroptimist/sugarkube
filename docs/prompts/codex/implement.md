@@ -57,7 +57,10 @@ CONTEXT:
   `git diff --cached | ./scripts/scan-secrets.py` (script lives at
   [`scripts/scan-secrets.py`](../../../scripts/scan-secrets.py)).
 - Log persistent failures in [`outages/`](../../../outages/) as JSON per
-  [`outages/schema.json`](../../../outages/schema.json).
+  [`outages/schema.json`](../../../outages/schema.json). Capture the incident
+  date with `curl -fsS https://worldtimeapi.org/api/timezone/Etc/UTC | jq -r
+  '.utc_datetime'` (fallback: `date -u +%F`) and ensure the filename prefix and
+  `"date"` field match what `git blame` records.
 
 REQUEST:
 1. Inventory existing future-work references and justify why the chosen item can

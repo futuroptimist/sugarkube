@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-14-k3s-discover-split-brain-mdns",
+  "date": "2025-10-22",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "avahi-browse returned 255 on transient lookups; k3s-discover ignored stdout so each Pi bootstrapped.",
+  "resolution": "Capture avahi-browse stdout on non-zero exits, reuse it via k3s_mdns_query.py, add regression tests.",
+  "references": [
+    "Console: sugarkube0 + sugarkube1 just up dev (2025-11-14)"
+  ]
+}
