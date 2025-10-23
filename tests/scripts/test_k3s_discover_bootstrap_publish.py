@@ -49,8 +49,8 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",  # bypass token requirement
-        "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "1",
-        "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
     })
 
     result = subprocess.run(
@@ -81,7 +81,11 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
 
     # stderr should mention that avahi-publish-service is advertising the bootstrap role
     assert "avahi-publish-service advertising bootstrap" in result.stderr
-    assert "phase=self-check host=" in result.stderr
+    expected = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "bootstrap advertisement confirmed."
+    )
+    assert expected in result.stderr
 
 
 def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
@@ -125,8 +129,8 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",
-        "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "1",
-        "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
     })
 
     result = subprocess.run(
@@ -142,7 +146,11 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     assert "TERM" in log_contents
     assert f"leader={hostname}.local" in log_contents
 
-    assert "Avahi did not report bootstrap advertisement" not in result.stderr
+    expected = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "bootstrap advertisement confirmed."
+    )
+    assert expected in result.stderr
 
 
 def test_publish_binds_host_and_self_check_delays(tmp_path):
@@ -187,8 +195,8 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",
-        "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "1",
-        "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_MDNS_HOST": "HostMixed.LOCAL.",
     })
 
@@ -206,11 +214,120 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     assert "-H HostMixed.LOCAL" in log_contents
     assert "leader=HostMixed.LOCAL" in log_contents
 
-    assert "phase=self-check host=HostMixed.LOCAL" in result.stderr
-    assert "observed=hostmixed.local" in result.stderr
+    expected = (
+        "phase=self-check host=HostMixed.LOCAL observed=hostmixed.local; "
+        "bootstrap advertisement confirmed."
+    )
+    assert expected in result.stderr
 
+
+def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+    flag_path = tmp_path / "server.ready"
+    count_path = tmp_path / "browse.count"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"START:$*\" >> '{log_path}'\n"
+        f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{flag_path}'; fi\n"
+        "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"COUNT_FILE='{count_path}'\n"
+            f"FLAG='{flag_path}'\n"
+            "service_type=\"${@: -1}\"\n"
+            "if [ \"${service_type}\" != '_k3s-sugar-dev._tcp' ]; then\n"
+            "  exit 0\n"
+            "fi\n"
+            "count=0\n"
+            "if [ -f \"${COUNT_FILE}\" ]; then\n"
+            "  count=$(cat \"${COUNT_FILE}\")\n"
+            "fi\n"
+            "count=$((count + 1))\n"
+            "echo \"${count}\" > \"${COUNT_FILE}\"\n"
+            "cat <<'EOF'\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;192.0.2.10;6443;"
+            f"txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending\n"
+            "EOF\n"
+            "if [ -f \"${FLAG}\" ] && [ \"${count}\" -ge 2 ]; then\n"
+            "  cat <<'EOF'\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (server);_k3s-sugar-dev._tcp;local;{hostname}.local;192.0.2.10;6443;"
+            f"txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader={hostname}.local;txt=phase=server\n"
+            "EOF\n"
+            "fi\n"
+        ),
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    systemctl_stub = bin_dir / "systemctl"
+    systemctl_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    systemctl_stub.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+        "SUGARKUBE_CLUSTER": "sugar",
+        "SUGARKUBE_ENV": "dev",
+        "ALLOW_NON_ROOT": "1",
+        "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+        "SUGARKUBE_TOKEN": "dummy",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_MDNS_SERVER_RETRIES": "5",
+        "SUGARKUBE_MDNS_SERVER_DELAY": "0",
+    })
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-server-flow"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert log_contents.count("START:") >= 2
+    assert log_contents.count("TERM") >= 2
+    assert "phase=bootstrap" in log_contents
+    assert "phase=server" in log_contents
+    assert flag_path.exists()
+
+    bootstrap_msg = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "bootstrap advertisement confirmed."
+    )
+    server_msg = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "server advertisement confirmed."
+    )
+    assert bootstrap_msg in result.stderr
+    assert server_msg in result.stderr
+    assert result.stderr.find(bootstrap_msg) < result.stderr.find(server_msg)
+
+    browse_calls = int(count_path.read_text(encoding="utf-8").strip())
+    assert browse_calls >= 2
 
 def test_bootstrap_publish_fails_without_mdns(tmp_path):
+    hostname = _hostname_short()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
@@ -243,8 +360,8 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",
-        "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "2",
-        "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "2",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
     })
 
     result = subprocess.run(
@@ -256,7 +373,11 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "advertisement not reported" in result.stderr
+    expected_failure = (
+        f"Unable to confirm bootstrap advertisement for {hostname}.local; "
+        "aborting to avoid split brain"
+    )
+    assert expected_failure in result.stderr
 
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     assert not service_file.exists()

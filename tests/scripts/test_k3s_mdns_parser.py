@@ -14,7 +14,7 @@ def test_parse_bootstrap_and_server_ipv4_preferred():
         "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local;host0.local;192.168.1.10;6443;"
         "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=phase=bootstrap;txt=leader=host0.local",
         "=;eth0;IPv4;k3s-sugar-dev@host1 (server);_k3s-sugar-dev._tcp;local;host1.local;192.168.1.11;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server",
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader=host1.local;txt=phase=server",
     ]
     recs = parse_mdns_records(lines, "sugar", "dev")
     # one bootstrap (host0) and one server (host1)
@@ -24,6 +24,9 @@ def test_parse_bootstrap_and_server_ipv4_preferred():
     boot = [r for r in recs if r.txt.get("role") == "bootstrap"][0]
     assert boot.address == "192.168.1.10"
     assert boot.port == 6443
+    server = [r for r in recs if r.txt.get("role") == "server"][0]
+    assert server.txt.get("phase") == "server"
+    assert server.txt.get("leader") == "host1.local"
 
 
 def test_parse_unresolved_bootstrap_uses_service_name():
