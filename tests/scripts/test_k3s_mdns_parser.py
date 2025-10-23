@@ -9,11 +9,11 @@ from k3s_mdns_parser import parse_mdns_records  # noqa: E402
 def test_parse_bootstrap_and_server_ipv4_preferred():
     # Simulated avahi-browse --parsable --resolve lines (IPv4 and IPv6 for same host+role)
     lines = [
-        "=;eth0;IPv6;k3s API sugar/dev [bootstrap] on host0;_https._tcp;local;host0.local;fe80::1;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local",
-        "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host0;_https._tcp;local;host0.local;192.168.1.10;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local",
-        "=;eth0;IPv4;k3s API sugar/dev [server] on host1;_https._tcp;local;host1.local;192.168.1.11;6443;"
+        "=;eth0;IPv6;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local;host0.local;fe80::1;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=phase=bootstrap;txt=leader=host0.local",
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local;host0.local;192.168.1.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=phase=bootstrap;txt=leader=host0.local",
+        "=;eth0;IPv4;k3s-sugar-dev@host1 (server);_k3s-sugar-dev._tcp;local;host1.local;192.168.1.11;6443;"
         "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server",
     ]
     recs = parse_mdns_records(lines, "sugar", "dev")
@@ -28,7 +28,7 @@ def test_parse_bootstrap_and_server_ipv4_preferred():
 
 def test_parse_unresolved_bootstrap_uses_service_name():
     lines = [
-        "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host2;_https._tcp;local",
+        "+;eth0;IPv4;k3s-sugar-dev@host2 (bootstrap);_k3s-sugar-dev._tcp;local",
     ]
     recs = parse_mdns_records(lines, "sugar", "dev")
     assert len(recs) == 1
@@ -42,9 +42,9 @@ def test_parse_unresolved_bootstrap_uses_service_name():
 def test_parse_trims_trailing_dots_from_host_fields():
     lines = [
         (
-            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host6.local.;_https._tcp;local.;"
+            "=;eth0;IPv4;k3s-sugar-dev@host6.local (bootstrap);_k3s-sugar-dev._tcp;local.;"
             "host6.local.;192.0.2.16;6443;"
-            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=phase=bootstrap;"
             "txt=leader=host6.local."
         )
     ]
@@ -58,12 +58,12 @@ def test_parse_trims_trailing_dots_from_host_fields():
 
 def test_resolved_record_replaces_unresolved_placeholder():
     lines = [
-        "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local",
+        "+;eth0;IPv4;k3s-sugar-dev@host4 (bootstrap);_k3s-sugar-dev._tcp;local",
         (
-            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host4 (bootstrap);_k3s-sugar-dev._tcp;local;"
             "host4.local;192.168.1.14;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
-            "txt=role=bootstrap;txt=leader=leader0.local"
+            "txt=role=bootstrap;txt=phase=bootstrap;txt=leader=leader0.local"
         ),
     ]
 
@@ -77,12 +77,12 @@ def test_resolved_record_replaces_unresolved_placeholder():
 def test_record_updates_when_txt_richer():
     lines = [
         (
-            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;_https._tcp;local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host5 (server);_k3s-sugar-dev._tcp;local;"
             "host5.local;192.168.1.15;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
         ),
         (
-            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;_https._tcp;local;"
+            "=;eth0;IPv4;k3s-sugar-dev@host5 (server);_k3s-sugar-dev._tcp;local;"
             "host5.local;192.168.1.15;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=extra=1"
         ),
@@ -97,9 +97,9 @@ def test_record_updates_when_txt_richer():
 def test_parse_preserves_mixed_case_hostnames():
     lines = [
         (
-            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on HostMixed;_https._tcp;local;"
+            "=;eth0;IPv4;k3s-sugar-dev@HostMixed (bootstrap);_k3s-sugar-dev._tcp;local;"
             "HostMixed.local;192.168.1.21;6443;"
-            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=phase=bootstrap;"
             "txt=leader=HostMixed.local"
         )
     ]

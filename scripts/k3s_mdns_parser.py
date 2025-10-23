@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from mdns_helpers import _norm_host
+
 
 _SERVICE_NAME_RE = re.compile(
     r"^k3s API (?P<cluster>[^/]+)/(?P<environment>\S+)"
@@ -37,15 +39,37 @@ def _normalize_host(host: str, domain: str) -> str:
     return host
 
 
-def _parse_service_name(service_name: str, domain: str) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
+def _parse_service_name(
+    service_name: str, domain: str
+) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
     match = _SERVICE_NAME_RE.match(service_name)
-    if not match:
-        return None, None, None, ""
-    cluster = match.group("cluster")
-    environment = match.group("environment")
-    role = _normalize_role(match.group("role"))
-    host = _normalize_host(match.group("host"), domain)
-    return cluster, environment, role, host
+    if match:
+        cluster = match.group("cluster")
+        environment = match.group("environment")
+        role = _normalize_role(match.group("role"))
+        host = _normalize_host(match.group("host"), domain)
+        return cluster, environment, role, host
+
+    if service_name.startswith("k3s-") and "@" in service_name:
+        slug, host_part = service_name.split("@", 1)
+        slug_body = slug[4:] if slug.startswith("k3s-") else slug
+        cluster = None
+        environment = None
+        if slug_body and "-" in slug_body:
+            cluster, environment = slug_body.rsplit("-", 1)
+        host_part = host_part.strip()
+        role = None
+        if " (" in host_part and host_part.endswith(")"):
+            host_candidate, suffix = host_part.rsplit(" (", 1)
+            suffix = suffix.rstrip(")")
+            candidate_role = _normalize_role(suffix)
+            if candidate_role:
+                role = candidate_role
+                host_part = host_candidate
+        host = _normalize_host(host_part, domain)
+        return cluster, environment, role, host
+
+    return None, None, None, ""
 
 
 @dataclass(frozen=True)
@@ -122,7 +146,16 @@ def parse_mdns_records(
             continue
 
         service_type = fields[4]
-        if service_type != "_https._tcp":
+        type_cluster: Optional[str] = None
+        type_environment: Optional[str] = None
+
+        if service_type == "_https._tcp":
+            pass
+        elif service_type.startswith("_k3s-") and service_type.endswith("._tcp"):
+            slug = service_type[len("_k3s-") : -len("._tcp")]
+            if "-" in slug:
+                type_cluster, type_environment = slug.rsplit("-", 1)
+        else:
             continue
 
         domain = fields[5] if len(fields) > 5 else ""
@@ -131,14 +164,19 @@ def parse_mdns_records(
             domain,
         )
 
+        if type_cluster and not service_cluster:
+            service_cluster = type_cluster
+        if type_environment and not service_env:
+            service_env = type_environment
+
         txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
         if "leader" in txt:
             txt["leader"] = _normalize_host(txt["leader"], domain)
         if txt.get("k3s") != "1" and not service_cluster:
             continue
 
-        cluster_value = txt.get("cluster") or service_cluster
-        environment_value = txt.get("env") or service_env
+        cluster_value = txt.get("cluster") or service_cluster or type_cluster
+        environment_value = txt.get("env") or service_env or type_environment
         if cluster_value != cluster or environment_value != environment:
             continue
 
@@ -170,14 +208,14 @@ def parse_mdns_records(
             txt["role"] = role
         if "k3s" not in txt:
             txt["k3s"] = "1"
-        if "cluster" not in txt and service_cluster:
-            txt["cluster"] = service_cluster
-        if "env" not in txt and service_env:
-            txt["env"] = service_env
+        if "cluster" not in txt and (service_cluster or type_cluster):
+            txt["cluster"] = service_cluster or type_cluster  # type: ignore[assignment]
+        if "env" not in txt and (service_env or type_environment):
+            txt["env"] = service_env or type_environment  # type: ignore[assignment]
         if txt.get("role") == "bootstrap" and "leader" not in txt:
             txt["leader"] = host
 
-        key = (host, txt.get("role", ""))
+        key = (_norm_host(host), txt.get("role", ""))
 
         record = MdnsRecord(
             host=host,

@@ -18,11 +18,11 @@ def _render(role, *txt):
 def test_render_bootstrap_xml_has_required_txt_records():
     root = _render("bootstrap", "leader=host0.local", "state=pending")
     name = root.find("./name")
-    assert name is not None and "sugar/dev" in name.text
+    assert name is not None and "k3s-sugar-dev@%h" in name.text
 
     svc = root.find("./service")
     assert svc is not None
-    assert svc.findtext("./type") == "_https._tcp"
+    assert svc.findtext("./type") == "_k3s-sugar-dev._tcp"
     assert svc.findtext("./port") == "6443"
 
     txts = [e.text for e in svc.findall("./txt-record")]
