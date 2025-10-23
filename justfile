@@ -24,18 +24,12 @@ up env='dev': prereqs
 
     # Preflight network/mDNS configuration
     if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then sudo -E bash scripts/configure_avahi.sh; fi
-    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then
-      WLAN_DISABLED=1
-      sudo -E bash scripts/toggle_wlan.sh --down
-    fi
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then WLAN_DISABLED=1; sudo -E bash scripts/toggle_wlan.sh --down; fi
     if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then sudo -E bash scripts/configure_k3s_node_ip.sh; fi
 
     # Proceed with discovery/join for subsequent nodes
     sudo -E bash scripts/k3s-discover.sh
-    if [ "$WLAN_DISABLED" = "1" ]; then
-      sudo -E bash scripts/toggle_wlan.sh --restore || true
-      WLAN_DISABLED=0
-    fi
+    if [ "$WLAN_DISABLED" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --restore || true; WLAN_DISABLED=0; fi
 
 prereqs:
     sudo apt-get update
@@ -60,19 +54,7 @@ wlan-up:
     sudo -E bash scripts/toggle_wlan.sh --restore
 
 mdns-reset:
-    sudo bash -lc '
-      set -e
-      if [ -f /etc/avahi/avahi-daemon.conf.bak ]; then
-        cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf
-        systemctl restart avahi-daemon
-      fi
-      for SVC in k3s.service k3s-agent.service; do
-        if systemctl list-unit-files | grep -q "^$SVC"; then
-          rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true
-        fi
-      done
-      systemctl daemon-reload
-    '
+    sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
 kubeconfig env='dev':
     mkdir -p ~/.kube
