@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -6,12 +7,14 @@ SCRIPT = str(Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh"
 
 
 def _render(role, *txt):
-    env = {
-        "SUGARKUBE_CLUSTER": "sugar",
-        "SUGARKUBE_ENV": "dev",
-    }
-    cmd = ["bash", SCRIPT, "--render-avahi-service", role, "6443", *txt]
-    out = subprocess.check_output(cmd, env=env, text=True)
+    with tempfile.TemporaryDirectory() as runtime_dir:
+        env = {
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_RUNTIME_DIR": runtime_dir,
+        }
+        cmd = ["bash", SCRIPT, "--render-avahi-service", role, "6443", *txt]
+        out = subprocess.check_output(cmd, env=env, text=True)
     return ET.fromstring(out)  # must be valid XML
 
 

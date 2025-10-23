@@ -33,6 +33,7 @@ fi
 
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
+RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
@@ -254,6 +255,7 @@ stop_bootstrap_publisher() {
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
   fi
+  remove_pid_file bootstrap
 }
 
 cleanup_avahi_bootstrap() {
@@ -297,10 +299,66 @@ log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
+pid_file_path() {
+  local phase="$1"
+  printf '%s/mdns-%s-%s-%s.pid' "${RUNTIME_DIR}" "${CLUSTER}" "${ENVIRONMENT}" "${phase}"
+}
+
+write_pid_file() {
+  local phase="$1"
+  local pid="$2"
+  local path
+  path="$(pid_file_path "${phase}")"
+  if [ -z "${pid}" ]; then
+    return 0
+  fi
+  if ! mkdir -p "${RUNTIME_DIR}" >/dev/null 2>&1; then
+    log "failed to create runtime directory ${RUNTIME_DIR}; pidfile ${path} not written"
+    return 1
+  fi
+  printf '%s\n' "${pid}" >"${path}" 2>/dev/null || log "unable to write pidfile ${path}"
+}
+
+remove_pid_file() {
+  local phase="$1"
+  local path
+  path="$(pid_file_path "${phase}")"
+  rm -f "${path}" 2>/dev/null || true
+}
+
+initialize_pid_tracking() {
+  if ! mkdir -p "${RUNTIME_DIR}" >/dev/null 2>&1; then
+    log "failed to ensure runtime directory ${RUNTIME_DIR} exists"
+    return 1
+  fi
+
+  local phase path pid
+  for phase in bootstrap server; do
+    path="$(pid_file_path "${phase}")"
+    if [ ! -f "${path}" ]; then
+      continue
+    fi
+    pid="$(cat "${path}" 2>/dev/null || true)"
+    if [ -z "${pid}" ] || ! kill -0 "${pid}" >/dev/null 2>&1; then
+      rm -f "${path}" 2>/dev/null || true
+    fi
+  done
+}
+
+initialize_pid_tracking || true
+
 start_bootstrap_publisher() {
   if ! command -v avahi-publish-service >/dev/null 2>&1; then
     log "avahi-publish-service not available; relying on Avahi service file"
     return 1
+  fi
+  if [ -z "${BOOTSTRAP_PUBLISH_PID:-}" ]; then
+    local existing
+    existing="$(cat "$(pid_file_path bootstrap)" 2>/dev/null || true)"
+    if [ -n "${existing}" ] && kill -0 "${existing}" >/dev/null 2>&1; then
+      BOOTSTRAP_PUBLISH_PID="${existing}"
+      return 0
+    fi
   fi
   if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
     return 0
@@ -339,6 +397,7 @@ start_bootstrap_publisher() {
     return 1
   fi
 
+  write_pid_file bootstrap "${BOOTSTRAP_PUBLISH_PID}"
   log "avahi-publish-service advertising bootstrap as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${BOOTSTRAP_PUBLISH_PID})"
   return 0
 }

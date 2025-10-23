@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 DRY_RUN="${DRY_RUN:-0}"
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 
@@ -22,6 +24,27 @@ declare -a SUMMARY=()
 
 append_summary() {
     SUMMARY+=("$1")
+}
+
+cleanup_mdns_publishers() {
+  local helper="${SCRIPT_DIR}/cleanup_mdns_publishers.sh"
+  local svc="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+  if [ "${DRY_RUN}" = "1" ]; then
+    printf 'DRY_RUN=1: would remove dynamic adverts for %s\n' "${svc}"
+    append_summary "cleanup-mdns:dry-run"
+    return 0
+  fi
+  if [ ! -x "${helper}" ]; then
+    printf 'Cleanup helper %s not found; skipping dynamic advert removal\n' "${helper}"
+    append_summary "cleanup-mdns:missing"
+    return 0
+  fi
+  if "${helper}"; then
+    append_summary "cleanup-mdns:${svc}"
+    printf 'removed-dynamic: %s\n' "${svc}"
+  else
+    append_summary "cleanup-mdns:failed"
+  fi
 }
 
 run_uninstaller() {
@@ -78,6 +101,8 @@ remove_file() {
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+cleanup_mdns_publishers
 
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then
