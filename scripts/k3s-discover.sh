@@ -52,6 +52,7 @@ TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
 TEST_PUBLISH_BOOTSTRAP=0
+TEST_CLAIM_BOOTSTRAP=0
 declare -a TEST_RENDER_ARGS=()
 
 while [ "$#" -gt 0 ]; do
@@ -81,6 +82,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-bootstrap-publish)
       TEST_PUBLISH_BOOTSTRAP=1
+      ;;
+    --test-claim-bootstrap)
+      TEST_CLAIM_BOOTSTRAP=1
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -197,6 +201,7 @@ AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${C
 AVAHI_ROLE=""
 BOOTSTRAP_PUBLISH_PID=""
 BOOTSTRAP_PUBLISH_LOG=""
+CLAIMED_SERVER_HOST=""
 
 run_privileged() {
   if [ -n "${SUDO_CMD:-}" ]; then
@@ -616,9 +621,17 @@ claim_bootstrap_leadership() {
     exit 1
   fi
   sleep "${DISCOVERY_WAIT_SECS}"
-  local consecutive leader candidates
+  local consecutive leader candidates server
   consecutive=0
   for attempt in $(seq 1 "${DISCOVERY_ATTEMPTS}"); do
+    server="$(discover_server_host || true)"
+    if [ -n "${server}" ]; then
+      log "Server advertisement from ${server} observed during bootstrap election; deferring bootstrap."
+      CLAIMED_SERVER_HOST="${server}"
+      cleanup_avahi_bootstrap
+      return 2
+    fi
+
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
@@ -776,6 +789,19 @@ if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
   exit 1
 fi
 
+if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
+  CLAIMED_SERVER_HOST=""
+  if claim_bootstrap_leadership; then
+    printf 'bootstrap\n'
+    exit 0
+  fi
+  status=$?
+  if [ "${status}" -eq 2 ] && [ -n "${CLAIMED_SERVER_HOST:-}" ]; then
+    printf '%s\n' "${CLAIMED_SERVER_HOST}"
+  fi
+  exit "${status}"
+fi
+
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
 server_host="$(discover_server_host || true)"
 
@@ -801,10 +827,20 @@ fi
 
 bootstrap_selected="false"
 if [ -z "${server_host:-}" ]; then
+  CLAIMED_SERVER_HOST=""
   if claim_bootstrap_leadership; then
     bootstrap_selected="true"
   else
-    server_host="$(wait_for_bootstrap_activity || true)"
+    claim_status=$?
+    if [ "${claim_status}" -eq 2 ]; then
+      if [ -n "${CLAIMED_SERVER_HOST:-}" ]; then
+        server_host="${CLAIMED_SERVER_HOST}"
+      else
+        server_host="$(discover_server_host || true)"
+      fi
+    else
+      server_host="$(wait_for_bootstrap_activity || true)"
+    fi
   fi
 fi
 
