@@ -222,9 +222,15 @@ while [[ "${MDNS_HOST_RAW}" == *"." ]]; do
 done
 MDNS_HOST="${MDNS_HOST_RAW,,}"
 
-MDNS_ADDR_V4="${SUGARKUBE_MDNS_PUBLISH_ADDR:-$(
-  ip -4 -o addr show "${MDNS_IFACE}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1
-)}"
+if [ -n "${SUGARKUBE_MDNS_PUBLISH_ADDR:-}" ]; then
+  MDNS_ADDR_V4="${SUGARKUBE_MDNS_PUBLISH_ADDR}"
+else
+  if ! MDNS_ADDR_V4="$(
+    ip -4 -o addr show "${MDNS_IFACE}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1
+  )"; then
+    MDNS_ADDR_V4=""
+  fi
+fi
 if [ -z "${MDNS_ADDR_V4}" ]; then
   >&2 printf '[sugarkube %s/%s] WARN: no IPv4 found on %s; publishing without -a\n' \
     "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_IFACE}"
