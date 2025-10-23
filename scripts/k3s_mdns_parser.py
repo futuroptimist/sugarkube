@@ -122,7 +122,8 @@ def parse_mdns_records(
             continue
 
         service_type = fields[4]
-        if service_type != "_https._tcp":
+        expected_bootstrap_type = f"_k3s-{cluster}-{environment}._tcp"
+        if service_type not in {"_https._tcp", expected_bootstrap_type}:
             continue
 
         domain = fields[5] if len(fields) > 5 else ""
