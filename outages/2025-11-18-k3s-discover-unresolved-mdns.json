@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-18-k3s-discover-unresolved-mdns",
+  "date": "2025-11-18",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "avahi-browse only returned unresolved + records while bootstrap hosts were still coming online, and the mdns parser ignored those entries, so peers saw no bootstrap leader and each Pi self-initialised k3s.",
+  "resolution": "Include the role in the advertised service name, teach the mdns parser to derive cluster/role/leader details from unresolved records, and add regression tests that cover the fallback path.",
+  "references": [
+    "Console: sugarkube0 & sugarkube1 just up dev (2025-11-18)",
+    "scripts/k3s-discover.sh",
+    "scripts/k3s_mdns_parser.py",
+    "tests/scripts/test_k3s_mdns_parser.py",
+    "tests/scripts/test_k3s_mdns_query.py"
+  ]
+}
