@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-08-pi-image-fix-script-paths",
+  "date": "2025-10-13",
+  "component": "pi-image workflow",
+  "rootCause": "pull_request.paths omitted the fix script, so bugs merged and builds failed.",
+  "resolution": "Added the script to the path filter and guarded it via workflow tests.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "scripts/fix_pi_image_permissions.sh",
+    "tests/test_pi_image_tooling.py"
+  ]
+}

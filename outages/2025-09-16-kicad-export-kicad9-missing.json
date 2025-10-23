@@ -1,0 +1,36 @@
+{
+  "id": "kicad-export-kicad9-missing",
+  "date": "2025-09-16",
+  "component": "kicad-export",
+  "dateRanges": [
+    {
+      "start": "2025-08-22",
+      "end": "2025-08-22"
+    },
+    {
+      "start": "2025-08-23",
+      "end": "2025-08-23"
+    },
+    {
+      "start": "2025-08-31",
+      "end": "2025-08-31"
+    },
+    {
+      "start": "2025-09-08",
+      "end": "2025-09-08"
+    },
+    {
+      "start": "2025-09-14",
+      "end": "2025-09-14"
+    }
+  ],
+  "rootCause": "KiBot ran on hosts limited to KiCad 7, so the KiCad 9 project failed to load and exports crashed.",
+  "resolution": "scripts/checks.sh deepens shallow clones and fetches base branch so KiCad 9 installs automatically.",
+  "references": [
+    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml",
+    "kibot-check",
+    "https://github.com/INTI-CMNB/kibot",
+    "https://kicad.org/download/",
+    "scripts/checks.sh"
+  ]
+}

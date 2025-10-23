@@ -12,6 +12,11 @@ Populate each file with these fields:
 - `resolution`: how it was fixed
 - `references`: array of related links (PRs, issues, docs)
 
+Before authoring an entry, confirm the real UTC date via a trustworthy source
+(for example `curl https://worldtimeapi.org/api/timezone/Etc/UTC` with
+`date -u` as a fallback). Align the filename and `date` field with that value so
+that `git blame` and `tests/test_outage_dates.py` stay consistent.
+
 Validate new entries against the schema before committing:
 
 ```sh

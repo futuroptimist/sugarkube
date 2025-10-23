@@ -1,0 +1,11 @@
+{
+  "id": "2025-08-29-pi-image-build-output-dir-missing",
+  "date": "2025-08-28",
+  "component": "pi-image build script",
+  "rootCause": "build_pi_image.sh failed when OUTPUT_DIR did not exist",
+  "resolution": "script now creates the output directory before moving artifacts",
+  "references": [
+    "scripts/build_pi_image.sh",
+    "docs/pi_image_cloudflare.md"
+  ]
+}

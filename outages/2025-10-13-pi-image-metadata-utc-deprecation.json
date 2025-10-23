@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-09-pi-image-metadata-utc-deprecation",
+  "date": "2025-10-13",
+  "component": "pi-image workflow",
+  "rootCause": "scripts/create_build_metadata.py relied on datetime.utcnow(), which is slated for removal in Python 3.13. When GitHub Actions updates its Python runtimes, the pi-image unit job's metadata smoke test crashes before writing metadata, causing the workflow to fail.",
+  "resolution": "Switched metadata timestamp generation to timezone-aware datetime.now(datetime.timezone.utc) via a shared helper and forced the e2e smoke test to treat DeprecationWarning as fatal so future regressions are caught ahead of time.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "scripts/create_build_metadata.py",
+    "tests/create_build_metadata_e2e.sh",
+    "tests/test_create_build_metadata.py"
+  ]
+}

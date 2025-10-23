@@ -1,0 +1,10 @@
+{
+  "id": "cloud-init-sugarkube-dir-missing",
+  "date": "2025-08-26",
+  "component": "cloud-init user-data",
+  "rootCause": "cloud-init runcmd attempted to touch /opt/sugarkube/.cloudflared.env before creating the directory",
+  "resolution": "user-data.yaml now creates /opt/sugarkube before writing files",
+  "references": [
+    "scripts/cloud-init/user-data.yaml"
+  ]
+}
