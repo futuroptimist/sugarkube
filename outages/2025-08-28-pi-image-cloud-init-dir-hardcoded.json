@@ -1,0 +1,10 @@
+{
+  "id": "2025-08-28-pi-image-cloud-init-dir-hardcoded",
+  "date": "2025-08-28",
+  "component": "pi-image build script",
+  "rootCause": "build script assumed cloud-init files lived under scripts/cloud-init, blocking custom configs",
+  "resolution": "build script now allows overriding the cloud-init directory via CLOUD_INIT_DIR",
+  "references": [
+    "scripts/build_pi_image.sh"
+  ]
+}

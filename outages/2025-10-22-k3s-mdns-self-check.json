@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-22-k3s-mdns-self-check",
+  "date": "2025-10-22",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "k3s-discover trusted Avahi service reloads without verifying that local bootstrap or server adverts were visible, so when avahi-browse returned no records each node self-initialized and created a split-brain control plane.",
+  "resolution": "Add an mDNS self-check that confirms our bootstrap and server adverts appear via avahi-browse before proceeding, aborting if they do not, and cover the behaviour with regression tests for both success and failure paths.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "scripts/k3s_mdns_query.py",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py",
+    "tests/scripts/test_k3s_mdns_query.py"
+  ]
+}

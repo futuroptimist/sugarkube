@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-13-pi-image-build-log-depth",
+  "date": "2025-10-13",
+  "component": "pi-image workflow",
+  "rootCause": "The pi-image-verify-just step only scanned deploy/ up to a depth of 2, so when pi-gen started nesting build logs under deploy/<image>/logs/, the grep never saw the '[sugarkube] just command verified' line and the workflow failed even though the log existed.",
+  "resolution": "Increase the verification search depth to include the new log layout and add tests that exercise the nested log scenario so future builds keep the guard in sync.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "tests/test_pi_image_tooling.py",
+    "tests/artifact_detection_test.sh"
+  ]
+}

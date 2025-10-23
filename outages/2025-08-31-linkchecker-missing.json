@@ -1,5 +1,5 @@
 {
-  "id": "linkchecker-missing-20250831",
+  "id": "2025-08-31-linkchecker-missing",
   "date": "2025-08-31",
   "component": "linkchecker",
   "rootCause": "`linkchecker` was not installed, so documentation links could not be validated at first.",

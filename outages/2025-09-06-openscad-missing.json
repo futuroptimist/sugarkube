@@ -1,0 +1,8 @@
+{
+  "id": "2025-09-06-openscad-missing",
+  "date": "2025-09-06",
+  "component": "openscad_render.sh",
+  "rootCause": "OpenSCAD not found in PATH; apt install did not complete",
+  "resolution": "Requires OpenSCAD 2021+ installed before rendering",
+  "references": []
+}

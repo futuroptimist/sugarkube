@@ -1,0 +1,11 @@
+{
+  "id": "2025-08-31-apt-proxy-503-archive-rpi",
+  "date": "2025-08-31",
+  "component": "apt-cacher-ng proxy for archive.raspberrypi.com",
+  "rootCause": "Apt-cacher-ng returned 503 'Connection closed, check DlMaxRetries' for openssl and related packages from archive.raspberrypi.com when proxied through the local cache.",
+  "resolution": "Added apt.conf.d proxy exceptions in stage0 to force DIRECT for archive.raspberrypi.com; removed proxy envs from the official pi-gen path to avoid caching. Post-change, archive pulls proceed without 503.",
+  "references": [
+    "scripts/build_pi_image.ps1",
+    "build logs showing 503 from archive.raspberrypi.com via proxy"
+  ]
+}

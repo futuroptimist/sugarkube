@@ -1,5 +1,5 @@
 {
-  "id": "pi-image-build-passwd-io-error",
+  "id": "2025-08-28-pi-image-build-passwd-io-error",
   "date": "2025-08-28",
   "component": "pi-image build script",
   "rootCause": "pi-gen built both 32-bit and 64-bit images by default, exhausting disk space and causing useradd to fail writing /etc/passwd",

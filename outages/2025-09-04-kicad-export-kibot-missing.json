@@ -1,0 +1,10 @@
+{
+  "id": "2025-09-04-kicad-export-kibot-missing",
+  "date": "2025-09-04",
+  "component": "kibot",
+  "rootCause": "`kibot` command was not found in the environment, preventing schematic export.",
+  "resolution": "Install KiBot or use a container image that includes KiCad 9 with KiBot support.",
+  "references": [
+    "kibot -b elex/power_ring/power_ring.kicad_pro -c .kibot/power_ring.yaml"
+  ]
+}

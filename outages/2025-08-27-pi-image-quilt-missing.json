@@ -1,0 +1,10 @@
+{
+  "id": "2025-08-27-pi-image-quilt-missing",
+  "date": "2025-08-27",
+  "component": "pi-image workflow",
+  "rootCause": "pi-image workflow failed to install quilt because the universe repo was not enabled",
+  "resolution": "workflow enables the universe repository before installing dependencies",
+  "references": [
+    ".github/workflows/pi-image.yml"
+  ]
+}

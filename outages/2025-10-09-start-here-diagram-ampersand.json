@@ -1,5 +1,5 @@
 {
-  "id": "start-here-diagram-ampersand",
+  "id": "2025-10-09-start-here-diagram-ampersand",
   "date": "2025-10-09",
   "component": "Documentation site rendering",
   "rootCause": "The architecture diagram SVG used literal ampersands in labels, so GitHub's XML parser aborted.",

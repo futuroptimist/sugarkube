@@ -1,5 +1,5 @@
 {
-  "id": "docs-clone-ssd-syntax-regression",
+  "id": "2025-10-17-docs-clone-ssd-syntax",
   "date": "2025-10-17",
   "component": "documentation",
   "rootCause": "Updated raspi-image-spot-check.md rewrote clone-ssd examples to use shell variable assignments separated by semicolons, so TARGET/WIPE never reached the just wrapper and the doc tests failed in CI.",

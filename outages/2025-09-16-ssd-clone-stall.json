@@ -1,0 +1,10 @@
+{
+  "id": "2025-09-16-ssd-clone-stall",
+  "date": "2025-09-16",
+  "component": "ssd migration",
+  "rootCause": "Failed rsync sessions left operators restarting full clones, increasing SSD wear.",
+  "resolution": "Documented resumable cloning strategy and recovery steps so migrations can restart safely.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/blob/main/docs/pi_headless_provisioning.md"
+  ]
+}

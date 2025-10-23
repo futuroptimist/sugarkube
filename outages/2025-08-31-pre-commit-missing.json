@@ -1,5 +1,5 @@
 {
-  "id": "pre-commit-missing-20250831",
+  "id": "2025-08-31-pre-commit-missing",
   "date": "2025-08-31",
   "component": "pre-commit",
   "rootCause": "`pre-commit` was not installed in the environment, so checks failed initially.",

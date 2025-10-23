@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-22-k3s-discover-mid-election-server",
+  "date": "2025-10-22",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "claim_bootstrap_leadership never re-checked for newly advertised servers, so a later advert from the first node was ignored and the next Pi self-initialised, creating split brain.",
+  "resolution": "Poll for server adverts during the bootstrap election, surface the discovered host to the join path, and add an integration test that stubs avahi-browse to reproduce the mid-election hand-off.",
+  "references": [
+    "Console: sugarkube0 + sugarkube1 just up dev (2025-11-18)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_mid_election_join.py"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "2025-08-28-pi-image-build-xz-missing",
+  "date": "2025-08-28",
+  "component": "pi-image build",
+  "rootCause": "xz utility not installed causing compression step to fail",
+  "resolution": "Install xz so build_pi_image.sh can compress the image",
+  "references": [
+    "scripts/build_pi_image.sh"
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "id": "kicad-export-missing-libs",
+  "id": "2025-08-17-kicad-export-missing-libs",
   "date": "2025-08-17",
   "component": "kicad-export workflow",
   "rootCause": "KiBot failed to export because sym-lib-table and fp-lib-table pointed to non-existent custom_pads_test libraries.",
