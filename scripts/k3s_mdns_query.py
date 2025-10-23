@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from k3s_mdns_parser import MdnsRecord, parse_mdns_records
+from mdns_helpers import _same_host
 
 DebugFn = Optional[Callable[[str], None]]
 
@@ -94,39 +95,39 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
         return [str(count)]
 
     if mode == "bootstrap-hosts":
-        seen = set()
+        seen: List[str] = []
         outputs: List[str] = []
         for record in records:
             if record.txt.get("role") != "bootstrap":
                 continue
-            if record.host in seen:
+            if any(_same_host(record.host, existing) for existing in seen):
                 continue
-            seen.add(record.host)
+            seen.append(record.host)
             outputs.append(record.host)
         return outputs
 
     if mode == "server-hosts":
-        seen = set()
+        seen: List[str] = []
         outputs: List[str] = []
         for record in records:
             if record.txt.get("role") != "server":
                 continue
-            if record.host in seen:
+            if any(_same_host(record.host, existing) for existing in seen):
                 continue
-            seen.add(record.host)
+            seen.append(record.host)
             outputs.append(record.host)
         return outputs
 
     if mode == "bootstrap-leaders":
-        seen = set()
+        seen: List[str] = []
         outputs: List[str] = []
         for record in records:
             if record.txt.get("role") != "bootstrap":
                 continue
             leader = record.txt.get("leader", record.host)
-            if leader in seen:
+            if any(_same_host(leader, existing) for existing in seen):
                 continue
-            seen.add(leader)
+            seen.append(leader)
             outputs.append(leader)
         return outputs
 

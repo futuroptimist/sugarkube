@@ -8,5 +8,14 @@
     "scripts/k3s_mdns_parser.py",
     "tests/scripts/test_k3s_discover_bootstrap_publish.py",
     "tests/scripts/test_k3s_mdns_parser.py"
+  ],
+  "notes": [
+    "Symptom: bootstrap publisher logged a PID but avahi-browse never surfaced a _k3s advert.",
+    "Impact: just up dev aborted and risked a split-brain when node 2 attempted to join.",
+    "Fix: bind avahi-publish-service with -H <FQDN>, add a 1s settle delay, and tee output to /tmp/sugar-publish.log.",
+    "Phase: bootstrap self-check now logs phase=self-check host=<fqdn> to make retries explicit.",
+    "Quick triage: avahi-browse -rt _k3s-sugar-dev._tcp --parsable | sed -n '1,80p'",
+    "Quick triage: pgrep -a avahi-publish || true",
+    "Quick triage: sed -n '1,80p' /tmp/sugar-publish.log || true"
   ]
 }
