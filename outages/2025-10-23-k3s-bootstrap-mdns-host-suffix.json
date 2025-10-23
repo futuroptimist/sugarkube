@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-23-k3s-bootstrap-mdns-host-suffix",
+  "date": "2025-10-23",
+  "component": "k3s-discover mdns self-check",
+  "rootCause": "Avahi omitted domains on bootstrap hosts so the self-check missed the broadcast.",
+  "resolution": "Normalize parsed hosts to add .local when Avahi omits domains and add tests.",
+  "references": [
+    "scripts/k3s_mdns_parser.py",
+    "tests/test_mdns_discovery_parsing.py"
+  ]
+}
