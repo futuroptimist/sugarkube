@@ -71,3 +71,41 @@ def test_ensure_self_ad_is_visible_filters_by_phase():
         sleep=lambda _: None,
     )
     assert missing_server is None
+
+
+def test_ensure_self_ad_is_visible_requires_expected_addr_match():
+    record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local;host0.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local;txt=phase=bootstrap\n"
+    )
+
+    runner = _make_runner({
+        "_k3s-sugar-dev._tcp": record,
+        "_https._tcp": "",
+    })
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        expect_addr="192.0.2.10",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+    assert observed == "host0.local"
+
+    mismatch = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        expect_addr="192.0.2.11",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+    assert mismatch is None
