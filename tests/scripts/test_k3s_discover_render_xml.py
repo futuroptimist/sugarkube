@@ -37,3 +37,6 @@ def test_render_server_xml_has_role_server():
     svc = root.find("./service")
     txts = [e.text for e in svc.findall("./txt-record")]
     assert "role=server" in txts
+    assert "phase=server" in txts
+    assert "state=ready" in txts
+    assert any(t.startswith("leader=") for t in txts)

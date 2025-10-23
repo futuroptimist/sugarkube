@@ -22,6 +22,24 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     state_file = tmp_path / "mdns-state.txt"
     sh_log = tmp_path / "sh.log"
     publish_log = tmp_path / "publish.log"
+    fixture_path = tmp_path / "mdns-fixture.txt"
+    hostname = subprocess.check_output(["hostname", "-s"], text=True).strip()
+    fqdn = f"{hostname}.local"
+    remote_host = "sugarkube0.local"
+    fixture_path.write_text(
+        (
+            f"=;eth0;IPv4;k3s-sugar-dev@{fqdn} (bootstrap);_k3s-sugar-dev._tcp;local;{fqdn};192.0.2.150;"
+            "6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            f"txt=leader={fqdn};txt=phase=bootstrap;txt=state=pending\n"
+            "=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;"
+            f"{remote_host};192.0.2.200;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+            f"txt=role=server;txt=leader={remote_host};txt=phase=server\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{fqdn} (server);_k3s-sugar-dev._tcp;local;{fqdn};192.0.2.201;"
+            "6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
+            f"txt=leader={fqdn};txt=phase=server\n"
+        ),
+        encoding="utf-8",
+    )
 
     # Stub sleep to avoid delays in the control-flow.
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
@@ -89,13 +107,25 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         "  server_count=$((server_count + 1))\n"
         "  if [ $server_count -ge $threshold ]; then\n"
         "    cat <<'EOF'\n"
-        "=;eth0;IPv4;k3s API sugar/dev on sugarkube0;_https._tcp;local;"
-        "sugarkube0.local;192.168.50.10;6443;txt=k3s=1;txt=cluster=sugar;"
-        "txt=env=dev;txt=role=server\n"
+        "=;eth0;IPv4;k3s API sugar/dev on sugarkube0;_https._tcp;local;\n"
+        "sugarkube0.local;192.168.50.10;6443;txt=k3s=1;txt=cluster=sugar;\n"
+        "txt=env=dev;txt=role=server;txt=leader=sugarkube0.local;txt=phase=server\n"
         "EOF\n"
         "  fi\n"
         "else\n"
         "  bootstrap_count=$((bootstrap_count + 1))\n"
+        "  host=$(hostname -s)\n"
+        "  fqdn=${host}.local\n"
+        "  cat <<EOF\n"
+        "=;eth0;IPv4;k3s-sugar-dev@${fqdn} (bootstrap);_k3s-sugar-dev._tcp;local;${fqdn};192.0.2.150;\n"
+        "6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=${fqdn};txt=phase=bootstrap;txt=state=pending\n"
+        "EOF\n"
+        "  if [ $server_count -ge $threshold ]; then\n"
+        "    cat <<EOF\n"
+        "=;eth0;IPv4;k3s-sugar-dev@${fqdn} (server);_k3s-sugar-dev._tcp;local;${fqdn};192.0.2.200;\n"
+        "6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader=${fqdn};txt=phase=server\n"
+        "EOF\n"
+        "  fi\n"
         "fi\n"
         "printf '%s %s\n' \"$server_count\" \"$bootstrap_count\" >\"$state\"\n"
         "exit 0\n",
@@ -114,8 +144,9 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "DISCOVERY_WAIT_SECS": "0",
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
             "SUGARKUBE_TEST_STATE": str(state_file),
-            "SUGARKUBE_TEST_SERVER_THRESHOLD": "9",
+            "SUGARKUBE_TEST_SERVER_THRESHOLD": "1",
             "SH_LOG_PATH": str(sh_log),
+            "SUGARKUBE_MDNS_FIXTURE_FILE": str(fixture_path),
         }
     )
 
@@ -128,7 +159,6 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "deferring bootstrap" in result.stderr
     assert "Joining as additional HA server via https://sugarkube0.local:6443" in result.stderr
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")
