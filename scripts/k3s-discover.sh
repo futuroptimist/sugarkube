@@ -49,6 +49,7 @@ TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
 TEST_PUBLISH_BOOTSTRAP=0
+TEST_CLAIM_BOOTSTRAP=0
 declare -a TEST_RENDER_ARGS=()
 
 while [ "$#" -gt 0 ]; do
@@ -78,6 +79,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-bootstrap-publish)
       TEST_PUBLISH_BOOTSTRAP=1
+      ;;
+    --test-claim-bootstrap)
+      TEST_CLAIM_BOOTSTRAP=1
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -233,7 +237,7 @@ reload_avahi_daemon() {
 
 stop_bootstrap_publisher() {
   if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ]; then
-    if kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+    if bootstrap_publisher_running; then
       kill "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
     fi
     wait "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
@@ -243,6 +247,14 @@ stop_bootstrap_publisher() {
     fi
     BOOTSTRAP_PUBLISH_LOG=""
   fi
+}
+
+bootstrap_publisher_running() {
+  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && \
+     kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
 }
 
 cleanup_avahi_bootstrap() {
@@ -265,7 +277,7 @@ start_bootstrap_publisher() {
     log "avahi-publish-service not available; relying on Avahi service file"
     return 1
   fi
-  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+  if bootstrap_publisher_running; then
     return 0
   fi
 
@@ -294,11 +306,13 @@ start_bootstrap_publisher() {
   BOOTSTRAP_PUBLISH_PID=$!
 
   sleep 1
-  if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+  if ! bootstrap_publisher_running; then
     if [ -s "${log_file}" ]; then
       while IFS= read -r line; do
         log "bootstrap publisher error: ${line}"
       done <"${log_file}"
+    else
+      log "bootstrap publisher exited immediately without emitting logs"
     fi
     rm -f "${log_file}" >/dev/null 2>&1 || true
     BOOTSTRAP_PUBLISH_PID=""
@@ -567,9 +581,26 @@ publish_bootstrap_service() {
 claim_bootstrap_leadership() {
   publish_bootstrap_service
   sleep "${DISCOVERY_WAIT_SECS}"
-  local consecutive leader candidates
+  local consecutive leader candidates restart_count
   consecutive=0
+  restart_count=0
   for attempt in $(seq 1 "${DISCOVERY_ATTEMPTS}"); do
+    if ! bootstrap_publisher_running; then
+      restart_count=$((restart_count + 1))
+      if ! start_bootstrap_publisher; then
+        log "Bootstrap publisher not running; refreshing Avahi service (restart ${restart_count})"
+      else
+        log "Bootstrap publisher relaunched (restart ${restart_count})"
+      fi
+      publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST}" "state=pending"
+      if [ "${attempt}" -lt "${DISCOVERY_ATTEMPTS}" ]; then
+        local next_attempt
+        next_attempt=$((attempt + 1))
+        log "Sleeping ${DISCOVERY_WAIT_SECS}s after refreshing bootstrap advertisement before retry ${next_attempt}/${DISCOVERY_ATTEMPTS}."
+        sleep "${DISCOVERY_WAIT_SECS}"
+      fi
+      continue
+    fi
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
@@ -588,7 +619,12 @@ claim_bootstrap_leadership() {
         return 1
       fi
     fi
-    sleep "${DISCOVERY_WAIT_SECS}"
+    if [ "${attempt}" -lt "${DISCOVERY_ATTEMPTS}" ]; then
+      local next_attempt
+      next_attempt=$((attempt + 1))
+      log "Sleeping ${DISCOVERY_WAIT_SECS}s before retry ${next_attempt}/${DISCOVERY_ATTEMPTS}."
+      sleep "${DISCOVERY_WAIT_SECS}"
+    fi
   done
   log "No stable bootstrap leader observed; proceeding as ${MDNS_HOST}"
   return 0
@@ -714,6 +750,15 @@ fi
 if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
   publish_bootstrap_service
   exit 0
+fi
+
+if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
+  if claim_bootstrap_leadership; then
+    printf '%s\n' 'claim-ok'
+    exit 0
+  fi
+  printf '%s\n' 'claim-failed'
+  exit 1
 fi
 
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."

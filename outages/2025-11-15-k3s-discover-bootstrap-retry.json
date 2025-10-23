@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-15-k3s-discover-bootstrap-retry",
+  "date": "2025-11-15",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "k3s-discover launched avahi-publish-service only once during bootstrap. When the daemon exited early (e.g. while avahi-daemon finished restarting) the helper never retried, so no bootstrap adverts were broadcast and subsequent nodes self-initialised, creating split brain.",
+  "resolution": "Detect when the bootstrap publisher dies, relaunch it while rewriting the Avahi service file, surface the failure in logs, and add a regression test that forces two failed launches before succeeding.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py"
+  ]
+}
+
