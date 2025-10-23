@@ -17,6 +17,7 @@ def test_wipe_dry_run_reports_actions(tmp_path, cluster, env):
             "DRY_RUN": "1",
             "SUGARKUBE_CLUSTER": cluster,
             "SUGARKUBE_ENV": env,
+            "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
             "PATH": env_vars.get("PATH", ""),
         }
     )
@@ -36,6 +37,7 @@ def test_wipe_dry_run_reports_actions(tmp_path, cluster, env):
     assert "k3s-uninstall.sh" in stdout or "Skipping k3s-uninstall.sh" in stdout
     assert "k3s-agent-uninstall.sh" in stdout or "Skipping k3s-agent-uninstall.sh" in stdout
     assert "/etc/avahi/services/k3s-" in stdout
+    assert "cleanup-mdns" in stdout
 
 
 def test_wipe_invokes_uninstallers_when_available(tmp_path):
@@ -72,6 +74,7 @@ def test_wipe_invokes_uninstallers_when_available(tmp_path):
             "DRY_RUN": "0",
             "SUGARKUBE_CLUSTER": "sugar",
             "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
             "PATH": f"{fakebin}:{env_vars.get('PATH', '')}",
         }
     )
@@ -92,3 +95,4 @@ def test_wipe_invokes_uninstallers_when_available(tmp_path):
         "k3s-agent-uninstall.sh",
     ):
         assert expected in logged
+    assert "removed-dynamic: _k3s-sugar-dev._tcp" in result.stdout

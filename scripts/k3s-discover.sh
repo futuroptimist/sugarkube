@@ -217,6 +217,10 @@ BOOTSTRAP_PUBLISH_PID=""
 BOOTSTRAP_PUBLISH_LOG=""
 SERVER_PUBLISH_PID=""
 SERVER_PUBLISH_LOG=""
+MDNS_RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
+BOOTSTRAP_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-bootstrap.pid"
+SERVER_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
+SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 
@@ -245,6 +249,28 @@ remove_privileged_file() {
   fi
 }
 
+if ! run_privileged mkdir -p "${MDNS_RUNTIME_DIR}"; then
+  echo "Failed to create ${MDNS_RUNTIME_DIR}" >&2
+  exit 1
+fi
+
+for phase in bootstrap server; do
+  pid_file="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-${phase}.pid"
+  if [ -f "${pid_file}" ]; then
+    pid_contents="$(cat "${pid_file}" 2>/dev/null || true)"
+    if [ -n "${pid_contents}" ] && kill -0 "${pid_contents}" >/dev/null 2>&1; then
+      if [ "${phase}" = "bootstrap" ]; then
+        BOOTSTRAP_PUBLISH_PID="${pid_contents}"
+      else
+        SERVER_PUBLISH_PID="${pid_contents}"
+        SERVER_PUBLISH_PERSIST=1
+      fi
+    else
+      remove_privileged_file "${pid_file}" || true
+    fi
+  fi
+done
+
 reload_avahi_daemon() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
@@ -264,6 +290,7 @@ stop_bootstrap_publisher() {
     wait "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
+    remove_privileged_file "${BOOTSTRAP_PID_FILE}" || true
   fi
 }
 
@@ -275,11 +302,14 @@ stop_server_publisher() {
     wait "${SERVER_PUBLISH_PID}" >/dev/null 2>&1 || true
     SERVER_PUBLISH_PID=""
     SERVER_PUBLISH_LOG=""
+    remove_privileged_file "${SERVER_PID_FILE}" || true
   fi
 }
 
 cleanup_avahi_publishers() {
-  stop_server_publisher
+  if [ "${SERVER_PUBLISH_PERSIST}" != "1" ]; then
+    stop_server_publisher
+  fi
   stop_bootstrap_publisher
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
     remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
@@ -363,6 +393,7 @@ start_bootstrap_publisher() {
   fi
 
   log "avahi-publish-service advertising bootstrap as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${BOOTSTRAP_PUBLISH_PID})"
+  printf '%s\n' "${BOOTSTRAP_PUBLISH_PID}" | write_privileged_file "${BOOTSTRAP_PID_FILE}"
   return 0
 }
 
@@ -408,6 +439,7 @@ start_server_publisher() {
   fi
 
   log "avahi-publish-service advertising server as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${SERVER_PUBLISH_PID})"
+  printf '%s\n' "${SERVER_PUBLISH_PID}" | write_privileged_file "${SERVER_PID_FILE}"
   return 0
 }
 
@@ -703,6 +735,7 @@ publish_api_service() {
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed."
+    SERVER_PUBLISH_PERSIST=1
     stop_bootstrap_publisher
     return 0
   fi

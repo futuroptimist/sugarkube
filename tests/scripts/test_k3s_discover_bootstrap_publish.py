@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 SCRIPT = str(Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh")
@@ -20,6 +21,19 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
         "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -51,6 +65,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "SUGARKUBE_TOKEN": "dummy",  # bypass token requirement
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(
@@ -65,6 +80,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
+    assert "PIDFILE_OK:bootstrap" in log_contents
 
     assert "-H" in log_contents
     assert f"-H {hostname}.local" in log_contents
@@ -99,6 +115,19 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
         "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -131,6 +160,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "SUGARKUBE_TOKEN": "dummy",
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(
@@ -145,6 +175,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     assert "START:" in log_contents
     assert "TERM" in log_contents
     assert f"leader={hostname}.local" in log_contents
+    assert "PIDFILE_OK:bootstrap" in log_contents
 
     expected = (
         f"phase=self-check host={hostname}.local observed={hostname}.local; "
@@ -165,6 +196,19 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
         "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -198,6 +242,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_MDNS_HOST": "HostMixed.LOCAL.",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(
@@ -213,6 +258,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     assert "TERM" in log_contents
     assert "-H HostMixed.LOCAL" in log_contents
     assert "leader=HostMixed.LOCAL" in log_contents
+    assert "PIDFILE_OK:bootstrap" in log_contents
 
     expected = (
         "phase=self-check host=HostMixed.LOCAL observed=hostmixed.local; "
@@ -234,7 +280,20 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo \"START:$*\" >> '{log_path}'\n"
-        f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{flag_path}'; fi\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        f"  touch '{flag_path}'\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
         "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -294,6 +353,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_MDNS_SERVER_RETRIES": "5",
         "SUGARKUBE_MDNS_SERVER_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(
@@ -304,12 +364,22 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         check=True,
     )
 
+    runtime_dir = tmp_path / "run"
+    bootstrap_pid_file = runtime_dir / "mdns-sugar-dev-bootstrap.pid"
+    server_pid_file = runtime_dir / "mdns-sugar-dev-server.pid"
+
     log_contents = log_path.read_text(encoding="utf-8")
     assert log_contents.count("START:") >= 2
-    assert log_contents.count("TERM") >= 2
     assert "phase=bootstrap" in log_contents
     assert "phase=server" in log_contents
+    assert "PIDFILE_OK:bootstrap" in log_contents
+    assert "PIDFILE_OK:server" in log_contents
     assert flag_path.exists()
+
+    assert not bootstrap_pid_file.exists()
+    server_pid = int(server_pid_file.read_text(encoding="utf-8").strip())
+    assert server_pid > 0
+    os.kill(server_pid, 0)
 
     bootstrap_msg = (
         f"phase=self-check host={hostname}.local observed={hostname}.local; "
@@ -322,6 +392,32 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
     assert bootstrap_msg in result.stderr
     assert server_msg in result.stderr
     assert result.stderr.find(bootstrap_msg) < result.stderr.find(server_msg)
+
+    cleanup_env = env.copy()
+    subprocess.run(
+        ["bash", str(Path(__file__).resolve().parents[2] / "scripts" / "cleanup_mdns_publishers.sh")],
+        env=cleanup_env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    for _ in range(50):
+        check = subprocess.run(
+            ["pgrep", "-af", "_k3s-sugar-dev._tcp"],
+            text=True,
+            capture_output=True,
+        )
+        if check.returncode != 0:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"dynamic publisher still running after cleanup: {check.stdout}")
+
+    assert not server_pid_file.exists()
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert log_contents.count("TERM") >= 1
 
     browse_calls = int(count_path.read_text(encoding="utf-8").strip())
     assert browse_calls >= 2
@@ -337,6 +433,19 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
         "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -362,6 +471,7 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
         "SUGARKUBE_TOKEN": "dummy",
         "SUGARKUBE_MDNS_BOOT_RETRIES": "2",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
     })
 
     result = subprocess.run(
