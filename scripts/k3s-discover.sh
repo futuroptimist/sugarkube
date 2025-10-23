@@ -46,6 +46,10 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-60}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-1}"
 
+MDNS_PID_DIR="/run/sugarkube"
+BOOTSTRAP_PUBLISH_PID_FILE="${MDNS_PID_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-bootstrap.pid"
+SERVER_PUBLISH_PID_FILE="${MDNS_PID_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
@@ -245,6 +249,35 @@ remove_privileged_file() {
   fi
 }
 
+ensure_mdns_pid_dir() {
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" mkdir -p "${MDNS_PID_DIR}"
+  else
+    mkdir -p "${MDNS_PID_DIR}"
+  fi
+}
+
+clean_orphan_pid_file() {
+  local pid_file="$1"
+  if [ ! -f "${pid_file}" ]; then
+    return 0
+  fi
+  local pid
+  pid="$(cat "${pid_file}" 2>/dev/null || true)"
+  if [ -z "${pid}" ]; then
+    remove_privileged_file "${pid_file}" || true
+    return 0
+  fi
+  if kill -0 "${pid}" >/dev/null 2>&1; then
+    return 0
+  fi
+  remove_privileged_file "${pid_file}" || true
+}
+
+ensure_mdns_pid_dir || true
+clean_orphan_pid_file "${BOOTSTRAP_PUBLISH_PID_FILE}"
+clean_orphan_pid_file "${SERVER_PUBLISH_PID_FILE}"
+
 reload_avahi_daemon() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
@@ -265,6 +298,7 @@ stop_bootstrap_publisher() {
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
   fi
+  remove_privileged_file "${BOOTSTRAP_PUBLISH_PID_FILE}" || true
 }
 
 stop_server_publisher() {
@@ -276,6 +310,7 @@ stop_server_publisher() {
     SERVER_PUBLISH_PID=""
     SERVER_PUBLISH_LOG=""
   fi
+  remove_privileged_file "${SERVER_PUBLISH_PID_FILE}" || true
 }
 
 cleanup_avahi_publishers() {
@@ -349,6 +384,7 @@ start_bootstrap_publisher() {
     "state=pending" \
     >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
+  printf '%s\n' "${BOOTSTRAP_PUBLISH_PID}" | write_privileged_file "${BOOTSTRAP_PUBLISH_PID_FILE}" || true
 
   sleep 1
   if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -394,6 +430,7 @@ start_server_publisher() {
     "phase=server" \
     >"${SERVER_PUBLISH_LOG}" 2>&1 &
   SERVER_PUBLISH_PID=$!
+  printf '%s\n' "${SERVER_PUBLISH_PID}" | write_privileged_file "${SERVER_PUBLISH_PID_FILE}" || true
 
   sleep 1
   if ! kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
