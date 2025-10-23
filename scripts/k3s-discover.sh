@@ -231,19 +231,15 @@ run_avahi_query() {
   local mode="$1"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
-import subprocess
 import sys
-from pathlib import Path
 
-from k3s_mdns_parser import parse_mdns_records
+from k3s_mdns_query import query_mdns
 
 
 mode, cluster, environment = sys.argv[1:4]
 
 fixture_path = os.environ.get("SUGARKUBE_MDNS_FIXTURE_FILE")
-
 debug_enabled = bool(os.environ.get("SUGARKUBE_DEBUG"))
-dump_path = Path("/tmp/sugarkube-mdns.txt")
 
 
 def debug(message: str) -> None:
@@ -251,64 +247,16 @@ def debug(message: str) -> None:
         print(f"[k3s-discover mdns] {message}", file=sys.stderr)
 
 
-def run_avahi() -> str:
-    try:
-        command = [
-            "avahi-browse",
-            "--parsable",
-            "--terminate",
-            "--resolve",  # required for host/port/TXT fields
-        ]
-        if mode in {"server-first", "server-count"}:
-            command.append("--ignore-local")  # skip local adverts when only remote servers matter
-        command.append("_https._tcp")
-        return subprocess.check_output(
-            command,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return ""
+results = query_mdns(
+    mode,
+    cluster,
+    environment,
+    fixture_path=fixture_path,
+    debug=debug if debug_enabled else None,
+)
 
-
-if fixture_path:
-    try:
-        output = Path(fixture_path).read_text(encoding="utf-8")
-    except OSError:
-        output = ""
-else:
-    output = run_avahi()
-lines = [line for line in output.splitlines() if line]
-records = parse_mdns_records(lines, cluster, environment)
-
-if debug_enabled and not records and lines:
-    try:
-        dump_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    except OSError:
-        debug("Unable to write browse dump to /tmp")
-
-if mode == "server-first":
-    for record in records:
-        if record.txt.get("role") == "server":
-            print(record.host)
-            break
-elif mode == "server-count":
-    count = sum(1 for record in records if record.txt.get("role") == "server")
-    print(count)
-elif mode == "bootstrap-hosts":
-    seen = set()
-    for record in records:
-        if record.txt.get("role") == "bootstrap" and record.host not in seen:
-            seen.add(record.host)
-            print(record.host)
-elif mode == "bootstrap-leaders":
-    seen = set()
-    for record in records:
-        if record.txt.get("role") == "bootstrap":
-            leader = record.txt.get("leader", record.host)
-            if leader not in seen:
-                seen.add(leader)
-                print(leader)
+for line in results:
+    print(line)
 PY
 }
 
