@@ -92,3 +92,20 @@ def test_record_updates_when_txt_richer():
     assert len(recs) == 1
     record = recs[0]
     assert record.txt.get("extra") == "1"
+
+
+def test_parse_preserves_mixed_case_hostnames():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on HostMixed;_https._tcp;local;"
+            "HostMixed.local;192.168.1.21;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "txt=leader=HostMixed.local"
+        )
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.host == "HostMixed.local"
+    assert record.txt.get("leader") == "HostMixed.local"
