@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-19-k3s-discover-bootstrap-mdns",
+  "date": "2025-11-19",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "k3s-discover's mDNS self-check aborted bootstrap because avahi-browse returned hostnames with a trailing dot, the parser appended the domain again (host.local..local), and the bootstrap advert never matched the expected host.",
+  "resolution": "Strip trailing dots and normalise case in the mDNS parser before appending the domain, then add regression tests that cover avahi outputs ending with trailing dots so bootstrap self-check accepts the advert.",
+  "references": [
+    "Console: sugarkube0 just up dev (2025-11-19)",
+    "scripts/k3s_mdns_parser.py",
+    "tests/scripts/test_k3s_mdns_parser.py",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py"
+  ]
+}

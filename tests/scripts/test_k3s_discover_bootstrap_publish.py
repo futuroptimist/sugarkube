@@ -32,7 +32,8 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "cat <<'EOF'\n"
-            f"=;eth0;IPv4;k3s API sugar/dev on {hostname};_https._tcp;local;{hostname}.local;192.0.2.10;6443;"
+            f"=;eth0;IPv4;k3s API sugar/dev on {hostname};"
+            f"_https._tcp;local;{hostname}.local.;192.0.2.10;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
             f"txt=leader={hostname}.local;txt=state=pending\n"
             "EOF\n"
@@ -66,8 +67,8 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     assert "START:" in log_contents
     assert "TERM" in log_contents
 
-    assert f"cluster=sugar" in log_contents
-    assert f"env=dev" in log_contents
+    assert "cluster=sugar" in log_contents
+    assert "env=dev" in log_contents
     assert f"leader={hostname}.local" in log_contents
     assert "role=bootstrap" in log_contents
 
