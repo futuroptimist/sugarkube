@@ -94,7 +94,7 @@ def test_record_updates_when_txt_richer():
     assert record.txt.get("extra") == "1"
 
 
-def test_parse_preserves_mixed_case_hostnames():
+def test_parse_normalises_mixed_case_hostnames():
     lines = [
         (
             "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on HostMixed;_https._tcp;local;"
@@ -107,5 +107,5 @@ def test_parse_preserves_mixed_case_hostnames():
     recs = parse_mdns_records(lines, "sugar", "dev")
     assert len(recs) == 1
     record = recs[0]
-    assert record.host == "HostMixed.local"
-    assert record.txt.get("leader") == "HostMixed.local"
+    assert record.host == "hostmixed.local"
+    assert record.txt.get("leader") == "hostmixed.local"
