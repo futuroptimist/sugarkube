@@ -9,11 +9,26 @@ from k3s_mdns_parser import parse_mdns_records  # noqa: E402
 def test_parse_bootstrap_and_server_ipv4_preferred():
     # Simulated avahi-browse --parsable --resolve lines (IPv4 and IPv6 for same host+role)
     lines = [
-        "=;eth0;IPv6;k3s API sugar/dev [bootstrap] on host0;_https._tcp;local;host0.local;fe80::1;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local",
-        "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host0;_https._tcp;local;host0.local;192.168.1.10;6443;"
-        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local",
-        "=;eth0;IPv4;k3s API sugar/dev [server] on host1;_https._tcp;local;host1.local;192.168.1.11;6443;"
+        (
+            "=;eth0;IPv6;k3s API sugar/dev [bootstrap] on host0;"
+            "_https._tcp;local;host0.local;fe80::1;6443;"
+        ),
+        (
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "txt=leader=host0.local"
+        ),
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host0;"
+            "_https._tcp;local;host0.local;192.168.1.10;6443;"
+        ),
+        (
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "txt=leader=host0.local"
+        ),
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [server] on host1;"
+            "_https._tcp;local;host1.local;192.168.1.11;6443;"
+        ),
         "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server",
     ]
     recs = parse_mdns_records(lines, "sugar", "dev")
@@ -43,8 +58,8 @@ def test_resolved_record_replaces_unresolved_placeholder():
     lines = [
         "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local",
         (
-            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local;"
-            "host4.local;192.168.1.14;6443;"
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;"
+            "_https._tcp;local;host4.local;192.168.1.14;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
             "txt=role=bootstrap;txt=leader=leader0.local"
         ),
@@ -60,13 +75,13 @@ def test_resolved_record_replaces_unresolved_placeholder():
 def test_record_updates_when_txt_richer():
     lines = [
         (
-            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;_https._tcp;local;"
-            "host5.local;192.168.1.15;6443;"
+            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;"
+            "_https._tcp;local;host5.local;192.168.1.15;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
         ),
         (
-            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;_https._tcp;local;"
-            "host5.local;192.168.1.15;6443;"
+            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;"
+            "_https._tcp;local;host5.local;192.168.1.15;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=extra=1"
         ),
     ]
@@ -75,3 +90,19 @@ def test_record_updates_when_txt_richer():
     assert len(recs) == 1
     record = recs[0]
     assert record.txt.get("extra") == "1"
+
+
+def test_host_and_domain_trailing_dots_are_normalized():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host6;"
+            "_https._tcp;local.;host6.local.;192.168.1.16;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap"
+        ),
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.host == "host6.local"
+    assert record.txt["role"] == "bootstrap"

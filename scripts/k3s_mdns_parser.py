@@ -19,7 +19,8 @@ def _normalize_role(role: Optional[str]) -> Optional[str]:
 
 
 def _normalize_host(host: str, domain: str) -> str:
-    host = host.strip()
+    host = host.strip().rstrip(".").lower()
+    domain = domain.strip().rstrip(".").lower()
     if not host:
         return ""
     if domain and not host.endswith(f".{domain}"):
@@ -27,7 +28,10 @@ def _normalize_host(host: str, domain: str) -> str:
     return host
 
 
-def _parse_service_name(service_name: str, domain: str) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
+def _parse_service_name(
+    service_name: str,
+    domain: str,
+) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
     match = _SERVICE_NAME_RE.match(service_name)
     if not match:
         return None, None, None, ""
@@ -132,7 +136,7 @@ def parse_mdns_records(
 
         host = ""
         if len(fields) > 6 and fields[6]:
-            host = fields[6]
+            host = _normalize_host(fields[6], domain)
         elif service_host:
             host = service_host
         if not host:
