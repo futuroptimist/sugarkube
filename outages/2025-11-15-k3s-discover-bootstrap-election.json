@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-15-k3s-discover-bootstrap-election",
+  "date": "2025-11-15",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Nodes entering bootstrap election never re-checked for newly published server adverts, so a follower that started slightly early kept self-electing even after an existing API node appeared, leading to a split-brain control-plane.",
+  "resolution": "Abort bootstrap when an API advertisement is detected before or during the leadership loop, add a fixture sequence test mode, and cover the regression with unit tests.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_election.py"
+  ]
+}

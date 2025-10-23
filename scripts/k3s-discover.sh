@@ -25,7 +25,34 @@ BOOT_TOKEN_PRESENT=0
 TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
+TEST_CLAIM_LEADERSHIP=0
 declare -a TEST_RENDER_ARGS=()
+declare -a MDNS_FIXTURE_SEQUENCE=()
+NEXT_MDNS_FIXTURE=""
+MDNS_FIXTURE_QUEUE_FILE=""
+
+if [ -n "${SUGARKUBE_MDNS_FIXTURE_SEQUENCE:-}" ]; then
+  IFS=':' read -r -a MDNS_FIXTURE_SEQUENCE <<<"${SUGARKUBE_MDNS_FIXTURE_SEQUENCE}"
+  if [ "${#MDNS_FIXTURE_SEQUENCE[@]}" -gt 0 ]; then
+    MDNS_FIXTURE_QUEUE_FILE="$(mktemp -t sugarkube-mdns-seq.XXXXXX)"
+    printf '%s\n' "${MDNS_FIXTURE_SEQUENCE[@]}" >"${MDNS_FIXTURE_QUEUE_FILE}"
+  fi
+fi
+
+prepare_mdns_fixture() {
+  if [ -n "${MDNS_FIXTURE_QUEUE_FILE:-}" ] && [ -s "${MDNS_FIXTURE_QUEUE_FILE}" ]; then
+    if IFS= read -r NEXT_MDNS_FIXTURE <"${MDNS_FIXTURE_QUEUE_FILE}"; then
+      if tail -n +2 "${MDNS_FIXTURE_QUEUE_FILE}" >"${MDNS_FIXTURE_QUEUE_FILE}.tmp"; then
+        mv "${MDNS_FIXTURE_QUEUE_FILE}.tmp" "${MDNS_FIXTURE_QUEUE_FILE}"
+      else
+        rm -f "${MDNS_FIXTURE_QUEUE_FILE}.tmp" 2>/dev/null || true
+      fi
+      return 0
+    fi
+  fi
+  NEXT_MDNS_FIXTURE="${SUGARKUBE_MDNS_FIXTURE_FILE:-}"
+  return 1
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -51,6 +78,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-wait-loop-only)
       TEST_WAIT_LOOP=1
+      ;;
+    --test-claim-leadership)
+      TEST_CLAIM_LEADERSHIP=1
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -174,7 +204,14 @@ cleanup_avahi_bootstrap() {
   fi
 }
 
-trap cleanup_avahi_bootstrap EXIT
+cleanup_fixture_sequence() {
+  if [ -n "${MDNS_FIXTURE_QUEUE_FILE:-}" ]; then
+    rm -f "${MDNS_FIXTURE_QUEUE_FILE}" "${MDNS_FIXTURE_QUEUE_FILE}.tmp" 2>/dev/null || true
+    MDNS_FIXTURE_QUEUE_FILE=""
+  fi
+}
+
+trap 'cleanup_avahi_bootstrap; cleanup_fixture_sequence' EXIT
 
 log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
@@ -313,20 +350,40 @@ PY
 }
 
 discover_server_host() {
-  run_avahi_query server-first | head -n1
+  local output
+  prepare_mdns_fixture || true
+  output="$(SUGARKUBE_MDNS_FIXTURE_FILE="${NEXT_MDNS_FIXTURE}" run_avahi_query server-first)"
+  if [ -z "${output}" ]; then
+    return 0
+  fi
+  printf '%s\n' "${output}" | head -n1
 }
 
 discover_bootstrap_hosts() {
-  run_avahi_query bootstrap-hosts | sort -u
+  local output
+  prepare_mdns_fixture || true
+  output="$(SUGARKUBE_MDNS_FIXTURE_FILE="${NEXT_MDNS_FIXTURE}" run_avahi_query bootstrap-hosts)"
+  if [ -z "${output}" ]; then
+    return 0
+  fi
+  printf '%s\n' "${output}" | sort -u
 }
 
 discover_bootstrap_leaders() {
-  run_avahi_query bootstrap-leaders | sort -u
+  local output
+  prepare_mdns_fixture || true
+  output="$(SUGARKUBE_MDNS_FIXTURE_FILE="${NEXT_MDNS_FIXTURE}" run_avahi_query bootstrap-leaders)"
+  if [ -z "${output}" ]; then
+    return 0
+  fi
+  printf '%s\n' "${output}" | sort -u
 }
 
 count_servers() {
-  local count
-  count="$(run_avahi_query server-count | head -n1)"
+  local output count
+  prepare_mdns_fixture || true
+  output="$(SUGARKUBE_MDNS_FIXTURE_FILE="${NEXT_MDNS_FIXTURE}" run_avahi_query server-count)"
+  count="$(printf '%s\n' "${output}" | head -n1)"
   if [ -z "${count}" ]; then
     count=0
   fi
@@ -483,10 +540,23 @@ publish_bootstrap_service() {
 
 claim_bootstrap_leadership() {
   publish_bootstrap_service
+  local server
+  server="$(discover_server_host || true)"
+  if [ -n "${server}" ]; then
+    log "API server advertisement from ${server} detected before bootstrap election; deferring cluster initialization"
+    cleanup_avahi_bootstrap
+    return 1
+  fi
   sleep "${DISCOVERY_WAIT_SECS}"
   local consecutive leader candidates
   consecutive=0
   for attempt in $(seq 1 "${DISCOVERY_ATTEMPTS}"); do
+    server="$(discover_server_host || true)"
+    if [ -n "${server}" ]; then
+      log "API server advertisement from ${server} detected during bootstrap election (attempt ${attempt}/${DISCOVERY_ATTEMPTS}); deferring cluster initialization"
+      cleanup_avahi_bootstrap
+      return 1
+    fi
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
@@ -605,7 +675,8 @@ install_agent() {
 }
 
 if [ -n "${TEST_RUN_AVAHI:-}" ]; then
-  run_avahi_query "${TEST_RUN_AVAHI}"
+  prepare_mdns_fixture || true
+  SUGARKUBE_MDNS_FIXTURE_FILE="${NEXT_MDNS_FIXTURE}" run_avahi_query "${TEST_RUN_AVAHI}"
   exit 0
 fi
 
@@ -626,6 +697,13 @@ if [ "${TEST_WAIT_LOOP:-0}" -eq 1 ]; then
   # fast path for tests
   wait_for_bootstrap_activity --require-activity
   exit 0
+fi
+
+if [ "${TEST_CLAIM_LEADERSHIP:-0}" -eq 1 ]; then
+  if claim_bootstrap_leadership; then
+    exit 0
+  fi
+  exit 1
 fi
 
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
