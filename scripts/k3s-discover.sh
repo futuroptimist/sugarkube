@@ -33,6 +33,13 @@ fi
 
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
+RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
+RUNTIME_DIR_OK=1
+if ! mkdir -p "${RUNTIME_DIR}" 2>/dev/null; then
+  RUNTIME_DIR_OK=0
+  >&2 printf '[sugarkube %s/%s] unable to ensure runtime dir %s; PID tracking disabled.\n' \
+    "${CLUSTER}" "${ENVIRONMENT}" "${RUNTIME_DIR}"
+fi
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
@@ -207,6 +214,8 @@ AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${C
 AVAHI_ROLE=""
 BOOTSTRAP_PUBLISH_PID=""
 BOOTSTRAP_PUBLISH_LOG=""
+SERVER_PUBLISH_PID=""
+SERVER_PUBLISH_LOG=""
 CLAIMED_SERVER_HOST=""
 
 run_privileged() {
@@ -245,6 +254,73 @@ reload_avahi_daemon() {
   fi
 }
 
+publisher_pid_file() {
+  local phase="$1"
+  printf '%s/mdns-%s-%s-%s.pid' "${RUNTIME_DIR}" "${CLUSTER}" "${ENVIRONMENT}" "${phase}"
+}
+
+publisher_pid_write() {
+  local phase="$1"
+  local pid="$2"
+  if [ "${RUNTIME_DIR_OK}" -ne 1 ]; then
+    return 0
+  fi
+  local pid_file
+  pid_file="$(publisher_pid_file "${phase}")"
+  if ! printf '%s\n' "${pid}" >"${pid_file}"; then
+    return 0
+  fi
+}
+
+publisher_pid_remove() {
+  local phase="$1"
+  if [ "${RUNTIME_DIR_OK}" -ne 1 ]; then
+    return 0
+  fi
+  local pid_file
+  pid_file="$(publisher_pid_file "${phase}")"
+  rm -f "${pid_file}" >/dev/null 2>&1 || true
+}
+
+publisher_pid_active() {
+  local phase="$1"
+  if [ "${RUNTIME_DIR_OK}" -ne 1 ]; then
+    return 1
+  fi
+  local pid_file pid
+  pid_file="$(publisher_pid_file "${phase}")"
+  if [ ! -f "${pid_file}" ]; then
+    return 1
+  fi
+  pid="$(cat "${pid_file}" 2>/dev/null || true)"
+  if [ -z "${pid}" ]; then
+    return 1
+  fi
+  if kill -0 "${pid}" >/dev/null 2>&1; then
+    printf '%s\n' "${pid}"
+    return 0
+  fi
+  return 1
+}
+
+cleanup_orphaned_publisher_pidfiles() {
+  local phase pid_file pid
+  for phase in bootstrap server; do
+    pid_file="$(publisher_pid_file "${phase}")"
+    if [ ! -f "${pid_file}" ]; then
+      continue
+    fi
+    pid="$(cat "${pid_file}" 2>/dev/null || true)"
+    if [ -z "${pid}" ] || ! kill -0 "${pid}" >/dev/null 2>&1; then
+      rm -f "${pid_file}" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+if [ "${RUNTIME_DIR_OK}" -eq 1 ]; then
+  cleanup_orphaned_publisher_pidfiles
+fi
+
 stop_bootstrap_publisher() {
   if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ]; then
     if kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -254,6 +330,7 @@ stop_bootstrap_publisher() {
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
   fi
+  publisher_pid_remove bootstrap
 }
 
 cleanup_avahi_bootstrap() {
@@ -302,11 +379,18 @@ start_bootstrap_publisher() {
     log "avahi-publish-service not available; relying on Avahi service file"
     return 1
   fi
-  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
-    return 0
+  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ]; then
+    if kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+      return 0
+    fi
+  else
+    if existing_pid="$(publisher_pid_active bootstrap)"; then
+      BOOTSTRAP_PUBLISH_PID="${existing_pid}"
+      return 0
+    fi
   fi
 
-  local publish_name
+  local publish_name existing_pid
   publish_name="$(service_instance_name bootstrap "${MDNS_HOST_RAW}")"
 
   BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish.log"
@@ -326,6 +410,7 @@ start_bootstrap_publisher() {
     "state=pending" \
     >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
+  publisher_pid_write bootstrap "${BOOTSTRAP_PUBLISH_PID}"
 
   sleep 1
   if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -334,12 +419,67 @@ start_bootstrap_publisher() {
         log "bootstrap publisher error: ${line}"
       done <"${BOOTSTRAP_PUBLISH_LOG}"
     fi
+    publisher_pid_remove bootstrap
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
     return 1
   fi
 
   log "avahi-publish-service advertising bootstrap as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${BOOTSTRAP_PUBLISH_PID})"
+  return 0
+}
+
+start_server_publisher() {
+  if ! command -v avahi-publish-service >/dev/null 2>&1; then
+    return 1
+  fi
+  if [ -n "${SERVER_PUBLISH_PID:-}" ]; then
+    if kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
+      return 0
+    fi
+  else
+    local existing_pid
+    if existing_pid="$(publisher_pid_active server)"; then
+      SERVER_PUBLISH_PID="${existing_pid}"
+      return 0
+    fi
+  fi
+
+  local publish_name existing_pid
+  publish_name="$(service_instance_name server "${MDNS_HOST_RAW}")"
+
+  SERVER_PUBLISH_LOG="/tmp/sugar-publish-server.log"
+  : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
+
+  avahi-publish-service \
+    -H "${MDNS_HOST_RAW}" \
+    "${publish_name}" \
+    "${MDNS_SERVICE_TYPE}" \
+    6443 \
+    "k3s=1" \
+    "cluster=${CLUSTER}" \
+    "env=${ENVIRONMENT}" \
+    "role=server" \
+    "leader=${MDNS_HOST_RAW}" \
+    "phase=server" \
+    >"${SERVER_PUBLISH_LOG}" 2>&1 &
+  SERVER_PUBLISH_PID=$!
+  publisher_pid_write server "${SERVER_PUBLISH_PID}"
+
+  sleep 1
+  if ! kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
+    if [ -s "${SERVER_PUBLISH_LOG}" ]; then
+      while IFS= read -r line; do
+        log "server publisher error: ${line}"
+      done <"${SERVER_PUBLISH_LOG}"
+    fi
+    publisher_pid_remove server
+    SERVER_PUBLISH_PID=""
+    SERVER_PUBLISH_LOG=""
+    return 1
+  fi
+
+  log "avahi-publish-service advertising server as ${MDNS_HOST_RAW} on ${MDNS_SERVICE_TYPE} (pid ${SERVER_PUBLISH_PID})"
   return 0
 }
 
@@ -645,7 +785,12 @@ publish_api_service() {
 
   reload_avahi_daemon || true
   AVAHI_ROLE="server"
-  ensure_self_mdns_advertisement server
+  start_server_publisher || true
+  if ensure_self_mdns_advertisement server; then
+    stop_bootstrap_publisher
+    return 0
+  fi
+  return $?
 }
 
 publish_bootstrap_service() {

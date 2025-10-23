@@ -14,12 +14,23 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir()
 
     stub = bin_dir / "avahi-publish-service"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo \"START:$*\" >> '{log_path}'\n"
+        f"echo \"PID=$$\" >> '{log_path}'\n"
+        "pid_file=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}/mdns-${SUGARKUBE_CLUSTER:-sugar}-${SUGARKUBE_ENV:-dev}-bootstrap.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"$pid_file\" ]; then\n"
+        f"    echo \"PIDFILE=$(cat \"$pid_file\")\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.1\n"
+        "done\n"
         "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -46,6 +57,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "PATH": f"{bin_dir}:{env.get('PATH', '')}",
         "SUGARKUBE_CLUSTER": "sugar",
         "SUGARKUBE_ENV": "dev",
+        "SUGARKUBE_RUNTIME_DIR": str(runtime_dir),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",  # bypass token requirement
@@ -65,6 +77,16 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
+    assert "PID=" in log_contents
+    assert "PIDFILE=" in log_contents
+    pid = next(line.split("=", 1)[1] for line in log_contents.splitlines() if line.startswith("PID="))
+    pidfile_pid = next(
+        line.split("=", 1)[1] for line in log_contents.splitlines() if line.startswith("PIDFILE=")
+    )
+    assert pid == pidfile_pid
+
+    pid_file = runtime_dir / "mdns-sugar-dev-bootstrap.pid"
+    assert not pid_file.exists()
 
     assert "-H" in log_contents
     assert f"-H {hostname}.local" in log_contents
@@ -89,6 +111,8 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir()
 
     stub = bin_dir / "avahi-publish-service"
     stub.write_text(
@@ -122,6 +146,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "PATH": f"{bin_dir}:{env.get('PATH', '')}",
         "SUGARKUBE_CLUSTER": "sugar",
         "SUGARKUBE_ENV": "dev",
+        "SUGARKUBE_RUNTIME_DIR": str(runtime_dir),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",
@@ -151,6 +176,8 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir()
 
     stub = bin_dir / "avahi-publish-service"
     stub.write_text(
@@ -184,6 +211,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "PATH": f"{bin_dir}:{env.get('PATH', '')}",
         "SUGARKUBE_CLUSTER": "sugar",
         "SUGARKUBE_ENV": "dev",
+        "SUGARKUBE_RUNTIME_DIR": str(runtime_dir),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",
