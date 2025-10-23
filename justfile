@@ -28,9 +28,7 @@ up env='dev': prereqs
     # Preflight network/mDNS configuration
     if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then sudo -E bash scripts/configure_avahi.sh; fi
     # Optionally bring WLAN down for deterministic bootstrap
-    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then
-      sudo -E bash scripts/toggle_wlan.sh --down
-    fi
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --down; fi
     if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then sudo -E bash scripts/configure_k3s_node_ip.sh; fi
 
     # Proceed with discovery/join for subsequent nodes
