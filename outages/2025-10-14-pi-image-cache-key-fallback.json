@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-14-pi-image-cache-key-fallback",
+  "date": "2025-10-14",
+  "component": "pi-image workflow",
+  "rootCause": "Cache warmup ran git ls-remote with no retry/fallback; throttling killed it.",
+  "resolution": "Add a helper that warns and falls back to offline key when git ls-remote fails.",
+  "references": [
+    ".github/workflows/pi-image.yml",
+    "scripts/compute_pi_gen_cache_key.sh",
+    "tests/compute_pi_gen_cache_key_e2e.sh",
+    "tests/test_pi_image_tooling.py"
+  ]
+}
