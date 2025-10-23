@@ -12,7 +12,13 @@ DebugFn = Optional[Callable[[str], None]]
 _DUMP_PATH = Path("/tmp/sugarkube-mdns.txt")
 
 
-def _build_command(mode: str) -> List[str]:
+def _service_type_for_mode(mode: str, cluster: str, environment: str) -> str:
+    if mode in {"bootstrap-hosts", "bootstrap-leaders"}:
+        return f"_k3s-{cluster}-{environment}._tcp"
+    return "_https._tcp"
+
+
+def _build_command(mode: str, cluster: str, environment: str) -> List[str]:
     command = [
         "avahi-browse",
         "--parsable",
@@ -21,16 +27,18 @@ def _build_command(mode: str) -> List[str]:
     ]
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
-    command.append("_https._tcp")
+    command.append(_service_type_for_mode(mode, cluster, environment))
     return command
 
 
 def _invoke_avahi(
     mode: str,
+    cluster: str,
+    environment: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
 ) -> subprocess.CompletedProcess[str]:
-    command = _build_command(mode)
+    command = _build_command(mode, cluster, environment)
     try:
         result = runner(
             command,
@@ -68,10 +76,12 @@ def _load_lines_from_fixture(fixture_path: str) -> Iterable[str]:
 
 def _load_lines_from_avahi(
     mode: str,
+    cluster: str,
+    environment: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
 ) -> Iterable[str]:
-    result = _invoke_avahi(mode, runner, debug)
+    result = _invoke_avahi(mode, cluster, environment, runner, debug)
     lines = [line for line in result.stdout.splitlines() if line]
     if debug is not None and not lines and result.stdout:
         try:
@@ -150,7 +160,7 @@ def query_mdns(
     if fixture_path:
         lines = _load_lines_from_fixture(fixture_path)
     else:
-        lines = _load_lines_from_avahi(mode, runner, debug)
+        lines = _load_lines_from_avahi(mode, cluster, environment, runner, debug)
 
     records = parse_mdns_records(lines, cluster, environment)
 

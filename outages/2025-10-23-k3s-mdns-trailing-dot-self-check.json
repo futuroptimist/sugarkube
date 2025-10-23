@@ -8,5 +8,14 @@
     "scripts/k3s_mdns_parser.py",
     "tests/scripts/test_k3s_discover_bootstrap_publish.py",
     "tests/scripts/test_k3s_mdns_parser.py"
+  ],
+  "notes": [
+    "2025-12-01 follow-up: mixed-case Avahi adverts caused the bootstrap self-check to miss our own publish on Pi nodes.",
+    "Symptom: avahi-publish-service PID logged but the self-check aborted before confirmation, risking split brain.",
+    "Fix: bind avahi-publish-service with -H <FQDN>, add a 1s pause before browsing, and normalize comparisons to ignore case/trailing dots.",
+    "Captured avahi-publish output in /tmp/sugar-publish.log for quick inspection on affected devices.",
+    "Quick triage: avahi-browse -rt _k3s-sugar-dev._tcp --parsable",
+    "Quick triage: pgrep -a avahi-publish || true",
+    "Quick triage: sed -n '1,120p' /tmp/sugar-publish.log || true"
   ]
 }
