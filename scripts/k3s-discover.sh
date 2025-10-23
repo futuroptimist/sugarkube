@@ -195,12 +195,70 @@ if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
 fi
 
 HN="$(hostname -s)"
-MDNS_HOST="${HN}.local"
+MDNS_HOST_DEFAULT="${HN}.local"
+MDNS_HOST_RAW="${SUGARKUBE_MDNS_HOST:-${MDNS_HOST_DEFAULT}}"
+MDNS_HOST_RAW="${MDNS_HOST_RAW%.}"
+MDNS_HOST="${MDNS_HOST_RAW}"
+MDNS_HOST_DOMAIN=""
+if [[ "${MDNS_HOST_RAW}" == *"."* ]]; then
+  MDNS_HOST_DOMAIN="${MDNS_HOST_RAW#*.}"
+  if [[ "${MDNS_HOST_DOMAIN}" != "${MDNS_HOST_RAW}" ]]; then
+    MDNS_HOST_DOMAIN="${MDNS_HOST_DOMAIN,,}"
+  else
+    MDNS_HOST_DOMAIN=""
+  fi
+fi
+
+mdns_normalize_host() {
+  local host="${1:-}"
+  host="${host,,}"
+  while [[ "${host}" == *"." ]]; do
+    host="${host%.}"
+  done
+  printf '%s\n' "${host}"
+}
+
+mdns_host_key() {
+  local host
+  host="$(mdns_normalize_host "$1")"
+  if [ -z "${host}" ]; then
+    printf '\n'
+    return 0
+  fi
+
+  if [ -n "${MDNS_HOST_DOMAIN}" ]; then
+    local suffix=".${MDNS_HOST_DOMAIN}"
+    if [[ "${host}" == *"${suffix}" ]]; then
+      host="${host%${suffix}}"
+    fi
+  fi
+
+  if [[ "${host}" == *.local ]]; then
+    host="${host%.local}"
+  fi
+
+  printf '%s\n' "${host}"
+}
+
+mdns_hosts_match() {
+  local lhs rhs
+  lhs="$(mdns_normalize_host "$1")"
+  rhs="$(mdns_normalize_host "$2")"
+  if [ -n "${lhs}" ] && [ "${lhs}" = "${rhs}" ]; then
+    return 0
+  fi
+
+  local lhs_key rhs_key
+  lhs_key="$(mdns_host_key "$1")"
+  rhs_key="$(mdns_host_key "$2")"
+  [ "${lhs_key}" = "${rhs_key}" ]
+}
+
 AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${CLUSTER}-${ENVIRONMENT}.service}"
 AVAHI_ROLE=""
 BOOTSTRAP_PUBLISH_PID=""
-BOOTSTRAP_PUBLISH_LOG=""
+BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish.log"
 CLAIMED_SERVER_HOST=""
 
 run_privileged() {
@@ -247,9 +305,8 @@ stop_bootstrap_publisher() {
     wait "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
     BOOTSTRAP_PUBLISH_PID=""
     if [ -n "${BOOTSTRAP_PUBLISH_LOG:-}" ] && [ -f "${BOOTSTRAP_PUBLISH_LOG}" ]; then
-      rm -f "${BOOTSTRAP_PUBLISH_LOG}" || true
+      : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
     fi
-    BOOTSTRAP_PUBLISH_LOG=""
   fi
 }
 
@@ -277,44 +334,42 @@ start_bootstrap_publisher() {
     return 0
   fi
 
-  local publish_name
-  publish_name="$(service_instance_name bootstrap "${HN}")"
+  local instance
+  instance="k3s-${CLUSTER}-${ENVIRONMENT}@${MDNS_HOST_RAW}"
 
-  local log_file
-  if log_file=$(mktemp -t sugarkube-avahi-publish.XXXXXX 2>/dev/null); then
-    BOOTSTRAP_PUBLISH_LOG="${log_file}"
-  else
-    BOOTSTRAP_PUBLISH_LOG="/tmp/sugarkube-avahi-publish.log"
-    log_file="${BOOTSTRAP_PUBLISH_LOG}"
+  local publish_log="${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish.log}"
+  if ! : >"${publish_log}" 2>/dev/null; then
+    publish_log="/tmp/sugar-publish.log"
+    : >"${publish_log}" 2>/dev/null || true
   fi
+  BOOTSTRAP_PUBLISH_LOG="${publish_log}"
 
-  avahi-publish-service \
-    "${publish_name}" \
+  avahi-publish-service -H "${MDNS_HOST_RAW}" \
+    "${instance}" \
     "_https._tcp" \
     6443 \
     "k3s=1" \
     "cluster=${CLUSTER}" \
     "env=${ENVIRONMENT}" \
     "role=bootstrap" \
-    "leader=${MDNS_HOST}" \
+    "leader=${MDNS_HOST_RAW}" \
+    "phase=bootstrap" \
     "state=pending" \
-    >"${log_file}" 2>&1 &
+    >"${publish_log}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
 
   sleep 1
   if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
-    if [ -s "${log_file}" ]; then
+    if [ -s "${publish_log}" ]; then
       while IFS= read -r line; do
         log "bootstrap publisher error: ${line}"
-      done <"${log_file}"
+      done <"${publish_log}"
     fi
-    rm -f "${log_file}" >/dev/null 2>&1 || true
     BOOTSTRAP_PUBLISH_PID=""
-    BOOTSTRAP_PUBLISH_LOG=""
     return 1
   fi
 
-  log "avahi-publish-service advertising bootstrap as ${MDNS_HOST} (pid ${BOOTSTRAP_PUBLISH_PID})"
+  log "avahi-publish-service advertising bootstrap as ${MDNS_HOST_RAW} (pid ${BOOTSTRAP_PUBLISH_PID})"
   return 0
 }
 
@@ -438,24 +493,34 @@ ensure_self_mdns_advertisement() {
 
   local attempts="${MDNS_SELF_CHECK_ATTEMPTS}"
   local delay="${MDNS_SELF_CHECK_DELAY}"
-  local attempt
+  local attempt host
   for attempt in $(seq 1 "${attempts}"); do
     mapfile -t hosts < <(run_avahi_query "${query_mode}" || true)
     if [ "${#hosts[@]}" -gt 0 ]; then
-      if printf '%s\n' "${hosts[@]}" | grep -Fxq "${MDNS_HOST}"; then
-        log "Confirmed Avahi reports ${role} advertisement for ${MDNS_HOST} (attempt ${attempt}/${attempts})."
-        return 0
-      fi
+      for host in "${hosts[@]}"; do
+        if mdns_hosts_match "${host}" "${MDNS_HOST_RAW}"; then
+          log "Confirmed Avahi reports ${role} advertisement for ${MDNS_HOST_RAW} (attempt ${attempt}/${attempts})."
+          return 0
+        fi
+      done
     fi
 
     if [ "${attempt}" -lt "${attempts}" ]; then
-      log "Avahi has not reported ${role} advertisement for ${MDNS_HOST} yet (attempt ${attempt}/${attempts}); retrying in ${delay}s."
+      log "phase=self-check host=${MDNS_HOST_RAW} attempt=${attempt}/${attempts}; retrying in ${delay}s."
       sleep "${delay}"
     fi
   done
 
-  log "Avahi did not report ${role} advertisement for ${MDNS_HOST} after ${attempts} attempts."
+  log "Avahi did not report ${role} advertisement for ${MDNS_HOST_RAW} after ${attempts} attempts."
   return 1
+}
+
+bootstrap_self_check() {
+  local role="$1"
+  if [ "${SKIP_MDNS_SELF_CHECK}" != "1" ]; then
+    sleep 1
+  fi
+  ensure_self_mdns_advertisement "${role}"
 }
 
 count_servers() {
@@ -618,13 +683,13 @@ publish_api_service() {
 publish_bootstrap_service() {
   log "Advertising bootstrap attempt for ${CLUSTER}/${ENVIRONMENT} via Avahi"
   start_bootstrap_publisher || true
-  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST}" "state=pending"
-  ensure_self_mdns_advertisement bootstrap
+  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
+  bootstrap_self_check bootstrap
 }
 
 claim_bootstrap_leadership() {
   if ! publish_bootstrap_service; then
-    log "Unable to confirm bootstrap advertisement for ${MDNS_HOST}; aborting to avoid split brain"
+    log "Unable to confirm bootstrap advertisement for ${MDNS_HOST_RAW}; aborting to avoid split brain"
     exit 1
   fi
   sleep "${DISCOVERY_WAIT_SECS}"
@@ -645,10 +710,10 @@ claim_bootstrap_leadership() {
       log "Bootstrap leadership attempt ${attempt}/${DISCOVERY_ATTEMPTS}: no candidates discovered"
     else
       leader="$(printf '%s\n' "${candidates[@]}" | sort | head -n1)"
-      if [ "${leader}" = "${MDNS_HOST}" ]; then
+      if mdns_hosts_match "${leader}" "${MDNS_HOST_RAW}"; then
         consecutive=$((consecutive + 1))
         if [ "${consecutive}" -ge 3 ]; then
-          log "Confirmed bootstrap leadership as ${MDNS_HOST}"
+          log "Confirmed bootstrap leadership as ${MDNS_HOST_RAW}"
           return 0
         fi
       else
@@ -659,7 +724,7 @@ claim_bootstrap_leadership() {
     fi
     sleep "${DISCOVERY_WAIT_SECS}"
   done
-  log "No stable bootstrap leader observed; proceeding as ${MDNS_HOST}"
+  log "No stable bootstrap leader observed; proceeding as ${MDNS_HOST_RAW}"
   return 0
 }
 

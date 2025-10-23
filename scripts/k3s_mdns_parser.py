@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from mdns_helpers import _norm_host
+
 
 _SERVICE_NAME_RE = re.compile(
     r"^k3s API (?P<cluster>[^/]+)/(?P<environment>\S+)"
@@ -177,7 +179,8 @@ def parse_mdns_records(
         if txt.get("role") == "bootstrap" and "leader" not in txt:
             txt["leader"] = host
 
-        key = (host, txt.get("role", ""))
+        host_key = _norm_host(host)
+        key = (host_key, txt.get("role", ""))
 
         record = MdnsRecord(
             host=host,
