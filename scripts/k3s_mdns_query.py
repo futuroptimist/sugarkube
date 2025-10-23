@@ -17,7 +17,15 @@ def _service_type(cluster: str, environment: str) -> str:
     return f"_k3s-{cluster}-{environment}._tcp"
 
 
-def _build_command(mode: str, cluster: str, environment: str) -> List[str]:
+def _service_types(cluster: str, environment: str) -> List[str]:
+    types = [_service_type(cluster, environment)]
+    legacy = "_https._tcp"
+    if legacy not in types:
+        types.append(legacy)
+    return types
+
+
+def _build_command(mode: str, service_type: str) -> List[str]:
     command = [
         "avahi-browse",
         "--parsable",
@@ -26,18 +34,17 @@ def _build_command(mode: str, cluster: str, environment: str) -> List[str]:
     ]
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
-    command.append(_service_type(cluster, environment))
+    command.append(service_type)
     return command
 
 
 def _invoke_avahi(
     mode: str,
-    cluster: str,
-    environment: str,
+    service_type: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
 ) -> subprocess.CompletedProcess[str]:
-    command = _build_command(mode, cluster, environment)
+    command = _build_command(mode, service_type)
     try:
         result = runner(
             command,
@@ -80,14 +87,17 @@ def _load_lines_from_avahi(
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
 ) -> Iterable[str]:
-    result = _invoke_avahi(mode, cluster, environment, runner, debug)
-    lines = [line for line in result.stdout.splitlines() if line]
-    if debug is not None and not lines and result.stdout:
-        try:
-            _DUMP_PATH.write_text(result.stdout, encoding="utf-8")
-            debug(f"Wrote browse dump to {_DUMP_PATH}")
-        except OSError:
-            debug("Unable to write browse dump to /tmp")
+    lines: List[str] = []
+    for service_type in _service_types(cluster, environment):
+        result = _invoke_avahi(mode, service_type, runner, debug)
+        new_lines = [line for line in result.stdout.splitlines() if line]
+        if debug is not None and not new_lines and result.stdout:
+            try:
+                _DUMP_PATH.write_text(result.stdout, encoding="utf-8")
+                debug(f"Wrote browse dump to {_DUMP_PATH}")
+            except OSError:
+                debug("Unable to write browse dump to /tmp")
+        lines.extend(new_lines)
     return lines
 
 

@@ -17,15 +17,24 @@ def _sample_server_stdout() -> str:
 def test_query_mdns_keeps_output_when_avahi_errors():
     messages = []
 
+    calls = []
+
     def runner(command, capture_output, text, check):
         assert command[0] == "avahi-browse"
         assert capture_output and text and not check
-        assert command[-1] == "_k3s-sugar-dev._tcp"
+        calls.append(command[-1])
+        if command[-1] == "_k3s-sugar-dev._tcp":
+            return subprocess.CompletedProcess(
+                command,
+                returncode=255,
+                stdout=_sample_server_stdout(),
+                stderr="Failed to resolve",
+            )
         return subprocess.CompletedProcess(
             command,
-            returncode=255,
-            stdout=_sample_server_stdout(),
-            stderr="Failed to resolve",
+            returncode=0,
+            stdout="",
+            stderr="",
         )
 
     results = query_mdns(
@@ -38,6 +47,44 @@ def test_query_mdns_keeps_output_when_avahi_errors():
 
     assert results == ["host0.local"]
     assert any("255" in msg for msg in messages)
+    assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
+
+
+def test_query_mdns_queries_legacy_service_type_when_needed():
+    legacy_stdout = (
+        "=;eth0;IPv4;k3s API sugar/dev [server] on host0;_https._tcp;local;host0.local;"
+        "192.168.1.50;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+    )
+
+    calls = []
+
+    def runner(command, capture_output, text, check):
+        assert command[0] == "avahi-browse"
+        assert capture_output and text and not check
+        calls.append(command[-1])
+        if command[-1] == "_https._tcp":
+            return subprocess.CompletedProcess(
+                command,
+                returncode=0,
+                stdout=legacy_stdout,
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    results = query_mdns(
+        "server-first",
+        "sugar",
+        "dev",
+        runner=runner,
+    )
+
+    assert results == ["host0.local"]
+    assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
 
 
 def test_query_mdns_bootstrap_leaders_uses_txt_leader(tmp_path):
