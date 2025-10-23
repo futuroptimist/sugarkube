@@ -79,6 +79,31 @@ remove_file() {
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
 
+cleanup_dynamic_mdns() {
+  local helper
+  helper="$(dirname "${BASH_SOURCE[0]}")/cleanup_mdns_publishers.sh"
+  if [ "${DRY_RUN}" = "1" ]; then
+    printf 'DRY_RUN=1: would run %s\n' "${helper}"
+    append_summary "cleanup-mdns:dry-run"
+    return 0
+  fi
+  if [ ! -x "${helper}" ]; then
+    printf 'Cleanup helper %s not found or not executable; skipping dynamic publisher cleanup\n' "${helper}" >&2
+    append_summary "cleanup-mdns:missing"
+    return 0
+  fi
+  if bash "${helper}"; then
+    append_summary "cleanup-mdns:executed"
+    printf 'removed-dynamic: _k3s-%s-%s._tcp\n' "${CLUSTER}" "${ENVIRONMENT}"
+  else
+    rc=$?
+    printf 'cleanup_mdns_publishers.sh exited with %s\n' "${rc}" >&2
+    append_summary "cleanup-mdns:failed"
+  fi
+}
+
+cleanup_dynamic_mdns
+
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then
     echo "DRY_RUN=1: would reload avahi-daemon"

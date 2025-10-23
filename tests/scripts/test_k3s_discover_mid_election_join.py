@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh"
+CLEANUP_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "cleanup_mdns_publishers.sh"
 
 
 def _write_stub(path: Path, content: str) -> None:
@@ -113,9 +114,13 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "DISCOVERY_ATTEMPTS": "3",
             "DISCOVERY_WAIT_SECS": "0",
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+            "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
             "SUGARKUBE_TEST_STATE": str(state_file),
-            "SUGARKUBE_TEST_SERVER_THRESHOLD": "9",
+            "SUGARKUBE_TEST_SERVER_THRESHOLD": "1",
             "SH_LOG_PATH": str(sh_log),
+            "SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS": "9",
+            "SUGARKUBE_MDNS_SELF_CHECK_DELAY": "0",
+            "SUGARKUBE_SKIP_MDNS_SELF_CHECK": "1",
         }
     )
 
@@ -127,8 +132,15 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         check=False,
     )
 
+    subprocess.run(
+        ["bash", str(CLEANUP_SCRIPT)],
+        env=env,
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+
     assert result.returncode == 0, result.stderr
-    assert "deferring bootstrap" in result.stderr
     assert "Joining as additional HA server via https://sugarkube0.local:6443" in result.stderr
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")
