@@ -67,6 +67,19 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     return txt
 
 
+def _txt_is_richer(existing: Dict[str, str], new: Dict[str, str]) -> bool:
+    """Return True when ``new`` contains more information than ``existing``."""
+
+    if len(new) > len(existing):
+        return True
+
+    for key, value in new.items():
+        if value and not existing.get(key):
+            return True
+
+    return False
+
+
 def parse_mdns_records(
     lines: Iterable[str], cluster: str, environment: str
 ) -> List[MdnsRecord]:
@@ -168,7 +181,16 @@ def parse_mdns_records(
             candidates[key] = record
             continue
 
+        replace = False
+
         if existing.protocol == "IPv6" and protocol == "IPv4":
+            replace = True
+        elif address and not existing.address:
+            replace = True
+        elif _txt_is_richer(existing.txt, txt):
+            replace = True
+
+        if replace:
             candidates[key] = record
 
     return list(candidates.values())

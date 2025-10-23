@@ -37,3 +37,41 @@ def test_parse_unresolved_bootstrap_uses_service_name():
     assert record.txt.get("role") == "bootstrap"
     assert record.txt.get("leader") == "host2.local"
     assert record.port == 6443
+
+
+def test_resolved_record_replaces_unresolved_placeholder():
+    lines = [
+        "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local",
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host4;_https._tcp;local;"
+            "host4.local;192.168.1.14;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+            "txt=role=bootstrap;txt=leader=leader0.local"
+        ),
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.address == "192.168.1.14"
+    assert record.txt.get("leader") == "leader0.local"
+
+
+def test_record_updates_when_txt_richer():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;_https._tcp;local;"
+            "host5.local;192.168.1.15;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
+        ),
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [server] on host5;_https._tcp;local;"
+            "host5.local;192.168.1.15;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=extra=1"
+        ),
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.txt.get("extra") == "1"
