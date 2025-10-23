@@ -17,10 +17,19 @@ up env='dev': prereqs
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
+    WLAN_DISABLED=0
+    trap $'if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && [ "$WLAN_DISABLED" = "1" ]; then\n  sudo -E bash scripts/toggle_wlan.sh --restore || true\n  WLAN_DISABLED=0\nfi' EXIT INT TERM
+
     "{{ scripts_dir }}/check_memory_cgroup.sh"
+
+    # Preflight network/mDNS configuration
+    if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then sudo -E bash scripts/configure_avahi.sh; fi
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then WLAN_DISABLED=1; sudo -E bash scripts/toggle_wlan.sh --down; fi
+    if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then sudo -E bash scripts/configure_k3s_node_ip.sh; fi
 
     # Proceed with discovery/join for subsequent nodes
     sudo -E bash scripts/k3s-discover.sh
+    if [ "$WLAN_DISABLED" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --restore || true; WLAN_DISABLED=0; fi
 
 prereqs:
     sudo apt-get update
@@ -31,6 +40,21 @@ prereqs:
 status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
+
+mdns-harden:
+    sudo -E bash scripts/configure_avahi.sh
+
+node-ip-dropin:
+    sudo -E bash scripts/configure_k3s_node_ip.sh
+
+wlan-down:
+    sudo -E bash scripts/toggle_wlan.sh --down
+
+wlan-up:
+    sudo -E bash scripts/toggle_wlan.sh --restore
+
+mdns-reset:
+    sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
 kubeconfig env='dev':
     mkdir -p ~/.kube

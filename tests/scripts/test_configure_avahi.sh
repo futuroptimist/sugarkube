@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+CONF_PATH="${TMP_DIR}/avahi-daemon.conf"
+LOG_DIR="${TMP_DIR}/logs"
+
+cat <<'CONF' >"${CONF_PATH}"
+# Sample Avahi configuration
+[publish]
+# Placeholder section to ensure additional sections remain untouched
+publish-addresses=yes
+
+[server]
+allow-interfaces=eth1
+use-ipv4=no
+use-ipv6=yes
+CONF
+
+ENV_VARS=(
+  "SUGARKUBE_MDNS_INTERFACE=eth0"
+  "SUGARKUBE_MDNS_IPV4_ONLY=1"
+  "AVAHI_CONF_PATH=${CONF_PATH}"
+  "SUGARKUBE_LOG_DIR=${LOG_DIR}"
+  "SYSTEMCTL_BIN="
+)
+
+( export "${ENV_VARS[@]}"; bash "${REPO_ROOT}/scripts/configure_avahi.sh" )
+
+if ! grep -q '^allow-interfaces=eth0$' "${CONF_PATH}"; then
+  echo "allow-interfaces was not updated" >&2
+  exit 1
+fi
+
+if ! grep -q '^use-ipv4=yes$' "${CONF_PATH}"; then
+  echo "use-ipv4 was not forced to yes" >&2
+  exit 1
+fi
+
+if ! grep -q '^use-ipv6=no$' "${CONF_PATH}"; then
+  echo "use-ipv6 was not forced to no" >&2
+  exit 1
+fi
+
+if [ ! -f "${CONF_PATH}.bak" ]; then
+  echo "Backup was not created" >&2
+  exit 1
+fi
+
+SECOND_COPY="${TMP_DIR}/avahi-second.conf"
+cp "${CONF_PATH}" "${SECOND_COPY}"
+
+( export "${ENV_VARS[@]}"; bash "${REPO_ROOT}/scripts/configure_avahi.sh" )
+
+if ! cmp -s "${CONF_PATH}" "${SECOND_COPY}"; then
+  echo "Configuration changed on second run" >&2
+  exit 1
+fi
+
+echo "configure_avahi.sh idempotency test passed"
