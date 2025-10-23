@@ -3,9 +3,9 @@ set -euo pipefail
 
 LOG_DIR="${SUGARKUBE_LOG_DIR:-/var/log/sugarkube}"
 LOG_FILE="${LOG_DIR}/toggle_wlan.log"
-RUN_DIR="${SUGARKUBE_RUN_DIR:-/run/sugarkube}"
+RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
 WLAN_IFACE="${SUGARKUBE_WLAN_INTERFACE:-wlan0}"
-GUARD_FILE="${RUN_DIR}/wlan-disabled"
+GUARD_FILE="${RUNTIME_DIR}/wlan-disabled"
 
 log() {
   local ts
@@ -19,17 +19,18 @@ interface_exists() {
 }
 
 bring_down() {
+  mkdir -p "${RUNTIME_DIR}"
   if ! interface_exists; then
     log "Interface ${WLAN_IFACE} not present; skipping disable"
     return 0
   fi
-  mkdir -p "${RUN_DIR}"
   if [ -f "${GUARD_FILE}" ]; then
     log "Guard ${GUARD_FILE} already present; ${WLAN_IFACE} assumed down"
   fi
   log "Bringing ${WLAN_IFACE} down"
   ip link set "${WLAN_IFACE}" down || log "Failed to bring ${WLAN_IFACE} down"
   : >"${GUARD_FILE}"
+  log "Guard ${GUARD_FILE} written"
 }
 
 restore() {
@@ -43,11 +44,11 @@ restore() {
     return 0
   fi
   log "Restoring ${WLAN_IFACE}"
-  ip link set "${WLAN_IFACE}" up || {
-    log "Failed to bring ${WLAN_IFACE} up";
-    return 1;
-  }
+  if ! ip link set "${WLAN_IFACE}" up; then
+    log "Failed to bring ${WLAN_IFACE} up"
+  fi
   rm -f "${GUARD_FILE}"
+  log "Guard ${GUARD_FILE} removed"
 }
 
 usage() {
