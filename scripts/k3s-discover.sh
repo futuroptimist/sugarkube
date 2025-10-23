@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+
+if [ "${EUID}" -eq 0 ]; then
+  SUDO_CMD="${SUGARKUBE_SUDO_BIN:-}"
+else
+  if [ "${ALLOW_NON_ROOT}" = "1" ]; then
+    SUDO_CMD="${SUGARKUBE_SUDO_BIN:-}"
+  else
+    SUDO_CMD="${SUGARKUBE_SUDO_BIN:-sudo}"
+  fi
+fi
+
+if [ -n "${SUDO_CMD:-}" ]; then
+  if ! command -v "${SUDO_CMD%% *}" >/dev/null 2>&1; then
+    if [ "${ALLOW_NON_ROOT}" = "1" ]; then
+      SUDO_CMD=""
+    else
+      echo "${SUDO_CMD%% *} command not found; run as root or set ALLOW_NON_ROOT=1" >&2
+      exit 1
+    fi
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -n "${PYTHONPATH:-}" ]; then
   export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
@@ -25,6 +48,7 @@ BOOT_TOKEN_PRESENT=0
 TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
+TEST_PUBLISH_BOOTSTRAP=0
 declare -a TEST_RENDER_ARGS=()
 
 while [ "$#" -gt 0 ]; do
@@ -51,6 +75,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-wait-loop-only)
       TEST_WAIT_LOOP=1
+      ;;
+    --test-bootstrap-publish)
+      TEST_PUBLISH_BOOTSTRAP=1
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -165,11 +192,64 @@ MDNS_HOST="${HN}.local"
 AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${CLUSTER}-${ENVIRONMENT}.service}"
 AVAHI_ROLE=""
+BOOTSTRAP_PUBLISH_PID=""
+BOOTSTRAP_PUBLISH_LOG=""
+
+run_privileged() {
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" "$@"
+  else
+    "$@"
+  fi
+}
+
+write_privileged_file() {
+  local path="$1"
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" tee "${path}" >/dev/null
+  else
+    cat >"${path}"
+  fi
+}
+
+remove_privileged_file() {
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" rm -f "$1"
+  else
+    rm -f "$1"
+  fi
+}
+
+reload_avahi_daemon() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" systemctl reload avahi-daemon || "${SUDO_CMD}" systemctl restart avahi-daemon
+  else
+    systemctl reload avahi-daemon || systemctl restart avahi-daemon
+  fi
+}
+
+stop_bootstrap_publisher() {
+  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ]; then
+    if kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+      kill "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
+    fi
+    wait "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
+    BOOTSTRAP_PUBLISH_PID=""
+    if [ -n "${BOOTSTRAP_PUBLISH_LOG:-}" ] && [ -f "${BOOTSTRAP_PUBLISH_LOG}" ]; then
+      rm -f "${BOOTSTRAP_PUBLISH_LOG}" || true
+    fi
+    BOOTSTRAP_PUBLISH_LOG=""
+  fi
+}
 
 cleanup_avahi_bootstrap() {
+  stop_bootstrap_publisher
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
-    sudo rm -f "${AVAHI_SERVICE_FILE}" || true
-    sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
+    remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
+    reload_avahi_daemon || true
     AVAHI_ROLE=""
   fi
 }
@@ -178,6 +258,56 @@ trap cleanup_avahi_bootstrap EXIT
 
 log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
+}
+
+start_bootstrap_publisher() {
+  if ! command -v avahi-publish-service >/dev/null 2>&1; then
+    log "avahi-publish-service not available; relying on Avahi service file"
+    return 1
+  fi
+  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local publish_name
+  publish_name="k3s API ${CLUSTER}/${ENVIRONMENT} on ${HN}"
+
+  local log_file
+  if log_file=$(mktemp -t sugarkube-avahi-publish.XXXXXX 2>/dev/null); then
+    BOOTSTRAP_PUBLISH_LOG="${log_file}"
+  else
+    BOOTSTRAP_PUBLISH_LOG="/tmp/sugarkube-avahi-publish.log"
+    log_file="${BOOTSTRAP_PUBLISH_LOG}"
+  fi
+
+  avahi-publish-service \
+    "${publish_name}" \
+    "_https._tcp" \
+    6443 \
+    "k3s=1" \
+    "cluster=${CLUSTER}" \
+    "env=${ENVIRONMENT}" \
+    "role=bootstrap" \
+    "leader=${MDNS_HOST}" \
+    "state=pending" \
+    >"${log_file}" 2>&1 &
+  BOOTSTRAP_PUBLISH_PID=$!
+
+  sleep 1
+  if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+    if [ -s "${log_file}" ]; then
+      while IFS= read -r line; do
+        log "bootstrap publisher error: ${line}"
+      done <"${log_file}"
+    fi
+    rm -f "${log_file}" >/dev/null 2>&1 || true
+    BOOTSTRAP_PUBLISH_PID=""
+    BOOTSTRAP_PUBLISH_LOG=""
+    return 1
+  fi
+
+  log "avahi-publish-service advertising bootstrap as ${MDNS_HOST} (pid ${BOOTSTRAP_PUBLISH_PID})"
+  return 0
 }
 
 xml_escape() {
@@ -397,35 +527,40 @@ publish_avahi_service() {
   local port="6443"
   if [ "$#" -gt 0 ]; then port="$1"; shift; fi
 
-  sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
-  sudo rm -f "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  if [ "${role}" != "bootstrap" ]; then
+    stop_bootstrap_publisher
+  fi
+
+  run_privileged install -d -m 755 "${AVAHI_SERVICE_DIR}"
+  if [ -f "${AVAHI_SERVICE_DIR}/k3s-https.service" ]; then
+    remove_privileged_file "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  fi
 
   local xml
   xml="$(render_avahi_service_xml "${role}" "${port}" "$@")"
-  printf '%s\n' "${xml}" | sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null
+  printf '%s\n' "${xml}" | write_privileged_file "${AVAHI_SERVICE_FILE}"
 
-  if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
-  fi
+  reload_avahi_daemon || true
   AVAHI_ROLE="${role}"
 }
 
 publish_api_service() {
-  sudo install -d -m 755 "${AVAHI_SERVICE_DIR}"
-  sudo rm -f "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  run_privileged install -d -m 755 "${AVAHI_SERVICE_DIR}"
+  if [ -f "${AVAHI_SERVICE_DIR}/k3s-https.service" ]; then
+    remove_privileged_file "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  fi
 
   local xml
   xml="$(render_avahi_service_xml server 6443)"
-  printf '%s\n' "${xml}" | sudo tee "${AVAHI_SERVICE_FILE}" >/dev/null
+  printf '%s\n' "${xml}" | write_privileged_file "${AVAHI_SERVICE_FILE}"
 
-  if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl reload avahi-daemon || sudo systemctl restart avahi-daemon
-  fi
+  reload_avahi_daemon || true
   AVAHI_ROLE="server"
 }
 
 publish_bootstrap_service() {
   log "Advertising bootstrap attempt for ${CLUSTER}/${ENVIRONMENT} via Avahi"
+  start_bootstrap_publisher || true
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST}" "state=pending"
 }
 
@@ -576,6 +711,11 @@ if [ "${TEST_WAIT_LOOP:-0}" -eq 1 ]; then
   exit 0
 fi
 
+if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
+  publish_bootstrap_service
+  exit 0
+fi
+
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
 server_host="$(discover_server_host || true)"
 
@@ -643,6 +783,6 @@ else
 fi
 
 if [ -f /etc/rancher/k3s/k3s.yaml ]; then
-  sudo mkdir -p /root/.kube
-  sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+  run_privileged mkdir -p /root/.kube
+  run_privileged cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
 fi
