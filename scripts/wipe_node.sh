@@ -3,6 +3,7 @@ set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 current_uid="${EUID:-0}"
 if [ "${ALLOW_NON_ROOT}" != "1" ] && [ "${current_uid}" -ne 0 ]; then
@@ -62,22 +63,47 @@ AVAHI_GLOB="/etc/avahi/services/k3s-*.service"
 
 remove_file() {
   local target="$1"
-    if [ "${DRY_RUN}" = "1" ]; then
-      printf 'DRY_RUN=1: would remove %s\n' "${target}"
-      append_summary "rm:${target}"
-      return 0
-    fi
-    if [ -e "${target}" ] || [ "${target}" != "${AVAHI_GLOB}" ]; then
-      rm -f "${target}" || true
-      append_summary "removed:${target}"
-    else
-      rm -f "${target}" || true
-      append_summary "removed:${target}"
-    fi
-  }
+  if [ "${DRY_RUN}" = "1" ]; then
+    printf 'DRY_RUN=1: would remove %s\n' "${target}"
+    append_summary "rm:${target}"
+    return 0
+  fi
+  if [ -e "${target}" ] || [ "${target}" != "${AVAHI_GLOB}" ]; then
+    rm -f "${target}" || true
+    append_summary "removed:${target}"
+  else
+    rm -f "${target}" || true
+    append_summary "removed:${target}"
+  fi
+}
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+cleanup_dynamic_publishers() {
+  local svc
+  svc="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+  if [ "${DRY_RUN}" = "1" ]; then
+    printf 'DRY_RUN=1: would remove dynamic publishers for %s\n' "${svc}"
+    append_summary "cleanup-mdns:${svc}"
+    return 0
+  fi
+  local -a env_cmd=(
+    "SUGARKUBE_CLUSTER=${CLUSTER}"
+    "SUGARKUBE_ENV=${ENVIRONMENT}"
+  )
+  if [ -n "${SUGARKUBE_RUNTIME_DIR:-}" ]; then
+    env_cmd+=("SUGARKUBE_RUNTIME_DIR=${SUGARKUBE_RUNTIME_DIR}")
+  fi
+  if env "${env_cmd[@]}" bash "${SCRIPT_DIR}/cleanup_mdns_publishers.sh"; then
+    printf 'removed-dynamic: %s\n' "${svc}"
+    append_summary "removed-dynamic:${svc}"
+  else
+    append_summary "cleanup-mdns:failed"
+  fi
+}
+
+cleanup_dynamic_publishers
 
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then
