@@ -3,9 +3,9 @@ set -euo pipefail
 
 LOG_DIR="${SUGARKUBE_LOG_DIR:-/var/log/sugarkube}"
 LOG_FILE="${LOG_DIR}/toggle_wlan.log"
-RUN_DIR="${SUGARKUBE_RUN_DIR:-/run/sugarkube}"
+RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
 WLAN_IFACE="${SUGARKUBE_WLAN_INTERFACE:-wlan0}"
-GUARD_FILE="${RUN_DIR}/wlan-disabled"
+GUARD_FILE="${RUNTIME_DIR}/wlan-disabled"
 
 log() {
   local ts
@@ -23,7 +23,7 @@ bring_down() {
     log "Interface ${WLAN_IFACE} not present; skipping disable"
     return 0
   fi
-  mkdir -p "${RUN_DIR}"
+  mkdir -p "${RUNTIME_DIR}"
   if [ -f "${GUARD_FILE}" ]; then
     log "Guard ${GUARD_FILE} already present; ${WLAN_IFACE} assumed down"
   fi
