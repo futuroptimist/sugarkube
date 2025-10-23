@@ -46,6 +46,20 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-60}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-1}"
 
+RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
+mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+for phase in bootstrap server; do
+  pid_file="${RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-${phase}.pid"
+  if [ -f "${pid_file}" ]; then
+    pid_value="$(cat "${pid_file}" 2>/dev/null || true)"
+    if [ -n "${pid_value}" ] && ! kill -0 "${pid_value}" 2>/dev/null; then
+      rm -f "${pid_file}" || true
+    fi
+  fi
+done
+unset pid_file
+unset pid_value
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
@@ -265,6 +279,7 @@ stop_bootstrap_publisher() {
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
   fi
+  remove_pid_file bootstrap
 }
 
 stop_server_publisher() {
@@ -276,6 +291,7 @@ stop_server_publisher() {
     SERVER_PUBLISH_PID=""
     SERVER_PUBLISH_LOG=""
   fi
+  remove_pid_file server
 }
 
 cleanup_avahi_publishers() {
@@ -320,12 +336,32 @@ log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
+pid_file_path() {
+  local phase="$1"
+  printf '%s/mdns-%s-%s-%s.pid' "${RUNTIME_DIR}" "${CLUSTER}" "${ENVIRONMENT}" "${phase}"
+}
+
+write_pid_file() {
+  local phase="$1"
+  local pid="$2"
+  if [ -z "${phase}" ] || [ -z "${pid}" ]; then
+    return 0
+  fi
+  printf '%s\n' "${pid}" >"$(pid_file_path "${phase}")" 2>/dev/null || true
+}
+
+remove_pid_file() {
+  local phase="$1"
+  rm -f "$(pid_file_path "${phase}")" 2>/dev/null || true
+}
+
 start_bootstrap_publisher() {
   if ! command -v avahi-publish-service >/dev/null 2>&1; then
     log "avahi-publish-service not available; relying on Avahi service file"
     return 1
   fi
   if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
+    write_pid_file bootstrap "${BOOTSTRAP_PUBLISH_PID}"
     return 0
   fi
 
@@ -349,6 +385,7 @@ start_bootstrap_publisher() {
     "state=pending" \
     >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
+  write_pid_file bootstrap "${BOOTSTRAP_PUBLISH_PID}"
 
   sleep 1
   if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -357,6 +394,7 @@ start_bootstrap_publisher() {
         log "bootstrap publisher error: ${line}"
       done <"${BOOTSTRAP_PUBLISH_LOG}"
     fi
+    remove_pid_file bootstrap
     BOOTSTRAP_PUBLISH_PID=""
     BOOTSTRAP_PUBLISH_LOG=""
     return 1
@@ -372,6 +410,7 @@ start_server_publisher() {
     return 1
   fi
   if [ -n "${SERVER_PUBLISH_PID:-}" ] && kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
+    write_pid_file server "${SERVER_PUBLISH_PID}"
     return 0
   fi
 
@@ -394,6 +433,7 @@ start_server_publisher() {
     "phase=server" \
     >"${SERVER_PUBLISH_LOG}" 2>&1 &
   SERVER_PUBLISH_PID=$!
+  write_pid_file server "${SERVER_PUBLISH_PID}"
 
   sleep 1
   if ! kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -402,6 +442,7 @@ start_server_publisher() {
         log "server publisher error: ${line}"
       done <"${SERVER_PUBLISH_LOG}"
     fi
+    remove_pid_file server
     SERVER_PUBLISH_PID=""
     SERVER_PUBLISH_LOG=""
     return 1

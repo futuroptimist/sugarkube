@@ -4,6 +4,9 @@ set -euo pipefail
 DRY_RUN="${DRY_RUN:-0}"
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLEANUP_HELPER="${SCRIPT_DIR}/cleanup_mdns_publishers.sh"
+
 current_uid="${EUID:-0}"
 if [ "${ALLOW_NON_ROOT}" != "1" ] && [ "${current_uid}" -ne 0 ]; then
   echo "scripts/wipe_node.sh must be run as root (set ALLOW_NON_ROOT=1 to override)." >&2
@@ -22,6 +25,25 @@ declare -a SUMMARY=()
 
 append_summary() {
     SUMMARY+=("$1")
+}
+
+cleanup_dynamic_publishers() {
+  local service="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+  if [ "${DRY_RUN}" = "1" ]; then
+    printf 'DRY_RUN=1: would run %s\n' "${CLEANUP_HELPER}"
+    append_summary "cleanup-mdns:dry-run"
+    return 0
+  fi
+
+  if [ -x "${CLEANUP_HELPER}" ]; then
+    "${CLEANUP_HELPER}"
+    append_summary "cleanup-mdns:executed"
+    append_summary "removed-dynamic:${service}"
+    printf 'removed-dynamic: %s\n' "${service}"
+  else
+    printf 'Cleanup helper %s not found; skipping dynamic publisher cleanup\n' "${CLEANUP_HELPER}" >&2
+    append_summary "cleanup-mdns:missing"
+  fi
 }
 
 run_uninstaller() {
@@ -78,6 +100,8 @@ remove_file() {
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+cleanup_dynamic_publishers
 
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then
