@@ -19,8 +19,14 @@ up env='dev': prereqs
 
     "{{ scripts_dir }}/check_memory_cgroup.sh"
 
+    # Preflight network/mDNS configuration
+    if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then sudo -E bash scripts/configure_avahi.sh; fi
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --down; fi
+    if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then sudo -E bash scripts/configure_k3s_node_ip.sh; fi
+
     # Proceed with discovery/join for subsequent nodes
     sudo -E bash scripts/k3s-discover.sh
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --restore || true; fi
 
 prereqs:
     sudo apt-get update
@@ -31,6 +37,33 @@ prereqs:
 status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
+
+mdns-harden:
+    sudo -E bash scripts/configure_avahi.sh
+
+node-ip-dropin:
+    sudo -E bash scripts/configure_k3s_node_ip.sh
+
+wlan-down:
+    sudo -E bash scripts/toggle_wlan.sh --down
+
+wlan-up:
+    sudo -E bash scripts/toggle_wlan.sh --restore
+
+mdns-reset:
+    sudo bash -lc '
+      set -e
+      if [ -f /etc/avahi/avahi-daemon.conf.bak ]; then
+        cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf
+        systemctl restart avahi-daemon
+      fi
+      for SVC in k3s.service k3s-agent.service; do
+        if systemctl list-unit-files | grep -q "^$SVC"; then
+          rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true
+        fi
+      done
+      systemctl daemon-reload
+    '
 
 kubeconfig env='dev':
     mkdir -p ~/.kube
