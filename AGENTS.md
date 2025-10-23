@@ -41,6 +41,11 @@ The name **sugarkube** has two meanings:
 - **When:** a script or workflow fails repeatedly
 - **Does:** add a JSON record under `outages/` using `schema.json` describing the
   root cause and resolution.
+- **Date source:** determine the current UTC date with a reliable tool before
+  creating or renaming outage files. Prefer a trusted time API such as
+  `https://worldtimeapi.org/api/timezone/Etc/UTC` (fallback: `date -u`). Ensure
+  filenames and the `date` field agree with `git blame` and the guard in
+  `tests/test_outage_dates.py`.
 
 ### STL generation
 STL meshes are not stored in the repository. The `scad-to-stl.yml` workflow renders
