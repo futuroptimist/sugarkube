@@ -66,7 +66,7 @@ def test_publish_avahi_service_creates_valid_xml(avahi_env):
 
     name = root.find("name")
     assert name is not None
-    assert name.text == "k3s API sugar/dev on %h"
+    assert name.text == "k3s API sugar/dev [server] on %h"
 
     port = root.find(".//port")
     assert port is not None

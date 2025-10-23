@@ -270,7 +270,7 @@ start_bootstrap_publisher() {
   fi
 
   local publish_name
-  publish_name="k3s API ${CLUSTER}/${ENVIRONMENT} on ${HN}"
+  publish_name="$(service_instance_name bootstrap "${HN}")"
 
   local log_file
   if log_file=$(mktemp -t sugarkube-avahi-publish.XXXXXX 2>/dev/null); then
@@ -319,10 +319,17 @@ print(html.escape(sys.argv[1], quote=True))
 PY
 }
 
+service_instance_name() {
+  local role="$1"
+  local host="${2:-%h}"
+  printf 'k3s API %s/%s [%s] on %s' "${CLUSTER}" "${ENVIRONMENT}" "${role}" "${host}"
+}
+
 render_avahi_service_xml() {
   local role="$1"; shift
   local port="${1:-6443}"; shift
-  local service_name="k3s API ${CLUSTER}/${ENVIRONMENT} on %h"
+  local service_name
+  service_name="$(service_instance_name "${role}" "%h")"
 
   # Escape user-provided bits to keep valid XML
   local xml_service_name xml_port xml_cluster xml_env xml_role

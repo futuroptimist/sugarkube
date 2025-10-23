@@ -45,7 +45,7 @@ def test_render_api_service_generates_expected_xml(tmp_path):
 
     name = root.find("name")
     assert name is not None
-    assert name.text == "k3s API sugar/dev on %h"
+    assert name.text == "k3s API sugar/dev [server] on %h"
 
     txt_records = [elem.text for elem in root.findall(".//txt-record")]
     assert set(txt_records) == {

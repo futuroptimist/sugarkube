@@ -9,11 +9,11 @@ from k3s_mdns_parser import parse_mdns_records  # noqa: E402
 def test_parse_bootstrap_and_server_ipv4_preferred():
     # Simulated avahi-browse --parsable --resolve lines (IPv4 and IPv6 for same host+role)
     lines = [
-        "=;eth0;IPv6;k3s API sugar/dev on host0;_https._tcp;local;host0.local;fe80::1;6443;"
+        "=;eth0;IPv6;k3s API sugar/dev [bootstrap] on host0;_https._tcp;local;host0.local;fe80::1;6443;"
         "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local",
-        "=;eth0;IPv4;k3s API sugar/dev on host0;_https._tcp;local;host0.local;192.168.1.10;6443;"
+        "=;eth0;IPv4;k3s API sugar/dev [bootstrap] on host0;_https._tcp;local;host0.local;192.168.1.10;6443;"
         "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=leader=host0.local",
-        "=;eth0;IPv4;k3s API sugar/dev on host1;_https._tcp;local;host1.local;192.168.1.11;6443;"
+        "=;eth0;IPv4;k3s API sugar/dev [server] on host1;_https._tcp;local;host1.local;192.168.1.11;6443;"
         "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server",
     ]
     recs = parse_mdns_records(lines, "sugar", "dev")
@@ -24,3 +24,16 @@ def test_parse_bootstrap_and_server_ipv4_preferred():
     boot = [r for r in recs if r.txt.get("role") == "bootstrap"][0]
     assert boot.address == "192.168.1.10"
     assert boot.port == 6443
+
+
+def test_parse_unresolved_bootstrap_uses_service_name():
+    lines = [
+        "+;eth0;IPv4;k3s API sugar/dev [bootstrap] on host2;_https._tcp;local",
+    ]
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.host == "host2.local"
+    assert record.txt.get("role") == "bootstrap"
+    assert record.txt.get("leader") == "host2.local"
+    assert record.port == 6443
