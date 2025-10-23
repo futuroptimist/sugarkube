@@ -39,6 +39,7 @@ kubeconfig env='dev':
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 wipe:
+    sudo -E bash scripts/cleanup_mdns_publishers.sh
     @sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
 
 scripts_dir := justfile_directory() + "/scripts"
