@@ -148,6 +148,8 @@ def parse_mdns_records(
     """
 
     candidates: Dict[Tuple[str, str], MdnsRecord] = {}
+    expected_cluster = cluster.strip().lower()
+    expected_env = environment.strip().lower()
 
     for raw in lines:
         if not _is_candidate_line(raw):
@@ -180,6 +182,15 @@ def parse_mdns_records(
         if type_environment and not service_env:
             service_env = type_environment
 
+        if service_cluster:
+            service_cluster = service_cluster.strip()
+        if service_env:
+            service_env = service_env.strip()
+        if type_cluster:
+            type_cluster = type_cluster.strip()
+        if type_environment:
+            type_environment = type_environment.strip()
+
         txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
         if "leader" in txt:
             txt["leader"] = _normalize_host(txt["leader"], domain)
@@ -192,8 +203,17 @@ def parse_mdns_records(
 
         cluster_value = txt.get("cluster") or service_cluster or type_cluster
         environment_value = txt.get("env") or service_env or type_environment
-        if cluster_value != cluster or environment_value != environment:
+        cluster_value_norm = cluster_value.strip().lower() if cluster_value else ""
+        environment_value_norm = (
+            environment_value.strip().lower() if environment_value else ""
+        )
+        if cluster_value_norm != expected_cluster or environment_value_norm != expected_env:
             continue
+
+        if cluster:
+            txt["cluster"] = cluster
+        if environment:
+            txt["env"] = environment
 
         host = ""
         if len(fields) > 6 and fields[6]:
@@ -227,10 +247,6 @@ def parse_mdns_records(
             txt["role"] = role
         if "k3s" not in txt:
             txt["k3s"] = "1"
-        if "cluster" not in txt and (service_cluster or type_cluster):
-            txt["cluster"] = service_cluster or type_cluster  # type: ignore[assignment]
-        if "env" not in txt and (service_env or type_environment):
-            txt["env"] = service_env or type_environment  # type: ignore[assignment]
         if txt.get("role") == "bootstrap" and "leader" not in txt:
             txt["leader"] = host
 

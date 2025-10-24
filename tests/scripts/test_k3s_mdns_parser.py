@@ -131,3 +131,20 @@ def test_parse_normalises_txt_whitespace_and_missing_host_falls_back_to_leader()
     assert record.txt.get("leader") == "LeaderHost.local"
     assert record.txt.get("phase") == "server"
     assert record.txt.get("role") == "server"
+
+
+def test_parse_accepts_uppercase_cluster_and_env_values():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s-sugar-dev@host7 (server);_k3s-sugar-dev._tcp;local;"
+            "host7.local;192.168.1.31;6443;"
+            "txt=k3s=1;txt=cluster=SUGAR ;txt=ENV=DEV ;txt=role=server;txt=phase=server"
+        )
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.txt.get("cluster") == "sugar"
+    assert record.txt.get("env") == "dev"
+    assert record.txt.get("role") == "server"
