@@ -365,6 +365,104 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
     assert f"ADDR:{hostname}.local 192.0.2.55" in log_contents
 
 
+def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+    count_path = tmp_path / "browse.count"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
+        "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"COUNT_FILE='{count_path}'\n"
+            "service_type=\"${@: -1}\"\n"
+            "if [ \"${service_type}\" != \"_k3s-sugar-dev._tcp\" ]; then\n"
+            "  exit 0\n"
+            "fi\n"
+            "count=0\n"
+            "if [ -f \"${COUNT_FILE}\" ]; then\n"
+            "  count=$(cat \"${COUNT_FILE}\")\n"
+            "fi\n"
+            "count=$((count + 1))\n"
+            "echo \"${count}\" > \"${COUNT_FILE}\"\n"
+            "if [ \"${count}\" -lt 3 ]; then\n"
+            "  exit 0\n"
+            "fi\n"
+            "cat <<'EOF'\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
+            "192.0.2.55;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending\n"
+            "EOF\n"
+        ),
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+        "SUGARKUBE_CLUSTER": "sugar",
+        "SUGARKUBE_ENV": "dev",
+        "ALLOW_NON_ROOT": "1",
+        "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+        "SUGARKUBE_TOKEN": "dummy",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "5",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0.05",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+    })
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "START:" in log_contents
+    assert "PIDFILE_OK:bootstrap" in log_contents
+    assert "TERM" in log_contents
+
+    browse_count = int(count_path.read_text(encoding="utf-8"))
+    assert browse_count >= 3
+
+    expected = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "bootstrap advertisement confirmed."
+    )
+    assert expected in result.stderr
+
 def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
     hostname = _hostname_short()
     bin_dir = tmp_path / "bin"
