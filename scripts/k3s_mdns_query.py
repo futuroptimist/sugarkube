@@ -218,6 +218,7 @@ def query_mdns(
 
     if fixture_path:
         lines = _load_lines_from_fixture(fixture_path)
+        records = parse_mdns_records(lines, cluster, environment)
     else:
         lines = _load_lines_from_avahi(
             mode,
@@ -227,8 +228,9 @@ def query_mdns(
             debug,
             timeout,
         )
-        if not lines:
-            lines = _load_lines_from_avahi(
+        records = parse_mdns_records(lines, cluster, environment)
+        if not records:
+            fallback_lines = _load_lines_from_avahi(
                 mode,
                 cluster,
                 environment,
@@ -237,8 +239,9 @@ def query_mdns(
                 timeout,
                 resolve=False,
             )
-
-    records = parse_mdns_records(lines, cluster, environment)
+            if fallback_lines:
+                lines = fallback_lines
+                records = parse_mdns_records(lines, cluster, environment)
 
     if debug is not None and not records and lines and not fixture_path:
         try:

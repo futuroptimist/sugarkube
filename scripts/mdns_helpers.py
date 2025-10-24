@@ -97,12 +97,20 @@ def _collect_mdns_records(
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
         lines.extend(_browse_service_type(service_type, runner, resolve=True))
-    if not lines:
-        for service_type in _service_types(cluster, environment):
-            lines.extend(_browse_service_type(service_type, runner, resolve=False))
-        if not lines:
-            return []
-    return parse_mdns_records(lines, cluster, environment)
+
+    records = parse_mdns_records(lines, cluster, environment)
+    if records:
+        return records
+
+    fallback_lines: List[str] = []
+    for service_type in _service_types(cluster, environment):
+        fallback_lines.extend(
+            _browse_service_type(service_type, runner, resolve=False)
+        )
+    if not fallback_lines:
+        return []
+
+    return parse_mdns_records(fallback_lines, cluster, environment)
 
 
 def ensure_self_ad_is_visible(
