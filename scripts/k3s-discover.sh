@@ -727,6 +727,78 @@ ensure_self_mdns_advertisement() {
   return 1
 }
 
+publisher_log_confirms_advertisement() {
+  local role="$1"
+  local log_file="$2"
+  local pid="$3"
+
+  if [ -z "${log_file}" ] || [ ! -s "${log_file}" ]; then
+    return 1
+  fi
+  if [ -z "${pid}" ] || ! kill -0 "${pid}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local observed=""
+  if ! observed="$(
+    ROLE="${role}" EXPECTED="${MDNS_HOST_RAW}" LOG_FILE="${log_file}" python3 <<'PY'
+import os
+import pathlib
+import re
+import sys
+
+role = os.environ.get("ROLE", "").strip().lower()
+expected = os.environ.get("EXPECTED", "")
+log_path = pathlib.Path(os.environ.get("LOG_FILE", ""))
+
+if not log_path.exists():
+    raise SystemExit(1)
+
+expected_norm = expected.strip().rstrip('.').lower()
+expected_base = expected_norm[:-6] if expected_norm.endswith('.local') else expected_norm
+
+pattern = re.compile(r"Established under name '([^']+)'", re.IGNORECASE)
+
+def normalise(host: str) -> tuple[str, str]:
+    host = host.strip().rstrip('.')
+    lower = host.lower()
+    base = lower[:-6] if lower.endswith('.local') else lower
+    return lower, base
+
+content = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+for line in content:
+    match = pattern.search(line)
+    if not match:
+        continue
+    name = match.group(1)
+    name_lower = name.lower()
+    if role and not name_lower.endswith(f"({role})"):
+        continue
+    if '@' not in name:
+        continue
+    host_part = name.split('@', 1)[1]
+    if '(' in host_part:
+        host_part = host_part.rsplit('(', 1)[0]
+    host_part = host_part.strip()
+    host_norm, host_base = normalise(host_part)
+    if host_norm == expected_norm or host_base == expected_base:
+        print(host_part)
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  )"; then
+    return 1
+  fi
+
+  if [ -n "${observed}" ]; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
+  else
+    MDNS_LAST_OBSERVED="${MDNS_HOST_RAW}"
+  fi
+  return 0
+}
+
 count_servers() {
   local count
   count="$(run_avahi_query server-count | head -n1)"
@@ -896,6 +968,16 @@ publish_api_service() {
     return 0
   fi
 
+  if publisher_log_confirms_advertisement server "${SERVER_PUBLISH_LOG}" "${SERVER_PUBLISH_PID}"; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "WARN: server advertisement for ${MDNS_HOST_RAW} still not visible via browse."
+    log "Continuing because Avahi reports it established (observed=${observed})."
+    SERVER_PUBLISH_PERSIST=1
+    stop_bootstrap_publisher
+    return 0
+  fi
+
   log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
@@ -928,6 +1010,14 @@ publish_bootstrap_service() {
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
     log "Bootstrap advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    return 0
+  fi
+
+  if publisher_log_confirms_advertisement bootstrap "${BOOTSTRAP_PUBLISH_LOG}" "${BOOTSTRAP_PUBLISH_PID}"; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "WARN: bootstrap advertisement for ${MDNS_HOST_RAW} still not visible via browse."
+    log "Continuing because Avahi reports it established (observed=${observed})."
     return 0
   fi
 

@@ -788,3 +788,79 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
 
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     assert not service_file.exists()
+
+
+def test_bootstrap_publish_uses_publisher_log_when_browse_silent(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"echo \"START:$*\" >> '{log_path}'\n"
+            f"host=\"${{SUGARKUBE_MDNS_HOST:-{hostname}.local}}\"\n"
+            "printf \"Established under name 'k3s-sugar-dev@%s (bootstrap)'\\n\" \"${host}\"\n"
+            f"printf \"ESTABLISHED:%s\\n\" \"${{host}}\" >> '{log_path}'\n"
+            f"trap 'echo TERM >> \"{log_path}\"; exit 0' TERM INT\n"
+            "while true; do sleep 1; done\n"
+        ),
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+            "ALLOW_NON_ROOT": "1",
+            "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+            "SUGARKUBE_TOKEN": "dummy",
+            "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+            "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+            "SUGARKUBE_MDNS_HOST": f"{hostname}.local",
+            "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+            "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.returncode == 0
+    stderr = result.stderr
+    assert "still not visible via browse." in stderr
+    assert "Continuing because Avahi reports it established" in stderr
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "ESTABLISHED:" in log_contents

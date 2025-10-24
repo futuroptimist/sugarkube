@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-publisher-fallback",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Avahi sometimes accepts the publish request but the local browse never shows the advert, causing the bootstrap guard to abort even though the publisher reported success.",
+  "resolution": "Detect established Avahi publishers via their log output when browse checks fail twice, proceed with a warning, and extend bootstrap publish tests to cover the new fallback.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py",
+    "tests/scripts/test_just_up.py"
+  ]
+}

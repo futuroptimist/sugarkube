@@ -142,6 +142,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         if [[ "$*" == *"phase=server"* ]]; then
           phase="server"
         fi
+        local_host="${{SUGARKUBE_MDNS_HOST:-pi0.local}}"
         touch "${{run_dir}}/publish-${{phase}}"
         count_file="${{run_dir}}/publish-${{phase}}-count"
         current=0
@@ -150,6 +151,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         fi
         current=$((current + 1))
         printf '%s\n' "${{current}}" >"${{count_file}}"
+        printf "Established under name 'k3s-sugar-dev@%s (%s)'\n" "${{local_host}}" "${{phase}}"
         if [ "$phase" = "server" ]; then
           touch "${{run_dir}}/server-ready"
         fi
@@ -223,6 +225,8 @@ def test_just_up_dev_two_nodes(tmp_path):
             fail_bootstrap_once and phase == "bootstrap" and publish_bootstrap_count <= 1
         )
 
+        suppress_bootstrap = os.environ.get("JUST_UP_SUPPRESS_BOOTSTRAP_BROWSE") == "1"
+
         if (run_dir / "publish-server").exists() and not fail_local_server:
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
@@ -237,6 +241,7 @@ def test_just_up_dev_two_nodes(tmp_path):
             phase == "bootstrap"
             and (run_dir / "publish-bootstrap").exists()
             and not fail_local_bootstrap
+            and not suppress_bootstrap
         ):
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
@@ -355,6 +360,7 @@ def test_just_up_dev_two_nodes(tmp_path):
             "JUST_UP_TEST_PHASE": "bootstrap",
             "JUST_UP_BOOTSTRAP_ADDR": "",
             "JUST_UP_FAIL_BOOTSTRAP_ONCE": "1",
+            "JUST_UP_SUPPRESS_BOOTSTRAP_BROWSE": "1",
         }
     )
 
@@ -366,12 +372,9 @@ def test_just_up_dev_two_nodes(tmp_path):
         capture_output=True,
     )
     assert result_bootstrap.returncode == 0, result_bootstrap.stderr
-    assert "advertisement omitted address" in result_bootstrap.stderr
     assert "WARN: bootstrap advertisement for pi0.local not visible" in result_bootstrap.stderr
-    assert (
-        "Bootstrap advertisement observed for pi0.local after restarting Avahi publishers."
-        in result_bootstrap.stderr
-    )
+    assert "WARN: bootstrap advertisement for pi0.local still not visible via browse." in result_bootstrap.stderr
+    assert "Continuing because Avahi reports it established (observed=" in result_bootstrap.stderr
 
     bootstrap_count_path = run_dir / "publish-bootstrap-count"
     if bootstrap_count_path.exists():
