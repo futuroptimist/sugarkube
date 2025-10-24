@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-address-omission",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "The new bootstrap self-check insisted on observing our own mDNS record with the exact IPv4 address published via avahi-publish-address. On physical Pis the Avahi browse sometimes surfaces the bootstrap TXT payload without an IPv4 value for several seconds, so the helper never saw a matching address and aborted to avoid split brain.",
+  "resolution": "Teach mdns_helpers.ensure_self_ad_is_visible to accept matching hostnames when Avahi omits the address field, emit a warning for that degraded path, and extend the just up two-node e2e to cover bootstrap records that are missing IPv4 so CI exercises the regression fix.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/mdns_helpers.py",
+    "tests/scripts/test_mdns_helpers.py",
+    "tests/scripts/test_just_up.py"
+  ]
+}
