@@ -142,6 +142,14 @@ def test_just_up_dev_two_nodes(tmp_path):
         if [[ "$*" == *"phase=server"* ]]; then
           phase="server"
         fi
+        service_name=""
+        for arg in "$@"; do
+          case "$arg" in
+            k3s-*-*@*)
+              service_name="$arg"
+              ;;
+          esac
+        done
         touch "${{run_dir}}/publish-${{phase}}"
         count_file="${{run_dir}}/publish-${{phase}}-count"
         current=0
@@ -152,6 +160,9 @@ def test_just_up_dev_two_nodes(tmp_path):
         printf '%s\n' "${{current}}" >"${{count_file}}"
         if [ "$phase" = "server" ]; then
           touch "${{run_dir}}/server-ready"
+        fi
+        if [ -n "${{service_name}}" ]; then
+          echo "Established under name '${{service_name}}'" >&2
         fi
         trap 'echo "avahi-publish-service:TERM:${{phase}}" >> "{log_path}"; exit 0' TERM INT
         while true; do sleep 1; done
@@ -223,7 +234,12 @@ def test_just_up_dev_two_nodes(tmp_path):
             fail_bootstrap_once and phase == "bootstrap" and publish_bootstrap_count <= 1
         )
 
-        if (run_dir / "publish-server").exists() and not fail_local_server:
+        suppress_bootstrap = os.environ.get("JUST_UP_SUPPRESS_BOOTSTRAP_BROWSE") == "1"
+        suppress_server = os.environ.get("JUST_UP_SUPPRESS_SERVER_BROWSE") == "1"
+
+        if (
+            run_dir / "publish-server"
+        ).exists() and not fail_local_server and not (suppress_server and phase == "join"):
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
                 + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
@@ -237,6 +253,7 @@ def test_just_up_dev_two_nodes(tmp_path):
             phase == "bootstrap"
             and (run_dir / "publish-bootstrap").exists()
             and not fail_local_bootstrap
+            and not suppress_bootstrap
         ):
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
@@ -404,6 +421,33 @@ def test_just_up_dev_two_nodes(tmp_path):
     assert (
         "Server advertisement observed for pi1.local after restarting Avahi publishers."
         in result_join.stderr
+    )
+
+    env_bootstrap_assume = env_common.copy()
+    env_bootstrap_assume.update(
+        {
+            "SUGARKUBE_MDNS_HOST": "pi2.local",
+            "JUST_UP_TEST_PHASE": "bootstrap",
+            "JUST_UP_SUPPRESS_BOOTSTRAP_BROWSE": "1",
+            "JUST_UP_BOOTSTRAP_ADDR": "",
+        }
+    )
+
+    result_assume = subprocess.run(
+        ["just", "up", "dev"],
+        cwd=REPO_ROOT,
+        env=env_bootstrap_assume,
+        text=True,
+        capture_output=True,
+    )
+    assert result_assume.returncode == 0, result_assume.stderr
+    assert (
+        "WARN: bootstrap advertisement for pi2.local not visible via mDNS; Avahi publish logs report service establishment; assuming success."
+        in result_assume.stderr
+    )
+    assert (
+        "Bootstrap advertisement assumed visible for pi2.local based on Avahi publish logs."
+        in result_assume.stderr
     )
 
     log_contents = log_path.read_text(encoding="utf-8")

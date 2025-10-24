@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-avahi-logs-fallback",
+  "date": "2025-10-24",
+  "component": "k3s-discover mDNS self-check",
+  "rootCause": "Local avahi-browse queries returned no records even though avahi-publish-service reported establishing the bootstrap advertisement, so the bootstrap self-check aborted every time.",
+  "resolution": "Treat successful avahi publish logs as a fallback confirmation when mDNS queries stay empty after retries, logging a warning before proceeding and covering the regression in tests.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "tests/scripts/test_just_up.py::test_just_up_dev_two_nodes"
+  ]
+}

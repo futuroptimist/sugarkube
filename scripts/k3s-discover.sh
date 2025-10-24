@@ -727,6 +727,43 @@ ensure_self_mdns_advertisement() {
   return 1
 }
 
+assume_mdns_visibility_from_logs() {
+  local role="$1"
+  local log_file=""
+  case "${role}" in
+    bootstrap)
+      log_file="${BOOTSTRAP_PUBLISH_LOG:-}"
+      ;;
+    server)
+      log_file="${SERVER_PUBLISH_LOG:-}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if [ -z "${log_file}" ] || [ ! -s "${log_file}" ]; then
+    return 1
+  fi
+
+  local expected_name
+  expected_name="$(service_instance_name "${role}" "${MDNS_HOST_RAW}")"
+
+  if grep -Fq "Established under name '${expected_name}'" "${log_file}"; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
+    log "WARN: ${role} advertisement for ${MDNS_HOST_RAW} not visible via mDNS; Avahi publish logs report service establishment; assuming success."
+    return 0
+  fi
+
+  if grep -Fq "Established under name" "${log_file}" && grep -Fq "${MDNS_HOST_RAW}" "${log_file}"; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
+    log "WARN: ${role} advertisement for ${MDNS_HOST_RAW} not visible via mDNS; Avahi publish logs report service establishment; assuming success."
+    return 0
+  fi
+
+  return 1
+}
+
 count_servers() {
   local count
   count="$(run_avahi_query server-count | head -n1)"
@@ -896,6 +933,16 @@ publish_api_service() {
     return 0
   fi
 
+  if assume_mdns_visibility_from_logs server; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement assumed via Avahi publish logs."
+    log "Server advertisement assumed visible for ${MDNS_HOST_RAW} based on Avahi publish logs."
+    SERVER_PUBLISH_PERSIST=1
+    stop_bootstrap_publisher
+    return 0
+  fi
+
   log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
@@ -928,6 +975,14 @@ publish_bootstrap_service() {
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
     log "Bootstrap advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    return 0
+  fi
+
+  if assume_mdns_visibility_from_logs bootstrap; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement assumed via Avahi publish logs."
+    log "Bootstrap advertisement assumed visible for ${MDNS_HOST_RAW} based on Avahi publish logs."
     return 0
   fi
 
