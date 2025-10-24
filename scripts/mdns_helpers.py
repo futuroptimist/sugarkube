@@ -141,12 +141,18 @@ def ensure_self_ad_is_visible(
                 record_addr = record.address.strip()
                 txt_addr = txt.get("a", "").strip()
                 txt_addr_alt = txt.get("addr", "").strip()
-                if expect_addr in {record_addr, txt_addr, txt_addr_alt}:
+                observed_addrs = [
+                    addr for addr in (record_addr, txt_addr, txt_addr_alt) if addr
+                ]
+                if expect_addr in observed_addrs:
                     return record.host
 
-                if fallback_candidate is None:
-                    fallback_candidate = record.host
-                    fallback_addr = record_addr or txt_addr or txt_addr_alt or None
+                if fallback_candidate is None and observed_addrs:
+                    has_ipv4 = any("." in addr and ":" not in addr for addr in observed_addrs)
+                    has_ipv6 = any(":" in addr for addr in observed_addrs)
+                    if has_ipv6 and not has_ipv4:
+                        fallback_candidate = record.host
+                        fallback_addr = observed_addrs[0]
                 continue
 
             return record.host
