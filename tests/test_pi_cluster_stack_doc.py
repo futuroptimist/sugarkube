@@ -22,3 +22,16 @@ def test_stack_doc_links_carrier_reference() -> None:
 
     text = DOC_PATH.read_text(encoding="utf-8")
     assert "pi_cluster_carrier.md" in text, "Stack doc should cross-link the carrier field guide"
+
+
+def test_stack_doc_deliverables_marked_shipped() -> None:
+    """Deliverables section should no longer be labeled as future work."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    lowered = text.lower()
+    assert (
+        "## 12. deliverables checklist (for future implementation)" not in lowered
+    ), "Stack doc still frames deliverables as future implementation"
+    assert (
+        "## 12. Deliverables checklist" in text
+    ), "Stack doc should keep the deliverables checklist header"
