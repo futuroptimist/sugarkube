@@ -336,10 +336,10 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "cat <<'EOF'\n"
-            "=;eth0;IPv4;k3s-sugar-dev@HostMixed.LOCAL (bootstrap);_k3s-sugar-dev._tcp;local.;"
-            "hostmixed.local.;192.0.2.10;6443;"
+            "=;eth0;IPv4;k3s-sugar-dev@HostMixed.LOCAL.local (bootstrap);_k3s-sugar-dev._tcp;local.;"
+            "hostmixed.local.local.;192.0.2.10;6443;"
             "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
-            "txt=leader=hostmixed.local.;txt=phase=bootstrap;txt=state=pending\n"
+            "txt=leader=hostmixed.local.local.;txt=phase=bootstrap;txt=state=pending\n"
             "EOF\n"
         ),
         encoding="utf-8",
