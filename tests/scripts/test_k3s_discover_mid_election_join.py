@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -123,6 +124,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "DISCOVERY_ATTEMPTS": "3",
             "DISCOVERY_WAIT_SECS": "0",
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+            "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
             "SUGARKUBE_TEST_STATE": str(state_file),
             "SUGARKUBE_TEST_SERVER_THRESHOLD": "9",
             "SH_LOG_PATH": str(sh_log),
@@ -147,5 +149,19 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
 
     publish_contents = publish_log.read_text(encoding="utf-8")
     assert "START:" in publish_contents
-    assert "TERM" in publish_contents
+
+    runtime_dir = tmp_path / "run"
+    server_pid_file = runtime_dir / "mdns-sugar-dev-server.pid"
+    assert server_pid_file.exists()
+
+    server_pid = int(server_pid_file.read_text(encoding="utf-8").strip())
+    assert server_pid > 0
+
+    try:
+        os.kill(server_pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    finally:
+        # Ensure the stub terminates to avoid leaking background publishers between tests.
+        server_pid_file.unlink(missing_ok=True)
 
