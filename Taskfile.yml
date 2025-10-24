@@ -41,6 +41,15 @@ tasks:
       - |
         {{.SUGARKUBE_CLI}} docs start-here{{if ne .START_HERE_ARGS ""}} {{.START_HERE_ARGS}}{{end}}
 
+  start-here:
+    desc: Mirror the Start Here helper exposed by the Makefile and justfile.
+    vars:
+      START_HERE_ARGS: '{{default "" .START_HERE_ARGS}}'
+    cmds:
+      - task: docs:start-here
+        vars:
+          START_HERE_ARGS: '{{.START_HERE_ARGS}}'
+
   doctor:
     desc: Run the sugarkube doctor workflow without memorising the script path.
     dir: '{{.REPO_ROOT}}'

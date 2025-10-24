@@ -46,7 +46,8 @@ docs apply to you.
 ## 15-minute tour
 
 > [!TIP]
-> Run `just start-here`, `make start-here`, or `task docs:start-here` to print this handbook directly in
+> Run `just start-here`, `make start-here`, `task start-here`, or `task docs:start-here`
+> to print this handbook directly in
 > your terminal.
 > Both wrappers call the unified CLI (`sugarkube docs start-here`) so updates to the
 > subcommand automatically flow through task runners.
