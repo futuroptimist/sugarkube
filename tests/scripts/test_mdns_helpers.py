@@ -220,3 +220,28 @@ def test_ensure_self_ad_is_visible_handles_uppercase_phase_and_leader_host_fallb
     )
 
     assert observed == "host0.local"
+
+
+def test_ensure_self_ad_is_visible_accepts_uppercase_cluster_and_env():
+    record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=SUGAR ;txt=ENV=DEV ;txt=role=server;"
+        "txt=phase=server\n"
+    )
+
+    runner = _make_runner({"_k3s-sugar-dev._tcp": record})
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="server",
+        expect_addr="192.0.2.10",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed == "host0.local"

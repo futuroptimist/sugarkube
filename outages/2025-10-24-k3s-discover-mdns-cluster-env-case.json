@@ -1,0 +1,15 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-cluster-env-case",
+  "date": "2025-10-24",
+  "component": "scripts/k3s_mdns_parser.py",
+  "rootCause": "Uppercase cluster/env TXT values from Avahi made the parser skip our advert, aborting self-check.",
+  "resolution": "Casefold cluster/env TXT values, normalise metadata, and add uppercase regression coverage.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s_mdns_parser.py",
+    "scripts/mdns_helpers.py",
+    "tests/scripts/test_k3s_mdns_parser.py",
+    "tests/scripts/test_mdns_helpers.py",
+    "tests/scripts/test_just_up.py"
+  ]
+}

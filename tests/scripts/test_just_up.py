@@ -213,7 +213,7 @@ def test_just_up_dev_two_nodes(tmp_path):
                 + "_k3s-sugar-dev._tcp;local;" + primary + ";"
                 + server_addr
                 + ";6443;"
-                + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
+                + "txt=k3s=1;txt=cluster=SUGAR ;txt=ENV=DEV ;txt=role=server;"
                 + "txt=leader=" + primary + ";txt=phase=server"
             )
 
