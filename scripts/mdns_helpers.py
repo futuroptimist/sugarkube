@@ -131,8 +131,14 @@ def ensure_self_ad_is_visible(
         records = _collect_mdns_records(cluster, env, runner)
         for record in records:
             txt = record.txt
-            if require_phase is not None and txt.get("phase") != require_phase:
-                continue
+
+            phase = txt.get("phase")
+            role = txt.get("role")
+            if require_phase is not None:
+                phase_matches = phase == require_phase
+                role_matches = role == require_phase if role else False
+                if not (phase_matches or (phase is None and role_matches)):
+                    continue
             host_match = _same_host(record.host, expected_norm)
             leader_match = _same_host(txt.get("leader", ""), expected_norm)
             if not (host_match or leader_match):

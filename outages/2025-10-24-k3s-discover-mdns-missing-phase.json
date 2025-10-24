@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-missing-phase",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Self-checks skipped our mDNS ad when Avahi omitted phase TXT key and bootstrap discovery timed out.",
+  "resolution": "Relax mdns_helpers.ensure_self_ad_is_visible to accept role matches without phase and add tests.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/mdns_helpers.py",
+    "tests/scripts/test_mdns_helpers.py"
+  ]
+}
