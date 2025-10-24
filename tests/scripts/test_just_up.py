@@ -187,7 +187,9 @@ def test_just_up_dev_two_nodes(tmp_path):
         bootstrap_addr = os.environ.get("JUST_UP_BOOTSTRAP_ADDR", "192.0.2.10")
         server_addr = os.environ.get("JUST_UP_SERVER_ADDR", "192.0.2.10")
 
-        if (run_dir / "publish-server").exists():
+        suppress_server = os.environ.get("JUST_UP_SUPPRESS_SERVER_BROWSE") == "1"
+
+        if (run_dir / "publish-server").exists() and not suppress_server:
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
                 + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
@@ -332,6 +334,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         {
             "SUGARKUBE_MDNS_HOST": "pi1.local",
             "JUST_UP_TEST_PHASE": "join",
+            "JUST_UP_SUPPRESS_SERVER_BROWSE": "1",
         }
     )
 
@@ -344,6 +347,7 @@ def test_just_up_dev_two_nodes(tmp_path):
     )
     assert result_join.returncode == 0, result_join.stderr
     assert "Joining as additional HA server" in result_join.stderr
+    assert "WARN: server advertisement not yet visible via browse" in result_join.stderr
 
     log_contents = log_path.read_text(encoding="utf-8")
     assert "avahi-publish-service:" in log_contents

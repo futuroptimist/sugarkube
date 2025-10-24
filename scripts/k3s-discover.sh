@@ -366,6 +366,55 @@ cleanup_avahi_publishers() {
 
 trap cleanup_avahi_publishers EXIT
 
+extract_publish_host_from_log() {
+  local log_path="$1"
+  local role="$2"
+
+  if [ -z "${log_path:-}" ] || [ ! -s "${log_path}" ]; then
+    return 1
+  fi
+
+  python3 - "${log_path}" "${role}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+log_path = Path(sys.argv[1])
+role = (sys.argv[2] or "").strip().lower()
+
+try:
+    text = log_path.read_text(encoding="utf-8")
+except OSError:
+    raise SystemExit(1)
+
+pattern = re.compile(r"Established under name '([^']+)'")
+
+for line in text.splitlines():
+    match = pattern.search(line)
+    if not match:
+        continue
+    name = match.group(1)
+    name_lower = name.lower()
+    if role and f"({role})" not in name_lower:
+        continue
+    host = ""
+    if "@" in name:
+        _, host_part = name.split("@", 1)
+        if " (" in host_part:
+            host = host_part.split(" (", 1)[0]
+        else:
+            host = host_part
+    elif " on " in name:
+        host = name.split(" on ", 1)[1]
+    host = host.strip().rstrip('.')
+    if host:
+        print(host)
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
 norm_host() {
   local host="${1:-}"
   while [[ "${host}" == *"." ]]; do
@@ -721,6 +770,24 @@ ensure_self_mdns_advertisement() {
       log "WARN: ${role} advertisement observed from ${observed} without expected addr ${MDNS_ADDR_V4}; continuing."
       return 0
     fi
+  fi
+
+  local publish_log=""
+  case "${role}" in
+    bootstrap)
+      publish_log="${BOOTSTRAP_PUBLISH_LOG:-}"
+      ;;
+    server)
+      publish_log="${SERVER_PUBLISH_LOG:-}"
+      ;;
+  esac
+
+  local observed_status=0
+  observed="$(extract_publish_host_from_log "${publish_log}" "${role}" 2>/dev/null)" || observed_status=$?
+  if [ "${observed_status}" -eq 0 ] && same_host "${observed}" "${MDNS_HOST_RAW}"; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
+    log "WARN: ${role} advertisement not yet visible via browse; trusting avahi-publish-service log for ${observed}."
+    return 0
   fi
 
   log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW} after ${retries} attempts (delay ${delay}s)."

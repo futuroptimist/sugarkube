@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-24-k3s-discover-server-browse-gap",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "The mDNS self-check only trusted avahi-browse output, so when Avahi accepted our server advert but the browse calls never observed it, bootstrap aborted even though the publication succeeded.",
+  "resolution": "Fall back to the avahi-publish-service log when browse results stay empty, record the observed host, and extend the two-node e2e to cover the warning path.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_just_up.py"
+  ]
+}
