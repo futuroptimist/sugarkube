@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-service-type-suffix",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "mDNS self-check skipped adverts when Avahi appended the local domain to the service type, so the parser ignored the server records and discovery aborted.",
+  "resolution": "Normalize service types before extracting the cluster/env slug, cover the regression with parser unit tests, and exercise the domain-suffixed browse output in the two-node e2e flow.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s_mdns_parser.py",
+    "tests/scripts/test_k3s_mdns_parser.py",
+    "tests/scripts/test_just_up.py"
+  ]
+}
