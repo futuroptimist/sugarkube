@@ -1,0 +1,14 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-hostname-address",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Self-check required IPv4 but Avahi reported our host name in the address field, so discovery never confirmed the server advert.",
+  "resolution": "Teach mdns_helpers.ensure_self_ad_is_visible to treat non-IP addresses as host-only fallbacks, surface warnings, and cover the regression with tests.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/mdns_helpers.py",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_mdns_helpers.py",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py"
+  ]
+}
