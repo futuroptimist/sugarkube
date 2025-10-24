@@ -245,3 +245,40 @@ def test_ensure_self_ad_is_visible_accepts_uppercase_cluster_and_env():
     )
 
     assert observed == "host0.local"
+
+
+def test_ensure_self_ad_is_visible_falls_back_without_resolve():
+    unresolved = "+;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local\n"
+
+    calls = []
+
+    def runner(cmd, capture_output=True, text=True, check=False):
+        assert capture_output and text and not check
+        service = cmd[-1]
+        resolve = "--resolve" in cmd
+        calls.append((service, resolve))
+        if service == "_k3s-sugar-dev._tcp" and not resolve:
+            stdout = unresolved
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        expect_addr="192.0.2.10",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed == "host0.local"
+    assert calls == [
+        ("_k3s-sugar-dev._tcp", True),
+        ("_https._tcp", True),
+        ("_k3s-sugar-dev._tcp", False),
+        ("_https._tcp", False),
+    ]

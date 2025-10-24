@@ -1,0 +1,14 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-browse-fallback",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "avahi-browse --resolve returned no records for the local bootstrap advert, so the self-check aborted even though Avahi accepted the publishers.",
+  "resolution": "Fallback to a non-resolved browse when resolve output is empty so we still recognise local adverts, and extend mdns tests.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/mdns_helpers.py",
+    "scripts/k3s_mdns_query.py",
+    "tests/scripts/test_mdns_helpers.py",
+    "tests/scripts/test_k3s_mdns_query.py"
+  ]
+}
