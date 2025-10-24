@@ -915,6 +915,26 @@ publish_bootstrap_service() {
     return 0
   fi
 
+  log "WARN: bootstrap advertisement for ${MDNS_HOST_RAW} not visible; restarting Avahi publishers."
+  stop_bootstrap_publisher
+  stop_address_publisher
+  sleep 1
+
+  start_bootstrap_publisher || true
+  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
+  sleep 1
+  if ensure_self_mdns_advertisement bootstrap; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
+    log "Bootstrap advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    return 0
+  fi
+
+  log "Failed to confirm Avahi bootstrap advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
+  pgrep -a avahi-publish || true
+  sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
+  sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
   log "Unable to confirm bootstrap advertisement for ${MDNS_HOST_RAW}; aborting to avoid split brain"
   return 1
 }

@@ -165,7 +165,7 @@ def parse_mdns_records(
         if service_type == "_https._tcp":
             pass
         elif service_type.startswith("_k3s-") and service_type.endswith("._tcp"):
-            slug = service_type[len("_k3s-") : -len("._tcp")]
+            slug = service_type[len("_k3s-"):-len("._tcp")]
             if "-" in slug:
                 type_cluster, type_environment = slug.rsplit("-", 1)
         else:
