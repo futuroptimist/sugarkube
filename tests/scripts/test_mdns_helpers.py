@@ -21,6 +21,11 @@ def test_same_host_normalises_case_and_trailing_dots():
     assert not _same_host("host-a", "host-b")
 
 
+def test_same_host_accepts_repeated_local_suffix():
+    assert _same_host("Host.LOCAL.local", "host.local")
+    assert _same_host("host.local.local", "HOST")
+
+
 def test_ensure_self_ad_is_visible_filters_by_phase():
     bootstrap_record = (
         "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;"

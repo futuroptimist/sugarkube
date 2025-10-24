@@ -31,8 +31,8 @@ def _norm_host(host: str) -> str:
 
 def _strip_local_suffix(host: str) -> str:
     for suffix in _LOCAL_SUFFIXES:
-        if host.endswith(suffix):
-            return host[: -len(suffix)]
+        while host.endswith(suffix):
+            host = host[: -len(suffix)]
     return host
 
 

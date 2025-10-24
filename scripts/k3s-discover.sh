@@ -374,6 +374,23 @@ norm_host() {
   printf '%s\n' "${host,,}"
 }
 
+strip_local_suffix() {
+  local host="${1:-}"
+  while [[ "${host}" == *.local ]]; do
+    host="${host%.local}"
+  done
+  printf '%s\n' "${host}"
+}
+
+canonical_host() {
+  local host
+  host="$(norm_host "${1:-}")"
+  while [[ "${host}" == *.local.local ]]; do
+    host="${host%.local}"
+  done
+  printf '%s\n' "${host}"
+}
+
 same_host() {
   local left right left_base right_base
   left="$(norm_host "${1:-}")"
@@ -384,8 +401,8 @@ same_host() {
   if [ "${left}" = "${right}" ]; then
     return 0
   fi
-  left_base="${left%'.local'}"
-  right_base="${right%'.local'}"
+  left_base="$(strip_local_suffix "${left}")"
+  right_base="$(strip_local_suffix "${right}")"
   if [ "${left_base}" = "${left}" ] && [ "${right_base}" = "${right}" ]; then
     return 1
   fi
@@ -694,13 +711,13 @@ ensure_self_mdns_advertisement() {
   fi
 
   if observed="$("${mdns_check[@]}")"; then
-    MDNS_LAST_OBSERVED="${observed}"
+    MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
     return 0
   fi
 
   if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
     if observed="$("${mdns_check_base[@]}")"; then
-      MDNS_LAST_OBSERVED="${observed}"
+      MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
       log "WARN: ${role} advertisement observed from ${observed} without expected addr ${MDNS_ADDR_V4}; continuing."
       return 0
     fi
