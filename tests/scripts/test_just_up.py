@@ -142,6 +142,8 @@ def test_just_up_dev_two_nodes(tmp_path):
         if [[ "$*" == *"phase=server"* ]]; then
           phase="server"
         fi
+        local_host="${{SUGARKUBE_MDNS_HOST:-pi0.local}}"
+        echo "Established under name 'k3s-sugar-dev@${{local_host}} (${{phase}})'"
         touch "${{run_dir}}/publish-${{phase}}"
         count_file="${{run_dir}}/publish-${{phase}}-count"
         current=0
@@ -223,7 +225,18 @@ def test_just_up_dev_two_nodes(tmp_path):
             fail_bootstrap_once and phase == "bootstrap" and publish_bootstrap_count <= 1
         )
 
-        if (run_dir / "publish-server").exists() and not fail_local_server:
+        suppress_raw = os.environ.get("JUST_UP_SUPPRESS_LOCAL_MDNS", "")
+        suppress_tokens = {{
+            token.strip().lower() for token in suppress_raw.split(",") if token.strip()
+        }}
+        hide_local_server = "server" in suppress_tokens or "all" in suppress_tokens
+        hide_local_bootstrap = "bootstrap" in suppress_tokens or "all" in suppress_tokens
+
+        if (
+            (run_dir / "publish-server").exists()
+            and not fail_local_server
+            and not hide_local_server
+        ):
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
                 + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
@@ -237,6 +250,7 @@ def test_just_up_dev_two_nodes(tmp_path):
             phase == "bootstrap"
             and (run_dir / "publish-bootstrap").exists()
             and not fail_local_bootstrap
+            and not hide_local_bootstrap
         ):
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
@@ -404,6 +418,32 @@ def test_just_up_dev_two_nodes(tmp_path):
     assert (
         "Server advertisement observed for pi1.local after restarting Avahi publishers."
         in result_join.stderr
+    )
+
+    env_fallback = env_common.copy()
+    env_fallback.update(
+        {
+            "SUGARKUBE_MDNS_HOST": "pi2.local",
+            "JUST_UP_TEST_PHASE": "bootstrap",
+            "JUST_UP_SUPPRESS_LOCAL_MDNS": "bootstrap",
+        }
+    )
+
+    result_fallback = subprocess.run(
+        ["just", "up", "dev"],
+        cwd=REPO_ROOT,
+        env=env_fallback,
+        text=True,
+        capture_output=True,
+    )
+    assert result_fallback.returncode == 0, result_fallback.stderr
+    assert (
+        "WARN: bootstrap advertisement for pi2.local unseen via avahi-browse."
+        in result_fallback.stderr
+    )
+    assert (
+        "WARN: Avahi reported registration; continuing with bootstrap publisher."
+        in result_fallback.stderr
     )
 
     log_contents = log_path.read_text(encoding="utf-8")
