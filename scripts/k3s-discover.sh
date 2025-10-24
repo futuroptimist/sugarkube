@@ -203,7 +203,125 @@ if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
   exit 0
 fi
 
-MDNS_IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
+select_primary_ipv4_from_ip_output() {
+  awk '
+    $3 == "inet" {
+      for (i = 1; i <= NF; ++i) {
+        if ($i == "secondary" || $i == "tentative" || $i == "deprecated") {
+          next
+        }
+      }
+      split($4, addr, "/")
+      if (addr[1] != "") {
+        print addr[1]
+        exit 0
+      }
+    }
+  '
+}
+
+detect_default_route_interface() {
+  if ! command -v ip >/dev/null 2>&1; then
+    return 1
+  fi
+  local route prev token
+  route="$(ip -4 route get 1 2>/dev/null | head -n1 || true)"
+  if [ -z "${route}" ]; then
+    return 1
+  fi
+  prev=""
+  for token in ${route}; do
+    if [ "${prev}" = "dev" ] && [ -n "${token}" ]; then
+      printf '%s\n' "${token}"
+      return 0
+    fi
+    prev="${token}"
+  done
+  return 1
+}
+
+discover_ipv4_for_interface() {
+  local iface="$1"
+  if [ -z "${iface}" ]; then
+    return 1
+  fi
+  if ! command -v ip >/dev/null 2>&1; then
+    return 1
+  fi
+  local output ip
+  output="$(ip -4 -o addr show "${iface}" 2>/dev/null || true)"
+  if [ -z "${output}" ]; then
+    return 1
+  fi
+  ip="$(printf '%s\n' "${output}" | select_primary_ipv4_from_ip_output)"
+  if [ -z "${ip}" ]; then
+    return 1
+  fi
+  printf '%s\n' "${ip}"
+}
+
+auto_detect_mdns_ipv4() {
+  local iface addr output line arg
+  if iface="$(detect_default_route_interface || true)"; then
+    if [ -n "${iface}" ]; then
+      addr="$(discover_ipv4_for_interface "${iface}" || true)"
+      if [ -n "${addr}" ]; then
+        printf '%s %s\n' "${iface}" "${addr}"
+        return 0
+      fi
+    fi
+  fi
+
+  if ! command -v ip >/dev/null 2>&1; then
+    return 1
+  fi
+  output="$(ip -4 -o addr show scope global 2>/dev/null || true)"
+  if [ -z "${output}" ]; then
+    return 1
+  fi
+  while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    set -- ${line}
+    iface="$2"
+    if [ "$3" != "inet" ]; then
+      continue
+    fi
+    addr="$4"
+    if [ -z "${iface}" ] || [ -z "${addr}" ]; then
+      continue
+    fi
+    for arg in "$@"; do
+      case "${arg}" in
+        secondary|tentative|deprecated)
+          continue 2
+          ;;
+      esac
+    done
+    case "${iface}" in
+      lo|lo:*|docker*|veth*|cni*|flannel*|kube-ipvs0|cilium_*|tailscale*|wg*|zt*)
+        continue
+        ;;
+    esac
+    addr="${addr%%/*}"
+    if [ -n "${addr}" ]; then
+      printf '%s %s\n' "${iface}" "${addr}"
+      return 0
+    fi
+  done <<<"${output}"
+  return 1
+}
+
+MDNS_AUTODETECT_LOG=""
+MDNS_IFACE="${SUGARKUBE_MDNS_INTERFACE:-}"
+MDNS_IFACE_FROM_ENV=0
+if [ -n "${MDNS_IFACE}" ]; then
+  MDNS_IFACE_FROM_ENV=1
+else
+  MDNS_IFACE="$(detect_default_route_interface || true)"
+  if [ -z "${MDNS_IFACE}" ]; then
+    MDNS_IFACE="eth0"
+  fi
+fi
 
 HN="$(hostname -s 2>/dev/null || hostname)"
 
@@ -229,13 +347,29 @@ MDNS_HOST="${MDNS_HOST_RAW,,}"
 if [ -n "${SUGARKUBE_MDNS_PUBLISH_ADDR:-}" ]; then
   MDNS_ADDR_V4="${SUGARKUBE_MDNS_PUBLISH_ADDR}"
 else
-  ip_output="$(ip -4 -o addr show "${MDNS_IFACE}" 2>/dev/null || true)"
-  MDNS_ADDR_V4="$(printf '%s\n' "${ip_output}" | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+  MDNS_ADDR_V4="$(discover_ipv4_for_interface "${MDNS_IFACE}" || true)"
+  if [ -n "${MDNS_ADDR_V4}" ] && [ "${MDNS_IFACE_FROM_ENV}" -eq 0 ]; then
+    if [ -z "${MDNS_AUTODETECT_LOG}" ]; then
+      MDNS_AUTODETECT_LOG="Auto-detected IPv4 ${MDNS_ADDR_V4} on ${MDNS_IFACE}"
+    fi
+  elif [ -z "${MDNS_ADDR_V4}" ] && [ "${MDNS_IFACE_FROM_ENV}" -eq 0 ]; then
+    if read -r auto_iface auto_addr <<<"$(auto_detect_mdns_ipv4 || true)"; then
+      if [ -n "${auto_iface}" ] && [ -n "${auto_addr}" ]; then
+        if [ -n "${MDNS_IFACE}" ] && [ "${MDNS_IFACE}" != "${auto_iface}" ]; then
+          MDNS_AUTODETECT_LOG="Auto-detected IPv4 ${auto_addr} on ${auto_iface} after ${MDNS_IFACE} yielded no address"
+        else
+          MDNS_AUTODETECT_LOG="Auto-detected IPv4 ${auto_addr} on ${auto_iface}"
+        fi
+        MDNS_IFACE="${auto_iface}"
+        MDNS_ADDR_V4="${auto_addr}"
+      fi
+    fi
+  fi
 fi
 
 if [ -z "${MDNS_ADDR_V4}" ]; then
   >&2 printf '[sugarkube %s/%s] WARN: no IPv4 found on %s; publishing without -a\n' \
-    "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_IFACE}"
+    "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_IFACE}" 
 fi
 MDNS_SERVICE_NAME="k3s-${CLUSTER}-${ENVIRONMENT}"
 MDNS_SERVICE_TYPE="_${MDNS_SERVICE_NAME}._tcp"
@@ -395,6 +529,10 @@ same_host() {
 log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
+
+if [ -n "${MDNS_AUTODETECT_LOG:-}" ]; then
+  log "${MDNS_AUTODETECT_LOG}"
+fi
 
 start_address_publisher() {
   if [ -z "${MDNS_ADDR_V4:-}" ]; then

@@ -148,11 +148,8 @@ def ensure_self_ad_is_visible(
                     return record.host
 
                 if fallback_candidate is None and observed_addrs:
-                    has_ipv4 = any("." in addr and ":" not in addr for addr in observed_addrs)
-                    has_ipv6 = any(":" in addr for addr in observed_addrs)
-                    if has_ipv6 and not has_ipv4:
-                        fallback_candidate = record.host
-                        fallback_addr = observed_addrs[0]
+                    fallback_candidate = record.host
+                    fallback_addr = observed_addrs[0]
                 continue
 
             return record.host

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import textwrap
 import time
 from pathlib import Path
 
@@ -285,15 +286,11 @@ def test_bootstrap_publish_warns_on_address_mismatch(tmp_path):
     assert "START:" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
-    warning = (
-        f"WARN: bootstrap advertisement observed from {hostname}.local without expected addr "
-        "192.0.2.55; continuing."
-    )
     confirm = (
         f"phase=self-check host={hostname}.local observed={hostname}.local; "
         "bootstrap advertisement confirmed."
     )
-    assert warning in result.stderr
+    assert "WARN: expected IPv4" in result.stderr
     assert confirm in result.stderr
 
 
@@ -446,6 +443,114 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
     assert "-a" not in log_contents
     assert "ADDR:" in log_contents
     assert f"ADDR:{hostname}.local 192.0.2.55" in log_contents
+
+
+def test_bootstrap_publish_autodetects_end0_ipv4(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
+        "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "cat <<'EOF'\n"
+            f"=;end0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
+            "10.0.0.5;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending\n"
+            "EOF\n"
+        ),
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    ip_bin = bin_dir / "ip"
+    ip_bin.write_text(
+        textwrap.dedent(
+            """#!/usr/bin/env bash
+            set -euo pipefail
+            if [ "$#" -ge 4 ] && [ "$1" = "-4" ] && [ "$2" = "route" ] && [ "$3" = "get" ] && [ "$4" = "1" ]; then
+              echo '1.0.0.0 via 0.0.0.0 dev end0 src 10.0.0.5'
+              exit 0
+            fi
+            if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ] && [ "$5" = "eth0" ]; then
+              exit 0
+            fi
+            if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ] && [ "$5" = "end0" ]; then
+              echo '2: end0    inet 10.0.0.5/24 brd 10.0.0.255 scope global end0'
+              exit 0
+            fi
+            if [ "$#" -ge 6 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ] && [ "$5" = "scope" ] && [ "$6" = "global" ]; then
+              echo '2: end0    inet 10.0.0.5/24 brd 10.0.0.255 scope global end0'
+              exit 0
+            fi
+            exit 1
+            """
+        ),
+        encoding="utf-8",
+    )
+    ip_bin.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+        "SUGARKUBE_CLUSTER": "sugar",
+        "SUGARKUBE_ENV": "dev",
+        "ALLOW_NON_ROOT": "1",
+        "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+        "SUGARKUBE_TOKEN": "dummy",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+    })
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "ADDR:" in log_contents
+    assert "10.0.0.5" in log_contents
+
+    assert "Auto-detected IPv4 10.0.0.5 on end0" in result.stderr
+    expected = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "bootstrap advertisement confirmed."
+    )
+    assert expected in result.stderr
 
 
 def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
