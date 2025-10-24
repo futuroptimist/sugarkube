@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-24-k3s-discover-avahi-publish-address",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Bootstrap self-check stalled because avahi-publish-service did not receive an explicit IPv4 binding. On the Pi cluster the hostname stopped resolving to an A record after WLAN was disabled, so only IPv6 answers were advertised and avahi-browse never returned the bootstrap record, causing k3s-discover to abort to avoid split brain.",
+  "resolution": "Pass the detected IPv4 address to avahi-publish-service via -a, keep the fallback when no address is available, and extend the self-check tests to assert the publish command includes the address flag while allowing addressless boots to proceed.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py",
+    "tests/scripts/test_k3s_discover_mid_election_join.py"
+  ]
+}

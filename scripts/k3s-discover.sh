@@ -457,6 +457,9 @@ start_bootstrap_publisher() {
     -s
     -H "${MDNS_HOST_RAW}"
   )
+  if [ -n "${MDNS_ADDR_V4:-}" ]; then
+    publish_cmd+=(-a "${MDNS_ADDR_V4}")
+  fi
   publish_cmd+=(
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
@@ -513,6 +516,9 @@ start_server_publisher() {
     -s
     -H "${MDNS_HOST_RAW}"
   )
+  if [ -n "${MDNS_ADDR_V4:-}" ]; then
+    publish_cmd+=(-a "${MDNS_ADDR_V4}")
+  fi
   publish_cmd+=(
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
