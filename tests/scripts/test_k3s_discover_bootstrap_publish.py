@@ -607,8 +607,9 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
             "EOF\n"
             "if [ -f \"${FLAG}\" ] && [ \"${count}\" -ge 2 ]; then\n"
             "  cat <<'EOF'\n"
-            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (server);_k3s-sugar-dev._tcp;local;{hostname}.local;192.0.2.10;6443;"
-            f"txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader={hostname}.local;txt=phase=server\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (server);_k3s-sugar-dev._tcp;local;{hostname}.local;{hostname}.local;6443;"
+            f"txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=leader={hostname}.local;txt=phase=server;"
+            f"txt=addr={hostname}.local\n"
             "EOF\n"
             "fi\n"
         ),
@@ -637,6 +638,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_MDNS_SERVER_RETRIES": "5",
         "SUGARKUBE_MDNS_SERVER_DELAY": "0",
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.60",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
@@ -675,8 +677,14 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         f"phase=self-check host={hostname}.local observed={hostname}.local; "
         "server advertisement confirmed."
     )
+    warn_msg = (
+        "[k3s-discover mdns] WARN: expected IPv4 192.0.2.60 for "
+        f"{hostname}.local but advertisement reported non-IP {hostname}.local; "
+        "assuming match after 5 attempts"
+    )
     assert bootstrap_msg in result.stderr
     assert server_msg in result.stderr
+    assert warn_msg in result.stderr
     assert result.stderr.find(bootstrap_msg) < result.stderr.find(server_msg)
 
     cleanup_env = env.copy()

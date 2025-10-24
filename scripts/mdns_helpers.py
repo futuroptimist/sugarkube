@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import subprocess
 import sys
 import time
@@ -123,6 +124,7 @@ def ensure_self_ad_is_visible(
     fallback_candidate: Optional[str] = None
     fallback_addr: Optional[str] = None
     host_only_candidate: Optional[str] = None
+    host_only_value: Optional[str] = None
 
     if runner is None:
         runner = subprocess.run  # type: ignore[assignment]
@@ -154,14 +156,30 @@ def ensure_self_ad_is_visible(
                 if expect_addr in observed_addrs:
                     return record.host
 
-                if fallback_candidate is None and observed_addrs:
-                    has_ipv4 = any("." in addr and ":" not in addr for addr in observed_addrs)
-                    has_ipv6 = any(":" in addr for addr in observed_addrs)
-                    if has_ipv6 and not has_ipv4:
-                        fallback_candidate = record.host
-                        fallback_addr = observed_addrs[0]
-                if not observed_addrs and host_only_candidate is None:
+                categories = []
+                for candidate in observed_addrs:
+                    try:
+                        ip_obj = ipaddress.ip_address(candidate)
+                    except ValueError:
+                        categories.append("other")
+                    else:
+                        categories.append("ipv4" if ip_obj.version == 4 else "ipv6")
+
+                has_ipv4 = "ipv4" in categories
+                has_ipv6 = "ipv6" in categories
+                has_other = "other" in categories
+
+                if fallback_candidate is None and has_ipv6 and not has_ipv4:
+                    fallback_candidate = record.host
+                    for candidate, category in zip(observed_addrs, categories):
+                        if category == "ipv6":
+                            fallback_addr = candidate
+                            break
+                if host_only_candidate is None and (
+                    not observed_addrs or (has_other and not has_ipv4 and not has_ipv6)
+                ):
                     host_only_candidate = record.host
+                    host_only_value = observed_addrs[0] if observed_addrs else None
                 continue
 
             return record.host
@@ -181,14 +199,17 @@ def ensure_self_ad_is_visible(
         return fallback_candidate
 
     if host_only_candidate and expect_addr:
-        print(
-            (
+        if host_only_value:
+            message = (
+                "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
+                "advertisement reported non-IP %s; assuming match after %d attempts"
+            ) % (expect_addr, expected_norm, host_only_value, attempts)
+        else:
+            message = (
                 "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
                 "advertisement omitted address; assuming match after %d attempts"
-            )
-            % (expect_addr, expected_norm, attempts),
-            file=sys.stderr,
-        )
+            ) % (expect_addr, expected_norm, attempts)
+        print(message, file=sys.stderr)
         return host_only_candidate
 
     return None
