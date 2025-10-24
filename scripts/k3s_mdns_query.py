@@ -40,13 +40,14 @@ def _service_types(cluster: str, environment: str) -> List[str]:
     return types
 
 
-def _build_command(mode: str, service_type: str) -> List[str]:
+def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> List[str]:
     command = [
         "avahi-browse",
         "--parsable",
         "--terminate",
-        "--resolve",
     ]
+    if resolve:
+        command.append("--resolve")
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
     command.append(service_type)
@@ -59,8 +60,10 @@ def _invoke_avahi(
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
     timeout: Optional[float],
+    *,
+    resolve: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    command = _build_command(mode, service_type)
+    command = _build_command(mode, service_type, resolve=resolve)
     run_kwargs = {
         "capture_output": True,
         "text": True,
@@ -119,10 +122,19 @@ def _load_lines_from_avahi(
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
     timeout: Optional[float],
+    *,
+    resolve: bool = True,
 ) -> Iterable[str]:
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
-        result = _invoke_avahi(mode, service_type, runner, debug, timeout)
+        result = _invoke_avahi(
+            mode,
+            service_type,
+            runner,
+            debug,
+            timeout,
+            resolve=resolve,
+        )
         new_lines = [line for line in result.stdout.splitlines() if line]
         if debug is not None and not new_lines and result.stdout:
             try:
@@ -206,6 +218,7 @@ def query_mdns(
 
     if fixture_path:
         lines = _load_lines_from_fixture(fixture_path)
+        records = parse_mdns_records(lines, cluster, environment)
     else:
         lines = _load_lines_from_avahi(
             mode,
@@ -215,8 +228,20 @@ def query_mdns(
             debug,
             timeout,
         )
-
-    records = parse_mdns_records(lines, cluster, environment)
+        records = parse_mdns_records(lines, cluster, environment)
+        if not records:
+            fallback_lines = _load_lines_from_avahi(
+                mode,
+                cluster,
+                environment,
+                runner,
+                debug,
+                timeout,
+                resolve=False,
+            )
+            if fallback_lines:
+                lines = fallback_lines
+                records = parse_mdns_records(lines, cluster, environment)
 
     if debug is not None and not records and lines and not fixture_path:
         try:

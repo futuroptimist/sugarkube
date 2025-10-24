@@ -61,15 +61,19 @@ def _service_types(cluster: str, environment: str) -> List[str]:
 
 
 def _browse_service_type(
-    service_type: str, runner: Runner
+    service_type: str,
+    runner: Runner,
+    *,
+    resolve: bool = True,
 ) -> Iterable[str]:
     command = [
         "avahi-browse",
         "--parsable",
         "--terminate",
-        "--resolve",
-        service_type,
     ]
+    if resolve:
+        command.append("--resolve")
+    command.append(service_type)
     try:
         result = runner(
             command,
@@ -92,10 +96,21 @@ def _collect_mdns_records(
     from k3s_mdns_parser import parse_mdns_records
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
-        lines.extend(_browse_service_type(service_type, runner))
-    if not lines:
+        lines.extend(_browse_service_type(service_type, runner, resolve=True))
+
+    records = parse_mdns_records(lines, cluster, environment)
+    if records:
+        return records
+
+    fallback_lines: List[str] = []
+    for service_type in _service_types(cluster, environment):
+        fallback_lines.extend(
+            _browse_service_type(service_type, runner, resolve=False)
+        )
+    if not fallback_lines:
         return []
-    return parse_mdns_records(lines, cluster, environment)
+
+    return parse_mdns_records(fallback_lines, cluster, environment)
 
 
 def ensure_self_ad_is_visible(

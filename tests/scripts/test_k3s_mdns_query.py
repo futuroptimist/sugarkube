@@ -195,3 +195,36 @@ def test_query_mdns_server_hosts_returns_unique_hosts(tmp_path):
     )
 
     assert results == ["host0.local", "host1.local"]
+
+
+def test_query_mdns_falls_back_without_resolve():
+    unresolved = "+;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local\n"
+
+    calls = []
+
+    def runner(command, capture_output, text, check, timeout=None):
+        assert command[0] == "avahi-browse"
+        assert capture_output and text and not check
+        resolve = "--resolve" in command
+        service = command[-1]
+        calls.append((service, resolve))
+        if service == "_k3s-sugar-dev._tcp" and not resolve:
+            stdout = unresolved
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    results = query_mdns(
+        "bootstrap-leaders",
+        "sugar",
+        "dev",
+        runner=runner,
+    )
+
+    assert results == ["host0.local"]
+    assert calls == [
+        ("_k3s-sugar-dev._tcp", True),
+        ("_https._tcp", True),
+        ("_k3s-sugar-dev._tcp", False),
+        ("_https._tcp", False),
+    ]
