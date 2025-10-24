@@ -878,6 +878,24 @@ publish_api_service() {
     return 0
   fi
 
+  log "WARN: server advertisement for ${MDNS_HOST_RAW} not visible; restarting Avahi publishers once before giving up."
+  stop_server_publisher
+  stop_address_publisher
+  sleep 1
+
+  start_server_publisher || true
+  publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
+
+  if ensure_self_mdns_advertisement server; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed."
+    log "Server advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    SERVER_PUBLISH_PERSIST=1
+    stop_bootstrap_publisher
+    return 0
+  fi
+
   log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true

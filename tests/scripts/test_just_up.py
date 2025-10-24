@@ -144,6 +144,13 @@ def test_just_up_dev_two_nodes(tmp_path):
         touch "${{run_dir}}/publish-${{phase}}"
         if [ "$phase" = "server" ]; then
           touch "${{run_dir}}/server-ready"
+          count_file="${run_dir}/publish-server-count"
+          current=0
+          if [ -f "${count_file}" ]; then
+            current="$(cat "${count_file}" 2>/dev/null || echo 0)"
+          fi
+          current=$((current + 1))
+          printf '%s\n' "${current}" >"${count_file}"
         fi
         trap 'echo "avahi-publish-service:TERM:${{phase}}" >> "{log_path}"; exit 0' TERM INT
         while true; do sleep 1; done
@@ -187,7 +194,20 @@ def test_just_up_dev_two_nodes(tmp_path):
         bootstrap_addr = os.environ.get("JUST_UP_BOOTSTRAP_ADDR", "192.0.2.10")
         server_addr = os.environ.get("JUST_UP_SERVER_ADDR", "192.0.2.10")
 
-        if (run_dir / "publish-server").exists():
+        fail_once = os.environ.get("JUST_UP_FAIL_SERVER_ONCE") == "1"
+        publish_server_count = 0
+        count_path = run_dir / "publish-server-count"
+        if count_path.exists():
+            try:
+                publish_server_count = int(count_path.read_text(encoding="utf-8").strip() or "0")
+            except Exception:
+                publish_server_count = 0
+
+        fail_local_server = bool(
+            fail_once and phase == "join" and publish_server_count <= 1
+        )
+
+        if (run_dir / "publish-server").exists() and not fail_local_server:
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
                 + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
@@ -327,11 +347,16 @@ def test_just_up_dev_two_nodes(tmp_path):
     assert result_bootstrap.returncode == 0, result_bootstrap.stderr
     assert "advertisement omitted address" in result_bootstrap.stderr
 
+    publish_count = run_dir / "publish-server-count"
+    if publish_count.exists():
+        publish_count.unlink()
+
     env_join = env_common.copy()
     env_join.update(
         {
             "SUGARKUBE_MDNS_HOST": "pi1.local",
             "JUST_UP_TEST_PHASE": "join",
+            "JUST_UP_FAIL_SERVER_ONCE": "1",
         }
     )
 
@@ -344,6 +369,8 @@ def test_just_up_dev_two_nodes(tmp_path):
     )
     assert result_join.returncode == 0, result_join.stderr
     assert "Joining as additional HA server" in result_join.stderr
+    assert "WARN: server advertisement for pi1.local not visible" in result_join.stderr
+    assert "Server advertisement observed for pi1.local after restarting Avahi publishers." in result_join.stderr
 
     log_contents = log_path.read_text(encoding="utf-8")
     assert "avahi-publish-service:" in log_contents
@@ -355,5 +382,9 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     # Ensure both bootstrap and server advertisements were logged
     assert log_contents.count("phase=bootstrap") >= 1
-    assert log_contents.count("phase=server") >= 1
+    assert log_contents.count("phase=server") >= 2
+
+    if publish_count.exists():
+        count_value = int(publish_count.read_text(encoding="utf-8").strip() or "0")
+        assert count_value >= 2
 

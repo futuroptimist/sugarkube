@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-server-retry",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Self-check aborted when Avahi temporarily failed to surface the local server advertisement even though the publishers were running, so bootstrap stopped on the first attempt.",
+  "resolution": "Restart the Avahi address and service publishers once before giving up, confirm the advert after the restart, and extend the just up two-node e2e test to cover the regression and recovery path.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_just_up.py"
+  ]
+}
