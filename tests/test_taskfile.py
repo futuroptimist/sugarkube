@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -67,6 +68,7 @@ def test_docs_reference_taskfile_shortcuts() -> None:
     assert "sudo task pi:flash" in readme_text
 
     start_here_text = START_HERE.read_text(encoding="utf-8")
+    assert "task start-here" in start_here_text
     assert "task docs:start-here" in start_here_text
 
     contributor_map_text = CONTRIBUTOR_MAP.read_text(encoding="utf-8")
@@ -75,3 +77,18 @@ def test_docs_reference_taskfile_shortcuts() -> None:
 
     quickstart_text = PI_QUICKSTART.read_text(encoding="utf-8")
     assert "task mac:setup" in quickstart_text
+
+
+def test_taskfile_exposes_start_here_alias() -> None:
+    """The Taskfile should offer a start-here alias mirroring other runners."""
+
+    text = TASKFILE.read_text(encoding="utf-8")
+
+    match = re.search(r"(?ms)^  start-here:\n(?P<body>(?: {4}.+\n)+)", text)
+    assert match, "Taskfile should expose a start-here alias for go-task users"
+
+    body = match.group("body")
+    assert "task: docs:start-here" in body, "Start-here alias should delegate to docs:start-here"
+    assert (
+        "START_HERE_ARGS" in body
+    ), "Start-here alias should forward START_HERE_ARGS environment variable"
