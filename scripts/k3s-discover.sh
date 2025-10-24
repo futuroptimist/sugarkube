@@ -45,6 +45,7 @@ SUGARKUBE_MDNS_BOOT_RETRIES="${SUGARKUBE_MDNS_BOOT_RETRIES:-${MDNS_SELF_CHECK_AT
 SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}}"
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-60}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-1}"
+SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
 
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
@@ -676,7 +677,7 @@ ensure_self_mdns_advertisement() {
 
   MDNS_LAST_OBSERVED=""
   local observed=""
-  local -a mdns_check=(
+  local -a mdns_check_base=(
     python3 "${SCRIPT_DIR}/mdns_helpers.py"
     --expect-host "${MDNS_HOST_RAW}"
     --cluster "${CLUSTER}"
@@ -685,13 +686,24 @@ ensure_self_mdns_advertisement() {
     --retries "${retries}"
     --delay "${delay}"
   )
+  local -a mdns_check=("${mdns_check_base[@]}")
+  local used_expect_addr=0
   if [ -n "${MDNS_ADDR_V4}" ]; then
     mdns_check+=(--expect-addr "${MDNS_ADDR_V4}")
+    used_expect_addr=1
   fi
 
   if observed="$("${mdns_check[@]}")"; then
     MDNS_LAST_OBSERVED="${observed}"
     return 0
+  fi
+
+  if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
+    if observed="$("${mdns_check_base[@]}")"; then
+      MDNS_LAST_OBSERVED="${observed}"
+      log "WARN: ${role} advertisement observed from ${observed} without expected addr ${MDNS_ADDR_V4}; continuing."
+      return 0
+    fi
   fi
 
   log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW} after ${retries} attempts (delay ${delay}s)."

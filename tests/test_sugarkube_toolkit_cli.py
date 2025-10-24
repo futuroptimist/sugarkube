@@ -271,6 +271,17 @@ def test_nvme_health_reports_missing_script(
     assert "scripts/nvme_health_check.sh is missing" in captured.err
 
 
+def test_nvme_health_help_lists_script_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    """The NVMe help output should surface the forwarded helper flags."""
+
+    with pytest.raises(SystemExit):
+        cli.main(["nvme", "health", "--help"])
+
+    captured = capsys.readouterr()
+    assert "--json-path" in captured.out
+    assert "--device" in captured.out
+
+
 def test_docs_start_here_prints_path_only(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

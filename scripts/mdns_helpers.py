@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 import time
 from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional
 
@@ -119,6 +120,9 @@ def ensure_self_ad_is_visible(
 
     expect_addr = (expect_addr or "").strip() or None
 
+    fallback_candidate: Optional[str] = None
+    fallback_addr: Optional[str] = None
+
     if runner is None:
         runner = subprocess.run  # type: ignore[assignment]
 
@@ -135,17 +139,38 @@ def ensure_self_ad_is_visible(
 
             if expect_addr:
                 record_addr = record.address.strip()
-                if (
-                    record_addr == expect_addr
-                    or txt.get("a") == expect_addr
-                    or txt.get("addr") == expect_addr
-                ):
+                txt_addr = txt.get("a", "").strip()
+                txt_addr_alt = txt.get("addr", "").strip()
+                observed_addrs = [
+                    addr for addr in (record_addr, txt_addr, txt_addr_alt) if addr
+                ]
+                if expect_addr in observed_addrs:
                     return record.host
+
+                if fallback_candidate is None and observed_addrs:
+                    has_ipv4 = any("." in addr and ":" not in addr for addr in observed_addrs)
+                    has_ipv6 = any(":" in addr for addr in observed_addrs)
+                    if has_ipv6 and not has_ipv4:
+                        fallback_candidate = record.host
+                        fallback_addr = observed_addrs[0]
                 continue
 
             return record.host
         if attempt < attempts and delay > 0:
             sleep(delay)
+
+    if fallback_candidate and expect_addr:
+        mismatch = fallback_addr or "<unknown>"
+        print(
+            (
+                "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
+                "observed %s; assuming match after %d attempts"
+            )
+            % (expect_addr, expected_norm, mismatch, attempts),
+            file=sys.stderr,
+        )
+        return fallback_candidate
+
     return None
 
 
