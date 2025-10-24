@@ -253,6 +253,7 @@ BOOTSTRAP_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-bootstrap
 SERVER_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
 SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
+MDNS_LAST_OBSERVED_SOURCE=""
 CLAIMED_SERVER_HOST=""
 
 run_privileged() {
@@ -670,8 +671,10 @@ discover_bootstrap_leaders() {
 
 ensure_self_mdns_advertisement() {
   local role="$1"
+  MDNS_LAST_OBSERVED_SOURCE=""
   if [ "${SKIP_MDNS_SELF_CHECK}" = "1" ]; then
     MDNS_LAST_OBSERVED="${MDNS_HOST_RAW}"
+    MDNS_LAST_OBSERVED_SOURCE="skipped"
     return 0
   fi
 
@@ -712,19 +715,54 @@ ensure_self_mdns_advertisement() {
 
   if observed="$("${mdns_check[@]}")"; then
     MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
+    MDNS_LAST_OBSERVED_SOURCE="mdns"
     return 0
   fi
 
   if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
     if observed="$("${mdns_check_base[@]}")"; then
       MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
+      MDNS_LAST_OBSERVED_SOURCE="mdns"
       log "WARN: ${role} advertisement observed from ${observed} without expected addr ${MDNS_ADDR_V4}; continuing."
       return 0
     fi
   fi
 
+  if [ "${role}" = "server" ] && avahi_log_confirms_advertisement "${role}"; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
+    MDNS_LAST_OBSERVED_SOURCE="avahi-log"
+    log "WARN: server advertisement not observed via mDNS after ${retries} attempts; relying on avahi-publish-service confirmation."
+    return 0
+  fi
+
   log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW} after ${retries} attempts (delay ${delay}s)."
   return 1
+}
+
+avahi_log_confirms_advertisement() {
+  local role="$1"
+  local log_path=""
+  case "${role}" in
+    server)
+      log_path="${SERVER_PUBLISH_LOG:-}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if [ -z "${log_path}" ] || [ ! -f "${log_path}" ]; then
+    return 1
+  fi
+
+  local service_name
+  service_name="$(service_instance_name "${role}" "${MDNS_HOST_RAW}")"
+
+  if grep -Fq "Failed to" "${log_path}" 2>/dev/null; then
+    return 1
+  fi
+
+  grep -Fq "Established under name '${service_name}'" "${log_path}" 2>/dev/null
 }
 
 count_servers() {
@@ -870,9 +908,14 @@ publish_api_service() {
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
   if ensure_self_mdns_advertisement server; then
-    local observed
+    local observed source note
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed."
+    source="${MDNS_LAST_OBSERVED_SOURCE:-mdns}"
+    note=""
+    if [ "${source}" != "mdns" ]; then
+      note=" (source=${source})"
+    fi
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed${note}."
     SERVER_PUBLISH_PERSIST=1
     stop_bootstrap_publisher
     return 0
@@ -891,9 +934,14 @@ publish_bootstrap_service() {
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
   sleep 1
   if ensure_self_mdns_advertisement bootstrap; then
-    local observed
+    local observed source note
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
+    source="${MDNS_LAST_OBSERVED_SOURCE:-mdns}"
+    note=""
+    if [ "${source}" != "mdns" ]; then
+      note=" (source=${source})"
+    fi
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed${note}."
     return 0
   fi
 
