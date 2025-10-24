@@ -448,6 +448,85 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
     assert f"ADDR:{hostname}.local 192.0.2.55" in log_contents
 
 
+def test_bootstrap_publish_accepts_ipv6_only_resolution(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"START:$*\" >> '{log_path}'\n"
+        "RUN_DIR=\"${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}\"\n"
+        "phase_label=bootstrap\n"
+        "if [[ \"$*\" == *\"phase=server\"* ]]; then\n"
+        "  phase_label=server\n"
+        "fi\n"
+        "pid_file=\"${RUN_DIR}/mdns-sugar-dev-${phase_label}.pid\"\n"
+        "for _ in $(seq 1 50); do\n"
+        "  if [ -f \"${pid_file}\" ] && grep -q \"$$\" \"${pid_file}\"; then\n"
+        f"    echo \"PIDFILE_OK:${{phase_label}}\" >> '{log_path}'\n"
+        "    break\n"
+        "  fi\n"
+        "  sleep 0.05\n"
+        "done\n"
+        "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "cat <<'EOF'\n"
+            f"=;eth0;IPv6;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
+            "fe80::1;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending;txt=addr=fe80::1\n"
+            "EOF\n"
+        ),
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+        "SUGARKUBE_CLUSTER": "sugar",
+        "SUGARKUBE_ENV": "dev",
+        "ALLOW_NON_ROOT": "1",
+        "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+        "SUGARKUBE_TOKEN": "dummy",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "2",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0.1",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.60",
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+    })
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "START:" in log_contents
+    assert "TERM" in log_contents
+    assert "PIDFILE_OK:bootstrap" in log_contents
+
+    assert "bootstrap advertisement confirmed" in result.stderr
+    assert "WARN: expected IPv4" in result.stderr
+
+
 def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
     hostname = _hostname_short()
     bin_dir = tmp_path / "bin"
