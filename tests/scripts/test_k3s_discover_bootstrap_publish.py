@@ -80,6 +80,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
+    assert "-s -H" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
     assert "-H" in log_contents
@@ -174,6 +175,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
+    assert "-s -H" in log_contents
     assert f"leader={hostname}.local" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
@@ -256,6 +258,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
+    assert "-s -H" in log_contents
     assert "-H HostMixed.LOCAL" in log_contents
     assert "leader=HostMixed.LOCAL" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
@@ -370,6 +373,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
 
     log_contents = log_path.read_text(encoding="utf-8")
     assert log_contents.count("START:") >= 2
+    assert "-s -H" in log_contents
     assert "phase=bootstrap" in log_contents
     assert "phase=server" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents

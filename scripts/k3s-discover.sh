@@ -395,6 +395,7 @@ start_bootstrap_publisher() {
 
   local -a publish_cmd=(
     avahi-publish-service
+    -s
     -H "${MDNS_HOST_RAW}"
   )
   if [ -n "${MDNS_ADDR_V4}" ]; then
@@ -452,6 +453,7 @@ start_server_publisher() {
 
   local -a publish_cmd=(
     avahi-publish-service
+    -s
     -H "${MDNS_HOST_RAW}"
   )
   if [ -n "${MDNS_ADDR_V4}" ]; then
