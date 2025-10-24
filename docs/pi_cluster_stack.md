@@ -377,7 +377,10 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
 
 ---
 
-## 12. Deliverables checklist (for future implementation)
+## 12. Deliverables checklist
+
+All deliverables below now ship with the repository; treat the list as a quick
+regression checklist when refreshing the stacked carrier design.
 
 - [x] Add `fan_patterns.scad`, `fan_wall.scad`, `pi_carrier_column.scad`, `pi_carrier_stack.scad`
       under `cad/pi_cluster/`.
