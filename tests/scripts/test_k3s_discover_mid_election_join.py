@@ -125,6 +125,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "DISCOVERY_WAIT_SECS": "0",
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
             "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+            "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
             "SUGARKUBE_TEST_STATE": str(state_file),
             "SUGARKUBE_TEST_SERVER_THRESHOLD": "9",
             "SH_LOG_PATH": str(sh_log),
@@ -149,6 +150,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
 
     publish_contents = publish_log.read_text(encoding="utf-8")
     assert "START:" in publish_contents
+    assert "-a 192.0.2.10" in publish_contents
 
     runtime_dir = tmp_path / "run"
     server_pid_file = runtime_dir / "mdns-sugar-dev-server.pid"

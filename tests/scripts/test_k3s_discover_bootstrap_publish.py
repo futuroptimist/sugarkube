@@ -55,6 +55,10 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
 
     _write_avahi_publish_address_stub(bin_dir, log_path)
 
+    ip_stub = bin_dir / "ip"
+    ip_stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    ip_stub.chmod(0o755)
+
     browse = bin_dir / "avahi-browse"
     browse.write_text(
         (
@@ -91,6 +95,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
     })
 
     result = subprocess.run(
@@ -110,6 +115,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
 
     assert "-H" in log_contents
     assert f"-H {hostname}.local" in log_contents
+    assert "-a 192.0.2.10" in log_contents
     assert f"_k3s-sugar-dev._tcp" in log_contents
     assert f"cluster=sugar" in log_contents
     assert f"env=dev" in log_contents
@@ -190,6 +196,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
     })
 
     result = subprocess.run(
@@ -205,6 +212,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     assert "TERM" in log_contents
     assert "-s -H" in log_contents
     assert f"leader={hostname}.local" in log_contents
+    assert "-a 192.0.2.10" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
     expected = (
@@ -284,6 +292,7 @@ def test_bootstrap_publish_warns_on_address_mismatch(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
+    assert "-a 192.0.2.55" in log_contents
 
     warning = (
         f"WARN: bootstrap advertisement observed from {hostname}.local without expected addr "
@@ -357,6 +366,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_MDNS_HOST": "HostMixed.LOCAL.",
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
@@ -374,6 +384,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     assert "TERM" in log_contents
     assert "-s -H" in log_contents
     assert "-H HostMixed.LOCAL" in log_contents
+    assert "-a 192.0.2.10" in log_contents
     assert "leader=HostMixed.LOCAL" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
@@ -429,7 +440,6 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
-        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.55",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
@@ -444,8 +454,7 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "ARGS:" in log_contents
     assert "-a" not in log_contents
-    assert "ADDR:" in log_contents
-    assert f"ADDR:{hostname}.local 192.0.2.55" in log_contents
+    assert "ADDR:" not in log_contents
 
 
 def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
@@ -537,6 +546,7 @@ def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
     assert "START:" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
     assert "TERM" in log_contents
+    assert "-a 192.0.2.60" in log_contents
 
     browse_count = int(count_path.read_text(encoding="utf-8"))
     assert browse_count >= 3
@@ -546,7 +556,11 @@ def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
         "bootstrap advertisement confirmed."
     )
     assert expected in result.stderr
-    assert "WARN: expected IPv4" in result.stderr
+    warning = (
+        f"WARN: bootstrap advertisement observed from {hostname}.local without expected addr "
+        "192.0.2.60; continuing."
+    )
+    assert warning in result.stderr
     
 
 def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
@@ -638,6 +652,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "SUGARKUBE_MDNS_SERVER_RETRIES": "5",
         "SUGARKUBE_MDNS_SERVER_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
@@ -656,6 +671,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
     log_contents = log_path.read_text(encoding="utf-8")
     assert log_contents.count("START:") >= 2
     assert "-s -H" in log_contents
+    assert "-a 192.0.2.10" in log_contents
     assert "phase=bootstrap" in log_contents
     assert "phase=server" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
@@ -760,6 +776,7 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "2",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
