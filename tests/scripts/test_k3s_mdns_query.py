@@ -19,9 +19,10 @@ def test_query_mdns_keeps_output_when_avahi_errors():
 
     calls = []
 
-    def runner(command, capture_output, text, check):
+    def runner(command, capture_output, text, check, timeout=None):
         assert command[0] == "avahi-browse"
         assert capture_output and text and not check
+        assert timeout is not None and timeout > 0
         calls.append(command[-1])
         if command[-1] == "_k3s-sugar-dev._tcp":
             return subprocess.CompletedProcess(
@@ -50,6 +51,29 @@ def test_query_mdns_keeps_output_when_avahi_errors():
     assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
 
 
+def test_query_mdns_handles_avahi_timeout():
+    messages = []
+
+    calls = []
+
+    def runner(command, capture_output, text, check, timeout=None):
+        calls.append(timeout)
+        raise subprocess.TimeoutExpired(command, timeout, output=_sample_server_stdout())
+
+    results = query_mdns(
+        "server-first",
+        "sugar",
+        "dev",
+        runner=runner,
+        debug=messages.append,
+    )
+
+    assert results == ["host0.local"]
+    assert len(calls) == 2  # primary + legacy service browse
+    assert all(call and call > 0 for call in calls)
+    assert any("timed out" in msg for msg in messages)
+
+
 def test_query_mdns_queries_legacy_service_type_when_needed():
     legacy_stdout = (
         "=;eth0;IPv4;k3s API sugar/dev [server] on host0;_https._tcp;local;host0.local;"
@@ -58,9 +82,10 @@ def test_query_mdns_queries_legacy_service_type_when_needed():
 
     calls = []
 
-    def runner(command, capture_output, text, check):
+    def runner(command, capture_output, text, check, timeout=None):
         assert command[0] == "avahi-browse"
         assert capture_output and text and not check
+        assert timeout is not None and timeout > 0
         calls.append(command[-1])
         if command[-1] == "_https._tcp":
             return subprocess.CompletedProcess(
@@ -131,7 +156,7 @@ def test_query_mdns_uses_service_name_when_unresolved(tmp_path):
 def test_query_mdns_handles_missing_avahi():
     messages = []
 
-    def runner(command, capture_output, text, check):
+    def runner(command, capture_output, text, check, timeout=None):
         raise FileNotFoundError("avahi-browse missing")
 
     results = query_mdns(
