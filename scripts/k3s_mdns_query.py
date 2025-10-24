@@ -1,6 +1,7 @@
 """Helpers for querying k3s mDNS advertisements via Avahi."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
@@ -11,6 +12,20 @@ from mdns_helpers import _norm_host
 DebugFn = Optional[Callable[[str], None]]
 
 _DUMP_PATH = Path("/tmp/sugarkube-mdns.txt")
+_TIMEOUT_ENV = "SUGARKUBE_MDNS_QUERY_TIMEOUT"
+_DEFAULT_TIMEOUT = 10.0
+
+
+def _resolve_timeout(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return _DEFAULT_TIMEOUT
+    try:
+        parsed = float(value)
+    except ValueError:
+        return _DEFAULT_TIMEOUT
+    if parsed <= 0:
+        return None
+    return parsed
 
 
 def _service_type(cluster: str, environment: str) -> str:
@@ -43,14 +58,31 @@ def _invoke_avahi(
     service_type: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
+    timeout: Optional[float],
 ) -> subprocess.CompletedProcess[str]:
     command = _build_command(mode, service_type)
+    run_kwargs = {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+    }
+    if timeout is not None:
+        run_kwargs["timeout"] = timeout
     try:
-        result = runner(
+        result = runner(command, **run_kwargs)
+    except subprocess.TimeoutExpired as exc:
+        if debug is not None and timeout is not None:
+            debug(
+                "avahi-browse timed out after "
+                f"{timeout:g}s; continuing without mDNS results"
+            )
+        stdout = exc.stdout or exc.output or ""
+        stderr = exc.stderr or ""
+        return subprocess.CompletedProcess(
             command,
-            capture_output=True,
-            text=True,
-            check=False,
+            returncode=124,
+            stdout=stdout,
+            stderr=stderr,
         )
     except FileNotFoundError:
         if debug is not None:
@@ -86,10 +118,11 @@ def _load_lines_from_avahi(
     environment: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
     debug: DebugFn,
+    timeout: Optional[float],
 ) -> Iterable[str]:
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
-        result = _invoke_avahi(mode, service_type, runner, debug)
+        result = _invoke_avahi(mode, service_type, runner, debug, timeout)
         new_lines = [line for line in result.stdout.splitlines() if line]
         if debug is not None and not new_lines and result.stdout:
             try:
@@ -169,10 +202,19 @@ def query_mdns(
     if runner is None:
         runner = subprocess.run  # type: ignore[assignment]
 
+    timeout = _resolve_timeout(os.environ.get(_TIMEOUT_ENV))
+
     if fixture_path:
         lines = _load_lines_from_fixture(fixture_path)
     else:
-        lines = _load_lines_from_avahi(mode, cluster, environment, runner, debug)
+        lines = _load_lines_from_avahi(
+            mode,
+            cluster,
+            environment,
+            runner,
+            debug,
+            timeout,
+        )
 
     records = parse_mdns_records(lines, cluster, environment)
 
