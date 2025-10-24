@@ -788,3 +788,66 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
 
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     assert not service_file.exists()
+
+
+def test_bootstrap_publish_falls_back_to_avahi_log_on_browse_failure(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"START:$*\" >> '{log_path}'\n"
+        f"echo \"Established under name 'k3s-sugar-dev@{hostname}.local (bootstrap)'\" >> '{log_path}'\n"
+        f"printf \"Established under name 'k3s-sugar-dev@{hostname}.local (bootstrap)'\\n\"\n"
+        "trap 'echo TERM >> \"" + str(log_path) + "\"; exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+        "SUGARKUBE_CLUSTER": "sugar",
+        "SUGARKUBE_ENV": "dev",
+        "ALLOW_NON_ROOT": "1",
+        "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+        "SUGARKUBE_TOKEN": "dummy",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+    })
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    stderr = result.stderr
+    assert "Self-check for bootstrap advertisement did not observe" in stderr
+    assert "WARN: bootstrap advertisement for" in stderr
+    fallback = (
+        "WARN: bootstrap self-check failed but avahi-publish-service reported success; "
+        f"continuing as {hostname}.local."
+    )
+    assert fallback in stderr
+    assert "Unable to confirm bootstrap advertisement" not in stderr

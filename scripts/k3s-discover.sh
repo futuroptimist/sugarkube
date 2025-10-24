@@ -509,6 +509,24 @@ addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${BOOTSTRAP_PUBLISH_PID
   return 0
 }
 
+bootstrap_publisher_log_reports_success() {
+  local log_path
+  log_path="${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}"
+  if [ -z "${log_path}" ] || [ ! -f "${log_path}" ]; then
+    return 1
+  fi
+
+  if grep -Fq "Established under name" "${log_path}" 2>/dev/null; then
+    return 0
+  fi
+
+  if grep -Fq "successfully established" "${log_path}" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
 start_server_publisher() {
   start_address_publisher || true
   if ! command -v avahi-publish-service >/dev/null 2>&1; then
@@ -912,6 +930,33 @@ publish_bootstrap_service() {
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
+    return 0
+  fi
+
+  log "WARN: bootstrap advertisement for ${MDNS_HOST_RAW} not visible; restarting Avahi publishers once before giving up."
+  stop_bootstrap_publisher
+  stop_address_publisher
+  sleep 1
+
+  start_bootstrap_publisher || true
+  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
+
+  if ensure_self_mdns_advertisement bootstrap; then
+    local observed
+    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
+    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
+    log "Bootstrap advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    return 0
+  fi
+
+  log "Failed to confirm Avahi bootstrap advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
+  pgrep -a avahi-publish || true
+  sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
+  sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
+
+  if bootstrap_publisher_log_reports_success; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
+    log "WARN: bootstrap self-check failed but avahi-publish-service reported success; continuing as ${MDNS_HOST_RAW}."
     return 0
   fi
 
