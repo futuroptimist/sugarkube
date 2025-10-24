@@ -448,11 +448,12 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
     assert f"ADDR:{hostname}.local 192.0.2.55" in log_contents
 
 
-def test_bootstrap_publish_accepts_ipv6_only_resolution(tmp_path):
+def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
     hostname = _hostname_short()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
+    count_path = tmp_path / "browse.count"
 
     stub = bin_dir / "avahi-publish-service"
     stub.write_text(
@@ -485,10 +486,24 @@ def test_bootstrap_publish_accepts_ipv6_only_resolution(tmp_path):
         (
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
+            f"COUNT_FILE='{count_path}'\n"
+            "service_type=\"${@: -1}\"\n"
+            "if [ \"${service_type}\" != \"_k3s-sugar-dev._tcp\" ]; then\n"
+            "  exit 0\n"
+            "fi\n"
+            "count=0\n"
+            "if [ -f \"${COUNT_FILE}\" ]; then\n"
+            "  count=$(cat \"${COUNT_FILE}\")\n"
+            "fi\n"
+            "count=$((count + 1))\n"
+            "echo \"${count}\" > \"${COUNT_FILE}\"\n"
+            "if [ \"${count}\" -lt 3 ]; then\n"
+            "  exit 0\n"
+            "fi\n"
             "cat <<'EOF'\n"
-            f"=;eth0;IPv6;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
-            "fe80::1;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
-            f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending;txt=addr=fe80::1\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
+            "192.0.2.55;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending;txt=addr=192.0.2.55\n"
             "EOF\n"
         ),
         encoding="utf-8",
@@ -503,8 +518,8 @@ def test_bootstrap_publish_accepts_ipv6_only_resolution(tmp_path):
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
         "SUGARKUBE_TOKEN": "dummy",
-        "SUGARKUBE_MDNS_BOOT_RETRIES": "2",
-        "SUGARKUBE_MDNS_BOOT_DELAY": "0.1",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "5",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0.05",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.60",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
@@ -520,12 +535,19 @@ def test_bootstrap_publish_accepts_ipv6_only_resolution(tmp_path):
 
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
-    assert "TERM" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
+    assert "TERM" in log_contents
 
-    assert "bootstrap advertisement confirmed" in result.stderr
+    browse_count = int(count_path.read_text(encoding="utf-8"))
+    assert browse_count >= 3
+
+    expected = (
+        f"phase=self-check host={hostname}.local observed={hostname}.local; "
+        "bootstrap advertisement confirmed."
+    )
+    assert expected in result.stderr
     assert "WARN: expected IPv4" in result.stderr
-
+    
 
 def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
     hostname = _hostname_short()
