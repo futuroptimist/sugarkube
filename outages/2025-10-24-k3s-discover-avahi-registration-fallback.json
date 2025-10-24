@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-24-k3s-discover-avahi-registration-fallback",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "k3s-discover aborted bootstrap when avahi-browse could not observe the node's own mDNS advertisement even though avahi-publish-service reported registration. On Pi hardware the Avahi daemon occasionally accepts the service but delays surfacing it back to local queries, so the strict self-check never recorded a match and the bootstrap logic bailed out to avoid split brain.",
+  "resolution": "Treat Avahi's \"Established under name\" log as confirmation when browse probes fail twice, keep the publishers alive, and extend the integration test harness to simulate hidden advertisements so the fallback stays covered.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_just_up.py"
+  ]
+}

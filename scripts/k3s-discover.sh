@@ -366,6 +366,20 @@ cleanup_avahi_publishers() {
 
 trap cleanup_avahi_publishers EXIT
 
+avahi_publish_confirmed() {
+  local log_path="${1:-}"
+  if [ -z "${log_path}" ] || [ ! -f "${log_path}" ]; then
+    return 1
+  fi
+
+  if grep -Fq "Established under name 'k3s-${CLUSTER}-${ENVIRONMENT}@${MDNS_HOST_RAW}" \
+    "${log_path}" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
 norm_host() {
   local host="${1:-}"
   while [[ "${host}" == *"." ]]; do
@@ -896,6 +910,15 @@ publish_api_service() {
     return 0
   fi
 
+  if avahi_publish_confirmed "${SERVER_PUBLISH_LOG}"; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
+    log "WARN: server advertisement for ${MDNS_HOST_RAW} unseen via avahi-browse."
+    log "WARN: Avahi reported registration; continuing with server publisher."
+    SERVER_PUBLISH_PERSIST=1
+    stop_bootstrap_publisher
+    return 0
+  fi
+
   log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
@@ -928,6 +951,13 @@ publish_bootstrap_service() {
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
     log "Bootstrap advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    return 0
+  fi
+
+  if avahi_publish_confirmed "${BOOTSTRAP_PUBLISH_LOG}"; then
+    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
+    log "WARN: bootstrap advertisement for ${MDNS_HOST_RAW} unseen via avahi-browse."
+    log "WARN: Avahi reported registration; continuing with bootstrap publisher."
     return 0
   fi
 
