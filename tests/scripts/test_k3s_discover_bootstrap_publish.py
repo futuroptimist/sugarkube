@@ -10,6 +10,19 @@ def _hostname_short() -> str:
     return subprocess.check_output(["hostname", "-s"], text=True).strip()
 
 
+def _write_avahi_publish_address_stub(bin_dir: Path, log_path: Path) -> None:
+    stub = bin_dir / "avahi-publish-address"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"ADDR:$*\" >> '{log_path}'\n"
+        "trap 'exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+
 def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     hostname = _hostname_short()
     bin_dir = tmp_path / "bin"
@@ -40,6 +53,8 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     )
     stub.chmod(0o755)
 
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
     browse = bin_dir / "avahi-browse"
     browse.write_text(
         (
@@ -47,13 +62,22 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
             "set -euo pipefail\n"
             "cat <<'EOF'\n"
             f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
-            "192.0.2.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            "192.0.2.55;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
             f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending\n"
             "EOF\n"
         ),
         encoding="utf-8",
     )
     browse.chmod(0o755)
+
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"SYSTEMCTL:$*\" >> '{log_path}'\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
 
     env = os.environ.copy()
     env.update({
@@ -66,6 +90,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
     result = subprocess.run(
@@ -135,6 +160,8 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     )
     stub.chmod(0o755)
 
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
     browse = bin_dir / "avahi-browse"
     browse.write_text(
         (
@@ -162,6 +189,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
     result = subprocess.run(
@@ -217,6 +245,8 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     )
     stub.chmod(0o755)
 
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
     browse = bin_dir / "avahi-browse"
     browse.write_text(
         (
@@ -245,6 +275,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_MDNS_HOST": "HostMixed.LOCAL.",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
     result = subprocess.run(
@@ -268,6 +299,70 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "bootstrap advertisement confirmed."
     )
     assert expected in result.stderr
+
+
+def test_bootstrap_publish_omits_address_flag(tmp_path):
+    hostname = _hostname_short()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "publish.log"
+
+    stub = bin_dir / "avahi-publish-service"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"ARGS:$*\" >> '{log_path}'\n"
+        "trap 'exit 0' TERM INT\n"
+        "sleep 0.25\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "cat <<'EOF'\n"
+            f"=;eth0;IPv4;k3s-sugar-dev@{hostname}.local (bootstrap);_k3s-sugar-dev._tcp;local;{hostname}.local;"
+            "192.0.2.55;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+            f"txt=leader={hostname}.local;txt=phase=bootstrap;txt=state=pending\n"
+            "EOF\n"
+        ),
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+        "SUGARKUBE_CLUSTER": "sugar",
+        "SUGARKUBE_ENV": "dev",
+        "ALLOW_NON_ROOT": "1",
+        "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+        "SUGARKUBE_TOKEN": "dummy",
+        "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+        "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+        "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.55",
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+    })
+
+    subprocess.run(
+        ["bash", SCRIPT, "--test-bootstrap-publish"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "ARGS:" in log_contents
+    assert "-a" not in log_contents
+    assert "ADDR:" in log_contents
+    assert f"ADDR:{hostname}.local 192.0.2.55" in log_contents
 
 
 def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
@@ -302,6 +397,8 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         encoding="utf-8",
     )
     stub.chmod(0o755)
+
+    _write_avahi_publish_address_stub(bin_dir, log_path)
 
     browse = bin_dir / "avahi-browse"
     browse.write_text(
@@ -357,6 +454,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "SUGARKUBE_MDNS_SERVER_RETRIES": "5",
         "SUGARKUBE_MDNS_SERVER_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
     result = subprocess.run(
@@ -456,6 +554,8 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
     )
     stub.chmod(0o755)
 
+    _write_avahi_publish_address_stub(bin_dir, log_path)
+
     browse = bin_dir / "avahi-browse"
     browse.write_text(
         "#!/usr/bin/env bash\n"
@@ -476,6 +576,7 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
         "SUGARKUBE_MDNS_BOOT_RETRIES": "2",
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+        "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     })
 
     result = subprocess.run(

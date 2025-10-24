@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-24-just-up-missing-e2e",
+  "date": "2025-10-24",
+  "component": "just up dev",
+  "rootCause": "The automation suite lacked an end-to-end regression test for the just up dev flow, so regressions in the bootstrap discovery logic were only caught on hardware after just up aborted due to the Avahi publish failure.",
+  "resolution": "Add a two-node simulation test that runs just up dev with stubbed system dependencies, exercising both the bootstrap and HA server join paths so future discovery regressions are caught before merging.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "tests/scripts/test_just_up.py"
+  ]
+}

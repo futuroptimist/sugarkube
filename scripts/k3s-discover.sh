@@ -245,6 +245,8 @@ BOOTSTRAP_PUBLISH_PID=""
 BOOTSTRAP_PUBLISH_LOG=""
 SERVER_PUBLISH_PID=""
 SERVER_PUBLISH_LOG=""
+ADDRESS_PUBLISH_PID=""
+ADDRESS_PUBLISH_LOG=""
 MDNS_RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
 BOOTSTRAP_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-bootstrap.pid"
 SERVER_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
@@ -300,6 +302,9 @@ for phase in bootstrap server; do
 done
 
 reload_avahi_daemon() {
+  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    return 0
+  fi
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
@@ -334,10 +339,22 @@ stop_server_publisher() {
   fi
 }
 
+stop_address_publisher() {
+  if [ -n "${ADDRESS_PUBLISH_PID:-}" ]; then
+    if kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
+      kill "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1 || true
+    fi
+    wait "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1 || true
+    ADDRESS_PUBLISH_PID=""
+    ADDRESS_PUBLISH_LOG=""
+  fi
+}
+
 cleanup_avahi_publishers() {
   if [ "${SERVER_PUBLISH_PERSIST}" != "1" ]; then
     stop_server_publisher
   fi
+  stop_address_publisher
   stop_bootstrap_publisher
   if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
     remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
@@ -378,7 +395,48 @@ log() {
   >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
+start_address_publisher() {
+  if [ -z "${MDNS_ADDR_V4:-}" ]; then
+    return 0
+  fi
+  if ! command -v avahi-publish-address >/dev/null 2>&1; then
+    log "avahi-publish-address not available; skipping direct address publish"
+    return 1
+  fi
+  if [ -n "${ADDRESS_PUBLISH_PID:-}" ] && kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ADDRESS_PUBLISH_LOG="/tmp/sugar-publish-address.log"
+  : >"${ADDRESS_PUBLISH_LOG}" 2>/dev/null || true
+
+  local -a publish_cmd=(
+    avahi-publish-address
+    "${MDNS_HOST_RAW}"
+    "${MDNS_ADDR_V4}"
+  )
+
+  log "publishing address host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4}"
+  "${publish_cmd[@]}" >"${ADDRESS_PUBLISH_LOG}" 2>&1 &
+  ADDRESS_PUBLISH_PID=$!
+
+  sleep 1
+  if ! kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
+    if [ -s "${ADDRESS_PUBLISH_LOG}" ]; then
+      while IFS= read -r line; do
+        log "address publisher error: ${line}"
+      done <"${ADDRESS_PUBLISH_LOG}"
+    fi
+    ADDRESS_PUBLISH_PID=""
+    ADDRESS_PUBLISH_LOG=""
+    return 1
+  fi
+
+  return 0
+}
+
 start_bootstrap_publisher() {
+  start_address_publisher || true
   if ! command -v avahi-publish-service >/dev/null 2>&1; then
     log "avahi-publish-service not available; relying on Avahi service file"
     return 1
@@ -398,9 +456,6 @@ start_bootstrap_publisher() {
     -s
     -H "${MDNS_HOST_RAW}"
   )
-  if [ -n "${MDNS_ADDR_V4}" ]; then
-    publish_cmd+=(-a "${MDNS_ADDR_V4}")
-  fi
   publish_cmd+=(
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
@@ -437,6 +492,7 @@ addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${BOOTSTRAP_PUBLISH_PID
 }
 
 start_server_publisher() {
+  start_address_publisher || true
   if ! command -v avahi-publish-service >/dev/null 2>&1; then
     log "avahi-publish-service not available; relying on Avahi service file"
     return 1
@@ -456,9 +512,6 @@ start_server_publisher() {
     -s
     -H "${MDNS_HOST_RAW}"
   )
-  if [ -n "${MDNS_ADDR_V4}" ]; then
-    publish_cmd+=(-a "${MDNS_ADDR_V4}")
-  fi
   publish_cmd+=(
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"

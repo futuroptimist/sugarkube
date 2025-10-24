@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-24-k3s-discover-avahi-address",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "k3s-discover passed the -a flag to avahi-publish-service even though that CLI only accepts -a when publishing a standalone address record. Avahi rejected the call with 'Bad number of arguments', so the bootstrap advertisement never started and just up dev aborted to avoid split brain.",
+  "resolution": "Stop passing -a to avahi-publish-service, rely on avahi-publish-address for explicit address announcements, and extend the bootstrap publish tests to assert that no invalid flags are present.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py"
+  ]
+}
