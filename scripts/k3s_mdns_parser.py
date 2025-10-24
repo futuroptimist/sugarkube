@@ -36,6 +36,12 @@ def _normalize_host(host: str, domain: str) -> str:
         except ValueError:
             host = f"{host}.{domain_lower}" if domain_lower else host
 
+    if domain_lower and "." in host:
+        parts = host.split(".")
+        if parts[-1].lower() == domain_lower:
+            parts[-1] = domain_lower
+            host = ".".join(parts)
+
     return host
 
 
@@ -94,9 +100,14 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
         if not field.startswith("txt="):
             continue
         payload = field[4:]
+        if not payload:
+            continue
+        payload = payload.strip()
         if "=" not in payload:
             continue
         key, value = payload.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
         txt[key] = value
     return txt
 
@@ -172,6 +183,10 @@ def parse_mdns_records(
         txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
         if "leader" in txt:
             txt["leader"] = _normalize_host(txt["leader"], domain)
+        if "phase" in txt and txt["phase"]:
+            txt["phase"] = txt["phase"].lower()
+        if "role" in txt and txt["role"]:
+            txt["role"] = _normalize_role(txt["role"])
         if txt.get("k3s") != "1" and not service_cluster:
             continue
 
@@ -185,6 +200,10 @@ def parse_mdns_records(
             host = _normalize_host(fields[6], domain)
         elif service_host:
             host = service_host
+        if not host:
+            host = txt.get("leader", "")
+            if host:
+                host = _normalize_host(host, domain)
         if not host:
             continue
 

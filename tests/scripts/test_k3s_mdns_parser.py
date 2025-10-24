@@ -112,3 +112,22 @@ def test_parse_preserves_mixed_case_hostnames():
     record = recs[0]
     assert record.host == "HostMixed.local"
     assert record.txt.get("leader") == "HostMixed.local"
+
+
+def test_parse_normalises_txt_whitespace_and_missing_host_falls_back_to_leader():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s-sugar-dev@LeaderHost (server);_k3s-sugar-dev._tcp;local;"
+            ";192.168.1.30;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=ENV=dev;txt=role=SERVER ;"
+            "txt=leader=LeaderHost.LOCAL.;txt=phase=Server "
+        )
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    assert record.host == "LeaderHost.local"
+    assert record.txt.get("leader") == "LeaderHost.local"
+    assert record.txt.get("phase") == "server"
+    assert record.txt.get("role") == "server"
