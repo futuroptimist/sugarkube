@@ -182,15 +182,23 @@ def test_just_up_dev_two_nodes(tmp_path):
         run_dir = pathlib.Path(os.environ.get("SUGARKUBE_RUNTIME_DIR", "/run/sugarkube"))
         local_host = os.environ.get("SUGARKUBE_MDNS_HOST", "pi0.local")
         primary = os.environ.get("JUST_UP_PRIMARY_HOST", "pi0.local")
+        suffix = os.environ.get("JUST_UP_SERVICE_SUFFIX", "")
         lines = []
 
         bootstrap_addr = os.environ.get("JUST_UP_BOOTSTRAP_ADDR", "192.0.2.10")
         server_addr = os.environ.get("JUST_UP_SERVER_ADDR", "192.0.2.10")
 
+        service_type = "_k3s-sugar-dev._tcp" + suffix
+
         if (run_dir / "publish-server").exists():
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write("avahi-browse-service-type:" + service_type + "\n")
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
-                + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
+                + service_type
+                + ";local;"
+                + local_host
+                + ";"
                 + server_addr
                 + ";6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
@@ -198,9 +206,14 @@ def test_just_up_dev_two_nodes(tmp_path):
             )
 
         if phase == "bootstrap" and (run_dir / "publish-bootstrap").exists():
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write("avahi-browse-service-type:" + service_type + "\n")
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
-                + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
+                + service_type
+                + ";local;"
+                + local_host
+                + ";"
                 + bootstrap_addr
                 + ";6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
@@ -208,9 +221,14 @@ def test_just_up_dev_two_nodes(tmp_path):
             )
 
         if phase == "join":
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write("avahi-browse-service-type:" + service_type + "\n")
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + primary + " (server);"
-                + "_k3s-sugar-dev._tcp;local;" + primary + ";"
+                + service_type
+                + ";local;"
+                + primary
+                + ";"
                 + server_addr
                 + ";6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
@@ -332,6 +350,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         {
             "SUGARKUBE_MDNS_HOST": "pi1.local",
             "JUST_UP_TEST_PHASE": "join",
+            "JUST_UP_SERVICE_SUFFIX": ".local",
         }
     )
 
@@ -356,4 +375,9 @@ def test_just_up_dev_two_nodes(tmp_path):
     # Ensure both bootstrap and server advertisements were logged
     assert log_contents.count("phase=bootstrap") >= 1
     assert log_contents.count("phase=server") >= 1
+
+    # The server advertisement should include the domain suffix in the service type
+    assert "avahi-browse-service-type:_k3s-sugar-dev._tcp.local" in log_contents
+
+    assert "Self-check for server advertisement did not observe" not in result_join.stderr
 

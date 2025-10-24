@@ -156,14 +156,19 @@ def parse_mdns_records(
         if len(fields) < 6:
             continue
 
-        service_type = fields[4]
+        service_type = fields[4].strip()
+        normalized_type = service_type
+        tcp_index = normalized_type.find("._tcp")
+        if tcp_index != -1:
+            normalized_type = normalized_type[: tcp_index + len("._tcp")]
+
         type_cluster: Optional[str] = None
         type_environment: Optional[str] = None
 
-        if service_type == "_https._tcp":
+        if normalized_type == "_https._tcp":
             pass
-        elif service_type.startswith("_k3s-") and service_type.endswith("._tcp"):
-            slug = service_type[len("_k3s-") : -len("._tcp")]
+        elif normalized_type.startswith("_k3s-") and normalized_type.endswith("._tcp"):
+            slug = normalized_type[len("_k3s-") : -len("._tcp")]
             if "-" in slug:
                 type_cluster, type_environment = slug.rsplit("-", 1)
         else:

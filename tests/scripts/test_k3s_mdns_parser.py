@@ -131,3 +131,23 @@ def test_parse_normalises_txt_whitespace_and_missing_host_falls_back_to_leader()
     assert record.txt.get("leader") == "LeaderHost.local"
     assert record.txt.get("phase") == "server"
     assert record.txt.get("role") == "server"
+
+
+def test_parse_handles_service_type_domain_suffix():
+    lines = [
+        (
+            "=;eth0;IPv4;k3s-sugar-dev@host7 (server);_k3s-sugar-dev._tcp.local;local;"
+            "host7.local;192.168.1.31;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server;"
+            "txt=leader=host7.local"
+        ),
+        (
+            "=;eth0;IPv4;k3s API sugar/dev [server] on host8;_https._tcp.local.;local;"
+            "host8.local;192.168.1.32;6443;txt=cluster=sugar;txt=env=dev;txt=role=server"
+        ),
+    ]
+
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    hosts = {record.host for record in recs}
+    assert "host7.local" in hosts
+    assert "host8.local" in hosts
