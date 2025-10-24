@@ -82,8 +82,19 @@ def test_just_up_dev_two_nodes(tmp_path):
         bin_dir / "ip",
         f"""#!/usr/bin/env bash
         set -euo pipefail
-        if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ]; then
-          echo "1: eth0    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth0"
+        if [ "$#" -ge 4 ] && [ "$1" = "-4" ] && [ "$2" = "route" ] && [ "$3" = "get" ] && [ "$4" = "1" ]; then
+          echo "1.0.0.0 via 0.0.0.0 dev end0 src 10.0.0.5"
+          exit 0
+        fi
+        if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ] && [ "$5" = "eth0" ]; then
+          exit 0
+        fi
+        if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ] && [ "$5" = "end0" ]; then
+          echo "2: end0    inet 10.0.0.5/24 brd 10.0.0.255 scope global end0"
+          exit 0
+        fi
+        if [ "$#" -ge 6 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ] && [ "$5" = "scope" ] && [ "$6" = "global" ]; then
+          echo "2: end0    inet 10.0.0.5/24 brd 10.0.0.255 scope global end0"
           exit 0
         fi
         echo "ip:$@" >> "{log_path}"
@@ -186,24 +197,24 @@ def test_just_up_dev_two_nodes(tmp_path):
 
         if (run_dir / "publish-server").exists():
             lines.append(
-                "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
-                + "_k3s-sugar-dev._tcp;local;" + local_host + ";192.0.2.10;6443;"
+                "=;end0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
+                + "_k3s-sugar-dev._tcp;local;" + local_host + ";10.0.0.5;6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
                 + "txt=leader=" + local_host + ";txt=phase=server"
             )
 
         if phase == "bootstrap" and (run_dir / "publish-bootstrap").exists():
             lines.append(
-                "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
-                + "_k3s-sugar-dev._tcp;local;" + local_host + ";192.0.2.10;6443;"
+                "=;end0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
+                + "_k3s-sugar-dev._tcp;local;" + local_host + ";10.0.0.5;6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
                 + "txt=leader=" + local_host + ";txt=phase=bootstrap;txt=state=pending"
             )
 
         if phase == "join":
             lines.append(
-                "=;eth0;IPv4;k3s-sugar-dev@" + primary + " (server);"
-                + "_k3s-sugar-dev._tcp;local;" + primary + ";192.0.2.10;6443;"
+                "=;end0;IPv4;k3s-sugar-dev@" + primary + " (server);"
+                + "_k3s-sugar-dev._tcp;local;" + primary + ";10.0.0.5;6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
                 + "txt=leader=" + primary + ";txt=phase=server"
             )
@@ -291,7 +302,6 @@ def test_just_up_dev_two_nodes(tmp_path):
             "JUST_UP_PRIMARY_HOST": "pi0.local",
             "JUST_UP_LOG": str(log_path),
             "ALLOW_NON_ROOT": "1",
-            "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.10",
             "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
             "SUGARKUBE_MDNS_BOOT_DELAY": "0",
             "SUGARKUBE_MDNS_SERVER_RETRIES": "1",

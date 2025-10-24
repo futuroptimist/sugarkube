@@ -1,0 +1,12 @@
+{
+  "id": "k3s-discover-end0-autodetect",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Raspberry Pi 5 renames the primary Ethernet interface to end0 so k3s-discover kept probing eth0, failed to find an IPv4 address, and aborted bootstrap after the self-check never observed its own advertisement.",
+  "resolution": "Auto-detect the active IPv4 interface before publishing mDNS advertisements and expand the end-to-end test harness to emulate end0 so the regression is covered in CI.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py",
+    "tests/scripts/test_just_up.py"
+  ]
+}
