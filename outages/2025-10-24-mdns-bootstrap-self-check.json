@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-24-mdns-bootstrap-self-check",
+  "date": "2025-10-24",
+  "component": "k3s-discover bootstrap self-check",
+  "rootCause": "IPv4-only self-check rejected IPv6-only avahi replies, so bootstrap aborted.",
+  "resolution": "Accept IPv6-only matches, warn about the mismatch, and add a regression test.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py (IPv6-only regression)"
+  ]
+}
