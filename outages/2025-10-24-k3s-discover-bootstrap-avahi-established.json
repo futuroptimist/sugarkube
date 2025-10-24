@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-24-k3s-discover-bootstrap-avahi-established",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Bootstrap self-check aborted when avahi-browse could not observe the freshly published bootstrap advertisement even though avahi-publish-service reported the service as established, so just up dev stopped to avoid split brain.",
+  "resolution": "Accept avahi-publish-service's 'Established under name' log as confirmation when browse results are empty, emit a warning, and add a regression test covering the fallback path.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py::test_bootstrap_publish_falls_back_to_avahi_log_on_browse_failure"
+  ]
+}
