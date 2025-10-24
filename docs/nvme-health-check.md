@@ -64,6 +64,10 @@ sudo NVME_JSON_PATH=/var/log/sugarkube/nvme-smart.json ./scripts/nvme_health_che
 sudo sugarkube nvme health --json-path /var/log/sugarkube/nvme-smart.json
 ```
 
+> **Tip:** `python -m sugarkube_toolkit nvme health --help` now lists the same
+> device, threshold, logger, and JSON export flags as the underlying helper so
+> you can discover supported options without leaving the CLI.
+
 Regression coverage: `tests/test_sugarkube_toolkit_cli.py::test_nvme_health_invokes_helper`,
 `tests/test_nvme_health_workflow.py`, and
 `tests/nvme_health_check_test.py::test_nvme_health_writes_json_snapshot` keep the CLI, Make,

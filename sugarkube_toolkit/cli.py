@@ -189,6 +189,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collect NVMe SMART metrics via scripts/nvme_health_check.sh.",
     )
     nvme_health_parser.add_argument(
+        "--device",
+        help="NVMe namespace to inspect (for example, /dev/nvme0n1).",
+    )
+    nvme_health_parser.add_argument(
+        "--pct-thresh",
+        type=int,
+        help="Percentage used threshold that triggers an alert.",
+    )
+    nvme_health_parser.add_argument(
+        "--tbw-limit",
+        help="Terabytes written threshold (accepts integer or float values).",
+    )
+    nvme_health_parser.add_argument(
+        "--media-errors",
+        type=int,
+        help="Maximum media error count before the helper exits non-zero.",
+    )
+    nvme_health_parser.add_argument(
+        "--unsafe-shutdowns",
+        type=int,
+        help="Maximum unsafe shutdown count before flagging an alert.",
+    )
+    nvme_health_parser.add_argument(
+        "--logger-tag",
+        help="Custom syslog tag when forwarding output via logger.",
+    )
+    nvme_health_parser.add_argument(
+        "--json-path",
+        help="Write nvme smart-log --output-format=json payload to this path.",
+    )
+    nvme_health_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the helper invocation without executing it.",
@@ -498,6 +529,22 @@ def _handle_pi_support_bundle(args: argparse.Namespace) -> int:
 
 
 def _handle_nvme_health(args: argparse.Namespace) -> int:
+    prefix: list[str] = []
+    if getattr(args, "device", None):
+        prefix.extend(["--device", args.device])
+    if getattr(args, "pct_thresh", None) is not None:
+        prefix.extend(["--pct-thresh", str(args.pct_thresh)])
+    if getattr(args, "tbw_limit", None):
+        prefix.extend(["--tbw-limit", str(args.tbw_limit)])
+    if getattr(args, "media_errors", None) is not None:
+        prefix.extend(["--media-errors", str(args.media_errors)])
+    if getattr(args, "unsafe_shutdowns", None) is not None:
+        prefix.extend(["--unsafe-shutdowns", str(args.unsafe_shutdowns)])
+    if getattr(args, "logger_tag", None):
+        prefix.extend(["--logger-tag", args.logger_tag])
+    if getattr(args, "json_path", None):
+        prefix.extend(["--json-path", args.json_path])
+
     return _forward_to_helper(
         script=NVME_HEALTH_CHECK_SCRIPT,
         args=args,
@@ -506,6 +553,7 @@ def _handle_nvme_health(args: argparse.Namespace) -> int:
             "scripts/nvme_health_check.sh is missing. "
             "Run from the repository root or reinstall the tooling."
         ),
+        prefix=prefix,
         auto_dry_run=False,
         always_execute=False,
     )
