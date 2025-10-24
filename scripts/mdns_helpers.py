@@ -122,6 +122,7 @@ def ensure_self_ad_is_visible(
 
     fallback_candidate: Optional[str] = None
     fallback_addr: Optional[str] = None
+    host_only_candidate: Optional[str] = None
 
     if runner is None:
         runner = subprocess.run  # type: ignore[assignment]
@@ -153,6 +154,8 @@ def ensure_self_ad_is_visible(
                     if has_ipv6 and not has_ipv4:
                         fallback_candidate = record.host
                         fallback_addr = observed_addrs[0]
+                if not observed_addrs and host_only_candidate is None:
+                    host_only_candidate = record.host
                 continue
 
             return record.host
@@ -170,6 +173,17 @@ def ensure_self_ad_is_visible(
             file=sys.stderr,
         )
         return fallback_candidate
+
+    if host_only_candidate and expect_addr:
+        print(
+            (
+                "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
+                "advertisement omitted address; assuming match after %d attempts"
+            )
+            % (expect_addr, expected_norm, attempts),
+            file=sys.stderr,
+        )
+        return host_only_candidate
 
     return None
 

@@ -184,10 +184,15 @@ def test_just_up_dev_two_nodes(tmp_path):
         primary = os.environ.get("JUST_UP_PRIMARY_HOST", "pi0.local")
         lines = []
 
+        bootstrap_addr = os.environ.get("JUST_UP_BOOTSTRAP_ADDR", "192.0.2.10")
+        server_addr = os.environ.get("JUST_UP_SERVER_ADDR", "192.0.2.10")
+
         if (run_dir / "publish-server").exists():
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (server);"
-                + "_k3s-sugar-dev._tcp;local;" + local_host + ";192.0.2.10;6443;"
+                + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
+                + server_addr
+                + ";6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
                 + "txt=leader=" + local_host + ";txt=phase=server"
             )
@@ -195,7 +200,9 @@ def test_just_up_dev_two_nodes(tmp_path):
         if phase == "bootstrap" and (run_dir / "publish-bootstrap").exists():
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + local_host + " (bootstrap);"
-                + "_k3s-sugar-dev._tcp;local;" + local_host + ";192.0.2.10;6443;"
+                + "_k3s-sugar-dev._tcp;local;" + local_host + ";"
+                + bootstrap_addr
+                + ";6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
                 + "txt=leader=" + local_host + ";txt=phase=bootstrap;txt=state=pending"
             )
@@ -203,7 +210,9 @@ def test_just_up_dev_two_nodes(tmp_path):
         if phase == "join":
             lines.append(
                 "=;eth0;IPv4;k3s-sugar-dev@" + primary + " (server);"
-                + "_k3s-sugar-dev._tcp;local;" + primary + ";192.0.2.10;6443;"
+                + "_k3s-sugar-dev._tcp;local;" + primary + ";"
+                + server_addr
+                + ";6443;"
                 + "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
                 + "txt=leader=" + primary + ";txt=phase=server"
             )
@@ -304,6 +313,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         {
             "SUGARKUBE_MDNS_HOST": "pi0.local",
             "JUST_UP_TEST_PHASE": "bootstrap",
+            "JUST_UP_BOOTSTRAP_ADDR": "",
         }
     )
 
@@ -315,6 +325,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         capture_output=True,
     )
     assert result_bootstrap.returncode == 0, result_bootstrap.stderr
+    assert "advertisement omitted address" in result_bootstrap.stderr
 
     env_join = env_common.copy()
     env_join.update(
@@ -345,7 +356,4 @@ def test_just_up_dev_two_nodes(tmp_path):
     # Ensure both bootstrap and server advertisements were logged
     assert log_contents.count("phase=bootstrap") >= 1
     assert log_contents.count("phase=server") >= 1
-
-    if shutil.which("just") is None:
-        pytest.skip("just binary is required for this test")
 
