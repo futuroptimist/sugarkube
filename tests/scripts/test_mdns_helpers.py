@@ -139,3 +139,56 @@ def test_ensure_self_ad_is_visible_accepts_missing_address(capsys):
     assert observed == "host0.local"
     warning = capsys.readouterr().err
     assert "advertisement omitted address" in warning
+
+
+def test_ensure_self_ad_is_visible_accepts_matching_role_when_phase_missing():
+    record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+        "txt=leader=host0.local\n"
+    )
+
+    runner = _make_runner({"_k3s-sugar-dev._tcp": record})
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed == "host0.local"
+
+    mismatched_role = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="server",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert mismatched_role is None
+
+    server_record = record.replace("role=bootstrap", "role=server")
+    runner_server = _make_runner({"_k3s-sugar-dev._tcp": server_record})
+
+    missing_bootstrap = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        runner=runner_server,
+        sleep=lambda _: None,
+    )
+
+    assert missing_bootstrap is None

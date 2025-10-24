@@ -11,6 +11,10 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
 
 _LOCAL_SUFFIXES: Final = (".local",)
+_PHASE_TO_ROLE: Final = {
+    "bootstrap": "bootstrap",
+    "server": "server",
+}
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SleepFn = Callable[[float], None]
@@ -118,6 +122,9 @@ def ensure_self_ad_is_visible(
     attempts = max(retries, 1)
     delay = max(delay, 0.0)
 
+    required_phase = (require_phase or "").strip().lower() or None
+    expected_role_for_phase = _PHASE_TO_ROLE.get(required_phase or "")
+
     expect_addr = (expect_addr or "").strip() or None
 
     fallback_candidate: Optional[str] = None
@@ -131,8 +138,12 @@ def ensure_self_ad_is_visible(
         records = _collect_mdns_records(cluster, env, runner)
         for record in records:
             txt = record.txt
-            if require_phase is not None and txt.get("phase") != require_phase:
-                continue
+            if required_phase is not None:
+                phase_value = txt.get("phase", "").strip().lower()
+                if phase_value != required_phase:
+                    role_value = txt.get("role", "").strip().lower()
+                    if not (phase_value == "" and role_value == expected_role_for_phase):
+                        continue
             host_match = _same_host(record.host, expected_norm)
             leader_match = _same_host(txt.get("leader", ""), expected_norm)
             if not (host_match or leader_match):
