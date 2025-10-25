@@ -7,7 +7,7 @@ from mdns_helpers import _same_host, ensure_self_ad_is_visible  # noqa: E402
 
 
 def _make_runner(stdout_by_service):
-    def _runner(cmd, capture_output=True, text=True, check=False):
+    def _runner(cmd, capture_output=True, text=True, check=False, **kwargs):
         service_type = cmd[-1]
         stdout = stdout_by_service.get(service_type, "")
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
@@ -220,6 +220,42 @@ def test_ensure_self_ad_is_visible_handles_uppercase_phase_and_leader_host_fallb
     )
 
     assert observed == "host0.local"
+
+
+def test_ensure_self_ad_is_visible_recovers_from_browse_timeout(capsys):
+    record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
+        "txt=leader=host0.local;txt=phase=server\n"
+    )
+
+    class TimeoutThenSuccess:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, cmd, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(cmd, timeout=kwargs.get("timeout", 5))
+            return subprocess.CompletedProcess(cmd, 0, stdout=record, stderr="")
+
+    runner = TimeoutThenSuccess()
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=2,
+        delay=0,
+        require_phase="server",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed == "host0.local"
+    warning = capsys.readouterr().err
+    assert "avahi-browse timed out" in warning
 
 
 def test_ensure_self_ad_is_visible_accepts_uppercase_cluster_and_env():

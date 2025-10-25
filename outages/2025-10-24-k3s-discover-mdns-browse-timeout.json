@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-24-k3s-discover-mdns-browse-timeout",
+  "date": "2025-10-24",
+  "component": "k3s-discover mDNS self-check",
+  "rootCause": "avahi-browse --resolve occasionally blocks indefinitely during the server self-check, so the discovery script never progressed past the publishing log line.",
+  "resolution": "Imposed a safety timeout around avahi-browse calls inside mdns_helpers, logged a warning when the browse takes too long, and covered the regression with a unit test that simulates the timeout path.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-24)",
+    "tests/scripts/test_mdns_helpers.py::test_ensure_self_ad_is_visible_recovers_from_browse_timeout"
+  ]
+}
