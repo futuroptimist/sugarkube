@@ -36,16 +36,26 @@ ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
-DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-9}"
-DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-15}"
-MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-60}"
-MDNS_SELF_CHECK_DELAY="${SUGARKUBE_MDNS_SELF_CHECK_DELAY:-1}"
+DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-4}"
+DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-8}"
+MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-20}"
+MDNS_SELF_CHECK_DELAY="${SUGARKUBE_MDNS_SELF_CHECK_DELAY:-0.5}"
 SKIP_MDNS_SELF_CHECK="${SUGARKUBE_SKIP_MDNS_SELF_CHECK:-0}"
 SUGARKUBE_MDNS_BOOT_RETRIES="${SUGARKUBE_MDNS_BOOT_RETRIES:-${MDNS_SELF_CHECK_ATTEMPTS}}"
 SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}}"
-SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-60}"
-SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-1}"
+SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
+SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+
+timestamp() {
+  date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+log() {
+  local ts
+  ts="$(timestamp)"
+  >&2 printf '%s [sugarkube %s/%s] %s\n' "${ts}" "${CLUSTER}" "${ENVIRONMENT}" "$*"
+}
 
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
@@ -234,8 +244,7 @@ else
 fi
 
 if [ -z "${MDNS_ADDR_V4}" ]; then
-  >&2 printf '[sugarkube %s/%s] WARN: no IPv4 found on %s; publishing without -a\n' \
-    "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_IFACE}"
+  log "WARN: no IPv4 found on ${MDNS_IFACE}; publishing without -a"
 fi
 MDNS_SERVICE_NAME="k3s-${CLUSTER}-${ENVIRONMENT}"
 MDNS_SERVICE_TYPE="_${MDNS_SERVICE_NAME}._tcp"
@@ -407,10 +416,6 @@ same_host() {
     return 1
   fi
   [ -n "${left_base}" ] && [ "${left_base}" = "${right_base}" ]
-}
-
-log() {
-  >&2 printf '[sugarkube %s/%s] %s\n' "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
 start_address_publisher() {
@@ -691,6 +696,8 @@ ensure_self_mdns_advertisement() {
       return 0
       ;;
   esac
+
+  log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts (delay ${delay}s)."
 
   MDNS_LAST_OBSERVED=""
   local observed=""

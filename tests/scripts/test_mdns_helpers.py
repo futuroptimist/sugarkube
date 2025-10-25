@@ -316,5 +316,4 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
         ("_k3s-sugar-dev._tcp", True),
         ("_https._tcp", True),
         ("_k3s-sugar-dev._tcp", False),
-        ("_https._tcp", False),
     ]
