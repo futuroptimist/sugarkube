@@ -1,0 +1,10 @@
+{
+  "id": "mdns-self-check-fallback-logging",
+  "date": "2025-10-25",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "When the IPv4 address comparison failed, k3s-discover silently reran the mDNS self-check without the address constraint, so operators saw a second wave of 20 attempts with no explanation in the logs.",
+  "resolution": "Emit an explicit log line before the fallback run to explain that the script is retrying without the IPv4 requirement after the expected address was not confirmed.",
+  "references": [
+    "scripts/k3s-discover.sh"
+  ]
+}

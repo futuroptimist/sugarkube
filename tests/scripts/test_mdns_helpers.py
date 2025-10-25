@@ -322,3 +322,59 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
         ("_https._tcp", True),
         ("_k3s-sugar-dev._tcp", False),
     ]
+
+
+def test_ensure_self_ad_is_visible_logs_phase_mismatch_details(capsys):
+    record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
+        "txt=leader=host0.local;txt=phase=server\n"
+    )
+
+    runner = _make_runner({"_k3s-sugar-dev._tcp": record})
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="bootstrap",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed is None
+    error_output = capsys.readouterr().err
+    assert "skipped host host0.local" in error_output
+    assert "require_phase=bootstrap" in error_output
+    assert "phase=server" in error_output
+
+
+def test_ensure_self_ad_is_visible_logs_host_comparison_details(capsys):
+    record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host1 (server);_k3s-sugar-dev._tcp;"
+        "local;host1.local;192.0.2.20;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server;"
+        "txt=leader=host1.local;txt=phase=server\n"
+    )
+
+    runner = _make_runner({"_k3s-sugar-dev._tcp": record})
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="server",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed is None
+    error_output = capsys.readouterr().err
+    assert "rejected host candidate host1.local" in error_output
+    assert "expected=host0.local" in error_output
+    assert "reason=host, leader" in error_output

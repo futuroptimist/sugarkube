@@ -319,14 +319,69 @@ def ensure_self_ad_is_visible(
 
             phase = txt.get("phase")
             role = txt.get("role")
+            leader_raw = txt.get("leader", "")
+            record_norm = _norm_host(record.host)
+            leader_norm = _norm_host(leader_raw)
+            record_stripped = _strip_local_suffix(record_norm) if record_norm else ""
+            leader_stripped = _strip_local_suffix(leader_norm) if leader_norm else ""
+            expected_stripped = _strip_local_suffix(expected_norm)
+
             if require_phase is not None:
                 phase_matches = phase == require_phase
                 role_matches = role == require_phase if role else False
                 if not (phase_matches or (phase is None and role_matches)):
+                    diag_messages.append(
+                        (
+                            "[k3s-discover mdns] Attempt %d/%d: skipped host %s "
+                            "(phase=%s role=%s leader=%s) because require_phase=%s "
+                            "(phase_match=%s role_match=%s)"
+                        )
+                        % (
+                            attempt,
+                            attempts,
+                            record.host,
+                            phase or "<unknown>",
+                            role or "<unknown>",
+                            leader_raw or "<none>",
+                            require_phase,
+                            "yes" if phase_matches else "no",
+                            "yes" if role_matches else "no",
+                        )
+                    )
                     continue
             host_match = _same_host(record.host, expected_norm)
-            leader_match = _same_host(txt.get("leader", ""), expected_norm)
+            leader_match = _same_host(leader_raw, expected_norm)
             if not (host_match or leader_match):
+                reason_bits: List[str] = []
+                if not host_match:
+                    reason_bits.append("host")
+                if leader_raw:
+                    if not leader_match:
+                        reason_bits.append("leader")
+                else:
+                    reason_bits.append("leader-missing")
+                reason = ", ".join(reason_bits) if reason_bits else "unknown"
+                diag_messages.append(
+                    (
+                        "[k3s-discover mdns] Attempt %d/%d: rejected host candidate %s "
+                        "(norm=%s stripped=%s) leader=%s (norm=%s stripped=%s) "
+                        "expected=%s (norm=%s stripped=%s); reason=%s"
+                    )
+                    % (
+                        attempt,
+                        attempts,
+                        record.host or "<none>",
+                        record_norm or "<empty>",
+                        record_stripped or "<empty>",
+                        leader_raw or "<none>",
+                        leader_norm or "<empty>",
+                        leader_stripped or "<empty>",
+                        expected_host,
+                        expected_norm,
+                        expected_stripped or "<empty>",
+                        reason,
+                    )
+                )
                 continue
 
             host_match_found = True
