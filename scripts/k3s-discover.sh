@@ -499,7 +499,7 @@ start_bootstrap_publisher() {
   )
 
   if [ -n "${MDNS_HOST_RAW}" ]; then
-    publish_cmd+=("${MDNS_HOST_RAW}")
+    publish_cmd+=(-H "${MDNS_HOST_RAW}")
   fi
 
   publish_cmd+=(
@@ -568,7 +568,7 @@ start_server_publisher() {
   )
 
   if [ -n "${MDNS_HOST_RAW}" ]; then
-    publish_cmd+=("${MDNS_HOST_RAW}")
+    publish_cmd+=(-H "${MDNS_HOST_RAW}")
   fi
 
   publish_cmd+=(
