@@ -186,6 +186,7 @@ def _collect_mdns_records(
     from k3s_mdns_parser import parse_mdns_records
     service_types = _service_types(cluster, environment)
 
+    resolved_lines: List[str] = []
     for service_type in service_types:
         lines = list(
             _browse_service_type(
@@ -197,10 +198,14 @@ def _collect_mdns_records(
         )
         if not lines:
             continue
-        records = parse_mdns_records(lines, cluster, environment)
+        resolved_lines.extend(lines)
+
+    if resolved_lines:
+        records = parse_mdns_records(resolved_lines, cluster, environment)
         if records:
             return records
 
+    fallback_lines: List[str] = []
     for service_type in service_types:
         lines = list(
             _browse_service_type(
@@ -212,7 +217,14 @@ def _collect_mdns_records(
         )
         if not lines:
             continue
-        records = parse_mdns_records(lines, cluster, environment)
+        fallback_lines.extend(lines)
+        # Match previous behaviour by returning as soon as unresolved records are
+        # observed for any service type. This preserves call expectations in the
+        # tests and avoids unnecessary avahi-browse invocations.
+        break
+
+    if fallback_lines:
+        records = parse_mdns_records(fallback_lines, cluster, environment)
         if records:
             return records
 
