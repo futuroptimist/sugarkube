@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import os
 import subprocess
 import sys
 import time
@@ -12,6 +13,20 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
 
 _LOCAL_SUFFIXES: Final = (".local",)
+
+
+def _determine_browse_timeout() -> float:
+    raw = os.environ.get("SUGARKUBE_MDNS_BROWSE_TIMEOUT", "")
+    if not raw:
+        return 5.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 5.0
+    return value if value > 0 else 5.0
+
+
+_DEFAULT_BROWSE_TIMEOUT: Final[float] = _determine_browse_timeout()
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SleepFn = Callable[[float], None]
@@ -65,6 +80,7 @@ def _browse_service_type(
     runner: Runner,
     *,
     resolve: bool = True,
+    timeout: float = _DEFAULT_BROWSE_TIMEOUT,
 ) -> Iterable[str]:
     command = [
         "avahi-browse",
@@ -74,15 +90,38 @@ def _browse_service_type(
     if resolve:
         command.append("--resolve")
     command.append(service_type)
+    kwargs = {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+    }
+
+    # Only pass a timeout when we are using subprocess.run directly, so that
+    # test doubles do not need to implement the parameter. Custom runners may
+    # still honour the timeout via **kwargs if they wish.
+    if runner is subprocess.run and timeout > 0:
+        kwargs["timeout"] = timeout
+
     try:
-        result = runner(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = runner(command, **kwargs)
     except FileNotFoundError:
         return []
+    except subprocess.TimeoutExpired as exc:
+        duration = exc.timeout if isinstance(exc.timeout, (int, float)) else timeout
+        print(
+            (
+                "[k3s-discover mdns] WARN: avahi-browse timed out after %.1fs "
+                "while resolving %s"
+            )
+            % (duration, service_type),
+            file=sys.stderr,
+        )
+        return []
+    except TypeError:
+        # Some tests inject lightweight runners that do not accept a timeout
+        # parameter. Retry without the optional kwargs in that scenario.
+        kwargs.pop("timeout", None)
+        result = runner(command, **kwargs)
 
     stdout = result.stdout if result.stdout else ""
     return [line for line in stdout.splitlines() if line]
@@ -96,7 +135,14 @@ def _collect_mdns_records(
     from k3s_mdns_parser import parse_mdns_records
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
-        lines.extend(_browse_service_type(service_type, runner, resolve=True))
+        lines.extend(
+            _browse_service_type(
+                service_type,
+                runner,
+                resolve=True,
+                timeout=_DEFAULT_BROWSE_TIMEOUT,
+            )
+        )
 
     records = parse_mdns_records(lines, cluster, environment)
     if records:
@@ -105,7 +151,12 @@ def _collect_mdns_records(
     fallback_lines: List[str] = []
     for service_type in _service_types(cluster, environment):
         fallback_lines.extend(
-            _browse_service_type(service_type, runner, resolve=False)
+            _browse_service_type(
+                service_type,
+                runner,
+                resolve=False,
+                timeout=_DEFAULT_BROWSE_TIMEOUT,
+            )
         )
     if not fallback_lines:
         return []
