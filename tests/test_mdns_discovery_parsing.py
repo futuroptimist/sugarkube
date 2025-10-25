@@ -17,18 +17,23 @@ def mdns_env(tmp_path):
         """#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -ne 5 ]]; then
+if [[ "$#" -ne 3 ]]; then
   echo "unexpected argument count: $#" >&2
   exit 1
 fi
 
-if [[ "$1" != "--parsable" || "$2" != "--terminate" || "$3" != "--resolve" || "$4" != "--ignore-local" ]]; then
+if [[ "$1" != "-rptk" && "$1" != "-ptk" ]]; then
+  echo "unexpected flags: $*" >&2
+  exit 1
+fi
+
+if [[ "$2" != "--ignore-local" ]]; then
   echo "unexpected arguments: $*" >&2
   exit 1
 fi
 
-if [[ "$5" != "_https._tcp" ]]; then
-  echo "unexpected service type: $5" >&2
+if [[ "$3" != "_https._tcp" ]]; then
+  echo "unexpected service type: $3" >&2
   exit 1
 fi
 

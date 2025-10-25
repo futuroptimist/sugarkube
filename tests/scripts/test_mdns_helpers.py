@@ -3,7 +3,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from mdns_helpers import _same_host, ensure_self_ad_is_visible  # noqa: E402
+from k3s_mdns_parser import parse_mdns_records  # noqa: E402
+from mdns_helpers import (  # noqa: E402
+    _same_host,
+    ensure_self_ad_is_visible,
+    normalize_hostname,
+)
 
 
 def _make_runner(stdout_by_service):
@@ -29,6 +34,49 @@ def test_same_host_accepts_repeated_local_suffix():
 def test_same_host_strips_control_characters():
     assert _same_host("host0.local\x00", "host0.local")
     assert _same_host("\x07host1.local", "host1")
+
+
+def test_normalize_hostname_strips_trailing_dot_and_is_case_insensitive():
+    assert normalize_hostname("Host.LOCAL.") == "host.local"
+    assert normalize_hostname("HOST") == "host"
+    assert normalize_hostname("") == ""
+
+
+def test_host_equality_uses_eq_not_identity():
+    left = "".join(["host", "0", ".local"])
+    right = "host0.local"
+    assert left is not right
+    assert _same_host(left, right)
+
+
+def test_txt_parsing_handles_multiple_trailing_args():
+    line = (
+        "=;eth0;IPv4;k3s-sugar-dev@node0 (bootstrap);_k3s-sugar-dev._tcp;local;"
+        "node0.local;192.0.2.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+        "txt=phase=bootstrap;txt=role=candidate;txt=leader=node0.local;txt=host=node0.local"
+    )
+    records = parse_mdns_records([line], "sugar", "dev")
+    assert len(records) == 1
+    txt = records[0].txt
+    assert txt["phase"] == "bootstrap"
+    assert txt["role"] == "candidate"
+    assert txt["leader"] == "node0.local"
+    assert txt.get("host") == "node0.local"
+
+
+def test_txt_parsing_handles_single_concatenated_string():
+    line = (
+        "=;eth0;IPv4;k3s-sugar-dev@node1 (server);_k3s-sugar-dev._tcp;local;"
+        "node1.local;192.0.2.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+        "txt=phase=server,role=server,leader=node1.local,host=node1.local"
+    )
+    records = parse_mdns_records([line], "sugar", "dev")
+    assert len(records) == 1
+    txt = records[0].txt
+    assert txt["phase"] == "server"
+    assert txt["role"] == "server"
+    assert txt["leader"] == "node1.local"
+    assert txt.get("host") == "node1.local"
 
 
 def test_ensure_self_ad_is_visible_filters_by_phase():
@@ -296,7 +344,8 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
     def runner(cmd, capture_output=True, text=True, check=False):
         assert capture_output and text and not check
         service = cmd[-1]
-        resolve = "--resolve" in cmd
+        flags = cmd[1] if len(cmd) > 1 else ""
+        resolve = flags == "-rptk"
         calls.append((service, resolve))
         if service == "_k3s-sugar-dev._tcp" and not resolve:
             stdout = unresolved
@@ -347,9 +396,9 @@ def test_ensure_self_ad_is_visible_logs_phase_mismatch_details(capsys):
 
     assert observed is None
     error_output = capsys.readouterr().err
-    assert "skipped host host0.local" in error_output
-    assert "require_phase=bootstrap" in error_output
-    assert "phase=server" in error_output
+    assert "require_phase=bootstrap mismatch for host=host0.local" in error_output
+    assert "phase raw=server" in error_output
+    assert "role raw=server" in error_output
 
 
 def test_ensure_self_ad_is_visible_logs_host_comparison_details(capsys):
@@ -375,6 +424,7 @@ def test_ensure_self_ad_is_visible_logs_host_comparison_details(capsys):
 
     assert observed is None
     error_output = capsys.readouterr().err
-    assert "rejected host candidate host1.local" in error_output
-    assert "expected=host0.local" in error_output
+    assert "host mismatch expected raw=host0.local" in error_output
+    assert "observed host raw=host1.local" in error_output
+    assert "leader raw=host1.local" in error_output
     assert "reason=host, leader" in error_output
