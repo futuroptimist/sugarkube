@@ -333,8 +333,9 @@ def ensure_self_ad_is_visible(
             role_display = role_norm or (role_raw or "")
 
             if require_phase is not None:
-                phase_matches = phase_norm == require_phase
-                role_matches = role_norm == require_phase
+                phase_present = bool(phase_norm)
+                phase_matches = phase_present and phase_norm == require_phase
+                role_matches = (not phase_present) and role_norm == require_phase
                 if not (phase_matches or role_matches):
                     diag_messages.append(
                         (
