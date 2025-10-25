@@ -94,30 +94,79 @@ def _is_candidate_line(line: str) -> bool:
     return bool(line) and line[0] in {"=", "+", "@"}
 
 
+def _strip_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
 def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     txt: Dict[str, str] = {}
     for field in fields:
+        field = field.strip()
+        if not field:
+            continue
         if not field.startswith("txt="):
             continue
-        payload = field[4:]
-        if not payload:
-            continue
-        payload = payload.strip()
+        payload = _strip_quotes(field[4:].strip())
         if not payload:
             continue
         entries = [payload]
         if "," in payload:
             entries = [item.strip() for item in payload.split(",") if item.strip()]
         for entry in entries:
-            if "=" not in entry:
+            entry = _strip_quotes(entry.strip())
+            if not entry:
                 continue
-            key, value = entry.split("=", 1)
-            key = key.strip().lower()
-            value = value.strip()
+            key, sep, value = entry.partition("=")
+            key = _strip_quotes(key.strip()).lower()
             if not key:
+                continue
+            value = _strip_quotes(value.strip()) if sep else ""
+            if not value and key in txt:
                 continue
             txt[key] = value
     return txt
+
+
+def parse_avahi_browse_record(line: str) -> Optional[Dict[str, object]]:
+    if not _is_candidate_line(line):
+        return None
+
+    fields = line.split(";")
+    if len(fields) < 9:
+        return None
+
+    status = fields[0]
+    interface = fields[1] if len(fields) > 1 else ""
+    protocol = fields[2] if len(fields) > 2 else ""
+    instance = _strip_quotes(fields[3]) if len(fields) > 3 else ""
+    service_type = _strip_quotes(fields[4]) if len(fields) > 4 else ""
+    domain = _strip_quotes(fields[5]) if len(fields) > 5 else ""
+    host = _strip_quotes(fields[6]) if len(fields) > 6 else ""
+    address = _strip_quotes(fields[7]) if len(fields) > 7 else ""
+    port_raw = fields[8] if len(fields) > 8 else ""
+    txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
+
+    port: Optional[int]
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = None
+
+    return {
+        "status": status,
+        "interface": interface,
+        "protocol": protocol,
+        "instance": instance,
+        "type": service_type,
+        "domain": domain,
+        "host": host,
+        "address": address,
+        "port": port,
+        "txt": txt,
+        "raw": line,
+    }
 
 
 def _txt_is_richer(existing: Dict[str, str], new: Dict[str, str]) -> bool:
@@ -160,13 +209,11 @@ def parse_mdns_records(
     expected_env = environment.strip().lower()
 
     for raw in lines:
-        if not _is_candidate_line(raw):
-            continue
-        fields = raw.split(";")
-        if len(fields) < 6:
+        parsed = parse_avahi_browse_record(raw)
+        if not parsed:
             continue
 
-        service_type = fields[4]
+        service_type = parsed["type"] or ""
         type_cluster: Optional[str] = None
         type_environment: Optional[str] = None
 
@@ -179,9 +226,9 @@ def parse_mdns_records(
         else:
             continue
 
-        domain = fields[5] if len(fields) > 5 else ""
+        domain = parsed["domain"] or ""
         service_cluster, service_env, service_role, service_host = _parse_service_name(
-            fields[3] if len(fields) > 3 else "",
+            parsed["instance"] or "",
             domain,
         )
 
@@ -199,7 +246,7 @@ def parse_mdns_records(
         if type_environment:
             type_environment = type_environment.strip()
 
-        txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
+        txt = dict(parsed["txt"])
         if "leader" in txt:
             txt["leader"] = _normalize_host(txt["leader"], domain)
         if "phase" in txt and txt["phase"]:
@@ -224,8 +271,8 @@ def parse_mdns_records(
             txt["env"] = environment
 
         host = ""
-        if len(fields) > 6 and fields[6]:
-            host = _normalize_host(fields[6], domain)
+        if parsed["host"]:
+            host = _normalize_host(str(parsed["host"]), domain)
         elif service_host:
             host = service_host
         if not host:
@@ -235,17 +282,14 @@ def parse_mdns_records(
         if not host:
             continue
 
-        protocol = fields[2] if len(fields) > 2 else ""
-        address = fields[7] if len(fields) > 7 else ""
+        protocol = parsed["protocol"] or ""
+        address = parsed["address"] or ""
 
-        port_field = fields[8] if len(fields) > 8 else ""
-        if port_field:
-            try:
-                port = int(port_field)
-            except ValueError:
-                continue
-        else:
+        port_value = parsed["port"]
+        if port_value is None:
             port = 6443
+        else:
+            port = port_value
 
         role = _normalize_role(txt.get("role")) or service_role
         if role is None and not txt:
@@ -289,4 +333,4 @@ def parse_mdns_records(
     return list(candidates.values())
 
 
-__all__ = ["MdnsRecord", "parse_mdns_records"]
+__all__ = ["MdnsRecord", "parse_avahi_browse_record", "parse_mdns_records"]
