@@ -1,0 +1,11 @@
+{
+  "id": "mdns-host-mismatch-logging",
+  "date": "2025-10-25",
+  "component": "scripts/mdns_helpers.py",
+  "rootCause": "The mDNS self-check collapsed all rejected records into a generic host list, hiding whether phase filtering, host normalisation, or leader comparisons failed and leading to repeated retries even when the record looked correct.",
+  "resolution": "Log the phase/role matches alongside the normalised host, leader, and stripped hostname values for every rejected record so future logs identify the exact comparison that failed.",
+  "references": [
+    "scripts/mdns_helpers.py",
+    "tests/scripts/test_mdns_helpers.py"
+  ]
+}

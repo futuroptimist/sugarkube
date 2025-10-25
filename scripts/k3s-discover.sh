@@ -742,6 +742,7 @@ ensure_self_mdns_advertisement() {
   fi
 
   if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
+    log "Self-check for ${role} advertisement: expected IPv4 ${MDNS_ADDR_V4} not confirmed; retrying without IPv4 requirement."
     if observed_line="$("${mdns_check_base[@]}")"; then
       local observed
       observed="$(strip_timestamp_prefix "${observed_line}")"
