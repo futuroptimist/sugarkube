@@ -37,9 +37,9 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         "#!/usr/bin/env bash\n" "echo 'LISTEN'\n" "exit 0\n",
     )
 
-    # Provide a long-running avahi-publish-service implementation so the helper keeps a PID.
+    # Provide a long-running avahi-publish implementation so the helper keeps a PID.
     _write_stub(
-        bin_dir / "avahi-publish-service",
+        bin_dir / "avahi-publish",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         f"echo START:\"$@\" >> '{publish_log}'\n"

@@ -133,10 +133,10 @@ def test_just_up_dev_two_nodes(tmp_path):
     )
 
     _write_executable(
-        bin_dir / "avahi-publish-service",
+        bin_dir / "avahi-publish",
         f"""#!/usr/bin/env bash
         set -euo pipefail
-        echo "avahi-publish-service:$@" >> "{log_path}"
+        echo "avahi-publish:$@" >> "{log_path}"
         run_dir="${{SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}}"
         phase="bootstrap"
         if [[ "$*" == *"phase=server"* ]]; then
@@ -164,7 +164,7 @@ def test_just_up_dev_two_nodes(tmp_path):
         if [ -n "${{service_name}}" ]; then
           echo "Established under name '${{service_name}}'" >&2
         fi
-        trap 'echo "avahi-publish-service:TERM:${{phase}}" >> "{log_path}"; exit 0' TERM INT
+        trap 'echo "avahi-publish:TERM:${{phase}}" >> "{log_path}"; exit 0' TERM INT
         while true; do sleep 1; done
         """,
     )
@@ -451,7 +451,7 @@ def test_just_up_dev_two_nodes(tmp_path):
     )
 
     log_contents = log_path.read_text(encoding="utf-8")
-    assert "avahi-publish-service:" in log_contents
+    assert "avahi-publish:" in log_contents
     assert "-a" not in log_contents
     assert "avahi-publish-address:" in log_contents
     assert "sudo:apt-get update" in log_contents

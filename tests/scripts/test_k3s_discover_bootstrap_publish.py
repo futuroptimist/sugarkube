@@ -29,7 +29,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -105,24 +105,24 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
-    assert "-s -H" in log_contents
+    assert "START:-s" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
-    assert "-H" in log_contents
-    assert f"-H {hostname}.local" in log_contents
+    assert f" {hostname}.local" in log_contents
     assert f"_k3s-sugar-dev._tcp" in log_contents
     assert f"cluster=sugar" in log_contents
     assert f"env=dev" in log_contents
     assert f"leader={hostname}.local" in log_contents
     assert "role=bootstrap" in log_contents
     assert "phase=bootstrap" in log_contents
+    assert f"host={hostname}.local" in log_contents
 
     # Service file should have been cleaned up by the EXIT trap
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     assert not service_file.exists()
 
-    # stderr should mention that avahi-publish-service is advertising the bootstrap role
-    assert "avahi-publish-service advertising bootstrap" in result.stderr
+    # stderr should mention that avahi-publish is advertising the bootstrap role
+    assert "avahi-publish advertising bootstrap" in result.stderr
     expected = (
         f"phase=self-check host={hostname}.local observed={hostname}.local; "
         "bootstrap advertisement confirmed."
@@ -136,7 +136,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -203,7 +203,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
-    assert "-s -H" in log_contents
+    assert "START:-s" in log_contents
     assert f"leader={hostname}.local" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
@@ -220,7 +220,7 @@ def test_bootstrap_publish_warns_on_address_mismatch(tmp_path):
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -304,7 +304,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -372,8 +372,9 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
     log_contents = log_path.read_text(encoding="utf-8")
     assert "START:" in log_contents
     assert "TERM" in log_contents
-    assert "-s -H" in log_contents
-    assert "-H HostMixed.LOCAL" in log_contents
+    assert "START:-s" in log_contents
+    assert " 6443 HostMixed.LOCAL" in log_contents
+    assert "host=HostMixed.LOCAL" in log_contents
     assert "leader=HostMixed.LOCAL" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
 
@@ -390,7 +391,7 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -455,7 +456,7 @@ def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
     log_path = tmp_path / "publish.log"
     count_path = tmp_path / "browse.count"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -557,7 +558,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
     flag_path = tmp_path / "server.ready"
     count_path = tmp_path / "browse.count"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -657,7 +658,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
 
     log_contents = log_path.read_text(encoding="utf-8")
     assert log_contents.count("START:") >= 2
-    assert "-s -H" in log_contents
+    assert "START:-s" in log_contents
     assert "phase=bootstrap" in log_contents
     assert "phase=server" in log_contents
     assert "PIDFILE_OK:bootstrap" in log_contents
@@ -722,7 +723,7 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
     bin_dir.mkdir()
     log_path = tmp_path / "publish.log"
 
-    stub = bin_dir / "avahi-publish-service"
+    stub = bin_dir / "avahi-publish"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"

@@ -39,12 +39,12 @@ for phase in bootstrap server; do
 done
 
 svc="_k3s-${CLUSTER}-${ENV}._tcp"
-if pgrep -af "avahi-publish-service.*${svc}" >/dev/null 2>&1; then
+if pgrep -af "avahi-publish.*${svc}" >/dev/null 2>&1; then
   if [ "${DRY_RUN}" = "1" ]; then
-    log "DRY_RUN=1: would pkill stray avahi-publish-service for ${svc}"
+    log "DRY_RUN=1: would pkill stray avahi-publish for ${svc}"
   else
-    log "pkill stray avahi-publish-service for ${svc}"
-    pkill -f "avahi-publish-service.*${svc}" 2>/dev/null || true
+    log "pkill stray avahi-publish for ${svc}"
+    pkill -f "avahi-publish.*${svc}" 2>/dev/null || true
   fi
   killed_any=1
 fi

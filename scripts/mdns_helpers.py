@@ -7,7 +7,18 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional, TextIO
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Final,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    TextIO,
+    Tuple,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
@@ -15,6 +26,41 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 _LOCAL_SUFFIXES: Final = (".local",)
 _CONTROL_CHAR_MAP: Final = {i: None for i in range(32)}
 _CONTROL_CHAR_MAP.update({0x7F: None})
+
+
+def normalize_hostname(hostname: str) -> str:
+    """Return a lowercase hostname without a trailing dot."""
+
+    if not hostname:
+        return ""
+    return hostname.rstrip(".").lower()
+
+
+def build_avahi_publish_args(
+    instance: str,
+    service_type: str,
+    port: int,
+    *,
+    host: Optional[str] = None,
+    txt: Optional[Sequence[Tuple[str, str]]] = None,
+    binary: str = "avahi-publish",
+) -> List[str]:
+    """Construct the argv used to publish an mDNS service via avahi-publish."""
+
+    argv: List[str] = [binary, "-s", instance, service_type, str(port)]
+    if host:
+        argv.append(host)
+
+    if txt:
+        txt_items: Iterable[Tuple[str, str]]
+        if isinstance(txt, Mapping):
+            txt_items = txt.items()
+        else:
+            txt_items = txt
+        for key, value in txt_items:
+            argv.append(f"{key}={value}")
+
+    return argv
 
 
 def _determine_browse_timeout() -> float:
@@ -74,10 +120,7 @@ def _norm_host(host: str) -> str:
     if not host:
         return ""
 
-    while host.endswith("."):
-        host = host[:-1]
-
-    return host.lower()
+    return normalize_hostname(host)
 
 
 def _strip_local_suffix(host: str) -> str:
@@ -161,13 +204,9 @@ def _browse_service_type(
     resolve: bool = True,
     timeout: float = _DEFAULT_BROWSE_TIMEOUT,
 ) -> Iterable[str]:
-    command = [
-        "avahi-browse",
-        "--parsable",
-        "--terminate",
-    ]
+    command = ["avahi-browse", "-p", "-t", "-k"]
     if resolve:
-        command.append("--resolve")
+        command.insert(1, "-r")
     command.append(service_type)
     kwargs = {
         "capture_output": True,
@@ -322,64 +361,51 @@ def ensure_self_ad_is_visible(
             leader_raw = txt.get("leader", "")
             record_norm = _norm_host(record.host)
             leader_norm = _norm_host(leader_raw)
-            record_stripped = _strip_local_suffix(record_norm) if record_norm else ""
-            leader_stripped = _strip_local_suffix(leader_norm) if leader_norm else ""
-            expected_stripped = _strip_local_suffix(expected_norm)
 
             if require_phase is not None:
                 phase_matches = phase == require_phase
                 role_matches = role == require_phase if role else False
-                if not (phase_matches or (phase is None and role_matches)):
+                if not (phase_matches or role_matches):
+                    details: List[str] = []
+                    if phase is None:
+                        details.append("phase=<missing>")
+                    else:
+                        details.append(f"phase={phase}")
+                    if role is None:
+                        details.append("role=<missing>")
+                    else:
+                        details.append(f"role={role}")
                     diag_messages.append(
                         (
                             "[k3s-discover mdns] Attempt %d/%d: skipped host %s "
-                            "(phase=%s role=%s leader=%s) because require_phase=%s "
-                            "(phase_match=%s role_match=%s)"
+                            "because require_phase=%s but %s"
                         )
                         % (
                             attempt,
                             attempts,
-                            record.host,
-                            phase or "<unknown>",
-                            role or "<unknown>",
-                            leader_raw or "<none>",
+                            record.host or "<none>",
                             require_phase,
-                            "yes" if phase_matches else "no",
-                            "yes" if role_matches else "no",
+                            ", ".join(details) if details else "no TXT keys provided",
                         )
                     )
                     continue
             host_match = _same_host(record.host, expected_norm)
             leader_match = _same_host(leader_raw, expected_norm)
             if not (host_match or leader_match):
-                reason_bits: List[str] = []
-                if not host_match:
-                    reason_bits.append("host")
-                if leader_raw:
-                    if not leader_match:
-                        reason_bits.append("leader")
-                else:
-                    reason_bits.append("leader-missing")
-                reason = ", ".join(reason_bits) if reason_bits else "unknown"
                 diag_messages.append(
                     (
-                        "[k3s-discover mdns] Attempt %d/%d: rejected host candidate %s "
-                        "(norm=%s stripped=%s) leader=%s (norm=%s stripped=%s) "
-                        "expected=%s (norm=%s stripped=%s); reason=%s"
+                        "[k3s-discover mdns] Attempt %d/%d: host mismatch. "
+                        "expected=%s (norm=%s); observed host=%s (norm=%s) leader=%s (norm=%s)"
                     )
                     % (
                         attempt,
                         attempts,
-                        record.host or "<none>",
-                        record_norm or "<empty>",
-                        record_stripped or "<empty>",
-                        leader_raw or "<none>",
-                        leader_norm or "<empty>",
-                        leader_stripped or "<empty>",
                         expected_host,
                         expected_norm,
-                        expected_stripped or "<empty>",
-                        reason,
+                        record.host or "<none>",
+                        record_norm or "<empty>",
+                        leader_raw or "<none>",
+                        leader_norm or "<empty>",
                     )
                 )
                 continue
@@ -520,4 +546,10 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry point
     raise SystemExit(_main())
 
 
-__all__ = ["_norm_host", "_same_host", "ensure_self_ad_is_visible"]
+__all__ = [
+    "_norm_host",
+    "_same_host",
+    "ensure_self_ad_is_visible",
+    "build_avahi_publish_args",
+    "normalize_hostname",
+]
