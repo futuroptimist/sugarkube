@@ -26,6 +26,12 @@ _CONTROL_CHAR_MAP: Final = {i: None for i in range(32)}
 _CONTROL_CHAR_MAP.update({0x7F: None})
 
 
+def norm_host(host: str | None) -> str:
+    """Normalise a hostname by trimming trailing dots and lowercasing."""
+
+    return (host or "").rstrip(".").lower()
+
+
 def _determine_browse_timeout() -> float:
     raw = os.environ.get("SUGARKUBE_MDNS_BROWSE_TIMEOUT", "")
     if not raw:
@@ -85,13 +91,13 @@ def normalize_hostname(host: str) -> str:
     if not candidate:
         return ""
 
-    return candidate.rstrip(".").lower()
+    return norm_host(candidate)
 
 
 def _norm_host(host: str) -> str:
-    """Backwards-compatible alias for ``normalize_hostname``."""
+    """Backwards-compatible alias for :func:`norm_host`."""
 
-    return normalize_hostname(host)
+    return norm_host(host)
 
 
 def _strip_local_suffix(host: str) -> str:
@@ -115,7 +121,7 @@ def _same_host(left: str, right: str) -> bool:
     return _strip_local_suffix(left_norm) == _strip_local_suffix(right_norm)
 
 
-def build_publish_command(
+def build_publish_cmd(
     *,
     instance: str,
     service_type: str,
@@ -125,15 +131,35 @@ def build_publish_command(
 ) -> List[str]:
     """Construct an ``avahi-publish`` command with discrete TXT arguments."""
 
-    command = ["avahi-publish", "-s", instance, service_type, str(port)]
+    command: List[str] = ["avahi-publish", "-s"]
     if host:
-        command.append(host)
+        command.extend(["-H", host])
+
+    command.extend([instance, service_type, str(port)])
 
     if txt:
-        for key, value in txt.items():
-            command.append(f"{key}={value}")
+        command.extend([f"{key}={value}" for key, value in txt.items()])
 
     return command
+
+
+def build_publish_command(
+    *,
+    instance: str,
+    service_type: str,
+    port: int,
+    host: Optional[str],
+    txt: Mapping[str, str],
+) -> List[str]:
+    """Backward compatible shim for :func:`build_publish_cmd`."""
+
+    return build_publish_cmd(
+        instance=instance,
+        service_type=service_type,
+        port=port,
+        host=host,
+        txt=txt,
+    )
 
 
 def _service_types(cluster: str, environment: str) -> List[str]:
@@ -551,7 +577,9 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry point
 __all__ = [
     "_norm_host",
     "_same_host",
-    "ensure_self_ad_is_visible",
-    "normalize_hostname",
+    "build_publish_cmd",
     "build_publish_command",
+    "ensure_self_ad_is_visible",
+    "norm_host",
+    "normalize_hostname",
 ]

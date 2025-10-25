@@ -94,26 +94,47 @@ def _is_candidate_line(line: str) -> bool:
     return bool(line) and line[0] in {"=", "+", "@"}
 
 
+def _split_resolved_line(line: str) -> Optional[List[str]]:
+    if not _is_candidate_line(line):
+        return None
+
+    fields = line.split(";")
+    if not fields:
+        return None
+
+    if fields[0] == "=" and len(fields) < 9:
+        return None
+
+    return fields
+
+
+def _strip_optional_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
 def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     txt: Dict[str, str] = {}
     for field in fields:
         if not field.startswith("txt="):
             continue
-        payload = field[4:]
-        if not payload:
-            continue
-        payload = payload.strip()
+        payload = _strip_optional_quotes(field[4:].strip())
         if not payload:
             continue
         entries = [payload]
         if "," in payload:
             entries = [item.strip() for item in payload.split(",") if item.strip()]
         for entry in entries:
-            if "=" not in entry:
+            entry = entry.strip()
+            if not entry:
                 continue
-            key, value = entry.split("=", 1)
+            if "=" in entry:
+                key, value = entry.split("=", 1)
+            else:
+                key, value = entry, ""
             key = key.strip().lower()
-            value = value.strip()
+            value = _strip_optional_quotes(value.strip())
             if not key:
                 continue
             txt[key] = value
@@ -160,10 +181,8 @@ def parse_mdns_records(
     expected_env = environment.strip().lower()
 
     for raw in lines:
-        if not _is_candidate_line(raw):
-            continue
-        fields = raw.split(";")
-        if len(fields) < 6:
+        fields = _split_resolved_line(raw)
+        if not fields or len(fields) < 6:
             continue
 
         service_type = fields[4]
