@@ -82,6 +82,33 @@ def test_ensure_self_ad_is_visible_filters_by_phase():
     assert missing_server is None
 
 
+def test_ensure_self_ad_is_visible_logs_phase_mismatch(capsys):
+    bootstrap_record = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;"
+        "txt=leader=host0.local;txt=phase=bootstrap\n"
+    )
+
+    runner = _make_runner({"_k3s-sugar-dev._tcp": bootstrap_record})
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="server",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed is None
+    err = capsys.readouterr().err
+    assert "required phase 'server' was not advertised" in err
+    assert "none matched expected" not in err
+
+
 def test_ensure_self_ad_is_visible_matches_expected_address():
     record = (
         "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;"

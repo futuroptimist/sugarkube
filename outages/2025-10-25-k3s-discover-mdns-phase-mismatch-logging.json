@@ -1,0 +1,11 @@
+{
+  "id": "k3s-discover-mdns-phase-mismatch-logging",
+  "date": "2025-10-25",
+  "component": "scripts/mdns_helpers.py",
+  "rootCause": "The mDNS self-check filtered advertisements by phase before evaluating the host identity. When bootstrap adverts lacked the requested phase value, the script logged that no hosts matched the expected name even though the local host was present, so discovery kept retrying unnecessarily.",
+  "resolution": "Track host/leader matches separately from the phase filter and emit a dedicated log message when the expected host appears with the wrong phase. This clarifies the situation and avoids the misleading \"none matched expected\" message.",
+  "references": [
+    "scripts/mdns_helpers.py",
+    "tests/scripts/test_mdns_helpers.py"
+  ]
+}
