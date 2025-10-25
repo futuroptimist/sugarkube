@@ -7,7 +7,7 @@ from mdns_helpers import _same_host, ensure_self_ad_is_visible  # noqa: E402
 
 
 def _make_runner(stdout_by_service):
-    def _runner(cmd, capture_output=True, text=True, check=False):
+    def _runner(cmd, capture_output=True, text=True, check=False, timeout=None):
         service_type = cmd[-1]
         stdout = stdout_by_service.get(service_type, "")
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
@@ -117,6 +117,31 @@ def test_ensure_self_ad_is_visible_matches_expected_address():
         sleep=lambda _: None,
     )
     assert missing is None
+
+
+def test_ensure_self_ad_is_visible_handles_timeout(monkeypatch):
+    calls = 0
+
+    def _timeout_runner(cmd, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired(cmd, timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setenv("SUGARKUBE_MDNS_QUERY_TIMEOUT", "0.1")
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=1,
+        delay=0,
+        require_phase="server",
+        runner=_timeout_runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed is None
+    assert calls >= 2  # resolves each service type (with and without --resolve)
 
 
 def test_ensure_self_ad_is_visible_accepts_missing_address(capsys):
@@ -252,7 +277,7 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
 
     calls = []
 
-    def runner(cmd, capture_output=True, text=True, check=False):
+    def runner(cmd, capture_output=True, text=True, check=False, timeout=None):
         assert capture_output and text and not check
         service = cmd[-1]
         resolve = "--resolve" in cmd
