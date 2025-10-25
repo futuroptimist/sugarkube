@@ -78,7 +78,7 @@ fi
 
 echo 99999 >"${BOOT_FILE}"
 
-FAKE_PUBLISHER="${TMP_DIR}/avahi-publish-service"
+FAKE_PUBLISHER="${TMP_DIR}/avahi-publish"
 cat <<'PUB' >"${FAKE_PUBLISHER}"
 #!/usr/bin/env bash
 set -euo pipefail

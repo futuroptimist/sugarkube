@@ -97,18 +97,23 @@ def _is_candidate_line(line: str) -> bool:
 def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     txt: Dict[str, str] = {}
     for field in fields:
-        if not field.startswith("txt="):
+        if not field:
             continue
-        payload = field[4:]
+        payload = field[4:] if field.startswith("txt=") else field
+        payload = payload.strip()
         if not payload:
             continue
-        payload = payload.strip()
-        if "=" not in payload:
-            continue
-        key, value = payload.split("=", 1)
-        key = key.strip().lower()
-        value = value.strip()
-        txt[key] = value
+        tokens = [payload]
+        if "," in payload:
+            tokens = [segment.strip() for segment in payload.split(",")]
+        for token in tokens:
+            if not token or "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            key = key.strip().lower()
+            if not key:
+                continue
+            txt[key] = value.strip()
     return txt
 
 

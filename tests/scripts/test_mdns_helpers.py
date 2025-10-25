@@ -3,7 +3,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from mdns_helpers import _same_host, ensure_self_ad_is_visible  # noqa: E402
+from mdns_helpers import (  # noqa: E402
+    _same_host,
+    build_avahi_publish_args,
+    ensure_self_ad_is_visible,
+    normalize_hostname,
+)
+from k3s_mdns_parser import parse_mdns_records  # noqa: E402
 
 
 def _make_runner(stdout_by_service):
@@ -13,6 +19,77 @@ def _make_runner(stdout_by_service):
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
     return _runner
+
+
+def test_normalize_hostname_strips_trailing_dot_and_is_case_insensitive():
+    assert normalize_hostname("Host.Local.") == "host.local"
+    assert normalize_hostname("HOST") == "host"
+    assert normalize_hostname("") == ""
+
+
+def test_txt_parsing_handles_multiple_trailing_args():
+    line = (
+        "=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (bootstrap);_k3s-sugar-dev._tcp;"
+        "local;sugarkube0.local;192.0.2.10;6443;txt=phase=bootstrap;txt=role=candidate;"
+        "txt=leader=sugarkube0.local;txt=host=sugarkube0.local\n"
+    )
+    records = parse_mdns_records([line], "sugar", "dev")
+    assert len(records) == 1
+    txt = records[0].txt
+    assert txt["phase"] == "bootstrap"
+    assert txt["role"] == "candidate"
+    assert txt["leader"] == "sugarkube0.local"
+    assert txt["host"] == "sugarkube0.local"
+
+
+def test_txt_parsing_handles_single_concatenated_string():
+    line = (
+        "=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;"
+        "local;sugarkube0.local;192.0.2.10;6443;"
+        "txt=phase=server,role=server,leader=sugarkube0.local,host=sugarkube0.local\n"
+    )
+    records = parse_mdns_records([line], "sugar", "dev")
+    assert len(records) == 1
+    txt = records[0].txt
+    assert txt["phase"] == "server"
+    assert txt["role"] == "server"
+    assert txt["leader"] == "sugarkube0.local"
+    assert txt["host"] == "sugarkube0.local"
+
+
+def test_host_equality_uses_eq_not_identity():
+    left = "".join(["sugar", "kube0.local"])
+    right = "sugarkube0.local"
+    assert left is not right
+    assert _same_host(left, right)
+
+
+def test_build_avahi_publish_args_matches_expected_order():
+    txt = [
+        ("phase", "bootstrap"),
+        ("role", "candidate"),
+        ("leader", "none"),
+        ("host", "sugarkube0.local"),
+    ]
+    argv = build_avahi_publish_args(
+        "sugar/dev bootstrap",
+        "_k3s-sugar-dev._tcp",
+        6443,
+        host="sugarkube0.local",
+        txt=txt,
+    )
+    assert argv == [
+        "avahi-publish",
+        "-s",
+        "sugar/dev bootstrap",
+        "_k3s-sugar-dev._tcp",
+        "6443",
+        "sugarkube0.local",
+        "phase=bootstrap",
+        "role=candidate",
+        "leader=none",
+        "host=sugarkube0.local",
+    ]
 
 
 def test_same_host_normalises_case_and_trailing_dots():
@@ -296,7 +373,7 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
     def runner(cmd, capture_output=True, text=True, check=False):
         assert capture_output and text and not check
         service = cmd[-1]
-        resolve = "--resolve" in cmd
+        resolve = "-r" in cmd
         calls.append((service, resolve))
         if service == "_k3s-sugar-dev._tcp" and not resolve:
             stdout = unresolved
@@ -375,6 +452,6 @@ def test_ensure_self_ad_is_visible_logs_host_comparison_details(capsys):
 
     assert observed is None
     error_output = capsys.readouterr().err
-    assert "rejected host candidate host1.local" in error_output
+    assert "host mismatch" in error_output
     assert "expected=host0.local" in error_output
-    assert "reason=host, leader" in error_output
+    assert "observed host=host1.local" in error_output

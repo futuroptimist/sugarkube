@@ -41,13 +41,9 @@ def _service_types(cluster: str, environment: str) -> List[str]:
 
 
 def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> List[str]:
-    command = [
-        "avahi-browse",
-        "--parsable",
-        "--terminate",
-    ]
+    command = ["avahi-browse", "-p", "-t", "-k"]
     if resolve:
-        command.append("--resolve")
+        command.insert(1, "-r")
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
     command.append(service_type)

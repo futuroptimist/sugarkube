@@ -47,6 +47,33 @@ status:
 mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 
+mdns-selfcheck env='dev':
+    svc="_k3s-{{ SUGARKUBE_CLUSTER }}-{{ env }}._tcp"
+    avahi-browse -rptk "${svc}" | python3 - <<'PY'
+import json
+import os
+import sys
+
+from k3s_mdns_parser import parse_mdns_records
+
+lines = [line.strip() for line in sys.stdin if line.strip()]
+cluster = os.environ.get("SUGARKUBE_CLUSTER", "sugar")
+environment = os.environ.get("SUGARKUBE_ENV", "{{ env }}")
+records = parse_mdns_records(lines, cluster, environment)
+payload = []
+for record in records:
+    data = {
+        "host": record.host,
+        "ipv4": record.address,
+        "port": record.port,
+    }
+    for key in ("phase", "role", "leader", "host"):
+        if key in record.txt:
+            data[key] = record.txt[key]
+    payload.append(data)
+print(json.dumps(payload, indent=2))
+PY
+
 node-ip-dropin:
     sudo -E bash scripts/configure_k3s_node_ip.sh
 
