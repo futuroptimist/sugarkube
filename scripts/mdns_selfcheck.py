@@ -210,9 +210,15 @@ def _record_matches(
         expected_norm = norm_host(expected_host)
         if host_norm != expected_norm:
             reasons.append(
-                "host mismatch"
-                f" raw={observed_host or '<missing>'} norm={host_norm or '<empty>'}"
-                f" expected_raw={expected_host} expected_norm={expected_norm or '<empty>'}"
+                " ".join(
+                    [
+                        "host mismatch",
+                        f"raw={observed_host or '<missing>'}",
+                        f"norm={host_norm or '<empty>'}",
+                        f"expected_raw={expected_host}",
+                        f"expected_norm={expected_norm or '<empty>'}",
+                    ]
+                )
             )
 
     if require_phase:
@@ -242,8 +248,7 @@ def _record_matches(
     if expected_ip:
         if expected_ip not in addresses:
             reasons.append(
-                "expected_ip="
-                f"{expected_ip} not observed (addresses={_format_addresses(addresses)})"
+                f"expected_ip={expected_ip} not observed (addresses={_format_addresses(addresses)})"
             )
     if require_ipv4 and not any(_is_ipv4(addr) for addr in addresses):
         reasons.append(
@@ -251,12 +256,14 @@ def _record_matches(
         )
 
     if reasons:
-        logger(
-            "[mdns-selfcheck] skipping"
-            f" instance={record.get('instance', '<unknown>')}"
-            f" source={record.get('source', '<unknown>')}"
-            f"; {'; '.join(reasons)}"
-        )
+        message = " ".join(
+            [
+                "[mdns-selfcheck] skipping",
+                f"instance={record.get('instance', '<unknown>')}",
+                f"source={record.get('source', '<unknown>')}",
+            ]
+        ) + f"; {'; '.join(reasons)}"
+        logger(message)
         return False
     return True
 
