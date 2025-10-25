@@ -47,6 +47,66 @@ status:
 mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 
+mdns-selfcheck env='dev':
+    svc="_k3s-${SUGARKUBE_CLUSTER}-{{ env }}._tcp"
+    avahi-browse -rptk "${svc}" \
+      | python3 - "${svc}" <<'PY'
+import json
+import sys
+
+service = sys.argv[1]
+records = []
+for raw_line in sys.stdin:
+    line = raw_line.strip()
+    if not line or line[0] not in "=+@":
+        continue
+    parts = line.split(";")
+    if len(parts) < 9:
+        continue
+    host = parts[6]
+    ipv4 = parts[7]
+    port_field = parts[8]
+    txt_values = {}
+    for token in parts[9:]:
+        if not token.startswith("txt="):
+            continue
+        payload = token[4:].strip()
+        if not payload:
+            continue
+        entries = [payload]
+        if "," in payload:
+            entries = [item.strip() for item in payload.split(",") if item.strip()]
+        for entry in entries:
+            if "=" not in entry:
+                continue
+            key, value = entry.split("=", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if not key:
+                continue
+            txt_values[key] = value
+    try:
+        port = int(port_field)
+    except ValueError:
+        port = port_field
+    records.append(
+        {
+            "service": service,
+            "host": host,
+            "ipv4": ipv4,
+            "port": port,
+            "txt": {
+                "phase": txt_values.get("phase"),
+                "role": txt_values.get("role"),
+                "leader": txt_values.get("leader"),
+                "host": txt_values.get("host"),
+            },
+        }
+    )
+
+print(json.dumps(records, indent=2))
+PY
+
 node-ip-dropin:
     sudo -E bash scripts/configure_k3s_node_ip.sh
 

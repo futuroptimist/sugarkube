@@ -116,6 +116,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
     assert f"leader={hostname}.local" in log_contents
     assert "role=bootstrap" in log_contents
     assert "phase=bootstrap" in log_contents
+    assert f"host={hostname}.local" in log_contents
 
     # Service file should have been cleaned up by the EXIT trap
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
