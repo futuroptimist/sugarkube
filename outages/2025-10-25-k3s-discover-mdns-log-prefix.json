@@ -1,0 +1,10 @@
+{
+  "id": "k3s-discover-mdns-log-prefix",
+  "date": "2025-10-25",
+  "component": "scripts/mdns_helpers.py",
+  "rootCause": "Log messages embedded the \"[k3s-discover mdns]\" prefix manually, so future updates risked emitting lines without timestamps or with duplicated prefixes. Some diagnostics already bypassed the helper, leading to inconsistent formatting in the self-check output.",
+  "resolution": "Centralised logging through the mdns_helpers logger so every message receives the timestamp and prefix automatically, ensuring consistent formatting across all code paths.",
+  "references": [
+    "scripts/mdns_helpers.py"
+  ]
+}

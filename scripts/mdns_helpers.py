@@ -7,12 +7,13 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional
+from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional, Tuple
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
 
 _LOCAL_SUFFIXES: Final = (".local",)
+_LOG_PREFIX: Final = "[k3s-discover mdns]"
 
 
 def _determine_browse_timeout() -> float:
@@ -37,7 +38,7 @@ def _timestamp() -> str:
 
 
 def _log(message: str) -> None:
-    print(f"{_timestamp()} {message}", file=sys.stderr)
+    print(f"{_timestamp()} {_LOG_PREFIX} {message}", file=sys.stderr)
 
 
 def _norm_host(host: str) -> str:
@@ -161,10 +162,7 @@ def _browse_service_type(
     except subprocess.TimeoutExpired as exc:
         duration = exc.timeout if isinstance(exc.timeout, (int, float)) else timeout
         _log(
-            (
-                "[k3s-discover mdns] WARN: avahi-browse timed out after %.1fs "
-                "while resolving %s"
-            )
+            "WARN: avahi-browse timed out after %.1fs while resolving %s"
             % (duration, service_type)
         )
         return []
@@ -266,24 +264,24 @@ def ensure_self_ad_is_visible(
         records = _collect_mdns_records(cluster, env, runner)
         if not records:
             _log(
-                "[k3s-discover mdns] Attempt %d/%d: no mDNS records discovered for cluster=%s env=%s"
+                "Attempt %d/%d: no mDNS records discovered for cluster=%s env=%s"
                 % (attempt, attempts, cluster, env)
             )
             if attempt < attempts and delay > 0:
                 _log(
-                    "[k3s-discover mdns] Attempt %d/%d: retrying in %.1fs"
-                    % (attempt, attempts, delay)
+                    "Attempt %d/%d: retrying in %.1fs" % (attempt, attempts, delay)
                 )
                 sleep(delay)
             continue
 
         _log(
-            "[k3s-discover mdns] Attempt %d/%d: collected %d record(s) for cluster=%s env=%s"
+            "Attempt %d/%d: collected %d record(s) for cluster=%s env=%s"
             % (attempt, attempts, len(records), cluster, env)
         )
 
         host_match_found = False
         diag_messages: List[str] = []
+        phase_mismatch_details: List[Tuple[str, Optional[str], Optional[str]]] = []
         observed_hosts: List[str] = []
 
         for record in records:
@@ -292,13 +290,16 @@ def ensure_self_ad_is_visible(
 
             phase = txt.get("phase")
             role = txt.get("role")
+            host_match = _same_host(record.host, expected_norm)
+            leader_match = _same_host(txt.get("leader", ""), expected_norm)
+            host_or_leader_matches = host_match or leader_match
             if require_phase is not None:
                 phase_matches = phase == require_phase
                 role_matches = role == require_phase if role else False
                 if not (phase_matches or (phase is None and role_matches)):
+                    if host_or_leader_matches:
+                        phase_mismatch_details.append((record.host, phase, role))
                     continue
-            host_match = _same_host(record.host, expected_norm)
-            leader_match = _same_host(txt.get("leader", ""), expected_norm)
             if not (host_match or leader_match):
                 continue
 
@@ -337,7 +338,7 @@ def ensure_self_ad_is_visible(
                 reason = _describe_addr_mismatch(expect_addr, observed_addrs, categories)
                 diag_messages.append(
                     (
-                        "[k3s-discover mdns] Attempt %d/%d: observed host %s (phase=%s role=%s) "
+                        "Attempt %d/%d: observed host %s (phase=%s role=%s) "
                         "with addresses %s; expected %s. %s"
                         % (
                             attempt,
@@ -358,19 +359,34 @@ def ensure_self_ad_is_visible(
         for message in diag_messages:
             _log(message)
 
-        if not host_match_found:
+        if phase_mismatch_details:
+            details = []
+            for host_value, phase_value, role_value in phase_mismatch_details:
+                details.append(
+                    "%s (phase=%s role=%s)"
+                    % (
+                        _norm_host(host_value) or "<unknown>",
+                        phase_value or "<missing>",
+                        role_value or "<missing>",
+                    )
+                )
+            _log(
+                "Attempt %d/%d: observed expected host(s) %s but required phase '%s' was not advertised"
+                % (attempt, attempts, ", ".join(details), require_phase)
+            )
+        elif not host_match_found:
             unique_hosts = sorted({
                 _norm_host(host) for host in observed_hosts if host
             })
             observed_text = ", ".join(unique_hosts) if unique_hosts else "<none>"
             _log(
-                "[k3s-discover mdns] Attempt %d/%d: observed hosts %s but none matched expected %s"
+                "Attempt %d/%d: observed hosts %s but none matched expected %s"
                 % (attempt, attempts, observed_text, expected_norm)
             )
 
         if attempt < attempts and delay > 0:
             _log(
-                "[k3s-discover mdns] Attempt %d/%d did not confirm advertisement; retrying in %.1fs"
+                "Attempt %d/%d did not confirm advertisement; retrying in %.1fs"
                 % (attempt, attempts, delay)
             )
             sleep(delay)
@@ -379,8 +395,7 @@ def ensure_self_ad_is_visible(
         mismatch = fallback_addr or "<unknown>"
         _log(
             (
-                "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
-                "observed %s; assuming match after %d attempts"
+                "WARN: expected IPv4 %s for %s but observed %s; assuming match after %d attempts"
             )
             % (expect_addr, expected_norm, mismatch, attempts)
         )
@@ -389,13 +404,11 @@ def ensure_self_ad_is_visible(
     if host_only_candidate and expect_addr:
         if host_only_value:
             message = (
-                "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
-                "advertisement reported non-IP %s; assuming match after %d attempts"
+                "WARN: expected IPv4 %s for %s but advertisement reported non-IP %s; assuming match after %d attempts"
             ) % (expect_addr, expected_norm, host_only_value, attempts)
         else:
             message = (
-                "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
-                "advertisement omitted address; assuming match after %d attempts"
+                "WARN: expected IPv4 %s for %s but advertisement omitted address; assuming match after %d attempts"
             ) % (expect_addr, expected_norm, attempts)
         _log(message)
         return host_only_candidate
