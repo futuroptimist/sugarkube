@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-25-k3s-discover-mdns-timeout-cap",
+  "date": "2025-10-25",
+  "component": "k3s-discover mDNS self-check",
+  "rootCause": "After adding an avahi-browse timeout, each self-check attempt still waited through the full retry budget so discovery stalled for many minutes when avahi never responded.",
+  "resolution": "Detect repeated avahi-browse timeouts inside mdns_helpers, cap the remaining retries, and let k3s-discover fall back to Avahi publish logs promptly. Added regression coverage for the timeout limiter.",
+  "references": [
+    "Console: pi@sugarkube0 just up dev (2025-10-25)",
+    "tests/scripts/test_mdns_helpers.py::test_ensure_self_ad_is_visible_limits_retries_after_timeouts"
+  ]
+}

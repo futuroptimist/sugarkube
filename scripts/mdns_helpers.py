@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
@@ -30,6 +31,14 @@ _DEFAULT_BROWSE_TIMEOUT: Final[float] = _determine_browse_timeout()
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SleepFn = Callable[[float], None]
+
+
+@dataclass(frozen=True)
+class BrowseTimeout(RuntimeError):
+    """Raised when avahi-browse exceeds the configured timeout."""
+
+    service_type: str
+    duration: float
 
 
 def _norm_host(host: str) -> str:
@@ -116,7 +125,7 @@ def _browse_service_type(
             % (duration, service_type),
             file=sys.stderr,
         )
-        return []
+        raise BrowseTimeout(service_type, float(duration) if duration else timeout)
     except TypeError:
         # Some tests inject lightweight runners that do not accept a timeout
         # parameter. Retry without the optional kwargs in that scenario.
@@ -135,14 +144,17 @@ def _collect_mdns_records(
     from k3s_mdns_parser import parse_mdns_records
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
-        lines.extend(
-            _browse_service_type(
-                service_type,
-                runner,
-                resolve=True,
-                timeout=_DEFAULT_BROWSE_TIMEOUT,
+        try:
+            lines.extend(
+                _browse_service_type(
+                    service_type,
+                    runner,
+                    resolve=True,
+                    timeout=_DEFAULT_BROWSE_TIMEOUT,
+                )
             )
-        )
+        except BrowseTimeout:
+            raise
 
     records = parse_mdns_records(lines, cluster, environment)
     if records:
@@ -150,14 +162,17 @@ def _collect_mdns_records(
 
     fallback_lines: List[str] = []
     for service_type in _service_types(cluster, environment):
-        fallback_lines.extend(
-            _browse_service_type(
-                service_type,
-                runner,
-                resolve=False,
-                timeout=_DEFAULT_BROWSE_TIMEOUT,
+        try:
+            fallback_lines.extend(
+                _browse_service_type(
+                    service_type,
+                    runner,
+                    resolve=False,
+                    timeout=_DEFAULT_BROWSE_TIMEOUT,
+                )
             )
-        )
+        except BrowseTimeout:
+            raise
     if not fallback_lines:
         return []
 
@@ -183,6 +198,8 @@ def ensure_self_ad_is_visible(
         return None
 
     attempts = max(retries, 1)
+    max_attempts = attempts
+    timeouts_seen = 0
     delay = max(delay, 0.0)
 
     expect_addr = (expect_addr or "").strip() or None
@@ -195,8 +212,20 @@ def ensure_self_ad_is_visible(
     if runner is None:
         runner = subprocess.run  # type: ignore[assignment]
 
-    for attempt in range(1, attempts + 1):
-        records = _collect_mdns_records(cluster, env, runner)
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            records = _collect_mdns_records(cluster, env, runner)
+        except BrowseTimeout:
+            timeouts_seen += 1
+            if timeouts_seen == 1:
+                max_attempts = min(max_attempts, attempt + 2)
+            if attempt >= max_attempts:
+                break
+            attempt += 1
+            if attempt <= max_attempts and delay > 0:
+                sleep(delay)
+            continue
         for record in records:
             txt = record.txt
 
@@ -249,8 +278,9 @@ def ensure_self_ad_is_visible(
                 continue
 
             return record.host
-        if attempt < attempts and delay > 0:
+        if attempt < max_attempts and delay > 0:
             sleep(delay)
+        attempt += 1
 
     if fallback_candidate and expect_addr:
         mismatch = fallback_addr or "<unknown>"
