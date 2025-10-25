@@ -18,18 +18,26 @@ _LOCAL_SUFFIXES: Final = (".local",)
 def _determine_browse_timeout() -> float:
     raw = os.environ.get("SUGARKUBE_MDNS_BROWSE_TIMEOUT", "")
     if not raw:
-        return 5.0
+        return 1.5
     try:
         value = float(raw)
     except ValueError:
-        return 5.0
-    return value if value > 0 else 5.0
+        return 1.5
+    return value if value > 0 else 1.5
 
 
 _DEFAULT_BROWSE_TIMEOUT: Final[float] = _determine_browse_timeout()
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SleepFn = Callable[[float], None]
+
+
+def _timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+
+
+def _log(message: str) -> None:
+    print(f"{_timestamp()} {message}", file=sys.stderr)
 
 
 def _norm_host(host: str) -> str:
@@ -75,6 +83,50 @@ def _service_types(cluster: str, environment: str) -> List[str]:
     return types
 
 
+def _categorise_addresses(addresses: Iterable[str]) -> List[str]:
+    categories: List[str] = []
+    for candidate in addresses:
+        try:
+            ip_obj = ipaddress.ip_address(candidate)
+        except ValueError:
+            categories.append("other")
+        else:
+            categories.append("ipv4" if ip_obj.version == 4 else "ipv6")
+    return categories
+
+
+def _describe_addr_mismatch(
+    expect_addr: str, observed_addrs: List[str], categories: List[str]
+) -> str:
+    if not observed_addrs:
+        return (
+            "Advertisement omitted addresses. Avahi may still be initialising or publishing via "
+            "another interface."
+        )
+
+    ipv4 = sorted({addr for addr, cat in zip(observed_addrs, categories) if cat == "ipv4"})
+    ipv6 = sorted({addr for addr, cat in zip(observed_addrs, categories) if cat == "ipv6"})
+    other = sorted({addr for addr, cat in zip(observed_addrs, categories) if cat == "other"})
+
+    if ipv4 and expect_addr not in ipv4:
+        return (
+            "Advertisement reported IPv4 address(es) %s that do not include expected %s. "
+            "Multiple interfaces (e.g. wlan0 vs eth0) or stale Avahi cache entries are likely."
+        ) % (", ".join(ipv4), expect_addr)
+
+    if not ipv4 and ipv6:
+        return (
+            "Advertisement only reported IPv6 address(es) %s. Ensure IPv4 is configured or allow IPv6 discovery."
+        ) % (", ".join(ipv6))
+
+    if other:
+        return (
+            "Advertisement reported non-IP address value(s) %s. Verify avahi-publish-address advertises IPv4."
+        ) % (", ".join(other))
+
+    return "Advertisement addresses did not match the expected value."
+
+
 def _browse_service_type(
     service_type: str,
     runner: Runner,
@@ -108,13 +160,12 @@ def _browse_service_type(
         return []
     except subprocess.TimeoutExpired as exc:
         duration = exc.timeout if isinstance(exc.timeout, (int, float)) else timeout
-        print(
+        _log(
             (
                 "[k3s-discover mdns] WARN: avahi-browse timed out after %.1fs "
                 "while resolving %s"
             )
-            % (duration, service_type),
-            file=sys.stderr,
+            % (duration, service_type)
         )
         return []
     except TypeError:
@@ -133,9 +184,10 @@ def _collect_mdns_records(
     runner: Runner,
 ) -> List["MdnsRecord"]:
     from k3s_mdns_parser import parse_mdns_records
-    lines: List[str] = []
-    for service_type in _service_types(cluster, environment):
-        lines.extend(
+    service_types = _service_types(cluster, environment)
+
+    for service_type in service_types:
+        lines = list(
             _browse_service_type(
                 service_type,
                 runner,
@@ -143,14 +195,14 @@ def _collect_mdns_records(
                 timeout=_DEFAULT_BROWSE_TIMEOUT,
             )
         )
+        if not lines:
+            continue
+        records = parse_mdns_records(lines, cluster, environment)
+        if records:
+            return records
 
-    records = parse_mdns_records(lines, cluster, environment)
-    if records:
-        return records
-
-    fallback_lines: List[str] = []
-    for service_type in _service_types(cluster, environment):
-        fallback_lines.extend(
+    for service_type in service_types:
+        lines = list(
             _browse_service_type(
                 service_type,
                 runner,
@@ -158,10 +210,13 @@ def _collect_mdns_records(
                 timeout=_DEFAULT_BROWSE_TIMEOUT,
             )
         )
-    if not fallback_lines:
-        return []
+        if not lines:
+            continue
+        records = parse_mdns_records(lines, cluster, environment)
+        if records:
+            return records
 
-    return parse_mdns_records(fallback_lines, cluster, environment)
+    return []
 
 
 def ensure_self_ad_is_visible(
@@ -197,7 +252,30 @@ def ensure_self_ad_is_visible(
 
     for attempt in range(1, attempts + 1):
         records = _collect_mdns_records(cluster, env, runner)
+        if not records:
+            _log(
+                "[k3s-discover mdns] Attempt %d/%d: no mDNS records discovered for cluster=%s env=%s"
+                % (attempt, attempts, cluster, env)
+            )
+            if attempt < attempts and delay > 0:
+                _log(
+                    "[k3s-discover mdns] Attempt %d/%d: retrying in %.1fs"
+                    % (attempt, attempts, delay)
+                )
+                sleep(delay)
+            continue
+
+        _log(
+            "[k3s-discover mdns] Attempt %d/%d: collected %d record(s) for cluster=%s env=%s"
+            % (attempt, attempts, len(records), cluster, env)
+        )
+
+        host_match_found = False
+        diag_messages: List[str] = []
+        observed_hosts: List[str] = []
+
         for record in records:
+            observed_hosts.append(record.host)
             txt = record.txt
 
             phase = txt.get("phase")
@@ -212,6 +290,8 @@ def ensure_self_ad_is_visible(
             if not (host_match or leader_match):
                 continue
 
+            host_match_found = True
+
             if expect_addr:
                 record_addr = record.address.strip()
                 txt_addr = txt.get("a", "").strip()
@@ -222,45 +302,75 @@ def ensure_self_ad_is_visible(
                 if expect_addr in observed_addrs:
                     return record.host
 
-                categories = []
-                for candidate in observed_addrs:
-                    try:
-                        ip_obj = ipaddress.ip_address(candidate)
-                    except ValueError:
-                        categories.append("other")
-                    else:
-                        categories.append("ipv4" if ip_obj.version == 4 else "ipv6")
+                categories = _categorise_addresses(observed_addrs)
 
-                has_ipv4 = "ipv4" in categories
-                has_ipv6 = "ipv6" in categories
-                has_other = "other" in categories
-
-                if fallback_candidate is None and has_ipv6 and not has_ipv4:
+                if fallback_candidate is None and "ipv6" in categories and "ipv4" not in categories:
                     fallback_candidate = record.host
                     for candidate, category in zip(observed_addrs, categories):
                         if category == "ipv6":
                             fallback_addr = candidate
                             break
                 if host_only_candidate is None and (
-                    not observed_addrs or (has_other and not has_ipv4 and not has_ipv6)
+                    not observed_addrs
+                    or (
+                        "other" in categories
+                        and "ipv4" not in categories
+                        and "ipv6" not in categories
+                    )
                 ):
                     host_only_candidate = record.host
                     host_only_value = observed_addrs[0] if observed_addrs else None
+
+                observed_text = ", ".join(observed_addrs) if observed_addrs else "<none>"
+                reason = _describe_addr_mismatch(expect_addr, observed_addrs, categories)
+                diag_messages.append(
+                    (
+                        "[k3s-discover mdns] Attempt %d/%d: observed host %s (phase=%s role=%s) "
+                        "with addresses %s; expected %s. %s"
+                        % (
+                            attempt,
+                            attempts,
+                            record.host,
+                            phase or "<unknown>",
+                            role or "<unknown>",
+                            observed_text,
+                            expect_addr,
+                            reason,
+                        )
+                    )
+                )
                 continue
 
             return record.host
+
+        for message in diag_messages:
+            _log(message)
+
+        if not host_match_found:
+            unique_hosts = sorted({
+                _norm_host(host) for host in observed_hosts if host
+            })
+            observed_text = ", ".join(unique_hosts) if unique_hosts else "<none>"
+            _log(
+                "[k3s-discover mdns] Attempt %d/%d: observed hosts %s but none matched expected %s"
+                % (attempt, attempts, observed_text, expected_norm)
+            )
+
         if attempt < attempts and delay > 0:
+            _log(
+                "[k3s-discover mdns] Attempt %d/%d did not confirm advertisement; retrying in %.1fs"
+                % (attempt, attempts, delay)
+            )
             sleep(delay)
 
     if fallback_candidate and expect_addr:
         mismatch = fallback_addr or "<unknown>"
-        print(
+        _log(
             (
                 "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
                 "observed %s; assuming match after %d attempts"
             )
-            % (expect_addr, expected_norm, mismatch, attempts),
-            file=sys.stderr,
+            % (expect_addr, expected_norm, mismatch, attempts)
         )
         return fallback_candidate
 
@@ -275,7 +385,7 @@ def ensure_self_ad_is_visible(
                 "[k3s-discover mdns] WARN: expected IPv4 %s for %s but "
                 "advertisement omitted address; assuming match after %d attempts"
             ) % (expect_addr, expected_norm, attempts)
-        print(message, file=sys.stderr)
+        _log(message)
         return host_only_candidate
 
     return None
