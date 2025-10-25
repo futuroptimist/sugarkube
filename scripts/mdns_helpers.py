@@ -66,6 +66,14 @@ def _log(message: str) -> None:
     _LOGGER.err(message)
 
 
+def normalize_hostname(hostname: str) -> str:
+    """Return a case-insensitive hostname without the trailing dot."""
+
+    if not hostname:
+        return ""
+    return hostname.rstrip(".").lower()
+
+
 def _norm_host(host: str) -> str:
     """Normalise a hostname for comparison."""
 
@@ -74,10 +82,7 @@ def _norm_host(host: str) -> str:
     if not host:
         return ""
 
-    while host.endswith("."):
-        host = host[:-1]
-
-    return host.lower()
+    return normalize_hostname(host)
 
 
 def _strip_local_suffix(host: str) -> str:
@@ -161,14 +166,12 @@ def _browse_service_type(
     resolve: bool = True,
     timeout: float = _DEFAULT_BROWSE_TIMEOUT,
 ) -> Iterable[str]:
-    command = [
-        "avahi-browse",
-        "--parsable",
-        "--terminate",
-    ]
-    if resolve:
-        command.append("--resolve")
-    command.append(service_type)
+    flags = "-rptk" if resolve else "-ptk"
+    command = ["avahi-browse", flags, service_type]
+    _log(
+        "[k3s-discover mdns] DEBUG: invoking avahi-browse argv=%s"
+        % (command,)
+    )
     kwargs = {
         "capture_output": True,
         "text": True,
@@ -317,35 +320,36 @@ def ensure_self_ad_is_visible(
             observed_hosts.append(record.host)
             txt = record.txt
 
-            phase = txt.get("phase")
-            role = txt.get("role")
+            phase_raw = txt.get("phase")
+            role_raw = txt.get("role")
             leader_raw = txt.get("leader", "")
             record_norm = _norm_host(record.host)
             leader_norm = _norm_host(leader_raw)
-            record_stripped = _strip_local_suffix(record_norm) if record_norm else ""
-            leader_stripped = _strip_local_suffix(leader_norm) if leader_norm else ""
             expected_stripped = _strip_local_suffix(expected_norm)
 
+            phase_norm = (phase_raw or "").strip().lower()
+            role_norm = (role_raw or "").strip().lower()
+            phase_display = phase_norm or (phase_raw or "")
+            role_display = role_norm or (role_raw or "")
+
             if require_phase is not None:
-                phase_matches = phase == require_phase
-                role_matches = role == require_phase if role else False
-                if not (phase_matches or (phase is None and role_matches)):
+                phase_matches = phase_norm == require_phase
+                role_matches = role_norm == require_phase
+                if not (phase_matches or role_matches):
                     diag_messages.append(
                         (
-                            "[k3s-discover mdns] Attempt %d/%d: skipped host %s "
-                            "(phase=%s role=%s leader=%s) because require_phase=%s "
-                            "(phase_match=%s role_match=%s)"
+                            "[k3s-discover mdns] Attempt %d/%d: require_phase=%s mismatch for host=%s "
+                            "(phase raw=%s norm=%s role raw=%s norm=%s)"
                         )
                         % (
                             attempt,
                             attempts,
-                            record.host,
-                            phase or "<unknown>",
-                            role or "<unknown>",
-                            leader_raw or "<none>",
                             require_phase,
-                            "yes" if phase_matches else "no",
-                            "yes" if role_matches else "no",
+                            record.host or "<none>",
+                            phase_raw or "<missing>",
+                            phase_norm or "<missing>",
+                            role_raw or "<missing>",
+                            role_norm or "<missing>",
                         )
                     )
                     continue
@@ -363,22 +367,21 @@ def ensure_self_ad_is_visible(
                 reason = ", ".join(reason_bits) if reason_bits else "unknown"
                 diag_messages.append(
                     (
-                        "[k3s-discover mdns] Attempt %d/%d: rejected host candidate %s "
-                        "(norm=%s stripped=%s) leader=%s (norm=%s stripped=%s) "
-                        "expected=%s (norm=%s stripped=%s); reason=%s"
+                        "[k3s-discover mdns] Attempt %d/%d: host mismatch expected raw=%s norm=%s stripped=%s; "
+                        "observed host raw=%s norm=%s stripped=%s; leader raw=%s norm=%s stripped=%s; reason=%s"
                     )
                     % (
                         attempt,
                         attempts,
+                        expected_host,
+                        expected_norm or "<empty>",
+                        expected_stripped or "<empty>",
                         record.host or "<none>",
                         record_norm or "<empty>",
-                        record_stripped or "<empty>",
+                        (_strip_local_suffix(record_norm) if record_norm else "") or "<empty>",
                         leader_raw or "<none>",
                         leader_norm or "<empty>",
-                        leader_stripped or "<empty>",
-                        expected_host,
-                        expected_norm,
-                        expected_stripped or "<empty>",
+                        (_strip_local_suffix(leader_norm) if leader_norm else "") or "<empty>",
                         reason,
                     )
                 )
@@ -425,8 +428,8 @@ def ensure_self_ad_is_visible(
                             attempt,
                             attempts,
                             record.host,
-                            phase or "<unknown>",
-                            role or "<unknown>",
+                            phase_display or "<unknown>",
+                            role_display or "<unknown>",
                             observed_text,
                             expect_addr,
                             reason,
@@ -520,4 +523,4 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry point
     raise SystemExit(_main())
 
 
-__all__ = ["_norm_host", "_same_host", "ensure_self_ad_is_visible"]
+__all__ = ["_norm_host", "_same_host", "ensure_self_ad_is_visible", "normalize_hostname"]

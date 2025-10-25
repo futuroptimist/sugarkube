@@ -41,13 +41,7 @@ def _service_types(cluster: str, environment: str) -> List[str]:
 
 
 def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> List[str]:
-    command = [
-        "avahi-browse",
-        "--parsable",
-        "--terminate",
-    ]
-    if resolve:
-        command.append("--resolve")
+    command = ["avahi-browse", "-rptk" if resolve else "-ptk"]
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
     command.append(service_type)
@@ -71,6 +65,8 @@ def _invoke_avahi(
     }
     if timeout is not None:
         run_kwargs["timeout"] = timeout
+    if debug is not None:
+        debug(f"avahi-browse argv={command!r}")
     try:
         result = runner(command, **run_kwargs)
     except subprocess.TimeoutExpired as exc:

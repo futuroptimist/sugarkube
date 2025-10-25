@@ -59,6 +59,51 @@ wlan-up:
 mdns-reset:
     sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
+mdns-selfcheck env='dev':
+    python3 - <<'PY'
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+repo_root = Path.cwd()
+sys.path.insert(0, str(repo_root / "scripts"))
+
+from k3s_mdns_parser import parse_mdns_records  # noqa: E402
+
+
+def main() -> None:
+    cluster = os.environ.get("SUGARKUBE_CLUSTER", "sugar").strip()
+    environment = "{{ env }}".strip()
+    service_type = f"_k3s-{cluster}-{environment}._tcp"
+    command = ["avahi-browse", "-rptk", service_type]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    lines = [line for line in result.stdout.splitlines() if line]
+    records = parse_mdns_records(lines, cluster, environment)
+    payload = []
+    for record in records:
+        entry = {
+            "host": record.host,
+            "ipv4": record.address or None,
+            "port": record.port,
+            "txt": {
+                key: record.txt[key]
+                for key in ("phase", "role", "leader", "host")
+                if record.txt.get(key)
+            },
+        }
+        payload.append(entry)
+    json.dump(payload, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+
+
+if __name__ == "__main__":
+    main()
+PY
+
 kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
