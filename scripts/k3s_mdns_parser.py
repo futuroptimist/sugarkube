@@ -88,10 +88,13 @@ class MdnsRecord:
     protocol: str
     txt: Dict[str, str]
     raw: str
-
-
-def _is_candidate_line(line: str) -> bool:
-    return bool(line) and line[0] in {"=", "+", "@"}
+def _split_resolved_fields(line: str) -> Optional[Sequence[str]]:
+    if not line or line[0] != "=":
+        return None
+    fields = line.split(";")
+    if len(fields) < 9:
+        return None
+    return fields
 
 
 def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
@@ -99,21 +102,22 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     for field in fields:
         if not field.startswith("txt="):
             continue
-        payload = field[4:]
-        if not payload:
-            continue
-        payload = payload.strip()
+        payload = field[4:].strip()
         if not payload:
             continue
         entries = [payload]
         if "," in payload:
             entries = [item.strip() for item in payload.split(",") if item.strip()]
         for entry in entries:
-            if "=" not in entry:
+            entry = entry.strip()
+            if not entry:
                 continue
-            key, value = entry.split("=", 1)
-            key = key.strip().lower()
-            value = value.strip()
+            if "=" in entry:
+                key, value = entry.split("=", 1)
+            else:
+                key, value = entry, ""
+            key = key.strip().strip('"\'').lower()
+            value = value.strip().strip('"\'')
             if not key:
                 continue
             txt[key] = value
@@ -160,10 +164,8 @@ def parse_mdns_records(
     expected_env = environment.strip().lower()
 
     for raw in lines:
-        if not _is_candidate_line(raw):
-            continue
-        fields = raw.split(";")
-        if len(fields) < 6:
+        fields = _split_resolved_fields(raw)
+        if fields is None:
             continue
 
         service_type = fields[4]
