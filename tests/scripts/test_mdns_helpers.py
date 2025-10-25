@@ -254,6 +254,7 @@ def test_ensure_self_ad_is_visible_recovers_from_browse_timeout(capsys):
     )
 
     assert observed == "host0.local"
+    assert runner.calls == 3
     warning = capsys.readouterr().err
     assert "avahi-browse timed out" in warning
 
@@ -281,6 +282,32 @@ def test_ensure_self_ad_is_visible_accepts_uppercase_cluster_and_env():
     )
 
     assert observed == "host0.local"
+
+
+def test_ensure_self_ad_is_visible_limits_retries_after_timeouts():
+    class AlwaysTimeout:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, cmd, **kwargs):
+            self.calls += 1
+            raise subprocess.TimeoutExpired(cmd, timeout=kwargs.get("timeout", 5))
+
+    runner = AlwaysTimeout()
+
+    observed = ensure_self_ad_is_visible(
+        expected_host="host0.local",
+        cluster="sugar",
+        env="dev",
+        retries=60,
+        delay=0,
+        require_phase="server",
+        runner=runner,
+        sleep=lambda _: None,
+    )
+
+    assert observed is None
+    assert runner.calls == 3
 
 
 def test_ensure_self_ad_is_visible_falls_back_without_resolve():
