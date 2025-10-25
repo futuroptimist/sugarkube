@@ -73,6 +73,21 @@ strip_timestamp_prefix() {
   esac
 }
 
+parse_selfcheck_host() {
+  python3 - <<'PY'
+import json
+import sys
+
+payload = sys.stdin.read()
+try:
+    data = json.loads(payload)
+except json.JSONDecodeError:
+    print("", end="")
+else:
+    print(data.get("host", ""))
+PY
+}
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
@@ -490,37 +505,60 @@ start_bootstrap_publisher() {
   BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish-bootstrap.log"
   : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
 
-  local -a publish_cmd=(
-    avahi-publish
-    -s
-    "${publish_name}"
-    "${MDNS_SERVICE_TYPE}"
-  )
-
-  if [ -n "${MDNS_HOST_RAW}" ]; then
-    publish_cmd+=(-H "${MDNS_HOST_RAW}")
-  fi
-
-  publish_cmd+=(
-    6443
+  local -a publish_txt_args=(
     "k3s=1"
     "cluster=${CLUSTER}"
     "env=${ENVIRONMENT}"
     "role=bootstrap"
-    "leader=${MDNS_HOST_RAW}"
     "phase=bootstrap"
     "state=pending"
   )
+  if [ -n "${MDNS_HOST_RAW}" ]; then
+    publish_txt_args+=("leader=${MDNS_HOST_RAW}")
+  fi
 
-  local serialized=""
-  local arg=""
-  for arg in "${publish_cmd[@]}"; do
-    if [ -n "${serialized}" ]; then
-      serialized+="; "
-    fi
-    serialized+="$(printf '%q' "${arg}")"
-  done
-  log "avahi-publish bootstrap argv: [${serialized}]"
+  local host_arg="${MDNS_HOST_RAW:-}"
+  local -a publish_cmd
+  mapfile -t publish_cmd < <(
+    python3 - "${publish_name}" "${MDNS_SERVICE_TYPE}" "6443" "${host_arg}" "${publish_txt_args[@]}" <<'PY'
+import sys
+from mdns_helpers import build_publish_cmd
+
+instance = sys.argv[1]
+service_type = sys.argv[2]
+port = int(sys.argv[3])
+host_value = sys.argv[4] or None
+txt = {}
+for item in sys.argv[5:]:
+    if not item:
+        continue
+    if "=" in item:
+        key, value = item.split("=", 1)
+    else:
+        key, value = item, ""
+    txt[key] = value
+
+cmd = build_publish_cmd(
+    instance=instance,
+    service_type=service_type,
+    port=port,
+    host=host_value or None,
+    txt=txt,
+)
+for element in cmd:
+    print(element)
+PY
+  )
+
+  local publish_cmd_json
+  publish_cmd_json="$(python3 - "${publish_cmd[@]}" <<'PY'
+import json
+import sys
+
+print(json.dumps(sys.argv[1:]))
+PY
+  )"
+  log "avahi-publish bootstrap argv: ${publish_cmd_json}"
 
   log "publishing bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
   "${publish_cmd[@]}" >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
@@ -559,36 +597,59 @@ start_server_publisher() {
   SERVER_PUBLISH_LOG="/tmp/sugar-publish-server.log"
   : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
 
-  local -a publish_cmd=(
-    avahi-publish
-    -s
-    "${publish_name}"
-    "${MDNS_SERVICE_TYPE}"
-  )
-
-  if [ -n "${MDNS_HOST_RAW}" ]; then
-    publish_cmd+=(-H "${MDNS_HOST_RAW}")
-  fi
-
-  publish_cmd+=(
-    6443
+  local -a publish_txt_args=(
     "k3s=1"
     "cluster=${CLUSTER}"
     "env=${ENVIRONMENT}"
     "role=server"
-    "leader=${MDNS_HOST_RAW}"
     "phase=server"
   )
+  if [ -n "${MDNS_HOST_RAW}" ]; then
+    publish_txt_args+=("leader=${MDNS_HOST_RAW}")
+  fi
 
-  local serialized=""
-  local arg=""
-  for arg in "${publish_cmd[@]}"; do
-    if [ -n "${serialized}" ]; then
-      serialized+="; "
-    fi
-    serialized+="$(printf '%q' "${arg}")"
-  done
-  log "avahi-publish server argv: [${serialized}]"
+  local host_arg="${MDNS_HOST_RAW:-}"
+  local -a publish_cmd
+  mapfile -t publish_cmd < <(
+    python3 - "${publish_name}" "${MDNS_SERVICE_TYPE}" "6443" "${host_arg}" "${publish_txt_args[@]}" <<'PY'
+import sys
+from mdns_helpers import build_publish_cmd
+
+instance = sys.argv[1]
+service_type = sys.argv[2]
+port = int(sys.argv[3])
+host_value = sys.argv[4] or None
+txt = {}
+for item in sys.argv[5:]:
+    if not item:
+        continue
+    if "=" in item:
+        key, value = item.split("=", 1)
+    else:
+        key, value = item, ""
+    txt[key] = value
+
+cmd = build_publish_cmd(
+    instance=instance,
+    service_type=service_type,
+    port=port,
+    host=host_value or None,
+    txt=txt,
+)
+for element in cmd:
+    print(element)
+PY
+  )
+
+  local publish_cmd_json
+  publish_cmd_json="$(python3 - "${publish_cmd[@]}" <<'PY'
+import json
+import sys
+
+print(json.dumps(sys.argv[1:]))
+PY
+  )"
+  log "avahi-publish server argv: ${publish_cmd_json}"
 
   log "publishing server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
   "${publish_cmd[@]}" >"${SERVER_PUBLISH_LOG}" 2>&1 &
@@ -742,16 +803,38 @@ ensure_self_mdns_advertisement() {
   log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts (delay ${delay}s)."
 
   MDNS_LAST_OBSERVED=""
-  local observed=""
+  local observed_json=""
+  local instance
+  instance="$(service_instance_name "${role}" "${MDNS_HOST_RAW}")"
+
+  local delay_ms
+  delay_ms="$(DELAY_VALUE="${delay}" python3 - <<'PY'
+import os
+
+raw = os.environ.get("DELAY_VALUE", "0")
+try:
+    value = float(raw)
+except ValueError:
+    value = 0.0
+if value < 0:
+    value = 0.0
+print(int(value * 1000))
+PY
+)"
+
   local -a mdns_check_base=(
-    python3 "${SCRIPT_DIR}/mdns_helpers.py"
-    --expect-host "${MDNS_HOST_RAW}"
-    --cluster "${CLUSTER}"
-    --env "${ENVIRONMENT}"
+    python3 "${SCRIPT_DIR}/mdns_selfcheck.py"
+    --instance "${instance}"
+    --type "${MDNS_SERVICE_TYPE}"
+    --domain "local"
+    --expected-host "${MDNS_HOST_RAW}"
     --require-phase "${require_phase}"
     --retries "${retries}"
-    --delay "${delay}"
+    --delay-ms "${delay_ms}"
   )
+  if [ -n "${role}" ]; then
+    mdns_check_base+=(--require-role "${role}")
+  fi
   local -a mdns_check=("${mdns_check_base[@]}")
   local used_expect_addr=0
   if [ -n "${MDNS_ADDR_V4}" ]; then
@@ -759,21 +842,25 @@ ensure_self_mdns_advertisement() {
     used_expect_addr=1
   fi
 
-  local observed_line
-  if observed_line="$("${mdns_check[@]}")"; then
-    local observed
-    observed="$(strip_timestamp_prefix "${observed_line}")"
-    MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
+  local observed_host=""
+  if observed_json="$("${mdns_check[@]}")"; then
+    observed_host="$(printf '%s\n' "${observed_json}" | parse_selfcheck_host)"
+    if [ -z "${observed_host}" ]; then
+      observed_host="${MDNS_HOST_RAW}"
+    fi
+    MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
     return 0
   fi
 
   if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
     log "Self-check for ${role} advertisement: expected IPv4 ${MDNS_ADDR_V4} not confirmed; retrying without IPv4 requirement."
-    if observed_line="$("${mdns_check_base[@]}")"; then
-      local observed
-      observed="$(strip_timestamp_prefix "${observed_line}")"
-      MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
-      log "WARN: ${role} advertisement observed from ${observed} without expected addr ${MDNS_ADDR_V4}; continuing."
+    if observed_json="$("${mdns_check_base[@]}")"; then
+      observed_host="$(printf '%s\n' "${observed_json}" | parse_selfcheck_host)"
+      if [ -z "${observed_host}" ]; then
+        observed_host="${MDNS_HOST_RAW}"
+      fi
+      MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
+      log "WARN: ${role} advertisement observed from ${observed_host} without expected addr ${MDNS_ADDR_V4}; continuing."
       return 0
     fi
   fi

@@ -26,6 +26,12 @@ _CONTROL_CHAR_MAP: Final = {i: None for i in range(32)}
 _CONTROL_CHAR_MAP.update({0x7F: None})
 
 
+def norm_host(host: Optional[str]) -> str:
+    """Return a lowercase hostname without a trailing dot."""
+
+    return (host or "").rstrip(".").lower()
+
+
 def _determine_browse_timeout() -> float:
     raw = os.environ.get("SUGARKUBE_MDNS_BROWSE_TIMEOUT", "")
     if not raw:
@@ -85,7 +91,7 @@ def normalize_hostname(host: str) -> str:
     if not candidate:
         return ""
 
-    return candidate.rstrip(".").lower()
+    return norm_host(candidate)
 
 
 def _norm_host(host: str) -> str:
@@ -115,7 +121,7 @@ def _same_host(left: str, right: str) -> bool:
     return _strip_local_suffix(left_norm) == _strip_local_suffix(right_norm)
 
 
-def build_publish_command(
+def build_publish_cmd(
     *,
     instance: str,
     service_type: str,
@@ -125,15 +131,36 @@ def build_publish_command(
 ) -> List[str]:
     """Construct an ``avahi-publish`` command with discrete TXT arguments."""
 
-    command = ["avahi-publish", "-s", instance, service_type, str(port)]
+    command: List[str] = ["avahi-publish", "-s"]
     if host:
-        command.append(host)
+        command.extend(["-H", host])
+
+    command.extend([instance, service_type, str(port)])
 
     if txt:
         for key, value in txt.items():
             command.append(f"{key}={value}")
 
     return command
+
+
+def build_publish_command(
+    *,
+    instance: str,
+    service_type: str,
+    port: int,
+    host: Optional[str],
+    txt: Mapping[str, str],
+) -> List[str]:
+    """Legacy alias for :func:`build_publish_cmd`."""
+
+    return build_publish_cmd(
+        instance=instance,
+        service_type=service_type,
+        port=port,
+        host=host,
+        txt=txt,
+    )
 
 
 def _service_types(cluster: str, environment: str) -> List[str]:
@@ -352,20 +379,17 @@ def ensure_self_ad_is_visible(
             phase = txt.get("phase")
             role = txt.get("role")
             leader_raw = txt.get("leader", "")
-            record_norm = normalize_hostname(record.host)
-            leader_norm = normalize_hostname(leader_raw)
-            record_stripped = _strip_local_suffix(record_norm) if record_norm else ""
-            leader_stripped = _strip_local_suffix(leader_norm) if leader_norm else ""
-            expected_stripped = _strip_local_suffix(expected_norm)
 
+            record_norm = norm_host(record.host)
+            leader_norm = norm_host(leader_raw)
             if require_phase is not None:
                 phase_matches = phase == require_phase
                 role_matches = role == require_phase if role else False
-                if not (phase_matches or (phase is None and role_matches)):
+                if not phase_matches and not role_matches:
                     diag_messages.append(
                         (
-                            "[k3s-discover mdns] Attempt %d/%d: skipped host %s "
-                            "because require_phase=%s (phase=%s role=%s)"
+                            "[k3s-discover mdns] Attempt %d/%d: skipped %s because "
+                            "require_phase=%s (phase=%s role=%s)"
                         )
                         % (
                             attempt,
@@ -377,37 +401,25 @@ def ensure_self_ad_is_visible(
                         )
                     )
                     continue
-            host_match = _same_host(record.host, expected_norm)
-            leader_match = _same_host(leader_raw, expected_norm)
+
+            host_match = record_norm == expected_norm if record_norm else False
+            leader_match = leader_norm == expected_norm if leader_norm else False
             if not (host_match or leader_match):
-                reason_bits: List[str] = []
-                if not host_match:
-                    reason_bits.append("host")
-                if leader_raw:
-                    if not leader_match:
-                        reason_bits.append("leader")
-                else:
-                    reason_bits.append("leader-missing")
-                reason = ", ".join(reason_bits) if reason_bits else "unknown"
                 diag_messages.append(
                     (
-                        "[k3s-discover mdns] Attempt %d/%d: rejected host candidate %s "
-                        "(norm=%s stripped=%s) leader=%s (norm=%s stripped=%s) "
-                        "expected=%s (norm=%s stripped=%s); reason=%s"
+                        "[k3s-discover mdns] Attempt %d/%d: host mismatch for %s (raw=%s norm=%s) "
+                        "leader=%s (norm=%s) expected raw=%s norm=%s"
                     )
                     % (
                         attempt,
                         attempts,
                         record.host or "<none>",
+                        record.host or "<none>",
                         record_norm or "<empty>",
-                        record_stripped or "<empty>",
                         leader_raw or "<none>",
                         leader_norm or "<empty>",
-                        leader_stripped or "<empty>",
                         expected_host,
                         expected_norm,
-                        expected_stripped or "<empty>",
-                        reason,
                     )
                 )
                 continue
@@ -470,7 +482,7 @@ def ensure_self_ad_is_visible(
 
         if not host_match_found:
             unique_hosts = sorted({
-                normalize_hostname(host) for host in observed_hosts if host
+                norm_host(host) for host in observed_hosts if host
             })
             observed_text = ", ".join(unique_hosts) if unique_hosts else "<none>"
             _log(
@@ -549,9 +561,11 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry point
 
 
 __all__ = [
+    "build_publish_cmd",
     "_norm_host",
     "_same_host",
     "ensure_self_ad_is_visible",
+    "norm_host",
     "normalize_hostname",
     "build_publish_command",
 ]
