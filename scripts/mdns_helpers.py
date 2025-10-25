@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import ipaddress
 import subprocess
 import sys
@@ -15,6 +16,21 @@ _LOCAL_SUFFIXES: Final = (".local",)
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SleepFn = Callable[[float], None]
+
+_TIMEOUT_ENV = "SUGARKUBE_MDNS_QUERY_TIMEOUT"
+_DEFAULT_TIMEOUT = 10.0
+
+
+def _resolve_timeout(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return _DEFAULT_TIMEOUT
+    try:
+        parsed = float(value)
+    except ValueError:
+        return _DEFAULT_TIMEOUT
+    if parsed <= 0:
+        return None
+    return parsed
 
 
 def _norm_host(host: str) -> str:
@@ -60,6 +76,41 @@ def _service_types(cluster: str, environment: str) -> List[str]:
     return types
 
 
+def _run_avahi_browse(
+    command: List[str],
+    runner: Runner,
+    *,
+    timeout: Optional[float],
+) -> subprocess.CompletedProcess[str]:
+    run_kwargs = {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+    }
+    if timeout is not None:
+        run_kwargs["timeout"] = timeout
+    try:
+        return runner(command, **run_kwargs)
+    except subprocess.TimeoutExpired as exc:
+        if timeout is not None:
+            print(
+                (
+                    "[k3s-discover mdns] WARN: avahi-browse timed out after %gs; "
+                    "continuing without mDNS results"
+                )
+                % timeout,
+                file=sys.stderr,
+            )
+        stdout = exc.stdout or exc.output or ""
+        stderr = exc.stderr or ""
+        return subprocess.CompletedProcess(
+            exc.cmd,
+            returncode=124,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
 def _browse_service_type(
     service_type: str,
     runner: Runner,
@@ -74,13 +125,11 @@ def _browse_service_type(
     if resolve:
         command.append("--resolve")
     command.append(service_type)
+
+    timeout = _resolve_timeout(os.environ.get(_TIMEOUT_ENV))
+
     try:
-        result = runner(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = _run_avahi_browse(command, runner, timeout=timeout)
     except FileNotFoundError:
         return []
 

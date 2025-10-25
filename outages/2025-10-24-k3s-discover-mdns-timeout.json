@@ -1,0 +1,11 @@
+{
+  "id": "k3s-discover-mdns-timeout",
+  "date": "2025-10-24",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "mdns_helpers ran avahi-browse without timeout; a stalled daemon blocked discovery.",
+  "resolution": "Added a timeout in mdns_helpers.py so avahi-browse exits and fallback proceeds.",
+  "references": [
+    "scripts/mdns_helpers.py",
+    "tests/scripts/test_mdns_helpers.py"
+  ]
+}
