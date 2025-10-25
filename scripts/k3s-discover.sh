@@ -495,7 +495,6 @@ start_bootstrap_publisher() {
     -s
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
-    6443
   )
 
   if [ -n "${MDNS_HOST_RAW}" ]; then
@@ -503,6 +502,7 @@ start_bootstrap_publisher() {
   fi
 
   publish_cmd+=(
+    6443
     "k3s=1"
     "cluster=${CLUSTER}"
     "env=${ENVIRONMENT}"
@@ -564,7 +564,6 @@ start_server_publisher() {
     -s
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
-    6443
   )
 
   if [ -n "${MDNS_HOST_RAW}" ]; then
@@ -572,6 +571,7 @@ start_server_publisher() {
   fi
 
   publish_cmd+=(
+    6443
     "k3s=1"
     "cluster=${CLUSTER}"
     "env=${ENVIRONMENT}"
