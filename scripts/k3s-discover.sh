@@ -57,6 +57,15 @@ log() {
   >&2 printf '%s [sugarkube %s/%s] %s\n' "${ts}" "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
+format_json_argv() {
+  python3 - "$@" <<'PY'
+import json
+import sys
+
+print(json.dumps(sys.argv[1:]))
+PY
+}
+
 strip_timestamp_prefix() {
   local line="$1"
   if [ -z "${line}" ]; then
@@ -493,9 +502,8 @@ start_bootstrap_publisher() {
   local -a publish_cmd=(
     avahi-publish-service
     -s
-    -H "${MDNS_HOST_RAW}"
-  )
-  publish_cmd+=(
+    -H
+    "${MDNS_HOST_RAW}"
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
     6443
@@ -506,9 +514,13 @@ start_bootstrap_publisher() {
     "leader=${MDNS_HOST_RAW}"
     "phase=bootstrap"
     "state=pending"
+    "host=${MDNS_HOST_RAW}"
   )
 
   log "publishing bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+  local publish_json
+  publish_json=$(format_json_argv "${publish_cmd[@]}")
+  log "avahi-publish-service argv=${publish_json}"
   "${publish_cmd[@]}" >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
 
@@ -549,9 +561,8 @@ start_server_publisher() {
   local -a publish_cmd=(
     avahi-publish-service
     -s
-    -H "${MDNS_HOST_RAW}"
-  )
-  publish_cmd+=(
+    -H
+    "${MDNS_HOST_RAW}"
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
     6443
@@ -561,9 +572,13 @@ start_server_publisher() {
     "role=server"
     "leader=${MDNS_HOST_RAW}"
     "phase=server"
+    "host=${MDNS_HOST_RAW}"
   )
 
   log "publishing server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+  local publish_json
+  publish_json=$(format_json_argv "${publish_cmd[@]}")
+  log "avahi-publish-service argv=${publish_json}"
   "${publish_cmd[@]}" >"${SERVER_PUBLISH_LOG}" 2>&1 &
   SERVER_PUBLISH_PID=$!
 
@@ -713,7 +728,7 @@ ensure_self_mdns_advertisement() {
       ;;
   esac
 
-  log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts (delay ${delay}s)."
+  log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts; delay ${delay}s."
 
   MDNS_LAST_OBSERVED=""
   local observed=""
@@ -752,7 +767,7 @@ ensure_self_mdns_advertisement() {
     fi
   fi
 
-  log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW} after ${retries} attempts (delay ${delay}s)."
+  log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW} after ${retries} attempts; delay ${delay}s."
   return 1
 }
 

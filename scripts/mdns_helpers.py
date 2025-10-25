@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import json
 import os
 import subprocess
 import sys
@@ -66,6 +67,14 @@ def _log(message: str) -> None:
     _LOGGER.err(message)
 
 
+def normalize_hostname(host: str) -> str:
+    """Return a lowercase hostname without trailing dots."""
+
+    if not host:
+        return ""
+    return host.rstrip(".").lower()
+
+
 def _norm_host(host: str) -> str:
     """Normalise a hostname for comparison."""
 
@@ -74,10 +83,7 @@ def _norm_host(host: str) -> str:
     if not host:
         return ""
 
-    while host.endswith("."):
-        host = host[:-1]
-
-    return host.lower()
+    return normalize_hostname(host)
 
 
 def _strip_local_suffix(host: str) -> str:
@@ -161,13 +167,11 @@ def _browse_service_type(
     resolve: bool = True,
     timeout: float = _DEFAULT_BROWSE_TIMEOUT,
 ) -> Iterable[str]:
+    flag = "-rptk" if resolve else "-ptk"
     command = [
         "avahi-browse",
-        "--parsable",
-        "--terminate",
+        flag,
     ]
-    if resolve:
-        command.append("--resolve")
     command.append(service_type)
     kwargs = {
         "capture_output": True,
@@ -273,6 +277,7 @@ def ensure_self_ad_is_visible(
     """Return the observed host when the local advertisement is visible."""
 
     expected_norm = _norm_host(expected_host)
+    expected_norm_simple = normalize_hostname(expected_host)
     if not expected_norm:
         return None
 
@@ -322,30 +327,32 @@ def ensure_self_ad_is_visible(
             leader_raw = txt.get("leader", "")
             record_norm = _norm_host(record.host)
             leader_norm = _norm_host(leader_raw)
-            record_stripped = _strip_local_suffix(record_norm) if record_norm else ""
-            leader_stripped = _strip_local_suffix(leader_norm) if leader_norm else ""
-            expected_stripped = _strip_local_suffix(expected_norm)
-
             if require_phase is not None:
                 phase_matches = phase == require_phase
                 role_matches = role == require_phase if role else False
                 if not (phase_matches or (phase is None and role_matches)):
+                    missing: List[str] = []
+                    mismatched: List[str] = []
+                    if not phase:
+                        missing.append("phase")
+                    elif not phase_matches:
+                        mismatched.append(f"phase={phase}")
+                    if role is None:
+                        missing.append("role")
+                    elif not role_matches:
+                        mismatched.append(f"role={role}")
                     diag_messages.append(
                         (
-                            "[k3s-discover mdns] Attempt %d/%d: skipped host %s "
-                            "(phase=%s role=%s leader=%s) because require_phase=%s "
-                            "(phase_match=%s role_match=%s)"
+                            "[k3s-discover mdns] Attempt %d/%d: skipped host %s for "
+                            "require_phase=%s (missing=%s mismatched=%s)"
                         )
                         % (
                             attempt,
                             attempts,
                             record.host,
-                            phase or "<unknown>",
-                            role or "<unknown>",
-                            leader_raw or "<none>",
                             require_phase,
-                            "yes" if phase_matches else "no",
-                            "yes" if role_matches else "no",
+                            json.dumps(missing),
+                            json.dumps(mismatched),
                         )
                     )
                     continue
@@ -363,22 +370,18 @@ def ensure_self_ad_is_visible(
                 reason = ", ".join(reason_bits) if reason_bits else "unknown"
                 diag_messages.append(
                     (
-                        "[k3s-discover mdns] Attempt %d/%d: rejected host candidate %s "
-                        "(norm=%s stripped=%s) leader=%s (norm=%s stripped=%s) "
-                        "expected=%s (norm=%s stripped=%s); reason=%s"
+                        "[k3s-discover mdns] Attempt %d/%d: host mismatch; expected %s "
+                        "(norm=%s) vs host=%s (norm=%s) leader=%s (norm=%s); reason=%s"
                     )
                     % (
                         attempt,
                         attempts,
-                        record.host or "<none>",
-                        record_norm or "<empty>",
-                        record_stripped or "<empty>",
-                        leader_raw or "<none>",
-                        leader_norm or "<empty>",
-                        leader_stripped or "<empty>",
                         expected_host,
-                        expected_norm,
-                        expected_stripped or "<empty>",
+                        expected_norm_simple or "<empty>",
+                        record.host or "<none>",
+                        normalize_hostname(record.host or "") or "<empty>",
+                        leader_raw or "<none>",
+                        normalize_hostname(leader_raw or "") or "<empty>",
                         reason,
                     )
                 )
@@ -520,4 +523,9 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry point
     raise SystemExit(_main())
 
 
-__all__ = ["_norm_host", "_same_host", "ensure_self_ad_is_visible"]
+__all__ = [
+    "_norm_host",
+    "_same_host",
+    "ensure_self_ad_is_visible",
+    "normalize_hostname",
+]

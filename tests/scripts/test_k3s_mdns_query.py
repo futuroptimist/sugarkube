@@ -4,7 +4,12 @@ from pathlib import Path
 
 # Add scripts/ to import path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from k3s_mdns_query import query_mdns  # noqa: E402
+from k3s_mdns_query import _build_command, query_mdns  # noqa: E402
+
+
+def test_build_command_uses_compact_flags():
+    command = _build_command("bootstrap-hosts", "_k3s-sugar-dev._tcp")
+    assert command == ["avahi-browse", "-rptk", "_k3s-sugar-dev._tcp"]
 
 
 def _sample_server_stdout() -> str:
@@ -205,9 +210,11 @@ def test_query_mdns_falls_back_without_resolve():
     def runner(command, capture_output, text, check, timeout=None):
         assert command[0] == "avahi-browse"
         assert capture_output and text and not check
-        resolve = "--resolve" in command
+        flags = [arg for arg in command[1:] if arg.startswith("-")]
+        primary_flag = flags[0] if flags else ""
+        resolve = "r" in primary_flag
         service = command[-1]
-        calls.append((service, resolve))
+        calls.append((service, primary_flag))
         if service == "_k3s-sugar-dev._tcp" and not resolve:
             stdout = unresolved
         else:
@@ -223,8 +230,8 @@ def test_query_mdns_falls_back_without_resolve():
 
     assert results == ["host0.local"]
     assert calls == [
-        ("_k3s-sugar-dev._tcp", True),
-        ("_https._tcp", True),
-        ("_k3s-sugar-dev._tcp", False),
-        ("_https._tcp", False),
+        ("_k3s-sugar-dev._tcp", "-rptk"),
+        ("_https._tcp", "-rptk"),
+        ("_k3s-sugar-dev._tcp", "-ptk"),
+        ("_https._tcp", "-ptk"),
     ]

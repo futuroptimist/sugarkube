@@ -41,13 +41,11 @@ def _service_types(cluster: str, environment: str) -> List[str]:
 
 
 def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> List[str]:
+    flag = "-rptk" if resolve else "-ptk"
     command = [
         "avahi-browse",
-        "--parsable",
-        "--terminate",
+        flag,
     ]
-    if resolve:
-        command.append("--resolve")
     if mode in {"server-first", "server-count"}:
         command.append("--ignore-local")
     command.append(service_type)

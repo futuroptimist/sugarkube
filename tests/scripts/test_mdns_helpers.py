@@ -3,7 +3,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from mdns_helpers import _same_host, ensure_self_ad_is_visible  # noqa: E402
+from k3s_mdns_parser import parse_mdns_records  # noqa: E402
+from mdns_helpers import (  # noqa: E402
+    _same_host,
+    ensure_self_ad_is_visible,
+    normalize_hostname,
+)
 
 
 def _make_runner(stdout_by_service):
@@ -13,6 +18,11 @@ def _make_runner(stdout_by_service):
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
     return _runner
+
+
+def test_normalize_hostname_strips_trailing_dot_and_is_case_insensitive():
+    assert normalize_hostname("Host0.LOCAL.") == "host0.local"
+    assert normalize_hostname("HOST0") == "host0"
 
 
 def test_same_host_normalises_case_and_trailing_dots():
@@ -29,6 +39,44 @@ def test_same_host_accepts_repeated_local_suffix():
 def test_same_host_strips_control_characters():
     assert _same_host("host0.local\x00", "host0.local")
     assert _same_host("\x07host1.local", "host1")
+
+
+def test_host_equality_uses_eq_not_identity():
+    left = "".join(["host", "0", ".local"])
+    right = "".join(["host", "0", ".local"])
+    assert left is not right
+    assert _same_host(left, right)
+
+
+def test_txt_parsing_handles_multiple_trailing_args():
+    line = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=phase=bootstrap;txt=role=candidate;"
+        "txt=leader=none;txt=host=host0.local"
+    )
+    records = parse_mdns_records([line], "sugar", "dev")
+    assert len(records) == 1
+    record = records[0]
+    assert record.txt["phase"] == "bootstrap"
+    assert record.txt["role"] == "candidate"
+    assert record.txt["leader"] == "none"
+    assert record.txt["host"] == "host0.local"
+
+
+def test_txt_parsing_handles_single_concatenated_string():
+    line = (
+        "=;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;"
+        "local;host0.local;192.0.2.10;6443;"
+        "txt=phase=bootstrap,role=candidate,leader=none,host=host0.local"
+    )
+    records = parse_mdns_records([line], "sugar", "dev")
+    assert len(records) == 1
+    record = records[0]
+    assert record.txt["phase"] == "bootstrap"
+    assert record.txt["role"] == "candidate"
+    assert record.txt["leader"] == "none"
+    assert record.txt["host"] == "host0.local"
 
 
 def test_ensure_self_ad_is_visible_filters_by_phase():
@@ -296,8 +344,10 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
     def runner(cmd, capture_output=True, text=True, check=False):
         assert capture_output and text and not check
         service = cmd[-1]
-        resolve = "--resolve" in cmd
-        calls.append((service, resolve))
+        flags = [arg for arg in cmd[1:] if arg.startswith("-")]
+        primary_flag = flags[0] if flags else ""
+        resolve = "r" in primary_flag
+        calls.append((service, primary_flag))
         if service == "_k3s-sugar-dev._tcp" and not resolve:
             stdout = unresolved
         else:
@@ -318,9 +368,9 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
 
     assert observed == "host0.local"
     assert calls == [
-        ("_k3s-sugar-dev._tcp", True),
-        ("_https._tcp", True),
-        ("_k3s-sugar-dev._tcp", False),
+        ("_k3s-sugar-dev._tcp", "-rptk"),
+        ("_https._tcp", "-rptk"),
+        ("_k3s-sugar-dev._tcp", "-ptk"),
     ]
 
 
@@ -349,7 +399,8 @@ def test_ensure_self_ad_is_visible_logs_phase_mismatch_details(capsys):
     error_output = capsys.readouterr().err
     assert "skipped host host0.local" in error_output
     assert "require_phase=bootstrap" in error_output
-    assert "phase=server" in error_output
+    assert '"phase=server"' in error_output
+    assert '"role=server"' in error_output
 
 
 def test_ensure_self_ad_is_visible_logs_host_comparison_details(capsys):
@@ -375,6 +426,7 @@ def test_ensure_self_ad_is_visible_logs_host_comparison_details(capsys):
 
     assert observed is None
     error_output = capsys.readouterr().err
-    assert "rejected host candidate host1.local" in error_output
-    assert "expected=host0.local" in error_output
+    assert "host mismatch" in error_output
+    assert "expected host0.local" in error_output
+    assert "host=host1.local" in error_output
     assert "reason=host, leader" in error_output

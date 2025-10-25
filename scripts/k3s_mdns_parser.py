@@ -103,12 +103,18 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
         if not payload:
             continue
         payload = payload.strip()
-        if "=" not in payload:
-            continue
-        key, value = payload.split("=", 1)
-        key = key.strip().lower()
-        value = value.strip()
-        txt[key] = value
+        entries = [payload]
+        if "," in payload:
+            entries = [item.strip() for item in payload.split(",") if item.strip()]
+        for entry in entries:
+            if "=" not in entry:
+                continue
+            key, value = entry.split("=", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if not key:
+                continue
+            txt[key] = value
     return txt
 
 
@@ -193,7 +199,11 @@ def parse_mdns_records(
 
         txt = _parse_txt_fields(fields[9:]) if len(fields) > 9 else {}
         if "leader" in txt:
-            txt["leader"] = _normalize_host(txt["leader"], domain)
+            leader_value = txt["leader"].strip()
+            if leader_value.lower() == "none" or not leader_value:
+                txt["leader"] = "none"
+            else:
+                txt["leader"] = _normalize_host(leader_value, domain)
         if "phase" in txt and txt["phase"]:
             txt["phase"] = txt["phase"].lower()
         if "role" in txt and txt["role"]:
