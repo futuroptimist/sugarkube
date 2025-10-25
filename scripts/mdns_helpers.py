@@ -7,12 +7,14 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional
+from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional, TextIO
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
 
 _LOCAL_SUFFIXES: Final = (".local",)
+_CONTROL_CHAR_MAP: Final = {i: None for i in range(32)}
+_CONTROL_CHAR_MAP.update({0x7F: None})
 
 
 def _determine_browse_timeout() -> float:
@@ -32,17 +34,42 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 SleepFn = Callable[[float], None]
 
 
-def _timestamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+class _TimestampedLogger:
+    """Emit timestamped log lines to the requested streams."""
+
+    def __init__(
+        self,
+        *,
+        stderr: Optional[TextIO] = None,
+        stdout: Optional[TextIO] = None,
+    ) -> None:
+        self._stderr = stderr
+        self._stdout = stdout
+
+    @staticmethod
+    def _timestamp() -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+
+    def err(self, message: str) -> None:
+        stream = self._stderr if self._stderr is not None else sys.stderr
+        print(f"{self._timestamp()} {message}", file=stream)
+
+    def out(self, message: str) -> None:
+        stream = self._stdout if self._stdout is not None else sys.stdout
+        print(f"{self._timestamp()} {message}", file=stream)
+
+
+_LOGGER = _TimestampedLogger()
 
 
 def _log(message: str) -> None:
-    print(f"{_timestamp()} {message}", file=sys.stderr)
+    _LOGGER.err(message)
 
 
 def _norm_host(host: str) -> str:
     """Normalise a hostname for comparison."""
 
+    host = host.translate(_CONTROL_CHAR_MAP)
     host = host.strip()
     if not host:
         return ""
@@ -429,7 +456,7 @@ def _main() -> int:
         expect_addr=args.expect_addr,
     )
     if observed:
-        print(observed)
+        _LOGGER.out(observed)
         return 0
     return 1
 

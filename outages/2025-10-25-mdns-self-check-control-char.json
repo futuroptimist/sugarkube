@@ -1,0 +1,10 @@
+{
+  "id": "mdns-self-check-control-char",
+  "date": "2025-10-25",
+  "component": "scripts/mdns_helpers.py",
+  "rootCause": "Avahi's avahi-browse output occasionally appends NUL or other control characters to hostnames, causing mdns_helpers._same_host to treat the observed host as distinct from the expected host despite their visual match. The self-check loop therefore never observed a match and retried until exhausting all attempts.",
+  "resolution": "Strip ASCII control characters during hostname normalisation so that mDNS advertisements with trailing NULs or other control bytes are compared correctly. Added regression coverage for control-character handling.",
+  "references": [
+    "tests/scripts/test_mdns_helpers.py::test_same_host_strips_control_characters"
+  ]
+}

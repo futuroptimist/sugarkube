@@ -57,6 +57,22 @@ log() {
   >&2 printf '%s [sugarkube %s/%s] %s\n' "${ts}" "${CLUSTER}" "${ENVIRONMENT}" "$*"
 }
 
+strip_timestamp_prefix() {
+  local line="$1"
+  if [ -z "${line}" ]; then
+    printf '\n'
+    return 0
+  fi
+  case "${line}" in
+    *" "*)
+      printf '%s\n' "${line#* }"
+      ;;
+    *)
+      printf '%s\n' "${line}"
+      ;;
+  esac
+}
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
@@ -717,13 +733,18 @@ ensure_self_mdns_advertisement() {
     used_expect_addr=1
   fi
 
-  if observed="$("${mdns_check[@]}")"; then
+  local observed_line
+  if observed_line="$("${mdns_check[@]}")"; then
+    local observed
+    observed="$(strip_timestamp_prefix "${observed_line}")"
     MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
     return 0
   fi
 
   if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
-    if observed="$("${mdns_check_base[@]}")"; then
+    if observed_line="$("${mdns_check_base[@]}")"; then
+      local observed
+      observed="$(strip_timestamp_prefix "${observed_line}")"
       MDNS_LAST_OBSERVED="$(canonical_host "${observed}")"
       log "WARN: ${role} advertisement observed from ${observed} without expected addr ${MDNS_ADDR_V4}; continuing."
       return 0
