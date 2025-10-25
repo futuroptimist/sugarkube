@@ -3,7 +3,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from mdns_helpers import _same_host, ensure_self_ad_is_visible  # noqa: E402
+from k3s_mdns_parser import _parse_txt_fields  # noqa: E402
+from mdns_helpers import (  # noqa: E402
+    _same_host,
+    build_publish_command,
+    ensure_self_ad_is_visible,
+    normalize_hostname,
+)
 
 
 def _make_runner(stdout_by_service):
@@ -13,6 +19,12 @@ def _make_runner(stdout_by_service):
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
     return _runner
+
+
+def test_normalize_hostname_strips_trailing_dot_and_is_case_insensitive():
+    assert normalize_hostname("Host.LOCAL.") == "host.local"
+    assert normalize_hostname("host.local.") == "host.local"
+    assert normalize_hostname("HOST") == "host"
 
 
 def test_same_host_normalises_case_and_trailing_dots():
@@ -29,6 +41,67 @@ def test_same_host_accepts_repeated_local_suffix():
 def test_same_host_strips_control_characters():
     assert _same_host("host0.local\x00", "host0.local")
     assert _same_host("\x07host1.local", "host1")
+
+
+def test_host_equality_uses_eq_not_identity():
+    left = "".join(["sugar", "cube", ".local"])
+    right = "sugar" + "cube" + ".local"
+    assert left is not right
+    assert _same_host(left, right)
+
+
+def test_txt_parsing_handles_multiple_trailing_args():
+    fields = [
+        "txt=phase=bootstrap",
+        "txt=role=candidate",
+        "txt=leader=sugarkube0.local",
+        "txt=host=sugarkube0.local",
+    ]
+    txt = _parse_txt_fields(fields)
+    assert txt == {
+        "phase": "bootstrap",
+        "role": "candidate",
+        "leader": "sugarkube0.local",
+        "host": "sugarkube0.local",
+    }
+
+
+def test_txt_parsing_handles_single_concatenated_string():
+    fields = ["txt=phase=bootstrap,role=candidate,leader=sugarkube0.local,host=sugarkube0.local"]
+    txt = _parse_txt_fields(fields)
+    assert txt == {
+        "phase": "bootstrap",
+        "role": "candidate",
+        "leader": "sugarkube0.local",
+        "host": "sugarkube0.local",
+    }
+
+
+def test_publish_command_includes_discrete_txt_arguments():
+    cmd = build_publish_command(
+        instance="sugar/dev bootstrap",
+        service_type="_k3s-sugar-dev._tcp",
+        port=6443,
+        host="sugarkube0.local",
+        txt={
+            "phase": "bootstrap",
+            "role": "candidate",
+            "leader": "none",
+            "host": "sugarkube0.local",
+        },
+    )
+    assert cmd == [
+        "avahi-publish",
+        "-s",
+        "sugar/dev bootstrap",
+        "_k3s-sugar-dev._tcp",
+        "6443",
+        "sugarkube0.local",
+        "phase=bootstrap",
+        "role=candidate",
+        "leader=none",
+        "host=sugarkube0.local",
+    ]
 
 
 def test_ensure_self_ad_is_visible_filters_by_phase():
@@ -296,7 +369,7 @@ def test_ensure_self_ad_is_visible_falls_back_without_resolve():
     def runner(cmd, capture_output=True, text=True, check=False):
         assert capture_output and text and not check
         service = cmd[-1]
-        resolve = "--resolve" in cmd
+        resolve = bool(cmd[1].startswith("-r"))
         calls.append((service, resolve))
         if service == "_k3s-sugar-dev._tcp" and not resolve:
             stdout = unresolved

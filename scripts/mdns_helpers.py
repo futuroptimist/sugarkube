@@ -7,7 +7,16 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Optional, TextIO
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Final,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    TextIO,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
@@ -66,18 +75,23 @@ def _log(message: str) -> None:
     _LOGGER.err(message)
 
 
-def _norm_host(host: str) -> str:
-    """Normalise a hostname for comparison."""
+def normalize_hostname(host: str) -> str:
+    """Return a case-insensitive, dot-normalised hostname."""
 
-    host = host.translate(_CONTROL_CHAR_MAP)
-    host = host.strip()
     if not host:
         return ""
 
-    while host.endswith("."):
-        host = host[:-1]
+    candidate = host.translate(_CONTROL_CHAR_MAP).strip()
+    if not candidate:
+        return ""
 
-    return host.lower()
+    return candidate.rstrip(".").lower()
+
+
+def _norm_host(host: str) -> str:
+    """Backwards-compatible alias for ``normalize_hostname``."""
+
+    return normalize_hostname(host)
 
 
 def _strip_local_suffix(host: str) -> str:
@@ -90,8 +104,8 @@ def _strip_local_suffix(host: str) -> str:
 def _same_host(left: str, right: str) -> bool:
     """Return True when two hosts refer to the same machine."""
 
-    left_norm = _norm_host(left)
-    right_norm = _norm_host(right)
+    left_norm = normalize_hostname(left)
+    right_norm = normalize_hostname(right)
     if not left_norm or not right_norm:
         return False
 
@@ -99,6 +113,27 @@ def _same_host(left: str, right: str) -> bool:
         return True
 
     return _strip_local_suffix(left_norm) == _strip_local_suffix(right_norm)
+
+
+def build_publish_command(
+    *,
+    instance: str,
+    service_type: str,
+    port: int,
+    host: Optional[str],
+    txt: Mapping[str, str],
+) -> List[str]:
+    """Construct an ``avahi-publish`` command with discrete TXT arguments."""
+
+    command = ["avahi-publish", "-s", instance, service_type, str(port)]
+    if host:
+        command.append(host)
+
+    if txt:
+        for key, value in txt.items():
+            command.append(f"{key}={value}")
+
+    return command
 
 
 def _service_types(cluster: str, environment: str) -> List[str]:
@@ -161,14 +196,11 @@ def _browse_service_type(
     resolve: bool = True,
     timeout: float = _DEFAULT_BROWSE_TIMEOUT,
 ) -> Iterable[str]:
-    command = [
-        "avahi-browse",
-        "--parsable",
-        "--terminate",
-    ]
+    command: List[str] = ["avahi-browse"]
+    flag = "-ptk"
     if resolve:
-        command.append("--resolve")
-    command.append(service_type)
+        flag = "-rptk"
+    command.extend([flag, service_type])
     kwargs = {
         "capture_output": True,
         "text": True,
@@ -272,7 +304,7 @@ def ensure_self_ad_is_visible(
 ) -> Optional[str]:
     """Return the observed host when the local advertisement is visible."""
 
-    expected_norm = _norm_host(expected_host)
+    expected_norm = normalize_hostname(expected_host)
     if not expected_norm:
         return None
 
@@ -320,8 +352,8 @@ def ensure_self_ad_is_visible(
             phase = txt.get("phase")
             role = txt.get("role")
             leader_raw = txt.get("leader", "")
-            record_norm = _norm_host(record.host)
-            leader_norm = _norm_host(leader_raw)
+            record_norm = normalize_hostname(record.host)
+            leader_norm = normalize_hostname(leader_raw)
             record_stripped = _strip_local_suffix(record_norm) if record_norm else ""
             leader_stripped = _strip_local_suffix(leader_norm) if leader_norm else ""
             expected_stripped = _strip_local_suffix(expected_norm)
@@ -333,19 +365,15 @@ def ensure_self_ad_is_visible(
                     diag_messages.append(
                         (
                             "[k3s-discover mdns] Attempt %d/%d: skipped host %s "
-                            "(phase=%s role=%s leader=%s) because require_phase=%s "
-                            "(phase_match=%s role_match=%s)"
+                            "because require_phase=%s (phase=%s role=%s)"
                         )
                         % (
                             attempt,
                             attempts,
-                            record.host,
-                            phase or "<unknown>",
-                            role or "<unknown>",
-                            leader_raw or "<none>",
+                            record.host or "<none>",
                             require_phase,
-                            "yes" if phase_matches else "no",
-                            "yes" if role_matches else "no",
+                            phase or "<missing>",
+                            role or "<missing>",
                         )
                     )
                     continue
@@ -442,7 +470,7 @@ def ensure_self_ad_is_visible(
 
         if not host_match_found:
             unique_hosts = sorted({
-                _norm_host(host) for host in observed_hosts if host
+                normalize_hostname(host) for host in observed_hosts if host
             })
             observed_text = ", ".join(unique_hosts) if unique_hosts else "<none>"
             _log(
@@ -520,4 +548,10 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry point
     raise SystemExit(_main())
 
 
-__all__ = ["_norm_host", "_same_host", "ensure_self_ad_is_visible"]
+__all__ = [
+    "_norm_host",
+    "_same_host",
+    "ensure_self_ad_is_visible",
+    "normalize_hostname",
+    "build_publish_command",
+]

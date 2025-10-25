@@ -47,6 +47,10 @@ status:
 mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 
+mdns-selfcheck env='dev':
+    export SUGARKUBE_ENV="{{ env }}"
+    python3 scripts/mdns_selfcheck.py
+
 node-ip-dropin:
     sudo -E bash scripts/configure_k3s_node_ip.sh
 

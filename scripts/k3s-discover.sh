@@ -476,8 +476,8 @@ start_address_publisher() {
 
 start_bootstrap_publisher() {
   start_address_publisher || true
-  if ! command -v avahi-publish-service >/dev/null 2>&1; then
-    log "avahi-publish-service not available; relying on Avahi service file"
+  if ! command -v avahi-publish >/dev/null 2>&1; then
+    log "avahi-publish not available; relying on Avahi service file"
     return 1
   fi
   if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -491,13 +491,17 @@ start_bootstrap_publisher() {
   : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
 
   local -a publish_cmd=(
-    avahi-publish-service
+    avahi-publish
     -s
-    -H "${MDNS_HOST_RAW}"
-  )
-  publish_cmd+=(
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
+  )
+
+  if [ -n "${MDNS_HOST_RAW}" ]; then
+    publish_cmd+=(-H "${MDNS_HOST_RAW}")
+  fi
+
+  publish_cmd+=(
     6443
     "k3s=1"
     "cluster=${CLUSTER}"
@@ -507,6 +511,16 @@ start_bootstrap_publisher() {
     "phase=bootstrap"
     "state=pending"
   )
+
+  local serialized=""
+  local arg=""
+  for arg in "${publish_cmd[@]}"; do
+    if [ -n "${serialized}" ]; then
+      serialized+="; "
+    fi
+    serialized+="$(printf '%q' "${arg}")"
+  done
+  log "avahi-publish bootstrap argv: [${serialized}]"
 
   log "publishing bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
   "${publish_cmd[@]}" >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
@@ -524,16 +538,15 @@ start_bootstrap_publisher() {
     return 1
   fi
 
-  log "avahi-publish-service advertising bootstrap host=${MDNS_HOST_RAW} \
-addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${BOOTSTRAP_PUBLISH_PID}"
+  log "avahi-publish advertising bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${BOOTSTRAP_PUBLISH_PID}"
   printf '%s\n' "${BOOTSTRAP_PUBLISH_PID}" | write_privileged_file "${BOOTSTRAP_PID_FILE}"
   return 0
 }
 
 start_server_publisher() {
   start_address_publisher || true
-  if ! command -v avahi-publish-service >/dev/null 2>&1; then
-    log "avahi-publish-service not available; relying on Avahi service file"
+  if ! command -v avahi-publish >/dev/null 2>&1; then
+    log "avahi-publish not available; relying on Avahi service file"
     return 1
   fi
   if [ -n "${SERVER_PUBLISH_PID:-}" ] && kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -547,13 +560,17 @@ start_server_publisher() {
   : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
 
   local -a publish_cmd=(
-    avahi-publish-service
+    avahi-publish
     -s
-    -H "${MDNS_HOST_RAW}"
-  )
-  publish_cmd+=(
     "${publish_name}"
     "${MDNS_SERVICE_TYPE}"
+  )
+
+  if [ -n "${MDNS_HOST_RAW}" ]; then
+    publish_cmd+=(-H "${MDNS_HOST_RAW}")
+  fi
+
+  publish_cmd+=(
     6443
     "k3s=1"
     "cluster=${CLUSTER}"
@@ -562,6 +579,16 @@ start_server_publisher() {
     "leader=${MDNS_HOST_RAW}"
     "phase=server"
   )
+
+  local serialized=""
+  local arg=""
+  for arg in "${publish_cmd[@]}"; do
+    if [ -n "${serialized}" ]; then
+      serialized+="; "
+    fi
+    serialized+="$(printf '%q' "${arg}")"
+  done
+  log "avahi-publish server argv: [${serialized}]"
 
   log "publishing server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
   "${publish_cmd[@]}" >"${SERVER_PUBLISH_LOG}" 2>&1 &
@@ -579,8 +606,7 @@ start_server_publisher() {
     return 1
   fi
 
-  log "avahi-publish-service advertising server host=${MDNS_HOST_RAW} \
-addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${SERVER_PUBLISH_PID}"
+  log "avahi-publish advertising server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${SERVER_PUBLISH_PID}"
   printf '%s\n' "${SERVER_PUBLISH_PID}" | write_privileged_file "${SERVER_PID_FILE}"
   return 0
 }

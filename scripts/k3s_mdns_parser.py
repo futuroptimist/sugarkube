@@ -103,12 +103,20 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
         if not payload:
             continue
         payload = payload.strip()
-        if "=" not in payload:
+        if not payload:
             continue
-        key, value = payload.split("=", 1)
-        key = key.strip().lower()
-        value = value.strip()
-        txt[key] = value
+        entries = [payload]
+        if "," in payload:
+            entries = [item.strip() for item in payload.split(",") if item.strip()]
+        for entry in entries:
+            if "=" not in entry:
+                continue
+            key, value = entry.split("=", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if not key:
+                continue
+            txt[key] = value
     return txt
 
 
