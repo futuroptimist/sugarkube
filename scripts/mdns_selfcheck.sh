@@ -1,8 +1,13 @@
 #!/bin/sh
-if ! set -Eeuo pipefail 2>/dev/null; then
-  if ! set -euo pipefail 2>/dev/null; then
-    set -eu
-  fi
+# shellcheck disable=SC3040,SC3041,SC3043
+set -eu
+
+if (set -o pipefail) 2>/dev/null; then
+  set -o pipefail
+fi
+
+if (set -E) 2>/dev/null; then
+  set -E
 fi
 
 SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
@@ -52,16 +57,24 @@ PY
 
 strip_quotes() {
   local value="$1"
-  case "${value}" in
-    "*"|'*')
-      if [ "${#value}" -ge 2 ]; then
-        value="${value#?}"
-        value="${value%?}"
-        printf '%s' "${value}"
-        return
-      fi
+  if [ "${#value}" -lt 2 ]; then
+    printf '%s' "${value}"
+    return
+  fi
+
+  local first last trimmed
+  first="${value%"${value#?}"}"
+  last="${value#"${value%?}"}"
+
+  case "${first}${last}" in
+    "\"\""|"''")
+      trimmed="${value#?}"
+      trimmed="${trimmed%?}"
+      printf '%s' "${trimmed}"
+      return
       ;;
   esac
+
   printf '%s' "${value}"
 }
 
@@ -70,7 +83,7 @@ parse_browse() {
   local srv_host=""
   local srv_port=""
 
-  while IFS=';' read -r record _iface _proto instance type domain host addr port rest; do
+  while IFS=';' read -r record _iface _proto instance type domain host _addr port rest; do
     [ "${record}" = "=" ] || continue
     instance="$(strip_quotes "${instance}")"
     type="$(strip_quotes "${type}")"
@@ -141,6 +154,7 @@ resolve_host() {
   local line field
   while IFS= read -r line; do
     [ -n "${line}" ] || continue
+    # shellcheck disable=SC2086
     set -- ${line}
     shift
     for field in "$@"; do
@@ -234,12 +248,13 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       status=$?
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
         resolved_ipv4="${resolved##*|}"
-        elapsed_ms="$(python3 - <<'PY'
+        elapsed_ms="$(
+          python3 - "${script_start_ms}" <<'PY'
 import sys, time
 start = int(sys.argv[1])
 print(int(time.time() * 1000) - start)
 PY
-"${script_start_ms}")"
+        )"
         printf 'event=mdns_selfcheck outcome=ok host=%s ipv4=%s port=%s attempts=%s ms_elapsed=%s\n' \
           "${srv_host}" "${resolved_ipv4}" "${srv_port}" "${attempt}" "${elapsed_ms}"
         exit 0
@@ -269,7 +284,8 @@ PY
     ''|*[!0-9]*) delay_ms=0 ;;
   esac
   if [ "${delay_ms}" -gt 0 ]; then
-    delay_s="$(python3 - <<'PY'
+    delay_s="$(
+      python3 - "${delay_ms}" <<'PY'
 import sys
 try:
     delay = int(sys.argv[1])
@@ -277,17 +293,18 @@ except ValueError:
     delay = 0
 print('{:.3f}'.format(delay / 1000.0))
 PY
-"${delay_ms}")"
+    )"
     sleep "${delay_s}"
   fi
   attempt=$((attempt + 1))
 done
 
-elapsed_ms="$(python3 - <<'PY'
+elapsed_ms="$(
+  python3 - "${script_start_ms}" <<'PY'
 import sys, time
 start = int(sys.argv[1])
 print(int(time.time() * 1000) - start)
 PY
-"${script_start_ms}")"
+)"
 >&2 printf 'event=mdns_selfcheck outcome=fail attempts=%s reason=%s ms_elapsed=%s\n' "${ATTEMPTS}" "${last_reason:-unknown}" "${elapsed_ms}"
 exit 1

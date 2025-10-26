@@ -9,7 +9,7 @@ setup() {
 @test "mdns self-check succeeds when instance is discoverable" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
-cat "$BATS_TEST_DIRNAME/../fixtures/avahi_browse_ok.txt"
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
 EOS
 
   stub_command avahi-resolve <<'EOS'
@@ -34,7 +34,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=100 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=100 \
-    "$BATS_TEST_DIRNAME/../../scripts/mdns_selfcheck.sh"
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 0 ]
   [[ "$output" =~ event=mdns_selfcheck ]]
@@ -45,7 +45,7 @@ EOS
 @test "mdns self-check reports failure when no records appear" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
-cat "$BATS_TEST_DIRNAME/../fixtures/avahi_browse_empty.txt"
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt"
 EOS
 
   stub_command avahi-resolve <<'EOS'
@@ -63,17 +63,17 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=10 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=10 \
-    "$BATS_TEST_DIRNAME/../../scripts/mdns_selfcheck.sh"
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 1 ]
-  [ -z "$output" ]
-  [[ "$stderr" =~ outcome=fail ]]
+  [[ "$output" =~ outcome=fail ]]
+  [[ "$output" =~ reason=browse_empty ]]
 }
 
 @test "mdns self-check ignores bootstrap advertisement when server required" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
-cat "$BATS_TEST_DIRNAME/../fixtures/avahi_browse_bootstrap_only.txt"
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_bootstrap_only.txt"
 EOS
 
   stub_command avahi-resolve <<'EOS'
@@ -91,9 +91,9 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=1 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
-    "$BATS_TEST_DIRNAME/../../scripts/mdns_selfcheck.sh"
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 1 ]
-  [ -z "$output" ]
-  [[ "$stderr" =~ instance_not_found ]]
+  [[ "$output" =~ instance_not_found ]]
+  [[ "$output" =~ reason=instance_not_found ]]
 }

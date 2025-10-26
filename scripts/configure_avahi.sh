@@ -305,7 +305,8 @@ main() {
     if [ -f "${CONF}" ]; then
       local diff_output
       diff_output="$(diff -U0 "${CONF}" "${tmp}" || true)"
-      changes=$(printf '%s\n' "${diff_output}" | sed '1,2d' | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | wc -l | tr -d ' ')
+      changes=$(printf '%s\n' "${diff_output}" | sed '1,2d' |
+        awk '/^[+-]/ && $0 !~ /^(\+\+\+|---)/ {count++} END {printf "%d", count}')
     else
       changes=$(wc -l <"${tmp}" | tr -d ' ')
     fi
