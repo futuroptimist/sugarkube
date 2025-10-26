@@ -49,15 +49,12 @@ mdns-harden:
 
 mdns-selfcheck env='dev':
     export SUGARKUBE_ENV="{{ env }}"
-    python3 scripts/mdns_selfcheck.py \
-      --instance "k3s-{{ SUGARKUBE_CLUSTER }}-{{ env }}@$(hostname).local (server)" \
-      --type "_k3s-{{ SUGARKUBE_CLUSTER }}-{{ env }}._tcp" \
-      --domain "local" \
-      --expected-host "$(hostname).local" \
-      --require-phase server \
-      --require-role server \
-      --retries 10 \
-      --delay-ms 500
+    env \
+      SUGARKUBE_EXPECTED_HOST="$(hostname).local" \
+      SUGARKUBE_SELFCHK_ATTEMPTS=10 \
+      SUGARKUBE_SELFCHK_BACKOFF_START_MS=500 \
+      SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=500 \
+      scripts/mdns_selfcheck.sh
 
 node-ip-dropin:
     sudo -E bash scripts/configure_k3s_node_ip.sh

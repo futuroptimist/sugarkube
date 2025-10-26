@@ -1,0 +1,2 @@
++;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (bootstrap);_k3s-sugar-dev._tcp;local
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (bootstrap);_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.3.10;6443;"txt=cluster=sugar","txt=env=dev","txt=role=bootstrap","txt=phase=bootstrap"

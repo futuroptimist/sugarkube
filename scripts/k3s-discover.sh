@@ -46,6 +46,7 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+MDNS_SELF_CHECK_FAILURE_CODE=94
 
 timestamp() {
   date '+%Y-%m-%dT%H:%M:%S%z'
@@ -71,21 +72,6 @@ strip_timestamp_prefix() {
       printf '%s\n' "${line}"
       ;;
   esac
-}
-
-parse_selfcheck_host() {
-  python3 - <<'PY'
-import json
-import sys
-
-payload = sys.stdin.read()
-try:
-    data = json.loads(payload)
-except json.JSONDecodeError:
-    print("", end="")
-else:
-    print(data.get("host", ""))
-PY
 }
 
 PRINT_TOKEN_ONLY=0
@@ -783,15 +769,13 @@ ensure_self_mdns_advertisement() {
     return 0
   fi
 
-  local require_phase retries delay
+  local retries delay
   case "${role}" in
     bootstrap)
-      require_phase="bootstrap"
       retries="${SUGARKUBE_MDNS_BOOT_RETRIES}"
       delay="${SUGARKUBE_MDNS_BOOT_DELAY}"
       ;;
     server)
-      require_phase="server"
       retries="${SUGARKUBE_MDNS_SERVER_RETRIES}"
       delay="${SUGARKUBE_MDNS_SERVER_DELAY}"
       ;;
@@ -800,18 +784,15 @@ ensure_self_mdns_advertisement() {
       ;;
   esac
 
-  log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts (delay ${delay}s)."
+  log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts."
 
   MDNS_LAST_OBSERVED=""
-  local observed_json=""
-  local instance
-  instance="$(service_instance_name "${role}" "${MDNS_HOST_RAW}")"
-
-  local delay_ms
-  delay_ms="$(DELAY_VALUE="${delay}" python3 - <<'PY'
+  local delay_ms=""
+  if [ -n "${delay}" ]; then
+    delay_ms="$(SELFCHK_DELAY="${delay}" python3 - <<'PY'
 import os
 
-raw = os.environ.get("DELAY_VALUE", "0")
+raw = os.environ.get("SELFCHK_DELAY", "0")
 try:
     value = float(raw)
 except ValueError:
@@ -821,41 +802,72 @@ if value < 0:
 print(int(value * 1000))
 PY
 )"
+  fi
 
-  local -a mdns_check_base=(
-    python3 "${SCRIPT_DIR}/mdns_selfcheck.py"
-    --instance "${instance}"
-    --type "${MDNS_SERVICE_TYPE}"
-    --domain "local"
-    --expected-host "${MDNS_HOST_RAW}"
-    --require-phase "${require_phase}"
-    --retries "${retries}"
-    --delay-ms "${delay_ms}"
+  local -a selfcheck_env=(
+    "SUGARKUBE_CLUSTER=${CLUSTER}"
+    "SUGARKUBE_ENV=${ENVIRONMENT}"
+    "SUGARKUBE_EXPECTED_HOST=${MDNS_HOST_RAW}"
+    "SUGARKUBE_SELFCHK_ATTEMPTS=${retries}"
+    "SUGARKUBE_EXPECTED_ROLE=${role}"
+    "SUGARKUBE_EXPECTED_PHASE=${role}"
   )
-  if [ -n "${role}" ]; then
-    mdns_check_base+=(--require-role "${role}")
+  if [ -n "${delay_ms}" ]; then
+    case "${delay_ms}" in
+      ''|*[!0-9]*) delay_ms="" ;;
+      0) delay_ms="" ;;
+    esac
   fi
-  local -a mdns_check=("${mdns_check_base[@]}")
-  local used_expect_addr=0
+  if [ -n "${delay_ms}" ]; then
+    selfcheck_env+=("SUGARKUBE_SELFCHK_BACKOFF_START_MS=${delay_ms}" "SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=${delay_ms}")
+  fi
   if [ -n "${MDNS_ADDR_V4}" ]; then
-    mdns_check+=(--expect-addr "${MDNS_ADDR_V4}")
-    used_expect_addr=1
+    selfcheck_env+=("SUGARKUBE_EXPECTED_IPV4=${MDNS_ADDR_V4}")
   fi
 
-  local observed_host=""
-  if observed_json="$("${mdns_check[@]}")"; then
-    observed_host="$(printf '%s\n' "${observed_json}" | parse_selfcheck_host)"
+  local selfcheck_output=""
+  local observed_host="${MDNS_HOST_RAW}"
+  if selfcheck_output="$(env "${selfcheck_env[@]}" "${SCRIPT_DIR}/mdns_selfcheck.sh")"; then
+    local token
+    for token in ${selfcheck_output}; do
+      case "${token}" in
+        host=*)
+          observed_host="${token#host=}"
+          ;;
+      esac
+    done
     if [ -z "${observed_host}" ]; then
       observed_host="${MDNS_HOST_RAW}"
     fi
     MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
+    log "Self-check for ${role} advertisement succeeded: ${selfcheck_output}"
     return 0
   fi
 
-  if [ "${used_expect_addr}" -eq 1 ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
+  local status=$?
+  if [ -n "${MDNS_ADDR_V4}" ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
     log "Self-check for ${role} advertisement: expected IPv4 ${MDNS_ADDR_V4} not confirmed; retrying without IPv4 requirement."
-    if observed_json="$("${mdns_check_base[@]}")"; then
-      observed_host="$(printf '%s\n' "${observed_json}" | parse_selfcheck_host)"
+    local -a relaxed_env=(
+      "SUGARKUBE_CLUSTER=${CLUSTER}"
+      "SUGARKUBE_ENV=${ENVIRONMENT}"
+      "SUGARKUBE_EXPECTED_HOST=${MDNS_HOST_RAW}"
+      "SUGARKUBE_SELFCHK_ATTEMPTS=${retries}"
+      "SUGARKUBE_EXPECTED_ROLE=${role}"
+      "SUGARKUBE_EXPECTED_PHASE=${role}"
+    )
+    if [ -n "${delay_ms}" ]; then
+      relaxed_env+=("SUGARKUBE_SELFCHK_BACKOFF_START_MS=${delay_ms}" "SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=${delay_ms}")
+    fi
+    if selfcheck_output="$(env "${relaxed_env[@]}" "${SCRIPT_DIR}/mdns_selfcheck.sh")"; then
+      local token
+      observed_host="${MDNS_HOST_RAW}"
+      for token in ${selfcheck_output}; do
+        case "${token}" in
+          host=*)
+            observed_host="${token#host=}"
+            ;;
+        esac
+      done
       if [ -z "${observed_host}" ]; then
         observed_host="${MDNS_HOST_RAW}"
       fi
@@ -865,45 +877,8 @@ PY
     fi
   fi
 
-  log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW} after ${retries} attempts (delay ${delay}s)."
-  return 1
-}
-
-assume_mdns_visibility_from_logs() {
-  local role="$1"
-  local log_file=""
-  case "${role}" in
-    bootstrap)
-      log_file="${BOOTSTRAP_PUBLISH_LOG:-}"
-      ;;
-    server)
-      log_file="${SERVER_PUBLISH_LOG:-}"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-
-  if [ -z "${log_file}" ] || [ ! -s "${log_file}" ]; then
-    return 1
-  fi
-
-  local expected_name
-  expected_name="$(service_instance_name "${role}" "${MDNS_HOST_RAW}")"
-
-  if grep -Fq "Established under name '${expected_name}'" "${log_file}"; then
-    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
-    log "WARN: ${role} advertisement for ${MDNS_HOST_RAW} not visible via mDNS; Avahi publish logs report service establishment; assuming success."
-    return 0
-  fi
-
-  if grep -Fq "Established under name" "${log_file}" && grep -Fq "${MDNS_HOST_RAW}" "${log_file}"; then
-    MDNS_LAST_OBSERVED="$(canonical_host "${MDNS_HOST_RAW}")"
-    log "WARN: ${role} advertisement for ${MDNS_HOST_RAW} not visible via mDNS; Avahi publish logs report service establishment; assuming success."
-    return 0
-  fi
-
-  return 1
+  log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW}; status=${status}."
+  return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 
 count_servers() {
@@ -1075,21 +1050,11 @@ publish_api_service() {
     return 0
   fi
 
-  if assume_mdns_visibility_from_logs server; then
-    local observed
-    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement assumed via Avahi publish logs."
-    log "Server advertisement assumed visible for ${MDNS_HOST_RAW} based on Avahi publish logs."
-    SERVER_PUBLISH_PERSIST=1
-    stop_bootstrap_publisher
-    return 0
-  fi
-
   log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
   sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
-  return 1
+  return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 
 publish_bootstrap_service() {
@@ -1120,20 +1085,12 @@ publish_bootstrap_service() {
     return 0
   fi
 
-  if assume_mdns_visibility_from_logs bootstrap; then
-    local observed
-    observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement assumed via Avahi publish logs."
-    log "Bootstrap advertisement assumed visible for ${MDNS_HOST_RAW} based on Avahi publish logs."
-    return 0
-  fi
-
   log "Failed to confirm Avahi bootstrap advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
   sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
   log "Unable to confirm bootstrap advertisement for ${MDNS_HOST_RAW}; aborting to avoid split brain"
-  return 1
+  return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 
 claim_bootstrap_leadership() {

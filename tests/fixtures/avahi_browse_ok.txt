@@ -1,0 +1,4 @@
++;eth0;IPv4;k3s-sugar-dev@sugarkube1.local (server);_k3s-sugar-dev._tcp;local
+=;eth0;IPv4;k3s-sugar-dev@sugarkube1.local (server);_k3s-sugar-dev._tcp;local;sugarkube1.local;192.168.3.11;6443;"txt=cluster=sugar","txt=env=dev","txt=role=server","txt=phase=server"
++;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (server);_k3s-sugar-dev._tcp;local
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.3.10;6443;"txt=cluster=sugar","txt=env=dev","txt=role=server","txt=phase=server"
