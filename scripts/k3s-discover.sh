@@ -47,6 +47,7 @@ SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
 MDNS_SELF_CHECK_FAILURE_CODE=94
+ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 
 timestamp() {
   date '+%Y-%m-%dT%H:%M:%S%z'
@@ -1287,48 +1288,59 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
 fi
 
 log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
-server_host="$(discover_server_host || true)"
-
-if [ -z "${server_host:-}" ]; then
-  wait_result="$(wait_for_bootstrap_activity --require-activity || true)"
-  if [ -n "${wait_result:-}" ]; then
-    server_host="${wait_result}"
-  fi
-fi
-
-if [ -z "${server_host:-}" ]; then
-  jitter=$((RANDOM % 11 + 5))
-  log "No servers discovered yet; waiting ${jitter}s before attempting bootstrap..."
-  sleep "${jitter}"
-  server_host="$(discover_server_host || true)"
-  if [ -z "${server_host:-}" ]; then
-    wait_result="$(wait_for_bootstrap_activity --require-activity || true)"
-    if [ -n "${wait_result:-}" ]; then
-      server_host="${wait_result}"
-    fi
-  fi
-fi
-
+server_host=""
 bootstrap_selected="false"
-if [ -z "${server_host:-}" ]; then
-  CLAIMED_SERVER_HOST=""
-  if claim_bootstrap_leadership; then
+
+while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
+  server_host="$(discover_server_host || true)"
+  if [ -n "${server_host}" ]; then
+    break
+  fi
+
+  election_output="$("${SCRIPT_DIR}/elect_leader.sh" 2>/dev/null || true)"
+  election_status=$?
+  election_winner="no"
+  election_key=""
+
+  if [ "${election_status}" -eq 0 ]; then
+    while IFS='=' read -r field value; do
+      case "${field}" in
+        winner)
+          election_winner="${value}"
+          ;;
+        key)
+          election_key="${value}"
+          ;;
+      esac
+    done <<<"${election_output}"
+  else
+    log "WARN: elect_leader.sh exited with status ${election_status}; defaulting to follower"
+  fi
+
+  if [ -z "${election_key}" ]; then
+    election_key="undefined"
+  fi
+
+  if [ "${election_winner}" = "yes" ]; then
+    log "event=election outcome=winner key=${election_key}"
+    sleep "${ELECTION_HOLDOFF}"
+    server_host="$(discover_server_host || true)"
+    if [ -n "${server_host}" ]; then
+      log "Server advertisement detected after election holdoff; joining ${server_host}"
+      break
+    fi
     bootstrap_selected="true"
   else
-    claim_status=$?
-    if [ "${claim_status}" -eq 2 ]; then
-      if [ -n "${CLAIMED_SERVER_HOST:-}" ]; then
-        server_host="${CLAIMED_SERVER_HOST}"
-      else
-        server_host="$(discover_server_host || true)"
-      fi
-    else
-      server_host="$(wait_for_bootstrap_activity || true)"
-    fi
+    log "event=election outcome=follower key=${election_key}"
+    sleep "${DISCOVERY_WAIT_SECS}"
   fi
-fi
+done
 
 if [ "${bootstrap_selected}" = "true" ]; then
+  if ! publish_bootstrap_service; then
+    log "Failed to advertise bootstrap attempt for ${MDNS_HOST_RAW}; aborting"
+    exit 1
+  fi
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     install_server_single
   else
