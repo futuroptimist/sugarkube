@@ -248,15 +248,23 @@ main() {
   local allow_mode="clear"
   local allow_value=""
   local iface_for_log="all"
+  local allow_source="none"
 
   if [ -n "${ALLOW_INTERFACES_OVERRIDE}" ]; then
     allow_mode="set"
     allow_value="${ALLOW_INTERFACES_OVERRIDE}"
     iface_for_log="${allow_value}"
+    allow_source="override"
   elif [ -n "${auto_allow}" ]; then
     allow_mode="set"
     allow_value="${auto_allow}"
     iface_for_log="${allow_value}"
+    allow_source="auto"
+  elif [ -n "${PREFERRED_IFACE}" ]; then
+    allow_mode="set"
+    allow_value="${PREFERRED_IFACE}"
+    iface_for_log="${allow_value}"
+    allow_source="preferred"
   fi
 
   local dir tmp mode owner group
@@ -308,7 +316,7 @@ main() {
     outcome="applied"
   fi
 
-  log_kv avahi_baseline "outcome=${outcome}" "iface=${iface_for_log}" "publish_workstation=${PUBLISH_WORKSTATION}"
+  log_kv avahi_baseline "outcome=${outcome}" "iface=${iface_for_log}" "allow_source=${allow_source}" "publish_workstation=${PUBLISH_WORKSTATION}"
 }
 
 main "$@"
