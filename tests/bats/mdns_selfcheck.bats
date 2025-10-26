@@ -29,6 +29,8 @@ EOS
     SUGARKUBE_ENV=dev \
     SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
     SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=100 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=100 \
@@ -56,6 +58,8 @@ EOS
     SUGARKUBE_CLUSTER=sugar \
     SUGARKUBE_ENV=dev \
     SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=10 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=10 \
@@ -64,4 +68,32 @@ EOS
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   [[ "$stderr" =~ outcome=fail ]]
+}
+
+@test "mdns self-check ignores bootstrap advertisement when server required" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+cat "$BATS_TEST_DIRNAME/../fixtures/avahi_browse_bootstrap_only.txt"
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+echo "avahi-resolve should not be called" >&2
+exit 2
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "$BATS_TEST_DIRNAME/../../scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" =~ instance_not_found ]]
 }

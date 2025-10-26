@@ -9,6 +9,8 @@ SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 SERVICE_ENV="${SUGARKUBE_ENV:-dev}"
 EXPECTED_HOST="${SUGARKUBE_EXPECTED_HOST:-}"
 EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}"
+EXPECTED_ROLE="${SUGARKUBE_EXPECTED_ROLE:-}"
+EXPECTED_PHASE="${SUGARKUBE_EXPECTED_PHASE:-}"
 ATTEMPTS="${SUGARKUBE_SELFCHK_ATTEMPTS:-12}"
 BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
 BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
@@ -76,14 +78,46 @@ parse_browse() {
     host="$(strip_quotes "${host}")"
     port="$(strip_quotes "${port}")"
 
-    case "${instance}" in
-      "${INSTANCE_PREFIX} (bootstrap)"|"${INSTANCE_PREFIX} (server)")
-        target_instance="${instance}"
-        srv_host="${host}"
-        srv_port="${port}"
-        break
-        ;;
-    esac
+    if [ -n "${EXPECTED_ROLE}" ]; then
+      case "${instance}" in
+        "${INSTANCE_PREFIX} (${EXPECTED_ROLE})")
+          ;;
+        *)
+          continue
+          ;;
+      esac
+    else
+      case "${instance}" in
+        "${INSTANCE_PREFIX} (bootstrap)"|"${INSTANCE_PREFIX} (server)")
+          ;;
+        *)
+          continue
+          ;;
+      esac
+    fi
+
+    if [ -n "${EXPECTED_ROLE}" ]; then
+      case "${rest}" in
+        *"role=${EXPECTED_ROLE}"*) ;;
+        *)
+          continue
+          ;;
+      esac
+    fi
+
+    if [ -n "${EXPECTED_PHASE}" ]; then
+      case "${rest}" in
+        *"phase=${EXPECTED_PHASE}"*) ;;
+        *)
+          continue
+          ;;
+      esac
+    fi
+
+    target_instance="${instance}"
+    srv_host="${host}"
+    srv_port="${port}"
+    break
   done
 
   if [ -n "${target_instance}" ] && [ -n "${srv_host}" ]; then

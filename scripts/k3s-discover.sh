@@ -809,6 +809,8 @@ PY
     "SUGARKUBE_ENV=${ENVIRONMENT}"
     "SUGARKUBE_EXPECTED_HOST=${MDNS_HOST_RAW}"
     "SUGARKUBE_SELFCHK_ATTEMPTS=${retries}"
+    "SUGARKUBE_EXPECTED_ROLE=${role}"
+    "SUGARKUBE_EXPECTED_PHASE=${role}"
   )
   if [ -n "${delay_ms}" ]; then
     case "${delay_ms}" in
@@ -850,6 +852,8 @@ PY
       "SUGARKUBE_ENV=${ENVIRONMENT}"
       "SUGARKUBE_EXPECTED_HOST=${MDNS_HOST_RAW}"
       "SUGARKUBE_SELFCHK_ATTEMPTS=${retries}"
+      "SUGARKUBE_EXPECTED_ROLE=${role}"
+      "SUGARKUBE_EXPECTED_PHASE=${role}"
     )
     if [ -n "${delay_ms}" ]; then
       relaxed_env+=("SUGARKUBE_SELFCHK_BACKOFF_START_MS=${delay_ms}" "SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=${delay_ms}")
