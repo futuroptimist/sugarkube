@@ -128,6 +128,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "SUGARKUBE_TEST_STATE": str(state_file),
             "SUGARKUBE_TEST_SERVER_THRESHOLD": "9",
             "SH_LOG_PATH": str(sh_log),
+            "SUGARKUBE_MDNS_DBUS": "0",
         }
     )
 

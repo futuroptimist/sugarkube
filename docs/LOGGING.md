@@ -13,9 +13,11 @@ machine-parseable while still being readable during interactive debugging.
 
 ## Debug toggles
 
-- `SUGARKUBE_DEBUG_MDNS=1` enables detailed network diagnostics in `k3s-discover.sh`,
-  dumping Avahi traces whenever a self-check fails or falls back to a relaxed match.
-- `SUGARKUBE_MDNS_DBUS=1` uses D-Bus backend for mDNS validation (see [DBUS.md](DBUS.md))
+- `SUGARKUBE_DEBUG_MDNS=1` enables detailed network diagnostics in
+  `k3s-discover.sh`, dumping Avahi traces whenever a self-check fails or falls
+  back to a relaxed match.
+- `SUGARKUBE_MDNS_DBUS=0` forces the CLI mDNS validator; omit or set to `1`
+  to keep the default D-Bus backend (see [DBUS.md](DBUS.md)).
 
 ## Usage examples
 

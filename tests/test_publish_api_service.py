@@ -27,6 +27,7 @@ def test_render_api_service_generates_expected_xml(tmp_path):
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(service_dir),
             "SUGARKUBE_CLUSTER": "sugar",
             "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_MDNS_DBUS": "0",
         }
     )
 

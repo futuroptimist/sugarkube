@@ -20,6 +20,7 @@ def default_env(tmp_path):
             "SUGARKUBE_SERVERS": "1",
             "SUGARKUBE_NODE_TOKEN_PATH": str(tmp_path / "node-token"),
             "SUGARKUBE_BOOT_TOKEN_PATH": str(tmp_path / "boot-token"),
+            "SUGARKUBE_MDNS_DBUS": "0",
         }
     )
     return env

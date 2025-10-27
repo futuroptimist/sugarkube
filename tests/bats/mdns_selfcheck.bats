@@ -34,6 +34,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=100 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=100 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 0 ]
@@ -68,6 +69,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=1 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 0 ]
@@ -101,6 +103,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=1 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 0 ]
@@ -128,6 +131,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=10 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=10 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 1 ]
@@ -162,6 +166,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=1 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 0 ]
@@ -194,6 +199,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=1 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 5 ]
@@ -222,6 +228,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=1 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 1 ]
@@ -269,4 +276,73 @@ EOS
   [ "$status" -eq 0 ]
   [[ "$output" =~ outcome=ok ]]
   [ -f "${BATS_TEST_TMPDIR}/gdbus.log" ]
+}
+
+@test "mdns self-check succeeds via dbus backend" {
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+method=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--method" ]; then
+    shift
+    method="${1:-}"
+    break
+  fi
+  shift
+done
+case "${method}" in
+  org.freedesktop.Avahi.Server.ServiceBrowserNew)
+    echo "(objectpath \"/Browser0\")"
+    ;;
+  org.freedesktop.Avahi.Server.ResolveService)
+    cat <<'OUT'
+(0, 0, "k3s-sugar-dev@sugarkube0.local (server)", "_k3s-sugar-dev._tcp", "local", "sugarkube0.local", 0, "192.168.3.10", 6443, ["role=server", "phase=server"], 0)
+OUT
+    ;;
+  org.freedesktop.Avahi.Server.ResolveHostName)
+    cat <<'OUT'
+(0, 0, "sugarkube0.local", "192.168.3.10", 0, 0)
+OUT
+    ;;
+  *)
+    echo "unexpected method: ${method}" >&2
+    exit 1
+    ;;
+esac
+echo "${method}" >>"${BATS_TEST_TMPDIR}/gdbus-calls.log"
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+echo "CLI path should not execute" >&2
+exit 1
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+echo "CLI resolver should not execute" >&2
+exit 1
+EOS
+
+  run env \
+    SUGARKUBE_MDNS_DBUS=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ host=sugarkube0.local ]]
+  [[ "$output" =~ ipv4=192.168.3.10 ]]
+  [[ "$output" =~ port=6443 ]]
+  grep -q "ResolveService" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
+  ! grep -q "CLI" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
 }

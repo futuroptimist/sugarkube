@@ -208,9 +208,11 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 ## Networking Notes
 
-- **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`) and `libnss-mdns` enable `.local` hostname resolution.
-  The `prereqs` recipe ensures `/etc/nsswitch.conf` includes
-  `mdns4_minimal [NOTFOUND=return] dns mdns4`.
+- **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`), `libnss-mdns`, and now
+  `glib2.0-bin` (for `gdbus`) enable deterministic `.local` hostname
+  resolution. The `prereqs` recipe also installs `tcpdump` so `net_diag.sh`
+  can capture UDP/5353 traffic when self-checks fail. It ensures
+  `/etc/nsswitch.conf` includes `mdns4_minimal [NOTFOUND=return] dns mdns4`.
 
 - **Service advertisement**:
   Servers broadcast the Kubernetes API as `_https._tcp` on port `6443` with TXT records tagging cluster (`cluster=<name>`), environment (`env=<env>`), and role (`role=server`).

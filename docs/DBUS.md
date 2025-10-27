@@ -1,17 +1,25 @@
 # Optional D-Bus mDNS self-check
 
-`scripts/mdns_selfcheck.sh` supports an alternative validator that uses the
-system D-Bus to query Avahi directly. The default CLI path (`avahi-browse`
-followed by `avahi-resolve`) remains unchanged, so existing CI and automation do
-not need any additional dependencies.
+`scripts/mdns_selfcheck.sh` now prefers the system D-Bus backend when `gdbus`
+is available, querying Avahi directly for deterministic results. The legacy CLI
+path (`avahi-browse` followed by `avahi-resolve`) is still bundled and is used
+whenever the D-Bus helper is unavailable or explicitly disabled.
 
-## Enabling the D-Bus backend
+## Controlling the backend
 
-Set `SUGARKUBE_MDNS_DBUS=1` when invoking the self-check to opt in to the D-Bus
-code path:
+To force the D-Bus path (even if a parent script opted out) export
+`SUGARKUBE_MDNS_DBUS=1`:
 
 ```bash
 SUGARKUBE_MDNS_DBUS=1 \
+  SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+  scripts/mdns_selfcheck.sh
+```
+
+Set `SUGARKUBE_MDNS_DBUS=0` to fall back to the CLI implementation:
+
+```bash
+SUGARKUBE_MDNS_DBUS=0 \
   SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
   scripts/mdns_selfcheck.sh
 ```
@@ -26,14 +34,14 @@ When the flag is enabled and `gdbus` is present, the helper script will:
    IPv4 address if one is specified.
 
 If the environment does not expose `gdbus`, or Avahi rejects the D-Bus calls,
-the D-Bus helper exits with status `2` and `mdns_selfcheck.sh` transparently
-falls back to the CLI implementation.
+the helper exits with status `2` and `mdns_selfcheck.sh` transparently falls
+back to the CLI implementation.
 
 ## Integration with discovery flow
 
-The D-Bus validator is automatically used by `scripts/k3s-discover.sh` when
-`SUGARKUBE_MDNS_DBUS=1` is set, providing more reliable mDNS validation during
-the bootstrap and server advertisement phases.
+`scripts/k3s-discover.sh` automatically opts into the D-Bus validator when
+possible, providing more reliable mDNS validation during the bootstrap and
+server advertisement phases.
 
 ## Caveats
 

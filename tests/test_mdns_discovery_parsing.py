@@ -75,6 +75,7 @@ EOF
             "SUGARKUBE_BOOT_TOKEN_PATH": str(tmp_path / "boot-token"),
             "SUGARKUBE_CLUSTER": "sugar",
             "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_MDNS_DBUS": "0",
         }
     )
     return env
