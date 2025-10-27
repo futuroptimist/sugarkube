@@ -79,4 +79,3 @@ def test_publish_avahi_service_creates_valid_xml(avahi_env):
     assert "role=server" in txt_records
     assert "leader=sugar-control-0" in txt_records
     assert "special=ctrl & co" in txt_records
-

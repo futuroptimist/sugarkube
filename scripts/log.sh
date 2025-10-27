@@ -58,4 +58,3 @@ log_debug() {
 log_trace() {
   log_kv trace "$@" >&2
 }
-

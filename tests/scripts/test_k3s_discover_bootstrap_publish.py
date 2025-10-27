@@ -547,7 +547,7 @@ def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
     )
     assert expected in result.stderr
     assert "WARN: bootstrap advertisement observed" in result.stderr
-    
+
 
 def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp_path):
     hostname = _hostname_short()
