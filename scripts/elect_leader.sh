@@ -119,7 +119,7 @@ main() {
   fi
 
   local -a expected_hosts=()
-  local expected_list prefix
+  local prefix
   prefix="${SUGARKUBE_NODE_PREFIX:-sugarkube}"
   prefix="$(normalize_lower "${prefix}")"
   if expected_output="$(build_expected_hosts "${SUGARKUBE_SERVERS:-}" "${prefix}" "${domain}" 2>/dev/null || true)"; then
