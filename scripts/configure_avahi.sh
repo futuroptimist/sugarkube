@@ -141,99 +141,108 @@ update_config() {
 import sys
 from pathlib import Path
 
-src_path = Path(sys.argv[1])
-dst_path = Path(sys.argv[2])
-publish_value = sys.argv[3]
-allow_mode = sys.argv[4]
-allow_value = sys.argv[5]
+try:
+    src_path = Path(sys.argv[1])
+    dst_path = Path(sys.argv[2])
+    publish_value = sys.argv[3]
+    allow_mode = sys.argv[4]
+    allow_value = sys.argv[5]
 
-if src_path.exists():
-    original_lines = src_path.read_text(encoding="utf-8").splitlines()
-else:
-    original_lines = []
-
-new_lines = []
-section = None
-publish_section_found = False
-publish_written = False
-allow_written = False
-
-for line in original_lines:
-    stripped = line.strip()
-    if stripped.startswith("[") and stripped.endswith("]"):
-        section = stripped[1:-1].strip().lower()
-        if section == "publish":
-            publish_section_found = True
-        new_lines.append(line)
-        continue
-
-    key = stripped.split("=", 1)[0].strip().lower() if "=" in stripped else ""
-
-    if section == "publish" and key == "publish-workstation":
-        new_lines.append(f"publish-workstation={publish_value}")
-        publish_written = True
-        continue
-
-    if section == "server" and key == "allow-interfaces":
-        if allow_mode == "set":
-            new_lines.append(f"allow-interfaces={allow_value}")
-            allow_written = True
-        continue
-
-    new_lines.append(line)
-
-
-def ensure_section(lines, name):
-    target = f"[{name}]"
-    for idx, value in enumerate(lines):
-        if value.strip().lower() == target.lower():
-            start = idx + 1
-            end = start
-            while end < len(lines) and not lines[end].lstrip().startswith("["):
-                end += 1
-            return idx, start, end
-    return None, None, None
-
-
-if allow_mode == "set" and not allow_written:
-    header, _, end = ensure_section(new_lines, "server")
-    if header is not None:
-        insert_at = end if end is not None else len(new_lines)
-        new_lines.insert(insert_at, f"allow-interfaces={allow_value}")
+    if src_path.exists():
+        try:
+            original_lines = src_path.read_text(encoding="utf-8").splitlines()
+        except Exception as e:
+            print(f"Error reading {src_path}: {e}", file=sys.stderr)
+            original_lines = []
     else:
-        if new_lines and new_lines[-1].strip():
-            new_lines.append("")
-        new_lines.append("[server]")
-        new_lines.append(f"allow-interfaces={allow_value}")
+        original_lines = []
 
-if allow_mode == "clear":
-    filtered_lines = []
+    new_lines = []
     section = None
-    for line in new_lines:
+    publish_section_found = False
+    publish_written = False
+    allow_written = False
+
+    for line in original_lines:
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             section = stripped[1:-1].strip().lower()
-            filtered_lines.append(line)
+            if section == "publish":
+                publish_section_found = True
+            new_lines.append(line)
             continue
+
         key = stripped.split("=", 1)[0].strip().lower() if "=" in stripped else ""
-        if section == "server" and key == "allow-interfaces":
+
+        if section == "publish" and key == "publish-workstation":
+            new_lines.append(f"publish-workstation={publish_value}")
+            publish_written = True
             continue
-        filtered_lines.append(line)
-    new_lines = filtered_lines
 
-if publish_section_found:
-    if not publish_written:
-        _, _, end = ensure_section(new_lines, "publish")
-        insert_at = end if end is not None else len(new_lines)
-        new_lines.insert(insert_at, f"publish-workstation={publish_value}")
-else:
-    if new_lines and new_lines[-1].strip():
-        new_lines.append("")
-    new_lines.append("[publish]")
-    new_lines.append(f"publish-workstation={publish_value}")
+        if section == "server" and key == "allow-interfaces":
+            if allow_mode == "set":
+                new_lines.append(f"allow-interfaces={allow_value}")
+                allow_written = True
+            continue
 
-content = "\n".join(new_lines) + "\n"
-dst_path.write_text(content, encoding="utf-8")
+        new_lines.append(line)
+
+
+    def ensure_section(lines, name):
+        target = f"[{name}]"
+        for idx, value in enumerate(lines):
+            if value.strip().lower() == target.lower():
+                start = idx + 1
+                end = start
+                while end < len(lines) and not lines[end].lstrip().startswith("["):
+                    end += 1
+                return idx, start, end
+        return None, None, None
+
+
+    if allow_mode == "set" and not allow_written:
+        header, _, end = ensure_section(new_lines, "server")
+        if header is not None:
+            insert_at = end if end is not None else len(new_lines)
+            new_lines.insert(insert_at, f"allow-interfaces={allow_value}")
+        else:
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("")
+            new_lines.append("[server]")
+            new_lines.append(f"allow-interfaces={allow_value}")
+
+    if allow_mode == "clear":
+        filtered_lines = []
+        section = None
+        for line in new_lines:
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                section = stripped[1:-1].strip().lower()
+                filtered_lines.append(line)
+                continue
+            key = stripped.split("=", 1)[0].strip().lower() if "=" in stripped else ""
+            if section == "server" and key == "allow-interfaces":
+                continue
+            filtered_lines.append(line)
+        new_lines = filtered_lines
+
+    if publish_section_found:
+        if not publish_written:
+            _, _, end = ensure_section(new_lines, "publish")
+            insert_at = end if end is not None else len(new_lines)
+            new_lines.insert(insert_at, f"publish-workstation={publish_value}")
+    else:
+        if new_lines and new_lines[-1].strip():
+            new_lines.append("")
+        new_lines.append("[publish]")
+        new_lines.append(f"publish-workstation={publish_value}")
+
+    content = "\n".join(new_lines) + "\n"
+    dst_path.write_text(content, encoding="utf-8")
+    
+except Exception as e:
+    print(f"Error in Python script: {e}", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 

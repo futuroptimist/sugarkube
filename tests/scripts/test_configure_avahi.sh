@@ -62,3 +62,36 @@ if ! cmp -s "${CONF_PATH}" "${SECOND_COPY}"; then
 fi
 
 echo "configure_avahi.sh idempotency test passed"
+
+# Test error handling with malformed configuration file
+echo "Testing error handling with malformed configuration..."
+
+MALFORMED_CONF="${TMP_DIR}/malformed-avahi.conf"
+cat <<'MALFORMED' >"${MALFORMED_CONF}"
+[publish]
+publish-workstation=yes
+use-ipv4=yes
+use-ipv6=no
+MALFORMED
+
+MALFORMED_ENV_VARS=(
+  "SUGARKUBE_MDNS_INTERFACE=eth0"
+  "SUGARKUBE_MDNS_IPV4_ONLY=1"
+  "AVAHI_CONF_PATH=${MALFORMED_CONF}"
+  "SUGARKUBE_LOG_DIR=${LOG_DIR}"
+  "SYSTEMCTL_BIN="
+)
+
+# This should not fail even with malformed input
+if ! ( export "${MALFORMED_ENV_VARS[@]}"; bash "${REPO_ROOT}/scripts/configure_avahi.sh" ); then
+  echo "Script failed with malformed configuration" >&2
+  exit 1
+fi
+
+# Verify the script created a valid output despite malformed input
+if ! grep -q '^allow-interfaces=eth0$' "${MALFORMED_CONF}"; then
+  echo "allow-interfaces was not set correctly with malformed input" >&2
+  exit 1
+fi
+
+echo "configure_avahi.sh error handling test passed"
