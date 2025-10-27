@@ -263,7 +263,9 @@ print(int(time.time() * 1000))
 PY
 )"
 
-if ! call_service_browser >/dev/null 2>&1; then
+if call_service_browser >/dev/null 2>&1; then
+  :
+else
   status=$?
   if [ "${status}" -eq 126 ] || [ "${status}" -eq 127 ]; then
     log_debug mdns_selfcheck_dbus outcome=skip reason=gdbus_unavailable
@@ -285,7 +287,9 @@ fi
 
 while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   for candidate in "$@"; do
-    if ! result_json="$(resolve_service "${candidate}" 2>/dev/null)"; then
+    if result_json="$(resolve_service "${candidate}" 2>/dev/null)"; then
+      :
+    else
       status=$?
       if [ "${status}" -eq 126 ] || [ "${status}" -eq 127 ]; then
         log_debug mdns_selfcheck_dbus outcome=skip reason=gdbus_unavailable attempt="${attempt}"

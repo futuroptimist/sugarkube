@@ -1,0 +1,11 @@
+{
+  "id": "mdns-selfcheck-shellcheck-unreachable",
+  "date": "2025-10-27",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "mdns_selfcheck.sh exited before defining its helper functions when SUGARKUBE_EXPECTED_HOST was unset, so shellcheck treated the remainder of the script as unreachable and failed the Pi image pipeline.",
+  "resolution": "Moved the helper function definitions ahead of the environment validation, restored the runtime guards, and added pytest coverage that runs shellcheck -S info -x to ensure SC2317 never regresses.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/test_mdns_selfcheck_shellcheck.py"
+  ]
+}

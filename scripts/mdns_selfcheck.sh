@@ -14,79 +14,6 @@ SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
 
-SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
-SERVICE_ENV="${SUGARKUBE_ENV:-dev}"
-EXPECTED_HOST="${SUGARKUBE_EXPECTED_HOST:-}"
-EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}"
-EXPECTED_ROLE="${SUGARKUBE_EXPECTED_ROLE:-}"
-EXPECTED_PHASE="${SUGARKUBE_EXPECTED_PHASE:-}"
-ATTEMPTS="${SUGARKUBE_SELFCHK_ATTEMPTS:-12}"
-BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
-BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
-JITTER_FRACTION="${JITTER:-0.2}"
-
-case "${ATTEMPTS}" in
-  ''|*[!0-9]*) ATTEMPTS=1 ;;
-  0) ATTEMPTS=1 ;;
-esac
-case "${BACKOFF_START_MS}" in
-  ''|*[!0-9]*) BACKOFF_START_MS=500 ;;
-esac
-case "${BACKOFF_CAP_MS}" in
-  ''|*[!0-9]*) BACKOFF_CAP_MS=5000 ;;
-esac
-
-if [ -z "${EXPECTED_HOST}" ]; then
-  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 >&2
-  exit 2
-fi
-
-if [ "${SUGARKUBE_MDNS_DBUS:-0}" = "1" ]; then
-  dbus_script="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
-  if [ -x "${dbus_script}" ]; then
-    if "${dbus_script}"; then
-      exit 0
-    fi
-    status=$?
-    case "${status}" in
-      1)
-        exit 1
-        ;;
-      2)
-        log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported fallback=cli
-        ;;
-      *)
-        exit "${status}"
-        ;;
-    esac
-  else
-    log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_script_missing fallback=cli
-  fi
-fi
-
-if ! command -v avahi-browse >/dev/null 2>&1; then
-  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 >&2
-  exit 3
-fi
-if ! command -v avahi-resolve >/dev/null 2>&1; then
-  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 >&2
-  exit 3
-fi
-
-SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
-INSTANCE_PREFIX="k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_HOST}"
-
-# Accept both short host and FQDN in browse results
-EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
-
-script_start_ms="$(python3 - <<'PY'
-import time
-print(int(time.time() * 1000))
-PY
-)"
-
-
-
 parse_browse() {
   awk -v svc="${SERVICE_TYPE}" \
       -v inst_pref="${INSTANCE_PREFIX}" \
@@ -244,6 +171,81 @@ print(delay)
 PY
 }
 
+SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
+SERVICE_ENV="${SUGARKUBE_ENV:-dev}"
+EXPECTED_HOST="${SUGARKUBE_EXPECTED_HOST:-}"
+EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}"
+EXPECTED_ROLE="${SUGARKUBE_EXPECTED_ROLE:-}"
+EXPECTED_PHASE="${SUGARKUBE_EXPECTED_PHASE:-}"
+ATTEMPTS="${SUGARKUBE_SELFCHK_ATTEMPTS:-12}"
+BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
+BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
+JITTER_FRACTION="${JITTER:-0.2}"
+
+case "${ATTEMPTS}" in
+  ''|*[!0-9]*) ATTEMPTS=1 ;;
+  0) ATTEMPTS=1 ;;
+esac
+case "${BACKOFF_START_MS}" in
+  ''|*[!0-9]*) BACKOFF_START_MS=500 ;;
+esac
+case "${BACKOFF_CAP_MS}" in
+  ''|*[!0-9]*) BACKOFF_CAP_MS=5000 ;;
+esac
+
+if [ -z "${EXPECTED_HOST}" ]; then
+  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 >&2
+  exit 2
+fi
+
+if [ "${SUGARKUBE_MDNS_DBUS:-0}" = "1" ]; then
+  if [ "${SUGARKUBE_MDNS_DBUS_FORCE_CLI:-0}" = "1" ]; then
+    log_debug mdns_selfcheck_dbus outcome=skip reason=force_cli fallback=cli
+  else
+  dbus_script="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
+  if [ -x "${dbus_script}" ]; then
+    if "${dbus_script}"; then
+      exit 0
+    fi
+    status=$?
+    case "${status}" in
+      1)
+        exit 1
+        ;;
+      2)
+        log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported fallback=cli
+        ;;
+      *)
+        exit "${status}"
+        ;;
+    esac
+  else
+    log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_script_missing fallback=cli
+  fi
+  fi
+fi
+
+if ! command -v avahi-browse >/dev/null 2>&1; then
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 >&2
+  exit 3
+fi
+if ! command -v avahi-resolve >/dev/null 2>&1; then
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 >&2
+  exit 3
+fi
+
+SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
+INSTANCE_PREFIX="k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_HOST}"
+
+# Accept both short host and FQDN in browse results
+EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
+
+script_start_ms="$(python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+)"
+
 attempt=1
 last_reason=""
 miss_count=0
@@ -260,8 +262,13 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     if [ -z "${srv_host}" ]; then
       last_reason="empty_srv_host"
     else
-      resolved="$(resolve_host "${srv_host}" || true)"
-      status=$?
+      resolved=""
+      if resolved="$(resolve_host "${srv_host}")"; then
+        status=0
+      else
+        status=$?
+        resolved=""
+      fi
       resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
       log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then

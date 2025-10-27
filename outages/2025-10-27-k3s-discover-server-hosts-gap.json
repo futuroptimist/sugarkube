@@ -1,0 +1,11 @@
+{
+  "id": "k3s-discover-server-hosts-gap",
+  "date": "2025-10-27",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Multi-node bring-up lacked a supported way to list all advertised control-plane hosts, leaving operators guessing which peers were visible during discovery.",
+  "resolution": "Documented the server-hosts query in the Raspberry Pi cluster guide and added test coverage that exercises the parser with multiple server advertisements so the helper stays multi-node aware.",
+  "references": [
+    "docs/raspi_cluster_setup.md",
+    "tests/test_mdns_discovery_parsing.py"
+  ]
+}

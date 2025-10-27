@@ -99,6 +99,17 @@ avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 # Look for port 6443 and TXT like: k3s=1, cluster=<name>, env=<env>, role=server
 ```
 
+Prefer a ready-made parser that only reports matching Sugarkube servers? Run the discovery helper
+directly from a Pi that already has this repository cloned:
+
+```bash
+scripts/k3s-discover.sh --run-avahi-query server-hosts
+```
+
+The command prints every control-plane advertisement for the current `SUGARKUBE_CLUSTER` and
+`SUGARKUBE_ENV` (defaults: `sugar`/`dev`). Use it after the first server finishes bootstrapping to
+confirm additional peers are visible before you attempt a multi-node join.
+
 > **Note**
 > mDNS/DNS-SD service files live in `/etc/avahi/services/`. Removing the relevant
 > `k3s-*.service` file and reloading Avahi clears stale adverts.
