@@ -138,7 +138,7 @@ The pattern is:
 
 2. **Run `just up dev` twice on the first control-plane node**
 
-   The first run modifies memory cgroup settings if needed and reboots automatically. The second run installs Avahi/libnss-mdns, bootstraps k3s as an HA server, publishes the API as `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
+   The first run modifies memory cgroup settings if needed and reboots automatically. The second run installs the networking tooling (`avahi-daemon`, `avahi-utils`, `libnss-mdns`, `libglib2.0-bin`, `tcpdump`, `curl`, `jq`), with `libglib2.0-bin` providing `gdbus` so the D-Bus discovery path stays enabled, bootstraps k3s as an HA server, publishes the API as `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
 
    > **HA choice**
    >
