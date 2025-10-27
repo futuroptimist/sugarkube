@@ -1,6 +1,6 @@
 # Optional D-Bus mDNS self-check
 
-`scripts/mdns_selfcheck.sh` now supports an alternative validator that uses the
+`scripts/mdns_selfcheck.sh` supports an alternative validator that uses the
 system D-Bus to query Avahi directly. The default CLI path (`avahi-browse`
 followed by `avahi-resolve`) remains unchanged, so existing CI and automation do
 not need any additional dependencies.
@@ -29,6 +29,12 @@ If the environment does not expose `gdbus`, or Avahi rejects the D-Bus calls,
 the D-Bus helper exits with status `2` and `mdns_selfcheck.sh` transparently
 falls back to the CLI implementation.
 
+## Integration with discovery flow
+
+The D-Bus validator is automatically used by `scripts/k3s-discover.sh` when
+`SUGARKUBE_MDNS_DBUS=1` is set, providing more reliable mDNS validation during
+the bootstrap and server advertisement phases.
+
 ## Caveats
 
 - The D-Bus helper requires access to the system bus and the Avahi D-Bus
@@ -37,3 +43,5 @@ falls back to the CLI implementation.
 - Only the subset of Avahi features used by Sugarkube are implemented. Any
   unexpected D-Bus failures bubble up as non-zero exits so the calling workflow
   can surface useful diagnostics.
+- Performance: D-Bus calls may be faster than CLI tools in environments with
+  high mDNS traffic, but the difference is typically negligible.
