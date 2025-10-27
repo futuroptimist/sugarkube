@@ -1,0 +1,14 @@
+{
+  "id": "2025-10-25-udp-5353-conflict",
+  "date": "2025-10-25",
+  "component": "scripts/mdns_selfcheck.sh",
+  "longForm": "outages/2025-10-25-udp-5353-conflict.md",
+  "rootCause": "Other daemons bound UDP/5353 before Avahi started, hijacking mDNS traffic so k3s discovery never saw its own adverts.",
+  "resolution": "Diagnose port conflicts with net_diag.sh, stop the competing process, and restart avahi-daemon so only Avahi owns UDP/5353.",
+  "references": [
+    "scripts/net_diag.sh",
+    "scripts/k3s-discover.sh",
+    "scripts/mdns_selfcheck.sh",
+    "outages/2025-10-25-udp-5353-conflict.md"
+  ]
+}

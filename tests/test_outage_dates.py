@@ -72,11 +72,26 @@ def test_outage_dates_are_not_in_the_future() -> None:
 def test_markdown_outages_have_json_counterparts() -> None:
     """Every long-form Markdown report should have a matching JSON record."""
 
-    outages_dir = Path("outages")
+    repo_root = Path(__file__).resolve().parent.parent
+    outages_dir = repo_root / "outages"
     assert outages_dir.is_dir(), "outages/ directory must exist for outage records"
 
+    json_records = {
+        path.name: path
+        for path in outages_dir.glob("*.json")
+        if path.name != "schema.json"
+    }
+
     for markdown_file in sorted(outages_dir.glob("*.md")):
-        json_file = markdown_file.with_suffix(".json")
-        assert json_file.exists(), (
-            f"Missing JSON outage record for {markdown_file.name}; add {json_file.name}"
+        json_name = markdown_file.with_suffix(".json").name
+        assert json_name in json_records, (
+            f"Missing JSON outage record for {markdown_file.name}; add {json_name}"
         )
+
+        record = json.loads(json_records[json_name].read_text(encoding="utf-8"))
+        long_form = record.get("longForm")
+        if long_form is not None:
+            expected_long_form = f"outages/{markdown_file.name}"
+            assert (
+                long_form == expected_long_form
+            ), f"{json_name} should reference {expected_long_form} via longForm"

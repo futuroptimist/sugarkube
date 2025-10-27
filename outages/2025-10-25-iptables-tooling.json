@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-25-iptables-tooling",
+  "date": "2025-10-25",
+  "component": "scripts/k3s-install-iptables.sh",
+  "longForm": "outages/2025-10-25-iptables-tooling.md",
+  "rootCause": "Fresh Debian-based images omitted iptables binaries, leaving k3s bootstrap without the legacy tooling it still expects.",
+  "resolution": "Add an installer helper that ensures the iptables package is present, logs the backend mode, and run it from every k3s install path.",
+  "references": [
+    "scripts/k3s-install-iptables.sh",
+    "scripts/k3s-discover.sh",
+    "outages/2025-10-25-iptables-tooling.md"
+  ]
+}
