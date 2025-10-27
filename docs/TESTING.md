@@ -11,7 +11,7 @@ Sugarkube uses a comprehensive testing strategy combining unit tests, integratio
 - Coverage reporting enabled via `--cov` flag
 - Focus on individual component behavior and edge cases
 
-**Shell Tests**: Located in `tests/bats/` with `*.bats` naming convention  
+**Shell Tests**: Located in `tests/bats/` with `*.bats` naming convention
 - Run with [Bats](https://bats-core.readthedocs.io/)
 - Test shell script logic and command-line interfaces
 - Validate parsing, error handling, and state transitions
@@ -79,7 +79,7 @@ The GitHub Actions workflow `.github/workflows/tests.yml` runs:
 - `tests/test_mdns_discovery_parsing.py`: mDNS parsing edge cases
 - `tests/test_k3s_discover_token_resolution.py`: Token handling
 
-### Pi Image Tests  
+### Pi Image Tests
 - `tests/build_pi_image_test.py`: Image building pipeline
 - `tests/pi_smoke_test_unit_test.py`: Node health validation
 - `tests/test_qemu_pi_smoke_test.py`: QEMU-based testing

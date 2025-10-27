@@ -164,4 +164,3 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     finally:
         # Ensure the stub terminates to avoid leaking background publishers between tests.
         server_pid_file.unlink(missing_ok=True)
-

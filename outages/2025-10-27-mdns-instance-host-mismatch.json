@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-27-mdns-instance-host-mismatch",
+  "date": "2025-10-27",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "Self-check required exact FQDN in instance name; Avahi sometimes reported short host (without .local), causing false negatives and aborting discovery.",
+  "resolution": "Teach mdns_selfcheck.sh to accept both short host and FQDN when matching instance names for the expected role and phase.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ]
+}
+
+

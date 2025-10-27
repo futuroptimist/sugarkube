@@ -76,6 +76,9 @@ fi
 SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
 INSTANCE_PREFIX="k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_HOST}"
 
+# Accept both short host and FQDN in browse results
+EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
+
 script_start_ms="$(python3 - <<'PY'
 import time
 print(int(time.time() * 1000))
@@ -118,23 +121,20 @@ parse_browse() {
     host="$(strip_quotes "${host}")"
     port="$(strip_quotes "${port}")"
 
+    match_ok=0
     if [ -n "${EXPECTED_ROLE}" ]; then
       case "${instance}" in
-        "${INSTANCE_PREFIX} (${EXPECTED_ROLE})")
-          ;;
-        *)
-          continue
-          ;;
+        "${INSTANCE_PREFIX} (${EXPECTED_ROLE})") match_ok=1 ;;
+        "k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_SHORT_HOST} (${EXPECTED_ROLE})") match_ok=1 ;;
       esac
     else
       case "${instance}" in
-        "${INSTANCE_PREFIX} (bootstrap)"|"${INSTANCE_PREFIX} (server)")
-          ;;
-        *)
-          continue
-          ;;
+        "${INSTANCE_PREFIX} (bootstrap)"|"${INSTANCE_PREFIX} (server)") match_ok=1 ;;
+        "k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_SHORT_HOST} (bootstrap)"|\
+        "k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_SHORT_HOST} (server)") match_ok=1 ;;
       esac
     fi
+    [ "${match_ok}" -eq 1 ] || continue
 
     if [ -n "${EXPECTED_ROLE}" ]; then
       case "${rest}" in

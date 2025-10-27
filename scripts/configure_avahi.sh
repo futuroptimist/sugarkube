@@ -9,6 +9,7 @@ RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}"
 WLAN_IFACE="${SUGARKUBE_WLAN_INTERFACE:-wlan0}"
 WLAN_GUARD_FILE="${RUNTIME_DIR}/wlan-disabled"
 PUBLISH_WORKSTATION="${SUGARKUBE_AVAHI_PUBLISH_WORKSTATION:-yes}"
+FORCE_IPV4_ONLY="${SUGARKUBE_MDNS_IPV4_ONLY:-0}"
 ALLOW_INTERFACES_OVERRIDE="${SUGARKUBE_AVAHI_ALLOW_INTERFACES:-}"
 PREFERRED_IFACE="${SUGARKUBE_MDNS_INTERFACE:-}"
 # Temporary file used during atomic write; referenced by EXIT trap safely
@@ -139,7 +140,7 @@ update_config() {
   local allow_value="$2"
   local tmp="$3"
 
-  python3 - <<'PY' "${CONF}" "${tmp}" "${PUBLISH_WORKSTATION}" "${allow_mode}" "${allow_value}"
+  python3 - <<'PY' "${CONF}" "${tmp}" "${PUBLISH_WORKSTATION}" "${allow_mode}" "${allow_value}" "${FORCE_IPV4_ONLY}"
 import sys
 from pathlib import Path
 
@@ -149,6 +150,7 @@ try:
     publish_value = sys.argv[3]
     allow_mode = sys.argv[4]
     allow_value = sys.argv[5]
+    force_ipv4_only = sys.argv[6] in ("1", "true", "yes")
 
     if src_path.exists():
         try:
@@ -165,6 +167,8 @@ try:
     publish_section_found = False
     publish_written = False
     allow_written = False
+    v4_written = False
+    v6_written = False
 
     for line in original_lines:
         stripped = line.strip()
@@ -187,6 +191,17 @@ try:
                 new_lines.append(f"allow-interfaces={allow_value}")
                 allow_written = True
             continue
+
+        if section == "server" and key == "use-ipv4":
+            if force_ipv4_only:
+                new_lines.append("use-ipv4=yes")
+                v4_written = True
+                continue
+        if section == "server" and key == "use-ipv6":
+            if force_ipv4_only:
+                new_lines.append("use-ipv6=no")
+                v6_written = True
+                continue
 
         new_lines.append(line)
 
@@ -240,9 +255,26 @@ try:
         new_lines.append("[publish]")
         new_lines.append(f"publish-workstation={publish_value}")
 
+    # Enforce IPv4-only knobs when requested
+    if force_ipv4_only:
+        header, start, end = ensure_section(new_lines, "server")
+        if header is None:
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("")
+            new_lines.append("[server]")
+            start = len(new_lines)
+            end = start
+        if not v4_written:
+            insert_at = end if end is not None else len(new_lines)
+            new_lines.insert(insert_at, "use-ipv4=yes")
+            end = insert_at + 1
+        if not v6_written:
+            insert_at = end if end is not None else len(new_lines)
+            new_lines.insert(insert_at, "use-ipv6=no")
+
     content = "\n".join(new_lines) + "\n"
     dst_path.write_text(content, encoding="utf-8")
-    
+
 except Exception as e:
     print(f"Error in Python script: {e}", file=sys.stderr)
     sys.exit(1)

@@ -146,7 +146,7 @@ if command -v lsof >/dev/null 2>&1; then
     if [ -z "${lsof_output}" ]; then
       udp_summary="none"
     else
-      udp_summary="${lsof_output}" 
+      udp_summary="${lsof_output}"
     fi
   fi
   udp_rc="${lsof_rc}"

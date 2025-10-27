@@ -80,4 +80,3 @@ def test_server_count_detects_single_server(mdns_env):
 def test_bootstrap_queries_ignore_server_only_records(mdns_env):
     assert run_query("bootstrap-hosts", mdns_env) == []
     assert run_query("bootstrap-leaders", mdns_env) == []
-
