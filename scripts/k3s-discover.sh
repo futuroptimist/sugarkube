@@ -1297,7 +1297,7 @@ while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
     break
   fi
 
-  election_output="$("${SCRIPT_DIR}/elect_leader.sh" 2>/dev/null || true)"
+  election_output="$(SUGARKUBE_SERVERS="${SERVERS_DESIRED}" "${SCRIPT_DIR}/elect_leader.sh" 2>/dev/null || true)"
   election_status=$?
   election_winner="no"
   election_key=""
