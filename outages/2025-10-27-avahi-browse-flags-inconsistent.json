@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-27-avahi-browse-flags-inconsistent",
+  "date": "2025-10-27",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "Self-check used avahi-browse without parsable (-k) and terminate (-t) flags, causing output format drift and longer waits on Raspberry Pi OS Bookworm.",
+  "resolution": "Invoke avahi-browse with -rptk to ensure resolved, parsable, and terminating output; adjust parser to the semicolon-delimited format and propagate explicit mismatch exit code.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ]
+}
+
+

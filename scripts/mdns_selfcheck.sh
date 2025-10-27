@@ -263,7 +263,8 @@ attempt=1
 last_reason=""
 miss_count=0
 while [ "${attempt}" -le "${ATTEMPTS}" ]; do
-  browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" 2>/dev/null || true)"
+  # Use parsable semicolon-delimited output with resolution and terminate flags
+  browse_output="$(avahi-browse -rptk "${SERVICE_TYPE}" 2>/dev/null || true)"
   parsed="$(printf '%s\n' "${browse_output}" | parse_browse || true)"
   browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
   log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
@@ -291,7 +292,18 @@ PY
         exit 0
       fi
       if [ "${status}" -eq 2 ]; then
+        # IPv4 mismatch: signal to caller explicitly and avoid unnecessary retries
         last_reason="ipv4_mismatch"
+        log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
+        elapsed_ms="$(
+          python3 - "${script_start_ms}" <<'PY'
+import sys, time
+start = int(sys.argv[1])
+print(int(time.time() * 1000) - start)
+PY
+        )"
+        log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+        exit 5
       else
         last_reason="resolve_failed"
       fi
@@ -340,4 +352,13 @@ print(int(time.time() * 1000) - start)
 PY
 )"
 log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
-exit 1
+
+# Use a distinct exit code for IPv4 mismatch to enable targeted relaxed retries upstream
+case "${last_reason}" in
+  ipv4_mismatch)
+    exit 5
+    ;;
+  *)
+    exit 1
+    ;;
+esac

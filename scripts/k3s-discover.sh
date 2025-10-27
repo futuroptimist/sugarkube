@@ -937,7 +937,8 @@ PY
   fi
 
   local status=$?
-  if [ -n "${MDNS_ADDR_V4}" ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
+  # Only perform a relaxed retry when the self-check explicitly signalled IPv4 mismatch (exit 5)
+  if [ -n "${MDNS_ADDR_V4}" ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ] && [ "${status}" -eq 5 ]; then
     log_warn_msg mdns_selfcheck "IPv4 expectation not met; retrying without requirement" "role=${role}" "host=${MDNS_HOST_RAW}" "expected_ipv4=${MDNS_ADDR_V4}"
     local -a relaxed_env=(
       "SUGARKUBE_CLUSTER=${CLUSTER}"
