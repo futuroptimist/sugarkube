@@ -138,7 +138,13 @@ The pattern is:
 
 2. **Run `just up dev` twice on the first control-plane node**
 
-   The first run modifies memory cgroup settings if needed and reboots automatically. The second run installs Avahi/libnss-mdns, bootstraps k3s as an HA server, publishes the API as `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
+   The first run modifies memory cgroup settings if needed and reboots automatically.
+   The second run installs `avahi-daemon`, `avahi-utils`, `libnss-mdns`, `libglib2.0-bin`,
+   `tcpdump`, `curl`, and `jq`, bootstraps k3s as an HA server, publishes the API as
+   `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and
+   taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer
+   agents. `libglib2.0-bin` enables the D-Bus fallback via the `gdbus` helper when Avahi's CLI
+   tools are unavailable.
 
    > **HA choice**
    >
@@ -208,8 +214,8 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
 
 ## Networking Notes
 
-- **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`), `libnss-mdns`, and now
-  `glib2.0-bin` (for `gdbus`) enable deterministic `.local` hostname
+  - **mDNS**: Avahi (`avahi-daemon` + `avahi-utils`), `libnss-mdns`, and now
+    `libglib2.0-bin` (for `gdbus`) enable deterministic `.local` hostname
   resolution. The `prereqs` recipe also installs `tcpdump` so `net_diag.sh`
   can capture UDP/5353 traffic when self-checks fail. It ensures
   `/etc/nsswitch.conf` includes `mdns4_minimal [NOTFOUND=return] dns mdns4`.
