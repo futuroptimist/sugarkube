@@ -1,6 +1,46 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/log.sh
+. "${SCRIPT_DIR}/log.sh"
+
+log_message() {
+  local level="$1"
+  shift
+  local event="$1"
+  shift
+  local message="$1"
+  shift || true
+  local safe_message
+  safe_message="$(printf '%s' "${message}" | sed 's/"/\\"/g')"
+  log_kv "${level}" "${event}" "msg=\"${safe_message}\"" "$@" >&2
+}
+
+log_info_msg() {
+  local event="$1"
+  shift
+  local message="$1"
+  shift || true
+  log_message info "${event}" "${message}" "$@"
+}
+
+log_warn_msg() {
+  local event="$1"
+  shift
+  local message="$1"
+  shift || true
+  log_message info "${event}" "${message}" "severity=warn" "$@"
+}
+
+log_error_msg() {
+  local event="$1"
+  shift
+  local message="$1"
+  shift || true
+  log_message info "${event}" "${message}" "severity=error" "$@"
+}
+
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 
 if [ "${EUID}" -eq 0 ]; then
@@ -18,13 +58,12 @@ if [ -n "${SUDO_CMD:-}" ]; then
     if [ "${ALLOW_NON_ROOT}" = "1" ]; then
       SUDO_CMD=""
     else
-      echo "${SUDO_CMD%% *} command not found; run as root or set ALLOW_NON_ROOT=1" >&2
+      log_error_msg discover "${SUDO_CMD%% *} command not found; run as root or set ALLOW_NON_ROOT=1"
       exit 1
     fi
   fi
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -n "${PYTHONPATH:-}" ]; then
   export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 else
@@ -48,32 +87,6 @@ SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
 MDNS_SELF_CHECK_FAILURE_CODE=94
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
-
-timestamp() {
-  date '+%Y-%m-%dT%H:%M:%S%z'
-}
-
-log() {
-  local ts
-  ts="$(timestamp)"
-  >&2 printf '%s [sugarkube %s/%s] %s\n' "${ts}" "${CLUSTER}" "${ENVIRONMENT}" "$*"
-}
-
-strip_timestamp_prefix() {
-  local line="$1"
-  if [ -z "${line}" ]; then
-    printf '\n'
-    return 0
-  fi
-  case "${line}" in
-    *" "*)
-      printf '%s\n' "${line#* }"
-      ;;
-    *)
-      printf '%s\n' "${line}"
-      ;;
-  esac
-}
 
 run_net_diag() {
   local reason="$1"
@@ -274,7 +287,7 @@ else
 fi
 
 if [ -z "${MDNS_ADDR_V4}" ]; then
-  log "WARN: no IPv4 found on ${MDNS_IFACE}; publishing without -a"
+  log_warn_msg mdns_publish "no IPv4 found" "iface=${MDNS_IFACE}" "action=publish_without_addr"
 fi
 MDNS_SERVICE_NAME="k3s-${CLUSTER}-${ENVIRONMENT}"
 MDNS_SERVICE_TYPE="_${MDNS_SERVICE_NAME}._tcp"
@@ -453,7 +466,7 @@ start_address_publisher() {
     return 0
   fi
   if ! command -v avahi-publish-address >/dev/null 2>&1; then
-    log "avahi-publish-address not available; skipping direct address publish"
+    log_warn_msg mdns_publish "avahi-publish-address not available; skipping direct address publish" "publisher=address"
     return 1
   fi
   if [ -n "${ADDRESS_PUBLISH_PID:-}" ] && kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -469,7 +482,7 @@ start_address_publisher() {
     "${MDNS_ADDR_V4}"
   )
 
-  log "publishing address host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4}"
+  log_debug mdns_publish action=publish_address host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4}"
   "${publish_cmd[@]}" >"${ADDRESS_PUBLISH_LOG}" 2>&1 &
   ADDRESS_PUBLISH_PID=$!
 
@@ -477,7 +490,7 @@ start_address_publisher() {
   if ! kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
     if [ -s "${ADDRESS_PUBLISH_LOG}" ]; then
       while IFS= read -r line; do
-        log "address publisher error: ${line}"
+        log_error_msg mdns_publish "address publisher error: ${line}"
       done <"${ADDRESS_PUBLISH_LOG}"
     fi
     ADDRESS_PUBLISH_PID=""
@@ -491,7 +504,7 @@ start_address_publisher() {
 start_bootstrap_publisher() {
   start_address_publisher || true
   if ! command -v avahi-publish >/dev/null 2>&1; then
-    log "avahi-publish not available; relying on Avahi service file"
+    log_warn_msg mdns_publish "avahi-publish not available; relying on Avahi service file" "publisher=bootstrap"
     return 1
   fi
   if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -557,9 +570,11 @@ import sys
 print(json.dumps(sys.argv[1:]))
 PY
   )"
-  log "avahi-publish bootstrap argv: ${publish_cmd_json}"
+  local publish_cmd_json_escaped
+  publish_cmd_json_escaped="$(printf '%s' "${publish_cmd_json}" | sed 's/"/\\"/g')"
+  log_trace mdns_publish role=bootstrap action=argv "cmd=\"${publish_cmd_json_escaped}\""
 
-  log "publishing bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+  log_debug mdns_publish action=start_publish role=bootstrap host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}"
   "${publish_cmd[@]}" >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
   BOOTSTRAP_PUBLISH_PID=$!
 
@@ -567,7 +582,7 @@ PY
   if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
     if [ -s "${BOOTSTRAP_PUBLISH_LOG}" ]; then
       while IFS= read -r line; do
-        log "bootstrap publisher error: ${line}"
+        log_error_msg mdns_publish "bootstrap publisher error: ${line}"
       done <"${BOOTSTRAP_PUBLISH_LOG}"
     fi
     BOOTSTRAP_PUBLISH_PID=""
@@ -575,7 +590,7 @@ PY
     return 1
   fi
 
-  log "avahi-publish advertising bootstrap host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${BOOTSTRAP_PUBLISH_PID}"
+  log_info mdns_publish outcome=started role=bootstrap host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}" pid="${BOOTSTRAP_PUBLISH_PID}" >&2
   printf '%s\n' "${BOOTSTRAP_PUBLISH_PID}" | write_privileged_file "${BOOTSTRAP_PID_FILE}"
   return 0
 }
@@ -583,7 +598,7 @@ PY
 start_server_publisher() {
   start_address_publisher || true
   if ! command -v avahi-publish >/dev/null 2>&1; then
-    log "avahi-publish not available; relying on Avahi service file"
+    log_warn_msg mdns_publish "avahi-publish not available; relying on Avahi service file" "publisher=server"
     return 1
   fi
   if [ -n "${SERVER_PUBLISH_PID:-}" ] && kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
@@ -648,9 +663,11 @@ import sys
 print(json.dumps(sys.argv[1:]))
 PY
   )"
-  log "avahi-publish server argv: ${publish_cmd_json}"
+  local publish_cmd_json_escaped
+  publish_cmd_json_escaped="$(printf '%s' "${publish_cmd_json}" | sed 's/"/\\"/g')"
+  log_trace mdns_publish role=server action=argv "cmd=\"${publish_cmd_json_escaped}\""
 
-  log "publishing server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE}"
+  log_debug mdns_publish action=start_publish role=server host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}"
   "${publish_cmd[@]}" >"${SERVER_PUBLISH_LOG}" 2>&1 &
   SERVER_PUBLISH_PID=$!
 
@@ -658,7 +675,7 @@ PY
   if ! kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
     if [ -s "${SERVER_PUBLISH_LOG}" ]; then
       while IFS= read -r line; do
-        log "server publisher error: ${line}"
+        log_error_msg mdns_publish "server publisher error: ${line}"
       done <"${SERVER_PUBLISH_LOG}"
     fi
     SERVER_PUBLISH_PID=""
@@ -666,7 +683,7 @@ PY
     return 1
   fi
 
-  log "avahi-publish advertising server host=${MDNS_HOST_RAW} addr=${MDNS_ADDR_V4:-auto} type=${MDNS_SERVICE_TYPE} pid=${SERVER_PUBLISH_PID}"
+  log_info mdns_publish outcome=started role=server host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}" pid="${SERVER_PUBLISH_PID}" >&2
   printf '%s\n' "${SERVER_PUBLISH_PID}" | write_privileged_file "${SERVER_PID_FILE}"
   return 0
 }
@@ -797,7 +814,7 @@ ensure_self_mdns_advertisement() {
       ;;
   esac
 
-  log "Self-check for ${role} advertisement: verifying ${MDNS_HOST_RAW} with up to ${retries} attempts."
+  log_info mdns_selfcheck phase=start role="${role}" host="${MDNS_HOST_RAW}" attempts="${retries}" >&2
 
   MDNS_LAST_OBSERVED=""
   local delay_ms=""
@@ -860,11 +877,19 @@ PY
   local relaxed_status="not_attempted"
 
   if selfcheck_output="$(env "${selfcheck_env[@]}" "${SCRIPT_DIR}/mdns_selfcheck.sh")"; then
-    local token
+    local token summary_attempts summary_elapsed
+    summary_attempts="${retries}"
+    summary_elapsed=""
     for token in ${selfcheck_output}; do
       case "${token}" in
         host=*)
           observed_host="${token#host=}"
+          ;;
+        attempts=*)
+          summary_attempts="${token#attempts=}"
+          ;;
+        ms_elapsed=*)
+          summary_elapsed="${token#ms_elapsed=}"
           ;;
       esac
     done
@@ -872,7 +897,7 @@ PY
       observed_host="${MDNS_HOST_RAW}"
     fi
     MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
-    log "Self-check for ${role} advertisement succeeded: ${selfcheck_output}"
+    log_info mdns_selfcheck outcome=ok role="${role}" host="${MDNS_HOST_RAW}" observed="${MDNS_LAST_OBSERVED}" attempts="${summary_attempts}" ms_elapsed="${summary_elapsed:-unknown}" >&2
     if [ "${SUGARKUBE_DEBUG_MDNS:-0}" = "1" ]; then
       run_net_diag \
         "mdns_selfcheck_debug" \
@@ -885,7 +910,7 @@ PY
 
   local status=$?
   if [ -n "${MDNS_ADDR_V4}" ] && [ "${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH}" != "0" ]; then
-    log "Self-check for ${role} advertisement: expected IPv4 ${MDNS_ADDR_V4} not confirmed; retrying without IPv4 requirement."
+    log_warn_msg mdns_selfcheck "IPv4 expectation not met; retrying without requirement" "role=${role}" "host=${MDNS_HOST_RAW}" "expected_ipv4=${MDNS_ADDR_V4}"
     local -a relaxed_env=(
       "SUGARKUBE_CLUSTER=${CLUSTER}"
       "SUGARKUBE_ENV=${ENVIRONMENT}"
@@ -912,7 +937,7 @@ PY
         observed_host="${MDNS_HOST_RAW}"
       fi
       MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
-      log "WARN: ${role} advertisement observed from ${observed_host} without expected addr ${MDNS_ADDR_V4}; continuing."
+      log_warn_msg mdns_selfcheck "advertisement observed without expected IPv4; continuing" "role=${role}" "observed=${observed_host}" "expected_ipv4=${MDNS_ADDR_V4}" "strict_status=${status}"
       if [ "${SUGARKUBE_DEBUG_MDNS:-0}" = "1" ]; then
         run_net_diag \
           "mdns_selfcheck_debug" \
@@ -927,7 +952,7 @@ PY
     fi
   fi
 
-  log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW}; status=${status}."
+  log_error_msg mdns_selfcheck "advertisement not observed for ${MDNS_HOST_RAW}; status=${status}" "role=${role}"
   if [ "${relaxed_attempted}" -eq 1 ]; then
     run_net_diag \
       "mdns_selfcheck_failure" \
@@ -990,11 +1015,12 @@ wait_for_bootstrap_activity() {
   if [ "${require_activity}" -eq 1 ]; then
     effective_attempts="${activity_grace_attempts}"
   fi
+  log_info discover phase=wait_bootstrap attempts="${attempts}" wait_secs="${wait_secs}" require_activity="${require_activity}" >&2
   for attempt in $(seq 1 "${attempts}"); do
     local server
     server="$(discover_server_host || true)"
     if [ -n "${server}" ]; then
-      log "Discovered API server advertisement from ${server} (attempt ${attempt}/${effective_attempts})"
+      log_info discover outcome=server_found host="${server}" attempt="${attempt}" total_attempts="${effective_attempts}" require_activity="${require_activity}" >&2
       printf '%s\n' "${server}"
       return 0
     fi
@@ -1006,34 +1032,36 @@ wait_for_bootstrap_activity() {
       no_activity_streak=0
       local bootstrap_hosts
       bootstrap_hosts="${bootstrap//$'\n'/, }"
-      log "Bootstrap advertisement(s) detected from ${bootstrap_hosts} (attempt ${attempt}/${effective_attempts}); waiting for server advertisement..."
+      local bootstrap_hosts_sanitized
+      bootstrap_hosts_sanitized="$(printf '%s' "${bootstrap_hosts}" | sed 's/"/\\"/g')"
+      log_debug discover event=bootstrap_activity attempt="${attempt}" total_attempts="${effective_attempts}" "hosts=\"${bootstrap_hosts_sanitized}\""
     else
       if [ "${require_activity}" -eq 1 ]; then
         no_activity_streak=$((no_activity_streak + 1))
         if [ "${activity_grace_attempts}" -gt 0 ] && [ "${no_activity_streak}" -ge "${activity_grace_attempts}" ]; then
-          log "No bootstrap advertisements detected (attempt ${attempt}/${effective_attempts}); exiting discovery wait."
+          log_info discover outcome=no_bootstrap activity_required=1 attempt="${attempt}" total_attempts="${effective_attempts}" >&2
           return 1
         fi
-        log "No bootstrap activity detected yet (attempt ${attempt}/${effective_attempts}); will retry before giving up."
+        log_debug discover event=no_activity attempt="${attempt}" total_attempts="${effective_attempts}" streak="${no_activity_streak}" activity_required="${require_activity}"
       elif [ "${observed_activity}" -eq 0 ]; then
-        log "No bootstrap activity detected yet (attempt ${attempt}/${effective_attempts})."
+        log_debug discover event=no_activity attempt="${attempt}" total_attempts="${effective_attempts}" activity_required="${require_activity}"
       else
-        log "Bootstrap activity previously detected; continuing to wait (attempt ${attempt}/${effective_attempts})."
+        log_debug discover event=activity_seen attempt="${attempt}" total_attempts="${effective_attempts}" activity_required="${require_activity}"
       fi
     fi
 
     if [ "${attempt}" -lt "${attempts}" ]; then
       local next_attempt
       next_attempt=$((attempt + 1))
-      log "Sleeping ${wait_secs}s before retry ${next_attempt}/${effective_attempts}."
+      log_debug discover event=sleep attempt="${attempt}" next_attempt="${next_attempt}" wait_secs="${wait_secs}" total_attempts="${effective_attempts}"
       sleep "${wait_secs}"
     fi
   done
 
   if [ "${observed_activity}" -eq 1 ]; then
-    log "Bootstrap advertisements did not yield a server after ${attempts} attempts."
+    log_info discover outcome=server_not_found attempts="${attempts}" observed_activity=1 >&2
   else
-    log "No bootstrap activity observed after ${attempts} attempts."
+    log_info discover outcome=no_bootstrap attempts="${attempts}" observed_activity=0 >&2
   fi
   return 1
 }
@@ -1092,13 +1120,13 @@ publish_api_service() {
   if ensure_self_mdns_advertisement server; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed."
+    log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
     SERVER_PUBLISH_PERSIST=1
     stop_bootstrap_publisher
     return 0
   fi
 
-  log "WARN: server advertisement for ${MDNS_HOST_RAW} not visible; restarting Avahi publishers once before giving up."
+  log_warn_msg mdns_selfcheck "server advertisement not visible; restarting publishers" "host=${MDNS_HOST_RAW}" "role=server"
   stop_server_publisher
   stop_address_publisher
   sleep 1
@@ -1109,14 +1137,14 @@ publish_api_service() {
   if ensure_self_mdns_advertisement server; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; server advertisement confirmed."
-    log "Server advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=restarted >&2
+    log_info_msg mdns_publish "Server advertisement observed after restart" "host=${MDNS_HOST_RAW}" "role=server"
     SERVER_PUBLISH_PERSIST=1
     stop_bootstrap_publisher
     return 0
   fi
 
-  log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
+  log_error_msg mdns_selfcheck "failed to confirm server advertisement; printing diagnostics" "host=${MDNS_HOST_RAW}" "role=server"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
   sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
@@ -1124,18 +1152,18 @@ publish_api_service() {
 }
 
 publish_bootstrap_service() {
-  log "Advertising bootstrap attempt for ${CLUSTER}/${ENVIRONMENT} via Avahi"
+  log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
   start_bootstrap_publisher || true
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
   sleep 1
   if ensure_self_mdns_advertisement bootstrap; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
+    log_info mdns_selfcheck outcome=confirmed role=bootstrap host="${MDNS_HOST_RAW}" observed="${observed}" phase=bootstrap check=initial >&2
     return 0
   fi
 
-  log "WARN: bootstrap advertisement for ${MDNS_HOST_RAW} not visible; restarting Avahi publishers."
+  log_warn_msg mdns_selfcheck "bootstrap advertisement not visible; restarting publishers" "host=${MDNS_HOST_RAW}" "role=bootstrap"
   stop_bootstrap_publisher
   stop_address_publisher
   sleep 1
@@ -1146,16 +1174,16 @@ publish_bootstrap_service() {
   if ensure_self_mdns_advertisement bootstrap; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log "phase=self-check host=${MDNS_HOST_RAW} observed=${observed}; bootstrap advertisement confirmed."
-    log "Bootstrap advertisement observed for ${MDNS_HOST_RAW} after restarting Avahi publishers."
+    log_info mdns_selfcheck outcome=confirmed role=bootstrap host="${MDNS_HOST_RAW}" observed="${observed}" phase=bootstrap check=restarted >&2
+    log_info_msg mdns_publish "Bootstrap advertisement observed after restart" "host=${MDNS_HOST_RAW}" "role=bootstrap"
     return 0
   fi
 
-  log "Failed to confirm Avahi bootstrap advertisement for ${MDNS_HOST_RAW}; printing diagnostics:"
+  log_error_msg mdns_selfcheck "failed to confirm bootstrap advertisement; printing diagnostics" "host=${MDNS_HOST_RAW}" "role=bootstrap"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
   sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
-  log "Unable to confirm bootstrap advertisement for ${MDNS_HOST_RAW}; aborting to avoid split brain"
+  log_error_msg mdns_selfcheck "unable to confirm bootstrap advertisement; aborting" "host=${MDNS_HOST_RAW}" "role=bootstrap"
   return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 
@@ -1169,7 +1197,7 @@ claim_bootstrap_leadership() {
   for attempt in $(seq 1 "${DISCOVERY_ATTEMPTS}"); do
     server="$(discover_server_host || true)"
     if [ -n "${server}" ]; then
-      log "Server advertisement from ${server} observed during bootstrap election; deferring bootstrap."
+      log_info discover outcome=server_during_election host="${server}" attempt="${attempt}" total_attempts="${DISCOVERY_ATTEMPTS}" >&2
       CLAIMED_SERVER_HOST="${server}"
       cleanup_avahi_publishers
       return 2
@@ -1178,24 +1206,24 @@ claim_bootstrap_leadership() {
     mapfile -t candidates < <(discover_bootstrap_leaders || true)
     if [ "${#candidates[@]}" -eq 0 ]; then
       consecutive=0
-      log "Bootstrap leadership attempt ${attempt}/${DISCOVERY_ATTEMPTS}: no candidates discovered"
+      log_debug discover event=leadership_no_candidates attempt="${attempt}" total_attempts="${DISCOVERY_ATTEMPTS}"
     else
       leader="$(printf '%s\n' "${candidates[@]}" | sort | head -n1)"
       if same_host "${leader}" "${MDNS_HOST_RAW}"; then
         consecutive=$((consecutive + 1))
         if [ "${consecutive}" -ge 3 ]; then
-          log "Confirmed bootstrap leadership as ${MDNS_HOST_RAW}"
+          log_info discover outcome=leadership_confirmed host="${MDNS_HOST_RAW}" attempts="${attempt}" consecutive="${consecutive}" >&2
           return 0
         fi
       else
-        log "Bootstrap leader ${leader} detected; deferring cluster initialization"
+        log_info discover outcome=leader_other host="${leader}" attempt="${attempt}" total_attempts="${DISCOVERY_ATTEMPTS}" >&2
         cleanup_avahi_publishers
         return 1
       fi
     fi
     sleep "${DISCOVERY_WAIT_SECS}"
   done
-  log "No stable bootstrap leader observed; proceeding as ${MDNS_HOST_RAW}"
+  log_info discover outcome=leadership_self host="${MDNS_HOST_RAW}" attempts="${DISCOVERY_ATTEMPTS}" >&2
   return 0
 }
 
@@ -1208,7 +1236,7 @@ build_install_env() {
 }
 
 install_server_single() {
-  log "Bootstrapping single-server (SQLite) ${CLUSTER}/${ENVIRONMENT} on ${MDNS_HOST_RAW}"
+  log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
@@ -1222,16 +1250,16 @@ install_server_single() {
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
     if ! publish_api_service; then
-      log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; aborting"
+      log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_single"
       exit 1
     fi
   else
-    log "k3s API did not become ready within 60s; skipping Avahi publish"
+    log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_single" "host=${MDNS_HOST_RAW}"
   fi
 }
 
 install_server_cluster_init() {
-  log "Bootstrapping first HA server (embedded etcd) ${CLUSTER}/${ENVIRONMENT} on ${MDNS_HOST_RAW}"
+  log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
@@ -1246,21 +1274,21 @@ install_server_cluster_init() {
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
     if ! publish_api_service; then
-      log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; aborting"
+      log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
       exit 1
     fi
   else
-    log "k3s API did not become ready within 60s; skipping Avahi publish"
+    log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_cluster_init" "host=${MDNS_HOST_RAW}"
   fi
 }
 
 install_server_join() {
   local server="$1"
   if [ -z "${TOKEN:-}" ]; then
-    log "Join token missing; cannot join existing HA server"
+    log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
-  log "Joining as additional HA server via https://${server}:6443 (desired servers=${SERVERS_DESIRED})"
+  log_info discover phase=install_join host="${MDNS_HOST_RAW}" server="${server}" desired_servers="${SERVERS_DESIRED}" >&2
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
@@ -1276,21 +1304,21 @@ install_server_join() {
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
     if ! publish_api_service; then
-      log "Failed to confirm Avahi server advertisement for ${MDNS_HOST_RAW}; aborting"
+      log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_join"
       exit 1
     fi
   else
-    log "k3s API did not become ready within 60s; skipping Avahi publish"
+    log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_join" "host=${MDNS_HOST_RAW}"
   fi
 }
 
 install_agent() {
   local server="$1"
   if [ -z "${TOKEN:-}" ]; then
-    log "Join token missing; cannot join agent to existing server"
+    log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
-  log "Joining as agent via https://${server}:6443"
+  log_info discover phase=install_agent host="${MDNS_HOST_RAW}" server="${server}" >&2
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server}:6443")
@@ -1352,7 +1380,7 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
   exit "${status}"
 fi
 
-log "Discovering existing k3s API for ${CLUSTER}/${ENVIRONMENT} via mDNS..."
+log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
 server_host=""
 bootstrap_selected="false"
 
@@ -1379,7 +1407,7 @@ while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
       esac
     done <<<"${election_output}"
   else
-    log "WARN: elect_leader.sh exited with status ${election_status}; defaulting to follower"
+    log_warn_msg discover "elect_leader.sh exited non-zero; defaulting to follower" "status=${election_status}"
   fi
 
   if [ -z "${election_key}" ]; then
@@ -1387,23 +1415,23 @@ while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
   fi
 
   if [ "${election_winner}" = "yes" ]; then
-    log "event=election outcome=winner key=${election_key}"
+    log_info discover event=election outcome=winner key="${election_key}" >&2
     sleep "${ELECTION_HOLDOFF}"
     server_host="$(discover_server_host || true)"
     if [ -n "${server_host}" ]; then
-      log "Server advertisement detected after election holdoff; joining ${server_host}"
+      log_info discover outcome=post_election_server host="${server_host}" holdoff="${ELECTION_HOLDOFF}" >&2
       break
     fi
     bootstrap_selected="true"
   else
-    log "event=election outcome=follower key=${election_key}"
+    log_info discover event=election outcome=follower key="${election_key}" >&2
     sleep "${DISCOVERY_WAIT_SECS}"
   fi
 done
 
 if [ "${bootstrap_selected}" = "true" ]; then
   if ! publish_bootstrap_service; then
-    log "Failed to advertise bootstrap attempt for ${MDNS_HOST_RAW}; aborting"
+    log_error_msg discover "Failed to advertise bootstrap attempt" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
   if [ "${SERVERS_DESIRED}" = "1" ]; then
@@ -1418,7 +1446,7 @@ else
       server_host="$(discover_server_host || true)"
     fi
     if [ -z "${server_host:-}" ]; then
-      log "No servers discovered after waiting; proceeding with bootstrap fallback"
+      log_info discover outcome=fallback_bootstrap reason=no_servers attempts="${DISCOVERY_ATTEMPTS}" >&2
       if [ "${SERVERS_DESIRED}" = "1" ]; then
         install_server_single
       else
@@ -1432,7 +1460,7 @@ else
       server_host="$(discover_server_host || true)"
     fi
     if [ -z "${server_host:-}" ]; then
-      log "Unable to discover an API server to join as agent; exiting"
+      log_error_msg discover "Unable to discover an API server to join as agent" "cluster=${CLUSTER}" "environment=${ENVIRONMENT}"
       exit 1
     fi
     install_agent "${server_host}"

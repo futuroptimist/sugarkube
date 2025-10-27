@@ -10,6 +10,10 @@ if (set -E) 2>/dev/null; then
   set -E
 fi
 
+SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/log.sh
+. "${SCRIPT_DIR}/log.sh"
+
 SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 SERVICE_ENV="${SUGARKUBE_ENV:-dev}"
 EXPECTED_HOST="${SUGARKUBE_EXPECTED_HOST:-}"
@@ -33,16 +37,16 @@ case "${BACKOFF_CAP_MS}" in
 esac
 
 if [ -z "${EXPECTED_HOST}" ]; then
-  >&2 printf 'event=mdns_selfcheck outcome=miss attempt=0 reason=missing_expected_host\n'
+  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 >&2
   exit 2
 fi
 
 if ! command -v avahi-browse >/dev/null 2>&1; then
-  >&2 printf 'event=mdns_selfcheck outcome=miss attempt=0 reason=avahi_browse_missing\n'
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 >&2
   exit 3
 fi
 if ! command -v avahi-resolve >/dev/null 2>&1; then
-  >&2 printf 'event=mdns_selfcheck outcome=miss attempt=0 reason=avahi_resolve_missing\n'
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 >&2
   exit 3
 fi
 
@@ -234,9 +238,12 @@ PY
 
 attempt=1
 last_reason=""
+miss_count=0
 while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" 2>/dev/null || true)"
   parsed="$(printf '%s\n' "${browse_output}" | parse_browse || true)"
+  browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
+  log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
   if [ -n "${parsed}" ]; then
     srv_host="${parsed#*|}"
     srv_host="${srv_host%%|*}"
@@ -246,6 +253,8 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     else
       resolved="$(resolve_host "${srv_host}" || true)"
       status=$?
+      resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
+      log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
         resolved_ipv4="${resolved##*|}"
         elapsed_ms="$(
@@ -255,8 +264,7 @@ start = int(sys.argv[1])
 print(int(time.time() * 1000) - start)
 PY
         )"
-        printf 'event=mdns_selfcheck outcome=ok host=%s ipv4=%s port=%s attempts=%s ms_elapsed=%s\n' \
-          "${srv_host}" "${resolved_ipv4}" "${srv_port}" "${attempt}" "${elapsed_ms}"
+        log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
         exit 0
       fi
       if [ "${status}" -eq 2 ]; then
@@ -273,7 +281,8 @@ PY
     fi
   fi
 
-  >&2 printf 'event=mdns_selfcheck outcome=miss attempt=%s reason=%s\n' "${attempt}" "${last_reason}"
+  miss_count=$((miss_count + 1))
+  log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
 
   if [ "${attempt}" -ge "${ATTEMPTS}" ]; then
     break
@@ -294,6 +303,7 @@ except ValueError:
 print('{:.3f}'.format(delay / 1000.0))
 PY
     )"
+    log_trace mdns_selfcheck_backoff attempt="${attempt}" delay_ms="${delay_ms}" delay_s="${delay_s}"
     sleep "${delay_s}"
   fi
   attempt=$((attempt + 1))
@@ -306,5 +316,5 @@ start = int(sys.argv[1])
 print(int(time.time() * 1000) - start)
 PY
 )"
->&2 printf 'event=mdns_selfcheck outcome=fail attempts=%s reason=%s ms_elapsed=%s\n' "${ATTEMPTS}" "${last_reason:-unknown}" "${elapsed_ms}"
+log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
 exit 1
