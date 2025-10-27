@@ -912,6 +912,13 @@ PY
   local relaxed_attempted=0
   local relaxed_status="not_attempted"
 
+  local selfcheck_start_ms
+  selfcheck_start_ms="$(python3 - <<'PY'
+import time
+print(int(time.monotonic() * 1000))
+PY
+)"
+
   local status=0
   if selfcheck_output="$(env "${selfcheck_env[@]}" "${MDNS_SELF_CHECK_BIN}")"; then
     local token summary_attempts summary_elapsed
@@ -934,7 +941,37 @@ PY
       observed_host="${MDNS_HOST_RAW}"
     fi
     MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
-    log_info mdns_selfcheck outcome=ok role="${role}" host="${MDNS_HOST_RAW}" observed="${MDNS_LAST_OBSERVED}" attempts="${summary_attempts}" ms_elapsed="${summary_elapsed:-unknown}" >&2
+    case "${summary_elapsed}" in
+      ''|*[!0-9]*) summary_elapsed="" ;;
+    esac
+    if [ -z "${summary_elapsed}" ]; then
+      local measured_elapsed
+      measured_elapsed="$(python3 - "${selfcheck_start_ms}" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.monotonic() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+)"
+      case "${measured_elapsed}" in
+        ''|*[!0-9]*) measured_elapsed="" ;;
+      esac
+      if [ -n "${measured_elapsed}" ]; then
+        summary_elapsed="${measured_elapsed}"
+      fi
+    fi
+    if [ -z "${summary_elapsed}" ]; then
+      summary_elapsed="0"
+    fi
+    log_info mdns_selfcheck outcome=ok role="${role}" host="${MDNS_HOST_RAW}" observed="${MDNS_LAST_OBSERVED}" attempts="${summary_attempts}" ms_elapsed="${summary_elapsed}" >&2
     if [ "${SUGARKUBE_DEBUG_MDNS:-0}" = "1" ]; then
       run_net_diag \
         "mdns_selfcheck_debug" \

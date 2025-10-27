@@ -36,6 +36,29 @@ BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
 JITTER_FRACTION="${JITTER:-0.2}"
 SERVICE_DOMAIN="${SUGARKUBE_MDNS_DOMAIN:-local}"
 
+script_start_ms="$(python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+)"
+
+elapsed_since_start_ms() {
+  python3 - "$@" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.time() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+}
+
 case "${ATTEMPTS}" in
   ''|*[!0-9]*) ATTEMPTS=1 ;;
   0) ATTEMPTS=1 ;;
@@ -48,7 +71,8 @@ case "${BACKOFF_CAP_MS}" in
 esac
 
 if [ -z "${EXPECTED_HOST}" ]; then
-  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 >&2
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 ms_elapsed="${elapsed_ms}" >&2
   exit 2
 fi
 
@@ -269,7 +293,8 @@ if ! call_service_browser >/dev/null 2>&1; then
     log_debug mdns_selfcheck_dbus outcome=skip reason=gdbus_unavailable
     exit 2
   fi
-  log_info mdns_selfcheck outcome=miss reason=browser_create_failed attempt=0 >&2
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck outcome=miss reason=browser_create_failed attempt=0 ms_elapsed="${elapsed_ms}" >&2
   exit 1
 fi
 
@@ -424,13 +449,7 @@ PY
       resolved_ipv4="${resolved_address}"
     fi
 
-    elapsed_ms="$(
-      python3 - "${script_start_ms}" <<'PY'
-import sys, time
-start = int(sys.argv[1])
-print(int(time.time() * 1000) - start)
-PY
-    )"
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
     log_info mdns_selfcheck \
       outcome=ok \
       host="${resolved_host}" \
@@ -483,13 +502,7 @@ PY
 
 done
 
-elapsed_ms="$(
-  python3 - "${script_start_ms}" <<'PY'
-import sys, time
-start = int(sys.argv[1])
-print(int(time.time() * 1000) - start)
-PY
-)"
+elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
 log_info mdns_selfcheck \
   outcome=fail \
   attempts="${ATTEMPTS}" \

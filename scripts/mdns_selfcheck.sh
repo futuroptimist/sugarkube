@@ -25,6 +25,29 @@ BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
 BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
 JITTER_FRACTION="${JITTER:-0.2}"
 
+script_start_ms="$(python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+)"
+
+elapsed_since_start_ms() {
+  python3 - "$@" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.time() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+}
+
 case "${ATTEMPTS}" in
   ''|*[!0-9]*) ATTEMPTS=1 ;;
   0) ATTEMPTS=1 ;;
@@ -37,7 +60,8 @@ case "${BACKOFF_CAP_MS}" in
 esac
 
 if [ -z "${EXPECTED_HOST}" ]; then
-  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 >&2
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 ms_elapsed="${elapsed_ms}" >&2
   exit 2
 fi
 
@@ -71,11 +95,13 @@ else
 fi
 
 if ! command -v avahi-browse >/dev/null 2>&1; then
-  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 >&2
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 ms_elapsed="${elapsed_ms}" >&2
   exit 3
 fi
 if ! command -v avahi-resolve >/dev/null 2>&1; then
-  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 >&2
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 ms_elapsed="${elapsed_ms}" >&2
   exit 3
 fi
 
@@ -84,14 +110,6 @@ INSTANCE_PREFIX="k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_HOST}"
 
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
-
-script_start_ms="$(python3 - <<'PY'
-import time
-print(int(time.time() * 1000))
-PY
-)"
-
-
 
 parse_browse() {
   awk -v svc="${SERVICE_TYPE}" \
@@ -279,13 +297,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
         resolved_ipv4="${resolved##*|}"
-        elapsed_ms="$(
-          python3 - "${script_start_ms}" <<'PY'
-import sys, time
-start = int(sys.argv[1])
-print(int(time.time() * 1000) - start)
-PY
-        )"
+        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
         log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
         exit 0
       fi
@@ -293,13 +305,7 @@ PY
         # IPv4 mismatch: signal to caller explicitly and avoid unnecessary retries
         last_reason="ipv4_mismatch"
         log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
-        elapsed_ms="$(
-          python3 - "${script_start_ms}" <<'PY'
-import sys, time
-start = int(sys.argv[1])
-print(int(time.time() * 1000) - start)
-PY
-        )"
+        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
         log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
         exit 5
       else
@@ -342,13 +348,7 @@ PY
   attempt=$((attempt + 1))
 done
 
-elapsed_ms="$(
-  python3 - "${script_start_ms}" <<'PY'
-import sys, time
-start = int(sys.argv[1])
-print(int(time.time() * 1000) - start)
-PY
-)"
+elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
 log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
 
 # Use a distinct exit code for IPv4 mismatch to enable targeted relaxed retries upstream
