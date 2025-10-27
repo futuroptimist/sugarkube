@@ -2,6 +2,7 @@
   "id": "2025-10-25-avahi-baseline",
   "date": "2025-10-25",
   "component": "scripts/configure_avahi.sh",
+  "longForm": "outages/2025-10-25-avahi-baseline.md",
   "rootCause": "Avahi defaulted to omitting workstation adverts and automatically selected down or unintended interfaces, so peers on Raspberry Pi OS Bookworm could not resolve the node via mDNS.",
   "resolution": "Force publish-workstation=yes by default while keeping it configurable, auto-detect a single active interface (preferring Ethernet) or honor overrides to pin allow-interfaces, and restart avahi-daemon only when the configuration changes.",
   "references": [

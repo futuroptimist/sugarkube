@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-25-split-brain-bootstrap-election",
+  "date": "2025-10-25",
+  "component": "scripts/k3s-discover.sh",
+  "longForm": "outages/2025-10-25-split-brain-bootstrap-election.md",
+  "rootCause": "Bootstrap relied on mdns races, so stalled browsing let multiple nodes initialize etcd and collide.",
+  "resolution": "Ship scripts/elect_leader.sh so k3s-discover elects one bootstrap node and keeps followers polling.",
+  "references": [
+    "scripts/elect_leader.sh",
+    "scripts/k3s-discover.sh",
+    "outages/2025-10-25-split-brain-bootstrap-election.md"
+  ]
+}
