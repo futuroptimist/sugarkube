@@ -97,3 +97,45 @@ EOS
   [[ "$output" =~ instance_not_found ]]
   [[ "$output" =~ reason=instance_not_found ]]
 }
+
+@test "mdns self-check falls back to CLI when dbus unsupported" {
+  if ! command -v gdbus >/dev/null 2>&1; then
+    skip "gdbus not available"
+  fi
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+echo "dbus" >>"${BATS_TEST_TMPDIR}/gdbus.log"
+exit 127
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "192.168.3.10"
+EOS
+
+  run env \
+    SUGARKUBE_MDNS_DBUS=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [ -f "${BATS_TEST_TMPDIR}/gdbus.log" ]
+}
