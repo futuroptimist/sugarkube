@@ -15,7 +15,7 @@ fi
 if [ "${#missing[@]}" -gt 0 ]; then
   export DEBIAN_FRONTEND="noninteractive"
   apt-get update >/dev/null
-  apt-get install -y iptables ip6tables >/dev/null
+  apt-get install -y iptables >/dev/null
   installed="yes"
 fi
 
