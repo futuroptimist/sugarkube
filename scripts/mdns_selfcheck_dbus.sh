@@ -432,7 +432,7 @@ PY
       port="${resolved_port}" \
       attempts="${attempt}" \
       ms_elapsed="${elapsed_ms}"
-    return 0
+    exit 0
   done
 
   miss_count=$((miss_count + 1))
