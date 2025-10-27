@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-27-mdns-selfcheck-cli-gap",
+  "date": "2025-10-27",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "The CLI fallback (avahi-browse/resolve) could not observe locally-published k3s adverts on Raspberry Pi 5 hardware, causing Sugarkube's mDNS self-check to fail even though avahi-publish reported success.",
+  "resolution": "Prefer the D-Bus helper when gdbus is available, falling back to the CLI path only when explicitly disabled or unsupported, and extend the Bats suite to cover the D-Bus happy-path and skip logic.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "scripts/mdns_selfcheck_dbus.sh",
+    "tests/bats/mdns_selfcheck.bats",
+    "docs/DBUS.md"
+  ]
+}

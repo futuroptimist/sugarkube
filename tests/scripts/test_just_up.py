@@ -456,6 +456,8 @@ def test_just_up_dev_two_nodes(tmp_path):
     assert "avahi-publish-address:" in log_contents
     assert "sudo:apt-get update" in log_contents
     assert "sudo:apt-get install" in log_contents
+    assert "glib2.0-bin" in log_contents
+    assert "tcpdump" in log_contents
     assert "hosts: files mdns4_minimal" in nsswitch_path.read_text(encoding="utf-8")
 
     # Ensure both bootstrap and server advertisements were logged

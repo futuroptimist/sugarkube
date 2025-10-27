@@ -91,6 +91,7 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
@@ -110,9 +111,9 @@ def test_bootstrap_publish_uses_avahi_publish(tmp_path):
 
     assert "-H" in log_contents
     assert f"-H {hostname}.local" in log_contents
-    assert f"_k3s-sugar-dev._tcp" in log_contents
-    assert f"cluster=sugar" in log_contents
-    assert f"env=dev" in log_contents
+    assert "_k3s-sugar-dev._tcp" in log_contents
+    assert "cluster=sugar" in log_contents
+    assert "env=dev" in log_contents
     assert f"leader={hostname}.local" in log_contents
     assert "role=bootstrap" in log_contents
     assert "phase=bootstrap" in log_contents
@@ -190,6 +191,7 @@ def test_bootstrap_publish_handles_trailing_dot_hostname(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
@@ -271,6 +273,7 @@ def test_bootstrap_publish_warns_on_address_mismatch(tmp_path):
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
         "SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
@@ -359,6 +362,7 @@ def test_publish_binds_host_and_self_check_delays(tmp_path):
         "SUGARKUBE_MDNS_HOST": "HostMixed.LOCAL.",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
@@ -431,6 +435,7 @@ def test_bootstrap_publish_omits_address_flag(tmp_path):
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.55",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     subprocess.run(
@@ -523,6 +528,7 @@ def test_bootstrap_publish_retries_until_mdns_visible(tmp_path):
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.60",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
@@ -641,6 +647,7 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
         "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.60",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
@@ -769,6 +776,7 @@ def test_bootstrap_publish_fails_without_mdns(tmp_path):
         "SUGARKUBE_MDNS_BOOT_DELAY": "0",
         "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+        "SUGARKUBE_MDNS_DBUS": "0",
     })
 
     result = subprocess.run(
