@@ -41,6 +41,29 @@ if [ -z "${EXPECTED_HOST}" ]; then
   exit 2
 fi
 
+if [ "${SUGARKUBE_MDNS_DBUS:-0}" = "1" ]; then
+  dbus_script="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
+  if [ -x "${dbus_script}" ]; then
+    if "${dbus_script}"; then
+      exit 0
+    fi
+    status=$?
+    case "${status}" in
+      1)
+        exit 1
+        ;;
+      2)
+        log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported fallback=cli
+        ;;
+      *)
+        exit "${status}"
+        ;;
+    esac
+  else
+    log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_script_missing fallback=cli
+  fi
+fi
+
 if ! command -v avahi-browse >/dev/null 2>&1; then
   log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 >&2
   exit 3
