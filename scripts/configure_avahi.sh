@@ -11,6 +11,8 @@ WLAN_GUARD_FILE="${RUNTIME_DIR}/wlan-disabled"
 PUBLISH_WORKSTATION="${SUGARKUBE_AVAHI_PUBLISH_WORKSTATION:-yes}"
 ALLOW_INTERFACES_OVERRIDE="${SUGARKUBE_AVAHI_ALLOW_INTERFACES:-}"
 PREFERRED_IFACE="${SUGARKUBE_MDNS_INTERFACE:-}"
+# Temporary file used during atomic write; referenced by EXIT trap safely
+TMP_AVAHI_TMPFILE=""
 
 log() {
   local ts
@@ -137,7 +139,7 @@ update_config() {
   local allow_value="$2"
   local tmp="$3"
 
-  python3 <<'PY' "${CONF}" "${tmp}" "${PUBLISH_WORKSTATION}" "${allow_mode}" "${allow_value}"
+  python3 - <<'PY' "${CONF}" "${tmp}" "${PUBLISH_WORKSTATION}" "${allow_mode}" "${allow_value}"
 import sys
 from pathlib import Path
 
@@ -280,7 +282,8 @@ main() {
   local dir tmp mode owner group
   dir="$(dirname "${CONF}")"
   tmp="$(mktemp "${dir}/avahi-daemon.conf.XXXXXX")"
-  trap 'rm -f "${tmp}"' EXIT
+  TMP_AVAHI_TMPFILE="${tmp}"
+  trap '[ -n "${TMP_AVAHI_TMPFILE:-}" ] && rm -f "${TMP_AVAHI_TMPFILE}"' EXIT
 
   mode=""
   owner=""
