@@ -87,12 +87,15 @@ SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
 MDNS_SELF_CHECK_FAILURE_CODE=94
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
+FOLLOWER_UNTIL_SERVER=0
+FOLLOWER_UNTIL_SERVER_SET_AT=0
+FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 
 run_net_diag() {
   local reason="$1"
   shift
 
-  local diag_script="${SCRIPT_DIR}/net_diag.sh"
+  local diag_script="${SUGARKUBE_NET_DIAG_BIN:-${SCRIPT_DIR}/net_diag.sh}"
   if [ ! -x "${diag_script}" ]; then
     return 0
   fi
@@ -316,6 +319,28 @@ run_privileged() {
   fi
 }
 
+run_configure_avahi() {
+  local configure_script
+  configure_script="${SUGARKUBE_CONFIGURE_AVAHI_BIN:-${SCRIPT_DIR}/configure_avahi.sh}"
+  if [ ! -x "${configure_script}" ]; then
+    return 0
+  fi
+
+  local -a command=("${configure_script}")
+  if [ -n "${SUDO_CMD:-}" ]; then
+    command=("${SUDO_CMD}" "${configure_script}")
+  fi
+
+  if "${command[@]}" >/dev/null 2>&1; then
+    log_info discover event=configure_avahi outcome=ok script="${configure_script}" >&2
+    return 0
+  fi
+
+  local status=$?
+  log_error_msg discover "configure_avahi.sh failed" "status=${status}" "script=${configure_script}"
+  exit "${status}"
+}
+
 write_privileged_file() {
   local path="$1"
   if [ -n "${SUDO_CMD:-}" ]; then
@@ -332,6 +357,8 @@ remove_privileged_file() {
     rm -f "$1"
   fi
 }
+
+run_configure_avahi
 
 if ! run_privileged mkdir -p "${MDNS_RUNTIME_DIR}"; then
   echo "Failed to create ${MDNS_RUNTIME_DIR}" >&2
@@ -877,7 +904,7 @@ PY
   local relaxed_attempted=0
   local relaxed_status="not_attempted"
 
-  if selfcheck_output="$(env "${selfcheck_env[@]}" "${SCRIPT_DIR}/mdns_selfcheck.sh")"; then
+  if selfcheck_output="$(env "${selfcheck_env[@]}" "${MDNS_SELF_CHECK_BIN}")"; then
     local token summary_attempts summary_elapsed
     summary_attempts="${retries}"
     summary_elapsed=""
@@ -924,7 +951,7 @@ PY
     if [ -n "${delay_ms}" ]; then
       relaxed_env+=("SUGARKUBE_SELFCHK_BACKOFF_START_MS=${delay_ms}" "SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=${delay_ms}")
     fi
-    if selfcheck_output="$(env "${relaxed_env[@]}" "${SCRIPT_DIR}/mdns_selfcheck.sh")"; then
+    if selfcheck_output="$(env "${relaxed_env[@]}" "${MDNS_SELF_CHECK_BIN}")"; then
       local token
       observed_host="${MDNS_HOST_RAW}"
       for token in ${selfcheck_output}; do
@@ -1228,6 +1255,49 @@ claim_bootstrap_leadership() {
   return 0
 }
 
+ELECTION_KEY="undefined"
+ELECT_LEADER_BIN="${SUGARKUBE_ELECT_LEADER_BIN:-${SCRIPT_DIR}/elect_leader.sh}"
+MDNS_SELF_CHECK_BIN="${SUGARKUBE_MDNS_SELF_CHECK_BIN:-${SCRIPT_DIR}/mdns_selfcheck.sh}"
+
+run_leader_election() {
+  local election_output
+  local election_status
+  local election_winner="no"
+  local election_key=""
+
+  election_output="$(SUGARKUBE_SERVERS="${SERVERS_DESIRED}" "${ELECT_LEADER_BIN}" 2>/dev/null || true)"
+  election_status=$?
+
+  if [ "${election_status}" -eq 0 ]; then
+    while IFS='=' read -r field value; do
+      case "${field}" in
+        winner)
+          election_winner="${value}"
+          ;;
+        key)
+          election_key="${value}"
+          ;;
+      esac
+    done <<<"${election_output}"
+  else
+    log_warn_msg discover "elect_leader exited non-zero" "status=${election_status}" "script=${ELECT_LEADER_BIN}"
+  fi
+
+  if [ -z "${election_key}" ]; then
+    election_key="undefined"
+  fi
+
+  ELECTION_KEY="${election_key}"
+
+  if [ "${election_winner}" = "yes" ]; then
+    log_info discover event=election outcome=winner key="${ELECTION_KEY}" >&2
+    return 0
+  fi
+
+  log_info discover event=election outcome=follower key="${ELECTION_KEY}" >&2
+  return 1
+}
+
 ensure_iptables_tools() {
   if [ "${IPTABLES_ENSURED}" -eq 1 ]; then
     return 0
@@ -1400,62 +1470,94 @@ log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${EN
 server_host=""
 bootstrap_selected="false"
 
-while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
-  server_host="$(discover_server_host || true)"
-  if [ -n "${server_host}" ]; then
-    break
+while :; do
+  if [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; then
+    while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
+      server_host="$(discover_server_host || true)"
+      if [ -n "${server_host}" ]; then
+        FOLLOWER_UNTIL_SERVER=0
+        FOLLOWER_UNTIL_SERVER_SET_AT=0
+        break
+      fi
+
+      if [ "${FOLLOWER_UNTIL_SERVER}" -eq 1 ]; then
+        if [ "${FOLLOWER_UNTIL_SERVER_SET_AT}" -eq 0 ]; then
+          FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
+        fi
+        now="$(date +%s)"
+        if [ $((now - FOLLOWER_UNTIL_SERVER_SET_AT)) -ge "${FOLLOWER_REELECT_SECS}" ]; then
+          log_info discover event=follower_election_retry wait_secs="${FOLLOWER_REELECT_SECS}" >&2
+          FOLLOWER_UNTIL_SERVER=0
+          FOLLOWER_UNTIL_SERVER_SET_AT=0
+        else
+          sleep "${DISCOVERY_WAIT_SECS}"
+          continue
+        fi
+      fi
+
+      if run_leader_election; then
+        sleep "${ELECTION_HOLDOFF}"
+        server_host="$(discover_server_host || true)"
+        if [ -n "${server_host}" ]; then
+          log_info discover outcome=post_election_server host="${server_host}" holdoff="${ELECTION_HOLDOFF}" >&2
+          FOLLOWER_UNTIL_SERVER=0
+          FOLLOWER_UNTIL_SERVER_SET_AT=0
+          break
+        fi
+        bootstrap_selected="true"
+        FOLLOWER_UNTIL_SERVER=0
+        FOLLOWER_UNTIL_SERVER_SET_AT=0
+        break
+      fi
+
+      FOLLOWER_UNTIL_SERVER=1
+      FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
+      sleep "${DISCOVERY_WAIT_SECS}"
+    done
   fi
 
-  election_output="$(SUGARKUBE_SERVERS="${SERVERS_DESIRED}" "${SCRIPT_DIR}/elect_leader.sh" 2>/dev/null || true)"
-  election_status=$?
-  election_winner="no"
-  election_key=""
-
-  if [ "${election_status}" -eq 0 ]; then
-    while IFS='=' read -r field value; do
-      case "${field}" in
-        winner)
-          election_winner="${value}"
-          ;;
-        key)
-          election_key="${value}"
-          ;;
-      esac
-    done <<<"${election_output}"
-  else
-    log_warn_msg discover "elect_leader.sh exited non-zero; defaulting to follower" "status=${election_status}"
-  fi
-
-  if [ -z "${election_key}" ]; then
-    election_key="undefined"
-  fi
-
-  if [ "${election_winner}" = "yes" ]; then
-    log_info discover event=election outcome=winner key="${election_key}" >&2
-    sleep "${ELECTION_HOLDOFF}"
-    server_host="$(discover_server_host || true)"
-    if [ -n "${server_host}" ]; then
-      log_info discover outcome=post_election_server host="${server_host}" holdoff="${ELECTION_HOLDOFF}" >&2
+  if [ "${bootstrap_selected}" = "true" ]; then
+    if publish_bootstrap_service; then
+      if [ "${SERVERS_DESIRED}" = "1" ]; then
+        install_server_single
+      else
+        install_server_cluster_init
+      fi
       break
     fi
-    bootstrap_selected="true"
-  else
-    log_info discover event=election outcome=follower key="${election_key}" >&2
-    sleep "${DISCOVERY_WAIT_SECS}"
-  fi
-done
 
-if [ "${bootstrap_selected}" = "true" ]; then
-  if ! publish_bootstrap_service; then
-    log_error_msg discover "Failed to advertise bootstrap attempt" "host=${MDNS_HOST_RAW}"
-    exit 1
+    log_warn_msg discover "mDNS self-check failed after bootstrap advertisement" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+    cleanup_avahi_publishers || true
+    run_net_diag "bootstrap_selfcheck_failure" \
+      --iface "${MDNS_IFACE}" \
+      --tag "cluster=${CLUSTER}" \
+      --tag "environment=${ENVIRONMENT}" \
+      --tag "host=${MDNS_HOST_RAW}" \
+      --tag "role=bootstrap" \
+      --tag "status=failure"
+
+    if run_leader_election; then
+      log_info discover event=bootstrap_selfcheck_election outcome=winner key="${ELECTION_KEY}" >&2
+      FOLLOWER_UNTIL_SERVER=0
+      FOLLOWER_UNTIL_SERVER_SET_AT=0
+      sleep "${ELECTION_HOLDOFF}"
+      if [ "${SERVERS_DESIRED}" = "1" ]; then
+        install_server_single
+      else
+        install_server_cluster_init
+      fi
+      break
+    fi
+
+    log_info discover event=bootstrap_selfcheck_election outcome=follower key="${ELECTION_KEY}" >&2
+    FOLLOWER_UNTIL_SERVER=1
+    FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
+    bootstrap_selected="false"
+    server_host=""
+    sleep "${DISCOVERY_WAIT_SECS}"
+    continue
   fi
-  if [ "${SERVERS_DESIRED}" = "1" ]; then
-    install_server_single
-  else
-    install_server_cluster_init
-  fi
-else
+
   servers_now="$(count_servers)"
   if [ "${servers_now}" -lt "${SERVERS_DESIRED}" ]; then
     if [ -z "${server_host:-}" ]; then
@@ -1481,7 +1583,8 @@ else
     fi
     install_agent "${server_host}"
   fi
-fi
+  break
+done
 
 if [ -f /etc/rancher/k3s/k3s.yaml ]; then
   run_privileged mkdir -p /root/.kube
