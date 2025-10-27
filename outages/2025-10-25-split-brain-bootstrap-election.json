@@ -1,0 +1,12 @@
+{
+  "id": "split-brain-bootstrap-election",
+  "date": "2025-10-25",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Bootstrap nodes relied on opportunistic mDNS and raced to advertise, letting multiple control-plane nodes initialise etcd concurrently and trigger split-brain.",
+  "resolution": "Added scripts/elect_leader.sh, introduced a bootstrap holdoff, and kept non-winners polling until a server appears.",
+  "references": [
+    "scripts/elect_leader.sh",
+    "scripts/k3s-discover.sh"
+  ],
+  "longForm": "2025-10-25-split-brain-bootstrap-election.md"
+}

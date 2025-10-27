@@ -67,3 +67,21 @@ def test_outage_dates_are_not_in_the_future() -> None:
         assert (
             expected_prefix == recorded_date
         ), f"Filename {outage_file.name} should start with outage date {recorded_date}"
+
+
+def test_markdown_outages_require_json_companions() -> None:
+    """Every long-form outage narrative must have a JSON record and link back to it."""
+
+    outages_dir = Path("outages")
+    assert outages_dir.is_dir(), "outages/ directory must exist for outage records"
+
+    for md_file in sorted(outages_dir.glob("*.md")):
+        json_file = md_file.with_suffix(".json")
+        assert json_file.exists(), f"Missing JSON outage record for {md_file.name}"
+
+        payload = json.loads(json_file.read_text(encoding="utf-8"))
+        long_form = payload.get("longForm")
+        assert long_form, f"{json_file.name} must declare its long-form companion"
+        assert (
+            Path(long_form).name == md_file.name
+        ), f"{json_file.name} should reference {md_file.name} via longForm"

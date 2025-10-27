@@ -1,0 +1,13 @@
+{
+  "id": "mdns-selfcheck-invisible",
+  "date": "2025-10-25",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "k3s-discover trusted avahi-publish log lines even when the Python self-check failed, so bootstrap advertisements stayed invisible to peers.",
+  "resolution": "Replaced the Python helper with scripts/mdns_selfcheck.sh, propagated failures in k3s-discover, and added regression coverage for the shell helper.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "scripts/k3s-discover.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ],
+  "longForm": "2025-10-25-mdns-selfcheck-invisible.md"
+}
