@@ -75,6 +75,18 @@ strip_timestamp_prefix() {
   esac
 }
 
+run_net_diag() {
+  local reason="$1"
+  shift
+
+  local diag_script="${SCRIPT_DIR}/net_diag.sh"
+  if [ ! -x "${diag_script}" ]; then
+    return 0
+  fi
+
+  "${diag_script}" --reason "${reason}" "$@" || true
+}
+
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
@@ -828,6 +840,25 @@ PY
 
   local selfcheck_output=""
   local observed_host="${MDNS_HOST_RAW}"
+  local -a diag_args=("--iface" "${MDNS_IFACE}")
+  if [ -n "${retries}" ]; then
+    diag_args+=("--attempt" "${retries}")
+  fi
+  diag_args+=(
+    "--tag" "role=${role}"
+    "--tag" "host=${MDNS_HOST_RAW}"
+    "--tag" "cluster=${CLUSTER}"
+    "--tag" "environment=${ENVIRONMENT}"
+  )
+  if [ -n "${MDNS_ADDR_V4}" ]; then
+    diag_args+=("--tag" "expected_ipv4=${MDNS_ADDR_V4}")
+  else
+    diag_args+=("--tag" "expected_ipv4=none")
+  fi
+
+  local relaxed_attempted=0
+  local relaxed_status="not_attempted"
+
   if selfcheck_output="$(env "${selfcheck_env[@]}" "${SCRIPT_DIR}/mdns_selfcheck.sh")"; then
     local token
     for token in ${selfcheck_output}; do
@@ -842,6 +873,13 @@ PY
     fi
     MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
     log "Self-check for ${role} advertisement succeeded: ${selfcheck_output}"
+    if [ "${SUGARKUBE_DEBUG_MDNS:-0}" = "1" ]; then
+      run_net_diag \
+        "mdns_selfcheck_debug" \
+        "${diag_args[@]}" \
+        "--tag" "mode=strict" \
+        "--tag" "status=0"
+    fi
     return 0
   fi
 
@@ -856,6 +894,7 @@ PY
       "SUGARKUBE_EXPECTED_ROLE=${role}"
       "SUGARKUBE_EXPECTED_PHASE=${role}"
     )
+    relaxed_attempted=1
     if [ -n "${delay_ms}" ]; then
       relaxed_env+=("SUGARKUBE_SELFCHK_BACKOFF_START_MS=${delay_ms}" "SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=${delay_ms}")
     fi
@@ -874,11 +913,37 @@ PY
       fi
       MDNS_LAST_OBSERVED="$(canonical_host "${observed_host}")"
       log "WARN: ${role} advertisement observed from ${observed_host} without expected addr ${MDNS_ADDR_V4}; continuing."
+      if [ "${SUGARKUBE_DEBUG_MDNS:-0}" = "1" ]; then
+        run_net_diag \
+          "mdns_selfcheck_debug" \
+          "${diag_args[@]}" \
+          "--tag" "mode=relaxed" \
+          "--tag" "status=0" \
+          "--tag" "strict_status=${status}"
+      fi
       return 0
+    else
+      relaxed_status="$?"
     fi
   fi
 
   log "Self-check for ${role} advertisement did not observe ${MDNS_HOST_RAW}; status=${status}."
+  if [ "${relaxed_attempted}" -eq 1 ]; then
+    run_net_diag \
+      "mdns_selfcheck_failure" \
+      "${diag_args[@]}" \
+      "--tag" "mode=strict" \
+      "--tag" "strict_status=${status}" \
+      "--tag" "relaxed_attempted=1" \
+      "--tag" "relaxed_status=${relaxed_status}"
+  else
+    run_net_diag \
+      "mdns_selfcheck_failure" \
+      "${diag_args[@]}" \
+      "--tag" "mode=strict" \
+      "--tag" "strict_status=${status}" \
+      "--tag" "relaxed_attempted=0"
+  fi
   return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 
