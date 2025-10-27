@@ -95,20 +95,28 @@ parse_browse() {
       -v expected_phase="${EXPECTED_PHASE}" \
       -v cluster="${SERVICE_CLUSTER}" \
       -v env="${SERVICE_ENV}" '
-    function strip_quotes(s,    n) {
-      n = length(s)
-      if (n >= 2 && ((substr(s,1,1) == "\"" && substr(s,n,1) == "\"") || (substr(s,1,1) == "\047" && substr(s,n,1) == "\047"))) {
-        return substr(s, 2, n-2)
+    function dequote(value,    first, last) {
+      if (length(value) < 2) {
+        return value
       }
-      return s
+      first = substr(value, 1, 1)
+      last = substr(value, length(value), 1)
+      if ((first == "\"" && last == "\"") || (first == "\047" && last == "\047")) {
+        return substr(value, 2, length(value) - 2)
+      }
+      return value
     }
+
     BEGIN { FS = ";" }
     $1 == "=" {
-      # find the index of the service type
+      delete fields
+      for (i = 1; i <= NF; i++) {
+        fields[i] = dequote($i)
+      }
+
       type_idx = -1
       for (i = 1; i <= NF; i++) {
-        candidate = strip_quotes($i)
-        if (candidate == svc) { type_idx = i; break }
+        if (fields[i] == svc) { type_idx = i; break }
       }
       if (type_idx < 0) next
 
@@ -117,14 +125,13 @@ parse_browse() {
       port_idx = type_idx + 4
       if (inst_idx < 1 || host_idx > NF || port_idx > NF) next
 
-      instance = strip_quotes($(inst_idx))
-      host = strip_quotes($(host_idx))
-      port = strip_quotes($(port_idx))
+      instance = fields[inst_idx]
+      host = fields[host_idx]
+      port = fields[port_idx]
 
-      # txt rest
       rest = ""
       for (j = port_idx + 1; j <= NF; j++) {
-        piece = strip_quotes($(j))
+        piece = fields[j]
         if (rest != "") rest = rest ";"
         rest = rest piece
       }

@@ -116,6 +116,7 @@ TEST_PUBLISH_BOOTSTRAP=0
 TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
 declare -a TEST_RENDER_ARGS=()
+PRINT_SERVER_HOSTS=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -150,6 +151,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-claim-bootstrap)
       TEST_CLAIM_BOOTSTRAP=1
+      ;;
+    --print-server-hosts)
+      PRINT_SERVER_HOSTS=1
       ;;
     --help)
       cat <<'EOF_HELP'
@@ -812,6 +816,10 @@ discover_server_host() {
   run_avahi_query server-first | head -n1
 }
 
+discover_server_hosts() {
+  run_avahi_query server-hosts | sort -u
+}
+
 discover_bootstrap_hosts() {
   run_avahi_query bootstrap-hosts | sort -u
 }
@@ -1419,6 +1427,11 @@ install_agent() {
 
 if [ -n "${TEST_RUN_AVAHI:-}" ]; then
   run_avahi_query "${TEST_RUN_AVAHI}"
+  exit 0
+fi
+
+if [ "${PRINT_SERVER_HOSTS}" -eq 1 ]; then
+  discover_server_hosts
   exit 0
 fi
 

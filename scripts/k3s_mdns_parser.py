@@ -141,8 +141,10 @@ def parse_avahi_resolved_line(line: str) -> Optional[Dict[str, Any]]:
         return None
 
     parts = line.split(";")
-    if len(parts) < 9:
+    if len(parts) < 6:
         return None
+    if len(parts) < 9:
+        parts = parts + [""] * (9 - len(parts))
 
     cleaned = [_strip_quotes(part.strip()) for part in parts]
 
