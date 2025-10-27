@@ -85,6 +85,14 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+MDNS_ABSENCE_GATE="${SUGARKUBE_MDNS_ABSENCE_GATE:-1}"
+MDNS_ABSENCE_TIMEOUT_MS="${SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS:-15000}"
+MDNS_ABSENCE_BACKOFF_START_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS:-500}"
+MDNS_ABSENCE_BACKOFF_CAP_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_CAP_MS:-4000}"
+MDNS_ABSENCE_JITTER="${SUGARKUBE_MDNS_ABSENCE_JITTER:-0.25}"
+MDNS_ABSENCE_USE_DBUS="${SUGARKUBE_MDNS_ABSENCE_DBUS:-${SUGARKUBE_MDNS_DBUS:-1}}"
+MDNS_ABSENCE_LAST_METHOD=""
+MDNS_ABSENCE_LAST_STATUS=""
 MDNS_SELF_CHECK_FAILURE_CODE=94
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
@@ -398,6 +406,350 @@ reload_avahi_daemon() {
   else
     systemctl reload avahi-daemon || systemctl restart avahi-daemon
   fi
+}
+
+restart_avahi_daemon_service() {
+  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" systemctl restart avahi-daemon
+  else
+    systemctl restart avahi-daemon
+  fi
+ }
+
+current_time_ms() {
+  python3 - <<'PY'
+import time
+
+print(int(time.time() * 1000))
+PY
+}
+
+elapsed_since_ms() {
+  python3 - "$1" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.time() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+}
+
+compute_absence_delay_ms() {
+  python3 - "$@" <<'PY'
+import random
+import sys
+
+try:
+    attempt = int(sys.argv[1])
+except (IndexError, ValueError):
+    attempt = 1
+try:
+    start = int(sys.argv[2])
+except (IndexError, ValueError):
+    start = 0
+try:
+    cap = int(sys.argv[3])
+except (IndexError, ValueError):
+    cap = 0
+try:
+    jitter = float(sys.argv[4])
+except (IndexError, ValueError):
+    jitter = 0.0
+
+if attempt < 1:
+    attempt = 1
+if start < 0:
+    start = 0
+if cap < 0:
+    cap = 0
+
+if cap and start > cap:
+    base = cap
+else:
+    base = start * (2 ** (attempt - 1)) if attempt > 0 else start
+
+if cap and base > cap:
+    base = cap
+
+if jitter > 0:
+    low = max(0.0, 1.0 - jitter)
+    high = 1.0 + jitter
+    delay = int(base * random.uniform(low, high))
+else:
+    delay = base
+
+if delay < 0:
+    delay = 0
+
+print(delay)
+PY
+}
+
+mdns_absence_check_dbus() {
+  if [ "${MDNS_ABSENCE_USE_DBUS}" != "1" ]; then
+    return 2
+  fi
+  if ! command -v gdbus >/dev/null 2>&1; then
+    return 2
+  fi
+
+  local service_domain
+  service_domain="${SUGARKUBE_MDNS_DOMAIN:-local}"
+
+  if ! gdbus call \
+    --system \
+    --dest org.freedesktop.Avahi \
+    --object-path / \
+    --method org.freedesktop.Avahi.Server.ServiceBrowserNew \
+    int32:-1 \
+    int32:-1 \
+    "${MDNS_SERVICE_TYPE}" \
+    "${service_domain}" \
+    uint32:0 >/dev/null 2>&1; then
+    local status=$?
+    if [ "${status}" -eq 126 ] || [ "${status}" -eq 127 ]; then
+      return 2
+    fi
+    return 2
+  fi
+
+  local base_instance
+  base_instance="k3s-${CLUSTER}-${ENVIRONMENT}@${MDNS_HOST_RAW}"
+  local -a candidates=(
+    "${base_instance}"
+    "${base_instance} (server)"
+    "${base_instance} (bootstrap)"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    [ -n "${candidate}" ] || continue
+    if gdbus call \
+      --system \
+      --dest org.freedesktop.Avahi \
+      --object-path / \
+      --method org.freedesktop.Avahi.Server.ResolveService \
+      int32:-1 \
+      int32:-1 \
+      "${candidate}" \
+      "${MDNS_SERVICE_TYPE}" \
+      "${service_domain}" \
+      int32:-1 \
+      uint32:0 >/dev/null 2>&1; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+mdns_absence_check_cli() {
+  python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
+import subprocess
+import sys
+
+from k3s_mdns_parser import parse_mdns_records
+from mdns_helpers import _norm_host
+
+service_type, cluster, environment, target = sys.argv[1:5]
+command = [
+    "avahi-browse",
+    "-rptk",
+    service_type,
+]
+
+try:
+    proc = subprocess.run(command, capture_output=True, text=True, check=False)
+except FileNotFoundError:
+    sys.exit(2)
+
+lines = [line for line in proc.stdout.splitlines() if line]
+records = parse_mdns_records(lines, cluster, environment)
+target_norm = _norm_host(target)
+
+for record in records:
+    if _norm_host(record.host) == target_norm:
+        sys.exit(1)
+
+sys.exit(0)
+PY
+}
+
+check_mdns_absence_once() {
+  MDNS_ABSENCE_LAST_METHOD=""
+  MDNS_ABSENCE_LAST_STATUS="unknown"
+
+  local status
+  if mdns_absence_check_dbus; then
+    status=0
+  else
+    status=$?
+  fi
+  if [ "${status}" -ne 2 ]; then
+    MDNS_ABSENCE_LAST_METHOD="dbus"
+    case "${status}" in
+      0) MDNS_ABSENCE_LAST_STATUS="absent" ;;
+      1) MDNS_ABSENCE_LAST_STATUS="present" ;;
+      *) MDNS_ABSENCE_LAST_STATUS="unknown" ;;
+    esac
+    return "${status}"
+  fi
+
+  if mdns_absence_check_cli; then
+    status=0
+  else
+    status=$?
+  fi
+  if [ "${status}" -ne 2 ]; then
+    MDNS_ABSENCE_LAST_METHOD="cli"
+    case "${status}" in
+      0) MDNS_ABSENCE_LAST_STATUS="absent" ;;
+      1) MDNS_ABSENCE_LAST_STATUS="present" ;;
+      *) MDNS_ABSENCE_LAST_STATUS="unknown" ;;
+    esac
+    return "${status}"
+  fi
+
+  MDNS_ABSENCE_LAST_METHOD="none"
+  MDNS_ABSENCE_LAST_STATUS="unknown"
+  return 2
+}
+
+ensure_mdns_absence_gate() {
+  if [ "${MDNS_ABSENCE_GATE}" != "1" ]; then
+    return 0
+  fi
+
+  local timeout_ms="${MDNS_ABSENCE_TIMEOUT_MS}"
+  case "${timeout_ms}" in
+    ''|*[!0-9]*) timeout_ms=15000 ;;
+  esac
+
+  local backoff_start="${MDNS_ABSENCE_BACKOFF_START_MS}"
+  case "${backoff_start}" in
+    ''|*[!0-9]*) backoff_start=500 ;;
+  esac
+
+  local backoff_cap="${MDNS_ABSENCE_BACKOFF_CAP_MS}"
+  case "${backoff_cap}" in
+    ''|*[!0-9]*) backoff_cap=4000 ;;
+  esac
+
+  local jitter="${MDNS_ABSENCE_JITTER}"
+
+  local start_ms
+  start_ms="$(current_time_ms)"
+
+  log_info discover event=mdns_absence_gate phase=start host="${MDNS_HOST_RAW}" service="${MDNS_SERVICE_TYPE}" timeout_ms="${timeout_ms}" >&2
+
+  if restart_avahi_daemon_service; then
+    log_info discover event=mdns_absence_gate action=restart_avahi outcome=ok >&2
+  else
+    log_warn_msg discover "failed to restart avahi-daemon" "action=restart_avahi" >&2
+  fi
+
+  local attempts=0
+  local consecutive_absent=0
+  local presence_seen=0
+  local elapsed_ms=0
+  local last_status="unknown"
+  local last_method="none"
+  local status=2
+
+  while :; do
+    attempts=$((attempts + 1))
+    if check_mdns_absence_once; then
+      status=0
+    else
+      status=$?
+    fi
+    last_method="${MDNS_ABSENCE_LAST_METHOD:-none}"
+    last_status="${MDNS_ABSENCE_LAST_STATUS:-unknown}"
+
+    case "${status}" in
+      0)
+        consecutive_absent=$((consecutive_absent + 1))
+        ;;
+      1)
+        presence_seen=1
+        consecutive_absent=0
+        ;;
+      *)
+        consecutive_absent=0
+        ;;
+    esac
+
+    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" >&2
+
+    elapsed_ms="$(elapsed_since_ms "${start_ms}")"
+
+    if [ "${consecutive_absent}" -ge 2 ]; then
+      break
+    fi
+
+    if [ "${timeout_ms}" -gt 0 ] && [ "${elapsed_ms}" -ge "${timeout_ms}" ]; then
+      break
+    fi
+
+    local delay_ms
+    delay_ms="$(compute_absence_delay_ms "${attempts}" "${backoff_start}" "${backoff_cap}" "${jitter}")"
+    case "${delay_ms}" in
+      ''|*[!0-9]*) delay_ms=0 ;;
+    esac
+    if [ "${delay_ms}" -gt 0 ]; then
+      local delay_s
+      delay_s="$(python3 - "${delay_ms}" <<'PY'
+import sys
+
+try:
+    value = int(sys.argv[1])
+except (IndexError, ValueError):
+    value = 0
+if value < 0:
+    value = 0
+print(value / 1000.0)
+PY
+)"
+      sleep "${delay_s}"
+    fi
+  done
+
+  local confirmed=0
+  if [ "${consecutive_absent}" -ge 2 ]; then
+    confirmed=1
+  fi
+
+  local reason=""
+  if [ "${confirmed}" -ne 1 ]; then
+    if [ "${timeout_ms}" -gt 0 ] && [ "${elapsed_ms}" -ge "${timeout_ms}" ]; then
+      reason="timeout"
+    elif [ "${presence_seen}" -eq 1 ]; then
+      reason="presence_detected"
+    else
+      reason="unconfirmed"
+    fi
+  fi
+
+  if [ "${confirmed}" -eq 1 ]; then
+    log_info discover event=mdns_absence_gate mdns_absence_confirmed=1 attempts="${attempts}" ms_elapsed="${elapsed_ms}" last_method="${last_method}" consecutive_absent="${consecutive_absent}" >&2
+  else
+    log_warn_msg discover "mDNS absence gate timed out" "mdns_absence_confirmed=0" "attempts=${attempts}" "ms_elapsed=${elapsed_ms}" "reason=${reason}" "last_method=${last_method}" >&2
+  fi
+
+  return 0
 }
 
 stop_bootstrap_publisher() {
@@ -1517,6 +1869,8 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
   fi
   exit "${status}"
 fi
+
+ensure_mdns_absence_gate
 
 log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
 server_host=""
