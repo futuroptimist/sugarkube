@@ -88,6 +88,8 @@ SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
 MDNS_SELF_CHECK_FAILURE_CODE=94
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
+FOLLOWER_UNTIL_SERVER_SET_AT=0
+FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 
 run_net_diag() {
   local reason="$1"
@@ -1474,12 +1476,23 @@ while :; do
       server_host="$(discover_server_host || true)"
       if [ -n "${server_host}" ]; then
         FOLLOWER_UNTIL_SERVER=0
+        FOLLOWER_UNTIL_SERVER_SET_AT=0
         break
       fi
 
       if [ "${FOLLOWER_UNTIL_SERVER}" -eq 1 ]; then
-        sleep "${DISCOVERY_WAIT_SECS}"
-        continue
+        if [ "${FOLLOWER_UNTIL_SERVER_SET_AT}" -eq 0 ]; then
+          FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
+        fi
+        now="$(date +%s)"
+        if [ $((now - FOLLOWER_UNTIL_SERVER_SET_AT)) -ge "${FOLLOWER_REELECT_SECS}" ]; then
+          log_info discover event=follower_election_retry wait_secs="${FOLLOWER_REELECT_SECS}" >&2
+          FOLLOWER_UNTIL_SERVER=0
+          FOLLOWER_UNTIL_SERVER_SET_AT=0
+        else
+          sleep "${DISCOVERY_WAIT_SECS}"
+          continue
+        fi
       fi
 
       if run_leader_election; then
@@ -1488,14 +1501,17 @@ while :; do
         if [ -n "${server_host}" ]; then
           log_info discover outcome=post_election_server host="${server_host}" holdoff="${ELECTION_HOLDOFF}" >&2
           FOLLOWER_UNTIL_SERVER=0
+          FOLLOWER_UNTIL_SERVER_SET_AT=0
           break
         fi
         bootstrap_selected="true"
         FOLLOWER_UNTIL_SERVER=0
+        FOLLOWER_UNTIL_SERVER_SET_AT=0
         break
       fi
 
       FOLLOWER_UNTIL_SERVER=1
+      FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
       sleep "${DISCOVERY_WAIT_SECS}"
     done
   fi
@@ -1523,6 +1539,7 @@ while :; do
     if run_leader_election; then
       log_info discover event=bootstrap_selfcheck_election outcome=winner key="${ELECTION_KEY}" >&2
       FOLLOWER_UNTIL_SERVER=0
+      FOLLOWER_UNTIL_SERVER_SET_AT=0
       sleep "${ELECTION_HOLDOFF}"
       if [ "${SERVERS_DESIRED}" = "1" ]; then
         install_server_single
@@ -1534,6 +1551,7 @@ while :; do
 
     log_info discover event=bootstrap_selfcheck_election outcome=follower key="${ELECTION_KEY}" >&2
     FOLLOWER_UNTIL_SERVER=1
+    FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
     bootstrap_selected="false"
     server_host=""
     sleep "${DISCOVERY_WAIT_SECS}"
