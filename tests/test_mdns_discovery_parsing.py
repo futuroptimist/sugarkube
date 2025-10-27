@@ -1,3 +1,7 @@
+"""Tests for the k3s-discover mDNS helpers."""
+
+from __future__ import annotations
+
 import os
 import subprocess
 from pathlib import Path
@@ -17,24 +21,45 @@ def mdns_env(tmp_path):
         """#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -ne 5 ]]; then
+if [[ "$#" -lt 4 || "$#" -gt 5 ]]; then
   echo "unexpected argument count: $#" >&2
   exit 1
 fi
 
-if [[ "$1" != "--parsable" || "$2" != "--terminate" || "$3" != "--resolve" || "$4" != "--ignore-local" ]]; then
+if [[ "$1" != "--parsable" || "$2" != "--terminate" ]]; then
   echo "unexpected arguments: $*" >&2
   exit 1
 fi
 
-if [[ "$5" != "_https._tcp" ]]; then
-  echo "unexpected service type: $5" >&2
+shift 2
+
+if [[ "$1" != "--resolve" ]]; then
+  echo "missing --resolve flag" >&2
+  exit 1
+fi
+
+shift
+
+if [[ "$1" == "--ignore-local" ]]; then
+  shift
+fi
+
+if [[ "$#" -ne 1 ]]; then
+  echo "unexpected trailing arguments: $*" >&2
+  exit 1
+fi
+
+service="$1"
+
+if [[ "$service" != "_k3s-sugar-dev._tcp" && "$service" != "_https._tcp" ]]; then
+  echo "unexpected service type: $service" >&2
   exit 1
 fi
 
 cat <<'EOF'
-=;eth0;IPv4;k3s API sugar/dev on ctrl-1;_https._tcp;local;sugar-control-0.local;192.168.50.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
-=;eth0;IPv4;broken;_https._tcp;local;sugar-control-1.local
+=;eth0;IPv4;k3s-sugar-dev@sugar-control-0 (server);_k3s-sugar-dev._tcp;local;sugar-control-0.local;192.168.50.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
+=;eth0;IPv4;k3s-sugar-dev@sugar-control-1 (server);_k3s-sugar-dev._tcp;local;sugar-control-1.local;192.168.50.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
+=;eth0;IPv4;broken;_k3s-sugar-dev._tcp;local;sugar-control-2.local
 EOF
 """,
         encoding="utf-8",
@@ -55,7 +80,7 @@ EOF
     return env
 
 
-def run_query(mode, env):
+def run_query(mode: str, env: dict[str, str]) -> list[str]:
     result = subprocess.run(
         ["bash", str(SCRIPT), "--run-avahi-query", mode],
         env=env,
@@ -72,11 +97,26 @@ def test_server_first_returns_expected_host(mdns_env):
     assert lines == ["sugar-control-0.local"]
 
 
-def test_server_count_detects_single_server(mdns_env):
+def test_server_count_detects_all_servers(mdns_env):
     lines = run_query("server-count", mdns_env)
-    assert lines == ["1"]
+    assert lines == ["2"]
 
 
 def test_bootstrap_queries_ignore_server_only_records(mdns_env):
     assert run_query("bootstrap-hosts", mdns_env) == []
     assert run_query("bootstrap-leaders", mdns_env) == []
+
+
+def test_print_server_hosts_lists_unique_hosts(mdns_env):
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--print-server-hosts"],
+        env=mdns_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "sugar-control-0.local",
+        "sugar-control-1.local",
+    ]

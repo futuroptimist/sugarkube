@@ -231,6 +231,13 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
   Set `SUGARKUBE_SERVERS>=3` before bring-up.
   The first server starts etcd with `--cluster-init`; subsequent servers detect peers via mDNS and join over `https://<peer>:6443`.
   Use NVMe or SSD storage for HA; SD cards aren’t durable enough for etcd writes.
+  List the currently discoverable control-plane hosts with:
+
+  ```bash
+  scripts/k3s-discover.sh --print-server-hosts
+  ```
+
+  Use the output to verify mDNS visibility before orchestrating multi-node joins or rehearsing with `pi rehearse`.
 
 ---
 
