@@ -67,3 +67,16 @@ def test_outage_dates_are_not_in_the_future() -> None:
         assert (
             expected_prefix == recorded_date
         ), f"Filename {outage_file.name} should start with outage date {recorded_date}"
+
+
+def test_markdown_outages_have_json_counterparts() -> None:
+    """Every long-form Markdown report should have a matching JSON record."""
+
+    outages_dir = Path("outages")
+    assert outages_dir.is_dir(), "outages/ directory must exist for outage records"
+
+    for markdown_file in sorted(outages_dir.glob("*.md")):
+        json_file = markdown_file.with_suffix(".json")
+        assert json_file.exists(), (
+            f"Missing JSON outage record for {markdown_file.name}; add {json_file.name}"
+        )
