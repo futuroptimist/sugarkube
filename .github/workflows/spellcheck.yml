@@ -5,6 +5,10 @@ on:
   pull_request:
     paths:
       - '**.md'
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**.md'
 
 permissions:
   contents: read
@@ -14,9 +18,24 @@ env:
 
 jobs:
   spellcheck:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        if: github.event_name != 'pull_request_target'
+        uses: actions/checkout@v5
+      - name: Checkout pull request head
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:

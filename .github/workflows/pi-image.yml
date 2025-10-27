@@ -30,16 +30,49 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - 'scripts/collect_pi_image.sh'
+      - 'scripts/build_pi_image.sh'
+      - 'scripts/build_pi_image.ps1'
+      - 'scripts/fix_pi_image_permissions.sh'
+      - 'scripts/create_build_metadata.py'
+      - 'scripts/download_pi_image.sh'
+      - 'scripts/render_pi_imager_preset.py'
+      - 'scripts/fix_pi_image_permissions.sh'
+      - 'tests/create_build_metadata_e2e.sh'
+      - 'tests/**'
+      - '.github/workflows/pi-image.yml'
+
+permissions:
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   unit:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        if: github.event_name != 'pull_request_target'
+        uses: actions/checkout@v5
         with:
+          fetch-depth: 1
+      - name: Checkout pull request head
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Install collector dependencies
         run: |

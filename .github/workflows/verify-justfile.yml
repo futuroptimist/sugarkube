@@ -9,12 +9,34 @@ on:
     paths:
       - justfile
       - .github/workflows/verify-justfile.yml
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - justfile
+      - .github/workflows/verify-justfile.yml
+
+permissions:
+  contents: read
 
 jobs:
   justfile:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        if: github.event_name != 'pull_request_target'
+        uses: actions/checkout@v5
+      - name: Checkout pull request head
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install just
         run: |
           sudo apt-get update
