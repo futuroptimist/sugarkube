@@ -17,10 +17,8 @@ log__level_to_num() {
 }
 
 log__should_emit() {
-  local desired current
-  desired="$(log__level_to_num "$1" 2>/dev/null || echo 1)"
-  current="$(log__level_to_num "${LOG_LEVEL}" 2>/dev/null || echo 1)"
-  [ "${desired}" -le "${current}" ]
+  [ "$(log__level_to_num "$1" 2>/dev/null || echo 1)" -le \
+    "$(log__level_to_num "${LOG_LEVEL}" 2>/dev/null || echo 1)" ]
 }
 
 log__timestamp() {
@@ -28,22 +26,25 @@ log__timestamp() {
 }
 
 log_kv() {
-  local level event
-  level="$1"
-  shift
-  event="$1"
-  shift
-  if ! log__should_emit "${level}"; then
+  log__level="${1:-info}"
+  if [ "$#" -lt 2 ]; then
+    return 0
+  fi
+  log__event="$2"
+  shift 2
+
+  if ! log__should_emit "${log__level}"; then
+    unset log__level log__event
     return 0
   fi
 
-  local message="ts=$(log__timestamp) level=${level} event=${event}"
-  local kv
-  for kv in "$@"; do
-    [ -n "${kv}" ] || continue
-    message="${message} ${kv}"
+  log__message="ts=$(log__timestamp) level=${log__level} event=${log__event}"
+  for log__kv in "$@"; do
+    [ -n "${log__kv}" ] || continue
+    log__message="${log__message} ${log__kv}"
   done
-  printf '%s\n' "${message}"
+  printf '%s\n' "${log__message}"
+  unset log__level log__event log__message log__kv
 }
 
 log_info() {
