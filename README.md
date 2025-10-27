@@ -185,6 +185,16 @@ Regression coverage:
 and
 `tests/test_sendemail_validate_hook.py::test_sendemail_hook_scans_patches_for_secrets`.
 
+### Integration tests
+
+Set `AVAHI_AVAILABLE=1` to opt into the Avahi-backed mDNS roundtrip test. The
+integration suite expects `avahi-publish`, `avahi-browse`, and `avahi-resolve`
+to be installed. Run it directly with:
+
+```bash
+AVAHI_AVAILABLE=1 bats tests/integration/mdns_roundtrip.bats
+```
+
 [hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
 [pi-smoke-test-doc]: docs/pi_smoke_test.md
 
