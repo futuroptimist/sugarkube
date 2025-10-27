@@ -298,34 +298,38 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       last_reason="resolve_empty"
       continue
     fi
-    resolved_host="$(printf '%s' "${result_json}" | python3 - <<'PY'
+    resolved_host="$(
+      python3 - "${result_json}" <<'PY'
 import json
 import sys
-payload = json.loads(sys.stdin.read())
+payload = json.loads(sys.argv[1])
 print(payload.get("host", ""))
 PY
-)"
-    resolved_port="$(printf '%s' "${result_json}" | python3 - <<'PY'
+    )"
+    resolved_port="$(
+      python3 - "${result_json}" <<'PY'
 import json
 import sys
-payload = json.loads(sys.stdin.read())
+payload = json.loads(sys.argv[1])
 print(payload.get("port", ""))
 PY
-)"
-    resolved_address="$(printf '%s' "${result_json}" | python3 - <<'PY'
+    )"
+    resolved_address="$(
+      python3 - "${result_json}" <<'PY'
 import json
 import sys
-payload = json.loads(sys.stdin.read())
+payload = json.loads(sys.argv[1])
 print(payload.get("address", ""))
 PY
-)"
-    txt_payload="$(printf '%s' "${result_json}" | python3 - <<'PY'
+    )"
+    txt_payload="$(
+      python3 - "${result_json}" <<'PY'
 import json
 import sys
-payload = json.loads(sys.stdin.read())
+payload = json.loads(sys.argv[1])
 print('\n'.join(payload.get("txt", [])))
 PY
-)"
+    )"
     txt_for_trace="$(printf '%s' "${txt_payload}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
     log_trace mdns_selfcheck_dbus \
       attempt="${attempt}" \
@@ -365,13 +369,14 @@ PY
 
     resolved_ipv4=""
     if name_resolution_json="$(resolve_host_name "${resolved_host}" 0 2>/dev/null)"; then
-      resolved_ipv4="$(printf '%s' "${name_resolution_json}" | python3 - <<'PY'
+      resolved_ipv4="$(
+        python3 - "${name_resolution_json}" <<'PY'
 import json
 import sys
-payload = json.loads(sys.stdin.read())
+payload = json.loads(sys.argv[1])
 print(payload.get("address", ""))
 PY
-)"
+      )"
     else
       status=$?
       if [ "${status}" -eq 126 ] || [ "${status}" -eq 127 ]; then
@@ -387,13 +392,14 @@ PY
     if [ -z "${resolved_ipv4}" ] && [ -n "${EXPECTED_IPV4}" ]; then
       # Attempt unspecified protocol if IPv4 lookup empty
       if name_resolution_json="$(resolve_host_name "${resolved_host}" -1 2>/dev/null)"; then
-        resolved_ipv4="$(printf '%s' "${name_resolution_json}" | python3 - <<'PY'
+        resolved_ipv4="$(
+          python3 - "${name_resolution_json}" <<'PY'
 import json
 import sys
-payload = json.loads(sys.stdin.read())
+payload = json.loads(sys.argv[1])
 print(payload.get("address", ""))
 PY
-)"
+        )"
       else
         status=$?
         if [ "${status}" -eq 126 ] || [ "${status}" -eq 127 ]; then
