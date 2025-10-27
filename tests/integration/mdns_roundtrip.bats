@@ -1,7 +1,5 @@
 #!/usr/bin/env bats
 
-publisher_pid=""
-
 setup() {
   if [ "${AVAHI_AVAILABLE:-0}" != "1" ]; then
     skip "AVAHI_AVAILABLE not enabled"
@@ -18,13 +16,14 @@ setup() {
   if ! command -v avahi-resolve >/dev/null 2>&1; then
     skip "avahi-resolve not available"
   fi
+
+  publisher_pid=""
 }
 
 teardown() {
-  if [ -n "${publisher_pid}" ]; then
-    if kill "${publisher_pid}" >/dev/null 2>&1; then
-      wait "${publisher_pid}" >/dev/null 2>&1 || true
-    fi
+  if [ -n "${publisher_pid:-}" ]; then
+    kill "${publisher_pid}" >/dev/null 2>&1 || true
+    wait "${publisher_pid}" >/dev/null 2>&1 || true
     publisher_pid=""
   fi
 }
