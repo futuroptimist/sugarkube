@@ -306,6 +306,7 @@ SERVER_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
 SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
+IPTABLES_ENSURED=0
 
 run_privileged() {
   if [ -n "${SUDO_CMD:-}" ]; then
@@ -1227,6 +1228,17 @@ claim_bootstrap_leadership() {
   return 0
 }
 
+ensure_iptables_tools() {
+  if [ "${IPTABLES_ENSURED}" -eq 1 ]; then
+    return 0
+  fi
+  if ! run_privileged "${SCRIPT_DIR}/k3s-install-iptables.sh"; then
+    log_error_msg discover "Failed to ensure iptables tooling" "script=${SCRIPT_DIR}/k3s-install-iptables.sh"
+    exit 1
+  fi
+  IPTABLES_ENSURED=1
+}
+
 build_install_env() {
   local -n _target=$1
   _target=("INSTALL_K3S_CHANNEL=${K3S_CHANNEL:-stable}")
@@ -1236,6 +1248,7 @@ build_install_env() {
 }
 
 install_server_single() {
+  ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
   local env_assignments
   build_install_env env_assignments
@@ -1259,6 +1272,7 @@ install_server_single() {
 }
 
 install_server_cluster_init() {
+  ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
   local env_assignments
   build_install_env env_assignments
@@ -1288,6 +1302,7 @@ install_server_join() {
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
+  ensure_iptables_tools
   log_info discover phase=install_join host="${MDNS_HOST_RAW}" server="${server}" desired_servers="${SERVERS_DESIRED}" >&2
   local env_assignments
   build_install_env env_assignments
@@ -1318,6 +1333,7 @@ install_agent() {
     log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
+  ensure_iptables_tools
   log_info discover phase=install_agent host="${MDNS_HOST_RAW}" server="${server}" >&2
   local env_assignments
   build_install_env env_assignments
