@@ -522,6 +522,8 @@ install -Dm755 "${REPO_ROOT}/scripts/post_clone_verify.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/post_clone_verify.sh"
 install -Dm755 "${REPO_ROOT}/scripts/k3s_preflight.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s_preflight.sh"
+install -Dm755 "${REPO_ROOT}/scripts/k3s-install-iptables.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-install-iptables.sh"
 
 install -Dm755 "${REPO_ROOT}/scripts/spot_check.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/sugarkube-spot-check"
@@ -535,6 +537,8 @@ install -Dm755 "${REPO_ROOT}/scripts/post_clone_verify.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/sugarkube-post-clone-verify"
 install -Dm755 "${REPO_ROOT}/scripts/k3s_preflight.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/sugarkube-k3s-preflight"
+install -Dm755 "${REPO_ROOT}/scripts/k3s-install-iptables.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/sugarkube-k3s-install-iptables"
 
 install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot.service"
