@@ -50,11 +50,14 @@ if [ "${dbus_mode}" != "0" ]; then
     fi
     status=$?
     case "${status}" in
+      # 0=ok, 1=transient fail, 2=unsupported -> CLI fallback
       1)
-        exit 1
+        log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_first_attempt_failed fallback=cli
         ;;
       2)
         log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported fallback=cli
+        ;;
+      0)
         ;;
       *)
         exit "${status}"
