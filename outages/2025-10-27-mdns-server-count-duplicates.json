@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-27-mdns-server-count-duplicates",
+  "date": "2025-10-27",
+  "component": "scripts/k3s_mdns_query.py",
+  "rootCause": "The server-count mDNS query counted every advertisement, so one server broadcasting both IPv4 and IPv6 records appeared as multiple control-plane nodes. Discovery then believed the desired quorum was met and stopped promoting new servers.",
+  "resolution": "Deduplicate server hosts by normalized hostname when counting adverts and add a regression test fixture that exercises IPv4+IPv6 pairs.",
+  "references": [
+    "scripts/k3s_mdns_query.py",
+    "tests/scripts/test_k3s_mdns_query.py"
+  ]
+}

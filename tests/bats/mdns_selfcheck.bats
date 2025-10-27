@@ -74,6 +74,40 @@ EOS
   [[ "$output" =~ outcome=ok ]]
 }
 
+@test "mdns self-check trims single-quoted avahi fields" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+cat <<'TXT'
+=;eth0;IPv4;'k3s-sugar-dev@sugarkube0 (server)';_k3s-sugar-dev._tcp;local;'sugarkube0.local';'10.0.0.5';6443;txt='k3s=1';txt='cluster=sugar';txt='env=dev';txt='role=server';txt='phase=server'
+TXT
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "10.0.0.5"
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=10.0.0.5 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ host=sugarkube0.local ]]
+}
+
+
 @test "mdns self-check reports failure when no records appear" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash

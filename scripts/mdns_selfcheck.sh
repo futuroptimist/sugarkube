@@ -44,19 +44,21 @@ fi
 if [ "${SUGARKUBE_MDNS_DBUS:-0}" = "1" ]; then
   dbus_script="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
   if [ -x "${dbus_script}" ]; then
+    dbus_status=0
     if "${dbus_script}"; then
       exit 0
+    else
+      dbus_status=$?
     fi
-    status=$?
-    case "${status}" in
+    case "${dbus_status}" in
       1)
-        exit 1
+        log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_browser_failed fallback=cli
         ;;
       2)
         log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported fallback=cli
         ;;
       *)
-        exit "${status}"
+        exit "${dbus_status}"
         ;;
     esac
   else
@@ -260,8 +262,12 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     if [ -z "${srv_host}" ]; then
       last_reason="empty_srv_host"
     else
-      resolved="$(resolve_host "${srv_host}" || true)"
-      status=$?
+      resolved=""
+      if resolved="$(resolve_host "${srv_host}")"; then
+        status=0
+      else
+        status=$?
+      fi
       resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
       log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then

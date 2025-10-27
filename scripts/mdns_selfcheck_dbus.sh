@@ -266,6 +266,8 @@ PY
 if ! call_service_browser >/dev/null 2>&1; then
   status=$?
   if [ "${status}" -eq 126 ] || [ "${status}" -eq 127 ]; then
+    log_debug mdns_selfcheck_dbus outcome=skip reason=gdbus_exit status="${status}"
+
     log_debug mdns_selfcheck_dbus outcome=skip reason=gdbus_unavailable
     exit 2
   fi

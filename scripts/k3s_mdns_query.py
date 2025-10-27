@@ -154,8 +154,15 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
         return []
 
     if mode == "server-count":
-        count = sum(1 for record in records if record.txt.get("role") == "server")
-        return [str(count)]
+        seen = set()
+        for record in records:
+            if record.txt.get("role") != "server":
+                continue
+            host_key = _norm_host(record.host)
+            if host_key in seen:
+                continue
+            seen.add(host_key)
+        return [str(len(seen))]
 
     if mode == "bootstrap-hosts":
         seen = set()

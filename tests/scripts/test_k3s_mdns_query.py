@@ -197,6 +197,30 @@ def test_query_mdns_server_hosts_returns_unique_hosts(tmp_path):
     assert results == ["host0.local", "host1.local"]
 
 
+def test_query_mdns_server_count_deduplicates_hosts(tmp_path):
+    fixture = tmp_path / "server-count.txt"
+    fixture.write_text(
+        (
+            "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;"
+            "192.168.1.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+            "=;eth0;IPv6;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;"
+            "fe80::1;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+            "=;eth0;IPv4;k3s-sugar-dev@host1 (server);_k3s-sugar-dev._tcp;local;host1.local;"
+            "192.168.1.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server\n"
+        ),
+        encoding="utf-8",
+    )
+
+    results = query_mdns(
+        "server-count",
+        "sugar",
+        "dev",
+        fixture_path=str(fixture),
+    )
+
+    assert results == ["2"]
+
+
 def test_query_mdns_falls_back_without_resolve():
     unresolved = "+;eth0;IPv4;k3s-sugar-dev@host0 (bootstrap);_k3s-sugar-dev._tcp;local\n"
 

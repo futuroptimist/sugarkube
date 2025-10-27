@@ -142,6 +142,26 @@ def parse_avahi_resolved_line(line: str) -> Optional[Dict[str, Any]]:
 
     parts = line.split(";")
     if len(parts) < 9:
+        # Unresolved entries lack address fields but still carry the service name.
+        # Preserve the instance/type/domain so callers can recover the host from
+        # the service label when Avahi never emitted a resolved record.
+        if len(parts) >= 6 and parts[0] in {"+", "@"}:
+            cleaned = [_strip_quotes(part.strip()) for part in parts]
+            return {
+                "raw": line,
+                "record_type": cleaned[0],
+                "interface": cleaned[1] if len(cleaned) > 1 else "",
+                "protocol": cleaned[2] if len(cleaned) > 2 else "",
+                "instance": cleaned[3] if len(cleaned) > 3 else "",
+                "type": cleaned[4] if len(cleaned) > 4 else "",
+                "domain": cleaned[5] if len(cleaned) > 5 else "",
+                "host": "",
+                "addr": "",
+                "port": 0,
+                "port_raw": "",
+                "txt": {},
+                "fields": cleaned,
+            }
         return None
 
     cleaned = [_strip_quotes(part.strip()) for part in parts]

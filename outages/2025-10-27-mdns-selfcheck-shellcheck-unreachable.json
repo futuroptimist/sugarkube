@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-27-mdns-selfcheck-shellcheck-unreachable",
+  "date": "2025-10-27",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "A retired shell-based quote trimmer lingered in mdns_selfcheck.sh even though the awk parser already handled quoting. ShellCheck flagged the helper's body as unreachable (SC2317), so the Pi image unit workflow aborted before running the rest of the suite.",
+  "resolution": "Rely solely on the awk strip_quotes helper and add a single-quoted avahi fixture test so mdns_selfcheck.sh stays shellcheck-clean going forward.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ]
+}
