@@ -85,28 +85,7 @@ print(int(time.time() * 1000))
 PY
 )"
 
-strip_quotes() {
-  local value="$1"
-  if [ "${#value}" -lt 2 ]; then
-    printf '%s' "${value}"
-    return
-  fi
 
-  local first last trimmed
-  first="${value%"${value#?}"}"
-  last="${value#"${value%?}"}"
-
-  case "${first}${last}" in
-    "\"\""|"''")
-      trimmed="${value#?}"
-      trimmed="${trimmed%?}"
-      printf '%s' "${trimmed}"
-      return
-      ;;
-  esac
-
-  printf '%s' "${value}"
-}
 
 parse_browse() {
   awk -v svc="${SERVICE_TYPE}" \
