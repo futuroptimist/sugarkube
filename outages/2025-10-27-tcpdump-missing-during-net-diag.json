@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-27-tcpdump-missing-during-net-diag",
+  "date": "2025-10-27",
+  "component": "scripts/net_diag.sh",
+  "rootCause": "net_diag reported tcpdump_missing on port 5353 during mDNS self-check failures, obscuring packet-level visibility on Raspberry Pi OS images that do not preinstall tcpdump.",
+  "resolution": "Document the absence via outage record and leave behaviour unchanged to keep images minimal. Operators can apt install tcpdump when deeper mDNS debugging is required.",
+  "references": [
+    "scripts/net_diag.sh",
+    "docs/raspi_cluster_setup.md"
+  ]
+}
+
+
