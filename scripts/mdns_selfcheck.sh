@@ -109,60 +109,66 @@ strip_quotes() {
 }
 
 parse_browse() {
-  local target_instance=""
-  local srv_host=""
-  local srv_port=""
+  awk -v svc="${SERVICE_TYPE}" \
+      -v inst_pref="${INSTANCE_PREFIX}" \
+      -v short_host="${EXPECTED_SHORT_HOST}" \
+      -v expected_role="${EXPECTED_ROLE}" \
+      -v expected_phase="${EXPECTED_PHASE}" \
+      -v cluster="${SERVICE_CLUSTER}" \
+      -v env="${SERVICE_ENV}" '
+    function strip_quotes(s,    n) {
+      n = length(s)
+      if (n >= 2 && ((substr(s,1,1) == "\"" && substr(s,n,1) == "\"") || (substr(s,1,1) == "\047" && substr(s,n,1) == "\047"))) {
+        return substr(s, 2, n-2)
+      }
+      return s
+    }
+    BEGIN { FS = ";" }
+    $1 == "=" {
+      # find the index of the service type
+      type_idx = -1
+      for (i = 1; i <= NF; i++) {
+        candidate = strip_quotes($i)
+        if (candidate == svc) { type_idx = i; break }
+      }
+      if (type_idx < 0) next
 
-  while IFS=';' read -r record _iface _proto instance type domain host _addr port rest; do
-    [ "${record}" = "=" ] || continue
-    instance="$(strip_quotes "${instance}")"
-    type="$(strip_quotes "${type}")"
-    domain="$(strip_quotes "${domain}")"
-    host="$(strip_quotes "${host}")"
-    port="$(strip_quotes "${port}")"
+      inst_idx = type_idx - 1
+      host_idx = type_idx + 2
+      port_idx = type_idx + 4
+      if (inst_idx < 1 || host_idx > NF || port_idx > NF) next
 
-    match_ok=0
-    if [ -n "${EXPECTED_ROLE}" ]; then
-      case "${instance}" in
-        "${INSTANCE_PREFIX} (${EXPECTED_ROLE})") match_ok=1 ;;
-        "k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_SHORT_HOST} (${EXPECTED_ROLE})") match_ok=1 ;;
-      esac
-    else
-      case "${instance}" in
-        "${INSTANCE_PREFIX} (bootstrap)"|"${INSTANCE_PREFIX} (server)") match_ok=1 ;;
-        "k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_SHORT_HOST} (bootstrap)"|\
-        "k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_SHORT_HOST} (server)") match_ok=1 ;;
-      esac
-    fi
-    [ "${match_ok}" -eq 1 ] || continue
+      instance = strip_quotes($(inst_idx))
+      host = strip_quotes($(host_idx))
+      port = strip_quotes($(port_idx))
 
-    if [ -n "${EXPECTED_ROLE}" ]; then
-      case "${rest}" in
-        *"role=${EXPECTED_ROLE}"*) ;;
-        *)
-          continue
-          ;;
-      esac
-    fi
+      # txt rest
+      rest = ""
+      for (j = port_idx + 1; j <= NF; j++) {
+        piece = strip_quotes($(j))
+        if (rest != "") rest = rest ";"
+        rest = rest piece
+      }
 
-    if [ -n "${EXPECTED_PHASE}" ]; then
-      case "${rest}" in
-        *"phase=${EXPECTED_PHASE}"*) ;;
-        *)
-          continue
-          ;;
-      esac
-    fi
+      ok = 0
+      if (expected_role != "") {
+        if (instance == inst_pref " (" expected_role ")") ok = 1
+        else if (instance == "k3s-" cluster "-" env "@" short_host " (" expected_role ")") ok = 1
+      } else {
+        if (instance == inst_pref " (bootstrap)" || instance == inst_pref " (server)") ok = 1
+        else if (instance == "k3s-" cluster "-" env "@" short_host " (bootstrap)" || instance == "k3s-" cluster "-" env "@" short_host " (server)") ok = 1
+      }
+      if (!ok) next
 
-    target_instance="${instance}"
-    srv_host="${host}"
-    srv_port="${port}"
-    break
-  done
+      if (expected_role != "" && rest !~ "role=" expected_role) next
+      if (expected_phase != "" && rest !~ "phase=" expected_phase) next
 
-  if [ -n "${target_instance}" ] && [ -n "${srv_host}" ]; then
-    printf '%s\n' "${target_instance}|${srv_host}|${srv_port}"
-  fi
+      if (host != "") {
+        print instance "|" host "|" port
+        exit 0
+      }
+    }
+  '
 }
 
 resolve_host() {

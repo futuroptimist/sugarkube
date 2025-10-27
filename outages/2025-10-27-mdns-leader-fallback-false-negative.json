@@ -1,0 +1,13 @@
+{
+  "id": "2025-10-27-mdns-leader-fallback-false-negative",
+  "date": "2025-10-27",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "Self-check strictly parsed fixed column positions from avahi-browse output, causing misses when optional address fields were present or re-ordered. As a result, valid adverts were treated as missing on some Avahi builds.",
+  "resolution": "Anchor parsing on the service type token and compute relative indices for instance/host/port. Accept both FQDN and short host variants and gate relaxed retry strictly on IPv4 mismatch exit code.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ]
+}
+
+
