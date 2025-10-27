@@ -120,3 +120,55 @@ def test_print_server_hosts_lists_unique_hosts(mdns_env):
         "sugar-control-0.local",
         "sugar-control-1.local",
     ]
+
+
+def test_print_server_hosts_normalizes_trailing_dots(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    browse = bin_dir / "avahi-browse"
+    browse.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+cat <<'EOF'
+=;eth0;IPv4;k3s-sugar-dev@sugar-control-0.local. (server);_k3s-sugar-dev._tcp.;local;sugar-control-0.local.;192.168.50.10;6443;txt=cluster=sugar;txt=env=dev;txt=role=server
+EOF
+""",
+        encoding="utf-8",
+    )
+    browse.chmod(0o755)
+
+    resolve = bin_dir / "avahi-resolve"
+    resolve.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "-n" ]]; then
+  shift
+fi
+printf '%s %s\n' "$1" "192.168.50.10"
+""",
+        encoding="utf-8",
+    )
+    resolve.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+            "SUGARKUBE_SERVERS": "1",
+            "SUGARKUBE_NODE_TOKEN_PATH": str(tmp_path / "node-token"),
+            "SUGARKUBE_BOOT_TOKEN_PATH": str(tmp_path / "boot-token"),
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--print-server-hosts"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["sugar-control-0.local"]

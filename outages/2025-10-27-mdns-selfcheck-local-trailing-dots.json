@@ -1,0 +1,12 @@
+{
+  "id": "mdns-selfcheck-local-trailing-dots",
+  "date": "2025-10-27",
+  "component": "mdns-selfcheck",
+  "rootCause": "Avahi 0.8 on the Raspberry Pi 5 returns service types and hostnames with trailing dots, so the awk parser in scripts/mdns_selfcheck.sh skipped the bootstrap/server advertisements and the self-check never observed the local service.",
+  "resolution": "Normalize service, instance, and host fields before matching so trailing dots collapse to the expected values, and add regression tests covering the Avahi output variant.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats",
+    "tests/test_mdns_discovery_parsing.py"
+  ]
+}

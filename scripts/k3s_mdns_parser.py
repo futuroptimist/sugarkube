@@ -27,6 +27,15 @@ def _normalize_role(role: Optional[str]) -> Optional[str]:
     return role.strip().lower() or None
 
 
+def _normalize_service_type(service_type: str) -> str:
+    service_type = service_type.strip()
+    while service_type.endswith("."):
+        service_type = service_type[:-1]
+    if service_type.endswith(".local"):
+        service_type = service_type[: -len(".local")]
+    return service_type
+
+
 def _normalize_host(host: str, domain: str) -> str:
     host = host.strip().rstrip(".")
     domain = domain.strip().rstrip(".")
@@ -220,7 +229,7 @@ def parse_mdns_records(
             continue
 
         fields = parsed["fields"]
-        service_type = parsed["type"]
+        service_type = _normalize_service_type(parsed["type"])
         type_cluster: Optional[str] = None
         type_environment: Optional[str] = None
 

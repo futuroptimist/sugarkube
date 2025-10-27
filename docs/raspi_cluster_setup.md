@@ -212,6 +212,9 @@ or, if that file is missing, reinstall the server (`just up dev` on a fresh node
   The `prereqs` recipe ensures `/etc/nsswitch.conf` includes
   `mdns4_minimal [NOTFOUND=return] dns mdns4`.
 
+- **Diagnostics**: `tcpdump` ships with the image so the network diagnostic helper can
+  capture multicast traffic when mDNS self-checks fail.
+
 - **Service advertisement**:
   Servers broadcast the Kubernetes API as `_https._tcp` on port `6443` with TXT records tagging cluster (`cluster=<name>`), environment (`env=<env>`), and role (`role=server`).
   Agents use these `.local` hostnames to locate the control-plane automatically.

@@ -107,16 +107,72 @@ parse_browse() {
       return value
     }
 
+    function rstrip_dot(value) {
+      while (length(value) > 0 && substr(value, length(value), 1) == ".") {
+        value = substr(value, 1, length(value) - 1)
+      }
+      return value
+    }
+
+    function normalize_host(value) {
+      value = dequote(value)
+      value = rstrip_dot(value)
+      while (value ~ /\.local\.local$/) {
+        sub(/\.local$/, "", value)
+      }
+      return value
+    }
+
+    function normalize_service(value) {
+      value = dequote(value)
+      value = rstrip_dot(value)
+      sub(/\.local$/, "", value)
+      return value
+    }
+
+    function normalize_instance(value,    at_pos, prefix, rest, role_part) {
+      value = dequote(value)
+      at_pos = index(value, "@")
+      if (at_pos <= 0) {
+        return value
+      }
+      prefix = substr(value, 1, at_pos)
+      rest = substr(value, at_pos + 1)
+      role_part = ""
+      at_pos = index(rest, " (")
+      if (at_pos > 0) {
+        role_part = substr(rest, at_pos)
+        rest = substr(rest, 1, at_pos - 1)
+      }
+      rest = normalize_host(rest)
+      return prefix rest role_part
+    }
+
+    function matches_role(role, instance_normalized) {
+      if (role == "") {
+        return 0
+      }
+      expected_full = normalize_instance(inst_pref " (" role ")")
+      expected_short = normalize_instance("k3s-" cluster "-" env "@" short_host " (" role ")")
+      if (instance_normalized == expected_full) {
+        return 1
+      }
+      if (instance_normalized == expected_short) {
+        return 1
+      }
+      return 0
+    }
+
     BEGIN { FS = ";" }
     $1 == "=" {
       delete fields
       for (i = 1; i <= NF; i++) {
-        fields[i] = dequote($i)
+        fields[i] = $i
       }
 
       type_idx = -1
       for (i = 1; i <= NF; i++) {
-        if (fields[i] == svc) { type_idx = i; break }
+        if (normalize_service(fields[i]) == svc) { type_idx = i; break }
       }
       if (type_idx < 0) next
 
@@ -126,23 +182,22 @@ parse_browse() {
       if (inst_idx < 1 || host_idx > NF || port_idx > NF) next
 
       instance = fields[inst_idx]
-      host = fields[host_idx]
+      host = normalize_host(fields[host_idx])
       port = fields[port_idx]
 
       rest = ""
       for (j = port_idx + 1; j <= NF; j++) {
-        piece = fields[j]
+        piece = dequote(fields[j])
         if (rest != "") rest = rest ";"
         rest = rest piece
       }
 
       ok = 0
+      instance_normalized = normalize_instance(instance)
       if (expected_role != "") {
-        if (instance == inst_pref " (" expected_role ")") ok = 1
-        else if (instance == "k3s-" cluster "-" env "@" short_host " (" expected_role ")") ok = 1
+        if (matches_role(expected_role, instance_normalized)) ok = 1
       } else {
-        if (instance == inst_pref " (bootstrap)" || instance == inst_pref " (server)") ok = 1
-        else if (instance == "k3s-" cluster "-" env "@" short_host " (bootstrap)" || instance == "k3s-" cluster "-" env "@" short_host " (server)") ok = 1
+        if (matches_role("bootstrap", instance_normalized) || matches_role("server", instance_normalized)) ok = 1
       }
       if (!ok) next
 
@@ -150,7 +205,7 @@ parse_browse() {
       if (expected_phase != "" && rest !~ "phase=" expected_phase) next
 
       if (host != "") {
-        print instance "|" host "|" port
+        print instance_normalized "|" host "|" port
         exit 0
       }
     }

@@ -36,7 +36,7 @@ up env='dev': prereqs
 
 prereqs:
     sudo apt-get update
-    sudo apt-get install -y avahi-daemon avahi-utils libnss-mdns curl jq
+    sudo apt-get install -y avahi-daemon avahi-utils libnss-mdns curl jq tcpdump
     sudo systemctl enable --now avahi-daemon
     if ! grep -q 'mdns4_minimal' /etc/nsswitch.conf; then sudo sed -i 's/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf; fi
 

@@ -1,0 +1,11 @@
+{
+  "id": "tcpdump-missing-diag",
+  "date": "2025-10-27",
+  "component": "network-diagnostics",
+  "rootCause": "The Pi image and bootstrap prereqs omitted tcpdump, so the network diagnostics emitted tcpdump_missing and could not capture mDNS packets when self-checks failed.",
+  "resolution": "Install tcpdump as part of the prereqs recipe and document the requirement so diag traces can inspect UDP 5353 traffic automatically.",
+  "references": [
+    "justfile",
+    "docs/raspi_cluster_setup.md"
+  ]
+}
