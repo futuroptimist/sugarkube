@@ -53,6 +53,8 @@ env:
 
 jobs:
   unit:
+    permissions:
+      contents: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push' ||
@@ -126,6 +128,9 @@ jobs:
     # Only run the expensive image build when manually dispatched
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     env:
       ARM64: 1
       DEBIAN_FRONTEND: noninteractive
