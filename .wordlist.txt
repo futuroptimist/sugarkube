@@ -188,6 +188,7 @@ resettable
 responder
 retightened
 roadmap
+roundtrip
 rpi
 runbook
 runtime
