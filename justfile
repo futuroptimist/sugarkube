@@ -77,6 +77,7 @@ kubeconfig env='dev':
 wipe:
     @sudo -E bash scripts/cleanup_mdns_publishers.sh
     @sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
+    @sudo --preserve-env=SUGARKUBE_RUNTIME_DIR,SUGARKUBE_RUN_DIR bash -lc $'set -euo pipefail\nRUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}"\nmkdir -p "${RUNTIME_DIR}"\ntouch "${RUNTIME_DIR}/mdns-negative-gate"\n'
 
 scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")

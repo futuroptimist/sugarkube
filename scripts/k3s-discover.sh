@@ -310,6 +310,7 @@ ADDRESS_PUBLISH_LOG=""
 MDNS_RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
 BOOTSTRAP_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-bootstrap.pid"
 SERVER_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
+MDNS_NEGATIVE_GATE_MARKER="${MDNS_RUNTIME_DIR}/mdns-negative-gate"
 SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
@@ -397,6 +398,20 @@ reload_avahi_daemon() {
     "${SUDO_CMD}" systemctl reload avahi-daemon || "${SUDO_CMD}" systemctl restart avahi-daemon
   else
     systemctl reload avahi-daemon || systemctl restart avahi-daemon
+  fi
+}
+
+restart_avahi_daemon() {
+  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -n "${SUDO_CMD:-}" ]; then
+    "${SUDO_CMD}" systemctl restart avahi-daemon
+  else
+    systemctl restart avahi-daemon
   fi
 }
 
@@ -826,6 +841,348 @@ discover_bootstrap_hosts() {
 
 discover_bootstrap_leaders() {
   run_avahi_query bootstrap-leaders | sort -u
+}
+
+mdns_check_absence_dbus() {
+  python3 - "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" "${SUGARKUBE_MDNS_DOMAIN:-local}" <<'PY'
+import subprocess
+import sys
+
+cluster, environment, host, domain = sys.argv[1:5]
+if not host:
+    sys.exit(0)
+
+service_type = f"_k3s-{cluster}-{environment}._tcp"
+candidates = [
+    f"k3s-{cluster}-{environment}@{host} (server)",
+    f"k3s-{cluster}-{environment}@{host} (bootstrap)",
+]
+
+
+def run_resolve(candidate: str) -> int:
+    cmd = [
+        "gdbus",
+        "call",
+        "--system",
+        "--dest",
+        "org.freedesktop.Avahi",
+        "--object-path",
+        "/",
+        "--method",
+        "org.freedesktop.Avahi.Server.ResolveService",
+        "int32:-1",
+        "int32:-1",
+        candidate,
+        service_type,
+        domain,
+        "int32:-1",
+        "uint32:0",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        return 2
+    if proc.returncode in (126, 127):
+        return 2
+    if proc.returncode == 0:
+        return 1
+    return 0
+
+
+for candidate in candidates:
+    result = run_resolve(candidate)
+    if result == 1:
+        sys.exit(1)
+    if result == 2:
+        sys.exit(2)
+
+sys.exit(0)
+PY
+}
+
+mdns_check_absence_cli() {
+  local host_key
+  host_key="$(canonical_host "${MDNS_HOST_RAW}")"
+  if [ -z "${host_key}" ]; then
+    return 0
+  fi
+
+  local mode
+  for mode in server-hosts bootstrap-hosts; do
+    local -a hosts=()
+    mapfile -t hosts < <(run_avahi_query "${mode}" | sort -u)
+    local entry
+    for entry in "${hosts[@]}"; do
+      [ -n "${entry}" ] || continue
+      if [ "$(canonical_host "${entry}")" = "${host_key}" ]; then
+        return 1
+      fi
+    done
+  done
+  return 0
+}
+
+mdns_wait_for_absence_gate() {
+  local marker_path="${1:-}"
+
+  if [ -z "${MDNS_HOST_RAW:-}" ]; then
+    log_debug discover event=mdns_negative_gate outcome=skip reason=missing_host
+    return 0
+  fi
+
+  local restart_status=0
+  if restart_avahi_daemon; then
+    log_info discover event=mdns_negative_gate action=restart_avahi outcome=ok host="${MDNS_HOST_RAW}" >&2
+  else
+    restart_status=$?
+    log_warn_msg discover "Failed to restart avahi-daemon" "status=${restart_status}" "host=${MDNS_HOST_RAW}"
+  fi
+
+  local required_consecutive="${SUGARKUBE_MDNS_ABSENCE_CONFIRMATIONS:-2}"
+  case "${required_consecutive}" in
+    ''|*[!0-9]*) required_consecutive=2 ;;
+    0) required_consecutive=1 ;;
+  esac
+
+  local attempts_limit="${SUGARKUBE_MDNS_ABSENCE_ATTEMPTS:-12}"
+  case "${attempts_limit}" in
+    ''|*[!0-9]*) attempts_limit=12 ;;
+  esac
+
+  local backoff_start_ms="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS:-500}"
+  case "${backoff_start_ms}" in
+    ''|*[!0-9]*) backoff_start_ms=500 ;;
+  esac
+
+  local backoff_cap_ms="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_CAP_MS:-4000}"
+  case "${backoff_cap_ms}" in
+    ''|*[!0-9]*) backoff_cap_ms=4000 ;;
+  esac
+
+  local jitter_fraction="${SUGARKUBE_MDNS_ABSENCE_JITTER:-0.2}"
+  case "${jitter_fraction}" in
+    ''|*[!0-9.]*|*..*) jitter_fraction=0.2 ;;
+  esac
+
+  local timeout_ms="${SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS:-30000}"
+  case "${timeout_ms}" in
+    ''|*[!0-9]*) timeout_ms=30000 ;;
+  esac
+
+  local start_ms
+  start_ms="$(python3 - <<'PY'
+import time
+print(int(time.monotonic() * 1000))
+PY
+)"
+
+  local attempt=0
+  local consecutive=0
+  local confirmed=0
+  local total_attempts=0
+  local last_method="unknown"
+  local reason=""
+  local elapsed_ms="0"
+  local use_dbus=1
+
+  while :; do
+    attempt=$((attempt + 1))
+    total_attempts="${attempt}"
+
+    local check_status=0
+    local method_used="dbus"
+    if [ "${use_dbus}" -eq 1 ]; then
+      mdns_check_absence_dbus
+      check_status=$?
+      case "${check_status}" in
+        0)
+          method_used="dbus"
+          ;;
+        1)
+          method_used="dbus"
+          ;;
+        2)
+          use_dbus=0
+          method_used="cli"
+          log_debug discover event=mdns_negative_gate outcome=fallback reason=dbus_unavailable attempt="${attempt}"
+          mdns_check_absence_cli
+          check_status=$?
+          case "${check_status}" in
+            0) ;;
+            *) check_status=1 ;;
+          esac
+          ;;
+        *)
+          method_used="dbus"
+          ;;
+      esac
+    else
+      mdns_check_absence_cli
+      check_status=$?
+      method_used="cli"
+      case "${check_status}" in
+        0) ;;
+        *) check_status=1 ;;
+      esac
+    fi
+
+    if [ "${check_status}" -eq 0 ]; then
+      consecutive=$((consecutive + 1))
+    else
+      consecutive=0
+    fi
+
+    last_method="${method_used}"
+
+    log_debug discover \
+      event=mdns_negative_attempt \
+      attempt="${attempt}" \
+      method="${method_used}" \
+      status="${check_status}" \
+      consecutive="${consecutive}"
+
+    elapsed_ms="$(python3 - "${start_ms}" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.monotonic() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+)"
+
+    if [ "${consecutive}" -ge "${required_consecutive}" ]; then
+      confirmed=1
+      reason="confirmed"
+      break
+    fi
+
+    if [ "${timeout_ms}" -gt 0 ] && [ "${elapsed_ms}" -ge "${timeout_ms}" ]; then
+      reason="timeout"
+      break
+    fi
+
+    if [ "${attempts_limit}" -gt 0 ] && [ "${attempt}" -ge "${attempts_limit}" ]; then
+      reason="attempts_exhausted"
+      break
+    fi
+
+    local delay_ms
+    delay_ms="$(python3 - "${attempt}" "${backoff_start_ms}" "${backoff_cap_ms}" "${jitter_fraction}" <<'PY'
+import random
+import sys
+
+try:
+    attempt = int(sys.argv[1])
+except ValueError:
+    attempt = 1
+try:
+    start = int(sys.argv[2])
+except ValueError:
+    start = 0
+try:
+    cap = int(sys.argv[3])
+except ValueError:
+    cap = 0
+try:
+    jitter = float(sys.argv[4])
+except ValueError:
+    jitter = 0.0
+
+if attempt < 1:
+    attempt = 1
+if start < 0:
+    start = 0
+if cap < 0:
+    cap = 0
+
+if start == 0:
+    base = 0
+else:
+    base = start * (2 ** (attempt - 1))
+    if cap and base > cap:
+        base = cap
+
+if base <= 0:
+    delay = 0
+elif jitter > 0:
+    low = max(0.0, 1.0 - jitter)
+    high = 1.0 + jitter
+    delay = int(base * random.uniform(low, high))
+else:
+    delay = int(base)
+
+if delay < 0:
+    delay = 0
+
+print(delay)
+PY
+)"
+
+    case "${delay_ms}" in
+      ''|*[!0-9]*) delay_ms=0 ;;
+    esac
+    if [ "${delay_ms}" -gt 0 ]; then
+      python3 - "${delay_ms}" <<'PY'
+import sys
+import time
+
+try:
+    delay = int(sys.argv[1])
+except (IndexError, ValueError):
+    delay = 0
+
+if delay > 0:
+    time.sleep(delay / 1000.0)
+PY
+    fi
+  done
+
+  elapsed_ms="$(python3 - "${start_ms}" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.monotonic() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+)"
+
+  if [ "${confirmed}" -eq 1 ]; then
+    log_info discover \
+      event=mdns_negative_gate \
+      outcome=ok \
+      mdns_absence_confirmed=1 \
+      attempts="${total_attempts}" \
+      ms_elapsed="${elapsed_ms}" \
+      method="${last_method}" \
+      consecutive_required="${required_consecutive}" >&2
+  else
+    log_info discover \
+      event=mdns_negative_gate \
+      outcome="${reason:-unknown}" \
+      mdns_absence_confirmed=0 \
+      attempts="${total_attempts}" \
+      ms_elapsed="${elapsed_ms}" \
+      method="${last_method}" \
+      consecutive_required="${required_consecutive}" >&2
+  fi
+
+  if [ -n "${marker_path}" ] && [ -e "${marker_path}" ]; then
+    run_privileged rm -f "${marker_path}" || true
+  fi
 }
 
 ensure_self_mdns_advertisement() {
@@ -1516,6 +1873,31 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
     printf '%s\n' "${CLAIMED_SERVER_HOST}"
   fi
   exit "${status}"
+fi
+
+NEGATIVE_GATE_MODE="${SUGARKUBE_MDNS_NEGATIVE_GATE:-auto}"
+SHOULD_RUN_MDNS_NEGATIVE_GATE=0
+NEGATIVE_GATE_SKIP_REASON="no_marker"
+case "${NEGATIVE_GATE_MODE}" in
+  1|true|TRUE|True|yes|YES|on|ON)
+    SHOULD_RUN_MDNS_NEGATIVE_GATE=1
+    ;;
+  0|false|FALSE|False|no|NO|off|OFF)
+    NEGATIVE_GATE_SKIP_REASON="disabled"
+    ;;
+  *)
+    if [ -f "${MDNS_NEGATIVE_GATE_MARKER}" ]; then
+      SHOULD_RUN_MDNS_NEGATIVE_GATE=1
+    else
+      NEGATIVE_GATE_SKIP_REASON="no_marker"
+    fi
+    ;;
+esac
+
+if [ "${SHOULD_RUN_MDNS_NEGATIVE_GATE}" -eq 1 ]; then
+  mdns_wait_for_absence_gate "${MDNS_NEGATIVE_GATE_MARKER}"
+else
+  log_debug discover event=mdns_negative_gate outcome=skip reason=${NEGATIVE_GATE_SKIP_REASON}
 fi
 
 log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
