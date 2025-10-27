@@ -153,7 +153,8 @@ try:
             original_lines = src_path.read_text(encoding="utf-8").splitlines()
         except Exception as e:
             print(f"Error reading {src_path}: {e}", file=sys.stderr)
-            original_lines = []
+            print("Aborting to avoid destroying existing configuration", file=sys.stderr)
+            sys.exit(1)
     else:
         original_lines = []
 

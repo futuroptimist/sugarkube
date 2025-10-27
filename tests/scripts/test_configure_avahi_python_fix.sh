@@ -83,4 +83,29 @@ if ! grep -q '^publish-workstation=yes$' "${EMPTY_CONF}"; then
   exit 1
 fi
 
+# Test error handling with unreadable configuration file
+echo "Testing configure_avahi.sh with unreadable configuration file..."
+
+UNREADABLE_CONF="${TMP_DIR}/unreadable-avahi.conf"
+# Create a file that exists but can't be read (simulate permission issues)
+echo "[server]" > "${UNREADABLE_CONF}"
+chmod 000 "${UNREADABLE_CONF}"
+
+UNREADABLE_ENV_VARS=(
+  "SUGARKUBE_MDNS_INTERFACE=eth0"
+  "SUGARKUBE_MDNS_IPV4_ONLY=1"
+  "AVAHI_CONF_PATH=${UNREADABLE_CONF}"
+  "SUGARKUBE_LOG_DIR=${LOG_DIR}"
+  "SYSTEMCTL_BIN="
+)
+
+# This should fail to avoid destroying configuration
+if ( export "${UNREADABLE_ENV_VARS[@]}"; bash "${REPO_ROOT}/scripts/configure_avahi.sh" ); then
+  echo "ERROR: configure_avahi.sh should have failed with unreadable configuration" >&2
+  exit 1
+fi
+
+# Restore permissions for cleanup
+chmod 644 "${UNREADABLE_CONF}"
+
 echo "SUCCESS: configure_avahi.sh Python syntax error fix test passed"
