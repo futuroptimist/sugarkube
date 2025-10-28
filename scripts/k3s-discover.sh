@@ -126,6 +126,7 @@ FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
 JOIN_GATE_HELD=0
+L4_PROBE_BIN="${SUGARKUBE_L4_PROBE_BIN:-${SCRIPT_DIR}/l4_probe.sh}"
 
 API_READY_CHECK_BIN="${SUGARKUBE_API_READY_CHECK_BIN:-${SCRIPT_DIR}/check_apiready.sh}"
 API_READY_TIMEOUT="${SUGARKUBE_API_READY_TIMEOUT:-120}"
@@ -2469,6 +2470,36 @@ install_server_join() {
   local server="$1"
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
+    exit 1
+  fi
+  local required_ports="6443,2379,2380"
+  if [ ! -x "${L4_PROBE_BIN}" ]; then
+    log_error_msg discover "Port connectivity helper missing" "phase=install_join" "server=${server}" "script=${L4_PROBE_BIN}"
+    exit 1
+  fi
+  local probe_output=""
+  local probe_status=0
+  set +e
+  probe_output="$(${L4_PROBE_BIN} "${server}" "${required_ports}")"
+  probe_status=$?
+  set -e
+  if [ -n "${probe_output}" ]; then
+    while IFS= read -r line; do
+      [ -n "${line}" ] || continue
+      local escaped_line
+      escaped_line="$(escape_log_value "${line}")"
+      log_info discover event=l4_probe phase=install_join \
+        "server=\"${server}\"" "result=\"${escaped_line}\"" >&2
+    done <<<"${probe_output}"
+  fi
+  if [ "${probe_status}" -ne 0 ]; then
+    if [ -n "${probe_output}" ]; then
+      printf '%s\n' "${probe_output}" >&2
+    fi
+    log_error_msg discover "Required TCP ports are not reachable" \
+      "phase=install_join" "server=${server}" "ports=${required_ports}"
+    log_error_msg discover "Ensure TCP 6443, 2379, and 2380 are open between control-plane nodes before retrying" \
+      "phase=install_join" "server=${server}"
     exit 1
   fi
   if ! wait_for_remote_api_ready "${server}"; then
