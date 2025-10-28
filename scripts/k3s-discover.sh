@@ -125,6 +125,14 @@ FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 SUGARKUBE_STRICT_TIME="${SUGARKUBE_STRICT_TIME:-0}"
+if [ -n "${SUGARKUBE_API_REGADDR:-}" ]; then
+  API_REGADDR="${SUGARKUBE_API_REGADDR}"
+  while [[ "${API_REGADDR}" == *. ]]; do
+    API_REGADDR="${API_REGADDR%.}"
+  done
+else
+  API_REGADDR=""
+fi
 JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
 JOIN_GATE_HELD=0
 L4_PROBE_BIN="${SUGARKUBE_L4_PROBE_BIN:-${SCRIPT_DIR}/l4_probe.sh}"
@@ -1640,6 +1648,15 @@ discover_bootstrap_leaders() {
   run_avahi_query bootstrap-leaders | sort -u
 }
 
+join_target_host() {
+  local discovered="$1"
+  if [ -n "${API_REGADDR:-}" ]; then
+    printf '%s\n' "${API_REGADDR}"
+    return 0
+  fi
+  printf '%s\n' "${discovered}"
+}
+
 ensure_self_mdns_advertisement() {
   local role="$1"
   if [ "${SKIP_MDNS_SELF_CHECK}" = "1" ]; then
@@ -2513,7 +2530,9 @@ install_server_cluster_init() {
 }
 
 install_server_join() {
-  local server="$1"
+  local discovered_server="$1"
+  local server
+  server="$(join_target_host "${discovered_server}")"
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
@@ -2564,7 +2583,16 @@ install_server_join() {
     exit 1
   fi
   ensure_iptables_tools
-  log_info discover phase=install_join host="${MDNS_HOST_RAW}" server="${server}" desired_servers="${SERVERS_DESIRED}" >&2
+  local -a log_args=(
+    "phase=install_join"
+    "host=${MDNS_HOST_RAW}"
+    "server=${server}"
+    "desired_servers=${SERVERS_DESIRED}"
+  )
+  if [ -n "${API_REGADDR:-}" ] && [ -n "${discovered_server:-}" ] && [ "${server}" != "${discovered_server}" ]; then
+    log_args+=("discovered_server=${discovered_server}")
+  fi
+  log_info discover "${log_args[@]}" >&2
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
@@ -2593,7 +2621,9 @@ install_server_join() {
 }
 
 install_agent() {
-  local server="$1"
+  local discovered_server="$1"
+  local server
+  server="$(join_target_host "${discovered_server}")"
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}"
     exit 1
@@ -2610,7 +2640,15 @@ install_agent() {
     exit 1
   fi
   ensure_iptables_tools
-  log_info discover phase=install_agent host="${MDNS_HOST_RAW}" server="${server}" >&2
+  local -a agent_log_args=(
+    "phase=install_agent"
+    "host=${MDNS_HOST_RAW}"
+    "server=${server}"
+  )
+  if [ -n "${API_REGADDR:-}" ] && [ -n "${discovered_server:-}" ] && [ "${server}" != "${discovered_server}" ]; then
+    agent_log_args+=("discovered_server=${discovered_server}")
+  fi
+  log_info discover "${agent_log_args[@]}" >&2
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server}:6443")

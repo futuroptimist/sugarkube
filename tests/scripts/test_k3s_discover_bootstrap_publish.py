@@ -723,6 +723,207 @@ def test_bootstrap_publish_waits_for_server_advert_before_retiring_bootstrap(tmp
     browse_calls = int(count_path.read_text(encoding="utf-8").strip())
     assert browse_calls >= 2
 
+
+def test_join_prefers_registration_address(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sh_log = tmp_path / "sh.log"
+    publish_log = tmp_path / "publish.log"
+    openssl_state = tmp_path / "openssl-host.txt"
+
+    def _write_stub(name: str, content: str) -> None:
+        path = bin_dir / name
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o755)
+
+    _write_stub(
+        "check_apiready.sh",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 0\n",
+    )
+
+    _write_stub("sleep", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub("systemctl", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub("iptables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub("ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub("apt-get", "#!/usr/bin/env bash\nexit 0\n")
+
+    _write_stub(
+        "join-gate.sh",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "case \"${1:-}\" in\n"
+        "  wait|acquire|release) exit 0 ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+    )
+
+    _write_stub(
+        "l4-probe.sh",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "echo ok\n"
+        "exit 0\n",
+    )
+
+    _write_stub("parity-check.sh", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub("time-check.sh", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub("ss", "#!/usr/bin/env bash\n"
+                "echo 'LISTEN'\n"
+                "exit 0\n")
+
+    server_host = "sugarkube0.local"
+    vip_host = "vip.sugar.test"
+
+    _write_stub(
+        "avahi-browse",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"cat <<'EOF'\n"
+        f"=;eth0;IPv4;k3s-sugar-dev@{server_host} (server);_k3s-sugar-dev._tcp;local;{server_host};"
+        "192.0.2.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;"
+        f"txt=role=server;txt=leader={server_host};txt=phase=server\n"
+        "EOF\n",
+    )
+
+    _write_stub("avahi-resolve", "#!/usr/bin/env bash\nexit 0\n")
+
+    _write_stub(
+        "avahi-publish-service",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"SERVICE:$*\" >> '{publish_log}'\n"
+        "trap 'exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+    )
+
+    _write_stub(
+        "avahi-publish",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo \"PUBLISH:$*\" >> '{publish_log}'\n"
+        "trap 'exit 0' TERM INT\n"
+        "while true; do sleep 1; done\n",
+    )
+
+    _write_stub(
+        "curl",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "for arg in \"$@\"; do\n"
+        "  if [[ $arg == *'/cacerts' ]]; then\n"
+        "    echo 'dummy-ca'\n"
+        "    exit 0\n"
+        "  fi\n"
+        "done\n"
+        "if [[ \"$*\" == *'https://get.k3s.io'* ]]; then\n"
+        "  cat <<'SCRIPT'\n"
+        "#!/usr/bin/env sh\n"
+        "exit 0\n"
+        "SCRIPT\n"
+        "  exit 0\n"
+        "fi\n"
+        "cat\n",
+    )
+
+    _write_stub(
+        "openssl",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"state='{openssl_state}'\n"
+        "cmd=\"${1:-}\"\n"
+        "shift || true\n"
+        "case \"${cmd}\" in\n"
+        "  s_client)\n"
+        "    host=''\n"
+        "    while [ $# -gt 0 ]; do\n"
+        "      if [ \"${1:-}\" = '-connect' ] && [ $# -gt 1 ]; then\n"
+        "        host=${2%%:*}\n"
+        "        break\n"
+        "      fi\n"
+        "      shift\n"
+        "    done\n"
+        f"    printf '%s' \"${{host:-}}\" > '{openssl_state}'\n"
+        "    echo 'mock-certificate'\n"
+        "    exit 0\n"
+        "    ;;\n"
+        "  x509)\n"
+        "    host=''\n"
+        f"    if [ -f '{openssl_state}' ]; then\n"
+        f"      host=$(cat '{openssl_state}')\n"
+        "    fi\n"
+        "    echo 'X509v3 Subject Alternative Name:'\n"
+        "    if [ -n \"${host}\" ]; then\n"
+        "      echo \"    DNS:${host}\"\n"
+        "    else\n"
+        "      echo '    DNS:placeholder'\n"
+        "    fi\n"
+        "    exit 0\n"
+        "    ;;\n"
+        "  *)\n"
+        "    exit 0\n"
+        "    ;;\n"
+        "esac\n",
+    )
+
+    _write_stub(
+        "sh",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"printf '%s\\n' \"$*\" >> '{sh_log}'\n"
+        f"printf 'ENV:K3S_URL=%s\\n' \"${{K3S_URL:-}}\" >> '{sh_log}'\n"
+        "cat >/dev/null\n"
+        "exit 0\n",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+            "ALLOW_NON_ROOT": "1",
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_SERVERS": "3",
+            "SUGARKUBE_TOKEN": "dummy-token",
+            "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+            "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
+            "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.55",
+            "SUGARKUBE_SKIP_SYSTEMCTL": "1",
+            "SUGARKUBE_MDNS_DBUS": "0",
+            "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
+            "SUGARKUBE_MDNS_BOOT_DELAY": "0",
+            "SUGARKUBE_SKIP_MDNS_SELF_CHECK": "1",
+            "SUGARKUBE_L4_PROBE_BIN": str(bin_dir / "l4-probe.sh"),
+            "SUGARKUBE_JOIN_GATE_BIN": str(bin_dir / "join-gate.sh"),
+            "SUGARKUBE_API_READY_CHECK_BIN": str(bin_dir / "check_apiready.sh"),
+            "SUGARKUBE_SERVER_FLAG_PARITY_BIN": str(bin_dir / "parity-check.sh"),
+            "SUGARKUBE_TIME_SYNC_BIN": str(bin_dir / "time-check.sh"),
+            "SUGARKUBE_API_REGADDR": vip_host,
+            "DISCOVERY_ATTEMPTS": "1",
+            "DISCOVERY_WAIT_SECS": "0",
+            "SH_LOG_PATH": str(sh_log),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", SCRIPT],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    sh_contents = sh_log.read_text(encoding="utf-8")
+    assert "--server https://vip.sugar.test:6443" in sh_contents
+    assert "ENV:K3S_URL=\n" in sh_contents
+    assert "--server https://sugarkube0.local:6443" not in sh_contents
+
+    assert "discovered_server=sugarkube0.local" in result.stderr
+
+
 def test_bootstrap_publish_fails_without_mdns(tmp_path):
     hostname = _hostname_short()
     bin_dir = tmp_path / "bin"
