@@ -640,6 +640,7 @@ mdns_wire_proof_check() {
 
   local output
   output="$(python3 - "${MDNS_IFACE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" "${duration}" <<'PY'
+import select
 import signal
 import subprocess
 import sys
@@ -710,15 +711,32 @@ def main() -> int:
 
     try:
         while True:
-            if duration > 0 and (time.monotonic() - start) >= duration:
-                break
-
-            line = proc.stdout.readline()
-            if not line:
-                if proc.poll() is not None:
+            now = time.monotonic()
+            if duration > 0:
+                remaining = (start + duration) - now
+                if remaining <= 0:
                     break
-                time.sleep(0.05)
-                continue
+                timeout = max(0.0, min(0.25, remaining))
+            else:
+                timeout = 0.25
+
+            if proc.poll() is not None:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+            else:
+                ready = []
+                try:
+                    ready = select.select([proc.stdout], [], [], timeout)[0]
+                except (OSError, ValueError):
+                    ready = [proc.stdout]
+
+                if not ready:
+                    continue
+
+                line = proc.stdout.readline()
+                if not line:
+                    continue
 
             frames += 1
             candidate = line.strip()
