@@ -362,17 +362,6 @@ MDNS_SERVICE_NAME="k3s-${CLUSTER}-${ENVIRONMENT}"
 MDNS_SERVICE_TYPE="_${MDNS_SERVICE_NAME}._tcp"
 AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${CLUSTER}-${ENVIRONMENT}.service}"
-AVAHI_ROLE=""
-BOOTSTRAP_PUBLISH_PID=""
-BOOTSTRAP_PUBLISH_LOG=""
-SERVER_PUBLISH_PID=""
-SERVER_PUBLISH_LOG=""
-ADDRESS_PUBLISH_PID=""
-ADDRESS_PUBLISH_LOG=""
-MDNS_RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
-BOOTSTRAP_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-bootstrap.pid"
-SERVER_PID_FILE="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-server.pid"
-SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 IPTABLES_ENSURED=0
@@ -538,28 +527,6 @@ run_configure_avahi
 
 iptables_preflight
 
-if ! run_privileged mkdir -p "${MDNS_RUNTIME_DIR}"; then
-  echo "Failed to create ${MDNS_RUNTIME_DIR}" >&2
-  exit 1
-fi
-
-for phase in bootstrap server; do
-  pid_file="${MDNS_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-${phase}.pid"
-  if [ -f "${pid_file}" ]; then
-    pid_contents="$(cat "${pid_file}" 2>/dev/null || true)"
-    if [ -n "${pid_contents}" ] && kill -0 "${pid_contents}" >/dev/null 2>&1; then
-      if [ "${phase}" = "bootstrap" ]; then
-        BOOTSTRAP_PUBLISH_PID="${pid_contents}"
-      else
-        SERVER_PUBLISH_PID="${pid_contents}"
-        SERVER_PUBLISH_PERSIST=1
-      fi
-    else
-      remove_privileged_file "${pid_file}" || true
-    fi
-  fi
-done
-
 reload_avahi_daemon() {
   if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
     return 0
@@ -586,7 +553,73 @@ restart_avahi_daemon_service() {
   else
     systemctl restart avahi-daemon
   fi
- }
+}
+
+cleanup_avahi_publishers() {
+  if [ -f "${AVAHI_SERVICE_FILE}" ]; then
+    remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
+    reload_avahi_daemon || true
+  fi
+}
+
+render_avahi_service_xml() {
+  local role="$1"; shift
+  local port="${1:-6443}"; shift || true
+  local phase=""
+  local leader=""
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      phase=*)
+        phase="${arg#phase=}"
+        ;;
+      leader=*)
+        leader="${arg#leader=}"
+        ;;
+    esac
+  done
+
+  python3 - <<'PY' \
+    "${CLUSTER}" \
+    "${ENVIRONMENT}" \
+    "${role}" \
+    "${port}" \
+    "${phase}" \
+    "${leader}"
+import html
+import sys
+
+cluster, environment, role, port, phase, leader = sys.argv[1:7]
+host = "%h"
+
+service_name = f"k3s-{cluster}-{environment}@{host} ({role})"
+service_type = f"_k3s-{cluster}-{environment}._tcp"
+
+records = [
+    ("k3s", "1"),
+    ("cluster", cluster),
+    ("env", environment),
+    ("role", role),
+    ("phase", phase),
+    ("leader", leader),
+]
+
+def esc(value: str) -> str:
+    return html.escape(value, quote=True)
+
+print("<?xml version=\"1.0\" standalone='no'?>")
+print("<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">")
+print("<service-group>")
+print(f"  <name replace-wildcards=\"yes\">{esc(service_name)}</name>")
+print("  <service>")
+print(f"    <type>{esc(service_type)}</type>")
+print(f"    <port>{esc(str(port))}</port>")
+for key, value in records:
+    print(f"    <txt-record>{esc(f'{key}={value}')}</txt-record>")
+print("  </service>")
+print("</service-group>")
+PY
+}
 
 current_time_ms() {
   python3 - <<'PY'
@@ -1224,56 +1257,6 @@ PY
   return 0
 }
 
-stop_bootstrap_publisher() {
-  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ]; then
-    if kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
-      kill "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
-    fi
-    wait "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1 || true
-    BOOTSTRAP_PUBLISH_PID=""
-    BOOTSTRAP_PUBLISH_LOG=""
-    remove_privileged_file "${BOOTSTRAP_PID_FILE}" || true
-  fi
-}
-
-stop_server_publisher() {
-  if [ -n "${SERVER_PUBLISH_PID:-}" ]; then
-    if kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
-      kill "${SERVER_PUBLISH_PID}" >/dev/null 2>&1 || true
-    fi
-    wait "${SERVER_PUBLISH_PID}" >/dev/null 2>&1 || true
-    SERVER_PUBLISH_PID=""
-    SERVER_PUBLISH_LOG=""
-    remove_privileged_file "${SERVER_PID_FILE}" || true
-  fi
-}
-
-stop_address_publisher() {
-  if [ -n "${ADDRESS_PUBLISH_PID:-}" ]; then
-    if kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
-      kill "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1 || true
-    fi
-    wait "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1 || true
-    ADDRESS_PUBLISH_PID=""
-    ADDRESS_PUBLISH_LOG=""
-  fi
-}
-
-cleanup_avahi_publishers() {
-  if [ "${SERVER_PUBLISH_PERSIST}" != "1" ]; then
-    stop_server_publisher
-  fi
-  stop_address_publisher
-  stop_bootstrap_publisher
-  if [ "${AVAHI_ROLE}" = "bootstrap" ]; then
-    remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
-    reload_avahi_daemon || true
-    AVAHI_ROLE=""
-  fi
-}
-
-trap cleanup_avahi_publishers EXIT
-
 norm_host() {
   local host="${1:-}"
   while [[ "${host}" == *"." ]]; do
@@ -1315,292 +1298,6 @@ same_host() {
     return 1
   fi
   [ -n "${left_base}" ] && [ "${left_base}" = "${right_base}" ]
-}
-
-start_address_publisher() {
-  if [ -z "${MDNS_ADDR_V4:-}" ]; then
-    return 0
-  fi
-  if ! command -v avahi-publish-address >/dev/null 2>&1; then
-    log_warn_msg mdns_publish "avahi-publish-address not available; skipping direct address publish" "publisher=address"
-    return 1
-  fi
-  if [ -n "${ADDRESS_PUBLISH_PID:-}" ] && kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  ADDRESS_PUBLISH_LOG="/tmp/sugar-publish-address.log"
-  : >"${ADDRESS_PUBLISH_LOG}" 2>/dev/null || true
-
-  local -a publish_cmd=(
-    avahi-publish-address
-    "${MDNS_HOST_RAW}"
-    "${MDNS_ADDR_V4}"
-  )
-
-  log_debug mdns_publish action=publish_address host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4}"
-  "${publish_cmd[@]}" >"${ADDRESS_PUBLISH_LOG}" 2>&1 &
-  ADDRESS_PUBLISH_PID=$!
-
-  sleep 1
-  if ! kill -0 "${ADDRESS_PUBLISH_PID}" >/dev/null 2>&1; then
-    if [ -s "${ADDRESS_PUBLISH_LOG}" ]; then
-      while IFS= read -r line; do
-        log_error_msg mdns_publish "address publisher error: ${line}"
-      done <"${ADDRESS_PUBLISH_LOG}"
-    fi
-    ADDRESS_PUBLISH_PID=""
-    ADDRESS_PUBLISH_LOG=""
-    return 1
-  fi
-
-  return 0
-}
-
-start_bootstrap_publisher() {
-  start_address_publisher || true
-  if ! command -v avahi-publish >/dev/null 2>&1; then
-    log_warn_msg mdns_publish "avahi-publish not available; relying on Avahi service file" "publisher=bootstrap"
-    return 1
-  fi
-  if [ -n "${BOOTSTRAP_PUBLISH_PID:-}" ] && kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  local publish_name
-  publish_name="$(service_instance_name bootstrap "${MDNS_HOST_RAW}")"
-
-  BOOTSTRAP_PUBLISH_LOG="/tmp/sugar-publish-bootstrap.log"
-  : >"${BOOTSTRAP_PUBLISH_LOG}" 2>/dev/null || true
-
-  local -a publish_txt_args=(
-    "k3s=1"
-    "cluster=${CLUSTER}"
-    "env=${ENVIRONMENT}"
-    "role=bootstrap"
-    "phase=bootstrap"
-    "state=pending"
-  )
-  if [ -n "${MDNS_HOST_RAW}" ]; then
-    publish_txt_args+=("leader=${MDNS_HOST_RAW}")
-  fi
-
-  local host_arg="${MDNS_HOST_RAW:-}"
-  local -a publish_cmd
-  mapfile -t publish_cmd < <(
-    python3 - "${publish_name}" "${MDNS_SERVICE_TYPE}" "6443" "${host_arg}" "${publish_txt_args[@]}" <<'PY'
-import sys
-from mdns_helpers import build_publish_cmd
-
-instance = sys.argv[1]
-service_type = sys.argv[2]
-port = int(sys.argv[3])
-host_value = sys.argv[4] or None
-txt = {}
-for item in sys.argv[5:]:
-    if not item:
-        continue
-    if "=" in item:
-        key, value = item.split("=", 1)
-    else:
-        key, value = item, ""
-    txt[key] = value
-
-cmd = build_publish_cmd(
-    instance=instance,
-    service_type=service_type,
-    port=port,
-    host=host_value or None,
-    txt=txt,
-)
-for element in cmd:
-    print(element)
-PY
-  )
-
-  local publish_cmd_json
-  publish_cmd_json="$(python3 - "${publish_cmd[@]}" <<'PY'
-import json
-import sys
-
-print(json.dumps(sys.argv[1:]))
-PY
-  )"
-  local publish_cmd_json_escaped
-  publish_cmd_json_escaped="$(printf '%s' "${publish_cmd_json}" | sed 's/"/\\"/g')"
-  log_trace mdns_publish role=bootstrap action=argv "cmd=\"${publish_cmd_json_escaped}\""
-
-  log_debug mdns_publish action=start_publish role=bootstrap host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}"
-  "${publish_cmd[@]}" >"${BOOTSTRAP_PUBLISH_LOG}" 2>&1 &
-  BOOTSTRAP_PUBLISH_PID=$!
-
-  sleep 1
-  if ! kill -0 "${BOOTSTRAP_PUBLISH_PID}" >/dev/null 2>&1; then
-    if [ -s "${BOOTSTRAP_PUBLISH_LOG}" ]; then
-      while IFS= read -r line; do
-        log_error_msg mdns_publish "bootstrap publisher error: ${line}"
-      done <"${BOOTSTRAP_PUBLISH_LOG}"
-    fi
-    BOOTSTRAP_PUBLISH_PID=""
-    BOOTSTRAP_PUBLISH_LOG=""
-    return 1
-  fi
-
-  log_info mdns_publish outcome=started role=bootstrap host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}" pid="${BOOTSTRAP_PUBLISH_PID}" >&2
-  printf '%s\n' "${BOOTSTRAP_PUBLISH_PID}" | write_privileged_file "${BOOTSTRAP_PID_FILE}"
-  return 0
-}
-
-start_server_publisher() {
-  start_address_publisher || true
-  if ! command -v avahi-publish >/dev/null 2>&1; then
-    log_warn_msg mdns_publish "avahi-publish not available; relying on Avahi service file" "publisher=server"
-    return 1
-  fi
-  if [ -n "${SERVER_PUBLISH_PID:-}" ] && kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  local publish_name
-  publish_name="$(service_instance_name server "${MDNS_HOST_RAW}")"
-
-  SERVER_PUBLISH_LOG="/tmp/sugar-publish-server.log"
-  : >"${SERVER_PUBLISH_LOG}" 2>/dev/null || true
-
-  local -a publish_txt_args=(
-    "k3s=1"
-    "cluster=${CLUSTER}"
-    "env=${ENVIRONMENT}"
-    "role=server"
-    "phase=server"
-  )
-  if [ -n "${MDNS_HOST_RAW}" ]; then
-    publish_txt_args+=("leader=${MDNS_HOST_RAW}")
-  fi
-
-  local host_arg="${MDNS_HOST_RAW:-}"
-  local -a publish_cmd
-  mapfile -t publish_cmd < <(
-    python3 - "${publish_name}" "${MDNS_SERVICE_TYPE}" "6443" "${host_arg}" "${publish_txt_args[@]}" <<'PY'
-import sys
-from mdns_helpers import build_publish_cmd
-
-instance = sys.argv[1]
-service_type = sys.argv[2]
-port = int(sys.argv[3])
-host_value = sys.argv[4] or None
-txt = {}
-for item in sys.argv[5:]:
-    if not item:
-        continue
-    if "=" in item:
-        key, value = item.split("=", 1)
-    else:
-        key, value = item, ""
-    txt[key] = value
-
-cmd = build_publish_cmd(
-    instance=instance,
-    service_type=service_type,
-    port=port,
-    host=host_value or None,
-    txt=txt,
-)
-for element in cmd:
-    print(element)
-PY
-  )
-
-  local publish_cmd_json
-  publish_cmd_json="$(python3 - "${publish_cmd[@]}" <<'PY'
-import json
-import sys
-
-print(json.dumps(sys.argv[1:]))
-PY
-  )"
-  local publish_cmd_json_escaped
-  publish_cmd_json_escaped="$(printf '%s' "${publish_cmd_json}" | sed 's/"/\\"/g')"
-  log_trace mdns_publish role=server action=argv "cmd=\"${publish_cmd_json_escaped}\""
-
-  log_debug mdns_publish action=start_publish role=server host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}"
-  "${publish_cmd[@]}" >"${SERVER_PUBLISH_LOG}" 2>&1 &
-  SERVER_PUBLISH_PID=$!
-
-  sleep 1
-  if ! kill -0 "${SERVER_PUBLISH_PID}" >/dev/null 2>&1; then
-    if [ -s "${SERVER_PUBLISH_LOG}" ]; then
-      while IFS= read -r line; do
-        log_error_msg mdns_publish "server publisher error: ${line}"
-      done <"${SERVER_PUBLISH_LOG}"
-    fi
-    SERVER_PUBLISH_PID=""
-    SERVER_PUBLISH_LOG=""
-    return 1
-  fi
-
-  log_info mdns_publish outcome=started role=server host="${MDNS_HOST_RAW}" ipv4="${MDNS_ADDR_V4:-auto}" type="${MDNS_SERVICE_TYPE}" pid="${SERVER_PUBLISH_PID}" >&2
-  printf '%s\n' "${SERVER_PUBLISH_PID}" | write_privileged_file "${SERVER_PID_FILE}"
-  return 0
-}
-
-xml_escape() {
-  python3 - "$1" <<'PY'
-import html
-import sys
-
-print(html.escape(sys.argv[1], quote=True))
-PY
-}
-
-service_instance_name() {
-  local role="$1"
-  local host="${2:-%h}"
-  local suffix=""
-  if [ -n "${role}" ]; then
-    suffix=" (${role})"
-  fi
-  printf 'k3s-%s-%s@%s%s' "${CLUSTER}" "${ENVIRONMENT}" "${host}" "${suffix}"
-}
-
-render_avahi_service_xml() {
-  local role="$1"; shift
-  local port="${1:-6443}"; shift
-  local service_name
-  service_name="$(service_instance_name "${role}" "%h")"
-
-  # Escape user-provided bits to keep valid XML
-  local xml_service_name xml_port xml_cluster xml_env xml_role xml_type
-  xml_service_name="$(xml_escape "${service_name}")"
-  xml_port="$(xml_escape "${port}")"
-  xml_cluster="$(xml_escape "${CLUSTER}")"
-  xml_env="$(xml_escape "${ENVIRONMENT}")"
-  xml_role="$(xml_escape "${role}")"
-  xml_type="$(xml_escape "${MDNS_SERVICE_TYPE}")"
-
-  # Optional TXT extras
-  local extra=""
-  local item
-  for item in "$@"; do
-    [ -n "${item}" ] || continue
-    extra+=$'\n    <txt-record>'"$(xml_escape "${item}")"'</txt-record>'
-  done
-
-  cat <<EOF
-<?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">${xml_service_name}</name>
-  <service>
-    <type>${xml_type}</type>
-    <port>${xml_port}</port>
-    <txt-record>k3s=1</txt-record>
-    <txt-record>cluster=${xml_cluster}</txt-record>
-    <txt-record>env=${xml_env}</txt-record>
-    <txt-record>role=${xml_role}</txt-record>${extra}
-  </service>
-</service-group>
-EOF
 }
 
 run_avahi_query() {
@@ -2006,63 +1703,84 @@ wait_for_api() {
 publish_avahi_service() {
   local role="$1"; shift
   local port="6443"
-  if [ "$#" -gt 0 ]; then port="$1"; shift; fi
-
-  run_privileged install -d -m 755 "${AVAHI_SERVICE_DIR}"
-  if [ -f "${AVAHI_SERVICE_DIR}/k3s-https.service" ]; then
-    remove_privileged_file "${AVAHI_SERVICE_DIR}/k3s-https.service" || true
+  if [ "$#" -gt 0 ]; then
+    port="$1"
+    shift
   fi
 
-  local xml
-  xml="$(render_avahi_service_xml "${role}" "${port}" "$@")"
-  printf '%s\n' "${xml}" | write_privileged_file "${AVAHI_SERVICE_FILE}"
+  local phase=""
+  local leader=""
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      phase=*)
+        phase="${arg#phase=}"
+        ;;
+      leader=*)
+        leader="${arg#leader=}"
+        ;;
+    esac
+  done
 
-  reload_avahi_daemon || true
-  AVAHI_ROLE="${role}"
+  local hostname="${MDNS_HOST_RAW:-}" 
+  if [ -z "${hostname}" ]; then
+    hostname="$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf '%s' "${HOSTNAME:-}")"
+  fi
+
+  local -a publish_env=(
+    "SUGARKUBE_CLUSTER=${CLUSTER}"
+    "SUGARKUBE_ENV=${ENVIRONMENT}"
+    "ROLE=${role}"
+    "PORT=${port}"
+    "HOSTNAME=${hostname}"
+    "PHASE=${phase}"
+    "LEADER=${leader}"
+  )
+  if [ -n "${SUGARKUBE_AVAHI_SERVICE_DIR:-}" ]; then
+    publish_env+=("SUGARKUBE_AVAHI_SERVICE_DIR=${SUGARKUBE_AVAHI_SERVICE_DIR}")
+  fi
+  if [ -n "${SUGARKUBE_AVAHI_SERVICE_FILE:-}" ]; then
+    publish_env+=("SUGARKUBE_AVAHI_SERVICE_FILE=${SUGARKUBE_AVAHI_SERVICE_FILE}")
+  fi
+  if [ -n "${SUGARKUBE_SKIP_SYSTEMCTL:-}" ]; then
+    publish_env+=("SUGARKUBE_SKIP_SYSTEMCTL=${SUGARKUBE_SKIP_SYSTEMCTL}")
+  fi
+
+  run_privileged env "${publish_env[@]}" "${SCRIPT_DIR}/mdns_publish_static.sh"
 }
 
 publish_api_service() {
-  start_server_publisher || true
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
   if ensure_self_mdns_advertisement server; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
-    SERVER_PUBLISH_PERSIST=1
-    stop_bootstrap_publisher
     return 0
   fi
 
-  log_warn_msg mdns_selfcheck "server advertisement not visible; restarting publishers" "host=${MDNS_HOST_RAW}" "role=server"
-  stop_server_publisher
-  stop_address_publisher
+  log_warn_msg mdns_selfcheck "server advertisement not visible; refreshing Avahi service" "host=${MDNS_HOST_RAW}" "role=server"
   sleep 1
 
-  start_server_publisher || true
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
   if ensure_self_mdns_advertisement server; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=restarted >&2
-    log_info_msg mdns_publish "Server advertisement observed after restart" "host=${MDNS_HOST_RAW}" "role=server"
-    SERVER_PUBLISH_PERSIST=1
-    stop_bootstrap_publisher
+    log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=reloaded >&2
+    log_info_msg mdns_publish "Server advertisement observed after Avahi reload" "host=${MDNS_HOST_RAW}" "role=server"
     return 0
   fi
 
-  log_error_msg mdns_selfcheck "failed to confirm server advertisement; printing diagnostics" "host=${MDNS_HOST_RAW}" "role=server"
-  pgrep -a avahi-publish || true
-  sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
-  sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
+  log_error_msg mdns_selfcheck "failed to confirm server advertisement after Avahi reload" "host=${MDNS_HOST_RAW}" "role=server"
+  if [ -f "${AVAHI_SERVICE_FILE}" ]; then
+    sed -n '1,120p' "${AVAHI_SERVICE_FILE}" 2>/dev/null || true
+  fi
   return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
-
 publish_bootstrap_service() {
   log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
-  start_bootstrap_publisher || true
-  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
+  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
   sleep 1
   if ensure_self_mdns_advertisement bootstrap; then
     local observed
@@ -2071,30 +1789,25 @@ publish_bootstrap_service() {
     return 0
   fi
 
-  log_warn_msg mdns_selfcheck "bootstrap advertisement not visible; restarting publishers" "host=${MDNS_HOST_RAW}" "role=bootstrap"
-  stop_bootstrap_publisher
-  stop_address_publisher
+  log_warn_msg mdns_selfcheck "bootstrap advertisement not visible; refreshing Avahi service" "host=${MDNS_HOST_RAW}" "role=bootstrap"
   sleep 1
 
-  start_bootstrap_publisher || true
-  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
+  publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
   sleep 1
   if ensure_self_mdns_advertisement bootstrap; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log_info mdns_selfcheck outcome=confirmed role=bootstrap host="${MDNS_HOST_RAW}" observed="${observed}" phase=bootstrap check=restarted >&2
-    log_info_msg mdns_publish "Bootstrap advertisement observed after restart" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+    log_info mdns_selfcheck outcome=confirmed role=bootstrap host="${MDNS_HOST_RAW}" observed="${observed}" phase=bootstrap check=reloaded >&2
+    log_info_msg mdns_publish "Bootstrap advertisement observed after Avahi reload" "host=${MDNS_HOST_RAW}" "role=bootstrap"
     return 0
   fi
 
-  log_error_msg mdns_selfcheck "failed to confirm bootstrap advertisement; printing diagnostics" "host=${MDNS_HOST_RAW}" "role=bootstrap"
-  pgrep -a avahi-publish || true
-  sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
-  sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
-  log_error_msg mdns_selfcheck "unable to confirm bootstrap advertisement; aborting" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+  log_error_msg mdns_selfcheck "failed to confirm bootstrap advertisement after Avahi reload" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+  if [ -f "${AVAHI_SERVICE_FILE}" ]; then
+    sed -n '1,120p' "${AVAHI_SERVICE_FILE}" 2>/dev/null || true
+  fi
   return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
-
 claim_bootstrap_leadership() {
   if ! publish_bootstrap_service; then
     exit 1

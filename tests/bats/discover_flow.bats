@@ -32,14 +32,60 @@ EOS
 exit 0
 EOS
 
-  stub_command avahi-publish <<'EOS'
+  stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
-sleep 60
-EOS
+set -euo pipefail
 
-  stub_command avahi-publish-address <<'EOS'
-#!/usr/bin/env bash
-sleep 60
+if [ "$1" != "-rtp" ]; then
+  echo "unexpected avahi-browse invocation: $*" >&2
+  exit 1
+fi
+
+service_type="$2"
+service_file="${SUGARKUBE_AVAHI_SERVICE_FILE:-${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}/k3s-${SUGARKUBE_CLUSTER:-sugar}-${SUGARKUBE_ENV:-dev}.service}"
+
+if [ ! -f "${service_file}" ]; then
+  exit 1
+fi
+
+python3 - "$service_file" "$service_type" <<'PY'
+import os
+import sys
+import xml.etree.ElementTree as ET
+
+path, expected_type = sys.argv[1:3]
+tree = ET.parse(path)
+root = tree.getroot()
+
+service = root.find("./service")
+if service is None:
+    service = root.find(".//service")
+if service is None:
+    sys.exit(1)
+
+service_type = service.findtext("type") or ""
+if expected_type and expected_type != service_type:
+    sys.exit(1)
+
+name = root.findtext("./name") or ""
+port = service.findtext("port") or ""
+records = [node.text or "" for node in service.findall("txt-record")]
+
+host = os.environ.get("HOSTNAME", "stub-host") + ".local"
+
+parts = [
+    "=;eth0;IPv4",
+    name,
+    service_type,
+    "local",
+    host,
+    "127.0.0.1",
+    port,
+]
+parts.extend(f"txt={record}" for record in records)
+
+print(";".join(parts))
+PY
 EOS
 }
 
@@ -153,6 +199,15 @@ EOS
 
   [ "$status" -eq 0 ]
   [[ "$output" =~ phase=install_join ]]
+
+  local service_file
+  service_file="${BATS_TEST_TMPDIR}/avahi/services/k3s-sugar-dev.service"
+  if [ -f "${service_file}" ]; then
+    run avahi-browse -rtp _k3s-sugar-dev._tcp
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ txt=cluster=sugar ]]
+    [[ "$output" =~ txt=env=dev ]]
+  fi
 }
 
 @test "discover flow elects winner after self-check failure" {
@@ -197,6 +252,15 @@ EOS
   [[ "$output" =~ event=bootstrap_selfcheck_election ]] || false
   [[ "$output" =~ outcome=winner ]]
   [[ "$output" =~ phase=install_single ]]
+
+  local service_file
+  service_file="${BATS_TEST_TMPDIR}/avahi/services/k3s-sugar-dev.service"
+  if [ -f "${service_file}" ]; then
+    run avahi-browse -rtp _k3s-sugar-dev._tcp
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ txt=role=bootstrap ]]
+    [[ "$output" =~ txt=phase=bootstrap ]]
+  fi
 }
 
 @test "discover flow remains follower after self-check failure" {
