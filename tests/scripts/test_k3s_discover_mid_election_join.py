@@ -24,6 +24,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     sh_log = tmp_path / "sh.log"
     publish_log = tmp_path / "publish.log"
     server_flag = tmp_path / "server-published"
+    parity_log = tmp_path / "parity.log"
 
     _write_stub(
         bin_dir / "check_apiready.sh",
@@ -47,6 +48,19 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "apt-get", "#!/usr/bin/env bash\nexit 0\n")
+
+    _write_stub(
+        bin_dir / "parity-check.sh",
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f"echo parity >> '{parity_log}'",
+                "exit 99",
+            ]
+        )
+        + "\n",
+    )
 
     # Pretend the API port starts listening immediately after the installer runs.
     _write_stub(
@@ -168,6 +182,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "SH_LOG_PATH": str(sh_log),
             "SUGARKUBE_MDNS_DBUS": "0",
             "SUGARKUBE_API_READY_CHECK_BIN": str(bin_dir / "check_apiready.sh"),
+            "SUGARKUBE_SERVER_FLAG_PARITY_BIN": str(bin_dir / "parity-check.sh"),
         }
     )
 
@@ -185,6 +200,8 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     assert "event=join_gate action=wait" in result.stderr
     assert "event=join_gate action=acquire" in result.stderr
     assert "event=join_gate action=release" in result.stderr
+
+    assert not parity_log.exists(), "Parity helper should be skipped when sources are absent"
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")
     assert "--cluster-init" not in sh_log_contents

@@ -2364,6 +2364,11 @@ ensure_server_flag_parity() {
       "script=${SERVER_FLAG_PARITY_BIN}" "phase=${phase}" "server=${server_host}"
     return 1
   fi
+  if ! server_flag_parity_sources_available; then
+    log_warn_msg discover "Server flag parity inputs unavailable; skipping validation" \
+      "phase=${phase}" "server=${server_host}"
+    return 0
+  fi
   local -a parity_args=()
   if [ -n "${server_host}" ]; then
     parity_args+=("--server" "${server_host}")
@@ -2373,6 +2378,42 @@ ensure_server_flag_parity() {
     return 1
   fi
   return 0
+}
+
+server_flag_parity_sources_available() {
+  if [ -n "${SUGARKUBE_SERVER_ENV_PREFIX:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_CMD:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_SERVICE_CMD:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_PATH:-}" ] && [ -r "${SUGARKUBE_SERVER_CONFIG_PATH}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_SERVICE_PATH:-}" ] && [ -r "${SUGARKUBE_SERVER_SERVICE_PATH}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_DIR:-}" ] && [ -d "${SUGARKUBE_SERVER_CONFIG_DIR}" ]; then
+    return 0
+  fi
+  if [ -r "/etc/rancher/k3s/config.yaml" ]; then
+    return 0
+  fi
+  local service_candidate
+  for service_candidate in \
+    /etc/systemd/system/k3s.service \
+    /usr/lib/systemd/system/k3s.service \
+    /lib/systemd/system/k3s.service \
+    /etc/systemd/system/multi-user.target.wants/k3s.service
+  do
+    if [ -r "${service_candidate}" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 install_server_single() {
