@@ -426,7 +426,7 @@ EOS
     SUGARKUBE_ENV=dev \
     DISCOVERY_ATTEMPTS=1 \
     DISCOVERY_WAIT_SECS=0 \
-    "${BATS_CWD}/scripts/k3s-discover.sh" --test-wait-loop-only
+    "${BATS_CWD}/scripts/k3s-discover.sh" --test-absence-gate-only
 
   [ "$status" -eq 0 ]
   [[ "$output" =~ mdns_absence_confirmed=1 ]]

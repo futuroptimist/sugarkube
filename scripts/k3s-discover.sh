@@ -142,6 +142,7 @@ BOOT_TOKEN_PRESENT=0
 TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
+TEST_ABSENCE_GATE_ONLY=0
 TEST_PUBLISH_BOOTSTRAP=0
 TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
@@ -172,6 +173,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-wait-loop-only)
       TEST_WAIT_LOOP=1
+      ;;
+    --test-absence-gate-only)
+      TEST_ABSENCE_GATE_ONLY=1
       ;;
     --test-bootstrap-publish)
       TEST_PUBLISH_BOOTSTRAP=1
@@ -2170,6 +2174,11 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
     printf '%s\n' "${CLAIMED_SERVER_HOST}"
   fi
   exit "${status}"
+fi
+
+if [ "${TEST_ABSENCE_GATE_ONLY:-0}" -eq 1 ]; then
+  ensure_mdns_absence_gate
+  exit 0
 fi
 
 ensure_mdns_absence_gate
