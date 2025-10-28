@@ -213,7 +213,7 @@ acquire_lock() {
   cleanup_stale_state
   HOSTNAME="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
   if read_state_file && [ "${JOIN_STATE_HOST}" = "${HOSTNAME}" ] && [ -n "${JOIN_STATE_PID}" ] && kill -0 "${JOIN_STATE_PID}" >/dev/null 2>&1; then
-    log_join_gate action=acquire outcome=ok pid="${JOIN_STATE_PID}" owner="${JOIN_STATE_OWNER:-existing}" mode=existing
+    log_join_gate action=acquire outcome=ok pid="${JOIN_STATE_PID}" owner="${JOIN_STATE_OWNER:-existing}" port="${JOIN_STATE_PORT:-unknown}" mode=existing
     return 0
   fi
   wait_for_clear || return 1
@@ -270,7 +270,7 @@ release_lock() {
     fi
   done
   rm -f "${STATE_FILE}" || true
-  log_join_gate action=release outcome=ok pid="${JOIN_STATE_PID}" owner="${JOIN_STATE_OWNER:-unknown}"
+  log_join_gate action=release outcome=ok pid="${JOIN_STATE_PID}" owner="${JOIN_STATE_OWNER:-unknown}" port="${JOIN_STATE_PORT:-unknown}"
 }
 
 wait_lock() {
