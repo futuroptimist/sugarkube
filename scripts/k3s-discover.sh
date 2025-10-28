@@ -93,6 +93,28 @@ MDNS_ABSENCE_JITTER="${SUGARKUBE_MDNS_ABSENCE_JITTER:-0.25}"
 MDNS_ABSENCE_USE_DBUS="${SUGARKUBE_MDNS_ABSENCE_DBUS:-${SUGARKUBE_MDNS_DBUS:-1}}"
 MDNS_ABSENCE_LAST_METHOD=""
 MDNS_ABSENCE_LAST_STATUS=""
+if [ "${MDNS_ABSENCE_USE_DBUS}" = "1" ] && command -v gdbus >/dev/null 2>&1; then
+  MDNS_ABSENCE_DBUS_CAPABLE=1
+else
+  MDNS_ABSENCE_DBUS_CAPABLE=0
+fi
+if command -v tcpdump >/dev/null 2>&1; then
+  TCPDUMP_AVAILABLE=1
+else
+  TCPDUMP_AVAILABLE=0
+fi
+if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
+  if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    SUGARKUBE_MDNS_WIRE_PROOF=1
+  else
+    SUGARKUBE_MDNS_WIRE_PROOF=0
+  fi
+fi
+MDNS_WIRE_PROOF_ENABLED="${SUGARKUBE_MDNS_WIRE_PROOF}"
+MDNS_WIRE_PROOF_LAST_STATUS=""
+MDNS_WIRE_PROOF_LAST_RESULT=""
+MDNS_WIRE_PROOF_DISABLED_LOGGED=0
+MDNS_WIRE_PROOF_SKIP_LOGGED=0
 MDNS_SELF_CHECK_FAILURE_CODE=94
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
@@ -588,6 +610,202 @@ sys.exit(0)
 PY
 }
 
+mdns_wire_proof_check() {
+  MDNS_WIRE_PROOF_LAST_RESULT=""
+
+  if [ "${MDNS_WIRE_PROOF_ENABLED}" != "1" ]; then
+    if [ "${MDNS_WIRE_PROOF_DISABLED_LOGGED}" -ne 1 ]; then
+      log_info discover event=mdns_wire_proof outcome=skip wire_proof_enabled=0 \
+        tcpdump_available="${TCPDUMP_AVAILABLE}" >&2
+      MDNS_WIRE_PROOF_DISABLED_LOGGED=1
+    fi
+    MDNS_WIRE_PROOF_LAST_STATUS="disabled"
+    MDNS_WIRE_PROOF_LAST_RESULT="wire_proof=disabled"
+    return 0
+  fi
+
+  if [ "${TCPDUMP_AVAILABLE}" -ne 1 ]; then
+    if [ "${MDNS_WIRE_PROOF_SKIP_LOGGED}" -ne 1 ]; then
+      log_info discover event=mdns_wire_proof outcome=skip wire_proof_enabled=1 \
+        tcpdump_available=0 >&2
+      MDNS_WIRE_PROOF_SKIP_LOGGED=1
+    fi
+    MDNS_WIRE_PROOF_LAST_STATUS="tcpdump_unavailable"
+    MDNS_WIRE_PROOF_LAST_RESULT="tcpdump_available=0"
+    return 0
+  fi
+
+  local duration
+  duration="${SUGARKUBE_MDNS_WIRE_PROOF_DURATION:-2.5}"
+
+  local output
+  output="$(python3 - "${MDNS_IFACE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" "${duration}" <<'PY'
+import signal
+import subprocess
+import sys
+import time
+
+
+def main() -> int:
+    if len(sys.argv) < 6:
+        print("matched=0 frames=0 https_lines=0 port_lines=0 return_code=1 error=1")
+        return 2
+
+    iface, cluster, env, host, raw_duration = sys.argv[1:6]
+
+    try:
+        duration = float(raw_duration)
+    except ValueError:
+        duration = 2.5
+    if duration <= 0:
+        duration = 2.5
+
+    short_host = host
+    if host.lower().endswith(".local"):
+        short_host = host[: -len(".local")]
+
+    prefix = f"k3s-{cluster}-{env}@"
+    candidates = {host.lower(), short_host.lower()}
+    patterns = {prefix.lower()}
+    for candidate in candidates:
+        if candidate:
+            patterns.add(f"{prefix}{candidate}".lower())
+            patterns.add(candidate)
+            patterns.add(f"{candidate}._https._tcp")
+            patterns.add(f"{candidate}._https._tcp.local")
+
+    patterns = {pattern for pattern in patterns if pattern}
+
+    command = [
+        "tcpdump",
+        "-l",
+        "-n",
+        "-vvv",
+        "-s",
+        "0",
+        "udp",
+        "port",
+        "5353",
+    ]
+    if iface:
+        command.extend(["-i", iface])
+
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except FileNotFoundError:
+        print("matched=0 frames=0 https_lines=0 port_lines=0 return_code=127 error=1")
+        return 2
+
+    start = time.monotonic()
+    frames = 0
+    https_lines = 0
+    port_lines = 0
+    matched_line = ""
+
+    try:
+        while True:
+            if duration > 0 and (time.monotonic() - start) >= duration:
+                break
+
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.05)
+                continue
+
+            frames += 1
+            candidate = line.strip()
+            lower = candidate.lower()
+
+            if "_https._tcp" in lower:
+                https_lines += 1
+                if not matched_line:
+                    for pattern in patterns:
+                        if pattern in lower:
+                            matched_line = candidate
+                            break
+
+            if "port 6443" in lower or " 6443" in lower:
+                port_lines += 1
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+    return_code = 0
+    if proc is not None and proc.returncode is not None:
+        return_code = proc.returncode
+
+    match_detected = bool(matched_line) and port_lines > 0
+    error_flag = 0 if return_code in (0, 130) else 1
+
+    print(
+        "matched={matched} frames={frames} https_lines={https_lines} "
+        "port_lines={port_lines} return_code={return_code} error={error}".format(
+            matched="1" if match_detected else "0",
+            frames=frames,
+            https_lines=https_lines,
+            port_lines=port_lines,
+            return_code=return_code,
+            error=error_flag,
+        )
+    )
+
+    if match_detected:
+        return 1
+    if error_flag:
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PY
+)"
+  local status=$?
+
+  MDNS_WIRE_PROOF_LAST_RESULT="${output}"
+
+  case "${status}" in
+    0)
+      MDNS_WIRE_PROOF_LAST_STATUS="absent"
+      # shellcheck disable=SC2086
+      log_info discover event=mdns_wire_proof outcome=absent ${output} >&2
+      ;;
+    1)
+      MDNS_WIRE_PROOF_LAST_STATUS="present"
+      # shellcheck disable=SC2086
+      log_warn_msg discover "wire proof detected DNS-SD answers" \
+        "mdns_wire_proof_status=present" ${output} >&2
+      ;;
+    2)
+      MDNS_WIRE_PROOF_LAST_STATUS="error"
+      # shellcheck disable=SC2086
+      log_warn_msg discover "wire proof failed" "mdns_wire_proof_status=error" \
+        ${output} >&2
+      ;;
+    *)
+      MDNS_WIRE_PROOF_LAST_STATUS="error"
+      # shellcheck disable=SC2086
+      log_warn_msg discover "wire proof failed" "mdns_wire_proof_status=error" \
+        ${output} >&2
+      ;;
+  esac
+
+  return "${status}"
+}
+
 check_mdns_absence_once() {
   MDNS_ABSENCE_LAST_METHOD=""
   MDNS_ABSENCE_LAST_STATUS="unknown"
@@ -663,11 +881,27 @@ ensure_mdns_absence_gate() {
 
   local attempts=0
   local consecutive_absent=0
+  local consecutive_dbus_absent=0
   local presence_seen=0
+  local wire_presence_seen=0
   local elapsed_ms=0
   local last_status="unknown"
   local last_method="none"
   local status=2
+  local dbus_requirement_met=0
+  local require_wire_proof=1
+  local wire_absent_window=0
+
+  if [ "${MDNS_ABSENCE_DBUS_CAPABLE}" -ne 1 ]; then
+    dbus_requirement_met=1
+    log_info discover event=mdns_absence_gate action=dbus_requirement_skip dbus_available=0 >&2
+  fi
+
+  if [ "${MDNS_WIRE_PROOF_ENABLED}" != "1" ] || [ "${TCPDUMP_AVAILABLE}" -ne 1 ]; then
+    require_wire_proof=0
+    mdns_wire_proof_check >/dev/null 2>&1 || true
+    wire_absent_window=1
+  fi
 
   while :; do
     attempts=$((attempts + 1))
@@ -682,21 +916,61 @@ ensure_mdns_absence_gate() {
     case "${status}" in
       0)
         consecutive_absent=$((consecutive_absent + 1))
+        if [ "${last_method}" = "dbus" ]; then
+          consecutive_dbus_absent=$((consecutive_dbus_absent + 1))
+        else
+          consecutive_dbus_absent=0
+        fi
         ;;
       1)
         presence_seen=1
         consecutive_absent=0
+        consecutive_dbus_absent=0
+        if [ "${MDNS_ABSENCE_DBUS_CAPABLE}" -eq 1 ]; then
+          dbus_requirement_met=0
+        else
+          dbus_requirement_met=1
+        fi
+        if [ "${require_wire_proof}" -eq 1 ]; then
+          wire_absent_window=0
+        fi
         ;;
       *)
         consecutive_absent=0
+        consecutive_dbus_absent=0
+        if [ "${require_wire_proof}" -eq 1 ]; then
+          wire_absent_window=0
+        fi
         ;;
     esac
 
-    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" >&2
+    if [ "${last_method}" = "dbus" ] && [ "${status}" -eq 0 ] && [ "${consecutive_dbus_absent}" -ge 2 ]; then
+      dbus_requirement_met=1
+    fi
+
+    if [ "${require_wire_proof}" -eq 1 ] && [ "${dbus_requirement_met}" -eq 1 ] && [ "${wire_absent_window}" -ne 1 ]; then
+      if mdns_wire_proof_check; then
+        wire_absent_window=1
+      else
+        local wire_status=$?
+        if [ "${wire_status}" -eq 1 ]; then
+          wire_presence_seen=1
+          presence_seen=1
+          consecutive_absent=0
+          consecutive_dbus_absent=0
+          dbus_requirement_met=0
+          wire_absent_window=0
+        elif [ "${wire_status}" -eq 2 ]; then
+          wire_absent_window=0
+        fi
+      fi
+    fi
+
+    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" consecutive_dbus_absent="${consecutive_dbus_absent}" dbus_requirement_met="${dbus_requirement_met}" wire_absent_window="${wire_absent_window}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
 
     elapsed_ms="$(elapsed_since_ms "${start_ms}")"
 
-    if [ "${consecutive_absent}" -ge 2 ]; then
+    if [ "${consecutive_absent}" -ge 2 ] && [ "${dbus_requirement_met}" -eq 1 ] && [ "${wire_absent_window}" -eq 1 ]; then
       break
     fi
 
@@ -728,7 +1002,7 @@ PY
   done
 
   local confirmed=0
-  if [ "${consecutive_absent}" -ge 2 ]; then
+  if [ "${consecutive_absent}" -ge 2 ] && [ "${dbus_requirement_met}" -eq 1 ] && [ "${wire_absent_window}" -eq 1 ]; then
     confirmed=1
   fi
 
@@ -736,17 +1010,27 @@ PY
   if [ "${confirmed}" -ne 1 ]; then
     if [ "${timeout_ms}" -gt 0 ] && [ "${elapsed_ms}" -ge "${timeout_ms}" ]; then
       reason="timeout"
+    elif [ "${wire_presence_seen}" -eq 1 ]; then
+      reason="wire_presence_detected"
     elif [ "${presence_seen}" -eq 1 ]; then
       reason="presence_detected"
+    elif [ "${dbus_requirement_met}" -ne 1 ]; then
+      reason="dbus_requirement_unmet"
+    elif [ "${wire_absent_window}" -ne 1 ]; then
+      reason="wire_absence_unconfirmed"
     else
       reason="unconfirmed"
     fi
   fi
 
   if [ "${confirmed}" -eq 1 ]; then
-    log_info discover event=mdns_absence_gate mdns_absence_confirmed=1 attempts="${attempts}" ms_elapsed="${elapsed_ms}" last_method="${last_method}" consecutive_absent="${consecutive_absent}" >&2
+    log_info discover event=mdns_absence_gate mdns_absence_confirmed=1 attempts="${attempts}" \
+      ms_elapsed="${elapsed_ms}" last_method="${last_method}" consecutive_absent="${consecutive_absent}" \
+      consecutive_dbus_absent="${consecutive_dbus_absent}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
   else
-    log_warn_msg discover "mDNS absence gate timed out" "mdns_absence_confirmed=0" "attempts=${attempts}" "ms_elapsed=${elapsed_ms}" "reason=${reason}" "last_method=${last_method}" >&2
+    log_warn_msg discover "mDNS absence gate timed out" "mdns_absence_confirmed=0" \
+      "attempts=${attempts}" "ms_elapsed=${elapsed_ms}" "reason=${reason}" "last_method=${last_method}" \
+      "consecutive_dbus_absent=${consecutive_dbus_absent}" "wire_proof_status=${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
   fi
 
   return 0

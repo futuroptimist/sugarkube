@@ -25,6 +25,20 @@ BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
 BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
 JITTER_FRACTION="${JITTER:-0.2}"
 
+if command -v tcpdump >/dev/null 2>&1; then
+  TCPDUMP_AVAILABLE=1
+else
+  TCPDUMP_AVAILABLE=0
+fi
+if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
+  if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    SUGARKUBE_MDNS_WIRE_PROOF=1
+  else
+    SUGARKUBE_MDNS_WIRE_PROOF=0
+  fi
+fi
+export SUGARKUBE_MDNS_WIRE_PROOF
+
 script_start_ms="$(python3 - <<'PY'
 import time
 print(int(time.time() * 1000))
