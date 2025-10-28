@@ -23,6 +23,8 @@ up env='dev': prereqs
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
+    sudo -E bash "{{ scripts_dir }}/ensure_unique_hostname.sh"
+
     # Restore WLAN on exit iff we actually disabled it (guard file written by toggle_wlan.sh)
     trap 'if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
              [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then \
