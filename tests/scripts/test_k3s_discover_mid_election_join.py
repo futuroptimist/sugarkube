@@ -31,6 +31,11 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     # Stub systemctl to avoid touching the host service manager.
     _write_stub(bin_dir / "systemctl", "#!/usr/bin/env bash\nexit 0\n")
 
+    # Provide minimal stubs for iptables tooling so the installer preflight succeeds.
+    _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "apt-get", "#!/usr/bin/env bash\nexit 0\n")
+
     # Pretend the API port starts listening immediately after the installer runs.
     _write_stub(
         bin_dir / "ss",
@@ -46,6 +51,27 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{server_flag}'; fi\n"
         "trap 'echo TERM >> \"" + str(publish_log) + "\"; exit 0' TERM INT\n"
         "while true; do read -r -t 1 _ || true; done\n",
+    )
+
+    _write_stub(
+        bin_dir / "avahi-publish",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo PUBLISH:\"$@\" >> '{publish_log}'\n"
+        f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{server_flag}'; fi\n"
+        "trap 'exit 0' TERM INT\n"
+        "while true; do read -r -t 1 _ || true; done\n",
+    )
+
+    _write_stub(
+        bin_dir / "avahi-resolve",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [ \"${1:-}\" = '-n' ]; then\n"
+        "  printf '%s\\t%s\\n' \"${2:-}\" '192.0.2.10'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n",
     )
 
     # Emit an installation script that immediately exits successfully.
@@ -126,7 +152,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
             "SUGARKUBE_RUNTIME_DIR": str(tmp_path / "run"),
             "SUGARKUBE_TEST_STATE": str(state_file),
-            "SUGARKUBE_TEST_SERVER_THRESHOLD": "9",
+            "SUGARKUBE_TEST_SERVER_THRESHOLD": "1",
             "SH_LOG_PATH": str(sh_log),
             "SUGARKUBE_MDNS_DBUS": "0",
         }
@@ -141,8 +167,11 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "server advertisement confirmed" in result.stderr
-    assert "Joining as additional HA server via https://sugarkube0.local:6443" in result.stderr
+    assert "event=mdns_selfcheck outcome=confirmed" in result.stderr
+    assert "phase=install_join" in result.stderr
+    assert "event=join_gate action=wait" in result.stderr
+    assert "event=join_gate action=acquire" in result.stderr
+    assert "event=join_gate action=release" in result.stderr
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")
     assert "--cluster-init" not in sh_log_contents

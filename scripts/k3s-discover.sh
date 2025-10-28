@@ -125,6 +125,8 @@ FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
+JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
+JOIN_GATE_HELD=0
 
 run_net_diag() {
   local reason="$1"
@@ -2157,6 +2159,42 @@ build_install_env() {
   fi
 }
 
+acquire_join_gate() {
+  if [ ! -x "${JOIN_GATE_BIN}" ]; then
+    log_error_msg discover "join gate helper missing" "script=${JOIN_GATE_BIN}"
+    return 1
+  fi
+  if ! "${JOIN_GATE_BIN}" wait; then
+    log_error_msg discover "join gate wait failed" "script=${JOIN_GATE_BIN}"
+    return 1
+  fi
+  if "${JOIN_GATE_BIN}" acquire; then
+    JOIN_GATE_HELD=1
+    return 0
+  fi
+  log_error_msg discover "join gate acquire failed" "script=${JOIN_GATE_BIN}"
+  return 1
+}
+
+release_join_gate_if_needed() {
+  if [ "${JOIN_GATE_HELD:-0}" -ne 1 ]; then
+    return 0
+  fi
+  if [ ! -x "${JOIN_GATE_BIN}" ]; then
+    log_warn_msg discover "join gate release skipped; helper missing" "script=${JOIN_GATE_BIN}"
+    JOIN_GATE_HELD=0
+    return 0
+  fi
+  if "${JOIN_GATE_BIN}" release; then
+    JOIN_GATE_HELD=0
+    return 0
+  fi
+  log_warn_msg discover "join gate release failed" "script=${JOIN_GATE_BIN}"
+  return 1
+}
+
+trap 'release_join_gate_if_needed || true' EXIT
+
 install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
@@ -2212,6 +2250,9 @@ install_server_join() {
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
+  if ! acquire_join_gate; then
+    exit 1
+  fi
   ensure_iptables_tools
   log_info discover phase=install_join host="${MDNS_HOST_RAW}" server="${server}" desired_servers="${SERVERS_DESIRED}" >&2
   local env_assignments
@@ -2230,6 +2271,10 @@ install_server_join() {
   if wait_for_api; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_join"
+      exit 1
+    fi
+    if ! release_join_gate_if_needed; then
+      log_error_msg discover "Failed to release join gate" "phase=install_join"
       exit 1
     fi
   else
