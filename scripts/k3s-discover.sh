@@ -112,6 +112,7 @@ if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
 fi
 MDNS_WIRE_PROOF_ENABLED="${SUGARKUBE_MDNS_WIRE_PROOF}"
 MDNS_WIRE_PROOF_LAST_STATUS=""
+# shellcheck disable=SC2034  # consumed by mdns absence telemetry
 MDNS_WIRE_PROOF_LAST_RESULT=""
 MDNS_WIRE_PROOF_DISABLED_LOGGED=0
 MDNS_WIRE_PROOF_SKIP_LOGGED=0
@@ -348,6 +349,10 @@ SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 IPTABLES_ENSURED=0
+# shellcheck disable=SC2034  # exposed for test harness inspection
+IPTABLES_PREFLIGHT_OUTCOME=""
+# shellcheck disable=SC2034  # exposed for test harness inspection
+IPTABLES_PREFLIGHT_DETAILS=""
 
 run_privileged() {
   if [ -n "${SUDO_CMD:-}" ]; then
@@ -797,6 +802,7 @@ PY
 )"
   local status=$?
 
+  # shellcheck disable=SC2034  # tracked for later telemetry/logging
   MDNS_WIRE_PROOF_LAST_RESULT="${output}"
 
   case "${status}" in
@@ -2009,9 +2015,37 @@ ensure_iptables_tools() {
   if [ "${IPTABLES_ENSURED}" -eq 1 ]; then
     return 0
   fi
-  if ! run_privileged "${SCRIPT_DIR}/k3s-install-iptables.sh"; then
-    log_error_msg discover "Failed to ensure iptables tooling" "script=${SCRIPT_DIR}/k3s-install-iptables.sh"
+  local outcome="ok"
+  local details=""
+  local output=""
+
+  if output="$(run_privileged "${SCRIPT_DIR}/k3s-install-iptables.sh" 2>&1)"; then
+    details="$(printf '%s' "${output}" | tr '\n' ' ')"
+    if [ -z "${details}" ]; then
+      details="event=iptables_check"
+    fi
+  else
+    local status=$?
+    outcome="error"
+    details="exit_code=${status}"
+    # shellcheck disable=SC2034  # surfaced for Bats assertions via stdout
+    IPTABLES_PREFLIGHT_OUTCOME="${outcome}"
+    # shellcheck disable=SC2034  # surfaced for Bats assertions via stdout
+    IPTABLES_PREFLIGHT_DETAILS="${details}"
+    log_error_msg discover "Failed to ensure iptables tooling" \
+      "script=${SCRIPT_DIR}/k3s-install-iptables.sh" "status=${status}" >&2
+    printf '%s\n' "${output}" >&2
     exit 1
+  fi
+
+  # shellcheck disable=SC2034  # surfaced for Bats assertions via stdout
+  IPTABLES_PREFLIGHT_OUTCOME="${outcome}"
+  # shellcheck disable=SC2034  # surfaced for Bats assertions via stdout
+  IPTABLES_PREFLIGHT_DETAILS="${details}"
+  log_debug discover event=iptables_preflight outcome="${outcome}" details="${details}" >&2
+
+  if [ -n "${output}" ]; then
+    printf '%s\n' "${output}"
   fi
   IPTABLES_ENSURED=1
 }
