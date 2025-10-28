@@ -41,6 +41,10 @@ log_error_msg() {
   log_message info "${event}" "${message}" "severity=error" "$@"
 }
 
+escape_log_value() {
+  printf '%s' "$1" | sed 's/"/\\"/g'
+}
+
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 
 if [ "${EUID}" -eq 0 ]; then
@@ -112,7 +116,7 @@ if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
 fi
 MDNS_WIRE_PROOF_ENABLED="${SUGARKUBE_MDNS_WIRE_PROOF}"
 MDNS_WIRE_PROOF_LAST_STATUS=""
-MDNS_WIRE_PROOF_LAST_RESULT=""
+MDNS_WIRE_PROOF_LAST_RESULT="" # shellcheck disable=SC2034
 MDNS_WIRE_PROOF_DISABLED_LOGGED=0
 MDNS_WIRE_PROOF_SKIP_LOGGED=0
 MDNS_SELF_CHECK_FAILURE_CODE=94
@@ -120,6 +124,7 @@ ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
+SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 
 run_net_diag() {
   local reason="$1"
@@ -344,6 +349,11 @@ SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 IPTABLES_ENSURED=0
+IPTABLES_PREFLIGHT_DONE=0
+# shellcheck disable=SC2034
+IPTABLES_PREFLIGHT_OUTCOME=""
+# shellcheck disable=SC2034
+IPTABLES_PREFLIGHT_DETAILS=""
 
 run_privileged() {
   if [ -n "${SUDO_CMD:-}" ]; then
@@ -351,6 +361,113 @@ run_privileged() {
   else
     "$@"
   fi
+}
+
+iptables_preflight() {
+  if [ "${IPTABLES_PREFLIGHT_DONE}" -eq 1 ]; then
+    return 0
+  fi
+
+  local strict="${SUGARKUBE_STRICT_IPTABLES:-0}"
+  local iptables_cmd=""
+  local iptables_variant="missing"
+  local iptables_version="unavailable"
+  local nft_available="no"
+  local kube_proxy_mode=""
+  local outcome="ok"
+  local message="iptables configuration appears compatible"
+  local remediation=""
+  local version_line=""
+
+  if command -v nft >/dev/null 2>&1; then
+    nft_available="yes"
+  fi
+
+  if command -v iptables >/dev/null 2>&1; then
+    iptables_cmd="$(command -v iptables)"
+    version_line="$(iptables --version 2>/dev/null | head -n1 || true)"
+    if [ -n "${version_line}" ]; then
+      iptables_version="$(printf '%s' "${version_line}" | awk '{print $2}')"
+      if printf '%s' "${version_line}" | grep -qi 'nf_tables'; then
+        iptables_variant="nf_tables"
+      elif printf '%s' "${version_line}" | grep -qi 'legacy'; then
+        iptables_variant="legacy"
+      else
+        iptables_variant="unknown"
+      fi
+    else
+      iptables_variant="unknown"
+      iptables_version="unknown"
+    fi
+  else
+    outcome="warn"
+    message="iptables binary is missing"
+    remediation="install_iptables_package"
+  fi
+
+  if [ -n "${SUGARKUBE_KUBE_PROXY_MODE:-}" ]; then
+    kube_proxy_mode="${SUGARKUBE_KUBE_PROXY_MODE}"
+  elif [ -n "${K3S_KUBE_PROXY_MODE:-}" ]; then
+    kube_proxy_mode="${K3S_KUBE_PROXY_MODE}"
+  elif [ -n "${KUBE_PROXY_MODE:-}" ]; then
+    kube_proxy_mode="${KUBE_PROXY_MODE}"
+  else
+    kube_proxy_mode="iptables (default)"
+  fi
+
+  if [ -n "${INSTALL_K3S_EXEC:-}" ] && printf '%s' "${INSTALL_K3S_EXEC}" | grep -q -- '--disable-kube-proxy'; then
+    kube_proxy_mode="disabled"
+  fi
+
+  if [ "${outcome}" = "ok" ] && [ "${iptables_variant}" = "nf_tables" ]; then
+    outcome="warn"
+    message="iptables is using the nf_tables backend which is known to break k3s kube-proxy"
+    remediation="use_update-alternatives_to_select_iptables-legacy"
+  fi
+
+  if [ "${outcome}" = "warn" ] && [ "${nft_available}" = "no" ] && [ "${iptables_variant}" = "nf_tables" ]; then
+    remediation="install_nftables_or_switch_to_iptables-legacy"
+  fi
+
+  local safe_kube_proxy_mode
+  safe_kube_proxy_mode="$(printf '%s' "${kube_proxy_mode}" | tr ' ' '_' | tr -d '"')"
+
+  local details
+  details="variant=${iptables_variant},version=${iptables_version},nft=${nft_available},kube-proxy=${safe_kube_proxy_mode}"
+  if [ -n "${iptables_cmd}" ]; then
+    details="${details},path=${iptables_cmd}"
+  fi
+
+  IPTABLES_PREFLIGHT_DONE=1
+  IPTABLES_PREFLIGHT_OUTCOME="${outcome}" # shellcheck disable=SC2034
+  IPTABLES_PREFLIGHT_DETAILS="${details}" # shellcheck disable=SC2034
+
+  local -a log_pairs=(
+    "outcome=${outcome}"
+    "details=\"$(escape_log_value "${details}")\""
+    "variant=${iptables_variant}"
+    "version=${iptables_version}"
+    "nft_available=${nft_available}"
+    "kube_proxy_mode=\"$(escape_log_value "${kube_proxy_mode}")\""
+  )
+
+  if [ -n "${remediation}" ]; then
+    log_pairs+=("remediation=\"$(escape_log_value "${remediation}")\"")
+  fi
+
+  if [ "${outcome}" = "warn" ]; then
+    log_warn_msg iptables_preflight "${message}" "${log_pairs[@]}"
+    if [ "${strict}" = "1" ]; then
+      log_error_msg iptables_preflight "Failing due to SUGARKUBE_STRICT_IPTABLES=1" \
+        "outcome=${outcome}" \
+        "details=\"$(escape_log_value "${details}")\""
+      exit 1
+    fi
+  else
+    log_info_msg iptables_preflight "${message}" "${log_pairs[@]}"
+  fi
+
+  return 0
 }
 
 run_configure_avahi() {
@@ -393,6 +510,8 @@ remove_privileged_file() {
 }
 
 run_configure_avahi
+
+iptables_preflight
 
 if ! run_privileged mkdir -p "${MDNS_RUNTIME_DIR}"; then
   echo "Failed to create ${MDNS_RUNTIME_DIR}" >&2
@@ -611,7 +730,7 @@ PY
 }
 
 mdns_wire_proof_check() {
-  MDNS_WIRE_PROOF_LAST_RESULT=""
+  MDNS_WIRE_PROOF_LAST_RESULT="" # shellcheck disable=SC2034
 
   if [ "${MDNS_WIRE_PROOF_ENABLED}" != "1" ]; then
     if [ "${MDNS_WIRE_PROOF_DISABLED_LOGGED}" -ne 1 ]; then
@@ -620,7 +739,7 @@ mdns_wire_proof_check() {
       MDNS_WIRE_PROOF_DISABLED_LOGGED=1
     fi
     MDNS_WIRE_PROOF_LAST_STATUS="disabled"
-    MDNS_WIRE_PROOF_LAST_RESULT="wire_proof=disabled"
+    MDNS_WIRE_PROOF_LAST_RESULT="wire_proof=disabled" # shellcheck disable=SC2034
     return 0
   fi
 
@@ -631,7 +750,7 @@ mdns_wire_proof_check() {
       MDNS_WIRE_PROOF_SKIP_LOGGED=1
     fi
     MDNS_WIRE_PROOF_LAST_STATUS="tcpdump_unavailable"
-    MDNS_WIRE_PROOF_LAST_RESULT="tcpdump_available=0"
+    MDNS_WIRE_PROOF_LAST_RESULT="tcpdump_available=0" # shellcheck disable=SC2034
     return 0
   fi
 
@@ -793,7 +912,7 @@ PY
 )"
   local status=$?
 
-  MDNS_WIRE_PROOF_LAST_RESULT="${output}"
+  MDNS_WIRE_PROOF_LAST_RESULT="${output}" # shellcheck disable=SC2034
 
   case "${status}" in
     0)
