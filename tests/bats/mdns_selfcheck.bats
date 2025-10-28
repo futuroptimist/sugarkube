@@ -434,6 +434,12 @@ EOS
 sleep 60
 EOS
 
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+cat "${SUGARKUBE_MDNS_FIXTURE_FILE}"
+exit 0
+EOS
+
   configure_stub="${BATS_TEST_TMPDIR}/configure-avahi-stub.sh"
   cat <<'EOS' >"${configure_stub}"
 #!/usr/bin/env bash
