@@ -51,6 +51,8 @@ unit_exists() {
 write_dropin() {
   local unit="$1"
   local ip="$2"
+  shift 2
+  local -a extra_env=("$@")
   local dir file tmp mode owner group
   dir="${SYSTEMD_SYSTEM_DIR}/${unit}.d"
   file="${dir}/${DROPIN_NAME}"
@@ -69,6 +71,12 @@ write_dropin() {
   {
     printf '[Service]\n'
     printf 'Environment=K3S_NODE_IP=%s\n' "${ip}"
+    local env_entry
+    for env_entry in "${extra_env[@]}"; do
+      if [ -n "${env_entry}" ]; then
+        printf 'Environment=%s\n' "${env_entry}"
+      fi
+    done
   } >"${tmp}"
 
   chmod "${mode}" "${tmp}"
@@ -195,11 +203,18 @@ main() {
   }
   log "Detected IPv4 ${ip} on ${IFACE}"
 
+  local flannel_iface
+  flannel_iface="${SUGARKUBE_FLANNEL_IFACE:-}"
+
   local -a changed_services=()
   local unit
   for unit in k3s.service k3s-agent.service; do
     if unit_exists "${unit}"; then
-      if write_dropin "${unit}" "${ip}"; then
+      local -a env_vars=()
+      if [ "${unit}" = "k3s.service" ] && [ -n "${flannel_iface}" ]; then
+        env_vars+=("K3S_FLANNEL_IFACE=${flannel_iface}")
+      fi
+      if write_dropin "${unit}" "${ip}" "${env_vars[@]}"; then
         changed_services+=("${unit}")
       else
         log "Drop-in for ${unit} already up-to-date"
