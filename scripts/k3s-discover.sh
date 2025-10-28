@@ -42,6 +42,7 @@ log_error_msg() {
 }
 
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
+SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 
 if [ "${EUID}" -eq 0 ]; then
   SUDO_CMD="${SUGARKUBE_SUDO_BIN:-}"
@@ -344,6 +345,158 @@ SERVER_PUBLISH_PERSIST=0
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 IPTABLES_ENSURED=0
+IPTABLES_PREFLIGHT_DONE=0
+
+_detect_kube_proxy_mode() {
+  if [ -n "${SUGARKUBE_KUBE_PROXY_MODE:-}" ]; then
+    printf '%s\n' "${SUGARKUBE_KUBE_PROXY_MODE}"
+    return 0
+  fi
+
+  if [ -n "${K3S_KUBE_PROXY_MODE:-}" ]; then
+    printf '%s\n' "${K3S_KUBE_PROXY_MODE}"
+    return 0
+  fi
+
+  if [ -n "${KUBE_PROXY_MODE:-}" ]; then
+    printf '%s\n' "${KUBE_PROXY_MODE}"
+    return 0
+  fi
+
+  local config_file
+  local config_line
+  for config_file in \
+    /etc/rancher/k3s/config.yaml \
+    /etc/rancher/k3s/config.yml \
+    /etc/systemd/system/k3s.service.env \
+    /etc/systemd/system/k3s-agent.service.env; do
+    if [ -r "${config_file}" ]; then
+      config_line="$(grep -E 'proxy-mode=' "${config_file}" 2>/dev/null | head -n1 || true)"
+      if [ -n "${config_line}" ]; then
+        config_line="${config_line#*proxy-mode=}"
+        config_line="$(printf '%s' "${config_line}" | tr -d "'\"")"
+        config_line="${config_line%% *}"
+        config_line="${config_line%%\\r*}"
+        config_line="${config_line%%,*}"
+        if [ -n "${config_line}" ]; then
+          printf '%s\n' "${config_line}"
+          return 0
+        fi
+      fi
+    fi
+  done
+
+  printf '%s\n' "iptables"
+}
+
+iptables_preflight() {
+  if [ "${IPTABLES_PREFLIGHT_DONE}" -eq 1 ]; then
+    return 0
+  fi
+
+  local iptables_bin
+  local iptables_path
+  local iptables_version_raw
+  local iptables_version="unknown"
+  local iptables_variant="unknown"
+  local nft_status="missing"
+  local kube_proxy_mode
+  local kube_proxy_mode_detail
+  local outcome="ok"
+  local hint=""
+  local details
+  local unsupported=0
+
+  iptables_bin="${SUGARKUBE_IPTABLES_BIN:-iptables}"
+  if command -v "${iptables_bin}" >/dev/null 2>&1; then
+    iptables_path="$(command -v "${iptables_bin}" 2>/dev/null || true)"
+    iptables_version_raw="$("${iptables_bin}" --version 2>&1 || true)"
+    iptables_version="$(printf '%s\n' "${iptables_version_raw}" | \
+      sed -n 's/^iptables v\([0-9.]*\).*/\1/p' | head -n1)"
+    if [ -z "${iptables_version}" ]; then
+      iptables_version="unknown"
+    fi
+    if printf '%s\n' "${iptables_version_raw}" | grep -qi 'nf_tables'; then
+      iptables_variant="nf_tables"
+    elif printf '%s\n' "${iptables_version_raw}" | grep -qi 'legacy'; then
+      iptables_variant="legacy"
+    elif [ -n "${iptables_path:-}" ]; then
+      case "${iptables_path}" in
+        *iptables-nft*)
+          iptables_variant="nf_tables"
+          ;;
+        *iptables-legacy*)
+          iptables_variant="legacy"
+          ;;
+      esac
+    fi
+  else
+    iptables_variant="missing"
+    iptables_version="absent"
+    hint="install_iptables_package"
+    unsupported=1
+  fi
+
+  if command -v nft >/dev/null 2>&1; then
+    nft_status="present"
+  fi
+
+  kube_proxy_mode="$(_detect_kube_proxy_mode)"
+  if [ -z "${kube_proxy_mode}" ]; then
+    kube_proxy_mode="unknown"
+  fi
+  kube_proxy_mode_detail="${kube_proxy_mode// /_}"
+
+  if [ "${iptables_variant}" = "nf_tables" ]; then
+    if [ "${kube_proxy_mode_detail}" = "iptables" ] || [ "${kube_proxy_mode_detail}" = "unknown" ]; then
+      unsupported=1
+      hint="set_update_alternatives_to_legacy"
+    fi
+  fi
+
+  if [ "${iptables_variant}" = "missing" ]; then
+    hint="install_iptables_package"
+  fi
+
+  details="bin:${iptables_bin}"
+  if [ -n "${iptables_path:-}" ]; then
+    details="${details},path:${iptables_path}"
+  fi
+  details="${details},variant:${iptables_variant},version:${iptables_version},nft:${nft_status},kube_proxy:${kube_proxy_mode_detail}"
+
+  if [ "${unsupported}" -eq 1 ]; then
+    outcome="warn"
+    log_warn_msg discover \
+      "iptables preflight detected a potentially unsupported configuration" \
+      "event=iptables_preflight" \
+      "outcome=${outcome}" \
+      "details=${details}" \
+      "iptables_variant=${iptables_variant}" \
+      "iptables_version=${iptables_version}" \
+      "nftables=${nft_status}" \
+      "kube_proxy_mode=${kube_proxy_mode_detail}" \
+      "hint=${hint}"
+    if [ "${SUGARKUBE_STRICT_IPTABLES}" = "1" ]; then
+      log_error_msg discover "Strict iptables preflight failure" \
+        "event=iptables_preflight" \
+        "outcome=fatal" \
+        "details=${details}" \
+        "hint=${hint}"
+      exit 1
+    fi
+  else
+    log_info_msg discover "iptables preflight passed" \
+      "event=iptables_preflight" \
+      "outcome=${outcome}" \
+      "details=${details}" \
+      "iptables_variant=${iptables_variant}" \
+      "iptables_version=${iptables_version}" \
+      "nftables=${nft_status}" \
+      "kube_proxy_mode=${kube_proxy_mode_detail}"
+  fi
+
+  IPTABLES_PREFLIGHT_DONE=1
+}
 
 run_privileged() {
   if [ -n "${SUDO_CMD:-}" ]; then
@@ -2171,6 +2324,8 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
   fi
   exit "${status}"
 fi
+
+iptables_preflight
 
 ensure_mdns_absence_gate
 
