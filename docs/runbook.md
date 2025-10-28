@@ -66,6 +66,11 @@ Verify discovery (mDNS):
 avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 ```
 
+Sugarkube's absence gate follows RFC 6762 guidance: after `just wipe`, the helper demands two
+consecutive "not found" responses from Avahi and, when `SUGARKUBE_MDNS_WIRE_PROOF=1`, a short
+tcpdump confirming that no port 6443 announcements remain on the wire. This double-negative protects
+against stale advertisements being cached elsewhere on the subnet.
+
 ## 4. Bootstrap Flux and secrets
 
 Flux bootstrapping defaults to the production overlay. Pass `env=<env>` to the Just recipes or set
@@ -165,6 +170,24 @@ just status
 kubectl -n kube-system get daemonset kube-vip
 kubectl -n kube-system get svc traefik
 ```
+
+### Discovery guardrails & debugging toggles
+
+- **Readiness gate:** `mdns_selfcheck.sh` refuses to mark a control-plane advertisement as confirmed
+  until the kube-apiserver answers on port 6443. The helper cycles through the `.local` hostname and
+  resolved IPs, opening sockets until one succeeds, which keeps mDNS truthful during Flannel's
+  default overlay setup.
+- **Environment toggles:**
+  - `SUGARKUBE_MDNS_DBUS=1` (default) leans on Avahi's D-Bus API for deterministic discovery;
+    forcing it to `0` reverts to the CLI fallback when the bus is unavailable.
+  - `SUGARKUBE_DEBUG_MDNS=1` dumps the browse/resolve traces so you can see exactly how Avahi and
+    tcp readiness checks behave.
+  - `SUGARKUBE_MDNS_WIRE_PROOF=1` (default outside containers) captures a brief multicast DNS trace
+    to prove that announcements really leave the host; set it to `0` if `tcpdump` is blocked.
+- **Interpreting `ms_elapsed`:** The field printed in `mdns_selfcheck` and `mdns_absence_gate` logs
+  is the end-to-end duration of the discovery attempt. On a quiet LAN with the default Flannel
+  backend, expect presence confirmations in ~120–400 ms and absence gates in ~1.5–3.0 s. Larger
+  numbers usually signal retransmits or congestion.
 
 ## 6. Backups and restore procedures
 

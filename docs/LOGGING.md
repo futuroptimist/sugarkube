@@ -18,6 +18,28 @@ machine-parseable while still being readable during interactive debugging.
   back to a relaxed match.
 - `SUGARKUBE_MDNS_DBUS=0` forces the CLI mDNS validator; omit or set to `1`
   to keep the default D-Bus backend (see [DBUS.md](DBUS.md)).
+- `SUGARKUBE_MDNS_WIRE_PROOF=1` instructs the discovery helpers to capture a
+  short burst of multicast DNS traffic and ensure that RFC 6762 responses for
+  the target host actually hit the wire. Set it to `0` to skip the
+  tcpdump-based verification when Avahi is running in a sandbox or when
+  `tcpdump` is prohibited.
+
+## Timing fields in the logs
+
+Many discovery log lines include an `ms_elapsed` field. It reports the wall
+clock milliseconds spent inside the relevant check—from the first Avahi browse
+through socket readiness probes. On a quiet LAN where K3s defaults (Flannel
+overlay with VXLAN encapsulation) are healthy, expect:
+
+- Presence confirmations (`mdns_selfcheck outcome=confirmed`) to resolve in
+  roughly **120–400 ms**, covering the Avahi browse and the 6443 readiness gate
+  that opens a TCP socket against the API server.
+- Absence gates after a `just wipe` or environment teardown to take **1.5–3.0
+  s** because Sugarkube requires two consecutive negative D-Bus reads and, when
+  enabled, one wire-level proof before declaring that an advertisement is gone.
+
+Higher values usually mean retransmissions on the LAN or slow responses from
+the mDNS publisher.
 
 ## Usage examples
 

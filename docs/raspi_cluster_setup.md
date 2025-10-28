@@ -78,6 +78,9 @@ What `just wipe` does:
   `k3s-agent-uninstall.sh`) to stop K3s and remove the local datastore and node config.
 - Removes the mDNS/DNS-SD service file for the current cluster/env from `/etc/avahi/services/` and
   restarts Avahi so stale advertisements disappear.
+- Waits for a **double-negative** absence gate: the helper polls Avahi over D-Bus twice (per RFC
+  6762 §6) and, when `SUGARKUBE_MDNS_WIRE_PROOF=1`, sniffs the wire to confirm that no port 6443
+  responses leak onto the LAN before declaring the wipe complete.
 
 After wiping, re-export the desired environment variables (and token if used) before retrying:
 
@@ -98,6 +101,10 @@ other nodes:
 avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 # Look for port 6443 and TXT like: k3s=1, cluster=<name>, env=<env>, role=server
 ```
+
+If the record lingers after a wipe, double-check that `SUGARKUBE_MDNS_DBUS=1` (the default) so the
+absence gate can see Avahi updates immediately; `SUGARKUBE_DEBUG_MDNS=1` and
+`SUGARKUBE_MDNS_WIRE_PROOF=1` surface additional traces and tcpdump summaries to aid debugging.
 
 > **Note**
 > mDNS/DNS-SD service files live in `/etc/avahi/services/`. Removing the relevant

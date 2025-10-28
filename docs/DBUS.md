@@ -37,6 +37,24 @@ If the environment does not expose `gdbus`, or Avahi rejects the D-Bus calls,
 the helper exits with status `2` and `mdns_selfcheck.sh` transparently falls
 back to the CLI implementation.
 
+### Wire-level confirmation toggle
+
+When the D-Bus backend is active, Sugarkube also supports an optional
+wire-capture safeguard controlled by `SUGARKUBE_MDNS_WIRE_PROOF`.
+
+- `SUGARKUBE_MDNS_WIRE_PROOF=1` (default outside of CI containers) runs a
+  bounded `tcpdump` capture alongside the D-Bus check. The capture watches for
+  RFC 6762 multicast responses that advertise port 6443 for the target host and
+  service type. Seeing frames on the wire confirms that Avahi is not only
+  publishing over D-Bus but that the packets are actually leaving the node.
+- `SUGARKUBE_MDNS_WIRE_PROOF=0` keeps the validation D-Bus-only, which is
+  helpful in restricted environments where `tcpdump` is unavailable or
+  disallowed.
+
+`SUGARKUBE_DEBUG_MDNS=1` pairs well with either backend when you need to watch
+the raw Avahi D-Bus calls, CLI fallbacks, and wire-proof summaries; see
+[LOGGING.md](LOGGING.md#debug-toggles) for full diagnostics.
+
 ## Integration with discovery flow
 
 `scripts/k3s-discover.sh` automatically opts into the D-Bus validator when
