@@ -37,6 +37,22 @@ If the environment does not expose `gdbus`, or Avahi rejects the D-Bus calls,
 the helper exits with status `2` and `mdns_selfcheck.sh` transparently falls
 back to the CLI implementation.
 
+### Related toggles
+
+- `SUGARKUBE_DEBUG_MDNS=1` emits Avahi CLI traces, D-Bus method responses, and
+  the raw record set observed during each lookup. Combine this with
+  `LOG_LEVEL=debug` to capture the full discovery transcript in
+  `k3s-discover.sh` and the runbook exercises.
+- `SUGARKUBE_MDNS_WIRE_PROOF=1` (default when `tcpdump` is present) performs a
+  short-lived packet capture to prove that `_https._tcp` advertisements for the
+  target host are not transiting the wire. Disabling it with
+  `SUGARKUBE_MDNS_WIRE_PROOF=0` skips the sniffing phase, which is useful when
+  packet capture permissions are unavailable.
+
+Both toggles respect RFC 6762 timing guidance for mDNS queries and responses
+(see [RFC 6762, Section 5](https://datatracker.ietf.org/doc/html/rfc6762)) so
+the additional diagnostics do not spam the multicast domain.
+
 ## Integration with discovery flow
 
 `scripts/k3s-discover.sh` automatically opts into the D-Bus validator when

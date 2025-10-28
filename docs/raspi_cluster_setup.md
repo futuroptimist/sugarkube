@@ -78,6 +78,10 @@ What `just wipe` does:
   `k3s-agent-uninstall.sh`) to stop K3s and remove the local datastore and node config.
 - Removes the mDNS/DNS-SD service file for the current cluster/env from `/etc/avahi/services/` and
   restarts Avahi so stale advertisements disappear.
+- Leaves behind a double-negative absence check: after the wipe Sugarkube expects
+  two consecutive misses from the D-Bus resolver and a quiet wire window before
+  it will proceed, ensuring `_https._tcp` advertisements have actually drained
+  from the LAN.
 
 After wiping, re-export the desired environment variables (and token if used) before retrying:
 
@@ -102,6 +106,18 @@ avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 > **Note**
 > mDNS/DNS-SD service files live in `/etc/avahi/services/`. Removing the relevant
 > `k3s-*.service` file and reloading Avahi clears stale adverts.
+
+For an automated absence or readiness check, run the bundled helper:
+
+```bash
+SUGARKUBE_MDNS_DBUS=1 \
+SUGARKUBE_MDNS_WIRE_PROOF=1 \
+scripts/mdns_selfcheck.sh
+```
+
+The self-check confirms a 6443 listener exists before reporting success and
+respects RFC 6762 retry intervals so it plays well with Flannel’s default
+multicast forwarding in K3s.
 
 ---
 

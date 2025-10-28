@@ -18,6 +18,23 @@ machine-parseable while still being readable during interactive debugging.
   back to a relaxed match.
 - `SUGARKUBE_MDNS_DBUS=0` forces the CLI mDNS validator; omit or set to `1`
   to keep the default D-Bus backend (see [DBUS.md](DBUS.md)).
+- `SUGARKUBE_MDNS_WIRE_PROOF=1` asks the discovery flow to capture a short
+  tcpdump window on UDP/5353 to prove that `_https._tcp` advertisements have
+  stopped propagating. Disable it with `SUGARKUBE_MDNS_WIRE_PROOF=0` on hosts
+  where packet capture is blocked.
+
+The wire-proof toggle lines up with the double-negative absence gate described
+in the recovery steps: two consecutive misses from the D-Bus path plus a quiet
+wire window are required before Sugarkube treats an mDNS record as removed.
+
+## Log fields
+
+- `ms_elapsed` accompanies absence gates and self-checks. It records the total
+  runtime (in milliseconds) between the start of a probe and the final decision.
+  On a quiet wired LAN the D-Bus resolver usually completes in **120–400 ms**,
+  and the wire-proof extension finishes inside **750 ms**. Multi-second values
+  point to link congestion, packet loss, or RFC 6762 suppression timers firing
+  repeatedly.
 
 ## Usage examples
 
