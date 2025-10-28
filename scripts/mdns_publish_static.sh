@@ -70,6 +70,8 @@ with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write("</service-group>\n")
 PY
 
+chmod 644 "${tmp_file}"
+
 mv "${tmp_file}" "${service_file}"
 
 if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
