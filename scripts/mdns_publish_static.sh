@@ -3,7 +3,7 @@ set -euo pipefail
 
 cluster="${SUGARKUBE_CLUSTER:?SUGARKUBE_CLUSTER is required}"
 environment="${SUGARKUBE_ENV:?SUGARKUBE_ENV is required}"
-hostname="${HOSTNAME:?HOSTNAME is required}"
+: "${HOSTNAME:?HOSTNAME is required}"
 role="${ROLE:?ROLE is required}"
 case "${role}" in
   bootstrap|server)
@@ -13,9 +13,9 @@ case "${role}" in
     exit 2
     ;;
 esac
-port="${PORT:-6443}"
-phase="${PHASE:-}"
-leader="${LEADER:-}"
+export PORT="${PORT:-6443}"
+export PHASE="${PHASE:-}"
+export LEADER="${LEADER:-}"
 service_dir="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 if [ -n "${SUGARKUBE_AVAHI_SERVICE_FILE:-}" ]; then
   service_file="${SUGARKUBE_AVAHI_SERVICE_FILE}"
