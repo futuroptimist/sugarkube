@@ -41,6 +41,12 @@ Copy the long `K10…` string to a safe place—you will export it on every join
 > the initial control-plane bootstrap to run without one so it can mint the token
 > above for the rest of the cluster.
 
+> **TLS SAN for mDNS**
+> The bootstrap step also writes `/etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml`
+> so the API certificate covers `sugarkube0.local`. Set `SUGARKUBE_API_REGADDR`
+> before running `just up` if you advertise a VIP or load balancer—the address is
+> added as an extra SAN to avoid TLS warnings when joining via that endpoint.
+
 ### Remaining control-plane peers or agents
 
 Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the saved token before the second run so it can join the cluster:

@@ -2279,6 +2279,75 @@ wait_for_remote_api_ready() {
   return 0
 }
 
+check_remote_server_tls_sans() {
+  local server_host="$1"
+  if [ -z "${server_host}" ]; then
+    return 0
+  fi
+  if ! command -v openssl >/dev/null 2>&1; then
+    log_warn_msg discover "openssl missing; skipping SAN validation" \
+      "server=${server_host}" "phase=tls_san_check"
+    return 0
+  fi
+
+  local tmpdir
+  tmpdir="$(mktemp -d 2>/dev/null || mktemp -d -t tls-sans)"
+  local cacert_path="${tmpdir}/cacerts.pem"
+
+  local -a curl_args=(
+    --fail
+    --silent
+    --show-error
+    --connect-timeout "${SUGARKUBE_TLS_SAN_CURL_TIMEOUT:-5}"
+    --max-time "${SUGARKUBE_TLS_SAN_CURL_MAX_TIME:-15}"
+    --insecure
+    "https://${server_host}:6443/cacerts"
+  )
+  if ! curl "${curl_args[@]}" >"${cacert_path}"; then
+    log_warn_msg discover "Failed to download server CA bundle" \
+      "server=${server_host}" "phase=tls_san_check"
+    rm -rf "${tmpdir}"
+    return 0
+  fi
+
+  local san_output
+  if ! san_output="$(
+    openssl s_client -servername "${server_host}" -connect "${server_host}:6443" \
+      -CAfile "${cacert_path}" </dev/null 2>/dev/null \
+      | openssl x509 -noout -ext subjectAltName 2>/dev/null
+  )"; then
+    log_warn_msg discover "Failed to inspect server certificate SANs" \
+      "server=${server_host}" "phase=tls_san_check"
+    rm -rf "${tmpdir}"
+    return 0
+  fi
+
+  rm -rf "${tmpdir}"
+
+  if [ -z "${san_output}" ]; then
+    log_warn_msg discover "Server certificate missing subjectAltName" \
+      "server=${server_host}" "phase=tls_san_check"
+    return 0
+  fi
+
+  local match_fragment
+  if [[ "${server_host}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    match_fragment="IP Address:${server_host}"
+  else
+    match_fragment="DNS:${server_host}"
+  fi
+
+  if ! grep -q -- "${match_fragment}" <<<"${san_output}"; then
+    local compact_sans
+    compact_sans="$(printf '%s' "${san_output}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
+    log_warn_msg discover "Server certificate SANs miss join host" \
+      "server=${server_host}" "hostname=${server_host}" \
+      "sans=$(escape_log_value "${compact_sans}")" "phase=tls_san_check"
+  fi
+
+  return 0
+}
+
 install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
@@ -2337,6 +2406,7 @@ install_server_join() {
   if ! wait_for_remote_api_ready "${server}"; then
     exit 1
   fi
+  check_remote_server_tls_sans "${server}"
   if ! acquire_join_gate; then
     exit 1
   fi
