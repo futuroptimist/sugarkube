@@ -14,6 +14,23 @@ SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
 
+TCPDUMP_BIN="${SUGARKUBE_TCPDUMP_BIN:-tcpdump}"
+if command -v "${TCPDUMP_BIN%% *}" >/dev/null 2>&1; then
+  TCPDUMP_AVAILABLE=1
+else
+  TCPDUMP_AVAILABLE=0
+fi
+
+if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
+  if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    SUGARKUBE_MDNS_WIRE_PROOF=1
+  else
+    SUGARKUBE_MDNS_WIRE_PROOF=0
+  fi
+fi
+
+log_trace mdns_selfcheck context=wire_proof tcpdump_available="${TCPDUMP_AVAILABLE}" wire_proof="${SUGARKUBE_MDNS_WIRE_PROOF}"
+
 SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 SERVICE_ENV="${SUGARKUBE_ENV:-dev}"
 EXPECTED_HOST="${SUGARKUBE_EXPECTED_HOST:-}"

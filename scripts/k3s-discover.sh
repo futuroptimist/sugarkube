@@ -94,6 +94,26 @@ MDNS_ABSENCE_USE_DBUS="${SUGARKUBE_MDNS_ABSENCE_DBUS:-${SUGARKUBE_MDNS_DBUS:-1}}
 MDNS_ABSENCE_LAST_METHOD=""
 MDNS_ABSENCE_LAST_STATUS=""
 MDNS_SELF_CHECK_FAILURE_CODE=94
+TCPDUMP_CMD="${SUGARKUBE_TCPDUMP_BIN:-tcpdump}"
+if command -v "${TCPDUMP_CMD%% *}" >/dev/null 2>&1; then
+  TCPDUMP_AVAILABLE=1
+else
+  TCPDUMP_AVAILABLE=0
+fi
+if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
+  if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    SUGARKUBE_MDNS_WIRE_PROOF=1
+  else
+    SUGARKUBE_MDNS_WIRE_PROOF=0
+  fi
+fi
+MDNS_WIRE_PROOF_ENABLED="${SUGARKUBE_MDNS_WIRE_PROOF}"
+MDNS_ABSENCE_CONFIRMED=0
+MDNS_ABSENCE_REASON=""
+MDNS_WIRE_PROOF_CONFIRMED=0
+MDNS_WIRE_PROOF_REASON=""
+MDNS_WIRE_PROOF_MATCHES=""
+MDNS_WIRE_PROOF_MATCH_COUNT=0
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -629,7 +649,26 @@ check_mdns_absence_once() {
 }
 
 ensure_mdns_absence_gate() {
+  MDNS_ABSENCE_CONFIRMED=0
+  MDNS_ABSENCE_REASON=""
+  MDNS_WIRE_PROOF_MATCHES=""
+  MDNS_WIRE_PROOF_MATCH_COUNT=0
+
   if [ "${MDNS_ABSENCE_GATE}" != "1" ]; then
+    MDNS_ABSENCE_CONFIRMED=1
+    if [ "${MDNS_WIRE_PROOF_ENABLED}" = "1" ] && [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+      MDNS_WIRE_PROOF_CONFIRMED=1
+      MDNS_WIRE_PROOF_REASON="gate_disabled"
+    else
+      MDNS_WIRE_PROOF_CONFIRMED=1
+      if [ "${MDNS_WIRE_PROOF_ENABLED}" != "1" ]; then
+        MDNS_WIRE_PROOF_REASON="disabled"
+      elif [ "${TCPDUMP_AVAILABLE}" -ne 1 ]; then
+        MDNS_WIRE_PROOF_REASON="tcpdump_missing"
+      else
+        MDNS_WIRE_PROOF_REASON="gate_disabled"
+      fi
+    fi
     return 0
   fi
 
@@ -661,8 +700,47 @@ ensure_mdns_absence_gate() {
     log_warn_msg discover "failed to restart avahi-daemon" "action=restart_avahi" >&2
   fi
 
+  local wire_capture_file=""
+  local wire_capture_pid=""
+  local wire_proof_started=0
+  local wire_proof_error_reason=""
+  MDNS_WIRE_PROOF_CONFIRMED=0
+  MDNS_WIRE_PROOF_REASON=""
+
+  if [ "${MDNS_WIRE_PROOF_ENABLED}" = "1" ]; then
+    if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+      wire_capture_file="$(mktemp "${TMPDIR:-/tmp}/mdns-wire-XXXXXXXX.log" 2>/dev/null || true)"
+      if [ -z "${wire_capture_file}" ]; then
+        wire_proof_error_reason="mktemp_failed"
+        log_warn_msg discover "unable to create tcpdump capture file" "tcpdump_available=1" "reason=${wire_proof_error_reason}" >&2
+      else
+        local -a tcpdump_args=("${TCPDUMP_CMD}" -nn -l -s 0 -vv -i "${MDNS_IFACE}" udp port 5353)
+        run_privileged "${tcpdump_args[@]}" >"${wire_capture_file}" 2>&1 &
+        wire_capture_pid=$!
+        sleep 0.1
+        if kill -0 "${wire_capture_pid}" >/dev/null 2>&1; then
+          wire_proof_started=1
+          log_debug discover event=mdns_wire_proof action=capture_started pid="${wire_capture_pid}" tcpdump_available=1 file="${wire_capture_file}" >&2
+        else
+          wait "${wire_capture_pid}" >/dev/null 2>&1 || true
+          wire_capture_pid=""
+          wire_proof_error_reason="start_failed"
+          log_warn_msg discover "tcpdump capture terminated immediately" "tcpdump_available=1" "reason=${wire_proof_error_reason}" >&2
+        fi
+      fi
+    else
+      log_info discover event=mdns_wire_proof outcome=skip reason=tcpdump_missing tcpdump_available=0 >&2
+      MDNS_WIRE_PROOF_CONFIRMED=1
+      MDNS_WIRE_PROOF_REASON="tcpdump_missing"
+    fi
+  else
+    log_info discover event=mdns_wire_proof outcome=skip reason=disabled tcpdump_available="${TCPDUMP_AVAILABLE}" >&2
+    MDNS_WIRE_PROOF_CONFIRMED=1
+    MDNS_WIRE_PROOF_REASON="disabled"
+  fi
+
   local attempts=0
-  local consecutive_absent=0
+  local consecutive_absent_dbus=0
   local presence_seen=0
   local elapsed_ms=0
   local last_status="unknown"
@@ -681,22 +759,28 @@ ensure_mdns_absence_gate() {
 
     case "${status}" in
       0)
-        consecutive_absent=$((consecutive_absent + 1))
+        if [ "${last_method}" = "dbus" ]; then
+          consecutive_absent_dbus=$((consecutive_absent_dbus + 1))
+        else
+          consecutive_absent_dbus=0
+        fi
         ;;
       1)
         presence_seen=1
-        consecutive_absent=0
+        consecutive_absent_dbus=0
         ;;
       *)
-        consecutive_absent=0
+        if [ "${last_method}" = "dbus" ]; then
+          consecutive_absent_dbus=0
+        fi
         ;;
     esac
 
-    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" >&2
+    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent_dbus="${consecutive_absent_dbus}" >&2
 
     elapsed_ms="$(elapsed_since_ms "${start_ms}")"
 
-    if [ "${consecutive_absent}" -ge 2 ]; then
+    if [ "${consecutive_absent_dbus}" -ge 2 ]; then
       break
     fi
 
@@ -728,7 +812,7 @@ PY
   done
 
   local confirmed=0
-  if [ "${consecutive_absent}" -ge 2 ]; then
+  if [ "${consecutive_absent_dbus}" -ge 2 ]; then
     confirmed=1
   fi
 
@@ -738,15 +822,143 @@ PY
       reason="timeout"
     elif [ "${presence_seen}" -eq 1 ]; then
       reason="presence_detected"
+    elif [ "${last_method}" != "dbus" ]; then
+      reason="dbus_unavailable"
     else
       reason="unconfirmed"
     fi
+  else
+    reason="dbus_absent"
   fi
 
+  MDNS_ABSENCE_CONFIRMED="${confirmed}"
+  MDNS_ABSENCE_REASON="${reason}"
+
   if [ "${confirmed}" -eq 1 ]; then
-    log_info discover event=mdns_absence_gate mdns_absence_confirmed=1 attempts="${attempts}" ms_elapsed="${elapsed_ms}" last_method="${last_method}" consecutive_absent="${consecutive_absent}" >&2
+    log_info discover event=mdns_absence_gate mdns_absence_confirmed=1 attempts="${attempts}" ms_elapsed="${elapsed_ms}" last_method="${last_method}" consecutive_absent_dbus="${consecutive_absent_dbus}" >&2
   else
     log_warn_msg discover "mDNS absence gate timed out" "mdns_absence_confirmed=0" "attempts=${attempts}" "ms_elapsed=${elapsed_ms}" "reason=${reason}" "last_method=${last_method}" >&2
+  fi
+
+  if [ -n "${wire_capture_pid:-}" ]; then
+    if kill -0 "${wire_capture_pid}" >/dev/null 2>&1; then
+      kill "${wire_capture_pid}" >/dev/null 2>&1 || true
+    fi
+    wait "${wire_capture_pid}" >/dev/null 2>&1 || true
+  fi
+
+  if [ "${wire_proof_started}" -eq 1 ]; then
+    local wire_matches=""
+    if wire_matches="$(python3 - "${wire_capture_file}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
+import sys
+from mdns_helpers import normalize_hostname
+
+
+def host_tokens(host_raw):
+    host = normalize_hostname(host_raw or "")
+    tokens = []
+    if host:
+        tokens.append(host)
+        tokens.append(host.rstrip("."))
+    if host.endswith(".local"):
+        short = host[: -len(".local")]
+        if short:
+            tokens.append(short)
+    if "." in host:
+        short = host.split(".", 1)[0]
+        if short:
+            tokens.append(short)
+    seen = set()
+    unique = []
+    for token in tokens:
+        candidate = token.strip().lower()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        unique.append(candidate)
+    return unique
+
+
+def candidate_instances(cluster, environment, hosts):
+    prefix = f"k3s api {cluster}/{environment}".lower()
+    legacy_prefix = f"k3s-{cluster}-{environment}@".lower()
+    candidates = []
+    for host in hosts:
+        candidates.append(f"{prefix} [server] on {host}")
+        candidates.append(f"{prefix} [bootstrap] on {host}")
+        candidates.append(f"{prefix} on {host}")
+        candidates.append(f"{legacy_prefix}{host}")
+    return candidates
+
+
+def main(path, cluster, environment, host_raw):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            lines = [line.rstrip() for line in handle if line.strip()]
+    except OSError:
+        return 0
+    if not lines:
+        return 0
+    cluster = (cluster or "").strip()
+    environment = (environment or "").strip()
+    hosts = host_tokens(host_raw)
+    if not hosts:
+        return 0
+    tokens = set(hosts)
+    tokens.update(candidate_instances(cluster, environment, hosts))
+    matches = []
+    for line in lines:
+        lower = line.lower()
+        if "_https._tcp" not in lower:
+            continue
+        for token in tokens:
+            if token and token in lower:
+                matches.append(line)
+                break
+    if matches:
+        for line in matches:
+            print(line)
+        return 10
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(*sys.argv[1:5]))
+PY
+)"; then
+      MDNS_WIRE_PROOF_CONFIRMED=1
+      MDNS_WIRE_PROOF_REASON="absent"
+      MDNS_WIRE_PROOF_MATCHES=""
+      MDNS_WIRE_PROOF_MATCH_COUNT=0
+      log_info discover event=mdns_wire_proof outcome=clean tcpdump_available=1 match_count=0 >&2
+    else
+      local wire_status=$?
+      if [ "${wire_status}" -eq 10 ]; then
+        local match_count=0
+        if [ -n "${wire_matches}" ]; then
+          match_count="$(printf '%s\n' "${wire_matches}" | sed '/^$/d' | wc -l | tr -d ' ')"
+        fi
+        local sanitized_matches=""
+        if [ -n "${wire_matches}" ]; then
+          sanitized_matches="$(printf '%s' "${wire_matches}" | tr '\n' ';' | sed 's/"/\\"/g')"
+        fi
+        MDNS_WIRE_PROOF_CONFIRMED=0
+        MDNS_WIRE_PROOF_REASON="advertisement_detected"
+        MDNS_WIRE_PROOF_MATCH_COUNT="${match_count}"
+        MDNS_WIRE_PROOF_MATCHES="${sanitized_matches}"
+        log_warn_msg discover "wire-level capture observed conflicting answers" "tcpdump_available=1" "match_count=${match_count}" "samples=${sanitized_matches}" >&2
+      else
+        MDNS_WIRE_PROOF_CONFIRMED=0
+        MDNS_WIRE_PROOF_REASON="analysis_error"
+        log_warn_msg discover "wire-level capture analysis failed" "tcpdump_available=1" "status=${wire_status}" >&2
+      fi
+    fi
+  elif [ "${MDNS_WIRE_PROOF_CONFIRMED}" -ne 1 ] && [ -n "${wire_proof_error_reason}" ]; then
+    MDNS_WIRE_PROOF_REASON="${wire_proof_error_reason}"
+  fi
+
+  if [ -n "${wire_capture_file}" ]; then
+    rm -f "${wire_capture_file}" >/dev/null 2>&1 || true
   fi
 
   return 0
@@ -1260,6 +1472,10 @@ PY
   else
     diag_args+=("--tag" "expected_ipv4=none")
   fi
+  diag_args+=(
+    "--tag" "wire_proof=${SUGARKUBE_MDNS_WIRE_PROOF}"
+    "--tag" "tcpdump_available=${TCPDUMP_AVAILABLE}"
+  )
 
   local relaxed_attempted=0
   local relaxed_status="not_attempted"
@@ -1871,6 +2087,31 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
 fi
 
 ensure_mdns_absence_gate
+
+if [ "${MDNS_ABSENCE_CONFIRMED:-0}" -ne 1 ]; then
+  log_error_msg discover "Refusing to self-elect without two consecutive D-Bus absence confirmations" \
+    "mdns_absence_confirmed=${MDNS_ABSENCE_CONFIRMED:-0}" \
+    "reason=${MDNS_ABSENCE_REASON:-unknown}" \
+    "last_method=${MDNS_ABSENCE_LAST_METHOD:-none}" \
+    "last_status=${MDNS_ABSENCE_LAST_STATUS:-unknown}"
+  exit 95
+fi
+
+if [ "${MDNS_WIRE_PROOF_CONFIRMED:-0}" -ne 1 ]; then
+  wire_error_fields=(
+    "wire_proof_confirmed=${MDNS_WIRE_PROOF_CONFIRMED:-0}"
+    "wire_proof_reason=${MDNS_WIRE_PROOF_REASON:-unknown}"
+    "tcpdump_available=${TCPDUMP_AVAILABLE}"
+  )
+  if [ -n "${MDNS_WIRE_PROOF_MATCH_COUNT:-}" ]; then
+    wire_error_fields+=("wire_proof_match_count=${MDNS_WIRE_PROOF_MATCH_COUNT}")
+  fi
+  if [ -n "${MDNS_WIRE_PROOF_MATCHES:-}" ]; then
+    wire_error_fields+=("wire_proof_samples=${MDNS_WIRE_PROOF_MATCHES}")
+  fi
+  log_error_msg discover "Wire-level proof detected conflicting mDNS advertisements; aborting self-election" "${wire_error_fields[@]}"
+  exit 96
+fi
 
 log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
 server_host=""
