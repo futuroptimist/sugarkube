@@ -242,6 +242,32 @@ __RES__
   return 0
 }
 
+check_server_socket_ready() {
+  local host="$1"
+
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    if curl --silent --output /dev/null --fail --connect-timeout 2 --max-time 4 -k "https://${host}:6443/livez" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if command -v timeout >/dev/null 2>&1; then
+    if timeout 2 bash -c 'exec 3<>/dev/tcp/$0/6443' "${host}" >/dev/null 2>&1; then
+      return 0
+    fi
+  else
+    if bash -c 'exec 3<>/dev/tcp/$0/6443' "${host}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 compute_delay_ms() {
   python3 - "$@" <<'PY'
 import random
@@ -312,7 +338,41 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
         resolved_ipv4="${resolved##*|}"
         elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-        log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
+        if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
+          if ! check_server_socket_ready "${srv_host}"; then
+            last_reason="server_unready"
+            miss_count=$((miss_count + 1))
+            log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" check=server host="${srv_host}" service_type="${SERVICE_TYPE}"
+            if [ "${attempt}" -ge "${ATTEMPTS}" ]; then
+              break
+            fi
+            delay_ms="$(compute_delay_ms "${attempt}" "${BACKOFF_START_MS}" "${BACKOFF_CAP_MS}" "${JITTER_FRACTION}" || echo 0)"
+            case "${delay_ms}" in
+              ''|*[!0-9]*) delay_ms=0 ;;
+            esac
+            if [ "${delay_ms}" -gt 0 ]; then
+              delay_s="$(
+                python3 - "${delay_ms}" <<'PY'
+import sys
+try:
+    delay = int(sys.argv[1])
+except ValueError:
+    delay = 0
+print('{:.3f}'.format(delay / 1000.0))
+PY
+              )"
+              log_trace mdns_selfcheck_backoff attempt="${attempt}" delay_ms="${delay_ms}" delay_s="${delay_s}"
+              sleep "${delay_s}"
+            fi
+            attempt=$((attempt + 1))
+            continue
+          fi
+        fi
+        if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
+          log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" check=server
+        else
+          log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
+        fi
         exit 0
       fi
       if [ "${status}" -eq 2 ]; then
