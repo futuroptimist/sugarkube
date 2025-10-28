@@ -14,6 +14,12 @@ personas:
 
 Every Raspberry Pi follows the same rhythm:
 
+> **Time sync prerequisite**
+> Sugarkube runs `scripts/check_time_sync.sh` before allowing a node to join. Make sure
+> either chrony reports an offset under 500 ms or systemd-timesyncd is active and recently
+> synchronized. Set `SUGARKUBE_FIX_TIME=1` to permit `chronyc -a makestep`, and
+> `SUGARKUBE_STRICT_TIME=1` to make `just up` abort instead of warning when clocks drift.
+
 ```bash
 export SUGARKUBE_SERVERS=3
 just up dev              # 1st run patches memory cgroups and reboots
