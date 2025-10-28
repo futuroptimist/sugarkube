@@ -130,6 +130,11 @@ JOIN_GATE_HELD=0
 API_READY_CHECK_BIN="${SUGARKUBE_API_READY_CHECK_BIN:-${SCRIPT_DIR}/check_apiready.sh}"
 API_READY_TIMEOUT="${SUGARKUBE_API_READY_TIMEOUT:-120}"
 API_READY_POLL_INTERVAL="${SUGARKUBE_API_READY_INTERVAL:-2}"
+if [ -n "${SUGARKUBE_SERVER_FLAG_PARITY_BIN:-}" ]; then
+  SERVER_FLAG_PARITY_BIN="${SUGARKUBE_SERVER_FLAG_PARITY_BIN}"
+else
+  SERVER_FLAG_PARITY_BIN="${SCRIPT_DIR}/check_server_flag_parity.sh"
+fi
 
 run_net_diag() {
   local reason="$1"
@@ -2348,6 +2353,69 @@ check_remote_server_tls_sans() {
   return 0
 }
 
+ensure_server_flag_parity() {
+  local server_host="$1"
+  local phase="$2"
+  if [ -z "${SERVER_FLAG_PARITY_BIN:-}" ]; then
+    return 0
+  fi
+  if [ ! -x "${SERVER_FLAG_PARITY_BIN}" ]; then
+    log_error_msg discover "Server flag parity helper missing" \
+      "script=${SERVER_FLAG_PARITY_BIN}" "phase=${phase}" "server=${server_host}"
+    return 1
+  fi
+  if ! server_flag_parity_sources_available; then
+    log_warn_msg discover "Server flag parity inputs unavailable; skipping validation" \
+      "phase=${phase}" "server=${server_host}"
+    return 0
+  fi
+  local -a parity_args=()
+  if [ -n "${server_host}" ]; then
+    parity_args+=("--server" "${server_host}")
+  fi
+  if ! SUGARKUBE_SERVER_FLAG_PARITY_PHASE="${phase}" \
+    "${SERVER_FLAG_PARITY_BIN}" "${parity_args[@]}"; then
+    return 1
+  fi
+  return 0
+}
+
+server_flag_parity_sources_available() {
+  if [ -n "${SUGARKUBE_SERVER_ENV_PREFIX:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_CMD:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_SERVICE_CMD:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_PATH:-}" ] && [ -r "${SUGARKUBE_SERVER_CONFIG_PATH}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_SERVICE_PATH:-}" ] && [ -r "${SUGARKUBE_SERVER_SERVICE_PATH}" ]; then
+    return 0
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_DIR:-}" ] && [ -d "${SUGARKUBE_SERVER_CONFIG_DIR}" ]; then
+    return 0
+  fi
+  if [ -r "/etc/rancher/k3s/config.yaml" ]; then
+    return 0
+  fi
+  local service_candidate
+  for service_candidate in \
+    /etc/systemd/system/k3s.service \
+    /usr/lib/systemd/system/k3s.service \
+    /lib/systemd/system/k3s.service \
+    /etc/systemd/system/multi-user.target.wants/k3s.service
+  do
+    if [ -r "${service_candidate}" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
@@ -2406,6 +2474,11 @@ install_server_join() {
   if ! wait_for_remote_api_ready "${server}"; then
     exit 1
   fi
+  if ! ensure_server_flag_parity "${server}" "install_join"; then
+    log_error_msg discover "Server flag parity validation failed" \
+      "phase=install_join" "host=${MDNS_HOST_RAW}" "server=${server}"
+    exit 1
+  fi
   check_remote_server_tls_sans "${server}"
   if ! acquire_join_gate; then
     exit 1
@@ -2446,6 +2519,11 @@ install_agent() {
     exit 1
   fi
   if ! wait_for_remote_api_ready "${server}"; then
+    exit 1
+  fi
+  if ! ensure_server_flag_parity "${server}" "install_agent"; then
+    log_error_msg discover "Server flag parity validation failed" \
+      "phase=install_agent" "host=${MDNS_HOST_RAW}" "server=${server}"
     exit 1
   fi
   ensure_iptables_tools
