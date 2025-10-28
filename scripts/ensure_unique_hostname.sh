@@ -207,7 +207,7 @@ main() {
   if ! command -v python3 >/dev/null 2>&1; then
     log_warn "python3 not available; skipping hostname uniqueness check"
     return 0
-  }
+  fi
 
   local current_host
   if command -v "${HOSTNAME_CMD}" >/dev/null 2>&1; then
@@ -229,8 +229,12 @@ main() {
   fi
 
   local decision
-  decision="$(collect_collision_decision "${current_host}")"
-  local status=$?
+  local status
+  if decision="$(collect_collision_decision "${current_host}")"; then
+    status=0
+  else
+    status=$?
+  fi
 
   if [ "${status}" -eq 0 ]; then
     log_info "hostname is already unique" "hostname=${current_host}"
