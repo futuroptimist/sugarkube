@@ -104,6 +104,22 @@ SCRIPT
 EOS
 }
 
+create_api_ready_stub() {
+  local target="$BATS_TEST_TMPDIR/api-ready-check.sh"
+  cat <<'EOS' >"${target}"
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${SERVER_HOST:-}" ]; then
+  printf 'ts=stub level=info event=apiready outcome=ok host="%s"\n' "${SERVER_HOST}" >&2
+else
+  printf 'ts=stub level=info event=apiready outcome=ok\n' >&2
+fi
+exit 0
+EOS
+  chmod +x "${target}"
+  echo "${target}"
+}
+
 @test "discover flow joins existing server when discovery succeeds" {
   stub_common_network_tools
   create_curl_stub
@@ -111,6 +127,8 @@ EOS
 #!/usr/bin/env bash
 exit 0
 EOS
+
+  api_ready_stub="$(create_api_ready_stub)"
 
   configure_stub="$(create_configure_stub)"
   token_path="${BATS_TEST_TMPDIR}/node-token"
@@ -130,6 +148,7 @@ EOS
     SKIP_MDNS_SELF_CHECK=1 \
     DISCOVERY_WAIT_SECS=0 \
     ELECTION_HOLDOFF=0 \
+    SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 0 ]
@@ -151,6 +170,8 @@ EOS
   token_path="${BATS_TEST_TMPDIR}/node-token"
   printf %s\n "demo-token" > "$token_path"
 
+  api_ready_stub="$(create_api_ready_stub)"
+
   run env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
@@ -169,6 +190,7 @@ EOS
     SUGARKUBE_MDNS_BOOT_DELAY=0 \
     DISCOVERY_WAIT_SECS=0 \
     ELECTION_HOLDOFF=0 \
+    SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 0 ]
@@ -188,6 +210,8 @@ EOS
   token_path="${BATS_TEST_TMPDIR}/node-token"
   printf %s\n "demo-token" > "$token_path"
 
+  api_ready_stub="$(create_api_ready_stub)"
+
   run timeout 1 env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
@@ -206,6 +230,7 @@ EOS
     SUGARKUBE_MDNS_BOOT_DELAY=0 \
     DISCOVERY_WAIT_SECS=0 \
     ELECTION_HOLDOFF=0 \
+    SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 124 ]

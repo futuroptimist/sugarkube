@@ -128,6 +128,10 @@ SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
 JOIN_GATE_HELD=0
 
+API_READY_CHECK_BIN="${SUGARKUBE_API_READY_CHECK_BIN:-${SCRIPT_DIR}/check_apiready.sh}"
+API_READY_TIMEOUT="${SUGARKUBE_API_READY_TIMEOUT:-120}"
+API_READY_POLL_INTERVAL="${SUGARKUBE_API_READY_INTERVAL:-2}"
+
 run_net_diag() {
   local reason="$1"
   shift
@@ -2195,6 +2199,81 @@ release_join_gate_if_needed() {
 
 trap 'release_join_gate_if_needed || true' EXIT
 
+resolve_server_ip_hint() {
+  local host="$1"
+  local hint="${2:-}"
+  if [ -n "${hint}" ]; then
+    printf '%s' "${hint}"
+    return 0
+  fi
+  case "${host}" in
+    '' )
+      return 0
+      ;;
+    *:*)
+      printf '%s' "${host}"
+      return 0
+      ;;
+    *[!0-9.]* )
+      if command -v getent >/dev/null 2>&1; then
+        local resolved
+        resolved="$(getent hosts "${host}" | awk 'NR==1 {print $1}' | head -n1)"
+        if [ -n "${resolved}" ]; then
+          printf '%s' "${resolved}"
+          return 0
+        fi
+      fi
+      ;;
+    * )
+      printf '%s' "${host}"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+wait_for_remote_api_ready() {
+  local host="$1"
+  local ip_hint="${2:-}"
+  local port="${3:-6443}"
+  if [ -z "${host}" ]; then
+    log_error_msg discover "API readiness check requires a host" "phase=api_ready"
+    return 1
+  fi
+  if [ -z "${API_READY_CHECK_BIN}" ] || [ ! -x "${API_READY_CHECK_BIN}" ]; then
+    log_error_msg discover "API readiness helper missing" "script=${API_READY_CHECK_BIN}" "phase=api_ready" "host=${host}" "port=${port}"
+    return 1
+  fi
+  local ip=""
+  if ip="$(resolve_server_ip_hint "${host}" "${ip_hint}")"; then
+    if [ -z "${ip}" ]; then
+      ip=""
+    fi
+  else
+    ip=""
+  fi
+  local -a check_env=(
+    "SERVER_HOST=${host}"
+    "SERVER_PORT=${port}"
+    "TIMEOUT=${API_READY_TIMEOUT}"
+  )
+  if [ -n "${API_READY_POLL_INTERVAL}" ]; then
+    check_env+=("POLL_INTERVAL=${API_READY_POLL_INTERVAL}")
+  fi
+  if [ -n "${ip}" ]; then
+    check_env+=("SERVER_IP=${ip}")
+  fi
+  if ! env "${check_env[@]}" "${API_READY_CHECK_BIN}"; then
+    if [ -n "${ip}" ]; then
+      log_error_msg discover "API readiness gate failed" "script=${API_READY_CHECK_BIN}" "host=${host}" "ip=${ip}" "port=${port}" "phase=api_ready"
+    else
+      log_error_msg discover "API readiness gate failed" "script=${API_READY_CHECK_BIN}" "host=${host}" "port=${port}" "phase=api_ready"
+    fi
+    return 1
+  fi
+  return 0
+}
+
 install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
@@ -2250,6 +2329,9 @@ install_server_join() {
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
+  if ! wait_for_remote_api_ready "${server}"; then
+    exit 1
+  fi
   if ! acquire_join_gate; then
     exit 1
   fi
@@ -2286,6 +2368,9 @@ install_agent() {
   local server="$1"
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}"
+    exit 1
+  fi
+  if ! wait_for_remote_api_ready "${server}"; then
     exit 1
   fi
   ensure_iptables_tools

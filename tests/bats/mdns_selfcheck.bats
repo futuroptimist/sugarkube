@@ -6,6 +6,22 @@ setup() {
   setup_path_stub_dir
 }
 
+create_api_ready_stub() {
+  local target="$BATS_TEST_TMPDIR/api-ready-check.sh"
+  cat <<'EOS' >"${target}"
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${SERVER_HOST:-}" ]; then
+  printf 'ts=stub level=info event=apiready outcome=ok host="%s"\n' "${SERVER_HOST}" >&2
+else
+  printf 'ts=stub level=info event=apiready outcome=ok\n' >&2
+fi
+exit 0
+EOS
+  chmod +x "${target}"
+  echo "${target}"
+}
+
 @test "mdns self-check succeeds when instance is discoverable" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
@@ -399,6 +415,8 @@ exit 0
 EOS
   chmod +x "${configure_stub}"
 
+  api_ready_stub="$(create_api_ready_stub)"
+
   run env \
     ALLOW_NON_ROOT=1 \
     LOG_LEVEL=info \
@@ -417,6 +435,7 @@ EOS
     SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
     DISCOVERY_WAIT_SECS=0 \
     DISCOVERY_ATTEMPTS=1 \
+    SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -ne 0 ]
