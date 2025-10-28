@@ -8,6 +8,7 @@ LOG_FILE="${LOG_DIR}/configure_avahi.log"
 RUNTIME_DIR="${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}"
 WLAN_IFACE="${SUGARKUBE_WLAN_INTERFACE:-wlan0}"
 WLAN_GUARD_FILE="${RUNTIME_DIR}/wlan-disabled"
+DISABLE_WLAN_DURING_BOOTSTRAP="${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}"
 PUBLISH_WORKSTATION="${SUGARKUBE_AVAHI_PUBLISH_WORKSTATION:-yes}"
 FORCE_IPV4_ONLY="${SUGARKUBE_MDNS_IPV4_ONLY:-0}"
 ALLOW_INTERFACES_OVERRIDE="${SUGARKUBE_AVAHI_ALLOW_INTERFACES:-}"
@@ -68,14 +69,31 @@ restart_avahi_if_needed() {
     return
   fi
   if "${SYSTEMCTL_BIN}" is-active --quiet avahi-daemon; then
+    local old_pid new_pid
+    old_pid="$("${SYSTEMCTL_BIN}" show avahi-daemon -p MainPID --value 2>/dev/null || true)"
     log "Restarting avahi-daemon"
     "${SYSTEMCTL_BIN}" restart avahi-daemon
+    new_pid="$("${SYSTEMCTL_BIN}" show avahi-daemon -p MainPID --value 2>/dev/null || true)"
+    if [ -n "${old_pid}" ] && [ -n "${new_pid}" ] && [ "${old_pid}" != "${new_pid}" ]; then
+      log "avahi-daemon PID changed from ${old_pid} to ${new_pid} after restart"
+    else
+      log "avahi-daemon restart issued; PID change could not be confirmed"
+    fi
   else
     log "avahi-daemon not active; skipping restart"
   fi
 }
 
 determine_auto_allow_interface() {
+  local guard_active="0"
+  if [ "${DISABLE_WLAN_DURING_BOOTSTRAP}" = "1" ] && [ -f "${WLAN_GUARD_FILE}" ]; then
+    guard_active="1"
+  fi
+
+  if [ "${guard_active}" != "1" ]; then
+    return 0
+  fi
+
   if ! command -v ip >/dev/null 2>&1; then
     return 0
   fi
@@ -91,45 +109,40 @@ determine_auto_allow_interface() {
     return 0
   fi
 
-  if [ -f "${WLAN_GUARD_FILE}" ]; then
-    local filtered=()
-    local candidate
-    for candidate in "${iface_list[@]}"; do
-      if [ "${candidate}" != "${WLAN_IFACE}" ]; then
-        filtered+=("${candidate}")
-      fi
-    done
-    iface_list=()
-    if [ "${#filtered[@]}" -gt 0 ]; then
-      iface_list+=("${filtered[@]}")
+  local filtered=()
+  local candidate
+  for candidate in "${iface_list[@]}"; do
+    if [ "${candidate}" = "${WLAN_IFACE}" ]; then
+      continue
     fi
-  fi
+    filtered+=("${candidate}")
+  done
 
-  if [ "${#iface_list[@]}" -eq 0 ]; then
+  if [ "${#filtered[@]}" -eq 0 ]; then
     return 0
   fi
 
-  if [ -n "${PREFERRED_IFACE}" ]; then
-    local candidate
-    for candidate in "${iface_list[@]}"; do
-      if [ "${candidate}" = "${PREFERRED_IFACE}" ]; then
-        printf '%s' "${PREFERRED_IFACE}"
-        return 0
-      fi
-    done
-  fi
-
-  local candidate
-  for candidate in "${iface_list[@]}"; do
+  for candidate in "${filtered[@]}"; do
     if [ "${candidate}" = "eth0" ]; then
       printf '%s' "eth0"
       return 0
     fi
   done
 
-  if [ "${#iface_list[@]}" -eq 1 ]; then
-    printf '%s' "${iface_list[0]}"
-    return 0
+  printf '%s' "${filtered[0]}"
+  return 0
+}
+
+preferred_iface_allowed() {
+  local iface="$1"
+  if [ -z "${iface}" ]; then
+    return 1
+  fi
+
+  if [ "${DISABLE_WLAN_DURING_BOOTSTRAP}" = "1" ] && [ -f "${WLAN_GUARD_FILE}" ]; then
+    if [ "${iface}" = "${WLAN_IFACE}" ]; then
+      return 1
+    fi
   fi
 
   return 0
@@ -286,29 +299,36 @@ main() {
   ensure_config_exists
   backup_config
 
+  local guard_active="0"
+  if [ "${DISABLE_WLAN_DURING_BOOTSTRAP}" = "1" ] && [ -f "${WLAN_GUARD_FILE}" ]; then
+    guard_active="1"
+  fi
+
   local auto_allow
   auto_allow="$(determine_auto_allow_interface || true)"
 
   local allow_mode="clear"
   local allow_value=""
   local iface_for_log="all"
-  local allow_source="none"
+  local allow_source="default"
 
   if [ -n "${ALLOW_INTERFACES_OVERRIDE}" ]; then
     allow_mode="set"
     allow_value="${ALLOW_INTERFACES_OVERRIDE}"
     iface_for_log="${allow_value}"
     allow_source="override"
+  elif [ -n "${PREFERRED_IFACE}" ] && preferred_iface_allowed "${PREFERRED_IFACE}"; then
+    allow_mode="set"
+    allow_value="${PREFERRED_IFACE}"
+    iface_for_log="${allow_value}"
+    allow_source="preferred"
   elif [ -n "${auto_allow}" ]; then
     allow_mode="set"
     allow_value="${auto_allow}"
     iface_for_log="${allow_value}"
     allow_source="auto"
-  elif [ -n "${PREFERRED_IFACE}" ]; then
-    allow_mode="set"
-    allow_value="${PREFERRED_IFACE}"
-    iface_for_log="${allow_value}"
-    allow_source="preferred"
+  elif [ "${guard_active}" = "1" ]; then
+    log "WLAN guard active but no alternative interface could be auto-selected"
   fi
 
   local dir tmp mode owner group
@@ -363,6 +383,7 @@ main() {
   fi
 
   log_kv avahi_baseline "outcome=${outcome}" "iface=${iface_for_log}" "allow_source=${allow_source}" "publish_workstation=${PUBLISH_WORKSTATION}"
+  log "avahi_baseline outcome=${outcome} iface=${iface_for_log} allow_source=${allow_source}"
 }
 
 main "$@"
