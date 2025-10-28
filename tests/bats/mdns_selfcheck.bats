@@ -278,6 +278,153 @@ EOS
   [ -f "${BATS_TEST_TMPDIR}/gdbus.log" ]
 }
 
+@test "mdns self-check falls back to CLI when dbus browser creation fails" {
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >>"${BATS_TEST_TMPDIR}/gdbus-calls.log"
+for arg in "$@"; do
+  if [ "${arg}" = "org.freedesktop.Avahi.Server.ServiceBrowserNew" ]; then
+    exit 1
+  fi
+done
+echo "unexpected gdbus invocation" >&2
+exit 2
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+echo "cli" >>"${BATS_TEST_TMPDIR}/cli-path.log"
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "192.168.3.10"
+EOS
+
+  run env \
+    LOG_LEVEL=debug \
+    SUGARKUBE_MDNS_DBUS=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ fallback=cli ]]
+  [ -f "${BATS_TEST_TMPDIR}/cli-path.log" ]
+  grep -q "ServiceBrowserNew" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
+}
+
+@test "mdns absence gate confirms wipe leaves no advertisements" {
+  stub_command hostname <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-s" ]; then
+  printf '%s\n' sugarkube0
+  exit 0
+fi
+printf '%s\n' sugarkube0.local
+EOS
+
+  stub_command ip <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ]; then
+  printf '2: eth0    inet 192.168.3.10/24\n'
+  exit 0
+fi
+if [ "$1" = "-o" ] && [ "$2" = "link" ] && [ "$3" = "show" ] && [ "$4" = "up" ]; then
+  printf '2: eth0: <UP>\n'
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+echo "avahi-browse $*" >>"${BATS_TEST_TMPDIR}/avahi-browse.log"
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt"
+EOS
+
+  stub_command sleep <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command curl <<'EOS'
+#!/usr/bin/env bash
+cat <<'SCRIPT'
+#!/usr/bin/env sh
+exit 0
+SCRIPT
+EOS
+
+  stub_command avahi-publish <<'EOS'
+#!/usr/bin/env bash
+sleep 60 &
+pid=$!
+echo "${pid}" >>"${BATS_TEST_TMPDIR}/publish.log"
+wait "$pid"
+EOS
+
+  stub_command avahi-publish-address <<'EOS'
+#!/usr/bin/env bash
+sleep 60 &
+pid=$!
+echo "${pid}" >>"${BATS_TEST_TMPDIR}/publish.log"
+wait "$pid"
+EOS
+
+  mkdir -p "${BATS_TEST_TMPDIR}/run" "${BATS_TEST_TMPDIR}/avahi/services"
+  token_path="${BATS_TEST_TMPDIR}/node-token"
+  printf '%s\n' "demo-token" >"${token_path}"
+  configure_stub="${BATS_TEST_TMPDIR}/configure-avahi-stub.sh"
+  cat <<'EOS' >"${configure_stub}"
+#!/usr/bin/env bash
+exit 0
+EOS
+  chmod +x "${configure_stub}"
+
+  run env \
+    ALLOW_NON_ROOT=1 \
+    LOG_LEVEL=info \
+    SUGARKUBE_SKIP_SYSTEMCTL=1 \
+    SUGARKUBE_MDNS_ABSENCE_DBUS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    SUGARKUBE_MDNS_WIRE_PROOF=0 \
+    SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
+    SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
+    SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
+    SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
+    SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10 \
+    SUGARKUBE_SERVERS=0 \
+    SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
+    DISCOVERY_WAIT_SECS=0 \
+    DISCOVERY_ATTEMPTS=1 \
+    "${BATS_CWD}/scripts/k3s-discover.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ mdns_absence_confirmed=1 ]]
+  calls=$(wc -l <"${BATS_TEST_TMPDIR}/avahi-browse.log")
+  [ "${calls}" -ge 2 ]
+}
+
 @test "mdns self-check succeeds via dbus backend" {
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
