@@ -759,10 +759,23 @@ def test_join_prefers_registration_address(tmp_path):
         "esac\n",
     )
 
+    server_host = "sugarkube0.local"
+    vip_host = "vip.sugar.test"
+    l4_probe_log = tmp_path / "l4-probe.log"
+
     _write_stub(
         "l4-probe.sh",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        f"printf '%s %s\\n' \"${1:-}\" \"${2:-}\" >> '{l4_probe_log}'\n"
+        f"if [ \"${{1:-}}\" != \"{server_host}\" ]; then\n"
+        "  echo 'unexpected host' >&2\n"
+        "  exit 9\n"
+        "fi\n"
+        "if [ \"${2:-}\" != '6443,2379,2380' ]; then\n"
+        "  echo 'unexpected ports' >&2\n"
+        "  exit 10\n"
+        "fi\n"
         "echo ok\n"
         "exit 0\n",
     )
@@ -772,9 +785,6 @@ def test_join_prefers_registration_address(tmp_path):
     _write_stub("ss", "#!/usr/bin/env bash\n"
                 "echo 'LISTEN'\n"
                 "exit 0\n")
-
-    server_host = "sugarkube0.local"
-    vip_host = "vip.sugar.test"
 
     _write_stub(
         "avahi-browse",
@@ -922,6 +932,8 @@ def test_join_prefers_registration_address(tmp_path):
     assert "--server https://sugarkube0.local:6443" not in sh_contents
 
     assert "discovered_server=sugarkube0.local" in result.stderr
+    assert l4_probe_log.read_text(encoding="utf-8").strip() == \
+        f"{server_host} 6443,2379,2380"
 
 
 def test_bootstrap_publish_fails_without_mdns(tmp_path):

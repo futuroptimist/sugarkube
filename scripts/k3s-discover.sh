@@ -2533,6 +2533,10 @@ install_server_join() {
   local discovered_server="$1"
   local server
   server="$(join_target_host "${discovered_server}")"
+  local probe_host="${server}"
+  if [ -n "${API_REGADDR:-}" ] && [ -n "${discovered_server:-}" ]; then
+    probe_host="${discovered_server}"
+  fi
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
@@ -2545,7 +2549,7 @@ install_server_join() {
   local probe_output=""
   local probe_status=0
   set +e
-  probe_output="$(${L4_PROBE_BIN} "${server}" "${required_ports}")"
+  probe_output="$(${L4_PROBE_BIN} "${probe_host}" "${required_ports}")"
   probe_status=$?
   set -e
   if [ -n "${probe_output}" ]; then
@@ -2553,8 +2557,14 @@ install_server_join() {
       [ -n "${line}" ] || continue
       local escaped_line
       escaped_line="$(escape_log_value "${line}")"
-      log_info discover event=l4_probe phase=install_join \
-        "server=\"${server}\"" "result=\"${escaped_line}\"" >&2
+      if [ "${probe_host}" != "${server}" ]; then
+        log_info discover event=l4_probe phase=install_join \
+          "server=\"${server}\"" "probe_host=\"${probe_host}\"" \
+          "result=\"${escaped_line}\"" >&2
+      else
+        log_info discover event=l4_probe phase=install_join \
+          "server=\"${server}\"" "result=\"${escaped_line}\"" >&2
+      fi
     done <<<"${probe_output}"
   fi
   if [ "${probe_status}" -ne 0 ]; then
@@ -2562,7 +2572,8 @@ install_server_join() {
       printf '%s\n' "${probe_output}" >&2
     fi
     log_error_msg discover "Required TCP ports are not reachable" \
-      "phase=install_join" "server=${server}" "ports=${required_ports}"
+      "phase=install_join" "server=${server}" "probe_host=${probe_host}" \
+      "ports=${required_ports}"
     log_error_msg discover "Ensure TCP 6443, 2379, and 2380 are open between control-plane nodes before retrying" \
       "phase=install_join" "server=${server}"
     exit 1
