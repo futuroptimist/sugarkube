@@ -77,8 +77,8 @@ fi
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
-NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
-BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
+SERVER_TOKEN_PATH="${SUGARKUBE_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
+TOKEN_RESOLVER_BIN="${SUGARKUBE_SERVER_TOKEN_RESOLVER:-${SCRIPT_DIR}/resolve_server_token.sh}"
 DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-4}"
 DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-8}"
 MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-20}"
@@ -147,8 +147,6 @@ run_net_diag() {
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
 
-NODE_TOKEN_PRESENT=0
-BOOT_TOKEN_PRESENT=0
 
 TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
@@ -232,51 +230,73 @@ case "${ENVIRONMENT}" in
 esac
 
 RESOLVED_TOKEN_SOURCE=""
+RESOLVED_TOKEN_FORMAT=""
+RESOLVE_TOKEN_ATTEMPTED=0
+RESOLVE_TOKEN_EXIT_CODE=0
+RESOLVE_TOKEN_STDERR=""
 
-resolve_local_token() {
+set_token_metadata() {
+  local token_value="$1"
+
+  if [[ "${token_value}" == K10* ]]; then
+    RESOLVED_TOKEN_FORMAT="secure"
+  else
+    RESOLVED_TOKEN_FORMAT="legacy"
+  fi
+}
+
+resolve_join_token() {
   if [ -n "${TOKEN:-}" ]; then
     return 0
   fi
 
-  local candidate=""
-  local line=""
+  RESOLVE_TOKEN_ATTEMPTED=1
 
-  if [ -s "${NODE_TOKEN_PATH}" ]; then
-    NODE_TOKEN_PRESENT=1
-    candidate="$(tr -d '\n' <"${NODE_TOKEN_PATH}")"
-    if [ -n "${candidate}" ]; then
-      TOKEN="${candidate}"
-      RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+  if [ ! -x "${TOKEN_RESOLVER_BIN}" ]; then
+    RESOLVE_TOKEN_EXIT_CODE=126
+    RESOLVE_TOKEN_STDERR="${TOKEN_RESOLVER_BIN} not executable"
+    return 1
+  fi
+
+  local tmp_output
+  tmp_output="$(mktemp)"
+
+  local resolved
+  resolved=""
+  if resolved="$(${TOKEN_RESOLVER_BIN} 2>"${tmp_output}")"; then
+    resolved="${resolved%$'\n'}"
+    if [ -n "${resolved}" ]; then
+      printf -v TOKEN '%s' "${resolved}"
+      RESOLVED_TOKEN_SOURCE="$(basename "${TOKEN_RESOLVER_BIN}")"
+      set_token_metadata "${TOKEN}"
+      rm -f "${tmp_output}"
       return 0
     fi
   fi
 
-  if [ -s "${BOOT_TOKEN_PATH}" ]; then
-    line="$(grep -m1 '^NODE_TOKEN=' "${BOOT_TOKEN_PATH}" 2>/dev/null || true)"
-    if [ -n "${line}" ]; then
-      BOOT_TOKEN_PRESENT=1
-      candidate="${line#NODE_TOKEN=}"
-      candidate="${candidate%$'\r'}"
-      candidate="${candidate%$'\n'}"
-      if [ -n "${candidate}" ]; then
-        TOKEN="${candidate}"
-        RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
-        return 0
-      fi
-    fi
-  fi
-
+  RESOLVE_TOKEN_EXIT_CODE=$?
+  RESOLVE_TOKEN_STDERR="$(cat "${tmp_output}")"
+  rm -f "${tmp_output}"
   return 1
 }
 
-resolve_local_token || true
+if [ -n "${TOKEN:-}" ]; then
+  RESOLVED_TOKEN_SOURCE="env:${ENVIRONMENT}"
+  set_token_metadata "${TOKEN}"
+fi
+
+resolve_join_token || true
+
+if [ -z "${TOKEN:-}" ] && [ "${RESOLVE_TOKEN_ATTEMPTED}" -eq 1 ] && [ -n "${RESOLVE_TOKEN_STDERR}" ]; then
+  log_warn_msg discover "Join token resolver failed" "phase=token_resolve" "details=$(escape_log_value "${RESOLVE_TOKEN_STDERR}")"
+fi
 
 ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
 if [ -z "${TOKEN:-}" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
-  elif [ "${NODE_TOKEN_PRESENT}" -eq 0 ] && [ "${BOOT_TOKEN_PRESENT}" -eq 0 ]; then
-    # No join token was provided and nothing has been written locally yet.
+  elif [ ! -f "${SERVER_TOKEN_PATH}" ]; then
+    # No join token was provided and the secure server token does not exist yet.
     # Allow the first HA control-plane node to bootstrap without a token so
     # it can generate one for subsequent peers.
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
@@ -285,11 +305,20 @@ fi
 
 if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
   if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
-    echo "SUGARKUBE_TOKEN (or per-env variant) required" >&2
+    echo "SUGARKUBE_TOKEN (or secure token via SUGARKUBE_ALLOW_TOKEN_CREATE=1) required" >&2
     exit 1
   fi
-  echo "SUGARKUBE_TOKEN (or per-env variant) required"
+  echo "SUGARKUBE_TOKEN (or secure token via SUGARKUBE_ALLOW_TOKEN_CREATE=1) required"
   exit 1
+fi
+
+if [ -n "${TOKEN:-}" ]; then
+  if [ -z "${RESOLVED_TOKEN_FORMAT:-}" ]; then
+    set_token_metadata "${TOKEN}"
+  fi
+  TOKEN_SOURCE_SAFE="$(escape_log_value "${RESOLVED_TOKEN_SOURCE:-unknown}")"
+  TOKEN_FORMAT_SAFE="$(escape_log_value "${RESOLVED_TOKEN_FORMAT:-unknown}")"
+  log_info_msg discover "Join token resolved" "phase=token_resolve" "token_source=${TOKEN_SOURCE_SAFE}" "token_format=${TOKEN_FORMAT_SAFE}"
 fi
 
 if [ "${PRINT_TOKEN_ONLY}" -eq 1 ]; then
