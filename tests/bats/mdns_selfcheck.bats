@@ -278,6 +278,64 @@ EOS
   [ -f "${BATS_TEST_TMPDIR}/gdbus.log" ]
 }
 
+@test "mdns self-check falls back to CLI when ServiceBrowserNew fails" {
+  if ! command -v gdbus >/dev/null 2>&1; then
+    skip "gdbus not available"
+  fi
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+method=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [ "${args[$i]}" = "--method" ] && [ $((i + 1)) -lt ${#args[@]} ]; then
+    method="${args[$((i + 1))]}"
+    break
+  fi
+done
+printf '%s\n' "${method}" >>"${BATS_TEST_TMPDIR}/gdbus-fallback.log"
+if [ "${method}" = "org.freedesktop.Avahi.Server.ServiceBrowserNew" ]; then
+  exit 1
+fi
+echo "unexpected gdbus method: ${method}" >&2
+exit 1
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "192.168.3.10"
+EOS
+
+  run env \
+    LOG_LEVEL=debug \
+    SUGARKUBE_MDNS_DBUS=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ reason=dbus_first_attempt_failed ]]
+  [[ "$output" =~ fallback=cli ]]
+  grep -q "ServiceBrowserNew" "${BATS_TEST_TMPDIR}/gdbus-fallback.log"
+}
+
 @test "mdns self-check succeeds via dbus backend" {
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
@@ -345,4 +403,77 @@ EOS
   [[ "$output" =~ port=6443 ]]
   grep -q "ResolveService" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
   ! grep -q "CLI" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
+}
+
+@test "mdns absence gate confirms absence after consecutive empty queries" {
+  stub_command ip <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-o" ] && [ "$2" = "link" ] && [ "$3" = "show" ] && [ "$4" = "up" ]; then
+  echo "2: eth0: <UP>"
+  exit 0
+fi
+if [ "$1" = "-4" ] && [ "$2" = "-o" ] && [ "$3" = "addr" ] && [ "$4" = "show" ]; then
+  echo "2: eth0    inet 192.0.2.10/24"
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command avahi-publish <<'EOS'
+#!/usr/bin/env bash
+sleep 60
+EOS
+
+  stub_command avahi-publish-address <<'EOS'
+#!/usr/bin/env bash
+sleep 60
+EOS
+
+  configure_stub="${BATS_TEST_TMPDIR}/configure-avahi-stub.sh"
+  cat <<'EOS' >"${configure_stub}"
+#!/usr/bin/env bash
+exit 0
+EOS
+  chmod +x "${configure_stub}"
+
+  mkdir -p "${BATS_TEST_TMPDIR}/run" "${BATS_TEST_TMPDIR}/avahi/services"
+
+  token_path="${BATS_TEST_TMPDIR}/node-token"
+  printf '%s\n' "demo" >"${token_path}"
+
+  run timeout 1 env \
+    ALLOW_NON_ROOT=1 \
+    SUGARKUBE_SKIP_SYSTEMCTL=1 \
+    SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
+    SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
+    SUGARKUBE_AVAHI_SERVICE_FILE="${BATS_TEST_TMPDIR}/avahi/services/k3s-sugar-dev.service" \
+    SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
+    SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
+    SUGARKUBE_MDNS_HOST=wipe-test.local \
+    SUGARKUBE_MDNS_PUBLISH_ADDR=192.0.2.10 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    SUGARKUBE_MDNS_ABSENCE_DBUS=0 \
+    SUGARKUBE_MDNS_WIRE_PROOF=0 \
+    SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS=0 \
+    SUGARKUBE_MDNS_ABSENCE_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_ABSENCE_JITTER=0 \
+    SUGARKUBE_SKIP_MDNS_SELF_CHECK=1 \
+    SUGARKUBE_MDNS_BOOT_RETRIES=1 \
+    SUGARKUBE_MDNS_BOOT_DELAY=0 \
+    SUGARKUBE_MDNS_SERVER_RETRIES=1 \
+    SUGARKUBE_MDNS_SERVER_DELAY=0 \
+    DISCOVERY_WAIT_SECS=0 \
+    ELECTION_HOLDOFF=0 \
+    "${BATS_CWD}/scripts/k3s-discover.sh"
+
+  [ "$status" -eq 124 ]
+  [[ "$output" =~ event=mdns_absence_gate ]]
+  [[ "$output" =~ mdns_absence_confirmed=1 ]]
 }
