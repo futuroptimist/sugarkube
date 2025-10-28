@@ -104,7 +104,11 @@ lock_present() {
   local output
   local status=0
   output="$(avahi-browse --terminate --parsable "${SERVICE_TYPE}" 2>/dev/null)" || status=$?
-  if [ "${status}" -ne 0 ] && [ "${status}" -ne 1 ] && [ "${status}" -ne 255 ]; then
+  if [ "${status}" -eq 255 ]; then
+    log_join_gate_error action=probe outcome=error status="${status}" reason=avahi_unavailable
+    return 2
+  fi
+  if [ "${status}" -ne 0 ] && [ "${status}" -ne 1 ]; then
     log_join_gate_error action=probe outcome=error status="${status}"
     return 2
   fi
