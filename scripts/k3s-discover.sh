@@ -345,11 +345,200 @@ MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
 IPTABLES_ENSURED=0
 
+version_lt() {
+  if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
+    return 1
+  fi
+  local first
+  first="$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)"
+  if [ "${first}" = "$1" ] && [ "${1}" != "$2" ]; then
+    return 0
+  fi
+  return 1
+}
+
 run_privileged() {
   if [ -n "${SUDO_CMD:-}" ]; then
     "${SUDO_CMD}" "$@"
   else
     "$@"
+  fi
+}
+
+detect_kube_proxy_mode() {
+  if [ -n "${SUGARKUBE_KUBE_PROXY_MODE:-}" ]; then
+    printf '%s\n' "${SUGARKUBE_KUBE_PROXY_MODE}"
+    return 0
+  fi
+  if [ -n "${K3S_KUBE_PROXY_MODE:-}" ]; then
+    printf '%s\n' "${K3S_KUBE_PROXY_MODE}"
+    return 0
+  fi
+
+  local config_path
+  config_path="${SUGARKUBE_K3S_CONFIG:-/etc/rancher/k3s/config.yaml}"
+  if [ -r "${config_path}" ]; then
+    local mode_line mode_value
+    mode_line="$(grep -E 'proxy-mode=' "${config_path}" 2>/dev/null | head -n1 || true)"
+    if [ -n "${mode_line}" ]; then
+      mode_value="${mode_line##*=}"
+      mode_value="${mode_value%%[[:space:]]*}"
+      if [ -n "${mode_value}" ]; then
+        printf '%s\n' "${mode_value}"
+        return 0
+      fi
+    fi
+  elif [ -f "${config_path}" ] && [ -n "${SUDO_CMD:-}" ]; then
+    local mode_line mode_value
+    mode_line="$(run_privileged cat "${config_path}" 2>/dev/null | grep -E 'proxy-mode=' | head -n1 || true)"
+    if [ -n "${mode_line}" ]; then
+      mode_value="${mode_line##*=}"
+      mode_value="${mode_value%%[[:space:]]*}"
+      if [ -n "${mode_value}" ]; then
+        printf '%s\n' "${mode_value}"
+        return 0
+      fi
+    fi
+  fi
+
+  if [ -n "${INSTALL_K3S_EXEC:-}" ]; then
+    if printf '%s' "${INSTALL_K3S_EXEC}" | grep -q -- '--disable-kube-proxy'; then
+      printf '%s\n' "disabled"
+      return 0
+    fi
+    local exec_mode
+    exec_mode="$(printf '%s' "${INSTALL_K3S_EXEC}" | sed -n 's/.*--kube-proxy-arg[ =]\(proxy-mode=[^[:space:]]*\).*/\1/p' | head -n1)"
+    if [ -n "${exec_mode}" ]; then
+      printf '%s\n' "${exec_mode#proxy-mode=}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "iptables_default"
+}
+
+iptables_preflight() {
+  local strict="${SUGARKUBE_STRICT_IPTABLES:-0}"
+  local iptables_variant="missing"
+  local iptables_version="unknown"
+  local iptables_version_numeric=0
+  local iptables_alt="unknown"
+  local nft_status="absent"
+  local nft_version="unknown"
+  local kube_proxy_mode
+  local -a warnings=()
+  local remediation_hint=""
+
+  if command -v iptables >/dev/null 2>&1; then
+    local version_line
+    version_line="$(iptables --version 2>/dev/null | head -n1 || true)"
+    if printf '%s' "${version_line}" | grep -qi 'nf_tables'; then
+      iptables_variant="nf_tables"
+    elif printf '%s' "${version_line}" | grep -qi 'legacy'; then
+      iptables_variant="legacy"
+    else
+      iptables_variant="unknown"
+    fi
+
+    if [ -n "${version_line}" ]; then
+      iptables_version="${version_line#iptables v}"
+      iptables_version="${iptables_version%% *}"
+      iptables_version="${iptables_version#v}"
+      if printf '%s' "${iptables_version}" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+        iptables_version_numeric=1
+      else
+        iptables_version="unknown"
+      fi
+    fi
+
+    if command -v update-alternatives >/dev/null 2>&1; then
+      local alt_value
+      alt_value="$(update-alternatives --query iptables 2>/dev/null | awk -F': ' '/Value:/{print $2; exit}' || true)"
+      case "${alt_value}" in
+        */iptables-nft)
+          iptables_alt="nft"
+          ;;
+        */iptables-legacy)
+          iptables_alt="legacy"
+          ;;
+        *)
+          iptables_alt="unknown"
+          ;;
+      esac
+    fi
+  else
+    warnings+=("iptables_missing")
+    remediation_hint="install_iptables_package"
+  fi
+
+  if command -v nft >/dev/null 2>&1; then
+    nft_status="present"
+    local nft_line
+    nft_line="$(nft --version 2>/dev/null | head -n1 || true)"
+    if [ -n "${nft_line}" ]; then
+      nft_version="${nft_line#nftables v}"
+      nft_version="${nft_version%% *}"
+      nft_version="${nft_version#v}"
+    fi
+  fi
+
+  kube_proxy_mode="$(detect_kube_proxy_mode)"
+
+  if [ "${iptables_variant}" = "nf_tables" ]; then
+    if [ "${nft_status}" != "present" ]; then
+      warnings+=("nf_tables_backend_without_nft")
+      if [ -z "${remediation_hint}" ]; then
+        remediation_hint="install_nftables_tools"
+      fi
+    fi
+    if [ "${iptables_version_numeric}" -eq 1 ] && version_lt "${iptables_version}" "1.8.7"; then
+      warnings+=("nf_tables_backend_old_version")
+      if [ -z "${remediation_hint}" ]; then
+        remediation_hint="upgrade_iptables_or_switch_legacy"
+      fi
+    fi
+  elif [ "${iptables_variant}" = "unknown" ]; then
+    warnings+=("iptables_variant_unknown")
+    if [ -z "${remediation_hint}" ]; then
+      remediation_hint="check_iptables_alternatives"
+    fi
+  fi
+
+  if [ "${iptables_variant}" = "legacy" ] && [ "${iptables_alt}" = "nft" ]; then
+    warnings+=("alternatives_mismatch")
+    if [ -z "${remediation_hint}" ]; then
+      remediation_hint="update_alternatives_to_match"
+    fi
+  fi
+
+  local outcome="ok"
+  if [ "${#warnings[@]}" -gt 0 ]; then
+    outcome="warn"
+  fi
+
+  local nft_details
+  nft_details="${nft_status}"
+  if [ "${nft_version}" != "unknown" ]; then
+    nft_details="${nft_details}_${nft_version}"
+  fi
+
+  local details
+  details="variant=${iptables_variant},version=${iptables_version},alt=${iptables_alt},nft=${nft_details},proxy=${kube_proxy_mode}"
+
+  if [ "${outcome}" = "warn" ]; then
+    local warning_summary
+    warning_summary="${warnings[*]}"
+    warning_summary="${warning_summary// /,}"
+    if [ -n "${remediation_hint}" ]; then
+      remediation_hint="remediation=${remediation_hint}"
+    fi
+    log_warn_msg iptables_preflight "iptables preflight warnings" "outcome=${outcome}" "details=${details}" "warnings=${warning_summary}" ${remediation_hint:+"${remediation_hint}"}
+    if [ "${strict}" = "1" ]; then
+      log_error_msg iptables_preflight "Strict iptables preflight failure" "details=${details}" "warnings=${warning_summary}" "outcome=fatal"
+      exit 1
+    fi
+  else
+    log_info_msg iptables_preflight "iptables preflight passed" "outcome=${outcome}" "details=${details}"
   fi
 }
 
@@ -393,6 +582,8 @@ remove_privileged_file() {
 }
 
 run_configure_avahi
+
+iptables_preflight
 
 if ! run_privileged mkdir -p "${MDNS_RUNTIME_DIR}"; then
   echo "Failed to create ${MDNS_RUNTIME_DIR}" >&2
