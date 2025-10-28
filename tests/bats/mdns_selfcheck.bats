@@ -342,6 +342,109 @@ EOS
   grep -q "ServiceBrowserNew" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
 }
 
+@test "mdns dbus self-check waits for avahi bus before browsing" {
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="$1"
+shift || true
+
+ready_file="${BATS_TEST_TMPDIR}/avahi-ready.flag"
+count_file="${BATS_TEST_TMPDIR}/introspect-count"
+
+if [ "${mode}" = "introspect" ]; then
+  count=0
+  if [ -f "${count_file}" ]; then
+    count="$(cat "${count_file}")"
+  fi
+  case "${count}" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
+  count=$((count + 1))
+  printf '%s' "${count}" >"${count_file}"
+  if [ "${count}" -lt 3 ]; then
+    echo "org.freedesktop.DBus.Error.ServiceUnknown" >&2
+    exit 1
+  fi
+  : >"${ready_file}"
+  exit 0
+fi
+
+if [ "${mode}" = "call" ]; then
+  method=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --method)
+        method="$2"
+        shift 2
+        ;;
+      --system)
+        shift
+        ;;
+      --dest|--object-path)
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  case "${method}" in
+    org.freedesktop.Avahi.Server.ServiceBrowserNew)
+      if [ ! -f "${ready_file}" ]; then
+        echo "org.freedesktop.DBus.Error.ServiceUnknown" >&2
+        exit 1
+      fi
+      printf "(objectpath '/org/freedesktop/Avahi/ServiceBrowser/65537')\n"
+      exit 0
+      ;;
+    org.freedesktop.Avahi.Server.ResolveService)
+      output="(int32 0, int32 0, 'k3s-sugar-dev@sugarkube0 (server)',"
+      output="${output} '_k3s-sugar-dev._tcp', 'local', 'sugarkube0.local',"
+      output="${output} int32 0, '192.168.3.10', uint16 6443, array"
+      output="${output} ['txt=\"cluster=sugar\"', 'txt=\"env=dev\"',"
+      output="${output} 'txt=\"role=server\"', 'txt=\"phase=server\"'],"
+      output="${output} uint32 0)"
+      printf '%s\n' "${output}"
+      exit 0
+      ;;
+    org.freedesktop.Avahi.Server.ResolveHostName)
+      printf "(int32 0, int32 0, 'sugarkube0.local', '192.168.3.10', int32 0, uint32 0)\n"
+      exit 0
+      ;;
+  esac
+fi
+
+echo "unexpected gdbus invocation" >&2
+exit 2
+EOS
+
+  run env \
+    LOG_LEVEL=info \
+    SUGARKUBE_MDNS_DBUS=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck_dbus.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=avahi_dbus_ready\ outcome=ok ]]
+  [[ "$output" =~ event=mdns_selfcheck\ outcome=ok ]]
+  [[ ! "$stderr" =~ browser_create_failed ]]
+  [ -f "${BATS_TEST_TMPDIR}/introspect-count" ]
+  count_value="$(cat "${BATS_TEST_TMPDIR}/introspect-count")"
+  [[ "$count_value" =~ ^[0-9]+$ ]]
+  (( count_value >= 3 ))
+}
+
 @test "mdns absence gate confirms wipe leaves no advertisements" {
   stub_command hostname <<'EOS'
 #!/usr/bin/env bash

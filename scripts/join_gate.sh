@@ -49,6 +49,19 @@ ensure_runtime_dir() {
   exit 1
 }
 
+wait_for_avahi_bus() {
+  if ! command -v gdbus >/dev/null 2>&1; then
+    return 0
+  fi
+  if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+    return 0
+  fi
+  local status
+  status=$?
+  log_join_gate_error action=dbus_wait outcome=error status="${status}"
+  return 1
+}
+
 read_state_file() {
   local key value
   JOIN_STATE_PID=""
@@ -210,6 +223,7 @@ start_publisher() {
 acquire_lock() {
   ensure_tools
   ensure_runtime_dir
+  wait_for_avahi_bus || return 1
   cleanup_stale_state
   HOSTNAME="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
   if read_state_file && [ "${JOIN_STATE_HOST}" = "${HOSTNAME}" ] && [ -n "${JOIN_STATE_PID}" ] && kill -0 "${JOIN_STATE_PID}" >/dev/null 2>&1; then
@@ -276,6 +290,7 @@ release_lock() {
 wait_lock() {
   ensure_tools
   ensure_runtime_dir
+  wait_for_avahi_bus || return 1
   cleanup_stale_state
   HOSTNAME="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
   if read_state_file && [ "${JOIN_STATE_HOST}" = "${HOSTNAME}" ] && [ -n "${JOIN_STATE_PID}" ] && kill -0 "${JOIN_STATE_PID}" >/dev/null 2>&1; then

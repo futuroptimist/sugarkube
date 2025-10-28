@@ -672,6 +672,10 @@ mdns_absence_check_dbus() {
     return 2
   fi
 
+  if ! "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+    return 2
+  fi
+
   local service_domain
   service_domain="${SUGARKUBE_MDNS_DOMAIN:-local}"
 
