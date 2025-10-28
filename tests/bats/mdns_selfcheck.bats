@@ -278,6 +278,64 @@ EOS
   [ -f "${BATS_TEST_TMPDIR}/gdbus.log" ]
 }
 
+@test "mdns self-check falls back to CLI when dbus browse fails" {
+  if ! command -v gdbus >/dev/null 2>&1; then
+    skip "gdbus not available"
+  fi
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+method=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--method" ]; then
+    shift
+    method="${1:-}"
+    break
+  fi
+  shift
+done
+printf '%s\n' "${method:-}" >>"${BATS_TEST_TMPDIR}/gdbus-calls.log"
+if [ "${method}" = "org.freedesktop.Avahi.Server.ServiceBrowserNew" ]; then
+  exit 1
+fi
+printf 'unexpected method: %s\n' "${method}" >&2
+exit 3
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+echo "cli" >>"${BATS_TEST_TMPDIR}/avahi.log"
+cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "192.168.3.10"
+EOS
+
+  run env \
+    SUGARKUBE_MDNS_DBUS=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  grep -q "org.freedesktop.Avahi.Server.ServiceBrowserNew" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
+  [ -f "${BATS_TEST_TMPDIR}/avahi.log" ]
+}
+
 @test "mdns self-check succeeds via dbus backend" {
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
@@ -345,4 +403,45 @@ EOS
   [[ "$output" =~ port=6443 ]]
   grep -q "ResolveService" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
   ! grep -q "CLI" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
+}
+
+@test "mdns absence gate confirms absence after wipe" {
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+echo "call:$*" >>"${BATS_TEST_TMPDIR}/avahi-browse.log"
+exit 0
+EOS
+
+  configure_stub="${BATS_TEST_TMPDIR}/configure-avahi-stub.sh"
+  cat <<'EOS' >"${configure_stub}"
+#!/usr/bin/env bash
+exit 0
+EOS
+  chmod +x "${configure_stub}"
+
+  run timeout 3 env \
+    ALLOW_NON_ROOT=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_MDNS_HOST=sugarkube0.local \
+    SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
+    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_MDNS_PUBLISH_ADDR=192.0.2.10 \
+    SUGARKUBE_MDNS_ABSENCE_DBUS=0 \
+    SUGARKUBE_MDNS_WIRE_PROOF=0 \
+    SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS=0 \
+    SUGARKUBE_MDNS_ABSENCE_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS=2000 \
+    SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
+    SUGARKUBE_SERVERS=1 \
+    LOG_LEVEL=debug \
+    "${BATS_CWD}/scripts/k3s-discover.sh"
+
+  [[ "$output" =~ mdns_absence_confirmed=1 ]]
 }
