@@ -24,6 +24,7 @@ ATTEMPTS="${SUGARKUBE_SELFCHK_ATTEMPTS:-12}"
 BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
 BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
 JITTER_FRACTION="${JITTER:-0.2}"
+LEGACY_SERVICE_TYPE="${SUGARKUBE_LEGACY_SERVICE_TYPE:-_https._tcp}"
 
 script_start_ms="$(python3 - <<'PY'
 import time
@@ -113,6 +114,7 @@ EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
 parse_browse() {
   awk -v svc="${SERVICE_TYPE}" \
+      -v legacy="${LEGACY_SERVICE_TYPE}" \
       -v inst_pref="${INSTANCE_PREFIX}" \
       -v short_host="${EXPECTED_SHORT_HOST}" \
       -v expected_role="${EXPECTED_ROLE}" \
@@ -141,6 +143,7 @@ parse_browse() {
       type_idx = -1
       for (i = 1; i <= NF; i++) {
         if (fields[i] == svc) { type_idx = i; break }
+        if (legacy != "" && fields[i] == legacy) { type_idx = i; break }
       }
       if (type_idx < 0) next
 

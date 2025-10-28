@@ -94,6 +94,29 @@ MDNS_ABSENCE_USE_DBUS="${SUGARKUBE_MDNS_ABSENCE_DBUS:-${SUGARKUBE_MDNS_DBUS:-1}}
 MDNS_ABSENCE_LAST_METHOD=""
 MDNS_ABSENCE_LAST_STATUS=""
 MDNS_SELF_CHECK_FAILURE_CODE=94
+TCPDUMP_AVAILABLE=0
+if command -v tcpdump >/dev/null 2>&1; then
+  TCPDUMP_AVAILABLE=1
+fi
+if [ -n "${SUGARKUBE_MDNS_WIRE_PROOF+x}" ]; then
+  case "${SUGARKUBE_MDNS_WIRE_PROOF}" in
+    0|false|FALSE|off|OFF)
+      SUGARKUBE_MDNS_WIRE_PROOF=0
+      ;;
+    1|true|TRUE|on|ON)
+      SUGARKUBE_MDNS_WIRE_PROOF=1
+      ;;
+    *)
+      SUGARKUBE_MDNS_WIRE_PROOF=1
+      ;;
+  esac
+else
+  if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    SUGARKUBE_MDNS_WIRE_PROOF=1
+  else
+    SUGARKUBE_MDNS_WIRE_PROOF=0
+  fi
+fi
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -845,6 +868,254 @@ same_host() {
   [ -n "${left_base}" ] && [ "${left_base}" = "${right_base}" ]
 }
 
+ensure_dbus_absence_window() {
+  local role="$1"
+  if [ "${MDNS_ABSENCE_USE_DBUS}" != "1" ]; then
+    log_info mdns_wire_proof_dbus outcome=skip reason=dbus_disabled role="${role}" >&2
+    return 2
+  fi
+  if ! command -v gdbus >/dev/null 2>&1; then
+    log_info mdns_wire_proof_dbus outcome=skip reason=gdbus_missing role="${role}" >&2
+    return 2
+  fi
+
+  local required_consecutive=2
+  local max_attempts=5
+  local attempts=0
+  local consecutive=0
+  local delay_raw="${MDNS_SELF_CHECK_DELAY:-0.5}"
+  local delay_secs
+  delay_secs="$(python3 - "${delay_raw}" <<'PY'
+import sys
+
+try:
+    value = float(sys.argv[1])
+except (IndexError, ValueError):
+    value = 0.5
+if value < 0:
+    value = 0.0
+print(value)
+PY
+)"
+  case "${delay_secs}" in
+    ''|*[!0-9.]) delay_secs="0.5" ;;
+  esac
+
+  while [ "${attempts}" -lt "${max_attempts}" ]; do
+    attempts=$((attempts + 1))
+    if mdns_absence_check_dbus; then
+      consecutive=$((consecutive + 1))
+      log_debug mdns_wire_proof_dbus attempt="${attempts}" result=absent role="${role}" >&2
+    else
+      local status=$?
+      log_warn_msg mdns_wire_proof_dbus "D-Bus reported existing advertisement" \
+        "role=${role}" "attempt=${attempts}" "status=${status}" >&2
+      return 1
+    fi
+
+    if [ "${consecutive}" -ge "${required_consecutive}" ]; then
+      break
+    fi
+
+    if [ "${delay_secs}" != "0" ]; then
+      sleep "${delay_secs}"
+    fi
+  done
+
+  if [ "${consecutive}" -ge "${required_consecutive}" ]; then
+    log_info mdns_wire_proof_dbus outcome=ok role="${role}" \
+      attempts="${attempts}" consecutive="${consecutive}" >&2
+    return 0
+  fi
+
+  log_warn_msg mdns_wire_proof_dbus "Insufficient negative D-Bus scans" \
+    "role=${role}" "attempts=${attempts}" "consecutive=${consecutive}" >&2
+  return 1
+}
+
+require_mdns_wire_proof() {
+  local role="$1"
+  local host_short
+  host_short="$(strip_local_suffix "${MDNS_HOST_RAW}")"
+  local base_instance
+  base_instance="k3s-${CLUSTER}-${ENVIRONMENT}@${MDNS_HOST_RAW}"
+  local base_instance_short
+  base_instance_short="k3s-${CLUSTER}-${ENVIRONMENT}@${host_short}"
+
+  local tcpdump_mode="${SUGARKUBE_MDNS_WIRE_PROOF}"
+  local tcpdump_started=0
+  local tcpdump_pid=""
+  local capture_file=""
+  local capture_lines=0
+  local wire_status=2
+  local wire_reason="disabled"
+
+  if [ "${tcpdump_mode}" = "1" ] && [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    capture_file="$(mktemp 2>/dev/null || mktemp /tmp/sugarkube-wire.XXXXXX)"
+    local -a tcpdump_cmd=(
+      tcpdump
+      -i "${MDNS_IFACE}"
+      -n
+      -l
+      -s 0
+      -vvv
+      udp port 5353
+    )
+    run_privileged "${tcpdump_cmd[@]}" >"${capture_file}" 2>&1 &
+    local tcpdump_launch_status=$?
+    if [ "${tcpdump_launch_status}" -eq 0 ]; then
+      tcpdump_pid=$!
+      tcpdump_started=1
+      sleep 0.2
+      if ! kill -0 "${tcpdump_pid}" >/dev/null 2>&1; then
+        wait "${tcpdump_pid}" >/dev/null 2>&1 || true
+        tcpdump_started=0
+        wire_status=3
+        wire_reason="start_failed"
+      else
+        wire_reason="capture"
+      fi
+    else
+      tcpdump_started=0
+      wire_status=3
+      wire_reason="start_failed"
+    fi
+  elif [ "${tcpdump_mode}" = "1" ]; then
+    log_info mdns_wire_proof outcome=skip reason=tcpdump_missing role="${role}" \
+      tcpdump_available=0 >&2
+    wire_reason="missing_tcpdump"
+  else
+    log_info mdns_wire_proof outcome=skip reason=disabled role="${role}" \
+      tcpdump_available="${TCPDUMP_AVAILABLE}" >&2
+    wire_reason="disabled"
+  fi
+
+  local dbus_status
+  if ensure_dbus_absence_window "${role}"; then
+    dbus_status=0
+  else
+    dbus_status=$?
+  fi
+
+  if [ "${tcpdump_started}" -eq 1 ]; then
+    sleep 0.5
+    if ! kill -INT "${tcpdump_pid}" >/dev/null 2>&1; then
+      kill "${tcpdump_pid}" >/dev/null 2>&1 || true
+    fi
+    wait "${tcpdump_pid}" >/dev/null 2>&1 || true
+    capture_lines=$(wc -l <"${capture_file}" 2>/dev/null || echo 0)
+    local detection
+    detection="$(python3 - "${capture_file}" \
+      "${base_instance}" \
+      "${base_instance_short}" \
+      "${base_instance} (server)" \
+      "${base_instance_short} (server)" \
+      "${base_instance} (bootstrap)" \
+      "${base_instance_short} (bootstrap)" \
+      "${MDNS_HOST_RAW}" \
+      "${host_short}" <<'PY'
+import sys
+
+path = sys.argv[1]
+tokens = []
+seen = set()
+for raw in sys.argv[2:]:
+    value = raw.strip().lower()
+    if not value or value in seen:
+        continue
+    seen.add(value)
+    tokens.append(value)
+    if value.endswith('.local'):
+        trimmed = value[:-6]
+        if trimmed and trimmed not in seen:
+            seen.add(trimmed)
+            tokens.append(trimmed)
+
+found = "0"
+try:
+    with open(path, 'r', errors='ignore') as handle:
+        for raw_line in handle:
+            line = raw_line.lower()
+            if "_https._tcp" not in line:
+                continue
+            for token in tokens:
+                if token and token in line:
+                    found = "1"
+                    raise SystemExit
+except FileNotFoundError:
+    pass
+except SystemExit:
+    pass
+
+print(found)
+PY
+    )"
+    case "${detection}" in
+      1)
+        wire_status=1
+        wire_reason="legacy_detected"
+        log_warn_msg mdns_wire_proof "Legacy HTTPS advertisement detected" \
+          "role=${role}" "tcpdump_available=${TCPDUMP_AVAILABLE}" \
+          "capture_lines=${capture_lines}" >&2
+        ;;
+      *)
+        wire_status=0
+        wire_reason="no_matches"
+        log_info mdns_wire_proof outcome=wire_absent role="${role}" \
+          tcpdump_available="${TCPDUMP_AVAILABLE}" \
+          capture_lines="${capture_lines}" >&2
+        ;;
+    esac
+  fi
+
+  if [ -n "${capture_file}" ]; then
+    rm -f "${capture_file}" 2>/dev/null || true
+  fi
+
+  local guard_ok=1
+  local dbus_summary="failed"
+  case "${dbus_status}" in
+    0)
+      dbus_summary="absent"
+      ;;
+    2)
+      dbus_summary="skipped"
+      ;;
+    *)
+      guard_ok=0
+      dbus_summary="failed"
+      ;;
+  esac
+
+  local wire_summary
+  case "${wire_status}" in
+    0)
+      wire_summary="absent"
+      ;;
+    1)
+      wire_summary="present"
+      guard_ok=0
+      ;;
+    2)
+      wire_summary="skipped"
+      ;;
+    *)
+      wire_summary="error"
+      guard_ok=0
+      ;;
+  esac
+
+  log_info mdns_wire_proof outcome=summary role="${role}" \
+    dbus="${dbus_summary}" wire="${wire_summary}" \
+    wire_reason="${wire_reason}" tcpdump_available="${TCPDUMP_AVAILABLE}" >&2
+
+  if [ "${guard_ok}" -ne 1 ]; then
+    return 1
+  fi
+
+  return 0
+}
+
 start_address_publisher() {
   if [ -z "${MDNS_ADDR_V4:-}" ]; then
     return 0
@@ -1541,6 +1812,9 @@ publish_avahi_service() {
 }
 
 publish_api_service() {
+  if ! require_mdns_wire_proof server; then
+    return "${MDNS_SELF_CHECK_FAILURE_CODE}"
+  fi
   start_server_publisher || true
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
@@ -1579,6 +1853,9 @@ publish_api_service() {
 }
 
 publish_bootstrap_service() {
+  if ! require_mdns_wire_proof bootstrap; then
+    return "${MDNS_SELF_CHECK_FAILURE_CODE}"
+  fi
   log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
   start_bootstrap_publisher || true
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap" "state=pending"
@@ -1616,7 +1893,7 @@ publish_bootstrap_service() {
 
 claim_bootstrap_leadership() {
   if ! publish_bootstrap_service; then
-    exit 1
+    return 1
   fi
   sleep "${DISCOVERY_WAIT_SECS}"
   local consecutive leader candidates server
