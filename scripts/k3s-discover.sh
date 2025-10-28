@@ -2488,14 +2488,16 @@ install_server_join() {
       [ -n "${line}" ] || continue
       local escaped_line
       escaped_line="$(escape_log_value "${line}")"
-      log_info discover event=l4_probe phase=install_join server=\"${server}\" result=\"${escaped_line}\" >&2
+      log_info discover event=l4_probe phase=install_join \
+        "server=\"${server}\"" "result=\"${escaped_line}\"" >&2
     done <<<"${probe_output}"
   fi
   if [ "${probe_status}" -ne 0 ]; then
     if [ -n "${probe_output}" ]; then
       printf '%s\n' "${probe_output}" >&2
     fi
-    log_error_msg discover "Required TCP ports are not reachable" "phase=install_join" "server=${server}" "ports=${required_ports}"
+    log_error_msg discover "Required TCP ports are not reachable" \
+      "phase=install_join" "server=${server}" "ports=${required_ports}"
     log_error_msg discover "Ensure TCP 6443, 2379, and 2380 are open between control-plane nodes before retrying" \
       "phase=install_join" "server=${server}"
     exit 1
