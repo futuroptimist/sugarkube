@@ -39,6 +39,24 @@ if [ -z "${SUGARKUBE_MDNS_WIRE_PROOF:-}" ]; then
 fi
 export SUGARKUBE_MDNS_WIRE_PROOF
 
+if command -v curl >/dev/null 2>&1; then
+  CURL_BIN="$(command -v curl)"
+else
+  CURL_BIN=""
+fi
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="$(command -v timeout)"
+else
+  TIMEOUT_BIN=""
+fi
+if command -v bash >/dev/null 2>&1; then
+  BASH_BIN="$(command -v bash)"
+else
+  BASH_BIN=""
+fi
+MDNS_SOCKET_CHECK_STATUS="skipped"
+MDNS_SOCKET_CHECK_METHOD=""
+
 script_start_ms="$(python3 - <<'PY'
 import time
 print(int(time.time() * 1000))
@@ -242,6 +260,123 @@ __RES__
   return 0
 }
 
+build_socket_targets() {
+  host="$1"
+  ipv4="$2"
+  any="$3"
+  result=""
+  for candidate in "${host}" "${ipv4}" "${any}"; do
+    [ -n "${candidate}" ] || continue
+    case ",${result}," in
+      *,"${candidate}",*)
+        continue
+        ;;
+    esac
+    if [ -n "${result}" ]; then
+      result="${result},${candidate}"
+    else
+      result="${candidate}"
+    fi
+  done
+  printf '%s' "${result}"
+}
+
+mdns_selfcheck__curl_probe() {
+  target="$1"
+  if [ -z "${CURL_BIN}" ]; then
+    return 1
+  fi
+  url_host="${target}"
+  case "${url_host}" in
+    *:*)
+      url_host="[${url_host}]"
+      ;;
+  esac
+  "${CURL_BIN}" --connect-timeout 2 --max-time 5 -ksS -o /dev/null \
+    "https://${url_host}:6443/livez" >/dev/null 2>&1
+}
+
+mdns_selfcheck__python_probe() {
+  target="$1"
+  python3 - "$target" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+host = sys.argv[1]
+
+try:
+    with socket.create_connection((host, 6443), timeout=2):
+        pass
+except Exception:
+    sys.exit(1)
+
+sys.exit(0)
+PY
+}
+
+mdns_selfcheck__devtcp_probe() {
+  target="$1"
+  if [ -z "${TIMEOUT_BIN}" ] || [ -z "${BASH_BIN}" ]; then
+    return 1
+  fi
+  case "${target}" in
+    *:*)
+      return 1
+      ;;
+  esac
+  "${TIMEOUT_BIN}" 2 "${BASH_BIN}" -c "exec 3</dev/tcp/${target}/6443" >/dev/null 2>&1
+}
+
+server_socket_ready() {
+  host="$1"
+  any_addr="$2"
+  ipv4_addr="$3"
+  MDNS_SOCKET_CHECK_STATUS="fail"
+  MDNS_SOCKET_CHECK_METHOD=""
+  attempted=0
+  seen=""
+  for candidate in "${ipv4_addr}" "${host}" "${any_addr}"; do
+    [ -n "${candidate}" ] || continue
+    case " ${seen} " in
+      *" ${candidate} "*)
+        continue
+        ;;
+    esac
+    seen="${seen} ${candidate}"
+    if [ -n "${CURL_BIN}" ]; then
+      attempted=1
+      if mdns_selfcheck__curl_probe "${candidate}"; then
+        MDNS_SOCKET_CHECK_STATUS="ok"
+        MDNS_SOCKET_CHECK_METHOD="curl"
+        return 0
+      fi
+      MDNS_SOCKET_CHECK_METHOD="curl"
+    fi
+    attempted=1
+    if mdns_selfcheck__python_probe "${candidate}"; then
+      MDNS_SOCKET_CHECK_STATUS="ok"
+      MDNS_SOCKET_CHECK_METHOD="python"
+      return 0
+    fi
+    MDNS_SOCKET_CHECK_METHOD="python"
+    if [ -n "${TIMEOUT_BIN}" ] && [ -n "${BASH_BIN}" ]; then
+      attempted=1
+      if mdns_selfcheck__devtcp_probe "${candidate}"; then
+        MDNS_SOCKET_CHECK_STATUS="ok"
+        MDNS_SOCKET_CHECK_METHOD="devtcp"
+        return 0
+      fi
+      MDNS_SOCKET_CHECK_METHOD="devtcp"
+    fi
+  done
+  if [ "${attempted}" -eq 0 ]; then
+    MDNS_SOCKET_CHECK_STATUS="skipped"
+    MDNS_SOCKET_CHECK_METHOD=""
+    return 2
+  fi
+  return 1
+}
+
 compute_delay_ms() {
   python3 - "$@" <<'PY'
 import random
@@ -299,6 +434,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
   log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
   if [ -n "${parsed}" ]; then
+    handshake_failed=0
     srv_host="${parsed#*|}"
     srv_host="${srv_host%%|*}"
     srv_port="${parsed##*|}"
@@ -311,9 +447,39 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
       if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
         resolved_ipv4="${resolved##*|}"
+        resolved_any="${resolved%%|*}"
         elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-        log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
-        exit 0
+        readiness_required=0
+        if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
+          readiness_required=1
+        fi
+        socket_targets="$(build_socket_targets "${srv_host}" "${resolved_ipv4}" "${resolved_any}")"
+        socket_targets_escaped="$(printf '%s' "${socket_targets}" | sed 's/"/\\"/g')"
+        if [ "${readiness_required}" -eq 1 ]; then
+          if server_socket_ready "${srv_host}" "${resolved_any}" "${resolved_ipv4}"; then
+            socket_status="${MDNS_SOCKET_CHECK_STATUS:-ok}"
+            socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
+            [ -n "${socket_method}" ] || socket_method="unknown"
+            [ -n "${socket_status}" ] || socket_status="ok"
+            log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
+            log_info mdns_selfcheck outcome=confirmed check=server host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" readiness_method="${socket_method}" readiness_targets="${socket_targets}"
+            exit 0
+          fi
+          handshake_failed=1
+          socket_status="${MDNS_SOCKET_CHECK_STATUS:-fail}"
+          socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
+          [ -n "${socket_method}" ] || socket_method="unknown"
+          [ -n "${socket_status}" ] || socket_status="fail"
+          log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
+          if [ "${socket_status}" = "skipped" ]; then
+            last_reason="server_socket_unchecked"
+          else
+            last_reason="server_socket_unready"
+          fi
+        else
+          log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
+          exit 0
+        fi
       fi
       if [ "${status}" -eq 2 ]; then
         # IPv4 mismatch: signal to caller explicitly and avoid unnecessary retries
@@ -322,6 +488,8 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
         elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
         log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
         exit 5
+      elif [ "${status}" -eq 0 ] && [ "${handshake_failed}" -eq 1 ]; then
+        :
       else
         last_reason="resolve_failed"
       fi
