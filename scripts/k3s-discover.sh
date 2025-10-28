@@ -94,6 +94,32 @@ MDNS_ABSENCE_USE_DBUS="${SUGARKUBE_MDNS_ABSENCE_DBUS:-${SUGARKUBE_MDNS_DBUS:-1}}
 MDNS_ABSENCE_LAST_METHOD=""
 MDNS_ABSENCE_LAST_STATUS=""
 MDNS_SELF_CHECK_FAILURE_CODE=94
+TCPDUMP_BIN="${SUGARKUBE_TCPDUMP_BIN:-tcpdump}"
+TCPDUMP_AVAILABLE=0
+if command -v "${TCPDUMP_BIN%% *}" >/dev/null 2>&1; then
+  TCPDUMP_AVAILABLE=1
+fi
+if [ -n "${SUGARKUBE_MDNS_WIRE_PROOF+x}" ]; then
+  case "${SUGARKUBE_MDNS_WIRE_PROOF}" in
+    0|1)
+      MDNS_WIRE_PROOF="${SUGARKUBE_MDNS_WIRE_PROOF}"
+      ;;
+    *)
+      MDNS_WIRE_PROOF=1
+      ;;
+  esac
+else
+  if [ "${TCPDUMP_AVAILABLE}" -eq 1 ]; then
+    MDNS_WIRE_PROOF=1
+  else
+    MDNS_WIRE_PROOF=0
+  fi
+fi
+case "${MDNS_WIRE_PROOF}" in
+  0) MDNS_WIRE_PROOF=0 ;;
+  *) MDNS_WIRE_PROOF=1 ;;
+esac
+MDNS_WIRE_LAST_MATCH=""
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -109,6 +135,131 @@ run_net_diag() {
   fi
 
   "${diag_script}" --reason "${reason}" "$@" || true
+}
+
+collect_mdns_wire_window() {
+  local window_ms="$1"
+  python3 - "$window_ms" "${MDNS_IFACE}" "${TCPDUMP_BIN}" <<'PY'
+import math
+import subprocess
+import sys
+import time
+
+def clamp_ms(value):
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        return 0
+    if parsed < 0:
+        return 0
+    return parsed
+
+window_ms = clamp_ms(sys.argv[1])
+iface = sys.argv[2]
+tcpdump_bin = sys.argv[3] if len(sys.argv) > 3 else "tcpdump"
+
+deadline = time.monotonic() + (window_ms / 1000.0)
+
+try:
+    proc = subprocess.Popen(
+        [tcpdump_bin, "-n", "-l", "-vvv", "-s", "0", "-i", iface, "udp", "port", "5353"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+except FileNotFoundError:
+    sys.exit(97)
+except PermissionError:
+    sys.exit(98)
+except OSError:
+    sys.exit(99)
+
+lines = []
+
+try:
+    while True:
+        if proc.stdout is None:
+            break
+        if window_ms <= 0:
+            break
+        now = time.monotonic()
+        if now >= deadline:
+            break
+        line = proc.stdout.readline()
+        if not line:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+            continue
+        lines.append(line)
+except KeyboardInterrupt:
+    pass
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+
+sys.stdout.write("".join(lines))
+sys.exit(0)
+PY
+}
+
+mdns_wire_sniff() {
+  local window_ms="$1"
+
+  if [ -z "${window_ms}" ]; then
+    window_ms=0
+  fi
+
+  local capture=""
+  if ! capture="$(collect_mdns_wire_window "${window_ms}")"; then
+    local status=$?
+    case "${status}" in
+      97)
+        return 2
+        ;;
+      98)
+        return 3
+        ;;
+      *)
+        return 4
+        ;;
+    esac
+  fi
+
+  local -a parser_env=(
+    "SUGARKUBE_CLUSTER=${CLUSTER}"
+    "SUGARKUBE_ENV=${ENVIRONMENT}"
+    "SUGARKUBE_EXPECTED_HOST=${MDNS_HOST_RAW}"
+  )
+
+  local parse_output=""
+  local parse_status=0
+  set +e
+  parse_output="$(printf '%s' "${capture}" | env "${parser_env[@]}" "${MDNS_SELF_CHECK_BIN}" --parse-wire-scan)"
+  parse_status=$?
+  set -e
+
+  case "${parse_status}" in
+    0)
+      return 0
+      ;;
+    1)
+      MDNS_WIRE_LAST_MATCH="${parse_output}" || true
+      return 1
+      ;;
+    *)
+      return 5
+      ;;
+  esac
 }
 
 PRINT_TOKEN_ONLY=0
@@ -653,7 +804,31 @@ ensure_mdns_absence_gate() {
   local start_ms
   start_ms="$(current_time_ms)"
 
+  local wire_guard_enabled=0
+  if [ "${MDNS_WIRE_PROOF}" = "1" ]; then
+    wire_guard_enabled=1
+  fi
+  local tcpdump_available_now="${TCPDUMP_AVAILABLE}"
+  local wire_tcpdump_enabled=0
+  if [ "${wire_guard_enabled}" -eq 1 ] && [ "${tcpdump_available_now}" -eq 1 ]; then
+    wire_tcpdump_enabled=1
+  fi
+  local wire_tcpdump_attempts=0
+  local wire_tcpdump_disabled_reason=""
+  local wire_hits=0
+  local wire_match_line=""
+  local dbus_absent_streak=0
+  local dbus_negatives=0
+  local dbus_checks=0
+  local dbus_supported=0
+
   log_info discover event=mdns_absence_gate phase=start host="${MDNS_HOST_RAW}" service="${MDNS_SERVICE_TYPE}" timeout_ms="${timeout_ms}" >&2
+
+  if [ "${wire_guard_enabled}" -ne 1 ]; then
+    log_info discover event=mdns_wire_proof status=disabled tcpdump_available="${tcpdump_available_now}" >&2
+  elif [ "${wire_tcpdump_enabled}" -ne 1 ]; then
+    log_info discover event=mdns_wire_proof status=limited tcpdump_available=0 reason=not_found >&2
+  fi
 
   if restart_avahi_daemon_service; then
     log_info discover event=mdns_absence_gate action=restart_avahi outcome=ok >&2
@@ -692,6 +867,21 @@ ensure_mdns_absence_gate() {
         ;;
     esac
 
+    if [ "${last_method}" = "dbus" ]; then
+      dbus_supported=1
+      dbus_checks=$((dbus_checks + 1))
+      if [ "${status}" -eq 0 ]; then
+        dbus_negatives=$((dbus_negatives + 1))
+        dbus_absent_streak=$((dbus_absent_streak + 1))
+      else
+        dbus_absent_streak=0
+      fi
+    else
+      if [ "${wire_guard_enabled}" -eq 1 ]; then
+        dbus_absent_streak=0
+      fi
+    fi
+
     log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" >&2
 
     elapsed_ms="$(elapsed_since_ms "${start_ms}")"
@@ -709,6 +899,56 @@ ensure_mdns_absence_gate() {
     case "${delay_ms}" in
       ''|*[!0-9]*) delay_ms=0 ;;
     esac
+
+    local sniff_ms="${delay_ms}"
+    case "${sniff_ms}" in
+      ''|*[!0-9]*) sniff_ms=0 ;;
+    esac
+    if [ "${sniff_ms}" -lt 200 ]; then
+      sniff_ms=200
+    fi
+
+    if [ "${wire_guard_enabled}" -eq 1 ] && [ "${wire_tcpdump_enabled}" -eq 1 ]; then
+      wire_tcpdump_attempts=$((wire_tcpdump_attempts + 1))
+      if mdns_wire_sniff "${sniff_ms}"; then
+        :
+      else
+        local sniff_status=$?
+        case "${sniff_status}" in
+          1)
+            wire_hits=1
+            wire_match_line="${MDNS_WIRE_LAST_MATCH}"
+            ;;
+          2)
+            wire_tcpdump_enabled=0
+            tcpdump_available_now=0
+            if [ -z "${wire_tcpdump_disabled_reason}" ]; then
+              wire_tcpdump_disabled_reason="not_found"
+            fi
+            log_info discover event=mdns_wire_proof status=limited tcpdump_available=0 reason=not_found >&2
+            ;;
+          3)
+            wire_tcpdump_enabled=0
+            if [ -z "${wire_tcpdump_disabled_reason}" ]; then
+              wire_tcpdump_disabled_reason="permission_denied"
+            fi
+            log_warn_msg discover "tcpdump permission denied during wire proof" "wire_guard=disabled" >&2
+            ;;
+          4|5)
+            wire_tcpdump_enabled=0
+            if [ -z "${wire_tcpdump_disabled_reason}" ]; then
+              wire_tcpdump_disabled_reason="error_${sniff_status}"
+            fi
+            log_warn_msg discover "tcpdump capture error during wire proof" "wire_guard=disabled" "status=${sniff_status}" >&2
+            ;;
+        esac
+      fi
+    fi
+
+    if [ "${wire_hits}" -eq 1 ]; then
+      break
+    fi
+
     if [ "${delay_ms}" -gt 0 ]; then
       local delay_s
       delay_s="$(python3 - "${delay_ms}" <<'PY'
@@ -740,6 +980,33 @@ PY
       reason="presence_detected"
     else
       reason="unconfirmed"
+    fi
+  fi
+
+  if [ "${wire_guard_enabled}" -eq 1 ]; then
+    local dbus_guard_satisfied=0
+    if [ "${dbus_absent_streak}" -ge 2 ]; then
+      dbus_guard_satisfied=1
+    fi
+    if [ "${dbus_supported}" -ne 1 ]; then
+      log_error_msg discover "unable to perform mDNS D-Bus absence checks" "wire_guard=failed" "reason=dbus_unavailable" >&2
+      return 1
+    fi
+    if [ "${dbus_guard_satisfied}" -ne 1 ]; then
+      log_error_msg discover "insufficient D-Bus negative checks before bootstrap" "wire_guard=failed" "dbus_checks=${dbus_checks}" "dbus_negatives=${dbus_negatives}" >&2
+      return 1
+    fi
+    if [ "${wire_hits}" -eq 1 ]; then
+      local wire_match_field="${wire_match_line}"
+      wire_match_field="$(printf '%s' "${wire_match_field}" | tr '\r\n' ' ')"
+      log_error_msg discover "_https._tcp answers detected during wire proof window" "wire_guard=failed" "match=${wire_match_field}" >&2
+      return 1
+    fi
+    if [ "${wire_tcpdump_enabled}" -eq 1 ]; then
+      log_info discover event=mdns_wire_proof outcome=clear tcpdump_available=1 dbus_negatives="${dbus_negatives}" wire_windows="${wire_tcpdump_attempts}" >&2
+    else
+      local degraded_reason="${wire_tcpdump_disabled_reason:-not_available}"
+      log_info discover event=mdns_wire_proof outcome=degraded tcpdump_available="${tcpdump_available_now}" reason="${degraded_reason}" dbus_negatives="${dbus_negatives}" >&2
     fi
   fi
 
@@ -1656,7 +1923,6 @@ claim_bootstrap_leadership() {
 
 ELECTION_KEY="undefined"
 ELECT_LEADER_BIN="${SUGARKUBE_ELECT_LEADER_BIN:-${SCRIPT_DIR}/elect_leader.sh}"
-MDNS_SELF_CHECK_BIN="${SUGARKUBE_MDNS_SELF_CHECK_BIN:-${SCRIPT_DIR}/mdns_selfcheck.sh}"
 
 run_leader_election() {
   local election_output

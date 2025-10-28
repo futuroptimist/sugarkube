@@ -20,6 +20,52 @@ EXPECTED_HOST="${SUGARKUBE_EXPECTED_HOST:-}"
 EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}"
 EXPECTED_ROLE="${SUGARKUBE_EXPECTED_ROLE:-}"
 EXPECTED_PHASE="${SUGARKUBE_EXPECTED_PHASE:-}"
+
+WIRE_SCAN_MODE=0
+if [ "${1:-}" = "--parse-wire-scan" ]; then
+  WIRE_SCAN_MODE=1
+  shift
+fi
+
+if [ "${WIRE_SCAN_MODE}" -eq 1 ]; then
+  python3 - "${SERVICE_CLUSTER}" "${SERVICE_ENV}" "${EXPECTED_HOST}" <<'PY'
+import sys
+
+cluster, environment, expected_host = sys.argv[1:4]
+payload = sys.stdin.read()
+
+if not payload:
+    sys.exit(0)
+
+needles = set()
+if expected_host:
+    lowered = expected_host.lower()
+    needles.add(lowered)
+    if lowered.endswith(".local"):
+        needles.add(lowered[:-6])
+    base = lowered.split(".")[0]
+    needles.add(base)
+
+cluster = cluster.strip()
+environment = environment.strip()
+if cluster and environment:
+    cluster_phrase = f"k3s api {cluster}/{environment}".lower()
+    needles.add(cluster_phrase)
+    needles.add(cluster_phrase.replace(" ", ""))
+    needles.add(f"k3s-{cluster}-{environment}".lower())
+
+for line in payload.splitlines():
+    lowered_line = line.lower()
+    if "_https._tcp" not in lowered_line:
+        continue
+    if any(token and token in lowered_line for token in needles):
+        print(line.strip())
+        sys.exit(1)
+
+sys.exit(0)
+PY
+  exit $?
+fi
 ATTEMPTS="${SUGARKUBE_SELFCHK_ATTEMPTS:-12}"
 BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
 BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
