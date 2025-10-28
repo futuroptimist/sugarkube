@@ -126,6 +126,42 @@ FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 
+JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
+JOIN_GATE_HELD=0
+
+join_gate_release_if_held() {
+  if [ "${JOIN_GATE_HELD}" -ne 1 ]; then
+    return 0
+  fi
+  if [ ! -x "${JOIN_GATE_BIN}" ]; then
+    JOIN_GATE_HELD=0
+    return 0
+  fi
+  if "${JOIN_GATE_BIN}" release; then
+    JOIN_GATE_HELD=0
+    return 0
+  fi
+  log_warn_msg discover "Join gate release failed" "path=${JOIN_GATE_BIN}"
+  return 1
+}
+
+join_gate_wait_and_acquire() {
+  if [ ! -x "${JOIN_GATE_BIN}" ]; then
+    log_error_msg discover "Join gate helper missing or not executable" "path=${JOIN_GATE_BIN}"
+    exit 1
+  fi
+  if ! "${JOIN_GATE_BIN}" wait; then
+    log_error_msg discover "Join gate wait failed" "path=${JOIN_GATE_BIN}"
+    exit 1
+  fi
+  if "${JOIN_GATE_BIN}" acquire; then
+    JOIN_GATE_HELD=1
+    return 0
+  fi
+  log_error_msg discover "Join gate acquire failed" "path=${JOIN_GATE_BIN}"
+  exit 1
+}
+
 run_net_diag() {
   local reason="$1"
   shift
@@ -1241,7 +1277,12 @@ cleanup_avahi_publishers() {
   fi
 }
 
-trap cleanup_avahi_publishers EXIT
+cleanup_discovery_resources() {
+  join_gate_release_if_held || true
+  cleanup_avahi_publishers
+}
+
+trap cleanup_discovery_resources EXIT
 
 norm_host() {
   local host="${1:-}"
@@ -2209,6 +2250,7 @@ install_server_cluster_init() {
 install_server_join() {
   local server="$1"
   if [ -z "${TOKEN:-}" ]; then
+    join_gate_release_if_held || true
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
@@ -2229,11 +2271,14 @@ install_server_join() {
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   if wait_for_api; then
     if ! publish_api_service; then
+      join_gate_release_if_held || true
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_join"
       exit 1
     fi
+    join_gate_release_if_held || true
   else
     log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_join" "host=${MDNS_HOST_RAW}"
+    join_gate_release_if_held || true
   fi
 }
 
@@ -2418,6 +2463,7 @@ while :; do
         install_server_cluster_init
       fi
     else
+      join_gate_wait_and_acquire
       install_server_join "${server_host}"
     fi
   else
