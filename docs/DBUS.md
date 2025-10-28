@@ -37,6 +37,24 @@ If the environment does not expose `gdbus`, or Avahi rejects the D-Bus calls,
 the helper exits with status `2` and `mdns_selfcheck.sh` transparently falls
 back to the CLI implementation.
 
+## Related toggles and diagnostics
+
+- `SUGARKUBE_DEBUG_MDNS=1` elevates mDNS logging across the discovery helpers so every
+  RFC 6762 probe/response cycle that the D-Bus client observes is surfaced in `discover`
+  logs. Combine it with `LOG_LEVEL=trace` (see [LOGGING.md](LOGGING.md)) when you need a
+  packet-by-packet narrative of Avahi's answers.
+- `SUGARKUBE_MDNS_WIRE_PROOF=1` (default) asks the helper to corroborate D-Bus results by
+  running the "wire proof" capture. When `tcpdump` is available the script records a
+  short, passive sniff on UDP/5353 and verifies that no multicast responses contradict
+  the D-Bus browser's view. Set the toggle to `0` to skip the capture on constrained
+  nodes that cannot run `tcpdump`.
+
+When both toggles are active you get structured logs that align D-Bus events with the
+wire-observed packets. The `ms_elapsed` field included in those log entries measures the
+time in milliseconds since the helper started; on a quiet LAN the D-Bus browse+resolve
+cycle typically closes within 150–400 ms, whereas congested networks might stretch above
+one second as the script waits for RFC 6762 retransmissions.
+
 ## Integration with discovery flow
 
 `scripts/k3s-discover.sh` automatically opts into the D-Bus validator when

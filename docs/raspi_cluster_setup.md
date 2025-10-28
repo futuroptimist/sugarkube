@@ -78,6 +78,10 @@ What `just wipe` does:
   `k3s-agent-uninstall.sh`) to stop K3s and remove the local datastore and node config.
 - Removes the mDNS/DNS-SD service file for the current cluster/env from `/etc/avahi/services/` and
   restarts Avahi so stale advertisements disappear.
+- Waits for the double-negative absence gate: `k3s-discover.sh` requires two consecutive
+  "absent" results from the D-Bus browser (plus the optional wire proof) before declaring the LAN
+  clear. Expect the gate to run a few seconds; watch `discover` logs for
+  `event=mdns_absence_gate` with `consecutive_absent=2`.
 
 After wiping, re-export the desired environment variables (and token if used) before retrying:
 
@@ -102,6 +106,10 @@ avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 > **Note**
 > mDNS/DNS-SD service files live in `/etc/avahi/services/`. Removing the relevant
 > `k3s-*.service` file and reloading Avahi clears stale adverts.
+
+Sugarkube will not publish the `_https._tcp` service until the server's HTTPS listener on port 6443
+passes its readiness gate. The helper loops over `ss`/`timeout` checks locally so agents only see an
+mDNS advertisement once the API is ready to answer Flannel-backed cluster traffic.
 
 ---
 
@@ -159,6 +167,11 @@ The pattern is:
    ```
 
    You can even run multiple environments on the same LAN simultaneously as long as they use different tokens.
+
+> **Networking note**
+> K3s defaults to the Flannel CNI with VXLAN encapsulation. Sugarkube keeps those defaults so
+> management traffic continues to ride the control-plane's `_https._tcp:6443` endpoint announced via
+> RFC 6762 mDNS.
 
 ### After bootstrap
 

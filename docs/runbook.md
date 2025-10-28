@@ -66,6 +66,20 @@ Verify discovery (mDNS):
 avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 ```
 
+If discovery still returns stale records, export the debug toggles before rerunning `just up`:
+
+```bash
+export SUGARKUBE_DEBUG_MDNS=1
+export SUGARKUBE_MDNS_DBUS=1
+export SUGARKUBE_MDNS_WIRE_PROOF=1
+LOG_LEVEL=trace just up dev
+```
+
+The trio surfaces the D-Bus transactions, requests a passive RFC 6762 wire proof, and records
+per-attempt timings (`ms_elapsed`). On a healthy, quiet LAN you should see resolution within
+approximately 150–400 ms. Longer spans indicate the helper is retrying because multicast responses
+are delayed or suppressed by the network.
+
 ## 4. Bootstrap Flux and secrets
 
 Flux bootstrapping defaults to the production overlay. Pass `env=<env>` to the Just recipes or set
