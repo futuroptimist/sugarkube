@@ -78,6 +78,10 @@ What `just wipe` does:
   `k3s-agent-uninstall.sh`) to stop K3s and remove the local datastore and node config.
 - Removes the mDNS/DNS-SD service file for the current cluster/env from `/etc/avahi/services/` and
   restarts Avahi so stale advertisements disappear.
+- Executes a double-negative absence check that waits for the `_https._tcp:6443`
+  advertisement to disappear **twice** before returning. This protects against
+  cache reuse described in [RFC 6762](https://datatracker.ietf.org/doc/html/rfc6762)
+  and makes the next bootstrap more deterministic.
 
 After wiping, re-export the desired environment variables (and token if used) before retrying:
 
@@ -102,6 +106,18 @@ avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 > **Note**
 > mDNS/DNS-SD service files live in `/etc/avahi/services/`. Removing the relevant
 > `k3s-*.service` file and reloading Avahi clears stale adverts.
+
+If discovery looks healthy but the join hangs, enable the wire diagnostics and
+readiness gates:
+
+```bash
+export SUGARKUBE_DEBUG_MDNS=1
+export SUGARKUBE_MDNS_WIRE_PROOF=1
+just up dev
+```
+
+`SUGARKUBE_MDNS_WIRE_PROOF` makes the helper refuse success until a TCP socket
+to port 6443 opens, ensuring the join path is viable—not just advertised.
 
 ---
 
@@ -153,12 +169,17 @@ The pattern is:
 
    Each environment (`dev`, `int`, `prod`) maintains its own token and mDNS advertisement:
 
-   ```bash
+  ```bash
    just up int
    just up prod
    ```
 
    You can even run multiple environments on the same LAN simultaneously as long as they use different tokens.
+
+   Discovery timing is captured in `ms_elapsed` log fields. Expect values under
+   200 ms on a quiet LAN; higher numbers typically point to multicast flooding
+   or pod-network churn. Sugarkube keeps the default Flannel VXLAN overlay that
+   ships with K3s, so no extra CNI tuning is required during bootstrap.
 
 ### After bootstrap
 

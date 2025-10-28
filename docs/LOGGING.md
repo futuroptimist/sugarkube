@@ -18,6 +18,15 @@ machine-parseable while still being readable during interactive debugging.
   back to a relaxed match.
 - `SUGARKUBE_MDNS_DBUS=0` forces the CLI mDNS validator; omit or set to `1`
   to keep the default D-Bus backend (see [DBUS.md](DBUS.md)).
+- `SUGARKUBE_MDNS_WIRE_PROOF=1` adds an explicit TCP probe to the discovery
+  loop. When enabled the scripts refuse to call a server ready until port 6443
+  answers, mirroring the readiness gate in the runbook.
+
+Each discovery log line carries an `ms_elapsed` field representing the time
+between starting the Avahi browse/resolve cycle and receiving a final answer.
+Values under 200 ms are typical on a quiet LAN with K3s’ default
+Flannel VXLAN overlay; spikes or timeouts point to multicast flooding or
+pod-network reachability issues that need investigation.
 
 ## Usage examples
 
