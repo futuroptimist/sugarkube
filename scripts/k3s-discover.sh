@@ -119,6 +119,10 @@ MDNS_WIRE_PROOF_LAST_STATUS=""
 MDNS_WIRE_PROOF_LAST_RESULT=""
 MDNS_WIRE_PROOF_DISABLED_LOGGED=0
 MDNS_WIRE_PROOF_SKIP_LOGGED=0
+SERVER_READINESS_TIMEOUT="${SUGARKUBE_SERVER_READY_TIMEOUT:-2}"
+SERVER_READINESS_RETRIES="${SUGARKUBE_SERVER_READY_RETRIES:-${SUGARKUBE_MDNS_SERVER_RETRIES}}"
+SERVER_READINESS_DELAY="${SUGARKUBE_SERVER_READY_DELAY:-${SUGARKUBE_MDNS_SERVER_DELAY}}"
+SERVER_READY_LAST_METHOD=""
 MDNS_SELF_CHECK_FAILURE_CODE=94
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
@@ -1930,6 +1934,86 @@ check_api_listen() {
   return 1
 }
 
+server_socket_attempt() {
+  local host="$1"
+  local timeout="$2"
+
+  SERVER_READY_LAST_METHOD=""
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    local curl_host
+    curl_host="${host}"
+    case "${curl_host}" in
+      *:* )
+        case "${curl_host}" in
+          \[*\] | *\]* ) : ;;
+          *) curl_host="[${curl_host}]" ;;
+        esac
+        ;;
+    esac
+    SERVER_READY_LAST_METHOD="curl"
+    if curl --connect-timeout "${timeout}" --max-time "${timeout}" -k -sS \
+      -o /dev/null "https://${curl_host}:6443/livez"; then
+      return 0
+    fi
+  fi
+
+  if command -v timeout >/dev/null 2>&1; then
+    SERVER_READY_LAST_METHOD="bash_tcp_timeout"
+    if timeout "${timeout}" bash -c 'exec 3<>/dev/tcp/$1/6443; exec 3>&-' \
+      _ "${host}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  SERVER_READY_LAST_METHOD="bash_tcp"
+  if bash -c 'exec 3<>/dev/tcp/$1/6443; exec 3>&-' _ "${host}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
+}
+
+wait_for_server_socket() {
+  local host="$1"
+  local attempts="$2"
+  local delay="$3"
+
+  local tries
+  tries="${attempts}"
+  case "${tries}" in
+    ''|*[!0-9]*) tries=1 ;;
+    0) tries=1 ;;
+  esac
+
+  local pause
+  pause="${delay}"
+  if [ -z "${pause}" ]; then
+    pause=0
+  fi
+
+  local attempt
+  for attempt in $(seq 1 "${tries}"); do
+    if server_socket_attempt "${host}" "${SERVER_READINESS_TIMEOUT}"; then
+      log_debug mdns_selfcheck event=server_socket_probe outcome=success \
+        host="${host}" attempt="${attempt}" attempts="${tries}" \
+        method="${SERVER_READY_LAST_METHOD}" timeout="${SERVER_READINESS_TIMEOUT}" >&2
+      return 0
+    fi
+    log_debug mdns_selfcheck event=server_socket_probe outcome=failure \
+      host="${host}" attempt="${attempt}" attempts="${tries}" \
+      method="${SERVER_READY_LAST_METHOD}" timeout="${SERVER_READINESS_TIMEOUT}" >&2
+    if [ "${attempt}" -lt "${tries}" ]; then
+      sleep "${pause}"
+    fi
+  done
+
+  return 1
+}
+
 wait_for_api() {
   local attempt
   for attempt in $(seq 1 60); do
@@ -1963,16 +2047,49 @@ publish_api_service() {
   start_server_publisher || true
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
+  local observed=""
+  local readiness_reason="advertisement"
+
   if ensure_self_mdns_advertisement server; then
-    local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
-    SERVER_PUBLISH_PERSIST=1
-    stop_bootstrap_publisher
-    return 0
+    if wait_for_server_socket "${observed}" "${SERVER_READINESS_RETRIES}" "${SERVER_READINESS_DELAY}"; then
+      log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
+      SERVER_PUBLISH_PERSIST=1
+      stop_bootstrap_publisher
+      return 0
+    fi
+    readiness_reason="socket"
+    local -a warn_args=(
+      "role=server"
+      "host=${MDNS_HOST_RAW}"
+      "phase=server"
+      "check=initial"
+      "method=${SERVER_READY_LAST_METHOD}"
+      "timeout=${SERVER_READINESS_TIMEOUT}"
+    )
+    if [ -n "${observed}" ]; then
+      warn_args+=("observed=${observed}")
+    fi
+    log_warn_msg mdns_selfcheck "server advertisement observed but API not reachable; continuing to retry" "${warn_args[@]}"
   fi
 
-  log_warn_msg mdns_selfcheck "server advertisement not visible; restarting publishers" "host=${MDNS_HOST_RAW}" "role=server"
+  if [ "${readiness_reason}" = "advertisement" ]; then
+    log_warn_msg mdns_selfcheck "server advertisement not visible; restarting publishers" "host=${MDNS_HOST_RAW}" "role=server"
+  else
+    local -a restart_warn=(
+      "host=${MDNS_HOST_RAW}"
+      "role=server"
+      "phase=server"
+      "reason=socket"
+      "method=${SERVER_READY_LAST_METHOD}"
+      "timeout=${SERVER_READINESS_TIMEOUT}"
+    )
+    if [ -n "${observed}" ]; then
+      restart_warn+=("observed=${observed}")
+    fi
+    log_warn_msg mdns_selfcheck "server API not reachable; restarting publishers" "${restart_warn[@]}"
+  fi
+
   stop_server_publisher
   stop_address_publisher
   sleep 1
@@ -1980,17 +2097,32 @@ publish_api_service() {
   start_server_publisher || true
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
+  readiness_reason="advertisement"
   if ensure_self_mdns_advertisement server; then
-    local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
-    log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=restarted >&2
-    log_info_msg mdns_publish "Server advertisement observed after restart" "host=${MDNS_HOST_RAW}" "role=server"
-    SERVER_PUBLISH_PERSIST=1
-    stop_bootstrap_publisher
-    return 0
+    if wait_for_server_socket "${observed}" "${SERVER_READINESS_RETRIES}" "${SERVER_READINESS_DELAY}"; then
+      log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=restarted >&2
+      log_info_msg mdns_publish "Server advertisement observed after restart" "host=${MDNS_HOST_RAW}" "role=server"
+      SERVER_PUBLISH_PERSIST=1
+      stop_bootstrap_publisher
+      return 0
+    fi
+    readiness_reason="socket"
+    local -a retry_warn=(
+      "role=server"
+      "host=${MDNS_HOST_RAW}"
+      "phase=server"
+      "check=restarted"
+      "method=${SERVER_READY_LAST_METHOD}"
+      "timeout=${SERVER_READINESS_TIMEOUT}"
+    )
+    if [ -n "${observed}" ]; then
+      retry_warn+=("observed=${observed}")
+    fi
+    log_warn_msg mdns_selfcheck "server advertisement observed after restart but API not reachable; continuing to retry" "${retry_warn[@]}"
   fi
 
-  log_error_msg mdns_selfcheck "failed to confirm server advertisement; printing diagnostics" "host=${MDNS_HOST_RAW}" "role=server"
+  log_error_msg mdns_selfcheck "failed to confirm server advertisement or readiness; printing diagnostics" "host=${MDNS_HOST_RAW}" "role=server"
   pgrep -a avahi-publish || true
   sed -n '1,120p' "${BOOTSTRAP_PUBLISH_LOG:-/tmp/sugar-publish-bootstrap.log}" 2>/dev/null || true
   sed -n '1,120p' "${SERVER_PUBLISH_LOG:-/tmp/sugar-publish-server.log}" 2>/dev/null || true
