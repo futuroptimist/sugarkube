@@ -80,19 +80,19 @@ for port in ports:
     start = time.perf_counter()
     status = "open"
     error = None
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
+    sock = None
     try:
-        sock.connect((host, port))
+        sock = socket.create_connection((host, port), timeout=timeout)
     except Exception as exc:  # noqa: BLE001
         status = "closed"
         error = str(exc)
         exit_code = 1
     finally:
-        try:
-            sock.close()
-        except Exception:  # noqa: BLE001
-            pass
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:  # noqa: BLE001
+                pass
     latency_ms = int((time.perf_counter() - start) * 1000)
     result = {
         "host": host,
