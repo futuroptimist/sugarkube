@@ -984,7 +984,29 @@ ensure_mdns_absence_gate() {
       fi
     fi
 
-    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" consecutive_dbus_absent="${consecutive_dbus_absent}" dbus_requirement_met="${dbus_requirement_met}" wire_absent_window="${wire_absent_window}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
+    local -a absence_gate_log_fields=(
+      "event=mdns_absence_gate"
+      "attempt=\"${attempts}\""
+      "method=\"${last_method}\""
+      "status=\"${last_status}\""
+      "consecutive_absent=\"${consecutive_absent}\""
+      "consecutive_dbus_absent=\"${consecutive_dbus_absent}\""
+      "dbus_requirement_met=\"${dbus_requirement_met}\""
+      "wire_absent_window=\"${wire_absent_window}\""
+      "wire_proof_status=\"${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}\""
+    )
+
+    if [ "${IPTABLES_PREFLIGHT_DONE:-0}" -eq 1 ]; then
+      local iptables_outcome="${IPTABLES_PREFLIGHT_OUTCOME:-unknown}"
+      absence_gate_log_fields+=("iptables_preflight_outcome=\"${iptables_outcome}\"")
+
+      if [ -n "${IPTABLES_PREFLIGHT_DETAILS:-}" ]; then
+        local iptables_details="${IPTABLES_PREFLIGHT_DETAILS//\"/\\\"}"
+        absence_gate_log_fields+=("iptables_preflight_details=\"${iptables_details}\"")
+      fi
+    fi
+
+    log_debug discover "${absence_gate_log_fields[@]}" >&2
 
     elapsed_ms="$(elapsed_since_ms "${start_ms}")"
 
