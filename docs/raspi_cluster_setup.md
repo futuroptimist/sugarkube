@@ -53,6 +53,24 @@ Copy the long `K10…` string to a safe place—you will export it on every join
 > before running `just up` if you advertise a VIP or load balancer—the address is
 > added as an extra SAN to avoid TLS warnings when joining via that endpoint.
 
+### Registration address (optional)
+
+Multi-node clusters often sit behind a stable virtual IP or external load balancer.
+Export `SUGARKUBE_API_REGADDR` before running `just up` so every join command uses
+that address instead of whichever `.local` host happens to be the leader at the
+moment.
+
+```bash
+# kube-vip advertising 10.99.0.5 on the control-plane VLAN
+export SUGARKUBE_API_REGADDR="10.99.0.5"
+
+# or an external load balancer DNS name
+export SUGARKUBE_API_REGADDR="api.sugar.example"
+```
+
+Nodes still discover each other via mDNS, but the registration address is used for
+`--server` URLs and `K3S_URL` so both servers and agents join through the VIP/LB.
+
 ### Remaining control-plane peers or agents
 
 Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the saved token before the second run so it can join the cluster:
