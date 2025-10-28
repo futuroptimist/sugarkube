@@ -25,6 +25,18 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     publish_log = tmp_path / "publish.log"
     server_flag = tmp_path / "server-published"
 
+    _write_stub(
+        bin_dir / "check_apiready.sh",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [ -n \"${SERVER_HOST:-}\" ]; then\n"
+        "  printf 'ts=stub level=info event=apiready outcome=ok host=\"%s\"\\n' \"${SERVER_HOST}\" >&2\n"
+        "else\n"
+        "  printf 'ts=stub level=info event=apiready outcome=ok\\n' >&2\n"
+        "fi\n"
+        "exit 0\n",
+    )
+
     # Stub sleep to avoid delays in the control-flow.
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
 
@@ -155,6 +167,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "SUGARKUBE_TEST_SERVER_THRESHOLD": "1",
             "SH_LOG_PATH": str(sh_log),
             "SUGARKUBE_MDNS_DBUS": "0",
+            "SUGARKUBE_API_READY_CHECK_BIN": str(bin_dir / "check_apiready.sh"),
         }
     )
 
