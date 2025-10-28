@@ -281,6 +281,34 @@ print(json.dumps({
 PY
 }
 
+"${SCRIPT_DIR}/wait_for_avahi_dbus.sh"
+status=$?
+if [ "${status}" -ne 0 ]; then
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  case "${status}" in
+    1)
+      log_info mdns_selfcheck \
+        outcome=miss \
+        reason=avahi_dbus_wait_timeout \
+        attempt=0 \
+        ms_elapsed="${elapsed_ms}" >&2
+      ;;
+    2)
+      log_debug mdns_selfcheck_dbus \
+        outcome=skip \
+        reason=avahi_dbus_wait_unavailable
+      ;;
+    *)
+      log_info mdns_selfcheck \
+        outcome=miss \
+        reason=avahi_dbus_wait_failed \
+        attempt=0 \
+        ms_elapsed="${elapsed_ms}" >&2
+      ;;
+  esac
+  exit "${status}"
+fi
+
 script_start_ms="$(python3 - <<'PY'
 import time
 print(int(time.time() * 1000))
