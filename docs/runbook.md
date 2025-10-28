@@ -66,6 +66,27 @@ Verify discovery (mDNS):
 avahi-browse --all --resolve --terminate | grep -A2 '_https._tcp'
 ```
 
+### mDNS readiness gates
+
+Sugarkube runs two readiness gates before calling a node healthy:
+
+1. **Absence gate (double-negative):** `just wipe` and the discovery scripts
+   watch the `_https._tcp` advertisement disappear **twice** before returning.
+   This protects the next bootstrap from cached responses permitted under
+   [RFC 6762](https://datatracker.ietf.org/doc/html/rfc6762).
+2. **Port 6443 wire proof:** When `SUGARKUBE_MDNS_WIRE_PROOF=1` (enabled by
+   default whenever `tcpdump` is available) the helpers refuse to mark discovery
+   successful until a
+   TCP connection to port 6443 completes. This mirrors the `k3s` readiness check
+   that agents use and aligns with the Flannel-backed service network that ships
+   with K3s.
+
+Discovery logs always include an `ms_elapsed` field. Values under 200 ms are
+normal on a quiet LAN with the default Flannel VXLAN overlay. Sustained values
+in the hundreds of milliseconds indicate congestion or multicast drops—enable
+`SUGARKUBE_DEBUG_MDNS=1` to capture Avahi traces and
+`SUGARKUBE_MDNS_DBUS=0` to fall back to the CLI path if D-Bus is blocked.
+
 ## 4. Bootstrap Flux and secrets
 
 Flux bootstrapping defaults to the production overlay. Pass `env=<env>` to the Just recipes or set
