@@ -1,0 +1,3 @@
+tls-san:
+  - "sugarkube0.local"
+  - "${SUGARKUBE_API_REGADDR:-}"

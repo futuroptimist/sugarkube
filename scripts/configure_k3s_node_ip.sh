@@ -9,6 +9,9 @@ LOG_FILE="${LOG_DIR}/configure_k3s_node_ip.log"
 SYSTEMD_SYSTEM_DIR="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
 UNIT_SEARCH_PATHS="${SYSTEMD_UNIT_PATHS:-/etc/systemd/system:/lib/systemd/system:/usr/lib/systemd/system}"
 DROPIN_NAME="10-node-ip.conf"
+K3S_CONFIG_DIR="${K3S_CONFIG_DIR:-/etc/rancher/k3s}"
+TLS_SAN_TEMPLATE_PATH="${TLS_SAN_TEMPLATE_PATH:-/opt/sugarkube/systemd/etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml}"
+TLS_SAN_DEST_NAME="10-sugarkube-tls.yaml"
 
 log() {
   local ts
@@ -88,6 +91,59 @@ write_dropin() {
   return 1
 }
 
+render_tls_san_config() {
+  local template="${TLS_SAN_TEMPLATE_PATH}"
+  local dest_dir="${K3S_CONFIG_DIR}/config.yaml.d"
+  local dest="${dest_dir}/${TLS_SAN_DEST_NAME}"
+  if [ ! -f "${template}" ]; then
+    log "TLS SAN template ${template} not found; skipping"
+    return 2
+  fi
+
+  mkdir -p "${dest_dir}"
+  local tmp
+  tmp="$(mktemp "${dest}.XXXXXX")"
+
+  local regaddr="${SUGARKUBE_API_REGADDR:-}"
+  regaddr="${regaddr//\\/\\\\}"
+  regaddr="${regaddr//\"/\\\"}"
+
+  local wrote=0
+  while IFS= read -r line || [ -n "${line}" ]; do
+    local rendered
+    rendered="${line//\$\{SUGARKUBE_API_REGADDR:-\}/${regaddr}}"
+    local compact
+    compact="$(printf '%s' "${rendered}" | tr -d '[:space:]')"
+    if [ "${compact}" = '-""' ]; then
+      continue
+    fi
+    printf '%s\n' "${rendered}" >>"${tmp}"
+    wrote=1
+  done <"${template}"
+
+  if [ "${wrote}" -eq 0 ]; then
+    rm -f "${tmp}"
+    log "Rendered TLS SAN config is empty; skipping"
+    return 1
+  fi
+
+  chmod 0644 "${tmp}"
+
+  local changed=1
+  if [ -f "${dest}" ] && cmp -s "${tmp}" "${dest}"; then
+    changed=0
+  fi
+
+  if [ "${changed}" -eq 1 ]; then
+    log "Updating TLS SAN configuration at ${dest}"
+    mv "${tmp}" "${dest}"
+    return 0
+  fi
+
+  rm -f "${tmp}"
+  return 1
+}
+
 detect_primary_ipv4() {
   local output
   if ! command -v "${IP_CMD}" >/dev/null 2>&1; then
@@ -152,6 +208,30 @@ main() {
       log "Unit ${unit} not found; skipping"
     fi
   done
+
+  local tls_rendered=0
+  if render_tls_san_config; then
+    tls_rendered=1
+  else
+    local tls_status=$?
+    if [ "${tls_status}" -gt 1 ]; then
+      log "Failed to render TLS SAN configuration (exit ${tls_status})"
+    fi
+  fi
+
+  if [ "${tls_rendered}" -eq 1 ] && unit_exists "k3s.service"; then
+    local already_present=0
+    local existing
+    for existing in "${changed_services[@]}"; do
+      if [ "${existing}" = "k3s.service" ]; then
+        already_present=1
+        break
+      fi
+    done
+    if [ "${already_present}" -eq 0 ]; then
+      changed_services+=("k3s.service")
+    fi
+  fi
 
   restart_services_if_needed "${changed_services[@]}"
 }
