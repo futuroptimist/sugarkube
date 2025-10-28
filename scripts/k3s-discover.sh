@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
+JOIN_GATE_BIN="${SCRIPT_DIR}/join_gate.sh"
 
 log_message() {
   local level="$1"
@@ -2208,6 +2209,33 @@ install_server_cluster_init() {
 
 install_server_join() {
   local server="$1"
+  local join_gate_enabled=0
+  local join_gate_acquired=0
+  local join_gate_released=0
+
+  join_gate_cleanup() {
+    if [ "${join_gate_enabled}" -eq 1 ] && [ "${join_gate_acquired}" -eq 1 ] && [ "${join_gate_released}" -eq 0 ]; then
+      if ! "${JOIN_GATE_BIN}" release; then
+        log_warn_msg discover "Failed to release join gate lock" "phase=install_join" "server=${server}" "host=${MDNS_HOST_RAW}"
+      fi
+      join_gate_released=1
+    fi
+  }
+
+  if [ -x "${JOIN_GATE_BIN}" ]; then
+    join_gate_enabled=1
+    trap join_gate_cleanup EXIT INT TERM
+    if ! "${JOIN_GATE_BIN}" wait; then
+      log_error_msg discover "Join gate wait failed" "phase=install_join" "server=${server}" "host=${MDNS_HOST_RAW}"
+      exit 1
+    fi
+    if "${JOIN_GATE_BIN}" acquire; then
+      join_gate_acquired=1
+    else
+      log_error_msg discover "Join gate acquire failed" "phase=install_join" "server=${server}" "host=${MDNS_HOST_RAW}"
+      exit 1
+    fi
+  fi
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
@@ -2234,6 +2262,10 @@ install_server_join() {
     fi
   else
     log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_join" "host=${MDNS_HOST_RAW}"
+  fi
+  if [ "${join_gate_enabled}" -eq 1 ]; then
+    join_gate_cleanup
+    trap - EXIT INT TERM
   fi
 }
 

@@ -31,6 +31,13 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     # Stub systemctl to avoid touching the host service manager.
     _write_stub(bin_dir / "systemctl", "#!/usr/bin/env bash\nexit 0\n")
 
+    # Avoid apt-get installation attempts during iptables setup.
+    _write_stub(bin_dir / "apt-get", "#!/usr/bin/env bash\nexit 0\n")
+
+    # Provide iptables binaries so the installer detects them.
+    _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+
     # Pretend the API port starts listening immediately after the installer runs.
     _write_stub(
         bin_dir / "ss",
@@ -46,6 +53,27 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{server_flag}'; fi\n"
         "trap 'echo TERM >> \"" + str(publish_log) + "\"; exit 0' TERM INT\n"
         "while true; do read -r -t 1 _ || true; done\n",
+    )
+
+    _write_stub(
+        bin_dir / "avahi-publish",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo START:\"$@\" >> '{publish_log}'\n"
+        f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{server_flag}'; fi\n"
+        "trap 'echo TERM >> \"" + str(publish_log) + "\"; exit 0' TERM INT\n"
+        "while true; do read -r -t 1 _ || true; done\n",
+    )
+
+    _write_stub(
+        bin_dir / "avahi-resolve",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [ \"$1\" = \"-n\" ] && [ $# -ge 2 ]; then\n"
+        "  echo \"$2 192.0.2.10\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
     )
 
     # Emit an installation script that immediately exits successfully.
@@ -76,6 +104,11 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         bin_dir / "avahi-browse",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        "for arg in \"$@\"; do\n"
+        "  case \"$arg\" in\n"
+        "    *_k3s-join-lock._tcp*) exit 0 ;;\n"
+        "  esac\n"
+        "done\n"
         'state="${SUGARKUBE_TEST_STATE}"\n'
         'threshold="${SUGARKUBE_TEST_SERVER_THRESHOLD:-9}"\n'
         "mode='bootstrap'\n"
@@ -141,8 +174,15 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "server advertisement confirmed" in result.stderr
-    assert "Joining as additional HA server via https://sugarkube0.local:6443" in result.stderr
+    assert "mdns_selfcheck outcome=confirmed" in result.stderr
+    assert "phase=install_join" in result.stderr
+
+    acquire_index = result.stderr.index("event=join_gate action=acquire")
+    join_index = result.stderr.index("phase=install_join")
+    readiness_index = result.stderr.index("mdns_selfcheck outcome=confirmed")
+    release_index = result.stderr.index("event=join_gate action=release")
+    assert acquire_index < join_index
+    assert release_index > readiness_index
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")
     assert "--cluster-init" not in sh_log_contents
