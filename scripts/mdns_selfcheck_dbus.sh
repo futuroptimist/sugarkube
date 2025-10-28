@@ -281,8 +281,9 @@ print(json.dumps({
 PY
 }
 
-if ! "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
-  status=$?
+"${SCRIPT_DIR}/wait_for_avahi_dbus.sh"
+status=$?
+if [ "${status}" -ne 0 ]; then
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
   case "${status}" in
     1)
