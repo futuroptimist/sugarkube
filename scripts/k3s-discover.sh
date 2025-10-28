@@ -77,8 +77,7 @@ fi
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
-NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
-BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
+SERVER_TOKEN_PATH="${SUGARKUBE_K3S_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
 DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-4}"
 DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-8}"
 MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-20}"
@@ -146,9 +145,6 @@ run_net_diag() {
 
 PRINT_TOKEN_ONLY=0
 CHECK_TOKEN_ONLY=0
-
-NODE_TOKEN_PRESENT=0
-BOOT_TOKEN_PRESENT=0
 
 TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
@@ -232,63 +228,72 @@ case "${ENVIRONMENT}" in
 esac
 
 RESOLVED_TOKEN_SOURCE=""
+INITIAL_TOKEN="${TOKEN:-}"
+TOKEN=""
 
-resolve_local_token() {
-  if [ -n "${TOKEN:-}" ]; then
-    return 0
+resolve_server_join_token() {
+  local resolver="${SCRIPT_DIR}/resolve_server_token.sh"
+  local -a resolver_env=()
+  local resolved_output=""
+
+  if [ -n "${INITIAL_TOKEN:-}" ]; then
+    resolver_env+=("SUGARKUBE_TOKEN=${INITIAL_TOKEN}")
+  fi
+  if [ -n "${SUGARKUBE_ALLOW_TOKEN_CREATE:-}" ]; then
+    resolver_env+=("SUGARKUBE_ALLOW_TOKEN_CREATE=${SUGARKUBE_ALLOW_TOKEN_CREATE}")
+  fi
+  if [ "${SUGARKUBE_SUDO_BIN+x}" = "x" ]; then
+    resolver_env+=("SUGARKUBE_SUDO_BIN=${SUGARKUBE_SUDO_BIN}")
+  fi
+  if [ "${SUGARKUBE_K3S_BIN+x}" = "x" ]; then
+    resolver_env+=("SUGARKUBE_K3S_BIN=${SUGARKUBE_K3S_BIN}")
+  fi
+  if [ -n "${SERVER_TOKEN_PATH:-}" ]; then
+    resolver_env+=("SUGARKUBE_K3S_SERVER_TOKEN_PATH=${SERVER_TOKEN_PATH}")
   fi
 
-  local candidate=""
-  local line=""
-
-  if [ -s "${NODE_TOKEN_PATH}" ]; then
-    NODE_TOKEN_PRESENT=1
-    candidate="$(tr -d '\n' <"${NODE_TOKEN_PATH}")"
-    if [ -n "${candidate}" ]; then
-      TOKEN="${candidate}"
-      RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
-      return 0
+  if [ "${#resolver_env[@]}" -gt 0 ]; then
+    if ! resolved_output="$(env "${resolver_env[@]}" "${resolver}")"; then
+      return 1
+    fi
+  else
+    if ! resolved_output="$("${resolver}")"; then
+      return 1
     fi
   fi
 
-  if [ -s "${BOOT_TOKEN_PATH}" ]; then
-    line="$(grep -m1 '^NODE_TOKEN=' "${BOOT_TOKEN_PATH}" 2>/dev/null || true)"
-    if [ -n "${line}" ]; then
-      BOOT_TOKEN_PRESENT=1
-      candidate="${line#NODE_TOKEN=}"
-      candidate="${candidate%$'\r'}"
-      candidate="${candidate%$'\n'}"
-      if [ -n "${candidate}" ]; then
-        TOKEN="${candidate}"
-        RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
-        return 0
-      fi
-    fi
+  TOKEN="${resolved_output}"
+  if [ -n "${TOKEN}" ]; then
+    RESOLVED_TOKEN_SOURCE="${resolver}"
   fi
 
-  return 1
+  return 0
 }
 
-resolve_local_token || true
+resolve_server_join_token || true
 
 ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
+SERVER_TOKEN_PRESENT=0
+if [ -f "${SERVER_TOKEN_PATH}" ]; then
+  SERVER_TOKEN_PRESENT=1
+fi
+
 if [ -z "${TOKEN:-}" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
-  elif [ "${NODE_TOKEN_PRESENT}" -eq 0 ] && [ "${BOOT_TOKEN_PRESENT}" -eq 0 ]; then
-    # No join token was provided and nothing has been written locally yet.
-    # Allow the first HA control-plane node to bootstrap without a token so
-    # it can generate one for subsequent peers.
+  elif [ "${SERVER_TOKEN_PRESENT}" -eq 0 ]; then
+    # No secure join token is yet available locally. Allow the first HA
+    # control-plane node to bootstrap so it can mint one for peers.
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
   fi
 fi
 
 if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
   if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
-    echo "SUGARKUBE_TOKEN (or per-env variant) required" >&2
+    echo "failed to resolve secure k3s server join token; provide SUGARKUBE_TOKEN or enable SUGARKUBE_ALLOW_TOKEN_CREATE=1" >&2
     exit 1
   fi
-  echo "SUGARKUBE_TOKEN (or per-env variant) required"
+  echo "failed to resolve secure k3s server join token; provide SUGARKUBE_TOKEN or enable SUGARKUBE_ALLOW_TOKEN_CREATE=1"
   exit 1
 fi
 
