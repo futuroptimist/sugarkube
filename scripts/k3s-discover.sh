@@ -988,7 +988,7 @@ ensure_mdns_absence_gate() {
       fi
     fi
 
-    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" consecutive_dbus_absent="${consecutive_dbus_absent}" dbus_requirement_met="${dbus_requirement_met}" wire_absent_window="${wire_absent_window}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
+    log_debug discover event=mdns_absence_gate attempt="${attempts}" method="${last_method}" status="${last_status}" consecutive_absent="${consecutive_absent}" consecutive_dbus_absent="${consecutive_dbus_absent}" dbus_requirement_met="${dbus_requirement_met}" wire_absent_window="${wire_absent_window}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" wire_proof_result="${MDNS_WIRE_PROOF_LAST_RESULT:-skipped}" >&2
 
     elapsed_ms="$(elapsed_since_ms "${start_ms}")"
 
@@ -1048,11 +1048,13 @@ PY
   if [ "${confirmed}" -eq 1 ]; then
     log_info discover event=mdns_absence_gate mdns_absence_confirmed=1 attempts="${attempts}" \
       ms_elapsed="${elapsed_ms}" last_method="${last_method}" consecutive_absent="${consecutive_absent}" \
-      consecutive_dbus_absent="${consecutive_dbus_absent}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
+      consecutive_dbus_absent="${consecutive_dbus_absent}" wire_proof_status="${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" \
+      wire_proof_result="${MDNS_WIRE_PROOF_LAST_RESULT:-skipped}" >&2
   else
     log_warn_msg discover "mDNS absence gate timed out" "mdns_absence_confirmed=0" \
       "attempts=${attempts}" "ms_elapsed=${elapsed_ms}" "reason=${reason}" "last_method=${last_method}" \
-      "consecutive_dbus_absent=${consecutive_dbus_absent}" "wire_proof_status=${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" >&2
+      "consecutive_dbus_absent=${consecutive_dbus_absent}" "wire_proof_status=${MDNS_WIRE_PROOF_LAST_STATUS:-skipped}" \
+      "wire_proof_result=${MDNS_WIRE_PROOF_LAST_RESULT:-skipped}" >&2
   fi
 
   return 0
