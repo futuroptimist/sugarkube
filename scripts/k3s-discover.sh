@@ -45,6 +45,26 @@ escape_log_value() {
   printf '%s' "$1" | sed 's/"/\\"/g'
 }
 
+JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
+JOIN_GATE_AVAILABLE=0
+JOIN_GATE_HELD=0
+
+if [ -x "${JOIN_GATE_BIN}" ]; then
+  JOIN_GATE_AVAILABLE=1
+fi
+
+cleanup_join_gate() {
+  if [ "${JOIN_GATE_AVAILABLE}" -eq 1 ] && [ "${JOIN_GATE_HELD}" -eq 1 ]; then
+    if "${JOIN_GATE_BIN}" release; then
+      JOIN_GATE_HELD=0
+    else
+      log_warn_msg discover "Failed to release join gate" "phase=cleanup"
+    fi
+  fi
+}
+
+trap cleanup_join_gate EXIT
+
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 
 if [ "${EUID}" -eq 0 ]; then
@@ -1989,6 +2009,7 @@ publish_api_service() {
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
+    log_info_msg mdns_publish "server advertisement confirmed" "host=${MDNS_HOST_RAW}" "role=server"
     SERVER_PUBLISH_PERSIST=1
     stop_bootstrap_publisher
     return 0
@@ -2212,8 +2233,23 @@ install_server_join() {
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     exit 1
   fi
+  local join_gate_acquired=0
+  if [ "${JOIN_GATE_AVAILABLE}" -eq 1 ]; then
+    if ! "${JOIN_GATE_BIN}" wait; then
+      log_error_msg discover "Failed to wait for join gate" "phase=install_join" "host=${MDNS_HOST_RAW}"
+      exit 1
+    fi
+    if "${JOIN_GATE_BIN}" acquire; then
+      JOIN_GATE_HELD=1
+      join_gate_acquired=1
+    else
+      log_error_msg discover "Failed to acquire join gate" "phase=install_join" "host=${MDNS_HOST_RAW}"
+      exit 1
+    fi
+  fi
   ensure_iptables_tools
   log_info discover phase=install_join host="${MDNS_HOST_RAW}" server="${server}" desired_servers="${SERVERS_DESIRED}" >&2
+  log_info_msg discover "Joining as additional HA server via https://${server}:6443" "host=${MDNS_HOST_RAW}" "role=server"
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \
@@ -2234,6 +2270,13 @@ install_server_join() {
     fi
   else
     log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_join" "host=${MDNS_HOST_RAW}"
+  fi
+  if [ "${JOIN_GATE_AVAILABLE}" -eq 1 ] && [ "${join_gate_acquired}" -eq 1 ]; then
+    if "${JOIN_GATE_BIN}" release; then
+      JOIN_GATE_HELD=0
+    else
+      log_warn_msg discover "Failed to release join gate" "phase=install_join" "host=${MDNS_HOST_RAW}"
+    fi
   fi
 }
 

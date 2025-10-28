@@ -31,6 +31,24 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     # Stub systemctl to avoid touching the host service manager.
     _write_stub(bin_dir / "systemctl", "#!/usr/bin/env bash\nexit 0\n")
 
+    # Provide fake iptables binaries so the installer skips apt-get.
+    _write_stub(
+        bin_dir / "iptables",
+        "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = \"-V\" ] || [ \"${1:-}\" = \"--version\" ]; then\n"
+        "  echo 'iptables v1.8.8 (nf_tables)'\n"
+        "fi\n"
+        "exit 0\n",
+    )
+    _write_stub(
+        bin_dir / "ip6tables",
+        "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = \"-V\" ] || [ \"${1:-}\" = \"--version\" ]; then\n"
+        "  echo 'ip6tables v1.8.8 (nf_tables)'\n"
+        "fi\n"
+        "exit 0\n",
+    )
+
     # Pretend the API port starts listening immediately after the installer runs.
     _write_stub(
         bin_dir / "ss",
@@ -46,6 +64,29 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         f"if [[ \"$*\" == *\"phase=server\"* ]]; then touch '{server_flag}'; fi\n"
         "trap 'echo TERM >> \"" + str(publish_log) + "\"; exit 0' TERM INT\n"
         "while true; do read -r -t 1 _ || true; done\n",
+    )
+
+    _write_stub(
+        bin_dir / "avahi-publish",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"echo PUBLISH:\"$@\" >> '{publish_log}'\n"
+        f"touch '{server_flag}'\n"
+        "trap 'exit 0' TERM INT\n"
+        "while true; do read -r -t 1 _ || true; done\n",
+    )
+
+    _write_stub(
+        bin_dir / "avahi-resolve",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [ \"${1:-}\" = \"-n\" ]; then\n"
+        "  shift\n"
+        "fi\n"
+        "if [ $# -ne 1 ]; then\n"
+        "  exit 1\n"
+        "fi\n"
+        "printf '%s 192.168.50.10\n' \"$1\"\n",
     )
 
     # Emit an installation script that immediately exits successfully.
@@ -143,6 +184,9 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "server advertisement confirmed" in result.stderr
     assert "Joining as additional HA server via https://sugarkube0.local:6443" in result.stderr
+    assert "event=join_gate action=wait outcome=ok" in result.stderr
+    assert "event=join_gate action=acquire outcome=ok" in result.stderr
+    assert "event=join_gate action=release outcome=ok" in result.stderr
 
     sh_log_contents = sh_log.read_text(encoding="utf-8")
     assert "--cluster-init" not in sh_log_contents
