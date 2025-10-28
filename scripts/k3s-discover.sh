@@ -124,9 +124,11 @@ FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
+SUGARKUBE_STRICT_TIME="${SUGARKUBE_STRICT_TIME:-0}"
 JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
 JOIN_GATE_HELD=0
 L4_PROBE_BIN="${SUGARKUBE_L4_PROBE_BIN:-${SCRIPT_DIR}/l4_probe.sh}"
+TIME_SYNC_CHECK_BIN="${SUGARKUBE_TIME_SYNC_BIN:-${SCRIPT_DIR}/check_time_sync.sh}"
 
 API_READY_CHECK_BIN="${SUGARKUBE_API_READY_CHECK_BIN:-${SCRIPT_DIR}/check_apiready.sh}"
 API_READY_TIMEOUT="${SUGARKUBE_API_READY_TIMEOUT:-120}"
@@ -2166,6 +2168,50 @@ ensure_iptables_tools() {
   IPTABLES_ENSURED=1
 }
 
+ensure_time_sync() {
+  local phase="$1"
+
+  if [ -z "${TIME_SYNC_CHECK_BIN}" ] || [ ! -x "${TIME_SYNC_CHECK_BIN}" ]; then
+    if [ "${SUGARKUBE_STRICT_TIME}" = "1" ]; then
+      log_error_msg discover "Time sync check helper missing" "phase=${phase}" "script=${TIME_SYNC_CHECK_BIN}"
+      return 1
+    fi
+    log_warn_msg discover "Time sync check skipped; helper missing" "phase=${phase}" "script=${TIME_SYNC_CHECK_BIN}"
+    return 0
+  fi
+
+  local output status
+  set +e
+  output="$(${TIME_SYNC_CHECK_BIN} 2>&1)"
+  status=$?
+  set -e
+
+  if [ -n "${output}" ]; then
+    while IFS= read -r line; do
+      [ -n "${line}" ] || continue
+      if [ "${status}" -eq 0 ]; then
+        log_info_msg discover "time sync: ${line}" "phase=${phase}"
+      else
+        if [ "${SUGARKUBE_STRICT_TIME}" = "1" ]; then
+          log_error_msg discover "time sync: ${line}" "phase=${phase}"
+        else
+          log_warn_msg discover "time sync: ${line}" "phase=${phase}"
+        fi
+      fi
+    done <<<"${output}"
+  fi
+
+  if [ "${status}" -ne 0 ]; then
+    if [ "${SUGARKUBE_STRICT_TIME}" = "1" ]; then
+      log_error_msg discover "Clock synchronization requirement failed" "phase=${phase}"
+      return 1
+    fi
+    log_warn_msg discover "Clock synchronization check failed; continuing" "phase=${phase}"
+  fi
+
+  return 0
+}
+
 build_install_env() {
   local -n _target=$1
   _target=("INSTALL_K3S_CHANNEL=${K3S_CHANNEL:-stable}")
@@ -2510,6 +2556,9 @@ install_server_join() {
       "phase=install_join" "host=${MDNS_HOST_RAW}" "server=${server}"
     exit 1
   fi
+  if ! ensure_time_sync "install_join"; then
+    exit 1
+  fi
   check_remote_server_tls_sans "${server}"
   if ! acquire_join_gate; then
     exit 1
@@ -2555,6 +2604,9 @@ install_agent() {
   if ! ensure_server_flag_parity "${server}" "install_agent"; then
     log_error_msg discover "Server flag parity validation failed" \
       "phase=install_agent" "host=${MDNS_HOST_RAW}" "server=${server}"
+    exit 1
+  fi
+  if ! ensure_time_sync "install_agent"; then
     exit 1
   fi
   ensure_iptables_tools
