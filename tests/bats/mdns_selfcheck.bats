@@ -59,6 +59,53 @@ EOS
   [[ "$output" =~ ipv4=192.168.3.10 ]]
 }
 
+@test "mdns self-check waits for active queries when instance appears within window" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+state_file="${BATS_TEST_TMPDIR}/browse-count"
+count=0
+if [ -f "${state_file}" ]; then
+  count="$(cat "${state_file}")"
+fi
+case "${count}" in
+  ''|*[!0-9]*) count=0 ;;
+esac
+count=$((count + 1))
+printf '%s' "${count}" >"${state_file}"
+if [ "${count}" -lt 3 ]; then
+  exit 0
+fi
+cat <<'TXT'
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (agent);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=agent;txt=phase=agent
+TXT
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "10.0.0.5"
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=10.0.0.5 \
+    SUGARKUBE_EXPECTED_ROLE=agent \
+    SUGARKUBE_EXPECTED_PHASE=agent \
+    SUGARKUBE_SELFCHK_ATTEMPTS=5 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=100 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=100 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ attempts=3 ]]
+}
+
 @test "mdns self-check strips surrounding quotes before matching" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
