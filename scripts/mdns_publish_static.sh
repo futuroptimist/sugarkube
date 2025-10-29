@@ -64,7 +64,13 @@ IGNORE_IFACE_PREFIXES = (
     "zt",
     "tailscale",
     "podman",
+    "br-",
+    "lxdbr",
 )
+IGNORE_IFACE_KINDS = {
+    "bridge",
+}
+IGNORE_IFACE_FLAGS = {"LOOPBACK"}
 
 
 def valid_ipv4(candidate):
@@ -77,19 +83,68 @@ def valid_ipv4(candidate):
     return True
 
 
+def gather_iface_metadata():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "link", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return {}
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return {}
+
+    metadata = {}
+    for entry in payload:
+        iface_name = entry.get("ifname") or entry.get("name") or ""
+        if not iface_name:
+            continue
+        link_type = ""
+        if isinstance(entry.get("linkinfo"), dict):
+            link_type = entry["linkinfo"].get("info_kind") or ""
+        if not link_type:
+            link_type = entry.get("link_type") or ""
+        flags = entry.get("flags") or []
+        metadata[iface_name] = {
+            "kind": link_type.lower() if isinstance(link_type, str) else "",
+            "flags": {flag.upper() for flag in flags if isinstance(flag, str)},
+        }
+    return metadata
+
+
+IFACE_METADATA = gather_iface_metadata()
+
+
+def interface_blacklisted(name):
+    if not name:
+        return True
+    if name in IGNORE_IFACE_NAMES:
+        return True
+    for prefix in IGNORE_IFACE_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    meta = IFACE_METADATA.get(name, {})
+    kind = meta.get("kind", "")
+    if kind in IGNORE_IFACE_KINDS:
+        return True
+    flags = meta.get("flags") or set()
+    if flags.intersection(IGNORE_IFACE_FLAGS):
+        return True
+    return False
+
+
 def interface_allowed(name, default_iface):
     if not name:
         return False
     if name == iface_hint:
         return True
-    if default_iface and name == default_iface:
+    if default_iface and name == default_iface and not interface_blacklisted(name):
         return True
-    if name in IGNORE_IFACE_NAMES:
-        return False
-    for prefix in IGNORE_IFACE_PREFIXES:
-        if name.startswith(prefix):
-            return False
-    return True
+    return not interface_blacklisted(name)
 
 
 def gather_ip_entries():
@@ -122,11 +177,15 @@ def gather_ip_entries():
     return entries
 
 
-def pick_from_interface(entries, target_iface):
+def pick_from_interface(entries, target_iface, allow_blacklisted=False):
     if not target_iface:
         return None
     for iface_name, candidate_ip in entries:
-        if iface_name == target_iface and valid_ipv4(candidate_ip):
+        if iface_name != target_iface:
+            continue
+        if not valid_ipv4(candidate_ip):
+            continue
+        if allow_blacklisted or not interface_blacklisted(iface_name):
             return candidate_ip
     return None
 
@@ -154,7 +213,7 @@ def choose_ip():
     entries = gather_ip_entries()
     default_iface_name = default_interface()
 
-    candidate = pick_from_interface(entries, iface_hint)
+    candidate = pick_from_interface(entries, iface_hint, allow_blacklisted=True)
     if candidate:
         return candidate
 
@@ -163,13 +222,22 @@ def choose_ip():
         if candidate:
             return candidate
 
+    had_entries = bool(entries)
+    allowed_candidates = []
     disallowed_ips = set()
     for iface_name, candidate_ip in entries:
+        if not valid_ipv4(candidate_ip):
+            continue
         if interface_allowed(iface_name, default_iface_name):
-            if valid_ipv4(candidate_ip):
-                return candidate_ip
-        elif valid_ipv4(candidate_ip):
+            allowed_candidates.append(candidate_ip)
+        else:
             disallowed_ips.add(candidate_ip)
+
+    if allowed_candidates:
+        return allowed_candidates[0]
+
+    if had_entries:
+        return None
 
     for candidate_ip in hostname_tokens:
         if candidate_ip in disallowed_ips:
