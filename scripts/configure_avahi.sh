@@ -25,6 +25,16 @@ FORCE_ENABLE_DBUS=1
 if [ "${SUGARKUBE_AVAHI_DBUS_DISABLED:-0}" = "1" ]; then
   FORCE_ENABLE_DBUS=0
 fi
+# Default to disabling wide-area DNS-SD unless explicitly requested.
+ENABLE_WIDE_AREA_RAW="${SUGARKUBE_ENABLE_WIDE_AREA:-0}"
+case "$(printf '%s' "${ENABLE_WIDE_AREA_RAW}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on)
+    ENABLE_WIDE_AREA_VALUE="yes"
+    ;;
+  *)
+    ENABLE_WIDE_AREA_VALUE="no"
+    ;;
+esac
 # Temporary file used during atomic write; referenced by EXIT trap safely
 TMP_AVAHI_TMPFILE=""
 
@@ -210,7 +220,7 @@ run_avahi_effective_check() {
   fi
 
   local use_ipv4="" use_ipv6="" allow_interfaces="" deny_interfaces=""
-  local disable_publishing="" enable_dbus=""
+  local disable_publishing="" enable_dbus="" wide_area=""
   local -a warning_codes=()
   local -a strict_hints=()
   local -A hint_seen=()
@@ -246,6 +256,9 @@ run_avahi_effective_check() {
         ;;
       enable_dbus=*)
         enable_dbus="${line#enable_dbus=}"
+        ;;
+      wide_area=*)
+        wide_area="${line#wide_area=}"
         ;;
       warning=*)
         local payload code message hint
@@ -298,7 +311,8 @@ run_avahi_effective_check() {
     "allow=${allow_interfaces}" \
     "deny=${deny_interfaces}" \
     "disable_publishing=${disable_publishing}" \
-    "enable_dbus=${enable_dbus}"
+    "enable_dbus=${enable_dbus}" \
+    "wide_area=${wide_area}"
 
   if [ "${STRICT_AVAHI}" = "1" ] && [ "${#warning_codes[@]}" -gt 0 ]; then
     local hint_message="See Avahi warnings above."
@@ -376,7 +390,8 @@ update_config() {
     "${allow_mode}" \
     "${allow_value}" \
     "${FORCE_IPV4_ONLY}" \
-    "${FORCE_ENABLE_DBUS}"
+    "${FORCE_ENABLE_DBUS}" \
+    "${ENABLE_WIDE_AREA_VALUE}"
 import sys
 from pathlib import Path
 
@@ -388,6 +403,7 @@ try:
     allow_value = sys.argv[5]
     force_ipv4_only = sys.argv[6] in ("1", "true", "yes")
     force_enable_dbus = sys.argv[7] not in ("0", "false", "no")
+    enable_wide_area = sys.argv[8].lower() in ("1", "true", "yes", "on")
 
     if src_path.exists():
         try:
@@ -407,6 +423,7 @@ try:
     v4_written = False
     v6_written = False
     enable_dbus_written = False
+    wide_area_written = False
 
     for line in original_lines:
         stripped = line.strip()
@@ -437,6 +454,12 @@ try:
                 continue
             enable_dbus_written = True
             new_lines.append(line)
+            continue
+
+        if section == "wide-area" and key == "enable-wide-area":
+            desired = "yes" if enable_wide_area else "no"
+            new_lines.append(f"enable-wide-area={desired}")
+            wide_area_written = True
             continue
 
         if section == "server" and key == "use-ipv4":
@@ -501,6 +524,18 @@ try:
                 new_lines.append("")
             new_lines.append("[server]")
             new_lines.append("enable-dbus=yes")
+
+    desired_wide_area = "yes" if enable_wide_area else "no"
+    if not wide_area_written:
+        header, _, end = ensure_section(new_lines, "wide-area")
+        if header is not None:
+            insert_at = end if end is not None else len(new_lines)
+            new_lines.insert(insert_at, f"enable-wide-area={desired_wide_area}")
+        else:
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("")
+            new_lines.append("[wide-area]")
+            new_lines.append(f"enable-wide-area={desired_wide_area}")
 
     if publish_section_found:
         if not publish_written:
@@ -582,6 +617,25 @@ main() {
     fi
   fi
 
+  if [ "${allow_mode}" != "set" ]; then
+    log "No allow-interfaces candidate resolved; defaulting to eth0"
+    allow_mode="set"
+    allow_value="eth0"
+    iface_for_log="${allow_value}"
+    allow_source="default"
+  fi
+
+  if [ -z "${allow_value}" ]; then
+    log "allow-interfaces resolved empty; forcing eth0"
+    allow_value="eth0"
+    iface_for_log="${allow_value}"
+    if [ -z "${allow_source}" ]; then
+      allow_source="default"
+    else
+      allow_source="${allow_source}-fallback"
+    fi
+  fi
+
   local dir tmp mode owner group
   dir="$(dirname "${CONF}")"
   tmp="$(mktemp "${dir}/avahi-daemon.conf.XXXXXX")"
@@ -647,7 +701,9 @@ main() {
     "outcome=${outcome}" \
     "iface=${iface_for_log}" \
     "allow_source=${allow_source}" \
-    "publish_workstation=${PUBLISH_WORKSTATION}"
+    "publish_workstation=${PUBLISH_WORKSTATION}" \
+    "wide_area=${ENABLE_WIDE_AREA_VALUE}" \
+    "force_enable_dbus=${FORCE_ENABLE_DBUS}"
   log_kv avahi_hosts \
     "outcome=${AVAHI_HOSTS_OUTCOME}" \
     "hostname=${MDNS_HOSTNAME}" \
