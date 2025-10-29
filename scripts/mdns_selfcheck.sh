@@ -169,7 +169,10 @@ else
   ACTIVE_QUERY_ENABLED=0
 fi
 
-SELF_HOSTNAME_SOURCE="${HOSTNAME:-}"
+SELF_HOSTNAME_SOURCE=""
+if [ "${HOSTNAME+set}" = "set" ] && [ -n "${HOSTNAME}" ]; then
+  SELF_HOSTNAME_SOURCE="${HOSTNAME}"
+fi
 if [ -z "${SELF_HOSTNAME_SOURCE}" ]; then
   SELF_HOSTNAME_SOURCE="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
 fi
