@@ -57,6 +57,11 @@ described in [docs/runbook.md](runbook.md#mdns-readiness-gates).
 possible, providing more reliable mDNS validation during the bootstrap and
 server advertisement phases.
 
+RFC 6763 treats the service instance string as a user-facing label. Rich names
+with spaces or punctuation are permitted and should not be used for matching.
+Resolvers must instead confirm the service type, inspect the TXT payload, and
+follow the SRV target that Avahi resolves.
+
 When cleaning up a node (`just wipe`), the discovery flow performs a
 double-negative absence check: it waits for mDNS advertisements to disappear,
 then confirms the absence twice before continuing. This guards against transient
