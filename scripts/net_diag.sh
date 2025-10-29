@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
+
 iface=""
 reason="mdns_selfcheck_failure"
 attempt=""
@@ -307,3 +309,12 @@ emit_line \
   "iface=${iface}" \
   "matches=${tcpdump_matches}" \
   "self_answers=${tcpdump_self_answers}"
+
+if [[ "${reason}" == *mdns* ]]; then
+  wire_probe_script="${SCRIPT_DIR}/mdns_wire_probe.sh"
+  if [ -x "${wire_probe_script}" ]; then
+    set +e
+    EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}" "${wire_probe_script}" --iface "${iface}" || true
+    set -e
+  fi
+fi
