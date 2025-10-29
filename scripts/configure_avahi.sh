@@ -81,6 +81,8 @@ restart_avahi_if_needed() {
 }
 
 run_avahi_effective_check() {
+  local target_conf="${1:-${CONF}}"
+
   if [ ! -x "${CHECK_AVAHI_BIN}" ]; then
     log "Avahi config check helper ${CHECK_AVAHI_BIN} not executable; skipping"
     return 0
@@ -93,7 +95,7 @@ run_avahi_effective_check() {
   local -A hint_seen=()
 
   local check_output=""
-  check_output="$(AVAHI_CONF_PATH="${CONF}" "${CHECK_AVAHI_BIN}" 2>&1)"
+  check_output="$(AVAHI_CONF_PATH="${target_conf}" "${CHECK_AVAHI_BIN}" 2>&1)"
   local status=$?
   if [ "${status}" -ne 0 ]; then
     log "Avahi config check failed with status ${status}: ${check_output}"
@@ -392,11 +394,6 @@ main() {
   ensure_config_exists
   backup_config
 
-  if ! run_avahi_effective_check; then
-    log "Avahi configuration validation failed"
-    return 1
-  fi
-
   local guard_active="0"
   if [ "${DISABLE_WLAN_DURING_BOOTSTRAP}" = "1" ] && [ -f "${WLAN_GUARD_FILE}" ]; then
     guard_active="1"
@@ -459,6 +456,11 @@ main() {
   fi
   if [ -n "${owner}" ] && [ -n "${group}" ]; then
     chown "${owner}:${group}" "${tmp}" || true
+  fi
+
+  if ! run_avahi_effective_check "${tmp}"; then
+    log "Avahi configuration validation failed after update attempt"
+    return 1
   fi
 
   local before_hash="" after_hash="" outcome="skipped"
