@@ -96,6 +96,31 @@ emit_line() {
   printf ' output=%q\n' "${output}"
 }
 
+emit_event() {
+  local event="$1"
+  local output="$2"
+  shift 2 || true
+
+  printf 'event=%s' "${event}"
+  printf ' reason=%s' "${reason}"
+  if [ -n "${attempt}" ]; then
+    printf ' attempt=%s' "${attempt}"
+  fi
+  local tag
+  for tag in "${tags[@]}"; do
+    if [ -n "${tag}" ]; then
+      printf ' %s' "${tag}"
+    fi
+  done
+  while [ "$#" -gt 0 ]; do
+    if [ -n "$1" ]; then
+      printf ' %s' "$1"
+    fi
+    shift
+  done
+  printf ' output=%q\n' "${output}"
+}
+
 systemctl_status="command_missing"
 systemctl_rc=""
 if command -v systemctl >/dev/null 2>&1; then
@@ -311,6 +336,33 @@ emit_line \
   "self_answers=${tcpdump_self_answers}"
 
 if [[ "${reason}" == *mdns* ]]; then
+  avahi_conf_path="/etc/avahi/avahi-daemon.conf"
+  avahi_conf_rc=""
+  avahi_conf_dump=""
+  if [ -r "${avahi_conf_path}" ]; then
+    set +e
+    avahi_conf_dump="$({
+      awk -F'#' 'NF{print $1}' "${avahi_conf_path}" \
+        | sed '/^\s*$/d' \
+        | sed -n '1,120p'
+    })"
+    avahi_conf_rc="$?"
+    set -e
+    if [ -z "${avahi_conf_dump}" ]; then
+      avahi_conf_dump="empty"
+    fi
+  else
+    avahi_conf_dump="unreadable"
+    avahi_conf_rc="1"
+  fi
+  if [ -z "${avahi_conf_rc}" ]; then
+    avahi_conf_rc="0"
+  fi
+  emit_event \
+    "avahi_conf_dump" \
+    "${avahi_conf_dump}" \
+    "path=${avahi_conf_path}" \
+    "rc=${avahi_conf_rc}"
   wire_probe_script="${SCRIPT_DIR}/mdns_wire_probe.sh"
   if [ -x "${wire_probe_script}" ]; then
     set +e
