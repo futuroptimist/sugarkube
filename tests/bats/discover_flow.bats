@@ -166,6 +166,34 @@ EOS
   echo "${target}"
 }
 
+@test "check_avahi_config_effective warns and sanitizes suffixed allow-interfaces" {
+  conf="${BATS_TEST_TMPDIR}/avahi-daemon.conf"
+  cat <<'EOF' >"${conf}"
+[server]
+allow-interfaces=eth0.IPv4, wlan0.IPv6
+use-ipv4=yes
+use-ipv6=yes
+EOF
+
+  run env \
+    AVAHI_CONF_PATH="${conf}" \
+    "${BATS_CWD}/scripts/check_avahi_config_effective.sh"
+
+  [ "$status" -eq 2 ]
+  [[ "${output}" == *"WARN: allow-interfaces includes IPv4/IPv6-specific suffixes"* ]]
+  [[ "${output}" == *"allow_interfaces=eth0.IPv4,wlan0.IPv6"* ]]
+
+  run env \
+    AVAHI_CONF_PATH="${conf}" \
+    SUGARKUBE_FIX_AVAHI=1 \
+    "${BATS_CWD}/scripts/check_avahi_config_effective.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "${output}" == *"INFO: stripped .IPv4/.IPv6 suffixes from allow-interfaces"* ]]
+  [[ "${output}" == *"allow_interfaces=eth0,wlan0"* ]]
+  grep -q '^allow-interfaces=eth0,wlan0$' "${conf}"
+}
+
 @test "discover flow joins existing server when discovery succeeds" {
   stub_common_network_tools
   create_curl_stub

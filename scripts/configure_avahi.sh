@@ -15,6 +15,8 @@ PREFERRED_IFACE="${SUGARKUBE_MDNS_INTERFACE:-}"
 DISABLE_WLAN_DURING_BOOTSTRAP="${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}"
 # Temporary file used during atomic write; referenced by EXIT trap safely
 TMP_AVAHI_TMPFILE=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECK_AVAHI_BIN="${SUGARKUBE_CHECK_AVAHI_BIN:-${SCRIPT_DIR}/check_avahi_config_effective.sh}"
 
 log() {
   local ts
@@ -74,6 +76,46 @@ restart_avahi_if_needed() {
     log "avahi-daemon restart complete; configuration reload confirmed"
   else
     log "avahi-daemon not active; skipping restart"
+  fi
+}
+
+run_avahi_config_check() {
+  if [ -z "${CHECK_AVAHI_BIN}" ]; then
+    return
+  fi
+  if [ ! -x "${CHECK_AVAHI_BIN}" ]; then
+    log "Avahi config check helper ${CHECK_AVAHI_BIN} not executable; skipping"
+    return
+  fi
+
+  log "Validating existing Avahi configuration"
+
+  local output
+  local status
+  set +e
+  output="$("${CHECK_AVAHI_BIN}" 2>&1)"
+  status=$?
+  set -e
+
+  if [ -n "${output}" ]; then
+    while IFS= read -r line; do
+      [ -z "${line}" ] && continue
+      log "avahi-check ${line}"
+    done <<<"${output}"
+  fi
+
+  if [ "${status}" -eq 2 ]; then
+    log "Avahi configuration check reported actionable issues"
+    if [ "${SUGARKUBE_STRICT_AVAHI:-0}" = "1" ]; then
+      log "SUGARKUBE_STRICT_AVAHI=1; aborting. Set SUGARKUBE_FIX_AVAHI=1 to auto-sanitize allow-interfaces or adjust ${CONF}."
+      exit 1
+    fi
+  elif [ "${status}" -ne 0 ]; then
+    log "Avahi configuration check failed with status ${status}"
+    if [ "${SUGARKUBE_STRICT_AVAHI:-0}" = "1" ]; then
+      log "SUGARKUBE_STRICT_AVAHI=1; aborting due to validation failure"
+      exit 1
+    fi
   fi
 }
 
@@ -275,6 +317,7 @@ main() {
   log "Configuring Avahi baseline"
   ensure_config_exists
   backup_config
+  run_avahi_config_check
 
   local guard_active="0"
   if [ "${DISABLE_WLAN_DURING_BOOTSTRAP}" = "1" ] && [ -f "${WLAN_GUARD_FILE}" ]; then
