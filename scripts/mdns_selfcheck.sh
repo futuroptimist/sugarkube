@@ -794,7 +794,6 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
   if [ -n "${parsed}" ]; then
     handshake_failed=0
-    srv_instance="${parsed%%|*}"
     srv_host="${parsed#*|}"
     srv_host="${srv_host%%|*}"
     srv_port="${parsed##*|}"
