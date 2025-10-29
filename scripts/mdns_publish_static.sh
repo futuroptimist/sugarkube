@@ -366,7 +366,7 @@ PY
     mv "${tmp}" "${hosts_path}"
   fi
 
-  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+  if [ "${hosts_changed}" = "1" ] && [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
     systemctl reload avahi-daemon || systemctl restart avahi-daemon || true
   fi
 
