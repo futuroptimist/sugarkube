@@ -142,8 +142,12 @@ SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
+ACTIVE_QUERY_RAW="${MDNS_ACTIVE_QUERY_SECS:-}"
+if [ -z "${ACTIVE_QUERY_RAW}" ]; then
+  ACTIVE_QUERY_RAW="${MDDNS_ACTIVE_QUERY_SECS:-5}"
+fi
 ACTIVE_QUERY_WINDOW_MS="$({
-  python3 - <<'PY' "${MDDNS_ACTIVE_QUERY_SECS:-5}"
+  python3 - <<'PY' "${ACTIVE_QUERY_RAW}"
 import sys
 
 def parse_secs(raw):
@@ -168,6 +172,9 @@ else
   ACTIVE_QUERY_WINDOW_MS=0
   ACTIVE_QUERY_ENABLED=0
 fi
+
+INITIAL_BROWSE_OUTPUT=""
+INITIAL_BROWSE_READY=0
 
 SELF_HOSTNAME_SOURCE=""
 if [ "${HOSTNAME+set}" = "set" ] && [ -n "${HOSTNAME}" ]; then
@@ -558,7 +565,9 @@ PY
 }
 
 mdns_selfcheck__service_type_check() {
-  local type_output type_present available_types available_flat available_kv available_escaped
+  local type_output type_present available_lines available_types available_kv available_escaped
+  local active_window_ms active_start_elapsed current_elapsed delta_ms remaining_ms sleep_seconds
+  local active_output active_count active_found active_attempts
 
   type_output="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
   type_present=0
@@ -581,7 +590,7 @@ END { print present }
     *) type_present=0 ;;
   esac
 
-  available_types="$(printf '%s\n' "${type_output}" | awk '
+  available_lines="$(printf '%s\n' "${type_output}" | awk '
 BEGIN { FS = ";" }
 {
   for (i = 1; i <= NF; i++) {
@@ -591,32 +600,132 @@ BEGIN { FS = ";" }
   }
 }
 ' 2>/dev/null | sort -u)"
-  available_flat="$(printf '%s' "${available_types}" | tr '\n' ',' | sed 's/,$//')"
+  available_types="$(printf '%s\n' "${available_lines}" | paste -sd';' - 2>/dev/null)"
   available_kv=""
-  if [ -n "${available_flat}" ]; then
-    available_escaped="$(printf '%s' "${available_flat}" | sed 's/"/\\"/g')"
+  if [ -n "${available_types}" ]; then
+    available_escaped="$(printf '%s' "${available_types}" | sed 's/"/\\"/g')"
     available_kv="available_types=\"${available_escaped}\""
   fi
 
-  if [ -n "${available_kv}" ]; then
-    log_debug mdns_selfcheck event=mdns_type_check \
-      present="${type_present}" \
-      service_type="${SERVICE_TYPE}" \
-      "${available_kv}"
+  if [ "${type_present}" -eq 1 ]; then
+    if [ -n "${available_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${available_kv}"
+    else
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}"
+    fi
   else
-    log_debug mdns_selfcheck event=mdns_type_check \
-      present="${type_present}" \
-      service_type="${SERVICE_TYPE}"
+    if [ -n "${available_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${available_kv}"
+    else
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn
+    fi
   fi
 
-  if [ "${type_present}" -ne 1 ]; then
-    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-    if [ -n "${available_kv}" ]; then
-      log_info mdns_selfcheck_failure outcome=miss reason=service_type_missing service_type="${SERVICE_TYPE}" \
-        "${available_kv}" attempt=0 ms_elapsed="${elapsed_ms}" >&2
-    else
-      log_info mdns_selfcheck_failure outcome=miss reason=service_type_missing service_type="${SERVICE_TYPE}" attempt=0 ms_elapsed="${elapsed_ms}" >&2
+  active_window_ms="${ACTIVE_QUERY_WINDOW_MS}"
+  case "${active_window_ms}" in
+    ''|*[!0-9]*) active_window_ms=0 ;;
+  esac
+
+  active_start_elapsed="$(elapsed_since_start_ms "${script_start_ms}")"
+  case "${active_start_elapsed}" in
+    ''|*[!0-9]*) active_start_elapsed=0 ;;
+  esac
+
+  active_attempts=0
+  active_found=0
+  INITIAL_BROWSE_OUTPUT=""
+  INITIAL_BROWSE_READY=0
+
+  while :; do
+    active_attempts=$((active_attempts + 1))
+    active_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
+    active_count="$(printf '%s\n' "${active_output}" | awk -v svc="${SERVICE_TYPE}" '
+BEGIN { FS = ";"; count = 0 }
+$1 == "=" {
+  for (i = 1; i <= NF; i++) {
+    if ($i == svc) {
+      count++
+      break
+    }
+  }
+}
+END { print count }
+' 2>/dev/null | tr -d '\n' | tr -d '\r')"
+    case "${active_count}" in
+      ''|*[!0-9]*) active_count=0 ;;
+    esac
+
+    if [ "${active_count}" -gt 0 ]; then
+      INITIAL_BROWSE_OUTPUT="${active_output}"
+      INITIAL_BROWSE_READY=1
+      active_found=1
+      log_debug mdns_selfcheck event=mdns_type_active outcome=hit attempts="${active_attempts}" instances="${active_count}"
+      break
     fi
+
+    if [ "${active_window_ms}" -le 0 ]; then
+      INITIAL_BROWSE_OUTPUT="${active_output}"
+      break
+    fi
+
+    current_elapsed="$(elapsed_since_start_ms "${script_start_ms}")"
+    case "${current_elapsed}" in
+      ''|*[!0-9]*) current_elapsed=0 ;;
+    esac
+    delta_ms=$((current_elapsed - active_start_elapsed))
+    if [ "${delta_ms}" -lt 0 ]; then
+      delta_ms=0
+    fi
+    if [ "${delta_ms}" -ge "${active_window_ms}" ]; then
+      INITIAL_BROWSE_OUTPUT="${active_output}"
+      break
+    fi
+
+    remaining_ms=$((active_window_ms - delta_ms))
+    if [ "${remaining_ms}" -le 0 ]; then
+      break
+    fi
+
+    if [ "${remaining_ms}" -gt 1000 ]; then
+      sleep_seconds=1
+    else
+      sleep_seconds="$({
+        python3 - <<'PY' "${remaining_ms}"
+import sys
+try:
+    delay = int(sys.argv[1])
+except ValueError:
+    delay = 0
+print('{:.3f}'.format(delay / 1000.0))
+PY
+      } 2>/dev/null)"
+      if [ -z "${sleep_seconds}" ]; then
+        sleep_seconds=0
+      fi
+      case "${sleep_seconds}" in
+        0|0.0|0.00|0.000) sleep_seconds=0 ;;
+      esac
+    fi
+
+    if [ "${sleep_seconds}" = "0" ] || [ -z "${sleep_seconds}" ]; then
+      sleep 1
+    else
+      sleep "${sleep_seconds}"
+    fi
+  done
+
+  if [ "${active_found}" -ne 1 ]; then
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+    case "${elapsed_ms}" in
+      ''|*[!0-9]*) elapsed_ms=0 ;;
+    esac
+    log_info mdns_selfcheck_failure outcome=miss reason=active_browse_empty service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" >&2
     exit 4
   fi
 }
@@ -628,7 +737,12 @@ last_reason=""
 miss_count=0
 while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   # Use parsable semicolon-delimited output with resolution and terminate flags
-  browse_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
+  if [ "${INITIAL_BROWSE_READY}" -eq 1 ]; then
+    browse_output="${INITIAL_BROWSE_OUTPUT}"
+    INITIAL_BROWSE_READY=0
+  else
+    browse_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
+  fi
   parsed="$(printf '%s\n' "${browse_output}" | parse_browse || true)"
   browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
   log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
