@@ -142,6 +142,42 @@ SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
+check_service_type_present() {
+  local browse_output
+  local present
+  local browse_for_trace
+
+  browse_output="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
+  present=0
+  if printf '%s\n' "${browse_output}" | awk -v svc="${SERVICE_TYPE}" '
+    BEGIN { FS = ";" }
+    $1 ~ /^[=+-]$/ {
+      if ($4 == svc) {
+        found = 1
+        exit 0
+      }
+    }
+    END {
+      if (found) {
+        exit 0
+      }
+      exit 1
+    }
+  '; then
+    present=1
+  fi
+
+  browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
+  log_trace mdns_type_check_raw raw="${browse_for_trace}" service_type="${SERVICE_TYPE}" present="${present}"
+  log_info mdns_type_check service_type="${SERVICE_TYPE}" present="${present}"
+
+  if [ "${present}" -ne 1 ]; then
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+    log_info mdns_selfcheck_failure outcome=miss reason=service_type_missing service_type="${SERVICE_TYPE}" attempt=0 ms_elapsed="${elapsed_ms}" >&2
+    exit 4
+  fi
+}
+
 ACTIVE_QUERY_WINDOW_MS="$({
   python3 - <<'PY' "${MDDNS_ACTIVE_QUERY_SECS:-5}"
 import sys
@@ -217,6 +253,8 @@ if [ -n "${SELF_HOSTNAME_ALIASES}" ]; then
 else
   HOSTNAME_CHECK_ENABLED=0
 fi
+
+check_service_type_present
 
 host_matches_self() {
   candidate="$1"

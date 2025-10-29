@@ -25,6 +25,11 @@ EOS
 @test "mdns self-check succeeds when instance is discoverable" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
 EOS
 
@@ -62,6 +67,11 @@ EOS
 @test "mdns self-check waits for active queries when instance appears within window" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 state_file="${BATS_TEST_TMPDIR}/browse-count"
 count=0
 if [ -f "${state_file}" ]; then
@@ -109,6 +119,11 @@ EOS
 @test "mdns self-check strips surrounding quotes before matching" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat <<'TXT'
 =;eth0;IPv4;"k3s-sugar-dev@sugarkube0 (server)";"_k3s-sugar-dev._tcp";local;"sugarkube0.local";"10.0.0.5";6443;"txt=\"cluster=sugar\"";"txt=\"env=dev\"";"txt=\"role=server\"";"txt=\"phase=server\""
 TXT
@@ -143,6 +158,11 @@ EOS
 @test "mdns self-check accepts short host when EXPECTED_HOST has .local" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat <<'TXT'
 =;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server
 TXT
@@ -176,6 +196,11 @@ EOS
 @test "mdns self-check handles spaces in instance name and TXT values" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat <<'TXT'
 =;eth0;IPv4;"k3s-sugar-dev@sugarkube0 (bootstrap)";"_k3s-sugar-dev._tcp";local;"sugarkube0.local";"10.0.0.5";6443;"txt=\"cluster=sugar\"";"txt=\"env=dev\"";"txt=\"role=bootstrap\"";"txt=\"phase=server ready\""
 TXT
@@ -210,6 +235,11 @@ EOS
 @test "mdns self-check reports failure when no records appear" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat "${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt"
 EOS
 
@@ -236,9 +266,53 @@ EOS
   [[ "$output" =~ reason=browse_empty ]]
 }
 
+@test "mdns self-check fails fast when service type is missing" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat <<'TXT'
+=;eth0;IPv4;_http._tcp;local
+TXT
+  exit 0
+fi
+
+echo "instance browse should not run" >&2
+exit 2
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+echo "avahi-resolve should not be called" >&2
+exit 2
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 4 ]
+  [[ "$output" =~ event=mdns_type_check ]]
+  [[ "$output" =~ present=0 ]]
+  [[ "$output" =~ service_type=_k3s-sugar-dev._tcp ]]
+  [[ "$output" =~ reason=service_type_missing ]]
+}
+
 @test "mdns self-check tolerates extra avahi-browse fields and anchors by type" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat <<'TXT'
 =;wlan0;IPv6;ignored-instance;_https._tcp;local;otherhost.local;fe80::1;443;txt="foo=bar";garbage
 =;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server
@@ -273,6 +347,11 @@ EOS
 @test "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat <<'TXT'
 =;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server
 TXT
@@ -307,6 +386,11 @@ EOS
 @test "mdns self-check ignores bootstrap advertisement when server required" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat "${BATS_CWD}/tests/fixtures/avahi_browse_bootstrap_only.txt"
 EOS
 
@@ -346,6 +430,11 @@ EOS
 
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
 EOS
 
@@ -390,6 +479,11 @@ EOS
 
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 echo "cli" >>"${BATS_TEST_TMPDIR}/cli-path.log"
 cat "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"
 EOS
@@ -556,6 +650,11 @@ EOS
 
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+if [ "$#" -ge 3 ] && [ "$3" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_present.txt"
+  exit 0
+fi
+
 echo "avahi-browse $*" >>"${BATS_TEST_TMPDIR}/avahi-browse.log"
 cat "${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt"
 EOS

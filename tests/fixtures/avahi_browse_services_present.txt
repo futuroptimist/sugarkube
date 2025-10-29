@@ -1,0 +1,1 @@
+=;eth0;IPv4;_k3s-sugar-dev._tcp;local
