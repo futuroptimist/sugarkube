@@ -642,10 +642,11 @@ BEGIN { FS = ";" }
   INITIAL_BROWSE_OUTPUT=""
   INITIAL_BROWSE_READY=0
 
-  while :; do
-    active_attempts=$((active_attempts + 1))
-    active_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
-    active_count="$(printf '%s\n' "${active_output}" | awk -v svc="${SERVICE_TYPE}" '
+  if [ "${type_present}" -eq 0 ]; then
+    while :; do
+      active_attempts=$((active_attempts + 1))
+      active_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
+      active_count="$(printf '%s\n' "${active_output}" | awk -v svc="${SERVICE_TYPE}" '
 BEGIN { FS = ";"; count = 0 }
 $1 == "=" {
   for (i = 1; i <= NF; i++) {
@@ -656,47 +657,47 @@ $1 == "=" {
   }
 }
 END { print count }
-' 2>/dev/null | tr -d '\n' | tr -d '\r')"
-    case "${active_count}" in
-      ''|*[!0-9]*) active_count=0 ;;
-    esac
+"' 2>/dev/null | tr -d '\n' | tr -d '\r')"
+      case "${active_count}" in
+        ''|*[!0-9]*) active_count=0 ;;
+      esac
 
-    if [ "${active_count}" -gt 0 ]; then
-      INITIAL_BROWSE_OUTPUT="${active_output}"
-      INITIAL_BROWSE_READY=1
-      active_found=1
-      log_debug mdns_selfcheck event=mdns_type_active outcome=hit attempts="${active_attempts}" instances="${active_count}"
-      break
-    fi
+      if [ "${active_count}" -gt 0 ]; then
+        INITIAL_BROWSE_OUTPUT="${active_output}"
+        INITIAL_BROWSE_READY=1
+        active_found=1
+        log_debug mdns_selfcheck event=mdns_type_active outcome=hit attempts="${active_attempts}" instances="${active_count}"
+        break
+      fi
 
-    if [ "${active_window_ms}" -le 0 ]; then
-      INITIAL_BROWSE_OUTPUT="${active_output}"
-      break
-    fi
+      if [ "${active_window_ms}" -le 0 ]; then
+        INITIAL_BROWSE_OUTPUT="${active_output}"
+        break
+      fi
 
-    current_elapsed="$(elapsed_since_start_ms "${script_start_ms}")"
-    case "${current_elapsed}" in
-      ''|*[!0-9]*) current_elapsed=0 ;;
-    esac
-    delta_ms=$((current_elapsed - active_start_elapsed))
-    if [ "${delta_ms}" -lt 0 ]; then
-      delta_ms=0
-    fi
-    if [ "${delta_ms}" -ge "${active_window_ms}" ]; then
-      INITIAL_BROWSE_OUTPUT="${active_output}"
-      break
-    fi
+      current_elapsed="$(elapsed_since_start_ms "${script_start_ms}")"
+      case "${current_elapsed}" in
+        ''|*[!0-9]*) current_elapsed=0 ;;
+      esac
+      delta_ms=$((current_elapsed - active_start_elapsed))
+      if [ "${delta_ms}" -lt 0 ]; then
+        delta_ms=0
+      fi
+      if [ "${delta_ms}" -ge "${active_window_ms}" ]; then
+        INITIAL_BROWSE_OUTPUT="${active_output}"
+        break
+      fi
 
-    remaining_ms=$((active_window_ms - delta_ms))
-    if [ "${remaining_ms}" -le 0 ]; then
-      break
-    fi
+      remaining_ms=$((active_window_ms - delta_ms))
+      if [ "${remaining_ms}" -le 0 ]; then
+        break
+      fi
 
-    if [ "${remaining_ms}" -gt 1000 ]; then
-      sleep_seconds=1
-    else
-      sleep_seconds="$({
-        python3 - <<'PY' "${remaining_ms}"
+      if [ "${remaining_ms}" -gt 1000 ]; then
+        sleep_seconds=1
+      else
+        sleep_seconds="$({
+          python3 - <<'PY' "${remaining_ms}"
 import sys
 try:
     delay = int(sys.argv[1])
@@ -704,29 +705,30 @@ except ValueError:
     delay = 0
 print('{:.3f}'.format(delay / 1000.0))
 PY
-      } 2>/dev/null)"
-      if [ -z "${sleep_seconds}" ]; then
-        sleep_seconds=0
+        } 2>/dev/null)"
+        if [ -z "${sleep_seconds}" ]; then
+          sleep_seconds=0
+        fi
+        case "${sleep_seconds}" in
+          0|0.0|0.00|0.000) sleep_seconds=0 ;;
+        esac
       fi
-      case "${sleep_seconds}" in
-        0|0.0|0.00|0.000) sleep_seconds=0 ;;
+
+      if [ "${sleep_seconds}" = "0" ] || [ -z "${sleep_seconds}" ]; then
+        sleep 1
+      else
+        sleep "${sleep_seconds}"
+      fi
+    done
+
+    if [ "${active_found}" -ne 1 ]; then
+      elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+      case "${elapsed_ms}" in
+        ''|*[!0-9]*) elapsed_ms=0 ;;
       esac
+      log_info mdns_selfcheck_failure outcome=miss reason=active_browse_empty service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" >&2
+      exit 4
     fi
-
-    if [ "${sleep_seconds}" = "0" ] || [ -z "${sleep_seconds}" ]; then
-      sleep 1
-    else
-      sleep "${sleep_seconds}"
-    fi
-  done
-
-  if [ "${active_found}" -ne 1 ]; then
-    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-    case "${elapsed_ms}" in
-      ''|*[!0-9]*) elapsed_ms=0 ;;
-    esac
-    log_info mdns_selfcheck_failure outcome=miss reason=active_browse_empty service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" >&2
-    exit 4
   fi
 }
 
