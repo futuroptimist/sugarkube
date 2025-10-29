@@ -16,6 +16,10 @@ DISABLE_WLAN_DURING_BOOTSTRAP="${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK_AVAHI_BIN="${SUGARKUBE_CHECK_AVAHI_BIN:-${SCRIPT_DIR}/check_avahi_config_effective.sh}"
 STRICT_AVAHI="${SUGARKUBE_STRICT_AVAHI:-0}"
+AVAHI_HOSTS_PATH="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
+EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}"
+MDNS_HOSTNAME="${SUGARKUBE_MDNS_HOSTNAME:-${HOSTNAME:-}}"
+AVAHI_HOSTS_OUTCOME="skipped"
 # Temporary file used during atomic write; referenced by EXIT trap safely
 TMP_AVAHI_TMPFILE=""
 
@@ -78,6 +82,118 @@ restart_avahi_if_needed() {
   else
     log "avahi-daemon not active; skipping restart"
   fi
+}
+
+ensure_avahi_hosts_entry() {
+  AVAHI_HOSTS_OUTCOME="skipped"
+
+  if [ -z "${MDNS_HOSTNAME}" ]; then
+    log "Skipping Avahi hosts update; hostname unavailable"
+    return 0
+  fi
+
+  if [ -z "${EXPECTED_IPV4}" ]; then
+    log "Skipping Avahi hosts update; expected IPv4 not provided"
+    return 0
+  fi
+
+  local hosts_dir tmp mode owner group
+  hosts_dir="$(dirname "${AVAHI_HOSTS_PATH}")"
+  if [ ! -d "${hosts_dir}" ]; then
+    log "Creating Avahi hosts directory ${hosts_dir}"
+    mkdir -p "${hosts_dir}"
+  fi
+
+  if [ ! -e "${AVAHI_HOSTS_PATH}" ]; then
+    log "Creating Avahi hosts file at ${AVAHI_HOSTS_PATH}"
+    touch "${AVAHI_HOSTS_PATH}"
+  fi
+
+  mode=""
+  owner=""
+  group=""
+  if [ -e "${AVAHI_HOSTS_PATH}" ]; then
+    mode="$(stat -c '%a' "${AVAHI_HOSTS_PATH}" 2>/dev/null || echo '')"
+    owner="$(stat -c '%u' "${AVAHI_HOSTS_PATH}" 2>/dev/null || echo '')"
+    group="$(stat -c '%g' "${AVAHI_HOSTS_PATH}" 2>/dev/null || echo '')"
+  fi
+
+  tmp="$(mktemp "${AVAHI_HOSTS_PATH}.XXXXXX")"
+  python3 - <<'PY' \
+    "${AVAHI_HOSTS_PATH}" \
+    "${tmp}" \
+    "${MDNS_HOSTNAME}" \
+    "${EXPECTED_IPV4}"
+import ipaddress
+import sys
+from pathlib import Path
+
+src_path = Path(sys.argv[1])
+dst_path = Path(sys.argv[2])
+hostname = sys.argv[3].strip()
+ipv4 = sys.argv[4].strip()
+
+try:
+    ipaddress.IPv4Address(ipv4)
+except ipaddress.AddressValueError as exc:
+    print(f"Invalid IPv4 {ipv4}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    existing = src_path.read_text(encoding="utf-8").splitlines()
+except FileNotFoundError:
+    existing = []
+except Exception as exc:  # pragma: no cover - defensive
+    print(f"Error reading {src_path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+new_lines = []
+for line in existing:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        new_lines.append(line)
+        continue
+    parts = stripped.split()
+    if len(parts) < 2:
+        new_lines.append(line)
+        continue
+    ip = parts[0]
+    hosts = [part for part in parts[1:] if part != hostname]
+    if len(hosts) != len(parts[1:]):
+        if hosts:
+            new_lines.append(f"{ip} {' '.join(hosts)}")
+        continue
+    new_lines.append(line)
+
+new_lines.append(f"{ipv4} {hostname}")
+content = "\n".join(new_lines).rstrip("\n") + "\n"
+dst_path.write_text(content, encoding="utf-8")
+PY
+
+  if [ ! -f "${tmp}" ]; then
+    log "Failed to create Avahi hosts temp file ${tmp}"
+    return 1
+  fi
+
+  if [ -f "${AVAHI_HOSTS_PATH}" ] && cmp -s "${AVAHI_HOSTS_PATH}" "${tmp}"; then
+    rm -f "${tmp}"
+    AVAHI_HOSTS_OUTCOME="unchanged"
+    return 0
+  fi
+
+  if [ -n "${mode}" ]; then
+    chmod "${mode}" "${tmp}"
+  else
+    chmod 0644 "${tmp}"
+  fi
+  if [ -n "${owner}" ] && [ -n "${group}" ]; then
+    chown "${owner}:${group}" "${tmp}" || true
+  fi
+
+  mv "${tmp}" "${AVAHI_HOSTS_PATH}"
+  AVAHI_HOSTS_OUTCOME="updated"
+  log "Ensured Avahi hosts entry for ${MDNS_HOSTNAME} (${EXPECTED_IPV4})"
+  return 0
 }
 
 run_avahi_effective_check() {
@@ -248,7 +364,13 @@ update_config() {
   local allow_value="$2"
   local tmp="$3"
 
-  python3 - <<'PY' "${CONF}" "${tmp}" "${PUBLISH_WORKSTATION}" "${allow_mode}" "${allow_value}" "${FORCE_IPV4_ONLY}"
+  python3 - <<'PY' \
+    "${CONF}" \
+    "${tmp}" \
+    "${PUBLISH_WORKSTATION}" \
+    "${allow_mode}" \
+    "${allow_value}" \
+    "${FORCE_IPV4_ONLY}"
 import sys
 from pathlib import Path
 
@@ -488,7 +610,20 @@ main() {
     outcome="applied"
   fi
 
-  log_kv avahi_baseline "outcome=${outcome}" "iface=${iface_for_log}" "allow_source=${allow_source}" "publish_workstation=${PUBLISH_WORKSTATION}"
+  ensure_avahi_hosts_entry
+  if [ "${AVAHI_HOSTS_OUTCOME}" = "updated" ] && [ "${outcome}" != "applied" ]; then
+    restart_avahi_if_needed
+  fi
+
+  log_kv avahi_baseline \
+    "outcome=${outcome}" \
+    "iface=${iface_for_log}" \
+    "allow_source=${allow_source}" \
+    "publish_workstation=${PUBLISH_WORKSTATION}"
+  log_kv avahi_hosts \
+    "outcome=${AVAHI_HOSTS_OUTCOME}" \
+    "hostname=${MDNS_HOSTNAME}" \
+    "ipv4=${EXPECTED_IPV4}"
 }
 
 main "$@"

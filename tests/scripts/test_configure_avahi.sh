@@ -21,12 +21,17 @@ use-ipv4=no
 use-ipv6=yes
 CONF
 
+AVAHI_HOSTS_PATH="${TMP_DIR}/avahi.hosts"
+
 ENV_VARS=(
   "SUGARKUBE_MDNS_INTERFACE=eth0"
   "SUGARKUBE_MDNS_IPV4_ONLY=1"
   "AVAHI_CONF_PATH=${CONF_PATH}"
   "SUGARKUBE_LOG_DIR=${LOG_DIR}"
   "SYSTEMCTL_BIN="
+  "SUGARKUBE_AVAHI_HOSTS_PATH=${AVAHI_HOSTS_PATH}"
+  "SUGARKUBE_EXPECTED_IPV4=10.0.0.10"
+  "HOSTNAME=test-node.local"
 )
 
 ( export "${ENV_VARS[@]}"; bash "${REPO_ROOT}/scripts/configure_avahi.sh" )
@@ -46,6 +51,11 @@ if ! grep -q '^use-ipv6=no$' "${CONF_PATH}"; then
   exit 1
 fi
 
+if ! grep -q '^10.0.0.10 test-node.local$' "${AVAHI_HOSTS_PATH}"; then
+  echo "Avahi hosts entry was not created" >&2
+  exit 1
+fi
+
 if [ ! -f "${CONF_PATH}.bak" ]; then
   echo "Backup was not created" >&2
   exit 1
@@ -53,11 +63,18 @@ fi
 
 SECOND_COPY="${TMP_DIR}/avahi-second.conf"
 cp "${CONF_PATH}" "${SECOND_COPY}"
+SECOND_HOSTS_COPY="${TMP_DIR}/avahi.hosts.second"
+cp "${AVAHI_HOSTS_PATH}" "${SECOND_HOSTS_COPY}"
 
 ( export "${ENV_VARS[@]}"; bash "${REPO_ROOT}/scripts/configure_avahi.sh" )
 
 if ! cmp -s "${CONF_PATH}" "${SECOND_COPY}"; then
   echo "Configuration changed on second run" >&2
+  exit 1
+fi
+
+if ! cmp -s "${AVAHI_HOSTS_PATH}" "${SECOND_HOSTS_COPY}"; then
+  echo "Avahi hosts file changed on second run" >&2
   exit 1
 fi
 
@@ -80,6 +97,9 @@ MALFORMED_ENV_VARS=(
   "AVAHI_CONF_PATH=${MALFORMED_CONF}"
   "SUGARKUBE_LOG_DIR=${LOG_DIR}"
   "SYSTEMCTL_BIN="
+  "SUGARKUBE_AVAHI_HOSTS_PATH=${AVAHI_HOSTS_PATH}"
+  "SUGARKUBE_EXPECTED_IPV4=10.0.0.10"
+  "HOSTNAME=test-node.local"
 )
 
 # This should not fail even with malformed input

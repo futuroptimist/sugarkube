@@ -212,7 +212,7 @@ for line in lines:
 count = sum(1 for entry in records.values() if entry["ptr"] and entry["srv"])
 print(count)
 PY
-} 2>/dev/null)
+} 2>/dev/null)"
 if [ -z "${answers}" ]; then
   answers="0"
 fi

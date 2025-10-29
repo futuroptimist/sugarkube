@@ -26,6 +26,346 @@ service_dir="$(dirname "${service_file}")"
 
 install -d -m 755 "${service_dir}"
 
+ensure_mdns_target_resolvable() {
+  if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    echo "avahi-resolve-host-name not found; skipping SRV target preflight" >&2
+    return 0
+  fi
+
+  if avahi-resolve-host-name "${HOSTNAME}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local hosts_path="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
+  local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-}"
+
+  if [ -z "${expected_ipv4}" ]; then
+    local iface addr_candidates
+    iface="${SUGARKUBE_MDNS_INTERFACE:-}"
+    addr_candidates="$(hostname -I 2>/dev/null || true)"
+    expected_ipv4="$(
+      python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+import ipaddress
+import json
+import subprocess
+import sys
+
+iface_hint = sys.argv[1].strip()
+hostname_tokens = [token for token in sys.argv[2].split() if token]
+
+IGNORE_IFACE_NAMES = {"lo"}
+IGNORE_IFACE_PREFIXES = (
+    "docker",
+    "veth",
+    "virbr",
+    "cni",
+    "flannel",
+    "kube-",
+    "zt",
+    "tailscale",
+    "podman",
+    "br-",
+    "lxdbr",
+)
+IGNORE_IFACE_KINDS = {
+    "bridge",
+}
+IGNORE_IFACE_FLAGS = {"LOOPBACK"}
+
+
+def valid_ipv4(candidate):
+    try:
+        ip = ipaddress.IPv4Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+        return False
+    return True
+
+
+def gather_iface_metadata():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "link", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return {}
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return {}
+
+    metadata = {}
+    for entry in payload:
+        iface_name = entry.get("ifname") or entry.get("name") or ""
+        if not iface_name:
+            continue
+        link_type = ""
+        if isinstance(entry.get("linkinfo"), dict):
+            link_type = entry["linkinfo"].get("info_kind") or ""
+        if not link_type:
+            link_type = entry.get("link_type") or ""
+        flags = entry.get("flags") or []
+        metadata[iface_name] = {
+            "kind": link_type.lower() if isinstance(link_type, str) else "",
+            "flags": {flag.upper() for flag in flags if isinstance(flag, str)},
+        }
+    return metadata
+
+
+IFACE_METADATA = gather_iface_metadata()
+
+
+def interface_blacklisted(name):
+    if not name:
+        return True
+    if name in IGNORE_IFACE_NAMES:
+        return True
+    for prefix in IGNORE_IFACE_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    meta = IFACE_METADATA.get(name, {})
+    kind = meta.get("kind", "")
+    if kind in IGNORE_IFACE_KINDS:
+        return True
+    flags = meta.get("flags") or set()
+    if flags.intersection(IGNORE_IFACE_FLAGS):
+        return True
+    return False
+
+
+def interface_allowed(name, default_iface):
+    if not name:
+        return False
+    if name == iface_hint:
+        return True
+    if default_iface and name == default_iface and not interface_blacklisted(name):
+        return True
+    return not interface_blacklisted(name)
+
+
+def gather_ip_entries():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "-4", "addr", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return []
+
+    entries = []
+    for entry in payload:
+        iface_name = entry.get("ifname", "")
+        for addr_info in entry.get("addr_info", []):
+            if addr_info.get("family") != "inet":
+                continue
+            if addr_info.get("scope") not in {"global", "site"}:
+                continue
+            local_ip = addr_info.get("local")
+            if not local_ip:
+                continue
+            entries.append((iface_name, local_ip))
+    return entries
+
+
+def pick_from_interface(entries, target_iface, allow_blacklisted=False):
+    if not target_iface:
+        return None
+    for iface_name, candidate_ip in entries:
+        if iface_name != target_iface:
+            continue
+        if not valid_ipv4(candidate_ip):
+            continue
+        if allow_blacklisted or not interface_blacklisted(iface_name):
+            return candidate_ip
+    return None
+
+
+def default_interface():
+    try:
+        output = subprocess.check_output(
+            ["ip", "-4", "route", "show", "default"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+    for line in output.splitlines():
+        parts = line.split()
+        if "dev" in parts:
+            try:
+                return parts[parts.index("dev") + 1]
+            except (IndexError, ValueError):
+                continue
+    return None
+
+
+def choose_ip():
+    entries = gather_ip_entries()
+    default_iface_name = default_interface()
+
+    candidate = pick_from_interface(entries, iface_hint, allow_blacklisted=True)
+    if candidate:
+        return candidate
+
+    if default_iface_name:
+        candidate = pick_from_interface(entries, default_iface_name)
+        if candidate:
+            return candidate
+
+    had_entries = bool(entries)
+    allowed_candidates = []
+    disallowed_ips = set()
+    for iface_name, candidate_ip in entries:
+        if not valid_ipv4(candidate_ip):
+            continue
+        if interface_allowed(iface_name, default_iface_name):
+            allowed_candidates.append(candidate_ip)
+        else:
+            disallowed_ips.add(candidate_ip)
+
+    if allowed_candidates:
+        return allowed_candidates[0]
+
+    if had_entries:
+        return None
+
+    for candidate_ip in hostname_tokens:
+        if candidate_ip in disallowed_ips:
+            continue
+        if valid_ipv4(candidate_ip):
+            return candidate_ip
+
+    return None
+
+
+selected = choose_ip()
+if selected:
+    print(selected)
+PY
+    )"
+  fi
+
+  if [ -z "${expected_ipv4}" ]; then
+    echo "Unable to determine IPv4 for ${HOSTNAME}; cannot pre-publish mDNS host" >&2
+    return 1
+  fi
+
+  local hosts_dir mode owner group tmp hosts_changed=0
+  hosts_dir="$(dirname "${hosts_path}")"
+  install -d -m 755 "${hosts_dir}"
+
+  if [ -e "${hosts_path}" ]; then
+    mode="$(stat -c '%a' "${hosts_path}" 2>/dev/null || echo '')"
+    owner="$(stat -c '%u' "${hosts_path}" 2>/dev/null || echo '')"
+    group="$(stat -c '%g' "${hosts_path}" 2>/dev/null || echo '')"
+  else
+    mode=""
+    owner=""
+    group=""
+    touch "${hosts_path}"
+    hosts_changed=1
+  fi
+
+  tmp="$(mktemp "${hosts_path}.XXXXXX")"
+  python3 - <<'PY' \
+    "${hosts_path}" \
+    "${tmp}" \
+    "${HOSTNAME}" \
+    "${expected_ipv4}"
+import ipaddress
+import sys
+from pathlib import Path
+
+src_path = Path(sys.argv[1])
+dst_path = Path(sys.argv[2])
+hostname = sys.argv[3].strip()
+ipv4 = sys.argv[4].strip()
+
+try:
+    ipaddress.IPv4Address(ipv4)
+except ipaddress.AddressValueError as exc:
+    print(f"Invalid IPv4 {ipv4}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    existing = src_path.read_text(encoding="utf-8").splitlines()
+except FileNotFoundError:
+    existing = []
+except Exception as exc:  # pragma: no cover - defensive
+    print(f"Error reading {src_path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+new_lines = []
+for line in existing:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        new_lines.append(line)
+        continue
+    parts = stripped.split()
+    if len(parts) < 2:
+        new_lines.append(line)
+        continue
+    ip = parts[0]
+    hosts = [part for part in parts[1:] if part != hostname]
+    if len(hosts) != len(parts[1:]):
+        if hosts:
+            new_lines.append(f"{ip} {' '.join(hosts)}")
+        continue
+    new_lines.append(line)
+
+new_lines.append(f"{ipv4} {hostname}")
+content = "\n".join(new_lines).rstrip("\n") + "\n"
+dst_path.write_text(content, encoding="utf-8")
+PY
+
+  if [ ! -f "${tmp}" ]; then
+    echo "Failed to build Avahi hosts temp file" >&2
+    return 1
+  fi
+
+  if [ -f "${hosts_path}" ] && cmp -s "${hosts_path}" "${tmp}"; then
+    rm -f "${tmp}"
+  else
+    hosts_changed=1
+    if [ -n "${mode}" ]; then
+      chmod "${mode}" "${tmp}"
+    else
+      chmod 0644 "${tmp}"
+    fi
+    if [ -n "${owner}" ] && [ -n "${group}" ]; then
+      chown "${owner}:${group}" "${tmp}" || true
+    fi
+    mv "${tmp}" "${hosts_path}"
+  fi
+
+  if [ "${hosts_changed}" = "1" ] && [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && \
+     command -v systemctl >/dev/null 2>&1; then
+    systemctl reload avahi-daemon || systemctl restart avahi-daemon || true
+  fi
+
+  if ! avahi-resolve-host-name "${HOSTNAME}" >/dev/null 2>&1; then
+    echo "mDNS resolution for ${HOSTNAME} still failing after hosts update" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+if ! ensure_mdns_target_resolvable; then
+  echo "Unable to ensure ${HOSTNAME} is resolvable via mDNS" >&2
+  exit 1
+fi
+
 tmp_file="$(mktemp "${service_dir}/.k3s-mdns.XXXXXX")"
 python3 - "$tmp_file" <<'PY'
 import html
