@@ -4,6 +4,8 @@ set -euo pipefail
 cluster="${SUGARKUBE_CLUSTER:?SUGARKUBE_CLUSTER is required}"
 environment="${SUGARKUBE_ENV:?SUGARKUBE_ENV is required}"
 : "${HOSTNAME:?HOSTNAME is required}"
+SRV_HOST="${HOSTNAME%.local}.local"
+export SRV_HOST
 role="${ROLE:?ROLE is required}"
 case "${role}" in
   bootstrap|server)
@@ -15,7 +17,21 @@ case "${role}" in
 esac
 export PORT="${PORT:-6443}"
 export PHASE="${PHASE:-}"
-export LEADER="${LEADER:-}"
+leader_value="${LEADER:-}"
+if [ -z "${leader_value}" ]; then
+  leader_value="${SRV_HOST}"
+else
+  while [[ "${leader_value}" == *"." ]]; do
+    leader_value="${leader_value%.}"
+  done
+  leader_value="${leader_value%.local}"
+  if [ -n "${leader_value}" ]; then
+    leader_value="${leader_value}.local"
+  else
+    leader_value="${SRV_HOST}"
+  fi
+fi
+export LEADER="${leader_value}"
 service_dir="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 if [ -n "${SUGARKUBE_AVAHI_SERVICE_FILE:-}" ]; then
   service_file="${SUGARKUBE_AVAHI_SERVICE_FILE}"
@@ -32,7 +48,9 @@ ensure_mdns_target_resolvable() {
     return 0
   fi
 
-  if avahi-resolve-host-name "${HOSTNAME}" >/dev/null 2>&1; then
+  local resolve_cmd=("avahi-resolve-host-name" "${SRV_HOST}" -4 "--timeout=1")
+
+  if "${resolve_cmd[@]}" >/dev/null 2>&1; then
     return 0
   fi
 
@@ -256,7 +274,7 @@ PY
   fi
 
   if [ -z "${expected_ipv4}" ]; then
-    echo "Unable to determine IPv4 for ${HOSTNAME}; cannot pre-publish mDNS host" >&2
+    echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
     return 1
   fi
 
@@ -280,7 +298,7 @@ PY
   python3 - <<'PY' \
     "${hosts_path}" \
     "${tmp}" \
-    "${HOSTNAME}" \
+    "${SRV_HOST}" \
     "${expected_ipv4}"
 import ipaddress
 import sys
@@ -348,13 +366,12 @@ PY
     mv "${tmp}" "${hosts_path}"
   fi
 
-  if [ "${hosts_changed}" = "1" ] && [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && \
-     command -v systemctl >/dev/null 2>&1; then
+  if [ "${hosts_changed}" = "1" ] && [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
     systemctl reload avahi-daemon || systemctl restart avahi-daemon || true
   fi
 
-  if ! avahi-resolve-host-name "${HOSTNAME}" >/dev/null 2>&1; then
-    echo "mDNS resolution for ${HOSTNAME} still failing after hosts update" >&2
+  if ! "${resolve_cmd[@]}" >/dev/null 2>&1; then
+    echo "mDNS resolution for ${SRV_HOST} still failing after hosts update" >&2
     return 1
   fi
 
@@ -375,13 +392,13 @@ import sys
 tmp_path = sys.argv[1]
 cluster = os.environ["SUGARKUBE_CLUSTER"]
 environment = os.environ["SUGARKUBE_ENV"]
-hostname = os.environ["HOSTNAME"]
+srv_host = os.environ["SRV_HOST"]
 role = os.environ["ROLE"]
 port = os.environ.get("PORT", "6443")
 phase = os.environ.get("PHASE", "")
 leader = os.environ.get("LEADER", "")
 
-service_name = f"k3s-{cluster}-{environment}@{hostname} ({role})"
+service_name = f"k3s-{cluster}-{environment}@{srv_host} ({role})"
 service_type = f"_k3s-{cluster}-{environment}._tcp"
 
 def esc(value: str) -> str:
@@ -403,6 +420,7 @@ with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write(f"  <name replace-wildcards=\"yes\">{esc(service_name)}</name>\n")
     fh.write("  <service>\n")
     fh.write(f"    <type>{esc(service_type)}</type>\n")
+    fh.write(f"    <host-name>{esc(srv_host)}</host-name>\n")
     fh.write(f"    <port>{esc(str(port))}</port>\n")
     for key, value in records:
         fh.write(f"    <txt-record>{esc(f'{key}={value}')}</txt-record>\n")
