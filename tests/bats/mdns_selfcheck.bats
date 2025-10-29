@@ -90,6 +90,44 @@ EOS
   [[ "$output" =~ ipv4=192.168.3.10 ]]
 }
 
+@test "mdns self-check warns when enumeration misses but browse succeeds" {
+  stub_avahi_browse_with_fixtures \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt" \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_services_without_k3s.txt"
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+if [ "$#" -ne 1 ]; then
+  echo "unexpected arguments" >&2
+  exit 1
+fi
+printf '%s %s\n' "$1" "192.168.3.10"
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=mdns_type_check ]]
+  [[ "$output" =~ present=0 ]]
+  [[ "$output" =~ severity=warn ]]
+  [[ ! "$output" =~ reason=service_type_missing ]]
+  [[ "$output" =~ outcome=ok ]]
+}
+
 @test "mdns self-check waits for active queries when instance appears within window" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
