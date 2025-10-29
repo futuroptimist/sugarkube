@@ -317,4 +317,35 @@ if [[ "${reason}" == *mdns* ]]; then
     EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}" "${wire_probe_script}" --iface "${iface}" || true
     set -e
   fi
+
+  if [ -r /etc/avahi/avahi-daemon.conf ]; then
+    set +e
+    avahi_conf_dump="$(
+      awk -F'#' 'NF{print $1}' /etc/avahi/avahi-daemon.conf \
+        | sed '/^\s*$/d' \
+        | sed -n '1,120p'
+    )"
+    avahi_conf_rc="$?"
+    set -e
+  else
+    avahi_conf_dump=""
+    avahi_conf_rc="missing"
+  fi
+  printf 'event=avahi_conf_dump reason=%s' "${reason}"
+  if [ -n "${attempt}" ]; then
+    printf ' attempt=%s' "${attempt}"
+  fi
+  printf ' iface=%s' "${iface}"
+  for tag in "${tags[@]}"; do
+    if [ -n "${tag}" ]; then
+      printf ' %s' "${tag}"
+    fi
+  done
+  if [ "${avahi_conf_rc}" = "missing" ]; then
+    printf ' status=missing output=%q\n' ""
+  else
+    printf ' status=%s' "${avahi_conf_rc}"
+    printf ' lines=%s' "$(printf '%s' "${avahi_conf_dump}" | wc -l | tr -d ' ')"
+    printf ' output=%q\n' "${avahi_conf_dump}"
+  fi
 fi
