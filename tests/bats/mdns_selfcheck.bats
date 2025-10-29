@@ -333,6 +333,46 @@ EOS
   [[ "$output" =~ reason=instance_not_found ]]
 }
 
+@test "mdns self-check fails fast when service type is missing" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+if printf '%s\n' "$@" | grep -q -- '_services._dns-sd._udp'; then
+  cat <<'TXT'
+=;eth0;IPv4;_workstation._tcp;local
+=;eth0;IPv4;_http._tcp;local
+TXT
+  exit 0
+fi
+echo "unexpected browse invocation: $*" >&2
+exit 2
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+echo "avahi-resolve should not run" >&2
+exit 3
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 4 ]
+  [[ "$output" =~ event=mdns_type_check ]]
+  [[ "$output" =~ present=0 ]]
+  [[ "$output" =~ missing_type=_k3s-sugar-dev._tcp ]]
+  [[ "$output" =~ reason=service_type_missing ]]
+  [[ ! "$output" =~ instance_not_found ]]
+}
+
 @test "mdns self-check falls back to CLI when dbus unsupported" {
   if ! command -v gdbus >/dev/null 2>&1; then
     skip "gdbus not available"
