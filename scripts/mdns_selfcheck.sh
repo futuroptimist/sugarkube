@@ -557,6 +557,72 @@ print(delay)
 PY
 }
 
+mdns_selfcheck__service_type_check() {
+  local type_output type_present available_types available_flat available_kv available_escaped
+
+  type_output="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
+  type_present=0
+  if [ -n "${type_output}" ]; then
+    type_present="$(printf '%s\n' "${type_output}" | awk -v svc="${SERVICE_TYPE}" '
+BEGIN { FS = ";"; present = 0 }
+{
+  for (i = 1; i <= NF; i++) {
+    if ($i == svc) {
+      present = 1
+      exit
+    }
+  }
+}
+END { print present }
+' 2>/dev/null | tr -d '\n' | tr -d '\r')"
+  fi
+  case "${type_present}" in
+    1) type_present=1 ;;
+    *) type_present=0 ;;
+  esac
+
+  available_types="$(printf '%s\n' "${type_output}" | awk '
+BEGIN { FS = ";" }
+{
+  for (i = 1; i <= NF; i++) {
+    if ($i ~ /^_[^;]*\._(tcp|udp)$/) {
+      print $i
+    }
+  }
+}
+' 2>/dev/null | sort -u)"
+  available_flat="$(printf '%s' "${available_types}" | tr '\n' ',' | sed 's/,$//')"
+  available_kv=""
+  if [ -n "${available_flat}" ]; then
+    available_escaped="$(printf '%s' "${available_flat}" | sed 's/"/\\"/g')"
+    available_kv="available_types=\"${available_escaped}\""
+  fi
+
+  if [ -n "${available_kv}" ]; then
+    log_debug mdns_selfcheck event=mdns_type_check \
+      present="${type_present}" \
+      service_type="${SERVICE_TYPE}" \
+      "${available_kv}"
+  else
+    log_debug mdns_selfcheck event=mdns_type_check \
+      present="${type_present}" \
+      service_type="${SERVICE_TYPE}"
+  fi
+
+  if [ "${type_present}" -ne 1 ]; then
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+    if [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck_failure outcome=miss reason=service_type_missing service_type="${SERVICE_TYPE}" \
+        "${available_kv}" attempt=0 ms_elapsed="${elapsed_ms}" >&2
+    else
+      log_info mdns_selfcheck_failure outcome=miss reason=service_type_missing service_type="${SERVICE_TYPE}" attempt=0 ms_elapsed="${elapsed_ms}" >&2
+    fi
+    exit 4
+  fi
+}
+
+mdns_selfcheck__service_type_check
+
 attempt=1
 last_reason=""
 miss_count=0
