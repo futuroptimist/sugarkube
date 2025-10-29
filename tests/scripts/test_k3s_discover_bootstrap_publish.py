@@ -1,8 +1,9 @@
 import os
 import subprocess
+import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 SCRIPT = str(Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh")
 
@@ -11,7 +12,7 @@ def _hostname_short() -> str:
     return subprocess.check_output(["hostname", "-s"], text=True).strip()
 
 
-def _run_bootstrap_publish(tmp_path: Path, mdns_host: str):
+def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.CompletedProcess[str], ET.ElementTree, str, Path, Path, Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
 
@@ -24,6 +25,45 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str):
         encoding="utf-8",
     )
     systemctl.chmod(0o755)
+
+    expected_host = mdns_host.rstrip(".")
+    expected_ipv4 = "192.0.2.10"
+    hosts_path = tmp_path / "avahi-hosts"
+    resolve_log = tmp_path / "avahi-resolve.log"
+
+    avahi_resolve = bin_dir / "avahi-resolve-host-name"
+    avahi_resolve.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            echo "CALL:$*" >> '{resolve_log}'
+            if [ "$#" -lt 3 ]; then
+              echo "invalid args: $*" >> '{resolve_log}'
+              exit 2
+            fi
+            host="$1"
+            shift
+            if [ "$host" != "{expected_host}" ]; then
+              echo "unexpected host: $host" >> '{resolve_log}'
+              exit 3
+            fi
+            if [ "${{1:-}}" != "-4" ] || [ "${{2:-}}" != "--timeout=1" ]; then
+              echo "unexpected args order: $host $*" >> '{resolve_log}'
+              exit 4
+            fi
+            if grep -q '^{expected_ipv4} {expected_host}$' '{hosts_path}' 2>/dev/null; then
+              echo "SUCCESS {expected_host} -> {expected_ipv4}" >> '{resolve_log}'
+              printf '%s\\t%s\\n' '{expected_host}' '{expected_ipv4}'
+              exit 0
+            fi
+            echo "FAIL {expected_host}" >> '{resolve_log}'
+            exit 1
+            """
+        ),
+        encoding="utf-8",
+    )
+    avahi_resolve.chmod(0o755)
 
     env = os.environ.copy()
     env.update(
@@ -40,6 +80,9 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str):
             "SUGARKUBE_SKIP_MDNS_SELF_CHECK": "1",
             "SUGARKUBE_MDNS_DBUS": "0",
             "SUGARKUBE_MDNS_HOST": mdns_host,
+            "SUGARKUBE_AVAHI_HOSTS_PATH": str(hosts_path),
+            "SUGARKUBE_EXPECTED_IPV4": expected_ipv4,
+            "LEADER": expected_host,
         }
     )
 
@@ -54,7 +97,7 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str):
     service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
     tree = ET.parse(service_file)
     log_contents = systemctl_log.read_text(encoding="utf-8")
-    return result, tree, log_contents
+    return result, tree, log_contents, service_file, hosts_path, resolve_log
 
 
 def _txt_records(tree: ET.ElementTree) -> List[str]:
@@ -63,13 +106,16 @@ def _txt_records(tree: ET.ElementTree) -> List[str]:
 
 def test_bootstrap_publish_writes_static_service(tmp_path):
     hostname = f"{_hostname_short()}.local"
-    result, tree, systemctl_log = _run_bootstrap_publish(tmp_path, hostname)
+    result, tree, systemctl_log, service_file, hosts_path, resolve_log = _run_bootstrap_publish(tmp_path, hostname)
 
     name = tree.findtext("./name")
     assert name == f"k3s-sugar-dev@{hostname} (bootstrap)"
 
     service_type = tree.findtext(".//type")
     assert service_type == "_k3s-sugar-dev._tcp"
+
+    host_name = tree.findtext(".//host-name")
+    assert host_name == hostname
 
     port = tree.findtext(".//port")
     assert port == "6443"
@@ -87,16 +133,33 @@ def test_bootstrap_publish_writes_static_service(tmp_path):
     assert "SYSTEMCTL:reload avahi-daemon" in systemctl_log or "SYSTEMCTL:restart avahi-daemon" in systemctl_log
     assert result.returncode == 0
 
+    service_text = service_file.read_text(encoding="utf-8")
+    assert "<host-name>" in service_text
+
+    hosts_content = hosts_path.read_text(encoding="utf-8")
+    assert hosts_content.strip().endswith(f"192.0.2.10 {hostname}")
+
+    resolve_log_contents = resolve_log.read_text(encoding="utf-8")
+    assert "FAIL" in resolve_log_contents
+    assert "SUCCESS" in resolve_log_contents
+    assert "SUCCESS" in resolve_log_contents.splitlines()[-1]
+
 
 def test_bootstrap_publish_sanitizes_trailing_dot_hostname(tmp_path):
     raw_host = f"{_hostname_short()}.local."
-    result, tree, _ = _run_bootstrap_publish(tmp_path, raw_host)
+    result, tree, _, _, _, resolve_log = _run_bootstrap_publish(tmp_path, raw_host)
 
     name = tree.findtext("./name")
     expected_host = raw_host.rstrip(".")
     assert name == f"k3s-sugar-dev@{expected_host} (bootstrap)"
 
+    host_name = tree.findtext(".//host-name")
+    assert host_name == expected_host
+
     txt_records = _txt_records(tree)
     assert txt_records[-1] == f"leader={expected_host}"
     assert "phase=bootstrap" in txt_records
     assert result.returncode == 0
+
+    resolve_log_contents = resolve_log.read_text(encoding="utf-8")
+    assert "SUCCESS" in resolve_log_contents
