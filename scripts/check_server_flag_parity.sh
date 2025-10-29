@@ -178,9 +178,14 @@ python3 - "$SERVER_HOST" \
   "${SERVER_CONFIG_LOCAL}" "${SERVER_CONFIG_LABEL}" \
   "${SERVER_SERVICE_LOCAL}" "${SERVER_SERVICE_LABEL}" <<'PY'
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
+import subprocess
+
+PROXY_MODE_KEY = "proxy-mode"
+NFTABLES_MIN_MINOR = 33
 
 CRITICAL_FLAGS = [
     ("cluster-cidr", "10.42.0.0/16"),
@@ -188,6 +193,7 @@ CRITICAL_FLAGS = [
     ("cluster-domain", "cluster.local"),
     ("flannel-backend", "vxlan"),
     ("secrets-encryption", "false"),
+    (PROXY_MODE_KEY, "iptables"),
 ]
 
 KEYS = {key for key, _ in CRITICAL_FLAGS}
@@ -232,9 +238,35 @@ def normalize_value(key: str, raw: str | None) -> str | None:
         if lowered in {"false", "0", "no", "off"}:
             return "false"
         return lowered
+    if key == PROXY_MODE_KEY:
+        lowered = value.lower()
+        if lowered in {"nftables", "nft"}:
+            return "nftables"
+        if lowered in {"iptables", "ip-tables"}:
+            return "iptables"
+        if lowered == "ipvs":
+            return "ipvs"
+        return lowered
     if key == "flannel-backend":
         return value.lower()
     return value
+
+
+def extract_proxy_mode_from_text(text: str) -> str | None:
+    candidate = text
+    if "proxy-mode=" in text:
+        candidate = text.split("proxy-mode=", 1)[1]
+    if "#" in candidate:
+        candidate = candidate.split("#", 1)[0]
+    candidate = candidate.strip()
+    if candidate.startswith(("'", '"')):
+        candidate = candidate[1:]
+        if candidate.endswith(("'", '"')):
+            candidate = candidate[:-1]
+    for delimiter in (",", " "):
+        if delimiter in candidate:
+            candidate = candidate.split(delimiter, 1)[0]
+    return normalize_value(PROXY_MODE_KEY, candidate)
 
 
 def parse_yaml_values(path: Path) -> dict[str, str]:
@@ -247,6 +279,10 @@ def parse_yaml_values(path: Path) -> dict[str, str]:
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        if PROXY_MODE_KEY in KEYS:
+            proxy_mode = extract_proxy_mode_from_text(stripped)
+            if proxy_mode:
+                values[PROXY_MODE_KEY] = proxy_mode
         if ":" not in stripped:
             continue
         key_part, value_part = stripped.split(":", 1)
@@ -305,16 +341,30 @@ def apply_tokens(store: dict[str, dict[str, str]], tokens: list[str], label: str
     i = 0
     total = len(tokens)
     while i < total:
-        token = tokens[i]
-        if not token.startswith("--"):
+        argument = tokens[i]
+        if argument.startswith("--kube-proxy-arg"):
+            proxy_arg_value = None
+            if argument == "--kube-proxy-arg" and i + 1 < total:
+                proxy_arg_value = tokens[i + 1]
+                i += 1
+            elif argument.startswith("--kube-proxy-arg="):
+                proxy_arg_value = argument.split("=", 1)[1]
+            if proxy_arg_value:
+                proxy_mode = extract_proxy_mode_from_text(proxy_arg_value)
+                if proxy_mode:
+                    store[PROXY_MODE_KEY] = {"value": proxy_mode, "source": label}
+                    applied = True
             i += 1
             continue
-        if token == "--secrets-encryption":
+        if not argument.startswith("--"):
+            i += 1
+            continue
+        if argument == "--secrets-encryption":
             store["secrets-encryption"] = {"value": "true", "source": label}
             applied = True
             i += 1
             continue
-        if token == "--disable-secrets-encryption":
+        if argument == "--disable-secrets-encryption":
             store["secrets-encryption"] = {"value": "false", "source": label}
             applied = True
             i += 1
@@ -322,15 +372,15 @@ def apply_tokens(store: dict[str, dict[str, str]], tokens: list[str], label: str
         matched = False
         for key in KEYS:
             flag = f"--{key}"
-            if token.startswith(flag + "="):
+            if argument.startswith(flag + "="):
                 store[key] = {
-                    "value": normalize_value(key, token[len(flag) + 1 :]),
+                    "value": normalize_value(key, argument[len(flag) + 1 :]),
                     "source": label,
                 }
                 applied = True
                 matched = True
                 break
-            if token == flag and i + 1 < total:
+            if argument == flag and i + 1 < total:
                 store[key] = {
                     "value": normalize_value(key, tokens[i + 1]),
                     "source": label,
@@ -396,6 +446,50 @@ def load_exec_from_service(path: str) -> list[str]:
     return tokens
 
 
+def parse_kubernetes_version(text: str) -> tuple[int, int, str] | None:
+    pattern = re.compile(r"v?(\d+)\.(\d+)(?:\.(\d+))?")
+    for match in pattern.finditer(text):
+        major = int(match.group(1))
+        if major != 1:
+            continue
+        minor = int(match.group(2))
+        raw = match.group(0)
+        return major, minor, raw
+    return None
+
+
+def detect_kubernetes_version() -> tuple[int, int, str] | None:
+    env_version = os.environ.get("SUGARKUBE_DETECTED_K8S_VERSION", "").strip()
+    if env_version:
+        parsed = parse_kubernetes_version(env_version)
+        if parsed:
+            return parsed
+    env_cmd = os.environ.get("SUGARKUBE_DETECTED_K8S_VERSION_CMD", "").strip()
+    commands: list[str] = []
+    if env_cmd:
+        commands.append(env_cmd)
+    commands.extend(
+        [
+            "k3s kubectl version --short",
+            "kubectl version --short",
+            "k3s --version",
+        ]
+    )
+    for command in commands:
+        if not command:
+            continue
+        try:
+            output = subprocess.check_output(
+                command, shell=True, stderr=subprocess.STDOUT, text=True
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        parsed = parse_kubernetes_version(output)
+        if parsed:
+            return parsed
+    return None
+
+
 intended_store = new_store()
 server_store = new_store()
 
@@ -427,6 +521,29 @@ if server_service_path:
 install_exec = os.environ.get("INSTALL_K3S_EXEC", "")
 if install_exec and apply_exec(intended_store, install_exec, "INSTALL_K3S_EXEC"):
     intended_sources += 1
+
+detected_version = detect_kubernetes_version()
+detected_minor = None
+detected_label = None
+if detected_version:
+    detected_minor = detected_version[1]
+    detected_label = detected_version[2]
+
+if detected_minor is not None and detected_minor < NFTABLES_MIN_MINOR:
+    fallback_applied = False
+    fallback_source = f"nftables-unsupported:{detected_label or detected_minor}"
+    for store in (intended_store, server_store):
+        proxy_entry = store.get(PROXY_MODE_KEY)
+        if proxy_entry and proxy_entry.get("value") == "nftables":
+            store[PROXY_MODE_KEY] = {"value": "iptables", "source": fallback_source}
+            fallback_applied = True
+    if fallback_applied:
+        message_label = detected_label or f"v1.{detected_minor}"
+        print(
+            f"Detected Kubernetes {message_label} without kube-proxy nftables support; "
+            "falling back to proxy-mode=iptables",
+            file=sys.stderr,
+        )
 
 for key, env_var in ENV_MAPPING.items():
     env_value = os.environ.get(env_var)
