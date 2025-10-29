@@ -70,6 +70,7 @@ def test_join_aborts_when_flag_parity_fails(tmp_path: Path) -> None:
     _write_stub(bin_dir / "avahi-resolve", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "avahi-browse", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ss", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "l4_probe.sh", "#!/usr/bin/env bash\nexit 0\n")
 
     server_config = tmp_path / "server-config.yaml"
     server_config.write_text(
@@ -131,6 +132,7 @@ def test_join_aborts_when_flag_parity_fails(tmp_path: Path) -> None:
             "SUGARKUBE_JOIN_GATE_BIN": str(bin_dir / "join_gate.sh"),
             "SUGARKUBE_MDNS_DBUS": "0",
             "SUGARKUBE_MDNS_WIRE_PROOF": "0",
+            "SUGARKUBE_L4_PROBE_BIN": str(bin_dir / "l4_probe.sh"),
             "SUGARKUBE_SERVER_CONFIG_PATH": str(server_config),
             "SUGARKUBE_SERVER_SERVICE_PATH": str(server_service),
             "SUGARKUBE_INTENDED_K3S_CONFIG_PATH": str(intended_config),
@@ -153,3 +155,55 @@ def test_join_aborts_when_flag_parity_fails(tmp_path: Path) -> None:
     assert "cluster-domain" in result.stderr
     assert not curl_log.exists(), "Installer should not have been invoked"
     assert not join_gate_log.exists(), "Join gate should not be touched on parity failure"
+
+
+def test_proxy_mode_falls_back_for_pre_133(tmp_path: Path) -> None:
+    intended_config = tmp_path / "intended.yaml"
+    intended_config.write_text(
+        "\n".join(
+            [
+                "cluster-cidr: 10.42.0.0/16",
+                "service-cidr: 10.43.0.0/16",
+                "cluster-domain: cluster.local",
+                "flannel-backend: vxlan",
+                "secrets-encryption: false",
+                "kube-proxy-arg:",
+                "  - proxy-mode=nftables",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    server_config = tmp_path / "server.yaml"
+    server_config.write_text(
+        "\n".join(
+            [
+                "cluster-cidr: 10.42.0.0/16",
+                "service-cidr: 10.43.0.0/16",
+                "cluster-domain: cluster.local",
+                "flannel-backend: vxlan",
+                "secrets-encryption: false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "SUGARKUBE_INTENDED_K3S_CONFIG_PATH": str(intended_config),
+            "SUGARKUBE_SERVER_CONFIG_PATH": str(server_config),
+            "SUGARKUBE_DETECTED_KUBERNETES_VERSION": "v1.32.5+k3s1",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(PARITY_SCRIPT)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "falling back to legacy iptables" in result.stderr.lower()

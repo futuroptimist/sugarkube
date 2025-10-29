@@ -17,8 +17,15 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
    - `etcd-snapshot-*`: leave the defaults in place for the built-in schedule and retention.
    - `#etcd-s3-*`: uncomment and populate the S3-compatible endpoint, bucket, and credentials once
      remote snapshot archiving is available.
-   - `disable`: Traefik remains the default ingress; keep the bundled ServiceLB enabled until a
-     replacement such as MetalLB is installed.
+ - `disable`: Traefik remains the default ingress; keep the bundled ServiceLB enabled until a
+   replacement such as MetalLB is installed.
+
+> **Note:** Kubernetes 1.33 promoted kube-proxy's nftables backend to GA, so the
+> Sugarkube image enables it by default via
+> `systemd/etc/rancher/k3s/config.yaml.d/11-sugarkube-proxy-mode.yaml`. Older
+> clusters can override the drop-in (or set `K3S_KUBE_PROXY_MODE=iptables`
+> before rerunning the installer) to stick with the legacy iptables proxy if
+> necessary.
 3. Start k3s on the first control-plane:
 
    ```bash
