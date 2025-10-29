@@ -17,7 +17,21 @@ case "${role}" in
 esac
 export PORT="${PORT:-6443}"
 export PHASE="${PHASE:-}"
-export LEADER="${LEADER:-}"
+leader_value="${LEADER:-}"
+if [ -z "${leader_value}" ]; then
+  leader_value="${SRV_HOST}"
+else
+  while [[ "${leader_value}" == *"." ]]; do
+    leader_value="${leader_value%.}"
+  done
+  leader_value="${leader_value%.local}"
+  if [ -n "${leader_value}" ]; then
+    leader_value="${leader_value}.local"
+  else
+    leader_value="${SRV_HOST}"
+  fi
+fi
+export LEADER="${leader_value}"
 service_dir="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 if [ -n "${SUGARKUBE_AVAHI_SERVICE_FILE:-}" ]; then
   service_file="${SUGARKUBE_AVAHI_SERVICE_FILE}"
