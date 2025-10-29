@@ -1,5 +1,11 @@
 """Tests for the k3s-discover mDNS helpers."""
 
+# Developer note: RFC 6763 and 6762 expose instance names as display strings,
+# so Avahi may emit spaces and punctuation between the label boundaries that DNS
+# still enforces. The script calls `avahi-browse --parsable` to keep the
+# semicolon field separators intact, ensuring tests exercise the same parsing
+# path instead of relying on naive whitespace splits.
+
 from __future__ import annotations
 
 import os

@@ -28,6 +28,11 @@ Values under 200 ms are typical on a quiet LAN with K3s’ default
 Flannel VXLAN overlay; spikes or timeouts point to multicast flooding or
 pod-network reachability issues that need investigation.
 
+RFC 6763 explicitly allows human-readable service instance names with spaces
+and punctuation. Treat the instance string as display text only—matching must
+verify the service type, TXT attributes, and the SRV record that resolves to
+the authoritative host.
+
 ## Usage examples
 
 Set variables for a single command:
