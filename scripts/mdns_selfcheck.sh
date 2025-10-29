@@ -142,6 +142,95 @@ SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
+MDNS_SERVICE_TYPE_PRESENT=0
+MDNS_SERVICE_TYPES_AVAILABLE=""
+MDNS_SERVICE_TYPE_STATUS=0
+
+mdns_service_type_check() {
+  local type="$1"
+  local browse_output=""
+  local browse_status=0
+  local present_and_types=""
+  local present="0"
+  local available=""
+
+  browse_output="$(
+    avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null
+  )" || browse_status=$?
+
+  present_and_types="$(
+    printf '%s\n' "${browse_output}" | python3 - "${type}" <<'PY'
+import sys
+
+target = sys.argv[1] if len(sys.argv) > 1 else ""
+present = 0
+types = []
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    parts = line.split(';')
+    if not parts:
+        continue
+    if parts[0] not in ('=', '+'):
+        continue
+    if len(parts) < 4:
+        continue
+    service = parts[3].strip()
+    if not service:
+        continue
+    if service not in types:
+        types.append(service)
+    if service == target:
+        present = 1
+
+print(f"{present}|{','.join(types)}")
+PY
+  )"
+
+  present="${present_and_types%%|*}"
+  case "${present}" in
+    1) present=1 ;;
+    *) present=0 ;;
+  esac
+  available="${present_and_types#*|}"
+  if [ "${available}" = "${present_and_types}" ]; then
+    available=""
+  fi
+
+  MDNS_SERVICE_TYPE_PRESENT="${present}"
+  MDNS_SERVICE_TYPES_AVAILABLE="${available}"
+  MDNS_SERVICE_TYPE_STATUS="${browse_status}"
+
+  local raw_for_trace
+  raw_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
+  if [ -n "${raw_for_trace}" ]; then
+    log_trace mdns_type_check_raw service_type="${type}" status="${browse_status}" \
+      "raw=\"${raw_for_trace}\""
+  fi
+
+  log_info mdns_type_check service_type="${type}" present="${present}" status="${browse_status}"
+
+  if [ "${present}" -eq 1 ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+if ! mdns_service_type_check "${SERVICE_TYPE}"; then
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  available_types="${MDNS_SERVICE_TYPES_AVAILABLE:-}"
+  if [ -z "${available_types}" ]; then
+    available_types="none"
+  fi
+  log_info mdns_selfcheck_failure outcome=miss reason=service_type_missing attempt=0 \
+    service_type="${SERVICE_TYPE}" available_types="${available_types}" \
+    status="${MDNS_SERVICE_TYPE_STATUS:-0}" ms_elapsed="${elapsed_ms}" >&2
+  exit 4
+fi
+
 ACTIVE_QUERY_WINDOW_MS="$({
   python3 - <<'PY' "${MDDNS_ACTIVE_QUERY_SECS:-5}"
 import sys
