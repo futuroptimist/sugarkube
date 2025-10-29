@@ -565,42 +565,54 @@ PY
 }
 
 mdns_selfcheck__service_type_check() {
-  local type_output type_present available_lines available_types available_kv available_escaped
+  local type_output type_present available_types available_kv available_escaped available_seen
   local active_window_ms active_start_elapsed current_elapsed delta_ms remaining_ms sleep_seconds
   local active_output active_count active_found active_attempts
 
   type_output="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
   type_present=0
+  available_types=""
+  available_seen="," 
   if [ -n "${type_output}" ]; then
-    type_present="$(printf '%s\n' "${type_output}" | awk -v svc="${SERVICE_TYPE}" '
-BEGIN { FS = ";"; present = 0 }
-{
-  for (i = 1; i <= NF; i++) {
-    if ($i == svc) {
-      present = 1
-      exit
-    }
-  }
-}
-END { print present }
-' 2>/dev/null | tr -d '\n' | tr -d '\r')"
+    local old_ifs field browse_line
+    old_ifs="${IFS}"
+    while IFS= read -r browse_line; do
+      [ -n "${browse_line}" ] || continue
+      IFS=';'
+      # shellcheck disable=SC2086
+      set -- ${browse_line}
+      IFS="${old_ifs}"
+      for field in "$@"; do
+        case "${field}" in
+          "${SERVICE_TYPE}")
+            type_present=1
+            ;;
+          _*._tcp|_*._udp)
+            case "${available_seen}" in
+              *,"${field}",*)
+                ;;
+              *)
+                available_seen="${available_seen}${field},"
+                if [ -n "${available_types}" ]; then
+                  available_types="${available_types},${field}"
+                else
+                  available_types="${field}"
+                fi
+                ;;
+            esac
+            ;;
+        esac
+      done
+    done <<__MDNS_TYPES__
+${type_output}
+__MDNS_TYPES__
+    IFS="${old_ifs}"
   fi
+
   case "${type_present}" in
     1) type_present=1 ;;
     *) type_present=0 ;;
   esac
-
-  available_lines="$(printf '%s\n' "${type_output}" | awk '
-BEGIN { FS = ";" }
-{
-  for (i = 1; i <= NF; i++) {
-    if ($i ~ /^_[^;]*\._(tcp|udp)$/) {
-      print $i
-    }
-  }
-}
-' 2>/dev/null | sort -u)"
-  available_types="$(printf '%s\n' "${available_lines}" | paste -sd';' - 2>/dev/null)"
   available_kv=""
   if [ -n "${available_types}" ]; then
     available_escaped="$(printf '%s' "${available_types}" | sed 's/"/\\"/g')"
