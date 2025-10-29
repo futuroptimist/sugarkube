@@ -92,6 +92,64 @@ EOS
   [[ "$stderr" =~ available_types="_http._tcp,_k3s-sugar-dev._tcp,_ssh._tcp" ]]
 }
 
+@test "mdns self-check confirms via CLI-only resolution" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+if [ "$#" -gt 0 ] && [ "${!#}" = "_services._dns-sd._udp" ]; then
+  cat "${BATS_CWD}/tests/fixtures/avahi_browse_services_with_k3s.txt"
+  exit 0
+fi
+cat <<'TXT'
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (agent);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=agent;txt=phase=agent
+TXT
+EOS
+
+  stub_command avahi-resolve-host-name <<'EOS'
+#!/usr/bin/env bash
+target="$1"
+shift || true
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -4)
+      ;;
+    --timeout=*)
+      ;;
+    *)
+      echo "unexpected argument: $1" >&2
+      exit 1
+      ;;
+  esac
+  shift || true
+done
+printf '%s %s\n' "${target}" "10.0.0.5"
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+echo "$*" >"${BATS_TEST_TMPDIR}/avahi-resolve-invoked"
+exit 2
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=10.0.0.5 \
+    SUGARKUBE_EXPECTED_ROLE=agent \
+    SUGARKUBE_EXPECTED_PHASE=agent \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=confirmed ]]
+  [[ "$output" =~ check=cli ]]
+  [[ "$output" =~ resolve_method=cli ]]
+  [ ! -f "${BATS_TEST_TMPDIR}/avahi-resolve-invoked" ]
+}
+
 @test "mdns self-check warns when enumeration misses but browse succeeds" {
   stub_avahi_browse_with_fixtures \
     "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt" \
