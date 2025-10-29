@@ -49,6 +49,7 @@ use_ipv4 = entries.get((None, "use-ipv4"), "")
 use_ipv6 = entries.get((None, "use-ipv6"), "")
 disable_publishing = entries.get((None, "disable-publishing"), "")
 enable_dbus = entries.get((None, "enable-dbus"), "")
+wide_area = entries.get(("wide-area", "enable-wide-area"), entries.get((None, "enable-wide-area"), ""))
 
 allow_value_clean = allow_value.strip()
 allow_suffix_pattern = re.compile(r"\.(?:ipv4|ipv6)(?=[\s,]|$)", re.IGNORECASE)
@@ -120,6 +121,7 @@ print(f"allow_interfaces={allow_value_clean}")
 print(f"deny_interfaces={deny_value}")
 print(f"disable_publishing={disable_publishing}")
 print(f"enable_dbus={enable_dbus}")
+print(f"wide_area={wide_area}")
 
 for code, message in warnings:
     safe_message = message.replace("\n", " ").strip()

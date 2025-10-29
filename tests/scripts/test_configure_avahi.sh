@@ -41,6 +41,16 @@ if ! grep -q '^allow-interfaces=eth0$' "${CONF_PATH}"; then
   exit 1
 fi
 
+if ! grep -q '^enable-dbus=yes$' "${CONF_PATH}"; then
+  echo "enable-dbus was not forced to yes" >&2
+  exit 1
+fi
+
+if ! awk '/^\[wide-area\]/{flag=1;next}/^\[/{flag=0}flag && /^enable-wide-area=no$/{found=1}END{exit(found?0:1)}' "${CONF_PATH}"; then
+  echo "enable-wide-area was not forced to no" >&2
+  exit 1
+fi
+
 if ! grep -q '^use-ipv4=yes$' "${CONF_PATH}"; then
   echo "use-ipv4 was not forced to yes" >&2
   exit 1
@@ -111,6 +121,16 @@ fi
 # Verify the script created a valid output despite malformed input
 if ! grep -q '^allow-interfaces=eth0$' "${MALFORMED_CONF}"; then
   echo "allow-interfaces was not set correctly with malformed input" >&2
+  exit 1
+fi
+
+if ! grep -q '^enable-dbus=yes$' "${MALFORMED_CONF}"; then
+  echo "enable-dbus was not enforced with malformed input" >&2
+  exit 1
+fi
+
+if ! awk '/^\[wide-area\]/{flag=1;next}/^\[/{flag=0}flag && /^enable-wide-area=no$/{found=1}END{exit(found?0:1)}' "${MALFORMED_CONF}"; then
+  echo "enable-wide-area was not disabled with malformed input" >&2
   exit 1
 fi
 
