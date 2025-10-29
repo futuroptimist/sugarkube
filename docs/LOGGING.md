@@ -50,3 +50,12 @@ LOG_LEVEL=trace scripts/k3s-discover.sh
 The `info` level keeps successful bootstrap runs to a handful of high-signal
 lines while still surfacing warnings and errors. Use `debug` or `trace` when
 investigating discovery failures or election behavior.
+
+## Avahi journal dumps
+
+When the mDNS diagnostics detect a failure, `scripts/net_diag.sh` now emits an
+`event=avahi_journal_dump` line that includes the last
+`${AVAHI_JOURNAL_LINES:-200}` Avahi log entries. The output also highlights
+whether Avahi reported `Service "…" … successfully established` or errored with
+`Failed to read service file` / `Failed to parse XML`. These phrases confirm if
+Avahi loaded the `.service` definition or rejected it during parsing.

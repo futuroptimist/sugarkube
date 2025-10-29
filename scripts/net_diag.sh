@@ -121,6 +121,55 @@ emit_event() {
   printf ' output=%q\n' "${output}"
 }
 
+dump_avahi_journal() {
+  if ! command -v journalctl >/dev/null 2>&1; then
+    emit_event "avahi_journal_dump" "journalctl_missing"
+    return
+  fi
+
+  local journal_lines="${AVAHI_JOURNAL_LINES:-200}"
+  local journal_output=""
+  local journal_rc=""
+
+  set +e
+  journal_output="$(
+    journalctl -u avahi-daemon -n "${journal_lines}" --no-pager 2>&1
+  )"
+  journal_rc="$?"
+  set -e
+
+  if [ -z "${journal_rc}" ]; then
+    journal_rc="0"
+  fi
+
+  if [ -z "${journal_output}" ]; then
+    journal_output="(no_journal_entries)"
+  fi
+
+  local journal_pattern
+  journal_pattern='Service ".*" .* successfully established'
+  journal_pattern="${journal_pattern}|Failed to read service file"
+  journal_pattern="${journal_pattern}|Failed to parse XML"
+  local journal_matches
+  journal_matches="$(
+    printf '%s\n' "${journal_output}" \
+      | grep -E "${journal_pattern}" \
+      || true
+  )"
+  if [ -z "${journal_matches}" ]; then
+    journal_matches="none"
+  else
+    journal_matches="$(printf '%s' "${journal_matches}" | tr '\n' ';')"
+  fi
+
+  emit_event \
+    "avahi_journal_dump" \
+    "${journal_output}" \
+    "rc=${journal_rc}" \
+    "lines=${journal_lines}" \
+    "matches=${journal_matches}"
+}
+
 systemctl_status="command_missing"
 systemctl_rc=""
 if command -v systemctl >/dev/null 2>&1; then
@@ -363,6 +412,7 @@ if [[ "${reason}" == *mdns* ]]; then
     "${avahi_conf_dump}" \
     "path=${avahi_conf_path}" \
     "rc=${avahi_conf_rc}"
+  dump_avahi_journal
   wire_probe_script="${SCRIPT_DIR}/mdns_wire_probe.sh"
   if [ -x "${wire_probe_script}" ]; then
     set +e
