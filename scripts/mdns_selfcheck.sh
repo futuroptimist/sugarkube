@@ -142,6 +142,66 @@ SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
+mdns_service_type_present() {
+  local browse_types=""
+  local present="0"
+
+  browse_types="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
+  present="$(
+    printf '%s\n' "${browse_types}" | python3 - "${SERVICE_TYPE}" <<'PY'
+import sys
+
+target = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+target_lower = target.lower()
+found = False
+
+def normalize(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if value[0] in '\"\'' and value[-1:] == value[0]:
+        value = value[1:-1]
+    return value.strip()
+
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw:
+        continue
+    parts = [normalize(piece) for piece in raw.split(';')]
+    for piece in parts:
+        if not piece:
+            continue
+        if piece == target or piece.lower() == target_lower:
+            found = True
+            break
+    if found:
+        break
+
+print("1" if found else "0")
+PY
+  )"
+  case "${present}" in
+    1) present=1 ;;
+    *) present=0 ;;
+  esac
+
+  log_info mdns_type_check service_type="${SERVICE_TYPE}" present="${present}"
+
+  if [ "${present}" -ne 1 ]; then
+    local elapsed_ms
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+    log_info mdns_selfcheck_failure \
+      outcome=miss \
+      reason=service_type_missing \
+      missing_type="${SERVICE_TYPE}" \
+      attempt=0 \
+      ms_elapsed="${elapsed_ms}" >&2
+    exit 4
+  fi
+}
+
+mdns_service_type_present
+
 ACTIVE_QUERY_WINDOW_MS="$({
   python3 - <<'PY' "${MDDNS_ACTIVE_QUERY_SECS:-5}"
 import sys
