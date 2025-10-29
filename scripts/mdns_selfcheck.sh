@@ -400,6 +400,38 @@ __RES__
   return 0
 }
 
+resolve_srv_target_cli() {
+  local target="$1"
+  local expected_ipv4="$2"
+
+  if [ -z "${target}" ] || [ -z "${expected_ipv4}" ]; then
+    return 3
+  fi
+
+  if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    return 3
+  fi
+
+  local output
+  if ! output="$(avahi-resolve-host-name "${target}" -4 --timeout=2 2>/dev/null)"; then
+    return 1
+  fi
+
+  local ipv4
+  ipv4="$(printf '%s\n' "${output}" | awk 'NF >= 2 { print $2; exit }' 2>/dev/null | tr -d '\r')"
+
+  if [ -z "${ipv4}" ]; then
+    return 1
+  fi
+
+  if [ "${ipv4}" != "${expected_ipv4}" ]; then
+    return 2
+  fi
+
+  printf '%s' "${ipv4}"
+  return 0
+}
+
 build_socket_targets() {
   host="$1"
   ipv4="$2"
@@ -777,10 +809,39 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
         fi
       fi
       if [ "${host_matches}" -eq 1 ]; then
-        resolved="$(resolve_host "${srv_host}" || true)"
-        status=$?
+        cli_status=3
+        cli_ipv4=""
+        if [ -n "${EXPECTED_IPV4}" ]; then
+          if cli_ipv4="$(resolve_srv_target_cli "${srv_host}" "${EXPECTED_IPV4}" 2>/dev/null)"; then
+            cli_status=0
+          else
+            cli_status=$?
+          fi
+        fi
+        cli_ipv4_for_trace="$(printf '%s' "${cli_ipv4}" | tr '\n' ' ' | sed 's/"/\\"/g')"
+        log_trace mdns_selfcheck_cli attempt="${attempt}" host="${srv_host}" status="${cli_status}" "ipv4=\"${cli_ipv4_for_trace}\""
+        if [ "${cli_status}" -eq 2 ]; then
+          last_reason="ipv4_mismatch"
+          log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
+          elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          exit 5
+        fi
+
+        resolved=""
+        status=1
+        resolution_method="avahi"
+        if [ "${cli_status}" -eq 0 ]; then
+          resolved="${cli_ipv4}|${cli_ipv4}"
+          status=0
+          resolution_method="cli"
+        else
+          resolved="$(resolve_host "${srv_host}" || true)"
+          status=$?
+        fi
         resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
-        log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
+        log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" method="${resolution_method}" "resolved=\"${resolved_for_trace}\""
+
         if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
           resolved_ipv4="${resolved##*|}"
           resolved_any="${resolved%%|*}"
@@ -789,6 +850,12 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
             readiness_required=1
           fi
+
+          if [ "${cli_status}" -eq 0 ] && [ "${readiness_required}" -ne 1 ]; then
+            log_info mdns_selfcheck outcome=confirmed check=cli host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
+            exit 0
+          fi
+
           socket_targets="$(build_socket_targets "${srv_host}" "${resolved_ipv4}" "${resolved_any}")"
           socket_targets_escaped="$(printf '%s' "${socket_targets}" | sed 's/"/\\"/g')"
           if [ "${readiness_required}" -eq 1 ]; then
@@ -798,7 +865,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
               [ -n "${socket_method}" ] || socket_method="unknown"
               [ -n "${socket_status}" ] || socket_status="ok"
               log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
-              log_info mdns_selfcheck outcome=confirmed check=server host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" readiness_method="${socket_method}" readiness_targets="${socket_targets}"
+              log_info mdns_selfcheck outcome=confirmed check=server host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" readiness_method="${socket_method}" readiness_targets="${socket_targets}" resolve_method="${resolution_method}"
               exit 0
             fi
             handshake_failed=1
@@ -813,7 +880,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
               last_reason="server_socket_unready"
             fi
           else
-            log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
+            log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
             exit 0
           fi
         fi
