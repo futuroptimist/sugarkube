@@ -701,11 +701,24 @@ mdns_absence_check_dbus() {
   if [ "${MDNS_ABSENCE_USE_DBUS}" != "1" ]; then
     return 2
   fi
+  if [ "${MDNS_ABSENCE_DBUS_CAPABLE}" -ne 1 ]; then
+    return 2
+  fi
   if ! command -v gdbus >/dev/null 2>&1; then
+    MDNS_ABSENCE_DBUS_CAPABLE=0
     return 2
   fi
 
   if ! "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+    local wait_status=$?
+    if [ "${wait_status}" -eq 2 ]; then
+      MDNS_ABSENCE_DBUS_CAPABLE=0
+      log_info discover \
+        event=mdns_absence_dbus \
+        outcome=skip \
+        reason=avahi_dbus_disabled \
+        severity=info >&2
+    fi
     return 2
   fi
 

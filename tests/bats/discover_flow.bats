@@ -166,6 +166,96 @@ EOS
   echo "${target}"
 }
 
+@test "wait_for_avahi_dbus reports ready when Avahi registers quickly" {
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ] && [ "$3" = "--dest" ]; then
+  if [ "$4" = "org.freedesktop.Avahi" ]; then
+    exit 0
+  fi
+  if [ "$4" = "org.freedesktop.DBus" ]; then
+    exit 0
+  fi
+fi
+echo "unexpected gdbus call: $*" >&2
+exit 1
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+echo "org.freedesktop.Avahi 123 456"
+exit 0
+EOS
+
+  run env \
+    AVAHI_DBUS_WAIT_MS=200 \
+    "${BATS_CWD}/scripts/wait_for_avahi_dbus.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"event=avahi_dbus_ready outcome=ok"* ]]
+}
+
+@test "wait_for_avahi_dbus exits with disabled when enable-dbus=no" {
+  conf_path="${BATS_TEST_TMPDIR}/avahi-disabled.conf"
+  cat <<'CONF' >"${conf_path}"
+[server]
+enable-dbus=no
+CONF
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  run env \
+    AVAHI_CONF_PATH="${conf_path}" \
+    AVAHI_DBUS_WAIT_MS=200 \
+    "${BATS_CWD}/scripts/wait_for_avahi_dbus.sh"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"event=avahi_dbus_ready outcome=disabled"* ]]
+  [[ "$output" == *"severity=info"* ]]
+}
+
+@test "wait_for_avahi_dbus logs timeout details when Avahi is absent" {
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ] && [ "$3" = "--dest" ]; then
+  if [ "$4" = "org.freedesktop.Avahi" ]; then
+    exit 1
+  fi
+  if [ "$4" = "org.freedesktop.DBus" ]; then
+    exit 0
+  fi
+fi
+exit 1
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "--system" ] && [ "$2" = "list" ]; then
+  echo "org.freedesktop.DBus 1 2"
+  exit 0
+fi
+echo "unexpected busctl: $*" >&2
+exit 1
+EOS
+
+  run env \
+    AVAHI_DBUS_WAIT_MS=200 \
+    "${BATS_CWD}/scripts/wait_for_avahi_dbus.sh"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"event=avahi_dbus_ready outcome=timeout"* ]]
+  [[ "$output" == *"busctl=absent"* ]]
+  [[ "$output" == *"dbus_ping=ok"* ]]
+}
+
 @test "discover flow joins existing server when discovery succeeds" {
   stub_common_network_tools
   create_curl_stub

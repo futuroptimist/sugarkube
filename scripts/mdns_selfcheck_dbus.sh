@@ -294,9 +294,11 @@ if [ "${status}" -ne 0 ]; then
         ms_elapsed="${elapsed_ms}" >&2
       ;;
     2)
-      log_debug mdns_selfcheck_dbus \
+      log_info mdns_selfcheck_dbus \
         outcome=skip \
-        reason=avahi_dbus_wait_unavailable
+        reason=avahi_dbus_disabled \
+        severity=info \
+        ms_elapsed="${elapsed_ms}" >&2
       ;;
     *)
       log_info mdns_selfcheck \
