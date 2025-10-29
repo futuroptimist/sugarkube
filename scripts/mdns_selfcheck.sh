@@ -138,14 +138,13 @@ if ! command -v avahi-resolve >/dev/null 2>&1; then
 fi
 
 SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
-INSTANCE_PREFIX="k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}@${EXPECTED_HOST}"
 
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
 parse_browse() {
   awk -v svc="${SERVICE_TYPE}" \
-      -v inst_pref="${INSTANCE_PREFIX}" \
+      -v expected_host="${EXPECTED_HOST}" \
       -v short_host="${EXPECTED_SHORT_HOST}" \
       -v expected_role="${EXPECTED_ROLE}" \
       -v expected_phase="${EXPECTED_PHASE}" \
@@ -163,11 +162,26 @@ parse_browse() {
       return value
     }
 
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+
+    function strip_and_trim(value) {
+      value = dequote(value)
+      gsub(/\\"/, "\"", value)
+      gsub(/\\'/, "'", value)
+      gsub(/\\\\/, "\\", value)
+      value = dequote(value)
+      return trim(value)
+    }
+
     BEGIN { FS = ";" }
     $1 == "=" {
       delete fields
       for (i = 1; i <= NF; i++) {
-        fields[i] = dequote($i)
+        fields[i] = strip_and_trim($i)
       }
 
       type_idx = -1
@@ -185,30 +199,45 @@ parse_browse() {
       host = fields[host_idx]
       port = fields[port_idx]
 
-      rest = ""
+      if (host == "") next
+
+      host_match = 0
+      if (expected_host != "" && host == expected_host) host_match = 1
+      if (!host_match && short_host != "") {
+        if (host == short_host) host_match = 1
+        else if (host == short_host ".local") host_match = 1
+      }
+      if (!host_match && expected_host ~ /\.local$/) {
+        base_host = substr(expected_host, 1, length(expected_host) - 6)
+        if (host == base_host) host_match = 1
+      }
+      if (!host_match) next
+
+      delete txt
       for (j = port_idx + 1; j <= NF; j++) {
         piece = fields[j]
-        if (rest != "") rest = rest ";"
-        rest = rest piece
+        if (piece == "") continue
+        if (tolower(substr(piece, 1, 4)) != "txt=") continue
+
+        entry = strip_and_trim(substr(piece, 5))
+        if (entry == "") continue
+
+        eq_pos = index(entry, "=")
+        if (eq_pos <= 0) continue
+
+        key = trim(substr(entry, 1, eq_pos - 1))
+        value = strip_and_trim(substr(entry, eq_pos + 1))
+        if (key == "") continue
+        txt[key] = value
       }
 
-      ok = 0
-      if (expected_role != "") {
-        if (instance == inst_pref " (" expected_role ")") ok = 1
-        else if (instance == "k3s-" cluster "-" env "@" short_host " (" expected_role ")") ok = 1
-      } else {
-        if (instance == inst_pref " (bootstrap)" || instance == inst_pref " (server)") ok = 1
-        else if (instance == "k3s-" cluster "-" env "@" short_host " (bootstrap)" || instance == "k3s-" cluster "-" env "@" short_host " (server)") ok = 1
-      }
-      if (!ok) next
+      if (cluster != "" && ( !("cluster" in txt) || txt["cluster"] != cluster)) next
+      if (env != "" && ( !("env" in txt) || txt["env"] != env)) next
+      if (expected_role != "" && ( !("role" in txt) || txt["role"] != expected_role)) next
+      if (expected_phase != "" && ( !("phase" in txt) || txt["phase"] != expected_phase)) next
 
-      if (expected_role != "" && rest !~ "role=" expected_role) next
-      if (expected_phase != "" && rest !~ "phase=" expected_phase) next
-
-      if (host != "") {
-        print instance "|" host "|" port
-        exit 0
-      }
+      print instance "|" host "|" port
+      exit 0
     }
   '
 }
@@ -429,7 +458,7 @@ last_reason=""
 miss_count=0
 while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   # Use parsable semicolon-delimited output with resolution and terminate flags
-  browse_output="$(avahi-browse -rptk "${SERVICE_TYPE}" 2>/dev/null || true)"
+  browse_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
   parsed="$(printf '%s\n' "${browse_output}" | parse_browse || true)"
   browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
   log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""

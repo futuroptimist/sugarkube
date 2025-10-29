@@ -63,7 +63,7 @@ EOS
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 cat <<'TXT'
-=;eth0;IPv4;"k3s-sugar-dev@sugarkube0 (server)";"_k3s-sugar-dev._tcp";local;"sugarkube0.local";"10.0.0.5";6443;"txt=\"k3s=1\"";"txt=\"cluster=sugar\"";"txt=\"env=dev\"";"txt=\"role=server\"";"txt=\"phase=server\""
+=;eth0;IPv4;"k3s-sugar-dev@sugarkube0 (server)";"_k3s-sugar-dev._tcp";local;"sugarkube0.local";"10.0.0.5";6443;"txt=\"cluster=sugar\"";"txt=\"env=dev\"";"txt=\"role=server\"";"txt=\"phase=server\""
 TXT
 EOS
 
@@ -97,7 +97,7 @@ EOS
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 cat <<'TXT'
-=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=\"k3s=1\" txt=\"cluster=sugar\" txt=\"env=dev\" txt=\"role=server\" txt=\"phase=server\"
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server
 TXT
 EOS
 
@@ -124,6 +124,40 @@ EOS
 
   [ "$status" -eq 0 ]
   [[ "$output" =~ outcome=ok ]]
+}
+
+@test "mdns self-check handles spaces in instance name and TXT values" {
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+cat <<'TXT'
+=;eth0;IPv4;"k3s-sugar-dev@sugarkube0 (bootstrap)";"_k3s-sugar-dev._tcp";local;"sugarkube0.local";"10.0.0.5";6443;"txt=\"cluster=sugar\"";"txt=\"env=dev\"";"txt=\"role=bootstrap\"";"txt=\"phase=server ready\""
+TXT
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-n" ]; then
+  shift
+fi
+printf '%s %s\n' "$1" "10.0.0.5"
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=10.0.0.5 \
+    SUGARKUBE_EXPECTED_ROLE=bootstrap \
+    'SUGARKUBE_EXPECTED_PHASE=server ready' \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ host=sugarkube0.local ]]
 }
 
 @test "mdns self-check reports failure when no records appear" {
@@ -160,7 +194,7 @@ EOS
 #!/usr/bin/env bash
 cat <<'TXT'
 =;wlan0;IPv6;ignored-instance;_https._tcp;local;otherhost.local;fe80::1;443;txt="foo=bar";garbage
-=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt="k3s=1";txt="cluster=sugar";txt="env=dev";txt="role=server";txt="phase=server"
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server
 TXT
 EOS
 
@@ -193,7 +227,7 @@ EOS
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 cat <<'TXT'
-=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt="k3s=1";txt="cluster=sugar";txt="env=dev";txt="role=server";txt="phase=server"
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0 (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server;txt=phase=server
 TXT
 EOS
 
