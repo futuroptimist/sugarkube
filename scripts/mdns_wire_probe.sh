@@ -145,7 +145,7 @@ def discover_entry_groups():
                 continue
             seen.add(child)
             queue.append(child)
-            if "EntryGroup" in child.split("/"):
+            if any(segment.startswith("EntryGroup") for segment in child.split("/")):
                 entry_groups.append(child)
     return entry_groups
 
