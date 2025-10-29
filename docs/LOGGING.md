@@ -22,6 +22,23 @@ machine-parseable while still being readable during interactive debugging.
   loop. When enabled the scripts refuse to call a server ready until port 6443
   answers, mirroring the readiness gate in the runbook.
 
+### Avahi journal diagnostics
+
+When mDNS self-checks fail `scripts/net_diag.sh` emits
+`event=avahi_journal_dump` entries. The first log item captures the most recent
+`journalctl -u avahi-daemon` output (200 lines by default, overridable via
+`AVAHI_JOURNAL_LINES`). Subsequent entries summarize whether Avahi reported:
+
+- `pattern=successfully_established`: service registration lines such as
+  `Service "foo" ... successfully established`.
+- `pattern=failed_to_read_service_file`: parse errors caused by unreadable
+  `.service` files.
+- `pattern=failed_to_parse_xml`: XML validation failures while loading service
+  definitions.
+
+These highlights make it clear whether Avahi accepted the service definition or
+rejected it while still preserving the raw journal for deeper inspection.
+
 Each discovery log line carries an `ms_elapsed` field representing the time
 between starting the Avahi browse/resolve cycle and receiving a final answer.
 Values under 200 ms are typical on a quiet LAN with K3s’ default

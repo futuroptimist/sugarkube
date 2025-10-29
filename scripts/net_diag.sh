@@ -121,6 +121,62 @@ emit_event() {
   printf ' output=%q\n' "${output}"
 }
 
+dump_avahi_journal() {
+  if ! command -v journalctl >/dev/null 2>&1; then
+    emit_event "avahi_journal_dump" "journalctl_missing" "rc=127"
+    return
+  fi
+
+  local journal_lines="${AVAHI_JOURNAL_LINES:-200}"
+  case "${journal_lines}" in
+    ''|*[!0-9]*) journal_lines=200 ;;
+  esac
+
+  local journal_output=""
+  local journal_rc=""
+  set +e
+  journal_output="$(
+    journalctl -u avahi-daemon -n "${journal_lines}" --no-pager 2>&1
+  )"
+  journal_rc="$?"
+  set -e
+  if [ -z "${journal_output}" ]; then
+    journal_output="empty"
+  fi
+
+  emit_event \
+    "avahi_journal_dump" \
+    "${journal_output}" \
+    "rc=${journal_rc}" \
+    "lines=${journal_lines}"
+
+  if [ "${journal_output}" = "empty" ]; then
+    return
+  fi
+
+  local pattern label matches match_count match_output
+  while IFS='|' read -r pattern label; do
+    [ -n "${pattern}" ] || continue
+    matches="$(printf '%s\n' "${journal_output}" | grep -E "${pattern}" || true)"
+    if [ -n "${matches}" ]; then
+      match_count="$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')"
+      match_output="$(printf '%s' "${matches}" | tr '\n' ';')"
+    else
+      match_count="0"
+      match_output="none"
+    fi
+    emit_event \
+      "avahi_journal_dump" \
+      "${match_output}" \
+      "pattern=${label}" \
+      "matches=${match_count}"
+  done <<'PATTERNS'
+Service ".*" .* successfully established|successfully_established
+Failed to read service file|failed_to_read_service_file
+Failed to parse XML|failed_to_parse_xml
+PATTERNS
+}
+
 systemctl_status="command_missing"
 systemctl_rc=""
 if command -v systemctl >/dev/null 2>&1; then
@@ -368,5 +424,8 @@ if [[ "${reason}" == *mdns* ]]; then
     set +e
     EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}" "${wire_probe_script}" --iface "${iface}" || true
     set -e
+  fi
+  if [[ "${reason}" == *failure* ]]; then
+    dump_avahi_journal
   fi
 fi
