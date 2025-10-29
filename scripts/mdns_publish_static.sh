@@ -40,18 +40,151 @@ ensure_mdns_target_resolvable() {
   local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-}"
 
   if [ -z "${expected_ipv4}" ]; then
-    local addr_candidates
+    local iface addr_candidates
+    iface="${SUGARKUBE_MDNS_INTERFACE:-}"
     addr_candidates="$(hostname -I 2>/dev/null || true)"
-    if [ -n "${addr_candidates}" ]; then
-      for candidate in ${addr_candidates}; do
-        case "${candidate}" in
-          *.*.*.*)
-            expected_ipv4="${candidate}"
-            break
-            ;;
-        esac
-      done
-    fi
+    expected_ipv4="$(
+      python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+import ipaddress
+import json
+import subprocess
+import sys
+
+iface_hint = sys.argv[1].strip()
+hostname_tokens = [token for token in sys.argv[2].split() if token]
+
+IGNORE_IFACE_NAMES = {"lo"}
+IGNORE_IFACE_PREFIXES = (
+    "docker",
+    "veth",
+    "virbr",
+    "cni",
+    "flannel",
+    "kube-",
+    "zt",
+    "tailscale",
+    "podman",
+)
+
+
+def valid_ipv4(candidate):
+    try:
+        ip = ipaddress.IPv4Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+        return False
+    return True
+
+
+def interface_allowed(name, default_iface):
+    if not name:
+        return False
+    if name == iface_hint:
+        return True
+    if default_iface and name == default_iface:
+        return True
+    if name in IGNORE_IFACE_NAMES:
+        return False
+    for prefix in IGNORE_IFACE_PREFIXES:
+        if name.startswith(prefix):
+            return False
+    return True
+
+
+def gather_ip_entries():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "-4", "addr", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return []
+
+    entries = []
+    for entry in payload:
+        iface_name = entry.get("ifname", "")
+        for addr_info in entry.get("addr_info", []):
+            if addr_info.get("family") != "inet":
+                continue
+            if addr_info.get("scope") not in {"global", "site"}:
+                continue
+            local_ip = addr_info.get("local")
+            if not local_ip:
+                continue
+            entries.append((iface_name, local_ip))
+    return entries
+
+
+def pick_from_interface(entries, target_iface):
+    if not target_iface:
+        return None
+    for iface_name, candidate_ip in entries:
+        if iface_name == target_iface and valid_ipv4(candidate_ip):
+            return candidate_ip
+    return None
+
+
+def default_interface():
+    try:
+        output = subprocess.check_output(
+            ["ip", "-4", "route", "show", "default"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+    for line in output.splitlines():
+        parts = line.split()
+        if "dev" in parts:
+            try:
+                return parts[parts.index("dev") + 1]
+            except (IndexError, ValueError):
+                continue
+    return None
+
+
+def choose_ip():
+    entries = gather_ip_entries()
+    default_iface_name = default_interface()
+
+    candidate = pick_from_interface(entries, iface_hint)
+    if candidate:
+        return candidate
+
+    if default_iface_name:
+        candidate = pick_from_interface(entries, default_iface_name)
+        if candidate:
+            return candidate
+
+    disallowed_ips = set()
+    for iface_name, candidate_ip in entries:
+        if interface_allowed(iface_name, default_iface_name):
+            if valid_ipv4(candidate_ip):
+                return candidate_ip
+        elif valid_ipv4(candidate_ip):
+            disallowed_ips.add(candidate_ip)
+
+    for candidate_ip in hostname_tokens:
+        if candidate_ip in disallowed_ips:
+            continue
+        if valid_ipv4(candidate_ip):
+            return candidate_ip
+
+    return None
+
+
+selected = choose_ip()
+if selected:
+    print(selected)
+PY
+    )"
   fi
 
   if [ -z "${expected_ipv4}" ]; then
