@@ -216,10 +216,11 @@ emit_line \
 tcpdump_summary="tcpdump_not_run"
 tcpdump_rc=""
 tcpdump_matches="0"
+tcpdump_self_answers="unknown"
 if command -v tcpdump >/dev/null 2>&1; then
   set +e
   tcpdump_raw="$(
-    timeout 4 tcpdump -n -l -i "${iface}" udp port 5353 -c 12 2>&1
+    timeout 6 tcpdump -n -l -i "${iface}" udp port 5353 -c 12 2>&1
   )"
   tcpdump_rc="$?"
   set -e
@@ -228,11 +229,72 @@ if command -v tcpdump >/dev/null 2>&1; then
       | grep -E '_k3s-|_services._dns-sd._udp' \
       || true
   )"
+  tcpdump_self_answers="no"
   if [ -n "${tcpdump_filtered}" ]; then
     tcpdump_matches="$(printf '%s\n' "${tcpdump_filtered}" | wc -l | tr -d ' ')"
     tcpdump_summary="$(printf '%s' "${tcpdump_filtered}" | tr '\n' ';')"
   else
     tcpdump_summary="$(printf '%s' "${tcpdump_raw}" | tr '\n' ';')"
+  fi
+  if [ -n "${tcpdump_raw}" ]; then
+    self_patterns=""
+    raw_hosts=""
+    if [ -n "${SUGARKUBE_EXPECTED_HOST:-}" ]; then
+      raw_hosts="${raw_hosts} ${SUGARKUBE_EXPECTED_HOST}"
+    fi
+    if [ -n "${HOSTNAME:-}" ]; then
+      raw_hosts="${raw_hosts} ${HOSTNAME}"
+    fi
+    host_cmd="$(hostname 2>/dev/null || true)"
+    if [ -n "${host_cmd}" ]; then
+      raw_hosts="${raw_hosts} ${host_cmd}"
+    fi
+    host_fqdn="$(hostname -f 2>/dev/null || true)"
+    if [ -n "${host_fqdn}" ]; then
+      raw_hosts="${raw_hosts} ${host_fqdn}"
+    fi
+    for host_candidate in ${raw_hosts}; do
+      [ -n "${host_candidate}" ] || continue
+      lowered="$(printf '%s' "${host_candidate}" | tr '[:upper:]' '[:lower:]')"
+      lowered="${lowered%.}"
+      [ -n "${lowered}" ] || continue
+      case " ${self_patterns} " in
+        *" ${lowered} "*) ;;
+        *) self_patterns="${self_patterns} ${lowered}" ;;
+      esac
+      base="${lowered%.local}"
+      if [ -n "${base}" ]; then
+        case " ${self_patterns} " in
+          *" ${base} "*) ;;
+          *) self_patterns="${self_patterns} ${base}" ;;
+        esac
+        case " ${self_patterns} " in
+          *" ${base}.local "*) ;;
+          *) self_patterns="${self_patterns} ${base}.local" ;;
+        esac
+      fi
+    done
+    iface_ipv4s=""
+    if command -v ip >/dev/null 2>&1; then
+      iface_ipv4s="$(ip -o -4 addr show "${iface}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+    fi
+    if [ -z "${iface_ipv4s}" ]; then
+      iface_ipv4s="$(hostname -I 2>/dev/null || true)"
+    fi
+    for ipv4_candidate in ${iface_ipv4s}; do
+      [ -n "${ipv4_candidate}" ] || continue
+      case " ${self_patterns} " in
+        *" ${ipv4_candidate} "*) ;;
+        *) self_patterns="${self_patterns} ${ipv4_candidate}" ;;
+      esac
+    done
+    for pattern in ${self_patterns}; do
+      [ -n "${pattern}" ] || continue
+      if printf '%s\n' "${tcpdump_raw}" | grep -Fqi -- "${pattern}"; then
+        tcpdump_self_answers="yes"
+        break
+      fi
+    done
   fi
 else
   tcpdump_summary="tcpdump_missing"
@@ -243,4 +305,5 @@ emit_line \
   "${tcpdump_rc}" \
   "${tcpdump_summary}" \
   "iface=${iface}" \
-  "matches=${tcpdump_matches}"
+  "matches=${tcpdump_matches}" \
+  "self_answers=${tcpdump_self_answers}"

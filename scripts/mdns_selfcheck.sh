@@ -142,6 +142,109 @@ SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
 # Accept both short host and FQDN in browse results
 EXPECTED_SHORT_HOST="${EXPECTED_HOST%.local}"
 
+ACTIVE_QUERY_WINDOW_MS="$({
+  python3 - <<'PY' "${MDDNS_ACTIVE_QUERY_SECS:-5}"
+import sys
+
+def parse_secs(raw):
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0
+    if value < 0:
+        value = 0.0
+    return int(value * 1000)
+
+arg = sys.argv[1] if len(sys.argv) > 1 else ""
+print(parse_secs(arg))
+PY
+} 2>/dev/null)"
+case "${ACTIVE_QUERY_WINDOW_MS}" in
+  ''|*[!0-9]*) ACTIVE_QUERY_WINDOW_MS=0 ;;
+esac
+if [ "${ACTIVE_QUERY_WINDOW_MS}" -gt 0 ]; then
+  ACTIVE_QUERY_ENABLED=1
+else
+  ACTIVE_QUERY_WINDOW_MS=0
+  ACTIVE_QUERY_ENABLED=0
+fi
+
+SELF_HOSTNAME_SOURCE=""
+if [ "${HOSTNAME+set}" = "set" ] && [ -n "${HOSTNAME}" ]; then
+  SELF_HOSTNAME_SOURCE="${HOSTNAME}"
+fi
+if [ -z "${SELF_HOSTNAME_SOURCE}" ]; then
+  SELF_HOSTNAME_SOURCE="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
+fi
+if [ -z "${SELF_HOSTNAME_SOURCE}" ]; then
+  SELF_HOSTNAME_SOURCE="${EXPECTED_HOST}"
+fi
+
+SELF_HOSTNAME_ALIASES="$({
+  python3 - <<'PY' "${SELF_HOSTNAME_SOURCE}" "${EXPECTED_HOST}"
+import sys
+
+aliases = []
+seen = set()
+
+def push(value):
+    value = (value or "").strip().lower().rstrip('.')
+    if not value:
+        return
+    if value in seen:
+        return
+    seen.add(value)
+    aliases.append(value)
+
+def expand(raw):
+    if not raw:
+        return
+    push(raw)
+    if raw.endswith('.local'):
+        base = raw[:-6]
+        push(base)
+    else:
+        push(raw + '.local')
+
+for arg in sys.argv[1:]:
+    expand((arg or '').strip().lower())
+
+print('\n'.join(aliases))
+PY
+} 2>/dev/null)"
+if [ -n "${SELF_HOSTNAME_ALIASES}" ]; then
+  HOSTNAME_CHECK_ENABLED=1
+else
+  HOSTNAME_CHECK_ENABLED=0
+fi
+
+host_matches_self() {
+  candidate="$1"
+  if [ -z "${candidate}" ]; then
+    return 1
+  fi
+  local lowered
+  lowered="$(printf '%s' "${candidate}" | tr '[:upper:]' '[:lower:]')"
+  lowered="${lowered%.}"
+  if [ -z "${lowered}" ]; then
+    return 1
+  fi
+  if [ "${HOSTNAME_CHECK_ENABLED}" -ne 1 ]; then
+    return 1
+  fi
+  local alias
+  local old_ifs="${IFS}"
+  IFS="$(printf '\n')"
+  for alias in ${SELF_HOSTNAME_ALIASES}; do
+    if [ "${lowered}" = "${alias}" ]; then
+      IFS="${old_ifs}"
+      return 0
+    fi
+  done
+  IFS="${old_ifs}"
+  return 1
+}
+
 parse_browse() {
   awk -v svc="${SERVICE_TYPE}" \
       -v expected_host="${EXPECTED_HOST}" \
@@ -471,57 +574,67 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     if [ -z "${srv_host}" ]; then
       last_reason="empty_srv_host"
     else
-      resolved="$(resolve_host "${srv_host}" || true)"
-      status=$?
-      resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
-      log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
-      if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
-        resolved_ipv4="${resolved##*|}"
-        resolved_any="${resolved%%|*}"
-        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-        readiness_required=0
-        if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
-          readiness_required=1
-        fi
-        socket_targets="$(build_socket_targets "${srv_host}" "${resolved_ipv4}" "${resolved_any}")"
-        socket_targets_escaped="$(printf '%s' "${socket_targets}" | sed 's/"/\\"/g')"
-        if [ "${readiness_required}" -eq 1 ]; then
-          if server_socket_ready "${srv_host}" "${resolved_any}" "${resolved_ipv4}"; then
-            socket_status="${MDNS_SOCKET_CHECK_STATUS:-ok}"
-            socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
-            [ -n "${socket_method}" ] || socket_method="unknown"
-            [ -n "${socket_status}" ] || socket_status="ok"
-            log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
-            log_info mdns_selfcheck outcome=confirmed check=server host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" readiness_method="${socket_method}" readiness_targets="${socket_targets}"
-            exit 0
-          fi
-          handshake_failed=1
-          socket_status="${MDNS_SOCKET_CHECK_STATUS:-fail}"
-          socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
-          [ -n "${socket_method}" ] || socket_method="unknown"
-          [ -n "${socket_status}" ] || socket_status="fail"
-          log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
-          if [ "${socket_status}" = "skipped" ]; then
-            last_reason="server_socket_unchecked"
-          else
-            last_reason="server_socket_unready"
-          fi
-        else
-          log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
-          exit 0
+      host_matches=1
+      if [ "${HOSTNAME_CHECK_ENABLED}" -eq 1 ]; then
+        if ! host_matches_self "${srv_host}"; then
+          host_matches=0
+          last_reason="srv_target_mismatch"
+          log_trace mdns_selfcheck_host attempt="${attempt}" host="${srv_host}" outcome=skip reason="${last_reason}"
         fi
       fi
-      if [ "${status}" -eq 2 ]; then
-        # IPv4 mismatch: signal to caller explicitly and avoid unnecessary retries
-        last_reason="ipv4_mismatch"
-        log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
-        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-        log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
-        exit 5
-      elif [ "${status}" -eq 0 ] && [ "${handshake_failed}" -eq 1 ]; then
-        :
-      else
-        last_reason="resolve_failed"
+      if [ "${host_matches}" -eq 1 ]; then
+        resolved="$(resolve_host "${srv_host}" || true)"
+        status=$?
+        resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
+        log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" "resolved=\"${resolved_for_trace}\""
+        if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
+          resolved_ipv4="${resolved##*|}"
+          resolved_any="${resolved%%|*}"
+          elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+          readiness_required=0
+          if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
+            readiness_required=1
+          fi
+          socket_targets="$(build_socket_targets "${srv_host}" "${resolved_ipv4}" "${resolved_any}")"
+          socket_targets_escaped="$(printf '%s' "${socket_targets}" | sed 's/"/\\"/g')"
+          if [ "${readiness_required}" -eq 1 ]; then
+            if server_socket_ready "${srv_host}" "${resolved_any}" "${resolved_ipv4}"; then
+              socket_status="${MDNS_SOCKET_CHECK_STATUS:-ok}"
+              socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
+              [ -n "${socket_method}" ] || socket_method="unknown"
+              [ -n "${socket_status}" ] || socket_status="ok"
+              log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
+              log_info mdns_selfcheck outcome=confirmed check=server host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" readiness_method="${socket_method}" readiness_targets="${socket_targets}"
+              exit 0
+            fi
+            handshake_failed=1
+            socket_status="${MDNS_SOCKET_CHECK_STATUS:-fail}"
+            socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
+            [ -n "${socket_method}" ] || socket_method="unknown"
+            [ -n "${socket_status}" ] || socket_status="fail"
+            log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
+            if [ "${socket_status}" = "skipped" ]; then
+              last_reason="server_socket_unchecked"
+            else
+              last_reason="server_socket_unready"
+            fi
+          else
+            log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}"
+            exit 0
+          fi
+        fi
+        if [ "${status}" -eq 2 ]; then
+          # IPv4 mismatch: signal to caller explicitly and avoid unnecessary retries
+          last_reason="ipv4_mismatch"
+          log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
+          elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          exit 5
+        elif [ "${status}" -eq 0 ] && [ "${handshake_failed}" -eq 1 ]; then
+          :
+        else
+          last_reason="resolve_failed"
+        fi
       fi
     fi
   else
@@ -539,7 +652,48 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     break
   fi
 
-  delay_ms="$(compute_delay_ms "${attempt}" "${BACKOFF_START_MS}" "${BACKOFF_CAP_MS}" "${JITTER_FRACTION}" || echo 0)"
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  case "${elapsed_ms}" in
+    ''|*[!0-9]*) elapsed_ms=0 ;;
+  esac
+
+  delay_ms=0
+  delay_mode="backoff"
+  use_backoff_delay=1
+
+  if [ "${ACTIVE_QUERY_ENABLED}" -eq 1 ] && [ "${ACTIVE_QUERY_WINDOW_MS}" -gt 0 ]; then
+    if [ "${elapsed_ms}" -lt "${ACTIVE_QUERY_WINDOW_MS}" ]; then
+      target_ms=""
+      case "${attempt}" in
+        1) target_ms=1000 ;;
+        2) target_ms=3000 ;;
+        3) target_ms="${ACTIVE_QUERY_WINDOW_MS}" ;;
+        *) target_ms="" ;;
+      esac
+      if [ -n "${target_ms}" ]; then
+        if [ "${target_ms}" -gt "${ACTIVE_QUERY_WINDOW_MS}" ]; then
+          target_ms="${ACTIVE_QUERY_WINDOW_MS}"
+        fi
+        delay_ms=$((target_ms - elapsed_ms))
+        if [ "${delay_ms}" -lt 0 ]; then
+          delay_ms=0
+        fi
+        delay_mode="active"
+        use_backoff_delay=0
+        if [ "${target_ms}" -ge "${ACTIVE_QUERY_WINDOW_MS}" ]; then
+          ACTIVE_QUERY_ENABLED=0
+        fi
+      else
+        ACTIVE_QUERY_ENABLED=0
+      fi
+    else
+      ACTIVE_QUERY_ENABLED=0
+    fi
+  fi
+
+  if [ "${use_backoff_delay}" -eq 1 ]; then
+    delay_ms="$(compute_delay_ms "${attempt}" "${BACKOFF_START_MS}" "${BACKOFF_CAP_MS}" "${JITTER_FRACTION}" || echo 0)"
+  fi
   case "${delay_ms}" in
     ''|*[!0-9]*) delay_ms=0 ;;
   esac
@@ -554,7 +708,7 @@ except ValueError:
 print('{:.3f}'.format(delay / 1000.0))
 PY
     )"
-    log_trace mdns_selfcheck_backoff attempt="${attempt}" delay_ms="${delay_ms}" delay_s="${delay_s}"
+    log_trace mdns_selfcheck_backoff attempt="${attempt}" delay_ms="${delay_ms}" delay_s="${delay_s}" mode="${delay_mode}"
     sleep "${delay_s}"
   fi
   attempt=$((attempt + 1))
