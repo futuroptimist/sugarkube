@@ -149,7 +149,8 @@ parse_browse() {
       -v expected_role="${EXPECTED_ROLE}" \
       -v expected_phase="${EXPECTED_PHASE}" \
       -v cluster="${SERVICE_CLUSTER}" \
-      -v env="${SERVICE_ENV}" '
+      -v env="${SERVICE_ENV}" \
+      -v sq="'" '
     function dequote(value,    first, last) {
       if (length(value) < 2) {
         return value
@@ -171,7 +172,7 @@ parse_browse() {
     function strip_and_trim(value) {
       value = dequote(value)
       gsub(/\\"/, "\"", value)
-      gsub(/\\'/, "'", value)
+      gsub(/\\\047/, sq, value)
       gsub(/\\\\/, "\\", value)
       value = dequote(value)
       return trim(value)
