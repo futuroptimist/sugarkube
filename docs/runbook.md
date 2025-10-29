@@ -32,6 +32,17 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
    sudo k3s etcdctl endpoint status --cluster --write-out=table
    ```
 
+### kube-proxy backend selection
+
+- Kubernetes **v1.33** promotes the kube-proxy nftables backend to GA, so Sugarkube now ships a
+  drop-in at `systemd/etc/rancher/k3s/config.yaml.d/11-sugarkube-proxy-mode.yaml` that sets
+  `proxy-mode=nftables` for k3s.
+- On clusters pinned to Kubernetes versions older than 1.33 the parity check automatically falls
+  back to the legacy iptables mode and emits a warning so bootstrap can proceed.
+- To override the mode manually, adjust the drop-in (or add a higher-numbered file alongside it)
+  and restart k3s, or export `INSTALL_K3S_EXEC="... --kube-proxy-arg proxy-mode=<mode>"` before
+  running the installers.
+
 ## 2. Deploy kube-vip and verify the virtual IP
 
 1. Apply the `kube-vip` manifest once the first node is up so that the virtual IP is available
