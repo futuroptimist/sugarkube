@@ -25,9 +25,11 @@ EOS
 stub_avahi_browse_with_fixtures() {
   local main_fixture="$1"
   local services_fixture="$2"
-  AVAHI_BROWSE_MAIN_FIXTURE="${main_fixture}" \
-    AVAHI_BROWSE_SERVICES_FIXTURE="${services_fixture}" \
-    stub_command avahi-browse <<'EOS'
+  export \
+    AVAHI_BROWSE_MAIN_FIXTURE="${main_fixture}" \
+    AVAHI_BROWSE_SERVICES_FIXTURE="${services_fixture}"
+
+  stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
 
