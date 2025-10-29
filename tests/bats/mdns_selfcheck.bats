@@ -81,6 +81,7 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=100 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=100 \
+    LOG_LEVEL=debug \
     SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
@@ -88,6 +89,7 @@ EOS
   [[ "$output" =~ event=mdns_selfcheck ]]
   [[ "$output" =~ host=sugarkube0.local ]]
   [[ "$output" =~ ipv4=192.168.3.10 ]]
+  [[ "$stderr" =~ available_types="_http._tcp,_k3s-sugar-dev._tcp,_ssh._tcp" ]]
 }
 
 @test "mdns self-check warns when enumeration misses but browse succeeds" {
