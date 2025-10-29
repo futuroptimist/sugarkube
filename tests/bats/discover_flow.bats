@@ -300,3 +300,25 @@ EOS
   [ "$status" -eq 124 ]
   [[ "$output" =~ outcome=follower ]]
 }
+
+@test "Avahi check warns on IPv4 suffix and can auto-fix" {
+  conf_path="${BATS_TEST_TMPDIR}/avahi-daemon.conf"
+  cat <<'CONF' >"${conf_path}"
+[server]
+allow-interfaces=eth0.IPv4
+CONF
+
+  run env AVAHI_CONF_PATH="${conf_path}" "${BATS_CWD}/scripts/check_avahi_config_effective.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning=allow_interfaces_suffix"* ]]
+  [[ "$output" == *"allow_interfaces=eth0"* ]]
+  run cat "${conf_path}"
+  [[ "$output" == *"eth0.IPv4"* ]]
+
+  run env AVAHI_CONF_PATH="${conf_path}" SUGARKUBE_FIX_AVAHI=1 "${BATS_CWD}/scripts/check_avahi_config_effective.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning=allow_interfaces_suffix"* ]]
+  [[ "$output" == *"fix_applied=allow_interfaces_suffix"* ]]
+  run cat "${conf_path}"
+  [[ "$output" == *"allow-interfaces=eth0"* ]]
+}

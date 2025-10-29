@@ -13,6 +13,9 @@ FORCE_IPV4_ONLY="${SUGARKUBE_MDNS_IPV4_ONLY:-0}"
 ALLOW_INTERFACES_OVERRIDE="${SUGARKUBE_AVAHI_ALLOW_INTERFACES:-}"
 PREFERRED_IFACE="${SUGARKUBE_MDNS_INTERFACE:-}"
 DISABLE_WLAN_DURING_BOOTSTRAP="${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECK_AVAHI_BIN="${SUGARKUBE_CHECK_AVAHI_BIN:-${SCRIPT_DIR}/check_avahi_config_effective.sh}"
+STRICT_AVAHI="${SUGARKUBE_STRICT_AVAHI:-0}"
 # Temporary file used during atomic write; referenced by EXIT trap safely
 TMP_AVAHI_TMPFILE=""
 
@@ -75,6 +78,121 @@ restart_avahi_if_needed() {
   else
     log "avahi-daemon not active; skipping restart"
   fi
+}
+
+run_avahi_effective_check() {
+  local target_conf="${1:-${CONF}}"
+
+  if [ ! -x "${CHECK_AVAHI_BIN}" ]; then
+    log "Avahi config check helper ${CHECK_AVAHI_BIN} not executable; skipping"
+    return 0
+  fi
+
+  local use_ipv4="" use_ipv6="" allow_interfaces="" deny_interfaces=""
+  local disable_publishing="" enable_dbus=""
+  local -a warning_codes=()
+  local -a strict_hints=()
+  local -A hint_seen=()
+
+  local check_output=""
+  check_output="$(AVAHI_CONF_PATH="${target_conf}" "${CHECK_AVAHI_BIN}" 2>&1)"
+  local status=$?
+  if [ "${status}" -ne 0 ]; then
+    log "Avahi config check failed with status ${status}: ${check_output}"
+    return "${status}"
+  fi
+
+  local line
+  while IFS= read -r line; do
+    if [ -z "${line}" ]; then
+      continue
+    fi
+    case "${line}" in
+      use_ipv4=*)
+        use_ipv4="${line#use_ipv4=}"
+        ;;
+      use_ipv6=*)
+        use_ipv6="${line#use_ipv6=}"
+        ;;
+      allow_interfaces=*)
+        allow_interfaces="${line#allow_interfaces=}"
+        ;;
+      deny_interfaces=*)
+        deny_interfaces="${line#deny_interfaces=}"
+        ;;
+      disable_publishing=*)
+        disable_publishing="${line#disable_publishing=}"
+        ;;
+      enable_dbus=*)
+        enable_dbus="${line#enable_dbus=}"
+        ;;
+      warning=*)
+        local payload code message hint
+        payload="${line#warning=}"
+        if [[ "${payload}" == *"|"* ]]; then
+          code="${payload%%|*}"
+          message="${payload#*|}"
+        else
+          code="${payload}"
+          message="${payload}"
+        fi
+        log "Avahi config warning (${code}): ${message}"
+        warning_codes+=("${code}")
+        hint=""
+        case "${code}" in
+          allow_interfaces_suffix)
+            hint="Set SUGARKUBE_FIX_AVAHI=1 or remove .IPv4/.IPv6 suffixes from allow-interfaces."
+            ;;
+          disable_publishing)
+            hint="Set disable-publishing=no or remove the directive to allow publishing."
+            ;;
+          dbus_disabled)
+            hint="Set enable-dbus=yes so Avahi can register services."
+            ;;
+          protocols_disabled)
+            hint="Enable at least one of use-ipv4 or use-ipv6 for mDNS traffic."
+            ;;
+          allow_interfaces_fix_failed)
+            hint="Review file permissions and update allow-interfaces manually."
+            ;;
+        esac
+        if [ -n "${hint}" ]; then
+          if [ -z "${hint_seen["${hint}"]+x}" ]; then
+            strict_hints+=("${hint}")
+            hint_seen["${hint}"]=1
+          fi
+        fi
+        ;;
+      fix_applied=*)
+        local fix_code
+        fix_code="${line#fix_applied=}"
+        log "Avahi config auto-fix applied: ${fix_code}"
+        ;;
+    esac
+  done <<<"${check_output}"
+
+  log_kv avahi_config_effective \
+    "use_ipv4=${use_ipv4}" \
+    "use_ipv6=${use_ipv6}" \
+    "allow=${allow_interfaces}" \
+    "deny=${deny_interfaces}" \
+    "disable_publishing=${disable_publishing}" \
+    "enable_dbus=${enable_dbus}"
+
+  if [ "${STRICT_AVAHI}" = "1" ] && [ "${#warning_codes[@]}" -gt 0 ]; then
+    local hint_message="See Avahi warnings above."
+    if [ "${#strict_hints[@]}" -gt 0 ]; then
+      hint_message="${strict_hints[0]}"
+      local idx
+      for idx in "${strict_hints[@]:1}"; do
+        hint_message+="; ${idx}"
+      done
+    fi
+    log "Strict Avahi validation failed; ${hint_message}"
+    return 1
+  fi
+
+  return 0
 }
 
 determine_auto_allow_interface() {
@@ -338,6 +456,11 @@ main() {
   fi
   if [ -n "${owner}" ] && [ -n "${group}" ]; then
     chown "${owner}:${group}" "${tmp}" || true
+  fi
+
+  if ! run_avahi_effective_check "${tmp}"; then
+    log "Avahi configuration validation failed after update attempt"
+    return 1
   fi
 
   local before_hash="" after_hash="" outcome="skipped"
