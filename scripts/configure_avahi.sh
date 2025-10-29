@@ -20,6 +20,11 @@ AVAHI_HOSTS_PATH="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
 EXPECTED_IPV4="${SUGARKUBE_EXPECTED_IPV4:-}"
 MDNS_HOSTNAME="${SUGARKUBE_MDNS_HOSTNAME:-${HOSTNAME:-}}"
 AVAHI_HOSTS_OUTCOME="skipped"
+# Unless explicitly disabled, force enable-dbus=yes so Avahi exposes D-Bus.
+FORCE_ENABLE_DBUS=1
+if [ "${SUGARKUBE_AVAHI_DBUS_DISABLED:-0}" = "1" ]; then
+  FORCE_ENABLE_DBUS=0
+fi
 # Temporary file used during atomic write; referenced by EXIT trap safely
 TMP_AVAHI_TMPFILE=""
 
@@ -370,7 +375,8 @@ update_config() {
     "${PUBLISH_WORKSTATION}" \
     "${allow_mode}" \
     "${allow_value}" \
-    "${FORCE_IPV4_ONLY}"
+    "${FORCE_IPV4_ONLY}" \
+    "${FORCE_ENABLE_DBUS}"
 import sys
 from pathlib import Path
 
@@ -381,6 +387,7 @@ try:
     allow_mode = sys.argv[4]
     allow_value = sys.argv[5]
     force_ipv4_only = sys.argv[6] in ("1", "true", "yes")
+    force_enable_dbus = sys.argv[7] not in ("0", "false", "no")
 
     if src_path.exists():
         try:
@@ -399,6 +406,7 @@ try:
     allow_written = False
     v4_written = False
     v6_written = False
+    enable_dbus_written = False
 
     for line in original_lines:
         stripped = line.strip()
@@ -420,6 +428,15 @@ try:
             if allow_mode == "set":
                 new_lines.append(f"allow-interfaces={allow_value}")
                 allow_written = True
+            continue
+
+        if section == "server" and key == "enable-dbus":
+            if force_enable_dbus:
+                new_lines.append("enable-dbus=yes")
+                enable_dbus_written = True
+                continue
+            enable_dbus_written = True
+            new_lines.append(line)
             continue
 
         if section == "server" and key == "use-ipv4":
@@ -473,6 +490,17 @@ try:
                 continue
             filtered_lines.append(line)
         new_lines = filtered_lines
+
+    if force_enable_dbus and not enable_dbus_written:
+        header, _, end = ensure_section(new_lines, "server")
+        if header is not None:
+            insert_at = end if end is not None else len(new_lines)
+            new_lines.insert(insert_at, "enable-dbus=yes")
+        else:
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("")
+            new_lines.append("[server]")
+            new_lines.append("enable-dbus=yes")
 
     if publish_section_found:
         if not publish_written:
