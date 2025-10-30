@@ -45,6 +45,7 @@ else
   service_file="${service_dir}/k3s-${cluster}-${environment}.service"
 fi
 service_dir="$(dirname "${service_file}")"
+SERVICE_TYPE="_k3s-${cluster}-${environment}._tcp"
 
 install -d -m 755 "${service_dir}"
 
@@ -63,20 +64,50 @@ ensure_mdns_target_resolvable() {
   fi
 
   local resolve_cmd=("avahi-resolve-host-name" "${SRV_HOST}" -4 "--timeout=1")
-
-  if "${resolve_cmd[@]}" >/dev/null 2>&1; then
-    return 0
-  fi
-
   local hosts_path="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
   local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-}"
+  local nss_ok=0
+  local resolve_ok=0
+  local browse_ok=0
+  local outcome="fail"
+  local hosts_updated=0
+  local avahi_hostname_ran=0
 
-  if [ -z "${expected_ipv4}" ]; then
+  gather_resolution_status() {
+    nss_ok=0
+    resolve_ok=0
+
+    if command -v getent >/dev/null 2>&1; then
+      local getent_ipv4=""
+      getent_ipv4="$(getent hosts "${SRV_HOST}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+      if [ -n "${getent_ipv4}" ]; then
+        if [ -n "${expected_ipv4}" ] && [ "${getent_ipv4}" != "${expected_ipv4}" ]; then
+          nss_ok=0
+        else
+          nss_ok=1
+        fi
+      fi
+    fi
+
+    if "${resolve_cmd[@]}" >/dev/null 2>&1; then
+      resolve_ok=1
+    fi
+
+    if [ "${nss_ok}" = "1" ] || [ "${resolve_ok}" = "1" ]; then
+      return 0
+    fi
+    return 1
+  }
+
+  ensure_expected_ipv4() {
+    if [ -n "${expected_ipv4}" ]; then
+      return 0
+    fi
+
     local iface addr_candidates
     iface="${SUGARKUBE_MDNS_INTERFACE:-}"
     addr_candidates="$(hostname -I 2>/dev/null || true)"
-    expected_ipv4="$(
-      python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+    expected_ipv4="$(python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
 import ipaddress
 import json
 import subprocess
@@ -285,35 +316,38 @@ if selected:
     print(selected)
 PY
     )"
-  fi
+    if [ -z "${expected_ipv4}" ]; then
+      echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
+      return 1
+    fi
+    return 0
+  }
 
-  if [ -z "${expected_ipv4}" ]; then
-    echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
-    return 1
-  fi
+  update_hosts_file() {
+    if ! ensure_expected_ipv4; then
+      return 1
+    fi
 
-  local hosts_dir mode owner group tmp hosts_changed=0
-  hosts_dir="$(dirname "${hosts_path}")"
-  install -d -m 755 "${hosts_dir}"
+    local hosts_dir owner group tmp hosts_changed=0
+    hosts_dir="$(dirname "${hosts_path}")"
+    install -d -m 755 "${hosts_dir}"
 
-  if [ -e "${hosts_path}" ]; then
-    mode="$(stat -c '%a' "${hosts_path}" 2>/dev/null || echo '')"
-    owner="$(stat -c '%u' "${hosts_path}" 2>/dev/null || echo '')"
-    group="$(stat -c '%g' "${hosts_path}" 2>/dev/null || echo '')"
-  else
-    mode=""
-    owner=""
-    group=""
-    touch "${hosts_path}"
-    hosts_changed=1
-  fi
+    if [ -e "${hosts_path}" ]; then
+      owner="$(stat -c '%u' "${hosts_path}" 2>/dev/null || echo '')"
+      group="$(stat -c '%g' "${hosts_path}" 2>/dev/null || echo '')"
+    else
+      owner=""
+      group=""
+      : >"${hosts_path}"
+      hosts_changed=1
+    fi
 
-  tmp="$(mktemp "${hosts_path}.XXXXXX")"
-  python3 - <<'PY' \
-    "${hosts_path}" \
-    "${tmp}" \
-    "${SRV_HOST}" \
-    "${expected_ipv4}"
+    tmp="$(mktemp "${hosts_path}.XXXXXX")" || return 1
+    if ! python3 - <<'PY' \
+      "${hosts_path}" \
+      "${tmp}" \
+      "${SRV_HOST}" \
+      "${expected_ipv4}"
 import ipaddress
 import sys
 from pathlib import Path
@@ -359,38 +393,119 @@ new_lines.append(f"{ipv4} {hostname}")
 content = "\n".join(new_lines).rstrip("\n") + "\n"
 dst_path.write_text(content, encoding="utf-8")
 PY
+    then
+      rm -f "${tmp}"
+      return 1
+    fi
 
-  if [ ! -f "${tmp}" ]; then
-    echo "Failed to build Avahi hosts temp file" >&2
-    return 1
-  fi
+    if [ ! -f "${tmp}" ]; then
+      echo "Failed to build Avahi hosts temp file" >&2
+      return 1
+    fi
 
-  if [ -f "${hosts_path}" ] && cmp -s "${hosts_path}" "${tmp}"; then
-    rm -f "${tmp}"
-  else
-    hosts_changed=1
-    if [ -n "${mode}" ]; then
-      chmod "${mode}" "${tmp}"
+    if [ -f "${hosts_path}" ] && cmp -s "${hosts_path}" "${tmp}"; then
+      rm -f "${tmp}"
+      chmod 0644 "${hosts_path}" 2>/dev/null || true
     else
+      hosts_changed=1
       chmod 0644 "${tmp}"
+      if [ -n "${owner}" ] && [ -n "${group}" ]; then
+        chown "${owner}:${group}" "${tmp}" || true
+      fi
+      mv "${tmp}" "${hosts_path}"
     fi
-    if [ -n "${owner}" ] && [ -n "${group}" ]; then
-      chown "${owner}:${group}" "${tmp}" || true
+
+    if [ "${hosts_changed}" = "1" ] && [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+      systemctl reload avahi-daemon || systemctl restart avahi-daemon || true
     fi
-    mv "${tmp}" "${hosts_path}"
+
+    return 0
+  }
+
+  run_avahi_set_host_name() {
+    if [ "${avahi_hostname_ran}" = "1" ]; then
+      return 0
+    fi
+    if ! command -v avahi-set-host-name >/dev/null 2>&1; then
+      return 0
+    fi
+
+    local raw_host
+    raw_host="$(hostname 2>/dev/null || true)"
+    raw_host="${raw_host%%.*}"
+    if [ -z "${raw_host}" ]; then
+      raw_host="${SRV_HOST%.local}"
+    fi
+    raw_host="${raw_host%.local}"
+    local avahi_host="${raw_host}.local"
+    if [ -z "${avahi_host}" ]; then
+      avahi_host="${SRV_HOST}"
+    fi
+    avahi-set-host-name "${avahi_host}" >/dev/null 2>&1 || true
+    avahi_hostname_ran=1
+  }
+
+  check_browse_status() {
+    browse_ok=0
+    if ! command -v avahi-browse >/dev/null 2>&1; then
+      return 1
+    fi
+
+    local browse_output=""
+    if ! browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" 2>/dev/null)"; then
+      return 1
+    fi
+    if [ -z "${browse_output}" ]; then
+      return 1
+    fi
+    if printf '%s\n' "${browse_output}" | grep -Fq "${SRV_HOST}"; then
+      browse_ok=1
+      return 0
+    fi
+    browse_ok=1
+    return 0
+  }
+
+  emit_resolution_status() {
+    local status_action="$1"
+    [ -n "${status_action}" ] || status_action="fail"
+    printf 'mdns resolution status action=%s nss_ok=%s resolve_ok=%s browse_ok=%s hosts_updated=%s\n' \
+      "${status_action}" "${nss_ok}" "${resolve_ok}" "${browse_ok}" "${hosts_updated}" >&2
+  }
+
+  if gather_resolution_status; then
+    outcome="ok"
+  else
+    if update_hosts_file; then
+      hosts_updated=1
+    fi
+    if gather_resolution_status; then
+      outcome="ok"
+    fi
   fi
 
-  if [ "${hosts_changed}" = "1" ] && [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
-    systemctl reload avahi-daemon || systemctl restart avahi-daemon || true
+  if [ "${outcome}" != "ok" ]; then
+    run_avahi_set_host_name
+    if gather_resolution_status; then
+      outcome="ok"
+    fi
   fi
 
-  if ! "${resolve_cmd[@]}" >/dev/null 2>&1; then
-    echo "mDNS resolution for ${SRV_HOST} still failing after hosts update" >&2
+  check_browse_status || true
+
+  if [ "${outcome}" != "ok" ] && [ "${browse_ok}" = "1" ]; then
+    outcome="warn"
+  fi
+
+  emit_resolution_status "${outcome}"
+
+  if [ "${outcome}" = "fail" ]; then
     return 1
   fi
 
   return 0
 }
+
 
 wait_for_avahi_publication() {
   local service_display timeout_seconds start_epoch pattern deadline now journal_output
