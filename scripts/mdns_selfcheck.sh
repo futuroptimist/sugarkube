@@ -80,6 +80,20 @@ print(elapsed)
 PY
 }
 
+extract_wait_field() {
+  key="$1"
+  awk -v prefix="${key}=" '
+    {
+      for (i = 1; i <= NF; ++i) {
+        if (index($i, prefix) == 1) {
+          print substr($i, length(prefix) + 1)
+          exit
+        }
+      }
+    }
+  '
+}
+
 case "${ATTEMPTS}" in
   ''|*[!0-9]*) ATTEMPTS=1 ;;
   0) ATTEMPTS=1 ;;
@@ -142,8 +156,10 @@ if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
         log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_skipped fallback=cli
         ;;
       1)
-        if printf '%s\n' "${avahi_wait_output}" | grep -Eq \
-          'reason=systemd_unavailable|systemd_detail=.*(System_has_not_been_booted_with_systemd|Systemd_service_manager_is_not_running|Failed_to_connect_to_bus|Failed_to_get_D-Bus_connection|No_such_file_or_directory)'; then
+        wait_reason="$(printf '%s\n' "${avahi_wait_output}" | extract_wait_field reason || true)"
+        wait_systemd_detail="$(printf '%s\n' "${avahi_wait_output}" | extract_wait_field systemd_detail || true)"
+        if [ "${wait_reason}" = "systemd_unavailable" ] || { [ -n "${wait_systemd_detail}" ] && printf '%s\n' "${wait_systemd_detail}" | grep -Ei \
+          'System_has_not_been_booted_with_systemd|Systemd_service_manager_is_not_running|Failed_to_connect_to_bus|Failed_to_get_D-Bus_connection|No_such_file_or_directory' >/dev/null; }; then
           log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_systemd_unavailable fallback=cli
         else
           elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
