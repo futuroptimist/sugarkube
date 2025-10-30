@@ -640,7 +640,7 @@ resolve_self_ipv4() {
   fi
 
   local output
-  if ! output="$(run_command_capture avahi_resolve_self avahi-resolve -4 "${host}")"; then
+  if ! output="$(run_command_capture avahi_resolve_self avahi-resolve -4 -n "${host}")"; then
     return 1
   fi
 
