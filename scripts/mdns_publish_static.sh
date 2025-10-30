@@ -2,6 +2,12 @@
 # shellcheck disable=SC1091  # optional helper libraries resolve at runtime
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/fs.sh
+. "${SCRIPT_DIR}/lib/fs.sh"
+
+fs::ensure_umask 022
+
 cluster="${SUGARKUBE_CLUSTER:?SUGARKUBE_CLUSTER is required}"
 environment="${SUGARKUBE_ENV:?SUGARKUBE_ENV is required}"
 : "${HOSTNAME:?HOSTNAME is required}"
@@ -42,6 +48,14 @@ fi
 service_dir="$(dirname "${service_file}")"
 
 install -d -m 755 "${service_dir}"
+
+service_tmp_file=""
+cleanup_service_tmp() {
+  if [ -n "${service_tmp_file}" ] && [ -e "${service_tmp_file}" ]; then
+    rm -f "${service_tmp_file}"
+  fi
+}
+trap cleanup_service_tmp EXIT
 
 ensure_mdns_target_resolvable() {
   if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
@@ -379,13 +393,80 @@ PY
   return 0
 }
 
+wait_for_avahi_publication() {
+  local service_display timeout_seconds start_epoch pattern deadline now journal_output
+  service_display="$1"
+  timeout_seconds="$2"
+  start_epoch="$3"
+
+  case "${timeout_seconds}" in
+    ''|*[!0-9]*)
+      timeout_seconds=20
+      ;;
+  esac
+
+  if ! command -v journalctl >/dev/null 2>&1; then
+    echo "journalctl not available; skipping Avahi publication confirmation" >&2
+    return 0
+  fi
+
+  pattern="Service \"${service_display}\" successfully established."
+  deadline=$(( $(date +%s) + timeout_seconds ))
+
+  while true; do
+    now=$(date +%s)
+    if [ "${now}" -gt "${deadline}" ]; then
+      echo "Timed out waiting for Avahi to publish ${service_display}" >&2
+      return 1
+    fi
+
+    if journal_output="$(journalctl -u avahi-daemon --since "@${start_epoch}" --no-pager 2>/dev/null)"; then
+      if grep -Fq "${pattern}" <<<"${journal_output}"; then
+        return 0
+      fi
+    else
+      echo "journalctl query failed; skipping Avahi publication confirmation" >&2
+      return 0
+    fi
+
+    sleep 1
+  done
+}
+
+reload_avahi_daemon() {
+  local service_display timeout_seconds start_epoch
+  service_display="$1"
+  timeout_seconds="$2"
+
+  case "${timeout_seconds}" in
+    ''|*[!0-9]*)
+      timeout_seconds=20
+      ;;
+  esac
+
+  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ] || ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  start_epoch=$(($(date +%s) - 1))
+
+  if ! systemctl reload avahi-daemon; then
+    if ! systemctl restart avahi-daemon; then
+      echo "Failed to reload or restart avahi-daemon" >&2
+      return 1
+    fi
+  fi
+
+  wait_for_avahi_publication "${service_display}" "${timeout_seconds}" "${start_epoch}"
+}
+
 if ! ensure_mdns_target_resolvable; then
   echo "Unable to ensure ${HOSTNAME} is resolvable via mDNS" >&2
   exit 1
 fi
 
-tmp_file="$(mktemp "${service_dir}/.k3s-mdns.XXXXXX")"
-python3 - "$tmp_file" <<'PY'
+service_tmp_file="$(mktemp "${service_dir}/.k3s-mdns.XXXXXX")"
+python3 - "${service_tmp_file}" <<'PY'
 import html
 import os
 import sys
@@ -429,9 +510,13 @@ with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write("</service-group>\n")
 PY
 
-install -m 644 "${tmp_file}" "${service_file}"
-rm -f "${tmp_file}"
-
-if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
-  systemctl reload avahi-daemon || systemctl restart avahi-daemon || true
+if [ ! -f "${service_tmp_file}" ]; then
+  echo "Failed to render Avahi service definition" >&2
+  exit 1
 fi
+
+fs::atomic_install "${service_tmp_file}" "${service_file}" 0644 root root
+service_tmp_file=""
+
+service_display="k3s-${cluster}-${environment}@${SRV_HOST} (${role})"
+reload_avahi_daemon "${service_display}" "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-20}"

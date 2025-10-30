@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+umask 022
+
 CONF="${AVAHI_CONF_PATH:-/etc/avahi/avahi-daemon.conf}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN-systemctl}"
 LOG_DIR="${SUGARKUBE_LOG_DIR:-/var/log/sugarkube}"
