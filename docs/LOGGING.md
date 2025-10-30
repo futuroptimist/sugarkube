@@ -39,6 +39,12 @@ When mDNS self-checks fail `scripts/net_diag.sh` emits
 These highlights make it clear whether Avahi accepted the service definition or
 rejected it while still preserving the raw journal for deeper inspection.
 
+Avahi only notices new `.service` files when they are moved atomically into
+`/etc/avahi/services/`. Use `install -m0644` (or copy into a temporary path and
+rename) so the daemon never parses half-written XML. Because the daemon runs in
+a chroot, journal messages cite `/services/<name>.service`; prepend
+`/etc/avahi` when locating the file on the host.
+
 Each discovery log line carries an `ms_elapsed` field representing the time
 between starting the Avahi browse/resolve cycle and receiving a final answer.
 Values under 200 ms are typical on a quiet LAN with K3s’ default
@@ -67,3 +73,28 @@ LOG_LEVEL=trace scripts/k3s-discover.sh
 The `info` level keeps successful bootstrap runs to a handful of high-signal
 lines while still surfacing warnings and errors. Use `debug` or `trace` when
 investigating discovery failures or election behavior.
+
+## End-of-run summaries
+
+`pi_node_verifier.sh` appends a Markdown block to `/boot/first-boot-report.txt`
+whenever logging is enabled. The generated table mirrors the CLI output and the
+JSON export, so you can diff results across runs:
+
+```markdown
+### Verifier Checks
+
+| Check | Status |
+| --- | --- |
+| iptables_backend | pass |
+| k3s_node_ready | fail |
+```
+
+Status semantics match the console output:
+
+- `pass` — prerequisite satisfied. Expect this once kube-proxy runs in nft mode
+  (GA as of Kubernetes v1.33).
+- `fail` — intervention required before continuing the runbook.
+- `skip` — the probe could not run and should be revisited later.
+
+When nftables mode is configured the `iptables_backend` check logs `pass`,
+avoiding the high-priority warning that accompanied the legacy backend.

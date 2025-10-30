@@ -25,7 +25,9 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 > `systemd/etc/rancher/k3s/config.yaml.d/11-sugarkube-proxy-mode.yaml`. Older
 > clusters can override the drop-in (or set `K3S_KUBE_PROXY_MODE=iptables`
 > before rerunning the installer) to stick with the legacy iptables proxy if
-> necessary.
+> necessary. When the drop-in is present `pi_node_verifier` records
+> `iptables_backend: pass`, which downgrades the legacy-backend warning that
+> appeared in earlier images.
 3. Start k3s on the first control-plane:
 
    ```bash
@@ -93,6 +95,23 @@ normal on a quiet LAN with the default Flannel VXLAN overlay. Sustained values
 in the hundreds of milliseconds indicate congestion or multicast drops—enable
 `SUGARKUBE_DEBUG_MDNS=1` to capture Avahi traces and
 `SUGARKUBE_MDNS_DBUS=0` to fall back to the CLI path if D-Bus is blocked.
+
+### mDNS Troubleshooting (Avahi)
+
+- **Atomic publish:** Write Avahi service definitions to a temporary file and
+  rename them into `/etc/avahi/services/`. Avahi only reacts to atomic moves,
+  so `install -m0644 foo.service /etc/avahi/services/` (or `cp` to a temp path
+  followed by `mv`) avoids partially written XML.
+- **File permissions:** Service manifests must be readable by the chrooted
+  daemon. Keep them at mode `0644`; stricter permissions cause
+  `failed_to_read_service_file` journal warnings.
+- **Chrooted paths:** Avahi logs paths under `/services/…` because the daemon
+  chroots into `/var/run/avahi-daemon/`. Treat those prefixes as relative to
+  the chroot when mapping back to the host filesystem.
+- **Static host publishes:** `/etc/avahi/hosts` uses the same
+  `IP-address hostname` format as `/etc/hosts`, but the entries are published
+  over mDNS by Avahi—they are not a Name Service Switch guarantee. Keep the
+  list short and rely on dynamic service files for SRV/TXT records.
 
 ## 4. Bootstrap Flux and secrets
 
@@ -193,6 +212,50 @@ just status
 kubectl -n kube-system get daemonset kube-vip
 kubectl -n kube-system get svc traefik
 ```
+
+### Verifier summary block and tests
+
+Successful `pi_node_verifier.sh` runs append a Markdown report to
+`/boot/first-boot-report.txt` (or a custom `--log` path). The block captures
+inventory details followed by a table of checks:
+
+```markdown
+## 2025-01-17T22:48:12Z
+
+* Hostname: `pi-01`
+* Kernel: `Linux 6.6.23-v8+`
+* Hardware: `Raspberry Pi 5 Model B`
+
+### Verifier Checks
+
+| Check | Status |
+| --- | --- |
+| cgroup_memory | pass |
+| iptables_backend | pass |
+| k3s_node_ready | pass |
+
+### Migration Steps
+
+_No migration steps recorded yet._
+```
+
+Status values map to runtime expectations:
+
+- `pass` — prerequisite satisfied (for example the nftables backend is active).
+- `fail` — action required before declaring the node healthy.
+- `skip` — probe could not run because a dependency was unavailable (for
+  example no kubeconfig on the first control-plane).
+
+Run the Bats suites locally to exercise the CLI without waiting on CI:
+
+```bash
+bats tests/pi_node_verifier_output_test.bats
+bats tests/pi_node_verifier_json_test.bats
+AVAHI_AVAILABLE=1 bats tests/bats/mdns_selfcheck.bats
+```
+
+The checks target the end-of-run summary and status semantics, ensuring the
+Markdown and JSON exports stay consistent across releases.
 
 ## 6. Backups and restore procedures
 
