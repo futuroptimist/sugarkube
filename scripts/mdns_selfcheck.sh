@@ -80,18 +80,51 @@ print(elapsed)
 PY
 }
 
-extract_wait_field() {
-  key="$1"
-  awk -v prefix="${key}=" '
-    {
-      for (i = 1; i <= NF; ++i) {
-        if (index($i, prefix) == 1) {
-          print substr($i, length(prefix) + 1)
-          exit
-        }
-      }
-    }
-  '
+MDNS_RESOLUTION_STATUS_LOGGED=0
+MDNS_RESOLUTION_STATUS_NSS=0
+MDNS_RESOLUTION_STATUS_RESOLVE=0
+MDNS_RESOLUTION_STATUS_BROWSE=0
+
+mdns_resolution_status_emit() {
+  local outcome="$1"
+  shift || true
+  [ -n "${outcome}" ] || outcome="unknown"
+  if [ "${MDNS_RESOLUTION_STATUS_LOGGED}" = "1" ]; then
+    return 0
+  fi
+  log_info \
+    mdns_resolution_status \
+    outcome="${outcome}" \
+    nss_ok="${MDNS_RESOLUTION_STATUS_NSS}" \
+    resolve_ok="${MDNS_RESOLUTION_STATUS_RESOLVE}" \
+    browse_ok="${MDNS_RESOLUTION_STATUS_BROWSE}" \
+    "$@"
+  MDNS_RESOLUTION_STATUS_LOGGED=1
+}
+
+mdns_check_nss_host() {
+  local host="$1"
+  local expected_ipv4="$2"
+
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+  if ! command -v getent >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local resolved=""
+  resolved="$(getent hosts "${host}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+  if [ -z "${resolved}" ]; then
+    return 1
+  fi
+
+  if [ -n "${expected_ipv4}" ] && [ "${resolved}" != "${expected_ipv4}" ]; then
+    return 2
+  fi
+
+  printf '%s' "${resolved}"
+  return 0
 }
 
 case "${ATTEMPTS}" in
@@ -867,6 +900,19 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
         fi
       fi
       if [ "${host_matches}" -eq 1 ]; then
+        MDNS_RESOLUTION_STATUS_BROWSE=1
+        local nss_ok=0
+        local nss_rc=1
+        if mdns_check_nss_host "${srv_host}" "${EXPECTED_IPV4}" >/dev/null 2>&1; then
+          nss_ok=1
+          nss_rc=0
+        else
+          nss_rc=$?
+        fi
+        if [ "${nss_rc}" -eq 2 ]; then
+          log_debug mdns_selfcheck_nss attempt="${attempt}" host="${srv_host}" outcome=mismatch expected_ipv4="${EXPECTED_IPV4}" >&2
+        fi
+        MDNS_RESOLUTION_STATUS_NSS="${nss_ok}"
         cli_status=3
         cli_ipv4=""
         if [ -n "${EXPECTED_IPV4}" ]; then
@@ -883,6 +929,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
           elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
           log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          mdns_resolution_status_emit fail attempt="${attempt}" host="${srv_host}" reason="${last_reason}"
           exit 5
         fi
 
@@ -900,6 +947,12 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
         resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
         log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" method="${resolution_method}" "resolved=\"${resolved_for_trace}\""
 
+        if [ "${status}" -eq 0 ]; then
+          MDNS_RESOLUTION_STATUS_RESOLVE=1
+        else
+          MDNS_RESOLUTION_STATUS_RESOLVE=0
+        fi
+
         if [ "${status}" -eq 0 ] && [ -n "${resolved}" ]; then
           resolved_ipv4="${resolved##*|}"
           resolved_any="${resolved%%|*}"
@@ -910,6 +963,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           fi
 
           if [ "${cli_status}" -eq 0 ] && [ "${readiness_required}" -ne 1 ]; then
+            mdns_resolution_status_emit ok attempt="${attempt}" host="${srv_host}" resolve_method="${resolution_method}"
             log_info mdns_selfcheck outcome=confirmed check=cli host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
             exit 0
           fi
@@ -923,6 +977,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
               [ -n "${socket_method}" ] || socket_method="unknown"
               [ -n "${socket_status}" ] || socket_status="ok"
               log_trace mdns_selfcheck_socket attempt="${attempt}" host="${srv_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "targets=\"${socket_targets_escaped}\""
+              mdns_resolution_status_emit ok attempt="${attempt}" host="${srv_host}" resolve_method="${resolution_method}" readiness_method="${socket_method}"
               log_info mdns_selfcheck outcome=confirmed check=server host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" readiness_method="${socket_method}" readiness_targets="${socket_targets}" resolve_method="${resolution_method}"
               exit 0
             fi
@@ -938,6 +993,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
               last_reason="server_socket_unready"
             fi
           else
+            mdns_resolution_status_emit ok attempt="${attempt}" host="${srv_host}" resolve_method="${resolution_method}"
             log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
             exit 0
           fi
@@ -1034,7 +1090,13 @@ PY
 done
 
 elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] && [ "${MDNS_RESOLUTION_STATUS_RESOLVE}" = "0" ] && [ "${last_reason}" = "resolve_failed" ]; then
+  mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}"
+  log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+  exit 0
+fi
 log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
+mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}"
 
 # Use a distinct exit code for IPv4 mismatch to enable targeted relaxed retries upstream
 case "${last_reason}" in
