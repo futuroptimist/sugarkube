@@ -16,6 +16,11 @@ teardown() {
 @test "join gate acquire and release manage publisher state" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--all" ]; then
+  echo "=;eth0;IPv4;dummy;_dummy._tcp;local;dummy.local;192.0.2.1;1234;"
+  exit 0
+fi
 exit 1
 EOS
 
@@ -76,6 +81,10 @@ EOS
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "$1" = "--all" ]; then
+  echo "=;eth0;IPv4;dummy;_dummy._tcp;local;dummy.local;192.0.2.1;1234;"
+  exit 0
+fi
 count_file="${BATS_TEST_TMPDIR}/browse-count"
 count=0
 if [ -f "${count_file}" ]; then

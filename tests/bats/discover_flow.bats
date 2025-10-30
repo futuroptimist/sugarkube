@@ -256,6 +256,106 @@ EOS
   [[ "$output" == *"dbus_ping=ok"* ]]
 }
 
+@test "discover flow waits for Avahi liveness after reload" {
+  stub_common_network_tools
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "--system" ] && [ "$2" = "list" ]; then
+  echo "org.freedesktop.Avahi 100 200"
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/systemctl.log"
+exit 0
+EOS
+
+  stub_command sleep <<'EOS'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"
+exit 0
+EOS
+
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+log="${BATS_TEST_TMPDIR}/avahi-browse.log"
+printf '%s\n' "$*" >>"${log}"
+ready_flag="${BATS_TEST_TMPDIR}/avahi_all_ready"
+count_file="${BATS_TEST_TMPDIR}/avahi_all_count"
+case "$1" in
+  --all)
+    count=0
+    if [ -f "${count_file}" ]; then
+      count="$(cat "${count_file}")"
+    fi
+    count=$((count + 1))
+    printf '%s' "${count}" >"${count_file}"
+    if [ "${count}" -eq 1 ]; then
+      exit 0
+    fi
+    printf '%s\n' "=;eth0;IPv4;ready;_k3s-demo-test._tcp;local;ready.local;192.0.2.1;1234;"
+    printf '%s' 1 >"${ready_flag}"
+    exit 0
+    ;;
+  -rtp)
+    if [ ! -f "${ready_flag}" ]; then
+      echo "liveness_not_confirmed" >&2
+      exit 1
+    fi
+    printf '%s\n' "=;eth0;IPv4;k3s-demo-test@demo.local (bootstrap);_k3s-demo-test._tcp;local;demo.local;192.0.2.10;6443;"
+    exit 0
+    ;;
+esac
+echo "unexpected avahi-browse invocation: $*" >&2
+exit 1
+EOS
+
+  avahi_conf="${BATS_TEST_TMPDIR}/avahi.conf"
+  cat <<'CONF' >"${avahi_conf}"
+[server]
+CONF
+
+  mkdir -p "${BATS_TEST_TMPDIR}/avahi/services"
+  mkdir -p "${BATS_TEST_TMPDIR}/run"
+  mkdir -p "${BATS_TEST_TMPDIR}/mdns"
+
+  mdns_stub="$(create_mdns_stub 0)"
+
+  run env \
+    ALLOW_NON_ROOT=1 \
+    AVAHI_CONF_PATH="${avahi_conf}" \
+    SUGARKUBE_CLUSTER=demo \
+    SUGARKUBE_ENV=test \
+    SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
+    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/mdns" \
+    SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_MDNS_PUBLISH_ADDR=192.0.2.10 \
+    SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
+    SUGARKUBE_MDNS_BOOT_RETRIES=1 \
+    SUGARKUBE_MDNS_BOOT_DELAY=0 \
+    "${BATS_CWD}/scripts/k3s-discover.sh" --test-bootstrap-publish
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=avahi_liveness outcome=ok ]]
+  [[ "$output" =~ attempt=2 ]]
+
+  [ -f "${BATS_TEST_TMPDIR}/avahi_all_count" ]
+  [ "$(cat "${BATS_TEST_TMPDIR}/avahi_all_count")" -eq 2 ]
+}
+
 @test "discover flow joins existing server when discovery succeeds" {
   stub_common_network_tools
   create_curl_stub

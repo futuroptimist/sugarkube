@@ -18,6 +18,7 @@ BACKOFF_CAP="${SUGARKUBE_JOIN_GATE_BACKOFF_CAP:-10}"
 publisher_pid=""
 owner_id=""
 HOSTNAME=""
+AVAHI_LIVENESS_CONFIRMED=0
 
 log_join_gate() {
   log_info join_gate "$@" >&2
@@ -59,6 +60,54 @@ wait_for_avahi_bus() {
   local status
   status=$?
   log_join_gate_error action=dbus_wait outcome=error status="${status}"
+  return 1
+}
+
+ensure_avahi_liveness_signal() {
+  if [ "${AVAHI_LIVENESS_CONFIRMED}" -eq 1 ]; then
+    return 0
+  fi
+
+  local wait_status=0
+  if command -v gdbus >/dev/null 2>&1; then
+    if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+      log_join_gate action=avahi_dbus outcome=ready
+    else
+      wait_status=$?
+      if [ "${wait_status}" -eq 2 ]; then
+        log_join_gate action=avahi_dbus outcome=disabled
+      else
+        log_join_gate_error action=avahi_dbus outcome=error status="${wait_status}"
+      fi
+    fi
+  else
+    log_join_gate action=avahi_dbus outcome=skip reason=gdbus_missing
+  fi
+
+  local attempt
+  local status
+  local browse_output
+  local lines
+  for attempt in 1 2; do
+    status=0
+    browse_output=""
+    if ! browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)"; then
+      status=$?
+      browse_output=""
+    fi
+    lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [ "${status}" -eq 0 ] && [ -n "${lines}" ] && [ "${lines}" -gt 0 ]; then
+      log_join_gate action=avahi_liveness outcome=ok attempt="${attempt}" lines="${lines}"
+      AVAHI_LIVENESS_CONFIRMED=1
+      return 0
+    fi
+    log_join_gate action=avahi_liveness outcome=retry attempt="${attempt}" status="${status}" lines="${lines:-0}"
+    if [ "${attempt}" -eq 1 ]; then
+      sleep 1
+    fi
+  done
+
+  log_join_gate_error action=avahi_liveness outcome=error reason=no_results
   return 1
 }
 
@@ -224,6 +273,7 @@ acquire_lock() {
   ensure_tools
   ensure_runtime_dir
   wait_for_avahi_bus || return 1
+  ensure_avahi_liveness_signal || return 1
   cleanup_stale_state
   HOSTNAME="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
   if read_state_file && [ "${JOIN_STATE_HOST}" = "${HOSTNAME}" ] && [ -n "${JOIN_STATE_PID}" ] && kill -0 "${JOIN_STATE_PID}" >/dev/null 2>&1; then
@@ -291,6 +341,7 @@ wait_lock() {
   ensure_tools
   ensure_runtime_dir
   wait_for_avahi_bus || return 1
+  ensure_avahi_liveness_signal || return 1
   cleanup_stale_state
   HOSTNAME="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
   if read_state_file && [ "${JOIN_STATE_HOST}" = "${HOSTNAME}" ] && [ -n "${JOIN_STATE_PID}" ] && kill -0 "${JOIN_STATE_PID}" >/dev/null 2>&1; then
