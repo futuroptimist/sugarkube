@@ -4,9 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
-SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${SCRIPT_DIR}/lib/summary.sh}"
-if [ -f "${SUMMARY_LIB}" ]; then
-  # shellcheck source=scripts/lib/summary.sh
+DEFAULT_SUMMARY_LIB="${SCRIPT_DIR}/lib/summary.sh"
+SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${DEFAULT_SUMMARY_LIB}}"
+
+if [ "${SUMMARY_LIB}" = "${DEFAULT_SUMMARY_LIB}" ]; then
+  if [ -f "${DEFAULT_SUMMARY_LIB}" ]; then
+    # shellcheck disable=SC1091  # Optional helper bundled with the repo
+    . "${SCRIPT_DIR}/lib/summary.sh"
+  fi
+elif [ -f "${SUMMARY_LIB}" ]; then
+  # shellcheck disable=SC1090,SC1091  # Runtime-configured summary helper
   . "${SUMMARY_LIB}"
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
@@ -826,8 +833,7 @@ PY
       remediation=""
     else
       outcome="warn"
-      message="iptables is using the nf_tables backend; enable kube-proxy nft mode "\
-"(GA in Kubernetes v1.33) or select iptables-legacy"
+      message="iptables is using the nf_tables backend; enable kube-proxy nft mode (GA in Kubernetes v1.33) or select iptables-legacy"
       remediation="enable_kube-proxy_nft_mode_or_select_iptables-legacy"
     fi
   fi
@@ -842,8 +848,7 @@ PY
   safe_kube_proxy_source="$(printf '%s' "${kube_proxy_source}" | tr ' ' '_' | tr -d '"')"
 
   local details
-  details="variant=${iptables_variant},version=${iptables_version},nft=${nft_available},"\
-"kube-proxy=${safe_kube_proxy_mode},kube-proxy-source=${safe_kube_proxy_source}"
+  details="variant=${iptables_variant},version=${iptables_version},nft=${nft_available},kube-proxy=${safe_kube_proxy_mode},kube-proxy-source=${safe_kube_proxy_source}"
   if [ -n "${iptables_cmd}" ]; then
     details="${details},path=${iptables_cmd}"
   fi
@@ -2286,7 +2291,7 @@ publish_avahi_service() {
     esac
   done
 
-  local hostname="${MDNS_HOST_RAW:-}" 
+  local hostname="${MDNS_HOST_RAW:-}"
   if [ -z "${hostname}" ]; then
     hostname="$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf '%s' "${HOSTNAME:-}")"
   fi
