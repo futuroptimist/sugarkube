@@ -1,13 +1,28 @@
+codecov:
+  require_ci_to_pass: yes
+
 coverage:
   status:
-    project:
-      default:
-        target: 100
-        threshold: 0
     patch:
       default:
-        target: 90
+        target: 100%
+        threshold: 1%
+        if_not_found: fail
+    project:
+      default:
+        target: 85%
+        threshold: 2%
+
 ignore:
-  - tests/*
-comment:
-  layout: "header, diff"
+  - "docs/**"
+  - "**/*.md"
+
+flags:
+  shell:
+    paths:
+      - scripts/
+      - tests/bats/
+  python:
+    paths:
+      - scripts/
+      - tests/

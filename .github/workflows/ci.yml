@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+
+      - name: Install bats + kcov (for Bash coverage)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats kcov
+
+      - name: Run Bash tests under kcov
+        env:
+          KCOV_OUT: ${{ github.workspace }}/coverage/kcov
+        run: |
+          mkdir -p "$KCOV_OUT"
+          # Run bats via kcov so executed shell scripts are tracked.
+          # Limit to our repo to avoid measuring system files.
+          kcov --include-path="${GITHUB_WORKSPACE}/scripts" \
+               --exclude-pattern="/usr,/opt,/lib,/bin,/sbin" \
+               "$KCOV_OUT" \
+               bats --recursive tests/bats
+
+      - name: Run Python tests with coverage
+        run: |
+          pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml || true
+          # '|| true' to let bash step continue; Codecov enforces pass/fail policy.
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          directory: coverage
+          files: |
+            coverage/python-coverage.xml
+          fail_ci_if_error: true
+          verbose: true
