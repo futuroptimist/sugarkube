@@ -39,11 +39,13 @@ jobs:
                bats --recursive tests/bats
 
       - name: Run Python tests with coverage
+        id: pytest
+        continue-on-error: true
         run: |
-          pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml || true
-          # '|| true' to let bash step continue; Codecov enforces pass/fail policy.
+          pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml
 
       - name: Upload to Codecov
+        if: always()
         uses: codecov/codecov-action@v4
         with:
           directory: coverage
@@ -51,3 +53,9 @@ jobs:
             coverage/python-coverage.xml
           fail_ci_if_error: true
           verbose: true
+
+      - name: Fail if Python tests failed
+        if: steps.pytest.outcome == 'failure'
+        run: |
+          echo "Pytest failed; see previous logs for details." >&2
+          exit 1
