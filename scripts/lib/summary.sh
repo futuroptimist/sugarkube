@@ -1,44 +1,128 @@
 #!/usr/bin/env bash
 
-# Summary reporting helpers. Designed to be sourced by interactive shells and
-# non-interactive scripts alike. The functions are safe to call even when the
-# summary feature is disabled (SUGARKUBE_SUMMARY_FILE unset or unwritable).
+# Lightweight summary helpers. Provides a small stable API that scripts can call
+# to record human-friendly results. The output is colourised when stdout is a TTY
+# (and TERM is not "dumb"), and falls back to plain text otherwise.
 
 if [ -n "${SUGARKUBE_SUMMARY_LOADED:-}" ]; then
   return 0 2>/dev/null || exit 0
 fi
 export SUGARKUBE_SUMMARY_LOADED=1
 
+# shellcheck disable=SC2034  # referenced from other files
+SUMMARY_IS_TTY=0
+SUMMARY__ENABLED=0
+SUMMARY__EMITTED=0
+SUMMARY__EXIT_TRAP_SET=0
+SUMMARY__ENTRIES=()
+SUMMARY__KV_ENTRIES=()
+SUMMARY__LAST_ENTRY_INDEX=-1
+SUMMARY__HAS_DATA=0
+
+SUMMARY__FMT_RESET=""
+SUMMARY__FMT_BOLD=""
+SUMMARY__FMT_OK=""
+SUMMARY__FMT_WARN=""
+SUMMARY__FMT_FAIL=""
+SUMMARY__FMT_SKIP=""
+
+SUMMARY__SYMBOL_OK="✅"
+SUMMARY__SYMBOL_WARN="⚠️"
+SUMMARY__SYMBOL_FAIL="❌"
+SUMMARY__SYMBOL_SKIP="⏭️"
+
+summary__with_strict() {
+  local __restore
+  __restore="$(set +o)"
+  set -Eeuo pipefail
+  "$@"
+  local __status=$?
+  eval "${__restore}"
+  return "${__status}"
+}
+
+summary__sanitize() {
+  local value="$*"
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  value="${value//$'\t'/ }"
+  printf '%s' "${value}"
+}
+
+summary__is_status() {
+  case "$1" in
+    OK|ok|Ok|oK|WARN|warn|Warn|FAIL|fail|Fail|SKIP|skip|Skip)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+summary__normalise_status() {
+  case "$1" in
+    ok|Ok|oK) printf 'OK' ;;
+    warn|Warn) printf 'WARN' ;;
+    fail|Fail) printf 'FAIL' ;;
+    skip|Skip) printf 'SKIP' ;;
+    OK|WARN|FAIL|SKIP) printf '%s' "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+summary__status_symbol() {
+  case "$1" in
+    OK) printf '%s' "${SUMMARY__SYMBOL_OK}" ;;
+    WARN) printf '%s' "${SUMMARY__SYMBOL_WARN}" ;;
+    FAIL) printf '%s' "${SUMMARY__SYMBOL_FAIL}" ;;
+    SKIP) printf '%s' "${SUMMARY__SYMBOL_SKIP}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+summary__status_colour() {
+  case "$1" in
+    OK) printf '%s' "${SUMMARY__FMT_OK}" ;;
+    WARN) printf '%s' "${SUMMARY__FMT_WARN}" ;;
+    FAIL) printf '%s' "${SUMMARY__FMT_FAIL}" ;;
+    SKIP) printf '%s' "${SUMMARY__FMT_SKIP}" ;;
+    *) printf '' ;;
+  esac
+}
+
 summary_enabled() {
-  [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ] && [ "${SUGARKUBE_SUMMARY_SUPPRESS:-0}" != "1" ]
+  [ "${SUMMARY__ENABLED:-0}" -eq 1 ]
 }
 
-summary__ensure_file() {
-  if ! summary_enabled; then
-    return 1
-  fi
-  local dir
-  dir="$(dirname "${SUGARKUBE_SUMMARY_FILE}")"
-  if [ ! -d "${dir}" ]; then
-    mkdir -p "${dir}" 2>/dev/null || true
-  fi
-  if [ ! -f "${SUGARKUBE_SUMMARY_FILE}" ]; then
-    : >"${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || return 1
-  fi
-  return 0
-}
-
-summary_now_ms() {
-  python3 - <<'PY' 2>/dev/null || date +%s%3N
+summary_now_ms_impl() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
 import time
 print(int(time.time() * 1000))
 PY
+    return 0
+  fi
+  date +%s%3N
+}
+
+summary_now_ms() {
+  local __restore __output __status
+  __restore="$(set +o)"
+  set -Eeuo pipefail
+  __output="$(summary_now_ms_impl)"
+  __status=$?
+  eval "${__restore}"
+  printf '%s\n' "${__output}"
+  return "${__status}"
 }
 
 summary_elapsed_ms() {
   local start_ms="$1"
-  local now
-  now="$(summary_now_ms)"
+  local __restore __status now
+  __restore="$(set +o)"
+  set -Eeuo pipefail
+  now="$(summary_now_ms_impl)"
+  __status=$?
+  eval "${__restore}"
   case "${start_ms}" in
     ''|*[!0-9-]*) start_ms=0 ;;
   esac
@@ -49,319 +133,287 @@ summary_elapsed_ms() {
     now="${start_ms}"
   fi
   printf '%d\n' $((now - start_ms))
+  return "${__status}"
 }
 
-summary_sanitize_note() {
-  local note="$1"
-  note="${note//$'\n'/' '}"
-  note="${note//$'\r'/' '}"
-  printf '%s' "${note}"
+summary__append_entry() {
+  SUMMARY__ENTRIES+=("$1")
+  SUMMARY__LAST_ENTRY_INDEX=${#SUMMARY__ENTRIES[@]}
+  SUMMARY__HAS_DATA=1
 }
 
-summary_step() {
-  local name="$1"
-  local status="${2:-OK}"
-  local duration_ms="${3:-0}"
-  local note="${4:-}"
+summary__append_kv() {
+  SUMMARY__KV_ENTRIES+=("$1")
+  SUMMARY__HAS_DATA=1
+}
 
-  if ! summary_enabled; then
+summary__format_duration() {
+  local duration="$1"
+  if [ -z "${duration}" ]; then
+    printf ''
     return 0
   fi
-  if ! summary__ensure_file; then
+  printf '%s ms' "${duration}"
+}
+
+summary__init_impl() {
+  if [ "${SUMMARY__ENABLED}" -eq 1 ]; then
     return 0
   fi
 
-  case "${status}" in
-    ok|Ok|oK) status="OK" ;;
-    warn|Warn) status="WARN" ;;
-    fail|Fail) status="FAIL" ;;
-    skip|Skip) status="SKIP" ;;
-    OK|WARN|FAIL|SKIP) ;;
-    *) status="${status^^}" ;;
-  esac
+  SUMMARY__ENABLED=1
+  SUMMARY__EMITTED=0
+  SUMMARY__ENTRIES=()
+  SUMMARY__KV_ENTRIES=()
+  SUMMARY__LAST_ENTRY_INDEX=-1
 
-  case "${duration_ms}" in
-    ''|*[!0-9-]*) duration_ms=0 ;;
-  esac
+  SUMMARY_IS_TTY=0
+  if [ -t 1 ] && [ "${TERM:-}" != 'dumb' ]; then
+    SUMMARY_IS_TTY=1
+  fi
 
-  local timestamp
-  timestamp="$(summary_now_ms)"
-  note="$(summary_sanitize_note "${note}")"
+  SUMMARY__FMT_RESET=""
+  SUMMARY__FMT_BOLD=""
+  SUMMARY__FMT_OK=""
+  SUMMARY__FMT_WARN=""
+  SUMMARY__FMT_FAIL=""
+  SUMMARY__FMT_SKIP=""
 
-  printf '%s\t%s\t%s\t%s\t%s\n' \
-    "${timestamp}" "${duration_ms}" "${status}" "${name}" "${note}" \
-    >>"${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
+  if [ "${SUMMARY_IS_TTY}" -eq 1 ] && command -v tput >/dev/null 2>&1; then
+    local reset bold colours colour_count
+    if reset="$(tput sgr0 2>/dev/null)"; then
+      SUMMARY__FMT_RESET="${reset}"
+    fi
+    if bold="$(tput bold 2>/dev/null)"; then
+      SUMMARY__FMT_BOLD="${bold}"
+    fi
+    if colours="$(tput colors 2>/dev/null)"; then
+      colour_count="${colours}"
+    else
+      colour_count=0
+    fi
+    if [ "${colour_count}" -ge 8 ]; then
+      SUMMARY__FMT_OK="$(tput setaf 2 2>/dev/null || printf '')"
+      SUMMARY__FMT_WARN="$(tput setaf 3 2>/dev/null || printf '')"
+      SUMMARY__FMT_FAIL="$(tput setaf 1 2>/dev/null || printf '')"
+      SUMMARY__FMT_SKIP="$(tput setaf 4 2>/dev/null || printf '')"
+    fi
+  fi
+
+  if [ "${SUMMARY__EXIT_TRAP_SET}" -eq 0 ]; then
+    trap 'summary::emit || true' EXIT
+    SUMMARY__EXIT_TRAP_SET=1
+  fi
 }
 
-summary_skip() {
-  local name="$1"
-  local note="${2:-}"
-  summary_step "${name}" "SKIP" 0 "${note}"
+summary::init() {
+  summary__with_strict summary__init_impl "$@"
 }
 
-summary_run() {
-  local note=""
-  while [ "$#" -gt 0 ]; do
+summary__section_impl() {
+  local title
+  title="$(summary__sanitize "$*")"
+  SUMMARY__CURRENT_SECTION="${title}"
+  summary__append_entry "section\t${title}"
+}
+
+summary::section() {
+  summary__section_impl "$@"
+}
+
+summary__step_impl() {
+  if [ $# -lt 1 ]; then
+    return 0
+  fi
+
+  local status label duration note
+
+  if summary__is_status "$1"; then
+    status="$(summary__normalise_status "$1")"
+    shift
+    label="$(summary__sanitize "$1")"
+    shift || true
+  else
+    label="$(summary__sanitize "$1")"
+    shift
+    status="$(summary__normalise_status "${1:-OK}")"
+    shift || true
+  fi
+
+  duration=""
+  note=""
+  if [ $# -gt 0 ]; then
     case "$1" in
-      --note)
-        shift
-        note="${1:-}"
-        shift || true
-        ;;
-      --)
-        shift
-        break
-        ;;
-      --*)
-        break
-        ;;
+      ''|*[!0-9-]*) ;;
       *)
-        break
+        duration="$1"
+        shift
+        ;;
+    esac
+  fi
+  if [ $# -gt 0 ]; then
+    note="$(summary__sanitize "$1")"
+  fi
+
+  summary__append_entry "step\t${status}\t${label}\t${duration}\t${note}"
+}
+
+summary::step() {
+  summary__step_impl "$@"
+}
+
+summary__kv_impl() {
+  if [ $# -lt 1 ]; then
+    return 0
+  fi
+  local key value
+  key="$(summary__sanitize "$1")"
+  value=""
+  if [ $# -gt 1 ]; then
+    shift
+    value="$(summary__sanitize "$*")"
+  fi
+  summary__append_kv "kv\t${key}\t${value}"
+}
+
+summary::kv() {
+  summary__kv_impl "$@"
+}
+
+summary__emit_impl() {
+  if [ "${SUMMARY__EMITTED}" -eq 1 ]; then
+    return 0
+  fi
+  SUMMARY__EMITTED=1
+
+  local -a lines=()
+  local title="Summary"
+  if [ -n "${SUMMARY__FMT_BOLD}" ] && [ -n "${SUMMARY__FMT_RESET}" ]; then
+    lines+=("${SUMMARY__FMT_BOLD}${title}${SUMMARY__FMT_RESET}")
+  else
+    lines+=("${title}")
+  fi
+  lines+=("${title//?/-}")
+
+  local entry kind status label duration note colour symbol details key value
+  for entry in "${SUMMARY__ENTRIES[@]}"; do
+    IFS=$'\t' read -r kind status label duration note <<<"${entry}"
+    case "${kind}" in
+      section)
+        lines+=("")
+        if [ -n "${SUMMARY__FMT_BOLD}" ] && [ -n "${SUMMARY__FMT_RESET}" ]; then
+          lines+=("${SUMMARY__FMT_BOLD}${label}${SUMMARY__FMT_RESET}")
+        else
+          lines+=("${label}")
+        fi
+        ;;
+      step)
+        colour="$(summary__status_colour "${status}")"
+        symbol="$(summary__status_symbol "${status}")"
+        if [ -n "${colour}" ] && [ -n "${SUMMARY__FMT_RESET}" ]; then
+          symbol="${colour}${symbol}${SUMMARY__FMT_RESET}"
+        fi
+        if [ -n "${SUMMARY__FMT_BOLD}" ] && [ -n "${SUMMARY__FMT_RESET}" ]; then
+          label="${SUMMARY__FMT_BOLD}${label}${SUMMARY__FMT_RESET}"
+        fi
+        details=""
+        if [ -n "${duration}" ]; then
+          details="$(summary__format_duration "${duration}")"
+        fi
+        if [ -n "${note}" ]; then
+          if [ -n "${details}" ]; then
+            details="${details}; ${note}"
+          else
+            details="${note}"
+          fi
+        fi
+        if [ -n "${details}" ]; then
+          lines+=("  ${symbol} ${label} (${details})")
+        else
+          lines+=("  ${symbol} ${label}")
+        fi
         ;;
     esac
   done
 
-  if [ "$#" -lt 1 ]; then
+  for entry in "${SUMMARY__KV_ENTRIES[@]}"; do
+    IFS=$'\t' read -r kind key value <<<"${entry}"
+    if [ "${kind}" = 'kv' ]; then
+      if [ -n "${value}" ]; then
+        lines+=("    ${key}: ${value}")
+      else
+        lines+=("    ${key}")
+      fi
+    fi
+  done
+
+  if [ "${#SUMMARY__ENTRIES[@]}" -eq 0 ] && [ "${#SUMMARY__KV_ENTRIES[@]}" -eq 0 ]; then
+    lines+=("(no summary entries recorded)")
+  fi
+
+  local output=""
+  for entry in "${lines[@]}"; do
+    output+="${entry}"$'\n'
+  done
+
+  if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
+    local summary_dir
+    summary_dir="$(dirname "${SUGARKUBE_SUMMARY_FILE}")"
+    mkdir -p "${summary_dir}" 2>/dev/null || true
+    printf '%s' "${output}" | tee "${SUGARKUBE_SUMMARY_FILE}" >/dev/null
+  fi
+
+  printf '%s' "${output}"
+}
+
+summary::emit() {
+  summary__with_strict summary__emit_impl "$@"
+}
+
+summary_skip() {
+  local label="$1"
+  local note="${2:-}"
+  if summary_enabled; then
+    if [ -n "${note}" ]; then
+      summary::step SKIP "${label}" "${note}"
+    else
+      summary::step SKIP "${label}"
+    fi
+  fi
+}
+
+summary_run() {
+  if [ $# -lt 1 ]; then
     return 0
   fi
-
-  local name="$1"
-  shift
-
-  local start_ms status duration exit_code
-  start_ms="$(summary_now_ms)"
-
+  local label="$1"
+  shift || true
+  if ! summary_enabled; then
+    "$@"
+    return "$?"
+  fi
+  local summary_start status restore_errexit
+  summary_start="$(summary_now_ms)"
+  restore_errexit=0
+  case "$-" in
+    *e*) restore_errexit=1 ;;
+  esac
   set +e
   "$@"
-  exit_code=$?
-  set -e
-
-  duration="$(summary_elapsed_ms "${start_ms}")"
-  status="OK"
-  if [ "${exit_code}" -ne 0 ]; then
-    status="FAIL"
+  status=$?
+  if [ "${restore_errexit}" -eq 1 ]; then
+    set -e
+  else
+    set +e
   fi
-
-  summary_step "${name}" "${status}" "${duration}" "${note}"
-  return "${exit_code}"
-}
-
-summary_display_width() {
-  SUMMARY_TMP_TEXT="${1-}" python3 - <<'PY'
-import os
-import re
-import sys
-import unicodedata
-text = os.environ.get("SUMMARY_TMP_TEXT", "")
-ansi_re = re.compile(r"\x1B\[[0-9;]*m")
-text = ansi_re.sub("", text)
-width = 0
-for ch in text:
-    if unicodedata.category(ch) in ("Mn", "Me", "Cf"):
-        continue
-    if unicodedata.combining(ch):
-        continue
-    if unicodedata.east_asian_width(ch) in ("F", "W"):
-        width += 2
-    else:
-        width += 1
-print(width)
-PY
-}
-
-summary_repeat_char() {
-  local char="$1"
-  local count="$2"
-  local result=""
-  while [ "${count}" -gt 0 ]; do
-    result+="${char}"
-    count=$((count - 1))
-  done
-  printf '%s' "${result}"
-}
-
-summary_format_duration() {
-  local ms="$1"
-  python3 - <<'PY' "${ms}"
-import sys
-try:
-    value = int(sys.argv[1])
-except (IndexError, ValueError):
-    value = 0
-if value < 0:
-    value = 0
-seconds, millis = divmod(value, 1000)
-minutes, seconds = divmod(seconds, 60)
-if minutes:
-    rem = seconds + millis / 1000.0
-    print(f"{minutes}m {rem:.1f}s")
-elif value >= 1000:
-    print(f"{seconds + millis / 1000.0:.1f}s")
-else:
-    print(f"{value}ms")
-PY
-}
-
-summary_status_display() {
-  local status="$1"
-  case "${status}" in
-    OK)
-      printf '\033[32m✅ OK\033[0m'
-      ;;
-    WARN)
-      printf '\033[33m⚠️ WARN\033[0m'
-      ;;
-    FAIL)
-      printf '\033[31m❌ FAIL\033[0m'
-      ;;
-    SKIP)
-      printf '\033[34m⏭️ SKIP\033[0m'
-      ;;
-    *)
-      printf '%s' "${status}"
-      ;;
-  esac
-}
-
-summary_status_plain() {
-  local status="$1"
-  case "${status}" in
-    OK) printf '✅ OK' ;;
-    WARN) printf '⚠️ WARN' ;;
-    FAIL) printf '❌ FAIL' ;;
-    SKIP) printf '⏭️ SKIP' ;;
-    *) printf '%s' "${status}" ;;
-  esac
-}
-
-summary_pad() {
-  local text="$1"
-  local width="$2"
-  local actual padding
-  actual="$(summary_display_width "${text}")"
-  case "${actual}" in
-    ''|*[!0-9]*) actual=0 ;;
-  esac
-  padding=$((width - actual))
-  if [ "${padding}" -lt 0 ]; then
-    padding=0
+  if [ "${status}" -eq 0 ]; then
+    summary::step OK "${label}" "$(summary_elapsed_ms "${summary_start}")"
+  else
+    summary::step FAIL "${label}" "$(summary_elapsed_ms "${summary_start}")" "exit=${status}"
   fi
-  printf '%s' "${text}"
-  if [ "${padding}" -gt 0 ]; then
-    printf '%*s' "${padding}" ''
-  fi
+  return "${status}"
 }
 
 summary_finalize() {
-  if ! summary_enabled; then
-    return 0
-  fi
-  if [ ! -s "${SUGARKUBE_SUMMARY_FILE}" ]; then
-    return 0
-  fi
-
-  local -a names=()
-  local -a status_codes=()
-  local -a status_display=()
-  local -a status_plain=()
-  local -a durations=()
-  local -a notes=()
-
-  local line
-  while IFS=$'\t' read -r _start_ms duration status name note; do
-    [ -n "${name}" ] || continue
-    names+=("${name}")
-    status_codes+=("${status}")
-    status_display+=("$(summary_status_display "${status}")")
-    status_plain+=("$(summary_status_plain "${status}")")
-    durations+=("$(summary_format_duration "${duration}")")
-    notes+=("${note}")
-  done <"${SUGARKUBE_SUMMARY_FILE}"
-
-  local count="${#names[@]}"
-  if [ "${count}" -eq 0 ]; then
-    return 0
-  fi
-
-  local step_width status_width duration_width
-  step_width="$(summary_display_width "Step")"
-  status_width="$(summary_display_width "Status")"
-  duration_width="$(summary_display_width "Duration")"
-
-  local idx note extra step_label plain_status
-  for idx in "${!names[@]}"; do
-    step_label="${names[idx]}"
-    note="${notes[idx]}"
-    if [ -n "${note}" ]; then
-      step_label+=" "
-      step_label+="\033[2m(${note})\033[0m"
-    fi
-    names[idx]="${step_label}"
-    extra="$(summary_display_width "${step_label}")"
-    if [ "${extra}" -gt "${step_width}" ]; then
-      step_width="${extra}"
-    fi
-    plain_status="${status_plain[idx]}"
-    extra="$(summary_display_width "${plain_status}")"
-    if [ "${extra}" -gt "${status_width}" ]; then
-      status_width="${extra}"
-    fi
-    extra="$(summary_display_width "${durations[idx]}")"
-    if [ "${extra}" -gt "${duration_width}" ]; then
-      duration_width="${extra}"
-    fi
-  done
-
-  local step_total status_total duration_total
-  step_total=$((step_width + 2))
-  status_total=$((status_width + 2))
-  duration_total=$((duration_width + 2))
-
-  printf '\n'
-  printf '┏%s┳%s┳%s┓\n' \
-    "$(summary_repeat_char '━' "${step_total}")" \
-    "$(summary_repeat_char '━' "${status_total}")" \
-    "$(summary_repeat_char '━' "${duration_total}")"
-  printf '┃ '
-  summary_pad "Step" "${step_width}"
-  printf ' ┃ '
-  summary_pad "Status" "${status_width}"
-  printf ' ┃ '
-  summary_pad "Duration" "${duration_width}"
-  printf ' ┃\n'
-  printf '┣%s╋%s╋%s┫\n' \
-    "$(summary_repeat_char '━' "${step_total}")" \
-    "$(summary_repeat_char '━' "${status_total}")" \
-    "$(summary_repeat_char '━' "${duration_total}")"
-
-  for idx in "${!names[@]}"; do
-    printf '┃ '
-    summary_pad "${names[idx]}" "${step_width}"
-    printf ' ┃ '
-    summary_pad "${status_display[idx]}" "${status_width}"
-    printf ' ┃ '
-    summary_pad "${durations[idx]}" "${duration_width}"
-    printf ' ┃\n'
-  done
-
-  printf '┗%s┻%s┻%s┛\n' \
-    "$(summary_repeat_char '━' "${step_total}")" \
-    "$(summary_repeat_char '━' "${status_total}")" \
-    "$(summary_repeat_char '━' "${duration_total}")"
-}
-
-summary::init() {
-  summary__ensure_file || true
-}
-
-summary::section() { :; }
-
-summary::step() {
-  summary_step "$@"
-}
-
-summary::kv() { :; }
-
-summary::emit() {
-  summary_finalize
+  summary::emit
 }
