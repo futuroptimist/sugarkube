@@ -504,7 +504,9 @@ iptables_preflight() {
 
   if [ -n "${detection_input}" ]; then
     local detection_output
-    detection_output="$(DETECTION_INPUT="${detection_input}" python3 - <<'PY'
+    detection_output=""
+    if command -v python3 >/dev/null 2>&1; then
+      if ! detection_output="$(DETECTION_INPUT="${detection_input}" python3 - <<'PY'
 import ast
 import os
 import shlex
@@ -753,7 +755,10 @@ def main() -> None:
 if __name__ == '__main__':
     main()
 PY
-    )"
+      )"; then
+        detection_output=""
+      fi
+    fi
 
     if [ -n "${detection_output}" ]; then
       local detected_mode
