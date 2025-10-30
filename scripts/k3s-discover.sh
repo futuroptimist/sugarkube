@@ -364,6 +364,7 @@ AVAHI_SERVICE_DIR="${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 AVAHI_SERVICE_FILE="${SUGARKUBE_AVAHI_SERVICE_FILE:-${AVAHI_SERVICE_DIR}/k3s-${CLUSTER}-${ENVIRONMENT}.service}"
 MDNS_LAST_OBSERVED=""
 CLAIMED_SERVER_HOST=""
+AVAHI_LIVENESS_READY=0
 IPTABLES_ENSURED=0
 IPTABLES_PREFLIGHT_DONE=0
 IPTABLES_PREFLIGHT_OUTCOME=""
@@ -534,11 +535,29 @@ reload_avahi_daemon() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
+  AVAHI_LIVENESS_READY=0
+  local reload_status=0
   if [ -n "${SUDO_CMD:-}" ]; then
-    "${SUDO_CMD}" systemctl reload avahi-daemon || "${SUDO_CMD}" systemctl restart avahi-daemon
+    if ! "${SUDO_CMD}" systemctl reload avahi-daemon; then
+      reload_status=$?
+      if ! "${SUDO_CMD}" systemctl restart avahi-daemon; then
+        return "${reload_status}"
+      fi
+    fi
   else
-    systemctl reload avahi-daemon || systemctl restart avahi-daemon
+    if ! systemctl reload avahi-daemon; then
+      reload_status=$?
+      if ! systemctl restart avahi-daemon; then
+        return "${reload_status}"
+      fi
+    fi
   fi
+
+  if ! ensure_avahi_liveness_signal; then
+    return 1
+  fi
+
+  return 0
 }
 
 restart_avahi_daemon_service() {
@@ -560,6 +579,54 @@ cleanup_avahi_publishers() {
     remove_privileged_file "${AVAHI_SERVICE_FILE}" || true
     reload_avahi_daemon || true
   fi
+}
+
+ensure_avahi_liveness_signal() {
+  if [ "${AVAHI_LIVENESS_READY}" -eq 1 ]; then
+    return 0
+  fi
+
+  local wait_status=0
+  if command -v gdbus >/dev/null 2>&1; then
+    if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+      log_info discover event=avahi_liveness_dbus outcome=ok >&2
+    else
+      wait_status=$?
+      if [ "${wait_status}" -eq 2 ]; then
+        log_info discover event=avahi_liveness_dbus outcome=disabled severity=info >&2
+      else
+        log_warn_msg discover "Avahi D-Bus wait failed" "event=avahi_liveness" "status=${wait_status}" >&2
+      fi
+    fi
+  else
+    log_info discover event=avahi_liveness_dbus outcome=skip reason=gdbus_missing severity=info >&2
+  fi
+
+  local attempt
+  local status
+  local browse_output
+  local lines
+  for attempt in 1 2; do
+    status=0
+    browse_output=""
+    if ! browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)"; then
+      status=$?
+      browse_output=""
+    fi
+    lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [ "${status}" -eq 0 ] && [ -n "${lines}" ] && [ "${lines}" -gt 0 ]; then
+      log_info discover event=avahi_liveness outcome=ok attempt="${attempt}" lines="${lines}" >&2
+      AVAHI_LIVENESS_READY=1
+      return 0
+    fi
+    log_warn_msg discover "Avahi liveness probe retry" "attempt=${attempt}" "status=${status}" "lines=${lines:-0}" >&2
+    if [ "${attempt}" -eq 1 ]; then
+      sleep 1
+    fi
+  done
+
+  log_error_msg discover "Avahi liveness probe failed" "event=avahi_liveness" >&2
+  return 1
 }
 
 render_avahi_service_xml() {
@@ -1759,7 +1826,10 @@ publish_avahi_service() {
     publish_env+=("SUGARKUBE_SKIP_SYSTEMCTL=${SUGARKUBE_SKIP_SYSTEMCTL}")
   fi
 
+  AVAHI_LIVENESS_READY=0
   run_privileged env "${publish_env[@]}" "${SCRIPT_DIR}/mdns_publish_static.sh"
+
+  ensure_avahi_liveness_signal || return 1
 }
 
 publish_api_service() {
