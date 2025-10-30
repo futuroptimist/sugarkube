@@ -26,53 +26,53 @@ up env='dev':
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
     export SUGARKUBE_SUMMARY_LIB="{{ scripts_dir }}/lib/summary.sh"
     if [ -f "${SUGARKUBE_SUMMARY_LIB}" ]; then
-      # shellcheck source=scripts/lib/summary.sh
-      . "${SUGARKUBE_SUMMARY_LIB}"
+    # shellcheck source=scripts/lib/summary.sh
+    . "${SUGARKUBE_SUMMARY_LIB}"
     fi
     if ! command -v summary_run >/dev/null 2>&1; then
-      summary_run() {
-        local _label="$1"
-        shift || true
-        "$@"
-        return "$?"
-      }
+    summary_run() {
+    local _label="$1"
+    shift || true
+    "$@"
+    return "$?"
+    }
     fi
     if ! command -v summary_skip >/dev/null 2>&1; then
-      summary_skip() { :; }
+    summary_skip() { :; }
     fi
     if ! command -v summary_finalize >/dev/null 2>&1; then
-      summary_finalize() { :; }
+    summary_finalize() { :; }
     fi
 
     __sugarkube_up_cleanup_common() {
-      local status="$1"
-      if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
-         [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
-        sudo -E bash scripts/toggle_wlan.sh --restore || true
-      fi
-      if command -v summary_finalize >/dev/null 2>&1; then
-        summary_finalize
-      fi
-      if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
-        rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
-      fi
-      return "${status}"
+    local status="$1"
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
+    [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
+    sudo -E bash scripts/toggle_wlan.sh --restore || true
+    fi
+    if command -v summary_finalize >/dev/null 2>&1; then
+    summary_finalize
+    fi
+    if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
+    rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
+    fi
+    return "${status}"
     }
 
     __sugarkube_up_exit_trap() {
-      local status="$?"
-      __sugarkube_up_cleanup_common "${status}"
+    local status="$?"
+    __sugarkube_up_cleanup_common "${status}"
     }
 
     __sugarkube_up_signal_trap() {
-      local signal="$1"
-      local status="$?"
-      trap - EXIT INT TERM
-      __sugarkube_up_cleanup_common "${status}"
-      case "${signal}" in
-        INT) exit 130 ;;
-        TERM) exit 143 ;;
-      esac
+    local signal="$1"
+    local status="$?"
+    trap - EXIT INT TERM
+    __sugarkube_up_cleanup_common "${status}"
+    case "${signal}" in
+    INT) exit 130 ;;
+    TERM) exit 143 ;;
+    esac
     }
 
     trap '__sugarkube_up_exit_trap' EXIT
@@ -87,22 +87,22 @@ up env='dev':
 
     # Preflight network/mDNS configuration
     if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then
-      summary_run "Avahi configure" sudo -E bash scripts/configure_avahi.sh
+    summary_run "Avahi configure" sudo -E bash scripts/configure_avahi.sh
     else
-      summary_skip "Avahi configure" "disabled"
+    summary_skip "Avahi configure" "disabled"
     fi
 
     # Optionally bring WLAN down for deterministic bootstrap
     if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then
-      summary_run "WLAN disable" sudo -E bash scripts/toggle_wlan.sh --down
+    summary_run "WLAN disable" sudo -E bash scripts/toggle_wlan.sh --down
     else
-      summary_skip "WLAN disable" "disabled"
+    summary_skip "WLAN disable" "disabled"
     fi
 
     if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then
-      summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh
+    summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh
     else
-      summary_skip "Node IP configure" "disabled"
+    summary_skip "Node IP configure" "disabled"
     fi
 
     # Proceed with discovery/join for subsequent nodes
@@ -124,11 +124,11 @@ mdns-harden:
 mdns-selfcheck env='dev':
     export SUGARKUBE_ENV="{{ env }}"
     env \
-      SUGARKUBE_EXPECTED_HOST="$(hostname).local" \
-      SUGARKUBE_SELFCHK_ATTEMPTS=10 \
-      SUGARKUBE_SELFCHK_BACKOFF_START_MS=500 \
-      SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=500 \
-      scripts/mdns_selfcheck.sh
+    SUGARKUBE_EXPECTED_HOST="$(hostname).local" \
+    SUGARKUBE_SELFCHK_ATTEMPTS=10 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=500 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=500 \
+    scripts/mdns_selfcheck.sh
 
 node-ip-dropin:
     sudo -E bash scripts/configure_k3s_node_ip.sh
@@ -296,7 +296,7 @@ eeprom-nvme-first:
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running clone-ssd." >&2; exit 1; fi
     sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
-        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 show-disks:
     lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
@@ -304,17 +304,17 @@ show-disks:
 preflight:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running preflight." >&2; exit 1; fi
     sudo --preserve-env=TARGET,WIPE \
-        "{{ preflight_cmd }}"
+    "{{ preflight_cmd }}"
 
 verify-clone:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running verify-clone." >&2; exit 1; fi
     sudo --preserve-env=TARGET,MOUNT_BASE \
-        env MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
-        "{{ verify_clone_cmd }}"
+    env MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+    "{{ verify_clone_cmd }}"
 
 finalize-nvme:
     sudo --preserve-env=EDITOR,FINALIZE_NVME_EDIT \
-        "{{ finalize_nvme_cmd }}"
+    "{{ finalize_nvme_cmd }}"
 
 rollback-to-sd:
     "{{ rollback_helper_cmd }}"
@@ -331,15 +331,15 @@ rollback-to-sd:
 
 clean-mounts args='':
     sudo --preserve-env=TARGET,MOUNT_BASE \
-      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
-          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
-      "{{ clean_mounts_cmd }}" {{ args }}
+    env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+    MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+    "{{ clean_mounts_cmd }}" {{ args }}
 
 clean-mounts-hard:
     sudo --preserve-env=TARGET,MOUNT_BASE \
-      env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
-          MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
-      "{{ clean_mounts_cmd }}" --force
+    env TARGET={{ env_var_or_default("TARGET", "/dev/nvme0n1") }} \
+    MOUNT_BASE={{ env_var_or_default("MOUNT_BASE", "/mnt/clone") }} \
+    "{{ clean_mounts_cmd }}" --force
 
 # One-command happy path: spot-check → EEPROM (optional) → clone → reboot
 
@@ -433,17 +433,17 @@ cluster-bootstrap:
 codespaces-bootstrap:
     sudo apt-get update
     sudo apt-get install -y \
-        aspell \
-        aspell-en \
-        curl \
-        gh \
-        jq \
-        pv \
-        python3 \
-        python3-pip \
-        python3-venv \
-        unzip \
-        xz-utils
+    aspell \
+    aspell-en \
+    curl \
+    gh \
+    jq \
+    pv \
+    python3 \
+    python3-pip \
+    python3-venv \
+    unzip \
+    xz-utils
     python3 -m pip install --user --upgrade pip pre-commit pyspelling linkchecker
 
 # Run spellcheck and linkcheck to keep docs automation aligned
@@ -490,8 +490,8 @@ flux-bootstrap env='dev':
 # Reconcile the platform Kustomization via Flux
 platform-apply env='dev':
     flux reconcile kustomization platform \
-        --namespace flux-system \
-        --with-source
+    --namespace flux-system \
+    --with-source
 
 # Reseal SOPS secrets for an environment
 seal-secrets env='dev':
