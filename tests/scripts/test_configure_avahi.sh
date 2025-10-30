@@ -8,6 +8,7 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 CONF_PATH="${TMP_DIR}/avahi-daemon.conf"
 LOG_DIR="${TMP_DIR}/logs"
+EXPECTED_HOSTS_FIXTURE="${REPO_ROOT}/tests/fixtures/avahi_hosts_expected.txt"
 
 cat <<'CONF' >"${CONF_PATH}"
 # Sample Avahi configuration
@@ -63,6 +64,12 @@ fi
 
 if ! grep -q '^10.0.0.10 test-node.local$' "${AVAHI_HOSTS_PATH}"; then
   echo "Avahi hosts entry was not created" >&2
+  exit 1
+fi
+
+if ! diff -u "${EXPECTED_HOSTS_FIXTURE}" "${AVAHI_HOSTS_PATH}" >/dev/null; then
+  echo "Avahi hosts file did not match expected fixture" >&2
+  diff -u "${EXPECTED_HOSTS_FIXTURE}" "${AVAHI_HOSTS_PATH}" >&2 || true
   exit 1
 fi
 

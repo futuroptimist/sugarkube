@@ -356,6 +356,46 @@ EOS
   [[ "$output" =~ host=sugarkube0.local ]]
 }
 
+@test "mdns self-check warns when browse succeeds but resolution lags" {
+  stub_avahi_browse_with_fixtures \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt" \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_services_with_k3s.txt"
+
+  stub_command avahi-resolve-host-name <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+
+  stub_command getent <<'EOS'
+#!/usr/bin/env bash
+exit 2
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=agent \
+    SUGARKUBE_EXPECTED_PHASE=agent \
+    SUGARKUBE_SELFCHK_ATTEMPTS=1 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    LOG_LEVEL=debug \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=warn ]]
+  [[ "$output" =~ reason=resolve_failed ]]
+  [[ "$output" =~ host=sugarkube0.local ]]
+}
+
 @test "mdns self-check reports failure when no records appear" {
   stub_avahi_browse_with_fixtures \
     "${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
