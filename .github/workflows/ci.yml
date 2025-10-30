@@ -55,6 +55,7 @@ jobs:
       - name: Run Bash tests under kcov
         env:
           KCOV_OUT: ${{ github.workspace }}/coverage/kcov
+          BATS_LIB_PATH: ${{ github.workspace }}/tests/bats
         run: |
           mkdir -p "$KCOV_OUT"
           # Run bats via kcov so executed shell scripts are tracked.
