@@ -1,6 +1,76 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+now_ms() {
+  python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+}
+
+elapsed_since_ms() {
+  python3 - "$1" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.time() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+}
+
+join_args_for_log() {
+  if [ "$#" -eq 0 ]; then
+    printf '%s' ""
+    return 0
+  fi
+  python3 - "$@" <<'PY'
+import shlex
+import sys
+print(' '.join(shlex.quote(arg) for arg in sys.argv[1:]))
+PY
+}
+
+WIRE_LAST_CMD_DISPLAY=""
+WIRE_LAST_CMD_DURATION_MS=""
+WIRE_LAST_CMD_OUTPUT=""
+WIRE_LAST_CMD_RC=""
+
+run_command_capture() {
+  if [ "$#" -lt 2 ]; then
+    return 127
+  fi
+  local label="$1"
+  shift
+  local display
+  display="$(join_args_for_log "$@" 2>/dev/null || printf '%s' "$*")"
+  local start
+  start="$(now_ms)"
+  local output
+  local rc
+  if ! output="$("$@" 2>&1)"; then
+    rc=$?
+  else
+    rc=0
+  fi
+  local duration
+  duration="$(elapsed_since_ms "${start}" 2>/dev/null || printf '%s' 0)"
+  case "${duration}" in
+    ''|*[!0-9]*) duration=0 ;;
+  esac
+  WIRE_LAST_CMD_DISPLAY="${display}"
+  WIRE_LAST_CMD_DURATION_MS="${duration}"
+  WIRE_LAST_CMD_OUTPUT="${output}"
+  WIRE_LAST_CMD_RC="${rc}"
+  return "${rc}"
+}
+
 iface=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -56,8 +126,11 @@ esac
 # Attempt to confirm via D-Bus first.
 dbus_summary=""
 dbus_rc=127
+dbus_command_display=""
+dbus_command_duration=""
 if command -v gdbus >/dev/null 2>&1; then
   set +e
+  dbus_start="$(now_ms)"
   dbus_summary="$({
     python3 - "${service_type}" <<'PY'
 import ast
@@ -207,51 +280,62 @@ sys.exit(4)
 PY
   } 2>&1)"
   dbus_rc=$?
+  dbus_command_duration="$(elapsed_since_ms "${dbus_start}" 2>/dev/null || printf '%s' 0)"
   set -e
+  dbus_command_display="python3 mdns_wire_probe_dbus_summary"
 else
   dbus_rc=127
 fi
 
 dbus_reason=""
-case "${dbus_rc}" in
-  0)
-    status="established"
-    answers="not_collected"
-    printf 'event=mdns_wire_probe iface=%s service_type=%s status=%s answers=%s dbus_rc=%s' \
-      "${iface}" "${service_type}" "${status}" "${answers}" "${dbus_rc}"
-    if [ -n "${expected_ipv4}" ]; then
-      printf ' expected_ipv4=%s' "${expected_ipv4}"
-    fi
-    if [ -n "${dbus_summary}" ]; then
-      printf ' dbus_summary=%q' "${dbus_summary}"
-    fi
-    printf '\n'
-    exit 0
-    ;;
-  2)
-    status="not_established"
-    answers="not_collected"
-    printf 'event=mdns_wire_probe iface=%s service_type=%s status=%s answers=%s dbus_rc=%s' \
-      "${iface}" "${service_type}" "${status}" "${answers}" "${dbus_rc}"
-    if [ -n "${expected_ipv4}" ]; then
-      printf ' expected_ipv4=%s' "${expected_ipv4}"
-    fi
-    if [ -n "${dbus_summary}" ]; then
-      printf ' dbus_summary=%q' "${dbus_summary}"
+  case "${dbus_rc}" in
+    0)
+      status="established"
+      answers="not_collected"
+      printf 'event=mdns_wire_probe iface=%s service_type=%s status=%s answers=%s dbus_rc=%s' \
+        "${iface}" "${service_type}" "${status}" "${answers}" "${dbus_rc}"
+      if [ -n "${dbus_command_display}" ]; then
+        printf ' dbus_command=%q dbus_duration_ms=%s' "${dbus_command_display}" "${dbus_command_duration}"
+      fi
+      if [ -n "${expected_ipv4}" ]; then
+        printf ' expected_ipv4=%s' "${expected_ipv4}"
+      fi
+      if [ -n "${dbus_summary}" ]; then
+        printf ' dbus_summary=%q' "${dbus_summary}"
     fi
     printf '\n'
     exit 0
     ;;
-  3|4)
-    status="no_entry_group"
-    answers="not_collected"
-    printf 'event=mdns_wire_probe iface=%s service_type=%s status=%s answers=%s dbus_rc=%s' \
-      "${iface}" "${service_type}" "${status}" "${answers}" "${dbus_rc}"
-    if [ -n "${expected_ipv4}" ]; then
-      printf ' expected_ipv4=%s' "${expected_ipv4}"
+    2)
+      status="not_established"
+      answers="not_collected"
+      printf 'event=mdns_wire_probe iface=%s service_type=%s status=%s answers=%s dbus_rc=%s' \
+        "${iface}" "${service_type}" "${status}" "${answers}" "${dbus_rc}"
+      if [ -n "${dbus_command_display}" ]; then
+        printf ' dbus_command=%q dbus_duration_ms=%s' "${dbus_command_display}" "${dbus_command_duration}"
+      fi
+      if [ -n "${expected_ipv4}" ]; then
+        printf ' expected_ipv4=%s' "${expected_ipv4}"
+      fi
+      if [ -n "${dbus_summary}" ]; then
+        printf ' dbus_summary=%q' "${dbus_summary}"
     fi
-    if [ -n "${dbus_summary}" ]; then
-      printf ' dbus_summary=%q' "${dbus_summary}"
+    printf '\n'
+    exit 0
+    ;;
+    3|4)
+      status="no_entry_group"
+      answers="not_collected"
+      printf 'event=mdns_wire_probe iface=%s service_type=%s status=%s answers=%s dbus_rc=%s' \
+        "${iface}" "${service_type}" "${status}" "${answers}" "${dbus_rc}"
+      if [ -n "${dbus_command_display}" ]; then
+        printf ' dbus_command=%q dbus_duration_ms=%s' "${dbus_command_display}" "${dbus_command_duration}"
+      fi
+      if [ -n "${expected_ipv4}" ]; then
+        printf ' expected_ipv4=%s' "${expected_ipv4}"
+      fi
+      if [ -n "${dbus_summary}" ]; then
+        printf ' dbus_summary=%q' "${dbus_summary}"
     fi
     printf '\n'
     exit 0
@@ -329,6 +413,8 @@ tcpdump_rc=""
 browse_rc=""
 browse_output=""
 reason="dbus_unavailable"
+browse_command_display=""
+browse_command_duration=""
 
 if [ -n "${dbus_reason}" ]; then
   reason="dbus_${dbus_reason}"
@@ -336,6 +422,8 @@ fi
 
 if [ "${have_tcpdump}" -eq 1 ]; then
   tmp_file="$(mktemp "${TMPDIR:-/tmp}/mdns-wire-probe.XXXXXX")"
+  tcpdump_command_display=""
+  tcpdump_command_duration=""
   cleanup() {
     rm -f "${tmp_file}"
     if [ -n "${timer_pid:-}" ]; then
@@ -352,9 +440,11 @@ if [ "${have_tcpdump}" -eq 1 ]; then
   tcpdump_args+=("${tcpdump_expr[@]}")
 
   set +e
+  tcpdump_start="$(now_ms)"
   if [ -n "${timeout_bin}" ]; then
     "${timeout_bin}" "${mdns_query_secs}" "${tcpdump_args[@]}" >"${tmp_file}" 2>&1 &
     tcpdump_pid=$!
+    tcpdump_command_display="$(join_args_for_log "${timeout_bin}" "${mdns_query_secs}" "${tcpdump_args[@]}")"
   else
     "${tcpdump_args[@]}" >"${tmp_file}" 2>&1 &
     tcpdump_pid=$!
@@ -363,6 +453,7 @@ if [ "${have_tcpdump}" -eq 1 ]; then
       kill -TERM "${tcpdump_pid}" >/dev/null 2>&1 || true
     ) &
     timer_pid=$!
+    tcpdump_command_display="$(join_args_for_log "${tcpdump_args[@]}")"
   fi
   set -e
 
@@ -370,17 +461,23 @@ if [ "${have_tcpdump}" -eq 1 ]; then
 else
   tmp_file=""
   tcpdump_pid=""
+  tcpdump_command_display=""
+  tcpdump_command_duration=""
 fi
 
 if [ "${have_browse}" -eq 1 ]; then
   browse_cmd=(avahi-browse --parsable --ignore-local --terminate "${service_type}")
   if [ -n "${timeout_bin}" ]; then
-    set +e
-    browse_output="$("${timeout_bin}" "${mdns_query_secs}" "${browse_cmd[@]}" 2>&1)"
-    browse_rc=$?
-    set -e
+    if run_command_capture mdns_wire_browse "${timeout_bin}" "${mdns_query_secs}" "${browse_cmd[@]}"; then
+      :
+    fi
+    browse_output="${WIRE_LAST_CMD_OUTPUT}"
+    browse_rc="${WIRE_LAST_CMD_RC}"
+    browse_command_display="${WIRE_LAST_CMD_DISPLAY}"
+    browse_command_duration="${WIRE_LAST_CMD_DURATION_MS}"
   else
     browse_tmp="$(mktemp "${TMPDIR:-/tmp}/mdns-browse.XXXXXX")"
+    browse_start="$(now_ms)"
     set +e
     "${browse_cmd[@]}" >"${browse_tmp}" 2>&1 &
     browse_pid=$!
@@ -395,10 +492,14 @@ if [ "${have_browse}" -eq 1 ]; then
     browse_output="$(cat "${browse_tmp}" 2>/dev/null || true)"
     rm -f "${browse_tmp}" || true
     set -e
+    browse_command_display="$(join_args_for_log "${browse_cmd[@]}")"
+    browse_command_duration="$(elapsed_since_ms "${browse_start}" 2>/dev/null || printf '%s' 0)"
   fi
 else
   browse_rc="127"
   browse_output="avahi-browse-missing"
+  browse_command_display=""
+  browse_command_duration=""
 fi
 
 if [ -n "${tcpdump_pid}" ]; then
@@ -406,6 +507,9 @@ if [ -n "${tcpdump_pid}" ]; then
   wait "${tcpdump_pid}"
   tcpdump_rc=$?
   set -e
+  if [ -n "${tcpdump_start:-}" ]; then
+    tcpdump_command_duration="$(elapsed_since_ms "${tcpdump_start}" 2>/dev/null || printf '%s' 0)"
+  fi
 else
   tcpdump_rc="127"
 fi
@@ -491,6 +595,15 @@ fi
 
 printf 'event=mdns_wire_probe iface=%s service_type=%s status=indeterminate visibility=no_local_loop reason=%s answers=%s tcpdump_rc=%s browse_rc=%s' \
   "${iface}" "${service_type}" "${reason}" "${answers}" "${tcpdump_rc}" "${browse_rc}"
+if [ -n "${tcpdump_command_display}" ]; then
+  printf ' tcpdump_command=%q tcpdump_duration_ms=%s' "${tcpdump_command_display}" "${tcpdump_command_duration:-0}"
+fi
+if [ -n "${browse_command_display}" ]; then
+  printf ' browse_command=%q browse_duration_ms=%s' "${browse_command_display}" "${browse_command_duration:-0}"
+fi
+if [ -n "${dbus_command_display}" ]; then
+  printf ' dbus_command=%q dbus_duration_ms=%s' "${dbus_command_display}" "${dbus_command_duration:-0}"
+fi
 if [ -n "${expected_ipv4}" ]; then
   printf ' expected_ipv4=%s' "${expected_ipv4}"
 fi
