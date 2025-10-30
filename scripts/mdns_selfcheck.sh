@@ -131,11 +131,25 @@ else
 fi
 
 if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
-  if ! "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+  avahi_wait_output=""
+  if ! avahi_wait_output="$("${SCRIPT_DIR}/wait_for_avahi_dbus.sh" 2>&1)"; then
     status=$?
+    if [ -n "${avahi_wait_output}" ]; then
+      printf '%s\n' "${avahi_wait_output}"
+    fi
     case "${status}" in
       2)
         log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_skipped fallback=cli
+        ;;
+      1)
+        if printf '%s\n' "${avahi_wait_output}" | grep -Eq \
+          'reason=systemd_unavailable|systemd_detail=.*(System_has_not_been_booted_with_systemd|Systemd_service_manager_is_not_running|Failed_to_connect_to_bus|Failed_to_get_D-Bus_connection|No_such_file_or_directory)'; then
+          log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_systemd_unavailable fallback=cli
+        else
+          elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+          log_info mdns_selfcheck_failure outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}" >&2
+          exit "${status}"
+        fi
         ;;
       *)
         elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
@@ -143,6 +157,8 @@ if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
         exit "${status}"
         ;;
     esac
+  elif [ -n "${avahi_wait_output}" ]; then
+    printf '%s\n' "${avahi_wait_output}"
   fi
 fi
 

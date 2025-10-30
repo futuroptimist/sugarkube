@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1091  # optional helper libraries resolve at runtime
 set -euo pipefail
 
 cluster="${SUGARKUBE_CLUSTER:?SUGARKUBE_CLUSTER is required}"
