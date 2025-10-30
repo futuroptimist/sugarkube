@@ -24,7 +24,7 @@ up env='dev':
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
-    export SUGARKUBE_SUMMARY_LIB="{{invocation_directory()}}/scripts/lib/summary.sh"
+    export SUGARKUBE_SUMMARY_LIB="{{ invocation_directory() }}/scripts/lib/summary.sh"
     if [ ! -f "${SUGARKUBE_SUMMARY_LIB}" ] && [ -f "{{ scripts_dir }}/lib/summary.sh" ]; then
     export SUGARKUBE_SUMMARY_LIB="{{ scripts_dir }}/lib/summary.sh"
     fi
