@@ -14,7 +14,7 @@ export SUGARKUBE_MDNS_ABSENCE_DBUS := env('SUGARKUBE_MDNS_ABSENCE_DBUS', '1')
 default: up
     @true
 
-up env='dev': prereqs
+up env='dev':
     # Select per-environment token if available
     if [ "{{ env }}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
     if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
@@ -23,24 +23,90 @@ up env='dev': prereqs
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
-    sudo -E bash "{{ scripts_dir }}/ensure_unique_hostname.sh"
+    export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
+    export SUGARKUBE_SUMMARY_LIB="{{ scripts_dir }}/lib/summary.sh"
+    if [ -f "${SUGARKUBE_SUMMARY_LIB}" ]; then
+      # shellcheck source=scripts/lib/summary.sh
+      . "${SUGARKUBE_SUMMARY_LIB}"
+    fi
+    if ! command -v summary_run >/dev/null 2>&1; then
+      summary_run() {
+        local _label="$1"
+        shift || true
+        "$@"
+        return "$?"
+      }
+    fi
+    if ! command -v summary_skip >/dev/null 2>&1; then
+      summary_skip() { :; }
+    fi
+    if ! command -v summary_finalize >/dev/null 2>&1; then
+      summary_finalize() { :; }
+    fi
 
-    # Restore WLAN on exit iff we actually disabled it (guard file written by toggle_wlan.sh)
-    trap 'if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
-             [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then \
-             sudo -E bash scripts/toggle_wlan.sh --restore || true; \
-           fi' EXIT INT TERM
+    __sugarkube_up_cleanup_common() {
+      local status="$1"
+      if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
+         [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
+        sudo -E bash scripts/toggle_wlan.sh --restore || true
+      fi
+      if command -v summary_finalize >/dev/null 2>&1; then
+        summary_finalize
+      fi
+      if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
+        rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
+      fi
+      return "${status}"
+    }
 
-    "{{ scripts_dir }}/check_memory_cgroup.sh"
+    __sugarkube_up_exit_trap() {
+      local status="$?"
+      __sugarkube_up_cleanup_common "${status}"
+    }
+
+    __sugarkube_up_signal_trap() {
+      local signal="$1"
+      local status="$?"
+      trap - EXIT INT TERM
+      __sugarkube_up_cleanup_common "${status}"
+      case "${signal}" in
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+      esac
+    }
+
+    trap '__sugarkube_up_exit_trap' EXIT
+    trap '__sugarkube_up_signal_trap INT' INT
+    trap '__sugarkube_up_signal_trap TERM' TERM
+
+    summary_run "Preflight (apt)" just prereqs
+
+    summary_run "Ensure unique hostname" sudo -E bash "{{ scripts_dir }}/ensure_unique_hostname.sh"
+
+    summary_run "Memory cgroup" "{{ scripts_dir }}/check_memory_cgroup.sh"
 
     # Preflight network/mDNS configuration
-    if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then sudo -E bash scripts/configure_avahi.sh; fi
+    if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then
+      summary_run "Avahi configure" sudo -E bash scripts/configure_avahi.sh
+    else
+      summary_skip "Avahi configure" "disabled"
+    fi
+
     # Optionally bring WLAN down for deterministic bootstrap
-    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then sudo -E bash scripts/toggle_wlan.sh --down; fi
-    if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then sudo -E bash scripts/configure_k3s_node_ip.sh; fi
+    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then
+      summary_run "WLAN disable" sudo -E bash scripts/toggle_wlan.sh --down
+    else
+      summary_skip "WLAN disable" "disabled"
+    fi
+
+    if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then
+      summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh
+    else
+      summary_skip "Node IP configure" "disabled"
+    fi
 
     # Proceed with discovery/join for subsequent nodes
-    sudo -E bash scripts/k3s-discover.sh
+    summary_run "k3s discover/install" sudo -E bash scripts/k3s-discover.sh
 
 prereqs:
     sudo apt-get update
