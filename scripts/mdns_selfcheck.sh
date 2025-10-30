@@ -24,6 +24,11 @@ ATTEMPTS="${SUGARKUBE_SELFCHK_ATTEMPTS:-12}"
 BACKOFF_START_MS="${SUGARKUBE_SELFCHK_BACKOFF_START_MS:-500}"
 BACKOFF_CAP_MS="${SUGARKUBE_SELFCHK_BACKOFF_CAP_MS:-5000}"
 JITTER_FRACTION="${JITTER:-0.2}"
+EXPECTED_PORT="${SUGARKUBE_EXPECTED_PORT:-6443}"
+
+case "${EXPECTED_PORT}" in
+  ''|*[!0-9]*) EXPECTED_PORT=6443 ;;
+esac
 
 if command -v tcpdump >/dev/null 2>&1; then
   TCPDUMP_AVAILABLE=1
@@ -79,6 +84,84 @@ if elapsed < 0:
 print(elapsed)
 PY
 }
+
+now_ms() {
+  python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+}
+
+kv_escape() {
+  printf '%s' "${1}" | tr '\n' ' ' | sed 's/"/\\"/g'
+}
+
+join_args_for_log() {
+  if [ "$#" -eq 0 ]; then
+    printf '%s' ""
+    return 0
+  fi
+  python3 - "$@" <<'PY'
+import shlex
+import sys
+print(' '.join(shlex.quote(arg) for arg in sys.argv[1:]))
+PY
+}
+
+MDNS_LAST_CMD_DISPLAY=""
+MDNS_LAST_CMD_DURATION_MS=""
+MDNS_LAST_CMD_OUTPUT=""
+MDNS_LAST_CMD_RC=""
+MDNS_LAST_CMD_PARSED_IPV4=""
+MDNS_LAST_FAILURE_COMMAND=""
+MDNS_LAST_FAILURE_DURATION=""
+
+run_command_capture() {
+  if [ "$#" -lt 2 ]; then
+    return 127
+  fi
+  local label="$1"
+  shift
+  local cmd_display
+  cmd_display="$(join_args_for_log "$@" 2>/dev/null || printf '%s' "$*")"
+  local start_ms
+  start_ms="$(now_ms)"
+  local output
+  local rc
+  if ! output="$("$@" 2>&1)"; then
+    rc=$?
+  else
+    rc=0
+  fi
+  local duration_ms
+  duration_ms="$(elapsed_since_start_ms "${start_ms}" 2>/dev/null || printf '%s' 0)"
+  case "${duration_ms}" in
+    ''|*[!0-9]*) duration_ms=0 ;;
+  esac
+  MDNS_LAST_CMD_DISPLAY="${cmd_display}"
+  MDNS_LAST_CMD_DURATION_MS="${duration_ms}"
+  MDNS_LAST_CMD_OUTPUT="${output}"
+  MDNS_LAST_CMD_RC="${rc}"
+  MDNS_LAST_CMD_PARSED_IPV4=""
+  local outcome
+  if [ "${rc}" -eq 0 ]; then
+    outcome="ok"
+  else
+    outcome="fail"
+  fi
+  local command_kv
+  command_kv="command=\"$(kv_escape "${cmd_display}")\""
+  log_debug mdns_command label="${label}" outcome="${outcome}" rc="${rc}" duration_ms="${duration_ms}" "${command_kv}"
+  printf '%s' "${output}"
+  return "${rc}"
+}
+
+SELF_RESOLVE_STATUS=3
+SELF_RESOLVE_HOST=""
+SELF_RESOLVE_IPV4=""
+SELF_RESOLVE_COMMAND=""
+SELF_RESOLVE_DURATION=""
+SELF_RESOLVE_REASON=""
 
 MDNS_RESOLUTION_STATUS_LOGGED=0
 MDNS_RESOLUTION_STATUS_NSS=0
@@ -339,6 +422,37 @@ else
   HOSTNAME_CHECK_ENABLED=0
 fi
 
+SELF_LOCAL_HOST=""
+if [ -n "${SELF_HOSTNAME_ALIASES}" ]; then
+  local_self_aliases="${SELF_HOSTNAME_ALIASES}"
+  old_ifs="${IFS}"
+  IFS="$(printf '\n')"
+  for self_alias in ${local_self_aliases}; do
+    case "${self_alias}" in
+      *.local)
+        SELF_LOCAL_HOST="${self_alias}"
+        break
+        ;;
+    esac
+  done
+  IFS="${old_ifs}"
+fi
+if [ -z "${SELF_LOCAL_HOST}" ]; then
+  raw_self_host="$(hostname 2>/dev/null || true)"
+  raw_self_host="$(printf '%s' "${raw_self_host}" | tr '[:upper:]' '[:lower:]')"
+  raw_self_host="${raw_self_host%.}"
+  if [ -n "${raw_self_host}" ]; then
+    case "${raw_self_host}" in
+      *.local)
+        SELF_LOCAL_HOST="${raw_self_host}"
+        ;;
+      *)
+        SELF_LOCAL_HOST="${raw_self_host}.local"
+        ;;
+    esac
+  fi
+fi
+
 host_matches_self() {
   candidate="$1"
   if [ -z "${candidate}" ]; then
@@ -474,7 +588,7 @@ resolve_host() {
   fi
 
   local output
-  if ! output="$(avahi-resolve -n "${host}" 2>/dev/null)"; then
+  if ! output="$(run_command_capture avahi_resolve avahi-resolve -n "${host}")"; then
     return 1
   fi
 
@@ -512,6 +626,258 @@ __RES__
 
   printf '%s|%s' "${any_addr}" "${ipv4_addr}"
   return 0
+}
+
+resolve_self_ipv4() {
+  local host="$1"
+  local expected_ipv4="${2:-}"
+
+  if [ -z "${host}" ]; then
+    return 3
+  fi
+  if ! command -v avahi-resolve >/dev/null 2>&1; then
+    return 3
+  fi
+
+  local output
+  if ! output="$(run_command_capture avahi_resolve_self avahi-resolve -4 "${host}")"; then
+    return 1
+  fi
+
+  local ipv4
+  ipv4="$(printf '%s\n' "${output}" | awk '{ for (i = NF; i >= 1; i--) { if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } } }' 2>/dev/null | tr -d '\r' | head -n1)"
+
+  if [ -z "${ipv4}" ]; then
+    return 1
+  fi
+
+  MDNS_LAST_CMD_PARSED_IPV4="${ipv4}"
+
+  if [ -n "${expected_ipv4}" ] && [ "${ipv4}" != "${expected_ipv4}" ]; then
+    printf '%s' "${ipv4}"
+    return 2
+  fi
+
+  printf '%s' "${ipv4}"
+  return 0
+}
+
+self_resolve_log() {
+  local stage="$1"
+  local attempt="$2"
+  local outcome="fail"
+  case "${SELF_RESOLVE_STATUS}" in
+    0) outcome="ok" ;;
+    3) outcome="skip" ;;
+  esac
+  local command_kv=""
+  local duration_kv=""
+  if [ -n "${SELF_RESOLVE_COMMAND}" ]; then
+    command_kv="command=\"$(kv_escape "${SELF_RESOLVE_COMMAND}")\""
+  fi
+  if [ -n "${SELF_RESOLVE_DURATION}" ]; then
+    duration_kv="command_duration_ms=${SELF_RESOLVE_DURATION}"
+  fi
+  if [ -n "${command_kv}" ] && [ -n "${duration_kv}" ]; then
+    log_debug mdns_self_resolve stage="${stage}" attempt="${attempt}" outcome="${outcome}" reason="${SELF_RESOLVE_REASON}" "${command_kv}" "${duration_kv}"
+  elif [ -n "${command_kv}" ]; then
+    log_debug mdns_self_resolve stage="${stage}" attempt="${attempt}" outcome="${outcome}" reason="${SELF_RESOLVE_REASON}" "${command_kv}"
+  elif [ -n "${duration_kv}" ]; then
+    log_debug mdns_self_resolve stage="${stage}" attempt="${attempt}" outcome="${outcome}" reason="${SELF_RESOLVE_REASON}" "${duration_kv}"
+  else
+    log_debug mdns_self_resolve stage="${stage}" attempt="${attempt}" outcome="${outcome}" reason="${SELF_RESOLVE_REASON}"
+  fi
+}
+
+self_resolve_attempt() {
+  local stage="$1"
+  local attempt="$2"
+
+  SELF_RESOLVE_STATUS=3
+  SELF_RESOLVE_HOST=""
+  SELF_RESOLVE_IPV4=""
+  SELF_RESOLVE_COMMAND=""
+  SELF_RESOLVE_DURATION=""
+  SELF_RESOLVE_REASON="skipped"
+
+  if [ -z "${EXPECTED_IPV4}" ]; then
+    self_resolve_log "${stage}" "${attempt}"
+    return 3
+  fi
+
+  local host="${SELF_LOCAL_HOST:-}" 
+  if [ -z "${host}" ]; then
+    self_resolve_log "${stage}" "${attempt}"
+    return 3
+  fi
+
+  SELF_RESOLVE_HOST="${host}"
+
+  local resolved
+  if ! resolved="$(resolve_self_ipv4 "${host}" "${EXPECTED_IPV4}" 2>/dev/null)"; then
+    local rc=$?
+    SELF_RESOLVE_STATUS="${rc}"
+    SELF_RESOLVE_COMMAND="${MDNS_LAST_CMD_DISPLAY:-}"
+    SELF_RESOLVE_DURATION="${MDNS_LAST_CMD_DURATION_MS:-}"
+    SELF_RESOLVE_IPV4="${MDNS_LAST_CMD_PARSED_IPV4:-}"
+    case "${rc}" in
+      2) SELF_RESOLVE_REASON="resolve_mismatch" ;;
+      1) SELF_RESOLVE_REASON="resolve_unavailable" ;;
+      3) SELF_RESOLVE_REASON="resolve_skipped" ;;
+      *) SELF_RESOLVE_REASON="resolve_error" ;;
+    esac
+    self_resolve_log "${stage}" "${attempt}"
+    return "${rc}"
+  fi
+
+  SELF_RESOLVE_STATUS=0
+  SELF_RESOLVE_COMMAND="${MDNS_LAST_CMD_DISPLAY:-}"
+  SELF_RESOLVE_DURATION="${MDNS_LAST_CMD_DURATION_MS:-}"
+  SELF_RESOLVE_IPV4="${MDNS_LAST_CMD_PARSED_IPV4:-${resolved}}"
+  SELF_RESOLVE_REASON="resolve_match"
+  self_resolve_log "${stage}" "${attempt}"
+  return 0
+}
+
+self_resolve_handle_success() {
+  local attempt="$1"
+  local stage="$2"
+
+  local host="${SELF_RESOLVE_HOST:-}" 
+  if [ -z "${host}" ]; then
+    host="${EXPECTED_HOST:-}"
+  fi
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+
+  local resolved_ipv4="${SELF_RESOLVE_IPV4:-${EXPECTED_IPV4}}"
+  local resolved_any="${resolved_ipv4}"
+  if [ -z "${resolved_any}" ]; then
+    resolved_any="${EXPECTED_IPV4}"
+  fi
+
+  local command_kv=""
+  local duration_kv=""
+  if [ -n "${SELF_RESOLVE_COMMAND}" ]; then
+    command_kv="command=\"$(kv_escape "${SELF_RESOLVE_COMMAND}")\""
+  fi
+  if [ -n "${SELF_RESOLVE_DURATION}" ]; then
+    duration_kv="command_duration_ms=${SELF_RESOLVE_DURATION}"
+  fi
+
+  local elapsed_ms
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}" 2>/dev/null || printf '%s' 0)"
+  case "${elapsed_ms}" in
+    ''|*[!0-9]*) elapsed_ms=0 ;;
+  esac
+
+  local nss_ok=0
+  local nss_rc=1
+  if mdns_check_nss_host "${host}" "${EXPECTED_IPV4}" >/dev/null 2>&1; then
+    nss_ok=1
+    nss_rc=0
+  else
+    nss_rc=$?
+  fi
+  if [ "${nss_rc}" -eq 2 ]; then
+    log_debug mdns_selfcheck_nss attempt="${attempt}" host="${host}" outcome=mismatch expected_ipv4="${EXPECTED_IPV4}" >&2
+  fi
+  MDNS_RESOLUTION_STATUS_NSS="${nss_ok}"
+  MDNS_RESOLUTION_STATUS_RESOLVE=1
+
+  local readiness_required=0
+  if [ "${EXPECTED_ROLE}" = "server" ] || [ "${EXPECTED_PHASE}" = "server" ]; then
+    readiness_required=1
+  fi
+
+  local srv_port="${EXPECTED_PORT}"
+  local server_host="${EXPECTED_HOST:-${host}}"
+  local resolve_method="avahi_resolve"
+
+  if [ "${readiness_required}" -eq 1 ]; then
+    local socket_targets
+    socket_targets="$(build_socket_targets "${server_host}" "${resolved_ipv4}" "${resolved_any}")"
+    if server_socket_ready "${server_host}" "${resolved_any}" "${resolved_ipv4}"; then
+      local socket_status="${MDNS_SOCKET_CHECK_STATUS:-ok}"
+      local socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
+      [ -n "${socket_status}" ] || socket_status="ok"
+      [ -n "${socket_method}" ] || socket_method="unknown"
+      local targets_kv="targets=\"$(kv_escape "${socket_targets}")\""
+      log_trace mdns_selfcheck_socket attempt="${attempt}" host="${server_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "${targets_kv}"
+      if [ -n "${command_kv}" ] && [ -n "${duration_kv}" ]; then
+        mdns_resolution_status_emit ok attempt="${attempt}" host="${server_host}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${command_kv}" "${duration_kv}"
+        log_info mdns_selfcheck outcome=confirmed check=self_resolve host="${server_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${command_kv}" "${duration_kv}"
+      elif [ -n "${command_kv}" ]; then
+        mdns_resolution_status_emit ok attempt="${attempt}" host="${server_host}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${command_kv}"
+        log_info mdns_selfcheck outcome=confirmed check=self_resolve host="${server_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${command_kv}"
+      elif [ -n "${duration_kv}" ]; then
+        mdns_resolution_status_emit ok attempt="${attempt}" host="${server_host}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${duration_kv}"
+        log_info mdns_selfcheck outcome=confirmed check=self_resolve host="${server_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${duration_kv}"
+      else
+        mdns_resolution_status_emit ok attempt="${attempt}" host="${server_host}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}"
+        log_info mdns_selfcheck outcome=confirmed check=self_resolve host="${server_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}"
+      fi
+      return 0
+    fi
+
+    local socket_status="${MDNS_SOCKET_CHECK_STATUS:-fail}"
+    local socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
+    [ -n "${socket_status}" ] || socket_status="fail"
+    [ -n "${socket_method}" ] || socket_method="unknown"
+    local targets_kv
+    targets_kv="targets=\"$(kv_escape "$(build_socket_targets "${server_host}" "${resolved_ipv4}" "${resolved_any}")")\""
+    log_trace mdns_selfcheck_socket attempt="${attempt}" host="${server_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "${targets_kv}"
+    if [ "${socket_status}" = "skipped" ]; then
+      SELF_RESOLVE_REASON="server_socket_unchecked"
+    else
+      SELF_RESOLVE_REASON="server_socket_unready"
+    fi
+    return 1
+  fi
+
+  if [ -n "${command_kv}" ] && [ -n "${duration_kv}" ]; then
+    mdns_resolution_status_emit ok attempt="${attempt}" host="${host}" resolve_method="${resolve_method}" stage="${stage}" "${command_kv}" "${duration_kv}"
+    log_info mdns_selfcheck outcome=ok host="${host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" stage="${stage}" "${command_kv}" "${duration_kv}"
+  elif [ -n "${command_kv}" ]; then
+    mdns_resolution_status_emit ok attempt="${attempt}" host="${host}" resolve_method="${resolve_method}" stage="${stage}" "${command_kv}"
+    log_info mdns_selfcheck outcome=ok host="${host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" stage="${stage}" "${command_kv}"
+  elif [ -n "${duration_kv}" ]; then
+    mdns_resolution_status_emit ok attempt="${attempt}" host="${host}" resolve_method="${resolve_method}" stage="${stage}" "${duration_kv}"
+    log_info mdns_selfcheck outcome=ok host="${host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" stage="${stage}" "${duration_kv}"
+  else
+    mdns_resolution_status_emit ok attempt="${attempt}" host="${host}" resolve_method="${resolve_method}" stage="${stage}"
+    log_info mdns_selfcheck outcome=ok host="${host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolve_method}" stage="${stage}"
+  fi
+  return 0
+}
+
+mdns_liveness_probe() {
+  local host="${SELF_LOCAL_HOST:-}"
+  local signal="liveness"
+
+  if command -v gdbus >/dev/null 2>&1; then
+    local dbus_output
+    if dbus_output="$(run_command_capture avahi_dbus_hostname gdbus call --system --dest org.freedesktop.Avahi --object-path / --method org.freedesktop.Avahi.Server.GetHostNameFqdn)"; then
+      local dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
+      local dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
+      local dbus_value="$(printf '%s' "${dbus_output}" | tr '\n' ' ' | sed 's/"/\\"/g')"
+      log_debug mdns_liveness outcome=ok signal=dbus_hostname "${dbus_command_kv}" "${dbus_duration_kv}" "output=\"${dbus_value}\""
+    else
+      local rc="${MDNS_LAST_CMD_RC:-1}"
+      local dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
+      local dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
+      log_debug mdns_liveness outcome=lag signal=dbus_hostname rc="${rc}" "${dbus_command_kv}" "${dbus_duration_kv}"
+    fi
+  else
+    log_debug mdns_liveness outcome=skip signal=dbus_hostname reason=gdbus_missing
+  fi
+
+  if [ -n "${host}" ] && [ -n "${EXPECTED_IPV4}" ]; then
+    self_resolve_attempt "${signal}" 0 >/dev/null 2>&1 || true
+  else
+    log_debug mdns_liveness outcome=skip signal=self_resolve reason=missing_context
+  fi
 }
 
 resolve_srv_target_cli() {
@@ -715,7 +1081,9 @@ mdns_selfcheck__service_type_check() {
   local active_window_ms active_start_elapsed current_elapsed delta_ms remaining_ms sleep_seconds
   local active_output active_count active_found active_attempts
 
-  type_output="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
+  type_output="$(run_command_capture mdns_browse_types avahi-browse --parsable --terminate _services._dns-sd._udp || true)"
+  type_command="${MDNS_LAST_CMD_DISPLAY:-}"
+  type_duration="${MDNS_LAST_CMD_DURATION_MS:-}"
   type_present=0
   available_types=""
   available_seen=","
@@ -765,21 +1133,88 @@ __MDNS_TYPES__
     available_kv="available_types=\"${available_escaped}\""
   fi
 
+  type_command_kv=""
+  type_duration_kv=""
+  if [ -n "${type_command}" ]; then
+    type_command_kv="command=\"$(kv_escape "${type_command}")\""
+  fi
+  if [ -n "${type_duration}" ]; then
+    type_duration_kv="command_duration_ms=${type_duration}"
+  fi
+
   if [ "${type_present}" -eq 1 ]; then
-    if [ -n "${available_kv}" ]; then
+    if [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${available_kv}" \
+        "${type_command_kv}" \
+        "${type_duration_kv}"
+    elif [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${available_kv}" \
+        "${type_command_kv}"
+    elif [ -n "${available_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${available_kv}" \
+        "${type_duration_kv}"
+    elif [ -n "${available_kv}" ]; then
       log_debug mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         "${available_kv}"
+    elif [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${type_command_kv}" \
+        "${type_duration_kv}"
+    elif [ -n "${type_command_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${type_command_kv}"
+    elif [ -n "${type_duration_kv}" ]; then
+      log_debug mdns_selfcheck event=mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        "${type_duration_kv}"
     else
       log_debug mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}"
     fi
   else
-    if [ -n "${available_kv}" ]; then
+    if [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${available_kv}" \
+        "${type_command_kv}" \
+        "${type_duration_kv}"
+    elif [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${available_kv}" \
+        "${type_command_kv}"
+    elif [ -n "${available_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${available_kv}" \
+        "${type_duration_kv}"
+    elif [ -n "${available_kv}" ]; then
       log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
         "${available_kv}"
+    elif [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${type_command_kv}" \
+        "${type_duration_kv}"
+    elif [ -n "${type_command_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${type_command_kv}"
+    elif [ -n "${type_duration_kv}" ]; then
+      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+        "${type_duration_kv}"
     else
       log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn
     fi
@@ -803,7 +1238,9 @@ __MDNS_TYPES__
   if [ "${type_present}" -eq 0 ]; then
     while :; do
       active_attempts=$((active_attempts + 1))
-      active_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
+      active_output="$(run_command_capture mdns_browse_active avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" || true)"
+      active_command="${MDNS_LAST_CMD_DISPLAY:-}"
+      active_duration="${MDNS_LAST_CMD_DURATION_MS:-}"
       active_count="$(printf '%s\n' "${active_output}" | awk -v svc="${SERVICE_TYPE}" '
 BEGIN { FS = ";"; count = 0 }
 $1 == "=" {
@@ -884,11 +1321,28 @@ PY
       case "${elapsed_ms}" in
         ''|*[!0-9]*) elapsed_ms=0 ;;
       esac
-      log_info mdns_selfcheck_failure outcome=miss reason=active_browse_empty service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" >&2
-      exit 4
+      active_command_kv=""
+      active_duration_kv=""
+      if [ -n "${active_command}" ]; then
+        active_command_kv="command=\"$(kv_escape "${active_command}")\""
+      fi
+      if [ -n "${active_duration}" ]; then
+        active_duration_kv="command_duration_ms=${active_duration}"
+      fi
+      if [ -n "${active_command_kv}" ] && [ -n "${active_duration_kv}" ]; then
+        log_debug mdns_selfcheck event=mdns_type_active outcome=miss service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" "${active_command_kv}" "${active_duration_kv}"
+      elif [ -n "${active_command_kv}" ]; then
+        log_debug mdns_selfcheck event=mdns_type_active outcome=miss service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" "${active_command_kv}"
+      elif [ -n "${active_duration_kv}" ]; then
+        log_debug mdns_selfcheck event=mdns_type_active outcome=miss service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}" "${active_duration_kv}"
+      else
+        log_debug mdns_selfcheck event=mdns_type_active outcome=miss service_type="${SERVICE_TYPE}" attempts="${active_attempts}" ms_elapsed="${elapsed_ms}"
+      fi
     fi
   fi
 }
+
+mdns_liveness_probe
 
 mdns_selfcheck__service_type_check
 
@@ -897,15 +1351,37 @@ last_reason=""
 miss_count=0
 while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   # Use parsable semicolon-delimited output with resolution and terminate flags
+  MDNS_LAST_FAILURE_COMMAND=""
+  MDNS_LAST_FAILURE_DURATION=""
   if [ "${INITIAL_BROWSE_READY}" -eq 1 ]; then
     browse_output="${INITIAL_BROWSE_OUTPUT}"
+    browse_command="${active_command:-}"
+    browse_duration="${active_duration:-}"
     INITIAL_BROWSE_READY=0
   else
-    browse_output="$(avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" 2>/dev/null || true)"
+    browse_output="$(run_command_capture mdns_browse avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" || true)"
+    browse_command="${MDNS_LAST_CMD_DISPLAY:-}"
+    browse_duration="${MDNS_LAST_CMD_DURATION_MS:-}"
   fi
   parsed="$(printf '%s\n' "${browse_output}" | parse_browse || true)"
   browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
-  log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
+  browse_command_kv=""
+  browse_duration_kv=""
+  if [ -n "${browse_command}" ]; then
+    browse_command_kv="command=\"$(kv_escape "${browse_command}")\""
+  fi
+  if [ -n "${browse_duration}" ]; then
+    browse_duration_kv="command_duration_ms=${browse_duration}"
+  fi
+  if [ -n "${browse_command_kv}" ] && [ -n "${browse_duration_kv}" ]; then
+    log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\"" "${browse_command_kv}" "${browse_duration_kv}"
+  elif [ -n "${browse_command_kv}" ]; then
+    log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\"" "${browse_command_kv}"
+  elif [ -n "${browse_duration_kv}" ]; then
+    log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\"" "${browse_duration_kv}"
+  else
+    log_trace mdns_selfcheck_browse attempt="${attempt}" "raw=\"${browse_for_trace}\""
+  fi
   if [ -n "${parsed}" ]; then
     handshake_failed=0
     srv_host="${parsed#*|}"
@@ -1015,6 +1491,8 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
             else
               last_reason="server_socket_unready"
             fi
+            MDNS_LAST_FAILURE_COMMAND="${browse_command:-}"
+            MDNS_LAST_FAILURE_DURATION="${browse_duration:-}"
           else
             mdns_resolution_status_emit ok attempt="${attempt}" host="${srv_host}" resolve_method="${resolution_method}"
             log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
@@ -1026,25 +1504,115 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           last_reason="ipv4_mismatch"
           log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
           elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          MDNS_LAST_FAILURE_COMMAND="${browse_command:-}"
+          MDNS_LAST_FAILURE_DURATION="${browse_duration:-}"
+          fail_command_kv=""
+          fail_duration_kv=""
+          if [ -n "${MDNS_LAST_FAILURE_COMMAND}" ]; then
+            fail_command_kv="command=\"$(kv_escape "${MDNS_LAST_FAILURE_COMMAND}")\""
+          fi
+          if [ -n "${MDNS_LAST_FAILURE_DURATION}" ]; then
+            fail_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
+          fi
+          if [ -n "${fail_command_kv}" ] && [ -n "${fail_duration_kv}" ]; then
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}" >&2
+          elif [ -n "${fail_command_kv}" ]; then
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" >&2
+          elif [ -n "${fail_duration_kv}" ]; then
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}" >&2
+          else
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          fi
           exit 5
         elif [ "${status}" -eq 0 ] && [ "${handshake_failed}" -eq 1 ]; then
           :
         else
           last_reason="resolve_failed"
+          MDNS_LAST_FAILURE_COMMAND="${browse_command:-}"
+          MDNS_LAST_FAILURE_DURATION="${browse_duration:-}"
         fi
       fi
     fi
   else
     if [ -z "${browse_output}" ]; then
-      last_reason="browse_empty"
+      browse_reason="browse_empty"
     else
-      last_reason="instance_not_found"
+      browse_reason="instance_not_found"
     fi
+    MDNS_LAST_FAILURE_COMMAND="${browse_command:-}" 
+    MDNS_LAST_FAILURE_DURATION="${browse_duration:-}"
+    if self_resolve_attempt browse "${attempt}" >/dev/null 2>&1; then
+      :
+    fi
+    case "${SELF_RESOLVE_STATUS}" in
+      0)
+        if self_resolve_handle_success "${attempt}" "browse"; then
+          exit 0
+        fi
+        MDNS_LAST_FAILURE_COMMAND="${SELF_RESOLVE_COMMAND:-${browse_command:-}}"
+        MDNS_LAST_FAILURE_DURATION="${SELF_RESOLVE_DURATION:-${browse_duration:-}}"
+        if [ -n "${SELF_RESOLVE_REASON}" ]; then
+          last_reason="${SELF_RESOLVE_REASON}"
+        else
+          last_reason="${browse_reason}"
+        fi
+        ;;
+      2)
+        MDNS_LAST_FAILURE_COMMAND="${SELF_RESOLVE_COMMAND:-${browse_command:-}}"
+        MDNS_LAST_FAILURE_DURATION="${SELF_RESOLVE_DURATION:-${browse_duration:-}}"
+        last_reason="resolve_mismatch"
+        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+        case "${elapsed_ms}" in
+          ''|*[!0-9]*) elapsed_ms=0 ;;
+        esac
+        mismatch_command_kv=""
+        mismatch_duration_kv=""
+        if [ -n "${SELF_RESOLVE_COMMAND}" ]; then
+          mismatch_command_kv="command=\"$(kv_escape "${SELF_RESOLVE_COMMAND}")\""
+        fi
+        if [ -n "${SELF_RESOLVE_DURATION}" ]; then
+          mismatch_duration_kv="command_duration_ms=${SELF_RESOLVE_DURATION}"
+        fi
+        if [ -n "${mismatch_command_kv}" ] && [ -n "${mismatch_duration_kv}" ]; then
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_command_kv}" "${mismatch_duration_kv}" >&2
+        elif [ -n "${mismatch_command_kv}" ]; then
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_command_kv}" >&2
+        elif [ -n "${mismatch_duration_kv}" ]; then
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_duration_kv}" >&2
+        else
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+        fi
+        mdns_resolution_status_emit fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
+        exit 5
+        ;;
+      *)
+        if [ -n "${SELF_RESOLVE_REASON}" ] && [ "${SELF_RESOLVE_STATUS}" -ne 3 ]; then
+          last_reason="${SELF_RESOLVE_REASON}"
+        else
+          last_reason="${browse_reason}"
+        fi
+        ;;
+    esac
   fi
 
   miss_count=$((miss_count + 1))
-  log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
+  miss_command_kv=""
+  miss_duration_kv=""
+  if [ -n "${MDNS_LAST_FAILURE_COMMAND}" ]; then
+    miss_command_kv="command=\"$(kv_escape "${MDNS_LAST_FAILURE_COMMAND}")\""
+  fi
+  if [ -n "${MDNS_LAST_FAILURE_DURATION}" ]; then
+    miss_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
+  fi
+  if [ -n "${miss_command_kv}" ] && [ -n "${miss_duration_kv}" ]; then
+    log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}" "${miss_command_kv}" "${miss_duration_kv}"
+  elif [ -n "${miss_command_kv}" ]; then
+    log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}" "${miss_command_kv}"
+  elif [ -n "${miss_duration_kv}" ]; then
+    log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}" "${miss_duration_kv}"
+  else
+    log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
+  fi
 
   if [ "${attempt}" -ge "${ATTEMPTS}" ]; then
     break
@@ -1114,12 +1682,50 @@ done
 
 elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
 if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] && [ "${MDNS_RESOLUTION_STATUS_RESOLVE}" = "0" ] && [ "${last_reason}" = "resolve_failed" ]; then
-  mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}"
-  log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+  warn_command_kv=""
+  warn_duration_kv=""
+  if [ -n "${MDNS_LAST_FAILURE_COMMAND}" ]; then
+    warn_command_kv="command=\"$(kv_escape "${MDNS_LAST_FAILURE_COMMAND}")\""
+  fi
+  if [ -n "${MDNS_LAST_FAILURE_DURATION}" ]; then
+    warn_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
+  fi
+  if [ -n "${warn_command_kv}" ] && [ -n "${warn_duration_kv}" ]; then
+    mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_command_kv}" "${warn_duration_kv}"
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}" "${warn_duration_kv}" >&2
+  elif [ -n "${warn_command_kv}" ]; then
+    mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_command_kv}"
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}" >&2
+  elif [ -n "${warn_duration_kv}" ]; then
+    mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_duration_kv}"
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_duration_kv}" >&2
+  else
+    mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}"
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+  fi
   exit 0
 fi
-log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
-mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}"
+fail_command_kv=""
+fail_duration_kv=""
+if [ -n "${MDNS_LAST_FAILURE_COMMAND}" ]; then
+  fail_command_kv="command=\"$(kv_escape "${MDNS_LAST_FAILURE_COMMAND}")\""
+fi
+if [ -n "${MDNS_LAST_FAILURE_DURATION}" ]; then
+  fail_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
+fi
+if [ -n "${fail_command_kv}" ] && [ -n "${fail_duration_kv}" ]; then
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}" >&2
+  mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}"
+elif [ -n "${fail_command_kv}" ]; then
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" >&2
+  mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}"
+elif [ -n "${fail_duration_kv}" ]; then
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}" >&2
+  mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}"
+else
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
+  mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}"
+fi
 
 # Use a distinct exit code for IPv4 mismatch to enable targeted relaxed retries upstream
 case "${last_reason}" in
