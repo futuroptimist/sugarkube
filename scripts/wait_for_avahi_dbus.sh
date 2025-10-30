@@ -84,7 +84,15 @@ case "${jitter_fraction}" in
 esac
 
 sanitize_kv() {
-  printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ' ' ' | tr ' ' '_' | tr -cd '[:alnum:]_.:-/'
+  # Ensure the sanitizer behaves consistently even on locales where the
+  # collating sequence would otherwise make '-' create an invalid range.
+  # GNU `tr` treats '-' as a range operator unless it appears first or
+  # last in the character set, so explicitly place it at the end.
+  LC_ALL=C printf '%s' "$1" \
+    | tr '\n\r\t' '   ' \
+    | tr -s ' ' ' ' \
+    | tr ' ' '_' \
+    | tr -cd '[:alnum:]_.:/-'
 }
 
 compute_sleep_ms() {
@@ -183,8 +191,11 @@ while :; do
     exit 2
   fi
 
-  systemctl_output="$(systemctl is-active avahi-daemon 2>&1 || true)"
-  systemctl_status=$?
+  if systemctl_output="$(systemctl is-active avahi-daemon 2>&1)"; then
+    systemctl_status=0
+  else
+    systemctl_status=$?
+  fi
   systemctl_state="$(printf '%s' "${systemctl_output}" | sed -n '1p' | tr -d '\r')"
   systemctl_state="$(printf '%s' "${systemctl_state}" | tr -d '[:space:]')"
   if [ -z "${systemctl_state}" ]; then
