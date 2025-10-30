@@ -389,6 +389,8 @@ iptables_preflight() {
   local iptables_version="unavailable"
   local nft_available="no"
   local kube_proxy_mode=""
+  local kube_proxy_source=""
+  local nft_mode_configured=0
   local outcome="ok"
   local message="iptables configuration appears compatible"
   local remediation=""
@@ -422,33 +424,395 @@ iptables_preflight() {
 
   if [ -n "${SUGARKUBE_KUBE_PROXY_MODE:-}" ]; then
     kube_proxy_mode="${SUGARKUBE_KUBE_PROXY_MODE}"
+    kube_proxy_source="env:SUGARKUBE_KUBE_PROXY_MODE"
   elif [ -n "${K3S_KUBE_PROXY_MODE:-}" ]; then
     kube_proxy_mode="${K3S_KUBE_PROXY_MODE}"
+    kube_proxy_source="env:K3S_KUBE_PROXY_MODE"
   elif [ -n "${KUBE_PROXY_MODE:-}" ]; then
     kube_proxy_mode="${KUBE_PROXY_MODE}"
+    kube_proxy_source="env:KUBE_PROXY_MODE"
   else
     kube_proxy_mode="iptables (default)"
+    kube_proxy_source="default"
   fi
 
   if [ -n "${INSTALL_K3S_EXEC:-}" ] && printf '%s' "${INSTALL_K3S_EXEC}" | grep -q -- '--disable-kube-proxy'; then
     kube_proxy_mode="disabled"
+    kube_proxy_source="install_args"
   fi
 
+  local detection_input=""
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_PATH:-}" ] && [ -r "${SUGARKUBE_SERVER_CONFIG_PATH}" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "yaml" "SUGARKUBE_SERVER_CONFIG_PATH" \
+      "${SUGARKUBE_SERVER_CONFIG_PATH}"
+  fi
+  if [ -n "${SUGARKUBE_SERVER_CONFIG_DIR:-}" ] && [ -d "${SUGARKUBE_SERVER_CONFIG_DIR}" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "yamldir" "SUGARKUBE_SERVER_CONFIG_DIR" \
+      "${SUGARKUBE_SERVER_CONFIG_DIR}"
+  fi
+  if [ -n "${K3S_CONFIG_FILE:-}" ] && [ -r "${K3S_CONFIG_FILE}" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "yaml" "K3S_CONFIG_FILE" "${K3S_CONFIG_FILE}"
+  fi
+  local config_dir
+  config_dir="${K3S_CONFIG_DIR:-/etc/rancher/k3s}"
+  if [ -n "${config_dir}" ] && [ -d "${config_dir}" ]; then
+    if [ -r "${config_dir}/config.yaml" ]; then
+      printf -v detection_input '%s%s\t%s\t%s\n' \
+        "${detection_input}" "yaml" "${config_dir}/config.yaml" \
+        "${config_dir}/config.yaml"
+    fi
+    if [ -d "${config_dir}/config.yaml.d" ]; then
+      printf -v detection_input '%s%s\t%s\t%s\n' \
+        "${detection_input}" "yamldir" "${config_dir}/config.yaml.d" \
+        "${config_dir}/config.yaml.d"
+    fi
+  elif [ -r "/etc/rancher/k3s/config.yaml" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "yaml" "/etc/rancher/k3s/config.yaml" \
+      "/etc/rancher/k3s/config.yaml"
+  fi
+  if [ -d "/etc/rancher/k3s/config.yaml.d" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "yamldir" "/etc/rancher/k3s/config.yaml.d" \
+      "/etc/rancher/k3s/config.yaml.d"
+  fi
+  if [ -n "${SUGARKUBE_SERVER_SERVICE_PATH:-}" ] && [ -r "${SUGARKUBE_SERVER_SERVICE_PATH}" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "service" "SUGARKUBE_SERVER_SERVICE_PATH" \
+      "${SUGARKUBE_SERVER_SERVICE_PATH}"
+  fi
+  local service_candidate
+  for service_candidate in \
+    /etc/systemd/system/k3s.service \
+    /usr/lib/systemd/system/k3s.service \
+    /lib/systemd/system/k3s.service \
+    /etc/systemd/system/multi-user.target.wants/k3s.service
+  do
+    if [ -r "${service_candidate}" ]; then
+      printf -v detection_input '%s%s\t%s\t%s\n' \
+        "${detection_input}" "service" "${service_candidate}" \
+        "${service_candidate}"
+    fi
+  done
+  if [ -n "${INSTALL_K3S_EXEC:-}" ]; then
+    printf -v detection_input '%s%s\t%s\t%s\n' \
+      "${detection_input}" "args" "INSTALL_K3S_EXEC" "${INSTALL_K3S_EXEC}"
+  fi
+
+  if [ -n "${detection_input}" ]; then
+    local detection_output
+    detection_output="$(DETECTION_INPUT="${detection_input}" python3 - <<'PY'
+import ast
+import os
+import shlex
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+
+def strip_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
+def clean_fragment(value: str) -> str:
+    value = value.split('#', 1)[0].strip()
+    value = strip_quotes(value)
+    return value.strip()
+
+
+def normalize_mode(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    if not cleaned:
+        return None
+    if cleaned in {'nftables', 'nft'}:
+        return 'nft'
+    return cleaned
+
+
+def extract_mode_fragment(fragment: str) -> Optional[str]:
+    fragment = clean_fragment(fragment)
+    if not fragment:
+        return None
+    if fragment.startswith('proxy-mode='):
+        fragment = fragment.split('=', 1)[1].strip()
+    return normalize_mode(fragment)
+
+
+def parse_yaml_mode(path: Path) -> Optional[str]:
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError:
+        return None
+    mode: Optional[str] = None
+    list_key: Optional[str] = None
+    list_indent = 0
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(' '))
+        if list_key == 'kube-proxy-arg':
+            if indent <= list_indent and not stripped.startswith('-'):
+                list_key = None
+            elif stripped.startswith('-'):
+                entry = stripped[1:].strip()
+                candidate = extract_mode_fragment(entry)
+                if candidate is not None:
+                    mode = candidate
+                continue
+        if ':' not in stripped:
+            continue
+        key_part, value_part = stripped.split(':', 1)
+        key = strip_quotes(key_part.strip())
+        value = value_part.strip()
+        if key == 'kube-proxy-arg':
+            list_key = key
+            list_indent = indent
+            cleaned_value = value.split('#', 1)[0].strip()
+            if cleaned_value.startswith('[') and cleaned_value.endswith(']'):
+                inner = cleaned_value[1:-1]
+                parsed = None
+                try:
+                    parsed = ast.literal_eval(cleaned_value)
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, (list, tuple)):
+                    for fragment in parsed:
+                        candidate = extract_mode_fragment(str(fragment))
+                        if candidate is not None:
+                            mode = candidate
+                else:
+                    for fragment in inner.split(','):
+                        candidate = extract_mode_fragment(fragment)
+                        if candidate is not None:
+                            mode = candidate
+            else:
+                candidate = extract_mode_fragment(cleaned_value)
+                if candidate is not None:
+                    mode = candidate
+            continue
+        else:
+            list_key = None
+        if key == 'proxy-mode':
+            candidate = extract_mode_fragment(value)
+            if candidate is not None:
+                mode = candidate
+    return mode
+
+
+def parse_yaml_dir(path: Path, label: str) -> Tuple[Optional[str], Optional[str]]:
+    if not path.is_dir():
+        return None, None
+    mode: Optional[str] = None
+    source: Optional[str] = None
+    candidates = list(sorted(path.glob('*.yml'))) + list(sorted(path.glob('*.yaml')))
+    for candidate in candidates:
+        candidate_mode = parse_yaml_mode(candidate)
+        if candidate_mode is not None:
+            mode = candidate_mode
+            source = f"{label}:{candidate.name}"
+    return mode, source
+
+
+def parse_tokens(tokens: List[str]) -> Optional[str]:
+    mode: Optional[str] = None
+    idx = 0
+    total = len(tokens)
+    while idx < total:
+        token = tokens[idx]
+        if token.startswith('--kube-proxy-arg'):
+            arg_value: Optional[str] = None
+            if token == '--kube-proxy-arg' and idx + 1 < total:
+                arg_value = tokens[idx + 1]
+                idx += 1
+            elif token.startswith('--kube-proxy-arg='):
+                arg_value = token.split('=', 1)[1]
+            if arg_value is not None:
+                candidate = extract_mode_fragment(arg_value)
+                if candidate is not None:
+                    mode = candidate
+            idx += 1
+            continue
+        if token.startswith('--proxy-mode'):
+            arg_value: Optional[str] = None
+            if token == '--proxy-mode' and idx + 1 < total:
+                arg_value = tokens[idx + 1]
+                idx += 1
+            elif token.startswith('--proxy-mode='):
+                arg_value = token.split('=', 1)[1]
+            if arg_value is not None:
+                candidate = extract_mode_fragment(arg_value)
+                if candidate is not None:
+                    mode = candidate
+            idx += 1
+            continue
+        idx += 1
+    return mode
+
+
+def parse_service_mode(path: Path) -> Optional[str]:
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError:
+        return None
+    mode: Optional[str] = None
+    buffer = ''
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if raw_line.rstrip().endswith('\\'):
+            buffer += raw_line.rstrip()[:-1] + ' '
+            continue
+        if buffer:
+            combined = buffer + raw_line.strip()
+            buffer = ''
+        else:
+            combined = raw_line
+        stripped_combined = combined.strip()
+        if not stripped_combined or stripped_combined.startswith('#'):
+            continue
+        lower = stripped_combined.lower()
+        if not lower.startswith('execstart'):
+            continue
+        _, _, value = stripped_combined.partition('=')
+        value = value.strip()
+        if not value:
+            continue
+        if value.startswith('-'):
+            value = value[1:].lstrip()
+        tokens = shlex.split(value)
+        candidate = parse_tokens(tokens)
+        if candidate is not None:
+            mode = candidate
+    if buffer:
+        stripped_combined = buffer.strip()
+        if stripped_combined.lower().startswith('execstart'):
+            _, _, value = stripped_combined.partition('=')
+            value = value.strip()
+            if value.startswith('-'):
+                value = value[1:].lstrip()
+            tokens = shlex.split(value)
+            candidate = parse_tokens(tokens)
+            if candidate is not None:
+                mode = candidate
+    return mode
+
+
+def main() -> None:
+    raw_input = os.environ.get('DETECTION_INPUT', '')
+    mode: Optional[str] = None
+    source: Optional[str] = None
+    for line in raw_input.splitlines():
+        if not line:
+            continue
+        parts = line.split('\t', 2)
+        if len(parts) != 3:
+            continue
+        entry_type, label, value = parts
+        if not value:
+            continue
+        if entry_type == 'yaml':
+            path = Path(value)
+            candidate = parse_yaml_mode(path)
+            if candidate is not None:
+                mode = candidate
+                source = label
+        elif entry_type == 'yamldir':
+            path = Path(value)
+            candidate, candidate_source = parse_yaml_dir(path, label)
+            if candidate is not None:
+                mode = candidate
+                source = candidate_source if candidate_source else label
+        elif entry_type == 'service':
+            path = Path(value)
+            candidate = parse_service_mode(path)
+            if candidate is not None:
+                mode = candidate
+                source = label
+        elif entry_type == 'args':
+            tokens = shlex.split(value)
+            candidate = parse_tokens(tokens)
+            if candidate is not None:
+                mode = candidate
+                source = label
+    if mode is None:
+        print()
+    elif source is None:
+        print(f"{mode}")
+    else:
+        print(f"{mode}\t{source}")
+
+
+if __name__ == '__main__':
+    main()
+PY
+    )"
+
+    if [ -n "${detection_output}" ]; then
+      local detected_mode
+      local detected_source
+      detected_mode="${detection_output%%$'\t'*}"
+      if [ "${detection_output}" != "${detected_mode}" ]; then
+        detected_source="${detection_output#*$'\t'}"
+      else
+        detected_source=""
+      fi
+      if [ -n "${detected_mode}" ]; then
+        kube_proxy_mode="${detected_mode}"
+        if [ -n "${detected_source}" ]; then
+          kube_proxy_source="${detected_source}"
+        else
+          kube_proxy_source="detected"
+        fi
+      fi
+    fi
+  fi
+
+  case "${kube_proxy_mode}" in
+    nft|nftables)
+      nft_mode_configured=1
+      kube_proxy_mode="nft"
+      ;;
+    "iptables (default)"|iptables)
+      kube_proxy_mode="iptables"
+      nft_mode_configured=0
+      ;;
+    "")
+      kube_proxy_mode="unknown"
+      ;;
+  esac
+
   if [ "${outcome}" = "ok" ] && [ "${iptables_variant}" = "nf_tables" ]; then
-    outcome="warn"
-    message="iptables is using the nf_tables backend which is known to break k3s kube-proxy"
-    remediation="use_update-alternatives_to_select_iptables-legacy"
+    if [ "${nft_mode_configured}" -eq 1 ]; then
+      message="nf_tables backend detected; kube-proxy nft mode is enabled (GA in Kubernetes v1.33)"
+      remediation=""
+    else
+      outcome="warn"
+      message="iptables is using the nf_tables backend; enable kube-proxy nft mode "\
+"(GA in Kubernetes v1.33) or select iptables-legacy"
+      remediation="enable_kube-proxy_nft_mode_or_select_iptables-legacy"
+    fi
   fi
 
   if [ "${outcome}" = "warn" ] && [ "${nft_available}" = "no" ] && [ "${iptables_variant}" = "nf_tables" ]; then
-    remediation="install_nftables_or_switch_to_iptables-legacy"
+    remediation="install_nftables_and_enable_kube-proxy_nft_mode_or_select_iptables-legacy"
   fi
 
   local safe_kube_proxy_mode
   safe_kube_proxy_mode="$(printf '%s' "${kube_proxy_mode}" | tr ' ' '_' | tr -d '"')"
+  local safe_kube_proxy_source
+  safe_kube_proxy_source="$(printf '%s' "${kube_proxy_source}" | tr ' ' '_' | tr -d '"')"
 
   local details
-  details="variant=${iptables_variant},version=${iptables_version},nft=${nft_available},kube-proxy=${safe_kube_proxy_mode}"
+  details="variant=${iptables_variant},version=${iptables_version},nft=${nft_available},"\
+"kube-proxy=${safe_kube_proxy_mode},kube-proxy-source=${safe_kube_proxy_source}"
   if [ -n "${iptables_cmd}" ]; then
     details="${details},path=${iptables_cmd}"
   fi
@@ -464,6 +828,8 @@ iptables_preflight() {
     "version=${iptables_version}"
     "nft_available=${nft_available}"
     "kube_proxy_mode=\"$(escape_log_value "${kube_proxy_mode}")\""
+    "kube_proxy_source=\"$(escape_log_value "${kube_proxy_source}")\""
+    "kube_proxy_nft_configured=${nft_mode_configured}"
   )
 
   if [ -n "${remediation}" ]; then
