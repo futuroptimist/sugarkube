@@ -169,6 +169,7 @@ last_systemctl_detail=""
 last_bus_status="pending"
 last_bus_error=""
 last_bus_code=1
+systemd_absent_hint=0
 
 while :; do
   if dbus_disabled; then
@@ -193,6 +194,10 @@ while :; do
   last_systemctl_status="${systemctl_status}"
   if [ "${systemctl_status}" -ne 0 ] && [ "${systemctl_status}" -ne 3 ]; then
     last_systemctl_detail="${systemctl_output}"
+    if printf '%s' "${last_systemctl_detail}" | grep -Eiq \
+      'System has not been booted with systemd|Failed to connect to bus|Failed to get D-Bus connection|Systemd service manager is not running'; then
+      systemd_absent_hint=1
+    fi
   else
     last_systemctl_detail=""
   fi
@@ -285,6 +290,26 @@ bus_status_log="$(sanitize_kv "${last_bus_status}")"
 [ -n "${bus_status_log}" ] || bus_status_log=unknown
 bus_error_log="$(sanitize_kv "${last_bus_error}")"
 systemd_detail_log="$(sanitize_kv "${last_systemctl_detail}")"
+
+if [ "${systemd_absent_hint}" -ne 0 ]; then
+  set -- \
+    avahi_dbus_ready \
+    outcome=skip \
+    reason=systemd_unavailable \
+    ms_elapsed="${elapsed_ms}" \
+    systemd_state="${systemd_state_log}" \
+    systemd_status="${last_systemctl_status}" \
+    bus_status="${bus_status_log}" \
+    bus_code="${last_bus_code}"
+  if [ -n "${systemd_detail_log}" ]; then
+    set -- "$@" systemd_detail="${systemd_detail_log}"
+  fi
+  if [ -n "${bus_error_log}" ]; then
+    set -- "$@" bus_error="${bus_error_log}"
+  fi
+  log_info "$@"
+  exit 2
+fi
 
 set -- \
   avahi_dbus_ready \
