@@ -85,6 +85,29 @@ MDNS_RESOLUTION_STATUS_NSS=0
 MDNS_RESOLUTION_STATUS_RESOLVE=0
 MDNS_RESOLUTION_STATUS_BROWSE=0
 
+extract_wait_field() {
+  local field_name="$1"
+  if [ -z "${field_name}" ]; then
+    return 1
+  fi
+  # Parse the first key=value pair matching the requested field from the
+  # structured log output emitted by wait_for_avahi_dbus.sh.
+  awk -v key="${field_name}" '
+    {
+      for (i = 1; i <= NF; i++) {
+        if (index($i, key "=") == 1) {
+          value = substr($i, length(key) + 2)
+          gsub(/^[[:space:]]+/, "", value)
+          gsub(/[[:space:]]+$/, "", value)
+          gsub(/"/, "", value)
+          print value
+          exit
+        }
+      }
+    }
+  ' 2>/dev/null
+}
+
 mdns_resolution_status_emit() {
   local outcome="$1"
   shift || true

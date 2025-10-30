@@ -4,9 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
-SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${SCRIPT_DIR}/lib/summary.sh}"
-if [ -f "${SUMMARY_LIB}" ]; then
-  # shellcheck source=scripts/lib/summary.sh
+DEFAULT_SUMMARY_LIB="${SCRIPT_DIR}/lib/summary.sh"
+SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${DEFAULT_SUMMARY_LIB}}"
+
+if [ "${SUMMARY_LIB}" = "${DEFAULT_SUMMARY_LIB}" ]; then
+  if [ -f "${DEFAULT_SUMMARY_LIB}" ]; then
+    # shellcheck disable=SC1091  # Optional helper bundled with the repo
+    . "${SCRIPT_DIR}/lib/summary.sh"
+  fi
+elif [ -f "${SUMMARY_LIB}" ]; then
+  # shellcheck disable=SC1090,SC1091  # Runtime-configured summary helper
   . "${SUMMARY_LIB}"
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
