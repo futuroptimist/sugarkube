@@ -16,7 +16,14 @@ elif [ -f "${SUMMARY_LIB}" ]; then
   # shellcheck disable=SC1090,SC1091  # Runtime-configured summary helper
   . "${SUMMARY_LIB}"
 fi
+if command -v summary::init >/dev/null 2>&1; then
+  summary::init
+fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
+SUMMARY_SECTION_ENV="${SUMMARY_SECTION_ENV:-0}"
+SUMMARY_SECTION_AVAHI="${SUMMARY_SECTION_AVAHI:-0}"
+SUMMARY_SECTION_MDNS="${SUMMARY_SECTION_MDNS:-0}"
+SUMMARY_SECTION_K3S="${SUMMARY_SECTION_K3S:-0}"
 
 log_message() {
   local level="$1"
@@ -158,6 +165,17 @@ if [ -n "${SUGARKUBE_SERVER_FLAG_PARITY_BIN:-}" ]; then
   SERVER_FLAG_PARITY_BIN="${SUGARKUBE_SERVER_FLAG_PARITY_BIN}"
 else
   SERVER_FLAG_PARITY_BIN="${SCRIPT_DIR}/check_server_flag_parity.sh"
+fi
+
+if command -v summary_enabled >/dev/null 2>&1 && summary_enabled && [ "${SUMMARY_SECTION_ENV}" -eq 0 ]; then
+  summary::section "Environment"
+  summary::kv "Cluster" "${CLUSTER}"
+  summary::kv "Environment" "${ENVIRONMENT}"
+  summary::kv "Servers desired" "${SERVERS_DESIRED}"
+  if [ -n "${API_REGADDR}" ]; then
+    summary::kv "API registry" "${API_REGADDR}"
+  fi
+  SUMMARY_SECTION_ENV=1
 fi
 
 run_net_diag() {
@@ -992,11 +1010,15 @@ ensure_avahi_liveness_signal() {
   if command -v summary_enabled >/dev/null 2>&1 && summary_enabled && [ "${SUMMARY_DBUS_RECORDED}" -eq 0 ]; then
     summary_active=1
     summary_start="$(summary_now_ms)"
+    if [ "${SUMMARY_SECTION_AVAHI}" -eq 0 ]; then
+      summary::section "Avahi readiness"
+      SUMMARY_SECTION_AVAHI=1
+    fi
   fi
 
   if [ "${AVAHI_LIVENESS_READY}" -eq 1 ]; then
     if [ "${summary_active}" -eq 1 ]; then
-      summary_step "D-Bus readiness" "OK" "$(summary_elapsed_ms "${summary_start}")" "cached=1"
+      summary::step OK "D-Bus readiness" "$(summary_elapsed_ms "${summary_start}")" "cached=1"
       SUMMARY_DBUS_RECORDED=1
       summary_recorded=1
     fi
@@ -1041,7 +1063,7 @@ ensure_avahi_liveness_signal() {
         if [ -n "${dbus_note}" ]; then
           summary_note+=" ${dbus_note}"
         fi
-        summary_step "D-Bus readiness" "OK" \
+        summary::step OK "D-Bus readiness" \
           "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note}"
         SUMMARY_DBUS_RECORDED=1
@@ -1064,7 +1086,7 @@ ensure_avahi_liveness_signal() {
     if [ "${wait_status}" -ne 0 ] && [ -z "${dbus_note}" ]; then
       summary_note+=" wait_status=${wait_status}"
     fi
-    summary_step "D-Bus readiness" "FAIL" \
+    summary::step FAIL "D-Bus readiness" \
       "$(summary_elapsed_ms "${summary_start}")" \
       "${summary_note}"
     SUMMARY_DBUS_RECORDED=1
@@ -1894,12 +1916,19 @@ ensure_self_mdns_advertisement() {
   if command -v summary_enabled >/dev/null 2>&1 && summary_enabled; then
     summary_active=1
     summary_start="$(summary_now_ms)"
+    if [ "${SUMMARY_SECTION_MDNS}" -eq 0 ]; then
+      summary::section "mDNS self-check"
+      if [ -n "${MDNS_IFACE:-}" ]; then
+        summary::kv "mDNS interface" "${MDNS_IFACE}"
+      fi
+      SUMMARY_SECTION_MDNS=1
+    fi
   fi
 
   if [ "${SKIP_MDNS_SELF_CHECK}" = "1" ]; then
     MDNS_LAST_OBSERVED="${MDNS_HOST_RAW}"
     if [ "${summary_active}" -eq 1 ]; then
-      summary_step "Self-check (mDNS)" "SKIP" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step SKIP "Self-check (mDNS)" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=skip"
       summary_recorded=1
     fi
@@ -1918,7 +1947,7 @@ ensure_self_mdns_advertisement() {
       ;;
     *)
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_step "Self-check (mDNS)" "SKIP" "$(summary_elapsed_ms "${summary_start}")" \
+        summary::step SKIP "Self-check (mDNS)" "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note} reason=unknown-role"
         summary_recorded=1
       fi
@@ -2060,7 +2089,7 @@ PY
       if [ -n "${summary_elapsed}" ]; then
         summary_extra+=" ms=${summary_elapsed}"
       fi
-      summary_step "Self-check (mDNS)" "OK" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step OK "Self-check (mDNS)" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} ${summary_extra}"
       summary_recorded=1
     fi
@@ -2107,7 +2136,7 @@ PY
           "--tag" "strict_status=${status}"
       fi
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_step "Self-check (mDNS)" "WARN" "$(summary_elapsed_ms "${summary_start}")" \
+        summary::step WARN "Self-check (mDNS)" "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note} attempts=${retries} relaxed=1"
         summary_recorded=1
       fi
@@ -2139,7 +2168,7 @@ PY
     if [ "${relaxed_attempted}" -eq 1 ]; then
       failure_note+=" relaxed_status=${relaxed_status}"
     fi
-    summary_step "Self-check (mDNS)" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+    summary::step FAIL "Self-check (mDNS)" "$(summary_elapsed_ms "${summary_start}")" \
       "${summary_note} ${failure_note}"
     summary_recorded=1
   fi
@@ -2340,7 +2369,7 @@ publish_avahi_service() {
     if [ "${publish_status}" -ne 0 ]; then
       publish_status_label="FAIL"
     fi
-    summary_step "Publish ${MDNS_SERVICE_TYPE}" "${publish_status_label}" \
+    summary::step "${publish_status_label}" "Publish ${MDNS_SERVICE_TYPE}" \
       "$(summary_elapsed_ms "${publish_summary_start}")" "${publish_note}"
   fi
 
@@ -2808,6 +2837,13 @@ install_server_single() {
   if command -v summary_enabled >/dev/null 2>&1 && summary_enabled; then
     summary_active=1
     summary_start="$(summary_now_ms)"
+    if [ "${SUMMARY_SECTION_K3S}" -eq 0 ]; then
+      summary::section "k3s install"
+      if [ -n "${K3S_CHANNEL:-}" ]; then
+        summary::kv "k3s channel" "${K3S_CHANNEL}"
+      fi
+      SUMMARY_SECTION_K3S=1
+    fi
   fi
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
@@ -2826,7 +2862,7 @@ install_server_single() {
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_single"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+        summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note} reason=mdns"
         summary_recorded=1
       fi
@@ -2838,7 +2874,7 @@ install_server_single() {
     summary_note+=" reason=api-timeout"
   fi
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-    summary_step "k3s install" "${summary_status}" \
+    summary::step "${summary_status}" "k3s install" \
       "$(summary_elapsed_ms "${summary_start}")" \
       "${summary_note}"
     summary_recorded=1
@@ -2854,6 +2890,13 @@ install_server_cluster_init() {
   if command -v summary_enabled >/dev/null 2>&1 && summary_enabled; then
     summary_active=1
     summary_start="$(summary_now_ms)"
+    if [ "${SUMMARY_SECTION_K3S}" -eq 0 ]; then
+      summary::section "k3s install"
+      if [ -n "${K3S_CHANNEL:-}" ]; then
+        summary::kv "k3s channel" "${K3S_CHANNEL}"
+      fi
+      SUMMARY_SECTION_K3S=1
+    fi
   fi
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
@@ -2873,7 +2916,7 @@ install_server_cluster_init() {
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+        summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note} reason=mdns"
         summary_recorded=1
       fi
@@ -2885,7 +2928,7 @@ install_server_cluster_init() {
     summary_note+=" reason=api-timeout"
   fi
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-    summary_step "k3s install" "${summary_status}" \
+    summary::step "${summary_status}" "k3s install" \
       "$(summary_elapsed_ms "${summary_start}")" \
       "${summary_note}"
     summary_recorded=1
@@ -2905,6 +2948,13 @@ install_server_join() {
   if command -v summary_enabled >/dev/null 2>&1 && summary_enabled; then
     summary_active=1
     summary_start="$(summary_now_ms)"
+    if [ "${SUMMARY_SECTION_K3S}" -eq 0 ]; then
+      summary::section "k3s install"
+      if [ -n "${K3S_CHANNEL:-}" ]; then
+        summary::kv "k3s channel" "${K3S_CHANNEL}"
+      fi
+      SUMMARY_SECTION_K3S=1
+    fi
   fi
   if [ -n "${API_REGADDR:-}" ] && [ -n "${discovered_server:-}" ]; then
     probe_host="${discovered_server}"
@@ -2912,7 +2962,7 @@ install_server_join() {
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=token"
       summary_recorded=1
     fi
@@ -2922,7 +2972,7 @@ install_server_join() {
   if [ ! -x "${L4_PROBE_BIN}" ]; then
     log_error_msg discover "Port connectivity helper missing" "phase=install_join" "server=${server}" "script=${L4_PROBE_BIN}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=l4-probe"
       summary_recorded=1
     fi
@@ -2959,7 +3009,7 @@ install_server_join() {
     log_error_msg discover "Ensure TCP 6443, 2379, and 2380 are open between control-plane nodes before retrying" \
       "phase=install_join" "server=${server}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=ports"
       summary_recorded=1
     fi
@@ -2967,7 +3017,7 @@ install_server_join() {
   fi
   if ! wait_for_remote_api_ready "${server}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=remote-api"
       summary_recorded=1
     fi
@@ -2977,7 +3027,7 @@ install_server_join() {
     log_error_msg discover "Server flag parity validation failed" \
       "phase=install_join" "host=${MDNS_HOST_RAW}" "server=${server}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=flag-parity"
       summary_recorded=1
     fi
@@ -2985,7 +3035,7 @@ install_server_join() {
   fi
   if ! ensure_time_sync "install_join"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=time-sync"
       summary_recorded=1
     fi
@@ -2994,7 +3044,7 @@ install_server_join() {
   check_remote_server_tls_sans "${server}"
   if ! acquire_join_gate; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=join-gate"
       summary_recorded=1
     fi
@@ -3028,7 +3078,7 @@ install_server_join() {
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_join"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+        summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note} reason=mdns"
         summary_recorded=1
       fi
@@ -3037,7 +3087,7 @@ install_server_join() {
     if ! release_join_gate_if_needed; then
       log_error_msg discover "Failed to release join gate" "phase=install_join"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+        summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
           "${summary_note} reason=join-gate-release"
         summary_recorded=1
       fi
@@ -3049,7 +3099,7 @@ install_server_join() {
     summary_note+=" reason=api-timeout"
   fi
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-    summary_step "k3s install" "${summary_status}" \
+    summary::step "${summary_status}" "k3s install" \
       "$(summary_elapsed_ms "${summary_start}")" \
       "${summary_note}"
     summary_recorded=1
@@ -3067,11 +3117,18 @@ install_agent() {
   if command -v summary_enabled >/dev/null 2>&1 && summary_enabled; then
     summary_active=1
     summary_start="$(summary_now_ms)"
+    if [ "${SUMMARY_SECTION_K3S}" -eq 0 ]; then
+      summary::section "k3s install"
+      if [ -n "${K3S_CHANNEL:-}" ]; then
+        summary::kv "k3s channel" "${K3S_CHANNEL}"
+      fi
+      SUMMARY_SECTION_K3S=1
+    fi
   fi
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=token"
       summary_recorded=1
     fi
@@ -3079,7 +3136,7 @@ install_agent() {
   fi
   if ! wait_for_remote_api_ready "${server}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=remote-api"
       summary_recorded=1
     fi
@@ -3089,7 +3146,7 @@ install_agent() {
     log_error_msg discover "Server flag parity validation failed" \
       "phase=install_agent" "host=${MDNS_HOST_RAW}" "server=${server}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=flag-parity"
       summary_recorded=1
     fi
@@ -3097,7 +3154,7 @@ install_agent() {
   fi
   if ! ensure_time_sync "install_agent"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      summary_step "k3s install" "FAIL" "$(summary_elapsed_ms "${summary_start}")" \
+      summary::step FAIL "k3s install" "$(summary_elapsed_ms "${summary_start}")" \
         "${summary_note} reason=time-sync"
       summary_recorded=1
     fi
@@ -3122,7 +3179,7 @@ install_agent() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-    summary_step "k3s install" "OK" \
+    summary::step OK "k3s install" \
       "$(summary_elapsed_ms "${summary_start}")" \
       "${summary_note}"
     summary_recorded=1
