@@ -21,10 +21,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-cov
 
-      - name: Install bats (for Bash coverage)
+      - name: Install bats and mDNS dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats build-essential cmake libcurl4-openssl-dev libdw-dev zlib1g-dev binutils-dev libiberty-dev
+          sudo apt-get install -y \
+            avahi-daemon \
+            avahi-utils \
+            bats \
+            build-essential \
+            cmake \
+            dbus \
+            libcurl4-openssl-dev \
+            libdw-dev \
+            libnss-mdns \
+            zlib1g-dev \
+            binutils-dev \
+            libiberty-dev
+
+      - name: Ensure Avahi services are running
+        run: |
+          sudo systemctl start dbus
+          sudo systemctl start avahi-daemon
+          sudo systemctl status avahi-daemon --no-pager
 
       - name: Build and install kcov
         run: |
