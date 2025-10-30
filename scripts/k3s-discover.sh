@@ -587,19 +587,15 @@ ensure_avahi_liveness_signal() {
   fi
 
   local wait_status=0
-  if command -v gdbus >/dev/null 2>&1; then
-    if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
-      log_info discover event=avahi_liveness_dbus outcome=ok >&2
-    else
-      wait_status=$?
-      if [ "${wait_status}" -eq 2 ]; then
-        log_info discover event=avahi_liveness_dbus outcome=disabled severity=info >&2
-      else
-        log_warn_msg discover "Avahi D-Bus wait failed" "event=avahi_liveness" "status=${wait_status}" >&2
-      fi
-    fi
+  if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+    log_info discover event=avahi_liveness_dbus outcome=ok >&2
   else
-    log_info discover event=avahi_liveness_dbus outcome=skip reason=gdbus_missing severity=info >&2
+    wait_status=$?
+    if [ "${wait_status}" -eq 2 ]; then
+      log_info discover event=avahi_liveness_dbus outcome=skip reason=avahi_dbus_wait_skipped status="${wait_status}" severity=info >&2
+    else
+      log_warn_msg discover "Avahi D-Bus wait failed" "event=avahi_liveness" "status=${wait_status}" >&2
+    fi
   fi
 
   local attempt

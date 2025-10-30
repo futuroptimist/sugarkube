@@ -97,10 +97,13 @@ if [ -z "${EXPECTED_HOST}" ]; then
   exit 2
 fi
 
+AVAHI_WAIT_ATTEMPTED=0
+
 dbus_mode="${SUGARKUBE_MDNS_DBUS:-auto}"
 if [ "${dbus_mode}" != "0" ]; then
   dbus_script="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
   if [ -x "${dbus_script}" ]; then
+    AVAHI_WAIT_ATTEMPTED=1
     if SUGARKUBE_MDNS_DBUS=1 "${dbus_script}"; then
       exit 0
     fi
@@ -111,6 +114,7 @@ if [ "${dbus_mode}" != "0" ]; then
         log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_first_attempt_failed fallback=cli
         ;;
       2)
+        AVAHI_WAIT_ATTEMPTED=0
         log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported fallback=cli
         ;;
       0)
@@ -124,6 +128,22 @@ if [ "${dbus_mode}" != "0" ]; then
   fi
 else
   log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_disabled fallback=cli
+fi
+
+if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
+  if ! "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+    status=$?
+    case "${status}" in
+      2)
+        log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_skipped fallback=cli
+        ;;
+      *)
+        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+        log_info mdns_selfcheck_failure outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}" >&2
+        exit "${status}"
+        ;;
+    esac
+  fi
 fi
 
 if ! command -v avahi-browse >/dev/null 2>&1; then

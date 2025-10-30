@@ -29,6 +29,10 @@ EOS
 
   stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
 exit 0
 EOS
 
@@ -167,24 +171,30 @@ EOS
 }
 
 @test "wait_for_avahi_dbus reports ready when Avahi registers quickly" {
-  stub_command gdbus <<'EOS'
+  stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
-if [ "$1" = "introspect" ] && [ "$3" = "--dest" ]; then
-  if [ "$4" = "org.freedesktop.Avahi" ]; then
-    exit 0
-  fi
-  if [ "$4" = "org.freedesktop.DBus" ]; then
-    exit 0
-  fi
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
 fi
-echo "unexpected gdbus call: $*" >&2
+echo "unexpected systemctl invocation: $*" >&2
 exit 1
 EOS
 
   stub_command busctl <<'EOS'
 #!/usr/bin/env bash
-echo "org.freedesktop.Avahi 123 456"
-exit 0
+if [ "$1" = "--system" ]; then
+  shift
+fi
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo 's "stub"'
+  exit 0
+fi
+echo "unexpected busctl call: $*" >&2
+exit 1
 EOS
 
   run env \
@@ -193,6 +203,8 @@ EOS
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"event=avahi_dbus_ready outcome=ok"* ]]
+  [[ "$output" == *"systemd_state=active"* ]]
+  [[ "$output" == *"bus_status=ok"* ]]
 }
 
 @test "wait_for_avahi_dbus exits with disabled when enable-dbus=no" {
@@ -202,13 +214,12 @@ EOS
 enable-dbus=no
 CONF
 
-  stub_command gdbus <<'EOS'
+  stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
-exit 1
-EOS
-
-  stub_command busctl <<'EOS'
-#!/usr/bin/env bash
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
 exit 0
 EOS
 
@@ -223,26 +234,29 @@ EOS
 }
 
 @test "wait_for_avahi_dbus logs timeout details when Avahi is absent" {
-  stub_command gdbus <<'EOS'
+  stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
-if [ "$1" = "introspect" ] && [ "$3" = "--dest" ]; then
-  if [ "$4" = "org.freedesktop.Avahi" ]; then
-    exit 1
-  fi
-  if [ "$4" = "org.freedesktop.DBus" ]; then
-    exit 0
-  fi
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
 fi
+echo "unexpected systemctl invocation: $*" >&2
 exit 1
 EOS
 
   stub_command busctl <<'EOS'
 #!/usr/bin/env bash
-if [ "$1" = "--system" ] && [ "$2" = "list" ]; then
-  echo "org.freedesktop.DBus 1 2"
-  exit 0
+if [ "$1" = "--system" ]; then
+  shift
 fi
-echo "unexpected busctl: $*" >&2
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo "Failed to call method: org.freedesktop.DBus.Error.NameHasNoOwner: Name not owned" >&2
+  exit 1
+fi
+echo "unexpected busctl call: $*" >&2
 exit 1
 EOS
 
@@ -252,8 +266,9 @@ EOS
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"event=avahi_dbus_ready outcome=timeout"* ]]
-  [[ "$output" == *"busctl=absent"* ]]
-  [[ "$output" == *"dbus_ping=ok"* ]]
+  [[ "$output" == *"systemd_state=active"* ]]
+  [[ "$output" == *"bus_status=name_not_owned"* ]]
+  [[ "$output" == *"bus_error=org.freedesktop.DBus.Error.NameHasNoOwner"* ]]
 }
 
 @test "discover flow waits for Avahi liveness after reload" {
@@ -269,16 +284,31 @@ EOS
 
   stub_command busctl <<'EOS'
 #!/usr/bin/env bash
-if [ "$1" = "--system" ] && [ "$2" = "list" ]; then
+if [ "$1" = "--system" ]; then
+  shift
+fi
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo 's "stub"'
+  exit 0
+fi
+if [ "$1" = "list" ]; then
   echo "org.freedesktop.Avahi 100 200"
   exit 0
 fi
-exit 0
+echo "unexpected busctl call: $*" >&2
+exit 1
 EOS
 
   stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
 echo "$*" >>"${BATS_TEST_TMPDIR}/systemctl.log"
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
 exit 0
 EOS
 

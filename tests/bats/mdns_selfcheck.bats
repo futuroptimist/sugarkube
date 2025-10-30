@@ -750,6 +750,10 @@ EOS
 
   stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
 exit 0
 EOS
 
