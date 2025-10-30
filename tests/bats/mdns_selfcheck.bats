@@ -904,3 +904,52 @@ EOS
   grep -q "ResolveService" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
   ! grep -q "CLI" "${BATS_TEST_TMPDIR}/gdbus-calls.log"
 }
+
+@test "mdns self-check warns when browse succeeds but resolution lags" {
+  stub_avahi_browse_with_fixtures \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt" \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_services_with_k3s.txt"
+
+  stub_command avahi-resolve <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+
+  stub_command avahi-resolve-host-name <<'EOS'
+#!/usr/bin/env bash
+exit 2
+EOS
+
+  stub_command getent <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "hosts" ]; then
+  sleep 0.05
+  exit 2
+fi
+exit 1
+EOS
+
+  stub_command sleep <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  run env \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    SUGARKUBE_EXPECTED_HOST=sugarkube0.local \
+    SUGARKUBE_EXPECTED_IPV4=192.168.3.10 \
+    SUGARKUBE_EXPECTED_ROLE=server \
+    SUGARKUBE_EXPECTED_PHASE=server \
+    SUGARKUBE_SELFCHK_ATTEMPTS=2 \
+    SUGARKUBE_SELFCHK_BACKOFF_START_MS=0 \
+    SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=0 \
+    SUGARKUBE_MDNS_DBUS=0 \
+    "${BATS_CWD}/scripts/mdns_selfcheck.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=warn ]]
+  [[ "$output" =~ reason=resolve_failed ]]
+  [[ "$output" =~ browse_ok=1 ]]
+  [[ "$output" =~ resolve_ok=0 ]]
+}

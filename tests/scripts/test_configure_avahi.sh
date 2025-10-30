@@ -66,6 +66,13 @@ if ! grep -q '^10.0.0.10 test-node.local$' "${AVAHI_HOSTS_PATH}"; then
   exit 1
 fi
 
+HOSTS_FIXTURE="${REPO_ROOT}/tests/fixtures/avahi_hosts_expected.txt"
+if ! diff -u "${HOSTS_FIXTURE}" "${AVAHI_HOSTS_PATH}" >/dev/null 2>&1; then
+  echo "Avahi hosts file differed from expected fixture" >&2
+  diff -u "${HOSTS_FIXTURE}" "${AVAHI_HOSTS_PATH}" || true
+  exit 1
+fi
+
 if [ ! -f "${CONF_PATH}.bak" ]; then
   echo "Backup was not created" >&2
   exit 1

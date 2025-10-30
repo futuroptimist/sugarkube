@@ -1,0 +1,16 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">k3s-sugar-dev@sugarkube0.local (bootstrap)</name>
+  <service>
+    <type>_k3s-sugar-dev._tcp</type>
+    <host-name>sugarkube0.local</host-name>
+    <port>6443</port>
+    <txt-record>k3s=1</txt-record>
+    <txt-record>cluster=sugar</txt-record>
+    <txt-record>env=dev</txt-record>
+    <txt-record>role=bootstrap</txt-record>
+    <txt-record>phase=bootstrap</txt-record>
+    <txt-record>leader=sugarkube0.local</txt-record>
+  </service>
+</service-group>
