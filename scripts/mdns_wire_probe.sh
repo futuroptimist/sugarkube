@@ -46,7 +46,7 @@ run_command_capture() {
   if [ "$#" -lt 2 ]; then
     return 127
   fi
-  local label="$1"
+  local _label="$1"
   shift
   local display
   display="$(join_args_for_log "$@" 2>/dev/null || printf '%s' "$*")"
