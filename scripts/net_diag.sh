@@ -208,6 +208,84 @@ else
 fi
 emit_line "avahi_daemon_version" "${avahi_rc}" "${avahi_version}"
 
+avahi_active=0
+if [ "${systemctl_rc}" = "0" ] && [ "${systemctl_status}" = "active" ]; then
+  avahi_active=1
+elif command -v pgrep >/dev/null 2>&1; then
+  if pgrep -x avahi-daemon >/dev/null 2>&1; then
+    avahi_active=1
+  fi
+fi
+
+resolved_status="command_missing"
+resolved_rc=""
+if command -v systemctl >/dev/null 2>&1; then
+  set +e
+  resolved_status="$(systemctl is-active systemd-resolved 2>&1)"
+  resolved_rc="$?"
+  set -e
+else
+  resolved_status="systemctl_missing"
+  resolved_rc="127"
+fi
+emit_line \
+  "systemctl_is_active_systemd_resolved" \
+  "${resolved_rc}" \
+  "${resolved_status}"
+
+resolved_active=0
+if [ "${resolved_rc}" = "0" ] && [ "${resolved_status}" = "active" ]; then
+  resolved_active=1
+fi
+
+resolved_mdns_state="inactive"
+resolved_mdns_rc="0"
+resolved_mdns_source="none"
+if [ "${resolved_active}" = "1" ]; then
+  resolved_mdns_state="unknown"
+  resolved_mdns_source="systemd"
+  resolved_mdns_output=""
+  if command -v resolvectl >/dev/null 2>&1; then
+    resolved_mdns_source="resolvectl"
+    set +e
+    resolved_mdns_output="$(resolvectl status 2>&1)"
+    resolved_mdns_rc="$?"
+    set -e
+  elif command -v systemd-resolve >/dev/null 2>&1; then
+    resolved_mdns_source="systemd-resolve"
+    set +e
+    resolved_mdns_output="$(systemd-resolve --status 2>&1)"
+    resolved_mdns_rc="$?"
+    set -e
+  else
+    resolved_mdns_source="missing"
+    resolved_mdns_rc="127"
+  fi
+
+  if [ "${resolved_mdns_rc}" = "0" ]; then
+    if printf '%s\n' "${resolved_mdns_output}" | grep -Eq '(^|[[:space:]])\+mDNS\b'; then
+      resolved_mdns_state="enabled"
+    elif printf '%s\n' "${resolved_mdns_output}" | grep -Eiq 'MulticastDNS setting:[[:space:]]*(yes|resolve)'; then
+      resolved_mdns_state="enabled"
+    elif printf '%s\n' "${resolved_mdns_output}" | grep -Eiq 'mDNS host name:'; then
+      resolved_mdns_state="enabled"
+    else
+      resolved_mdns_state="disabled"
+    fi
+  fi
+fi
+emit_line \
+  "systemd_resolved_mdns_state" \
+  "${resolved_mdns_rc}" \
+  "${resolved_mdns_state}" \
+  "source=${resolved_mdns_source}" \
+  "active=${resolved_active}"
+
+if [ "${avahi_active}" = "1" ] && [ "${resolved_mdns_state}" = "enabled" ]; then
+  printf '%s\n' \
+    "[net-diag] WARN: Avahi + systemd-resolved mDNS both active; disable one responder (MulticastDNS=off)"
+fi
+
 udp_summary=""
 udp_rc=""
 udp_source=""
