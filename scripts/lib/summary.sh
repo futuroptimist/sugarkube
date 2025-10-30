@@ -349,3 +349,19 @@ summary_finalize() {
     "$(summary_repeat_char '━' "${status_total}")" \
     "$(summary_repeat_char '━' "${duration_total}")"
 }
+
+summary::init() {
+  summary__ensure_file || true
+}
+
+summary::section() { :; }
+
+summary::step() {
+  summary_step "$@"
+}
+
+summary::kv() { :; }
+
+summary::emit() {
+  summary_finalize
+}

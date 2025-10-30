@@ -24,11 +24,26 @@ up env='dev':
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
+    export SUGARKUBE_SUMMARY_LIB="{{ invocation_directory() }}/scripts/lib/summary.sh"
+    if [ ! -f "${SUGARKUBE_SUMMARY_LIB}" ] && [ -f "{{ scripts_dir }}/lib/summary.sh" ]; then
     export SUGARKUBE_SUMMARY_LIB="{{ scripts_dir }}/lib/summary.sh"
-    if [ -f "${SUGARKUBE_SUMMARY_LIB}" ]; then
-    # shellcheck source=scripts/lib/summary.sh
-    . "${SUGARKUBE_SUMMARY_LIB}"
     fi
+
+    # Load summary lib if present; otherwise define no-ops.
+    if [ -f "${SUGARKUBE_SUMMARY_LIB}" ]; then
+    # shellcheck disable=SC1090
+    . "${SUGARKUBE_SUMMARY_LIB}"
+    else
+    summary::init() { :; }
+    summary::section() { :; }
+    summary::step() { :; }
+    summary::kv() { :; }
+    summary::emit() { :; }
+    fi
+
+    # Always emit summary on exit (best-effort)
+    trap 'summary::emit || true' EXIT
+
     if ! command -v summary_run >/dev/null 2>&1; then
     summary_run() {
     local _label="$1"
@@ -50,7 +65,9 @@ up env='dev':
     [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
     sudo -E bash scripts/toggle_wlan.sh --restore || true
     fi
-    if command -v summary_finalize >/dev/null 2>&1; then
+    if command -v summary::emit >/dev/null 2>&1; then
+    summary::emit || true
+    elif command -v summary_finalize >/dev/null 2>&1; then
     summary_finalize
     fi
     if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
