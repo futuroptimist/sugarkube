@@ -107,8 +107,7 @@ ensure_mdns_target_resolvable() {
     local iface addr_candidates
     iface="${SUGARKUBE_MDNS_INTERFACE:-}"
     addr_candidates="$(hostname -I 2>/dev/null || true)"
-    expected_ipv4="$(-
-      python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+    expected_ipv4="$(python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
 import ipaddress
 import json
 import subprocess
