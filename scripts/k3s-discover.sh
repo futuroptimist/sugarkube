@@ -156,7 +156,27 @@ run_net_diag() {
     return 0
   fi
 
-  "${diag_script}" --reason "${reason}" "$@" || true
+  local diag_output=""
+  if ! diag_output="$("${diag_script}" --reason "${reason}" "$@")"; then
+    :
+  fi
+
+  if [ -n "${diag_output}" ]; then
+    while IFS= read -r diag_line; do
+      [ -n "${diag_line}" ] || continue
+      case "${diag_line}" in
+        "[net-diag] WARN:"*)
+          log_warn_msg net_diag "${diag_line#\[net-diag\] WARN: }" "reason=${reason}"
+          printf '%s\n' "${diag_line}"
+          ;;
+        *)
+          printf '%s\n' "${diag_line}"
+          ;;
+      esac
+    done <<<"${diag_output}"
+  fi
+
+  return 0
 }
 
 PRINT_TOKEN_ONLY=0
