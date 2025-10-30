@@ -158,8 +158,14 @@ if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
       1)
         wait_reason="$(printf '%s\n' "${avahi_wait_output}" | extract_wait_field reason || true)"
         wait_systemd_detail="$(printf '%s\n' "${avahi_wait_output}" | extract_wait_field systemd_detail || true)"
-        if [ "${wait_reason}" = "systemd_unavailable" ] || { [ -n "${wait_systemd_detail}" ] && printf '%s\n' "${wait_systemd_detail}" | grep -Ei \
-          'System_has_not_been_booted_with_systemd|Systemd_service_manager_is_not_running|Failed_to_connect_to_bus|Failed_to_get_D-Bus_connection|No_such_file_or_directory' >/dev/null; }; then
+        wait_bus_error="$(printf '%s\n' "${avahi_wait_output}" | extract_wait_field bus_error || true)"
+        wait_bus_status="$(printf '%s\n' "${avahi_wait_output}" | extract_wait_field bus_status || true)"
+        if [ "${wait_reason}" = "systemd_unavailable" ] ||
+          { [ -n "${wait_systemd_detail}" ] && printf '%s\n' "${wait_systemd_detail}" | grep -Ei \
+            'System_has_not_been_booted_with_systemd|Systemd_service_manager_is_not_running|Failed_to_connect_to_bus|Failed_to_get_D-Bus_connection|No_such_file_or_directory' >/dev/null; } ||
+          { [ -n "${wait_bus_error}" ] && printf '%s\n' "${wait_bus_error}" | grep -Ei \
+            'No_such_file_or_directory|Failed_to_connect_to_socket|Connection_refused|System_has_not_been_booted_with_systemd|Systemd_service_manager_is_not_running' >/dev/null; } ||
+          [ "${wait_bus_status}" = "systemd_wait" ]; then
           log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_systemd_unavailable fallback=cli
         else
           elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
@@ -656,7 +662,7 @@ mdns_selfcheck__service_type_check() {
   type_output="$(avahi-browse --parsable --terminate _services._dns-sd._udp 2>/dev/null || true)"
   type_present=0
   available_types=""
-  available_seen="," 
+  available_seen=","
   if [ -n "${type_output}" ]; then
     local old_ifs field browse_line
     old_ifs="${IFS}"
