@@ -140,6 +140,7 @@ run_command_capture() {
   esac
   MDNS_LAST_CMD_DISPLAY="${cmd_display}"
   MDNS_LAST_CMD_DURATION_MS="${duration_ms}"
+  # shellcheck disable=SC2034  # stored for external consumers of the sourcing shell
   MDNS_LAST_CMD_OUTPUT="${output}"
   MDNS_LAST_CMD_RC="${rc}"
   MDNS_LAST_CMD_PARSED_IPV4=""
@@ -151,7 +152,9 @@ run_command_capture() {
   fi
   local command_kv
   command_kv="command=\"$(kv_escape "${cmd_display}")\""
-  log_debug mdns_command label="${label}" outcome="${outcome}" rc="${rc}" duration_ms="${duration_ms}" "${command_kv}"
+  local output_kv
+  output_kv="output=\"$(kv_escape "${output}")\""
+  log_debug mdns_command label="${label}" outcome="${outcome}" rc="${rc}" duration_ms="${duration_ms}" "${command_kv}" "${output_kv}"
   printf '%s' "${output}"
   return "${rc}"
 }
@@ -803,7 +806,8 @@ self_resolve_handle_success() {
       local socket_method="${MDNS_SOCKET_CHECK_METHOD:-unknown}"
       [ -n "${socket_status}" ] || socket_status="ok"
       [ -n "${socket_method}" ] || socket_method="unknown"
-      local targets_kv="targets=\"$(kv_escape "${socket_targets}")\""
+      local targets_kv
+      targets_kv="targets=\"$(kv_escape "${socket_targets}")\""
       log_trace mdns_selfcheck_socket attempt="${attempt}" host="${server_host}" port="${srv_port}" status="${socket_status}" method="${socket_method}" "${targets_kv}"
       if [ -n "${command_kv}" ] && [ -n "${duration_kv}" ]; then
         mdns_resolution_status_emit ok attempt="${attempt}" host="${server_host}" resolve_method="${resolve_method}" readiness_method="${socket_method}" stage="${stage}" "${command_kv}" "${duration_kv}"
@@ -859,14 +863,19 @@ mdns_liveness_probe() {
   if command -v gdbus >/dev/null 2>&1; then
     local dbus_output
     if dbus_output="$(run_command_capture avahi_dbus_hostname gdbus call --system --dest org.freedesktop.Avahi --object-path / --method org.freedesktop.Avahi.Server.GetHostNameFqdn)"; then
-      local dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
-      local dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
-      local dbus_value="$(printf '%s' "${dbus_output}" | tr '\n' ' ' | sed 's/"/\\"/g')"
+      local dbus_command_kv
+      dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
+      local dbus_duration_kv
+      dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
+      local dbus_value
+      dbus_value="$(printf '%s' "${dbus_output}" | tr '\n' ' ' | sed 's/"/\\"/g')"
       log_debug mdns_liveness outcome=ok signal=dbus_hostname "${dbus_command_kv}" "${dbus_duration_kv}" "output=\"${dbus_value}\""
     else
       local rc="${MDNS_LAST_CMD_RC:-1}"
-      local dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
-      local dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
+      local dbus_command_kv
+      dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
+      local dbus_duration_kv
+      dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
       log_debug mdns_liveness outcome=lag signal=dbus_hostname rc="${rc}" "${dbus_command_kv}" "${dbus_duration_kv}"
     fi
   else
