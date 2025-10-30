@@ -286,6 +286,70 @@ if [ "${avahi_active}" = "1" ] && [ "${resolved_mdns_state}" = "enabled" ]; then
     "[net-diag] WARN: Avahi + systemd-resolved mDNS both active; disable one responder (MulticastDNS=off)"
 fi
 
+mdns_status_host="${SUGARKUBE_EXPECTED_HOST:-}"
+if [ -z "${mdns_status_host}" ]; then
+  if [ -n "${HOSTNAME:-}" ]; then
+    mdns_status_host="${HOSTNAME}"
+  else
+    mdns_status_host="$(hostname 2>/dev/null || true)"
+  fi
+fi
+mdns_status_host="${mdns_status_host%.}"
+case "${mdns_status_host}" in
+  *.local) ;;
+  "") ;;
+  *) mdns_status_host="${mdns_status_host}.local" ;;
+esac
+
+service_cluster="${SUGARKUBE_CLUSTER:-sugar}"
+service_env="${SUGARKUBE_ENV:-dev}"
+mdns_service_type="_k3s-${service_cluster}-${service_env}._tcp"
+
+nss_ok=0
+nss_ip=""
+if [ -n "${mdns_status_host}" ] && command -v getent >/dev/null 2>&1; then
+  nss_ip="$(getent hosts "${mdns_status_host}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+  if [ -n "${nss_ip}" ]; then
+    nss_ok=1
+  fi
+fi
+
+resolve_ok=0
+resolve_ip=""
+if [ -n "${mdns_status_host}" ] && command -v avahi-resolve-host-name >/dev/null 2>&1; then
+  resolve_output="$(avahi-resolve-host-name "${mdns_status_host}" -4 --timeout=2 2>/dev/null || true)"
+  if [ -n "${resolve_output}" ]; then
+    resolve_ip="$(printf '%s\n' "${resolve_output}" | awk 'NR==1 {print $2}' | head -n1)"
+    if [ -n "${resolve_ip}" ]; then
+      resolve_ok=1
+    fi
+  fi
+fi
+
+browse_ok=0
+browse_matches=0
+if command -v avahi-browse >/dev/null 2>&1; then
+  browse_output="$(avahi-browse -rt "${mdns_service_type}" 2>/dev/null || true)"
+  if [ -n "${browse_output}" ]; then
+    if [ -n "${mdns_status_host}" ] && printf '%s\n' "${browse_output}" | grep -Fq "${mdns_status_host}"; then
+      browse_ok=1
+      browse_matches=1
+    else
+      browse_ok=1
+    fi
+  fi
+fi
+
+emit_line \
+  "mdns_resolution_status" \
+  "0" \
+  "nss_ok=${nss_ok} resolve_ok=${resolve_ok} browse_ok=${browse_ok}" \
+  "host=${mdns_status_host:-unknown}" \
+  "service_type=${mdns_service_type}" \
+  "nss_ip=${nss_ip:-none}" \
+  "resolve_ip=${resolve_ip:-none}" \
+  "browse_match=${browse_matches}"
+
 udp_summary=""
 udp_rc=""
 udp_source=""
