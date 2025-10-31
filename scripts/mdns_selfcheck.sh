@@ -286,7 +286,7 @@ else
   log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_disabled fallback=cli
 fi
 
-if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
+if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ] && [ "${dbus_mode}" != "0" ]; then
   avahi_wait_output=""
   if ! avahi_wait_output="$("${SCRIPT_DIR}/wait_for_avahi_dbus.sh" 2>&1)"; then
     status=$?
