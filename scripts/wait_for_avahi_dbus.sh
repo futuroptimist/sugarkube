@@ -275,6 +275,59 @@ while :; do
     fi
     busctl_output="${original_bus_output}"
     bus_error_name="$(printf '%s\n' "${busctl_output}" | awk 'match($0, /org\.freedesktop\.DBus\.Error\.[A-Za-z0-9]+/) { print substr($0, RSTART, RLENGTH); exit }')"
+
+    fallback_success=0
+    fallback_hint=""
+    if [ "${busctl_status}" -ne 0 ]; then
+      case "${bus_error_name}" in
+        org.freedesktop.DBus.Error.UnknownMethod)
+          fallback_hint="unknown_method"
+          ;;
+      esac
+      if [ -z "${fallback_hint}" ] && printf '%s' "${busctl_output}" \
+        | grep -Fqi 'GetVersionString'; then
+        fallback_hint="missing_get_version_string"
+      fi
+      if [ -n "${fallback_hint}" ]; then
+        if busctl --system --timeout=2 get-property \
+          org.freedesktop.Avahi \
+          /org/freedesktop/Avahi/Server \
+          org.freedesktop.Avahi.Server \
+          State >/dev/null 2>&1; then
+          fallback_success=1
+          fallback_hint="get_property_state"
+        elif busctl --system --timeout=2 call \
+          org.freedesktop.Avahi \
+          /org/freedesktop/Avahi/Server \
+          org.freedesktop.Avahi.Server \
+          GetState >/dev/null 2>&1; then
+          fallback_success=1
+          fallback_hint="call_get_state"
+        fi
+      fi
+    fi
+
+    if [ "${fallback_success}" -eq 1 ]; then
+      last_bus_status="ok"
+      last_bus_error=""
+      last_bus_code=0
+      elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+      systemd_state_log="$(sanitize_kv "${last_systemctl_state}")"
+      [ -n "${systemd_state_log}" ] || systemd_state_log=unknown
+      set -- \
+        avahi_dbus_ready \
+        outcome=ok \
+        "ms_elapsed=${elapsed_ms}" \
+        "systemd_state=${systemd_state_log}" \
+        bus_status=ok
+      fallback_log="$(sanitize_kv "${fallback_hint}")"
+      if [ -n "${fallback_log}" ]; then
+        set -- "$@" "bus_fallback=${fallback_log}"
+      fi
+      log_info "$@"
+      exit 0
+    fi
+
     if [ -n "${bus_error_name}" ]; then
       last_bus_error="${bus_error_name}"
       case "${bus_error_name}" in
