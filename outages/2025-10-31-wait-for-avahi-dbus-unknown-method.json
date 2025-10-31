@@ -1,0 +1,11 @@
+{
+  "id": "wait-for-avahi-dbus-unknown-method",
+  "date": "2025-10-31",
+  "component": "scripts/wait_for_avahi_dbus.sh",
+  "rootCause": "Avahi 0.9 removed org.freedesktop.Avahi.Server.GetVersionString, so the readiness probe treated UnknownMethod as a timeout and never unblocked the mDNS tests.",
+  "resolution": "Treat UnknownMethod as a success by querying Server.State (or GetState) so newer Avahi builds still mark the bus ready.",
+  "references": [
+    "scripts/wait_for_avahi_dbus.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ]
+}
