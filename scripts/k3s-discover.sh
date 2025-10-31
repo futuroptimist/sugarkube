@@ -58,6 +58,23 @@ escape_log_value() {
   printf '%s' "$1" | sed 's/"/\\"/g'
 }
 
+token__trim() {
+  local value="$1"
+  value="${value%$'\r'}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+ }
+
+token__strip_quotes() {
+  local value="$1"
+  if [ "${value#\"}" != "${value}" ] && [ "${value%\"}" != "${value}" ]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  fi
+  printf '%s' "${value}"
+ }
+
 ALLOW_NON_ROOT="${ALLOW_NON_ROOT:-0}"
 
 if [ "${EUID}" -eq 0 ]; then
@@ -91,6 +108,8 @@ CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 SERVER_TOKEN_PATH="${SUGARKUBE_K3S_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
+NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
+BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
 DISCOVERY_WAIT_SECS="${DISCOVERY_WAIT_SECS:-4}"
 DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-8}"
 MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-20}"
@@ -333,6 +352,51 @@ resolve_server_join_token() {
 
 resolve_server_join_token || true
 
+NODE_TOKEN_STATE="missing"
+BOOT_TOKEN_STATE="missing"
+
+if [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH:-}" ] && [ -f "${NODE_TOKEN_PATH}" ]; then
+  NODE_TOKEN_STATE="empty"
+  token__node_raw=""
+  if IFS= read -r token__node_raw <"${NODE_TOKEN_PATH}"; then
+    :
+  else
+    token__node_raw=""
+  fi
+  token__node_raw="$(token__trim "${token__node_raw}")"
+  if [ -n "${token__node_raw}" ] && [ "${token__node_raw#\#}" = "${token__node_raw}" ]; then
+    TOKEN="${token__node_raw}"
+    RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+    NODE_TOKEN_STATE="value"
+  fi
+fi
+
+if [ -z "${TOKEN:-}" ] && [ -n "${BOOT_TOKEN_PATH:-}" ] && [ -f "${BOOT_TOKEN_PATH}" ]; then
+  BOOT_TOKEN_STATE="placeholder"
+  token__boot_line=""
+  while IFS= read -r token__boot_line || [ -n "${token__boot_line}" ]; do
+    token__trimmed_line="$(token__trim "${token__boot_line}")"
+    if [ -z "${token__trimmed_line}" ] || [ "${token__trimmed_line#\#}" != "${token__trimmed_line}" ]; then
+      continue
+    fi
+    case "${token__trimmed_line}" in
+      NODE_TOKEN=*)
+        token__boot_value="${token__trimmed_line#NODE_TOKEN=}"
+        token__boot_value="$(token__trim "${token__boot_value}")"
+        token__boot_value="$(token__strip_quotes "${token__boot_value}")"
+        if [ -n "${token__boot_value}" ]; then
+          TOKEN="${token__boot_value}"
+          RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+          BOOT_TOKEN_STATE="value"
+        else
+          BOOT_TOKEN_STATE="empty"
+        fi
+        break
+        ;;
+    esac
+  done <"${BOOT_TOKEN_PATH}"
+fi
+
 ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
 SERVER_TOKEN_PRESENT=0
 if [ -f "${SERVER_TOKEN_PATH}" ]; then
@@ -343,11 +407,31 @@ if [ -z "${TOKEN:-}" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
   elif [ "${SERVER_TOKEN_PRESENT}" -eq 0 ]; then
-    # No secure join token is yet available locally. Allow the first HA
-    # control-plane node to bootstrap so it can mint one for peers.
-    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+    if [ "${BOOT_TOKEN_STATE}" = "empty" ]; then
+      ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
+    else
+      ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+    fi
   fi
 fi
+
+TOKEN_PRESENT=0
+if [ "${NODE_TOKEN_STATE}" = "value" ] || [ "${BOOT_TOKEN_STATE}" = "value" ] || [ -n "${TOKEN:-}" ]; then
+  TOKEN_PRESENT=1
+fi
+
+token_source_kv=""
+if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
+  token_source_kv="token_source=\"$(escape_log_value "${RESOLVED_TOKEN_SOURCE}")\""
+fi
+
+log_info discover \
+  event=token_resolution \
+  "token_present=${TOKEN_PRESENT}" \
+  "allow_bootstrap=${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" \
+  "node_token_state=${NODE_TOKEN_STATE}" \
+  "boot_token_state=${BOOT_TOKEN_STATE}" \
+  "${token_source_kv}" >&2
 
 if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
   if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
@@ -3124,7 +3208,7 @@ install_agent() {
     summary_start="$(summary_now_ms)"
   fi
   if [ -z "${TOKEN:-}" ]; then
-    log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}" 
+    log_error_msg discover "Join token missing; cannot join agent to existing server" "phase=install_agent" "host=${MDNS_HOST_RAW}"
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"

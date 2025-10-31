@@ -6,6 +6,6 @@
   "resolution": "Teach k3s-discover.sh to resolve the token from local sources, permit single-server installs without a preset value, and add targeted regression tests to prevent the fallback from regressing.",
   "references": [
     "scripts/k3s-discover.sh",
-    "tests/test_k3s_discover_token_resolution.py"
+    "tests/test_k3s_discover_token_resolution_cli.py"
   ]
 }
