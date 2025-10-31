@@ -246,6 +246,34 @@ while :; do
     fi
     busctl_status=$?
     last_bus_code="${busctl_status}"
+    original_bus_output="${busctl_output}"
+    if [ "${busctl_status}" -ne 0 ]; then
+      if busctl_output="$(busctl \
+        --system \
+        --timeout=2 \
+        get-property \
+        org.freedesktop.Avahi \
+        /org/freedesktop/Avahi/Server \
+        org.freedesktop.Avahi.Server \
+        VersionString 2>&1)"; then
+        last_bus_status="ok"
+        last_bus_error=""
+        last_bus_code=0
+        elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+        systemd_state_log="$(sanitize_kv "${last_systemctl_state}")"
+        [ -n "${systemd_state_log}" ] || systemd_state_log=unknown
+        set -- \
+          avahi_dbus_ready \
+          outcome=ok \
+          ms_elapsed="${elapsed_ms}" \
+          systemd_state="${systemd_state_log}" \
+          bus_status=ok \
+          bus_fallback=get_property
+        log_info "$@"
+        exit 0
+      fi
+    fi
+    busctl_output="${original_bus_output}"
     bus_error_name="$(printf '%s\n' "${busctl_output}" | awk 'match($0, /org\.freedesktop\.DBus\.Error\.[A-Za-z0-9]+/) { print substr($0, RSTART, RLENGTH); exit }')"
     if [ -n "${bus_error_name}" ]; then
       last_bus_error="${bus_error_name}"
