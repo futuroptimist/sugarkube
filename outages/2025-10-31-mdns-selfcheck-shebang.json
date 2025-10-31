@@ -1,0 +1,10 @@
+{
+  "id": "mdns-selfcheck-shebang",
+  "date": "2025-10-31",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "The script declared a /bin/sh shebang while using bash-specific features such as [[, {, and local, so dash exited early during the mdns bats suite on GitHub Actions.",
+  "resolution": "Switch the shebang to /usr/bin/env bash so mdns_selfcheck.sh runs with the shell it requires.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/18986984283/job/54232665670"
+  ]
+}
