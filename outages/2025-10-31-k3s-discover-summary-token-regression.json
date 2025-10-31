@@ -1,0 +1,11 @@
+{
+  "id": "k3s-discover-summary-token-regression",
+  "date": "2025-10-31",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Summary refactor used stdout and skipped token exports, breaking discovery.",
+  "resolution": "Send summaries to stderr, read token files, and stop HA boots on empty exports.",
+  "references": [
+    "tests/test_k3s_discover_token_resolution.py",
+    "tests/scripts/test_k3s_discover_token_resolution_secure.py"
+  ]
+}
