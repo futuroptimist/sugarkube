@@ -379,7 +379,7 @@ CONF
     "${BATS_CWD}/scripts/k3s-discover.sh" --test-bootstrap-publish
 
   [ "$status" -eq 0 ]
-  [[ "$output" =~ 'event=avahi_liveness outcome=ok' ]]
+  [[ "$output" == *"event=avahi_liveness outcome=ok"* ]]
   [[ "$output" =~ attempt=2 ]]
 
   [ -f "${BATS_TEST_TMPDIR}/avahi_all_count" ]
