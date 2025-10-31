@@ -1,0 +1,11 @@
+{
+  "id": "2025-10-30-join-gate-stdout-regression",
+  "date": "2025-10-30",
+  "component": "scripts/join_gate.sh",
+  "rootCause": "join_gate routed structured info logs to stderr via helper wrappers, leaving stdout empty so automation could not observe acquire/release outcomes.",
+  "resolution": "Update the join_gate logging helpers to emit info-level records on stdout and reserve stderr for debug-only output, matching the expectations baked into the Bats suite.",
+  "references": [
+    "scripts/join_gate.sh",
+    "tests/bats/join_gate.bats"
+  ]
+}
