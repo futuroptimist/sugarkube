@@ -1409,8 +1409,8 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       fi
       if [ "${host_matches}" -eq 1 ]; then
         MDNS_RESOLUTION_STATUS_BROWSE=1
-        local nss_ok=0
-        local nss_rc=1
+        nss_ok=0
+        nss_rc=1
         if mdns_check_nss_host "${srv_host}" "${EXPECTED_IPV4}" >/dev/null 2>&1; then
           nss_ok=1
           nss_rc=0
