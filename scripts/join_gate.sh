@@ -21,11 +21,11 @@ HOSTNAME=""
 AVAHI_LIVENESS_CONFIRMED=0
 
 log_join_gate() {
-  log_info join_gate "$@" >&2
+  log_info join_gate "$@"
 }
 
 log_join_gate_error() {
-  log_kv info join_gate "$@" >&2
+  log_kv info join_gate "$@"
 }
 
 ensure_tools() {

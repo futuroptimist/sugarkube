@@ -249,7 +249,7 @@ esac
 
 if [ -z "${EXPECTED_HOST}" ]; then
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 ms_elapsed="${elapsed_ms}" >&2
+  log_info mdns_selfcheck_failure outcome=miss reason=missing_expected_host attempt=0 ms_elapsed="${elapsed_ms}"
   exit 2
 fi
 
@@ -311,13 +311,13 @@ if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ]; then
           log_debug mdns_selfcheck_dbus outcome=skip reason=avahi_dbus_wait_systemd_unavailable fallback=cli
         else
           elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-          log_info mdns_selfcheck_failure outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}" >&2
+          log_info mdns_selfcheck_failure outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}"
           exit "${status}"
         fi
         ;;
       *)
         elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-        log_info mdns_selfcheck_failure outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}" >&2
+        log_info mdns_selfcheck_failure outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}"
         exit "${status}"
         ;;
     esac
@@ -328,12 +328,12 @@ fi
 
 if ! command -v avahi-browse >/dev/null 2>&1; then
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 ms_elapsed="${elapsed_ms}" >&2
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_browse_missing attempt=0 ms_elapsed="${elapsed_ms}"
   exit 3
 fi
 if ! command -v avahi-resolve >/dev/null 2>&1; then
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 ms_elapsed="${elapsed_ms}" >&2
+  log_info mdns_selfcheck_failure outcome=miss reason=avahi_resolve_missing attempt=0 ms_elapsed="${elapsed_ms}"
   exit 3
 fi
 
@@ -708,7 +708,7 @@ self_resolve_attempt() {
     return 3
   fi
 
-  local host="${SELF_LOCAL_HOST:-}" 
+  local host="${SELF_LOCAL_HOST:-}"
   if [ -z "${host}" ]; then
     self_resolve_log "${stage}" "${attempt}"
     return 3
@@ -746,7 +746,7 @@ self_resolve_handle_success() {
   local attempt="$1"
   local stage="$2"
 
-  local host="${SELF_RESOLVE_HOST:-}" 
+  local host="${SELF_RESOLVE_HOST:-}"
   if [ -z "${host}" ]; then
     host="${EXPECTED_HOST:-}"
   fi
@@ -1436,7 +1436,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           last_reason="ipv4_mismatch"
           log_debug mdns_selfcheck outcome=miss attempt="${attempt}" reason="${last_reason}" service_type="${SERVICE_TYPE}"
           elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
           mdns_resolution_status_emit fail attempt="${attempt}" host="${srv_host}" reason="${last_reason}"
           exit 5
         fi
@@ -1524,13 +1524,13 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
             fail_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
           fi
           if [ -n "${fail_command_kv}" ] && [ -n "${fail_duration_kv}" ]; then
-            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}" >&2
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}"
           elif [ -n "${fail_command_kv}" ]; then
-            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" >&2
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}"
           elif [ -n "${fail_duration_kv}" ]; then
-            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}" >&2
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}"
           else
-            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+            log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
           fi
           exit 5
         elif [ "${status}" -eq 0 ] && [ "${handshake_failed}" -eq 1 ]; then
@@ -1548,7 +1548,7 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     else
       browse_reason="instance_not_found"
     fi
-    MDNS_LAST_FAILURE_COMMAND="${browse_command:-}" 
+    MDNS_LAST_FAILURE_COMMAND="${browse_command:-}"
     MDNS_LAST_FAILURE_DURATION="${browse_duration:-}"
     if self_resolve_attempt browse "${attempt}" >/dev/null 2>&1; then
       :
@@ -1583,13 +1583,13 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           mismatch_duration_kv="command_duration_ms=${SELF_RESOLVE_DURATION}"
         fi
         if [ -n "${mismatch_command_kv}" ] && [ -n "${mismatch_duration_kv}" ]; then
-          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_command_kv}" "${mismatch_duration_kv}" >&2
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_command_kv}" "${mismatch_duration_kv}"
         elif [ -n "${mismatch_command_kv}" ]; then
-          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_command_kv}" >&2
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_command_kv}"
         elif [ -n "${mismatch_duration_kv}" ]; then
-          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_duration_kv}" >&2
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${mismatch_duration_kv}"
         else
-          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+          log_info mdns_selfcheck outcome=fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
         fi
         mdns_resolution_status_emit fail attempts="${attempt}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
         exit 5
@@ -1701,16 +1701,16 @@ if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] && [ "${MDNS_RESOLUTION_STATUS_R
   fi
   if [ -n "${warn_command_kv}" ] && [ -n "${warn_duration_kv}" ]; then
     mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_command_kv}" "${warn_duration_kv}"
-    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}" "${warn_duration_kv}" >&2
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}" "${warn_duration_kv}"
   elif [ -n "${warn_command_kv}" ]; then
     mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_command_kv}"
-    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}" >&2
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}"
   elif [ -n "${warn_duration_kv}" ]; then
     mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_duration_kv}"
-    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_duration_kv}" >&2
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_duration_kv}"
   else
     mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}"
-    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" >&2
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
   fi
   exit 0
 fi
@@ -1723,16 +1723,16 @@ if [ -n "${MDNS_LAST_FAILURE_DURATION}" ]; then
   fail_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
 fi
 if [ -n "${fail_command_kv}" ] && [ -n "${fail_duration_kv}" ]; then
-  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}" >&2
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}"
   mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}"
 elif [ -n "${fail_command_kv}" ]; then
-  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" >&2
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}"
   mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}"
 elif [ -n "${fail_duration_kv}" ]; then
-  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}" >&2
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}"
   mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}"
 else
-  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}" >&2
+  log_info mdns_selfcheck outcome=fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}"
   mdns_resolution_status_emit fail attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason:-unknown}" ms_elapsed="${elapsed_ms}"
 fi
 

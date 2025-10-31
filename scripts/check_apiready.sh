@@ -154,7 +154,7 @@ while :; do
       if [ -n "${SERVER_IP}" ]; then
         log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
       fi
-      log_kv info apiready "${log_fields[@]}" >&2
+      log_kv info apiready "${log_fields[@]}"
       exit 0
     fi
     last_reason="body_not_ok"
@@ -195,7 +195,7 @@ while :; do
     if [ -n "${SERVER_IP}" ]; then
       failure_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
     fi
-    log_kv info apiready "${failure_fields[@]}" >&2
+    log_kv info apiready "${failure_fields[@]}"
     exit 1
   fi
 

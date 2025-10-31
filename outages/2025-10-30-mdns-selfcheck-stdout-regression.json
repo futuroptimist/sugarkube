@@ -1,0 +1,12 @@
+{
+  "id": "2025-10-30-mdns-selfcheck-stdout-regression",
+  "date": "2025-10-30",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "Numerous info-level mdns_selfcheck outcomes were redirected to stderr, which broke the contract relied on by the CLI and exhaustive Bats coverage suite.",
+  "resolution": "Return success, warning, and failure events to stdout while leaving verbose trace/debug output on stderr so downstream tooling and tests can parse structured fields again.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats",
+    "tests/bats/mdns_wire_probe.bats"
+  ]
+}
