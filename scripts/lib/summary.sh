@@ -20,6 +20,10 @@ SUMMARY__SYMBOL_WARN="⚠️"
 SUMMARY__SYMBOL_FAIL="❌"
 SUMMARY__SYMBOL_SKIP="⏭️"
 
+if [ ! -t 1 ] && [ "${SUMMARY_FORCE_TTY:-0}" != "1" ] && [ -z "${SUGARKUBE_SUMMARY_SUPPRESS+x}" ]; then
+  SUGARKUBE_SUMMARY_SUPPRESS=1
+fi
+
 summary_enabled() {
   [ "${SUGARKUBE_SUMMARY_SUPPRESS:-0}" != "1" ]
 }
@@ -196,7 +200,7 @@ summary::step() {
   label="$(summary__sanitize "$1")"
   shift
   if [ "$#" -gt 0 ]; then
-    detail="$(summary__sanitize "$*)"
+    detail="$(summary__sanitize "$*")"
   else
     detail=""
   fi
@@ -215,7 +219,7 @@ summary::kv() {
   key="$(summary__sanitize "$1")"
   shift
   if [ "$#" -gt 0 ]; then
-    value="$(summary__sanitize "$*)"
+    value="$(summary__sanitize "$*")"
   else
     value=""
   fi

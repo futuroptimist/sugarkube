@@ -1,0 +1,11 @@
+{
+  "id": "k3s-discover-token-resolution-regression",
+  "date": "2025-10-31",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "Refactor broke summary quoting, so k3s-discover.sh exited before tokens output.",
+  "resolution": "Fixed summary quoting, disabled non-TTY summaries, and restored node/boot tokens.",
+  "references": [
+    "tests/test_k3s_discover_token_resolution.py",
+    "tests/scripts/test_k3s_discover_token_resolution.py"
+  ]
+}

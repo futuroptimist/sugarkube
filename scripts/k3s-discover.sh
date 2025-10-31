@@ -18,6 +18,14 @@ elif [ -f "${SUMMARY_LIB}" ]; then
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
 
+NODE_TOKEN_VALUE=""
+NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-}"
+BOOT_TOKEN_VALUE=""
+BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-}"
+BOOT_TOKEN_PRESENT=0
+BOOT_TOKEN_PLACEHOLDER=0
+BOOT_TOKEN_EMPTY=0
+
 log_message() {
   local level="$1"
   shift
@@ -52,6 +60,64 @@ log_error_msg() {
   local message="$1"
   shift || true
   log_message info "${event}" "${message}" "severity=error" "$@"
+}
+
+read_node_token_from_file() {
+  local path="$1"
+  NODE_TOKEN_VALUE=""
+  if [ -z "${path}" ] || [ ! -f "${path}" ]; then
+    return 1
+  fi
+  local first_line=""
+  if ! IFS= read -r first_line <"${path}"; then
+    return 1
+  fi
+  first_line="${first_line%%$'\r'*}"
+  if [ -z "${first_line}" ]; then
+    return 1
+  fi
+  NODE_TOKEN_VALUE="${first_line}"
+  return 0
+}
+
+read_boot_token_from_file() {
+  local path="$1"
+  BOOT_TOKEN_VALUE=""
+  BOOT_TOKEN_PRESENT=0
+  BOOT_TOKEN_PLACEHOLDER=0
+  BOOT_TOKEN_EMPTY=0
+  if [ -z "${path}" ] || [ ! -f "${path}" ]; then
+    return 1
+  fi
+  BOOT_TOKEN_PRESENT=1
+  local saw_assignment=0
+  local line=""
+  while IFS= read -r line || [ -n "${line}" ]; do
+    case "${line}" in
+      ''|\#*)
+        continue
+        ;;
+      NODE_TOKEN=*)
+        saw_assignment=1
+        local value="${line#NODE_TOKEN=}"
+        value="${value%%$'\r'*}"
+        if [ -n "${value}" ]; then
+          BOOT_TOKEN_VALUE="${value}"
+          return 0
+        fi
+        ;;
+      *)
+        saw_assignment=1
+        ;;
+    esac
+  done <"${path}"
+
+  if [ "${saw_assignment}" -eq 1 ]; then
+    BOOT_TOKEN_EMPTY=1
+  else
+    BOOT_TOKEN_PLACEHOLDER=1
+  fi
+  return 1
 }
 
 escape_log_value() {
@@ -292,6 +358,18 @@ RESOLVED_TOKEN_SOURCE=""
 INITIAL_TOKEN="${TOKEN:-}"
 TOKEN=""
 
+if [ -z "${INITIAL_TOKEN}" ] && read_node_token_from_file "${NODE_TOKEN_PATH}"; then
+  INITIAL_TOKEN="${NODE_TOKEN_VALUE}"
+  RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+fi
+
+if [ -z "${INITIAL_TOKEN}" ] && read_boot_token_from_file "${BOOT_TOKEN_PATH}"; then
+  INITIAL_TOKEN="${BOOT_TOKEN_VALUE}"
+  RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+fi
+
+TOKEN=""
+
 resolve_server_join_token() {
   local resolver="${SCRIPT_DIR}/resolve_server_token.sh"
   local -a resolver_env=()
@@ -343,9 +421,13 @@ if [ -z "${TOKEN:-}" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
   elif [ "${SERVER_TOKEN_PRESENT}" -eq 0 ]; then
-    # No secure join token is yet available locally. Allow the first HA
-    # control-plane node to bootstrap so it can mint one for peers.
-    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+    if [ "${BOOT_TOKEN_EMPTY}" -eq 1 ] && [ "${BOOT_TOKEN_PLACEHOLDER}" -ne 1 ]; then
+      ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
+    else
+      # No secure join token is yet available locally. Allow the first HA
+      # control-plane node to bootstrap so it can mint one for peers.
+      ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+    fi
   fi
 fi
 
