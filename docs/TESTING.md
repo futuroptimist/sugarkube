@@ -77,7 +77,7 @@ The GitHub Actions workflow `.github/workflows/tests.yml` runs:
 ### Discovery Flow Tests
 - `tests/bats/discover_flow.bats`: Core discovery logic
 - `tests/test_mdns_discovery_parsing.py`: mDNS parsing edge cases
-- `tests/test_k3s_discover_token_resolution.py`: Token handling
+- `tests/test_k3s_discover_token_resolution_cli.py`: Token handling
 
 ### Pi Image Tests
 - `tests/build_pi_image_test.py`: Image building pipeline
