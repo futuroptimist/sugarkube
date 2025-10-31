@@ -1,0 +1,11 @@
+{
+  "id": "mdns-selfcheck-dbus-disabled-wait",
+  "date": "2025-10-31",
+  "component": "mdns_selfcheck.sh",
+  "rootCause": "CLI-only runs still waited on Avahi D-Bus even when disabled, triggering timeouts and failing bats coverage runs.",
+  "resolution": "Skip wait_for_avahi_dbus.sh when SUGARKUBE_MDNS_DBUS is 0 so CLI mode avoids D-Bus interactions.",
+  "references": [
+    "scripts/mdns_selfcheck.sh",
+    "tests/bats/mdns_selfcheck.bats"
+  ]
+}
