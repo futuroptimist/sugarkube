@@ -18,6 +18,83 @@ elif [ -f "${SUMMARY_LIB}" ]; then
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
 
+trim_token() {
+  local value="$1"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/}"
+  value="${value#${value%%[![:space:]]*}}"
+  value="${value%${value##*[![:space:]]}}"
+  if [ "${value#\"}" != "${value}" ] && [ "${value%\"}" != "${value}" ]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  fi
+  printf '%s' "${value}"
+}
+
+read_node_token_file() {
+  local path="$1"
+  NODE_TOKEN_VALUE=""
+  if [ -z "${path}" ] || [ ! -f "${path}" ]; then
+    return 1
+  fi
+  local first_line=""
+  if ! first_line="$(head -n 1 "${path}" 2>/dev/null || true)"; then
+    first_line=""
+  fi
+  first_line="$(trim_token "${first_line}")"
+  if [ -z "${first_line}" ]; then
+    return 1
+  fi
+  NODE_TOKEN_VALUE="${first_line}"
+  return 0
+}
+
+NODE_TOKEN_VALUE=""
+BOOT_TOKEN_STATUS="missing"
+BOOT_TOKEN_PLACEHOLDER=0
+BOOT_TOKEN_VALUE=""
+
+read_boot_token_file() {
+  local path="$1"
+  BOOT_TOKEN_STATUS="missing"
+  BOOT_TOKEN_PLACEHOLDER=0
+  BOOT_TOKEN_VALUE=""
+  if [ -z "${path}" ] || [ ! -f "${path}" ]; then
+    return 1
+  fi
+  BOOT_TOKEN_STATUS="empty"
+  local line value
+  while IFS= read -r line || [ -n "${line}" ]; do
+    case "${line}" in
+      \#*)
+        case "${line}" in
+          '# Sugarkube k3s node token export (pending)'*)
+            BOOT_TOKEN_PLACEHOLDER=1
+            ;;
+        esac
+        continue
+        ;;
+      NODE_TOKEN=*)
+        value="${line#NODE_TOKEN=}"
+        value="$(trim_token "${value}")"
+        if [ -n "${value}" ]; then
+          BOOT_TOKEN_STATUS="value"
+          BOOT_TOKEN_VALUE="${value}"
+          return 0
+        fi
+        break
+        ;;
+      *)
+        continue
+        ;;
+    esac
+  done <"${path}"
+  if [ "${BOOT_TOKEN_PLACEHOLDER}" -eq 1 ]; then
+    BOOT_TOKEN_STATUS="placeholder"
+  fi
+  return 1
+}
+
 log_message() {
   local level="$1"
   shift
@@ -339,13 +416,43 @@ if [ -f "${SERVER_TOKEN_PATH}" ]; then
   SERVER_TOKEN_PRESENT=1
 fi
 
+NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-}"
+BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-}"
+BOOT_TOKEN_STATUS="missing"
+
+if [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH}" ]; then
+  if read_node_token_file "${NODE_TOKEN_PATH}"; then
+    TOKEN="${NODE_TOKEN_VALUE}"
+    RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+  fi
+fi
+
+if [ -n "${BOOT_TOKEN_PATH}" ]; then
+  if read_boot_token_file "${BOOT_TOKEN_PATH}"; then
+    if [ -z "${TOKEN:-}" ]; then
+      TOKEN="${BOOT_TOKEN_VALUE}"
+      RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+    fi
+  fi
+fi
+
 if [ -z "${TOKEN:-}" ]; then
   if [ "${SERVERS_DESIRED}" = "1" ]; then
     ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
   elif [ "${SERVER_TOKEN_PRESENT}" -eq 0 ]; then
-    # No secure join token is yet available locally. Allow the first HA
-    # control-plane node to bootstrap so it can mint one for peers.
-    ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+    case "${BOOT_TOKEN_STATUS}" in
+      placeholder|missing)
+        # No secure join token is yet available locally. Allow the first HA
+        # control-plane node to bootstrap so it can mint one for peers.
+        ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+        ;;
+      empty)
+        ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
+        ;;
+      *)
+        ALLOW_BOOTSTRAP_WITHOUT_TOKEN=1
+        ;;
+    esac
   fi
 fi
 

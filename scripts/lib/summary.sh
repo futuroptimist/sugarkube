@@ -196,7 +196,7 @@ summary::step() {
   label="$(summary__sanitize "$1")"
   shift
   if [ "$#" -gt 0 ]; then
-    detail="$(summary__sanitize "$*)"
+    detail="$(summary__sanitize "$*")"
   else
     detail=""
   fi
@@ -215,7 +215,7 @@ summary::kv() {
   key="$(summary__sanitize "$1")"
   shift
   if [ "$#" -gt 0 ]; then
-    value="$(summary__sanitize "$*)"
+    value="$(summary__sanitize "$*")"
   else
     value=""
   fi
@@ -306,7 +306,7 @@ summary__write_output_impl() {
   if [ -z "${output}" ]; then
     return 0
   fi
-  printf '%s' "${output}"
+  printf '%s' "${output}" >&2
 }
 
 summary__write_output() {
