@@ -40,27 +40,26 @@ EOS
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$1" != "-rtp" ]; then
-  echo "unexpected avahi-browse invocation: $*" >&2
-  exit 1
-fi
-
-service_type="$2"
 service_file="${SUGARKUBE_AVAHI_SERVICE_FILE:-${SUGARKUBE_AVAHI_SERVICE_DIR:-/etc/avahi/services}/k3s-${SUGARKUBE_CLUSTER:-sugar}-${SUGARKUBE_ENV:-dev}.service}"
 
-if [ ! -f "${service_file}" ]; then
-  exit 1
-fi
-
-python3 - "$service_file" "$service_type" <<'PY'
+emit_from_service() {
+  local mode="$1"
+  python3 - "$service_file" "$mode" "${2:-}" <<'PY'
 import os
 import sys
 import xml.etree.ElementTree as ET
 
-path, expected_type = sys.argv[1:3]
-tree = ET.parse(path)
-root = tree.getroot()
+if len(sys.argv) < 3:
+    sys.exit(1)
 
+path, mode = sys.argv[1:3]
+expected_type = sys.argv[3] if len(sys.argv) > 3 else ""
+try:
+    tree = ET.parse(path)
+except FileNotFoundError:
+    sys.exit(1)
+
+root = tree.getroot()
 service = root.find("./service")
 if service is None:
     service = root.find(".//service")
@@ -68,28 +67,62 @@ if service is None:
     sys.exit(1)
 
 service_type = service.findtext("type") or ""
-if expected_type and expected_type != service_type:
-    sys.exit(1)
-
 name = root.findtext("./name") or ""
 port = service.findtext("port") or ""
 records = [node.text or "" for node in service.findall("txt-record")]
 
+if expected_type and expected_type != service_type:
+    sys.exit(1)
+
 host = os.environ.get("HOSTNAME", "stub-host") + ".local"
+iface = "eth0"
+address = "127.0.0.1"
 
-parts = [
-    "=;eth0;IPv4",
-    name,
-    service_type,
-    "local",
-    host,
-    "127.0.0.1",
-    port,
-]
-parts.extend(f"txt={record}" for record in records)
-
-print(";".join(parts))
+if mode == "all":
+    print(f"+;{iface};IPv4;{name};{service_type};local")
+    parts = [
+        "=", iface, "IPv4", name, service_type, "local", host, address, port
+    ]
+    tail = [f"txt={record}" for record in records]
+    print(";".join(parts + tail))
+else:
+    parts = [
+        "=;{iface};IPv4".format(iface=iface),
+        name,
+        service_type,
+        "local",
+        host,
+        address,
+        port,
+    ]
+    parts.extend(f"txt={record}" for record in records)
+    print(";".join(parts))
 PY
+}
+
+if [ "$#" -gt 0 ] && [ "$1" = "--all" ]; then
+  if [ ! -f "${service_file}" ]; then
+    exit 1
+  fi
+  emit_from_service "all"
+  exit 0
+fi
+
+if [ "$#" -gt 0 ] && [ "$1" = "-rtp" ]; then
+  service_type="${2:-}"
+  if [ -z "${service_type}" ]; then
+    echo "unexpected avahi-browse invocation: $*" >&2
+    exit 1
+  fi
+  if [ ! -f "${service_file}" ]; then
+    exit 1
+  fi
+  emit_from_service "resolve" "${service_type}"
+  exit 0
+fi
+
+echo "unexpected avahi-browse invocation: $*" >&2
+exit 1
 EOS
 }
 
