@@ -416,7 +416,7 @@ if [ -z "${TOKEN:-}" ]; then
 fi
 
 TOKEN_PRESENT=0
-if [ -n "${TOKEN:-}" ]; then
+if [ "${NODE_TOKEN_STATE}" = "value" ] || [ "${BOOT_TOKEN_STATE}" = "value" ] || [ -n "${TOKEN:-}" ]; then
   TOKEN_PRESENT=1
 fi
 
