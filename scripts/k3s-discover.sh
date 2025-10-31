@@ -415,6 +415,24 @@ if [ -z "${TOKEN:-}" ]; then
   fi
 fi
 
+TOKEN_PRESENT=0
+if [ -n "${TOKEN:-}" ]; then
+  TOKEN_PRESENT=1
+fi
+
+token_source_kv=""
+if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
+  token_source_kv="token_source=\"$(escape_log_value "${RESOLVED_TOKEN_SOURCE}")\""
+fi
+
+log_info discover \
+  event=token_resolution \
+  "token_present=${TOKEN_PRESENT}" \
+  "allow_bootstrap=${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" \
+  "node_token_state=${NODE_TOKEN_STATE}" \
+  "boot_token_state=${BOOT_TOKEN_STATE}" \
+  "${token_source_kv}" >&2
+
 if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then
   if [ "${CHECK_TOKEN_ONLY}" -eq 1 ]; then
     echo "failed to resolve secure k3s server join token; provide SUGARKUBE_TOKEN or enable SUGARKUBE_ALLOW_TOKEN_CREATE=1" >&2
