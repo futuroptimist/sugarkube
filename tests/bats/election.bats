@@ -18,7 +18,7 @@ stub_hostname() {
   local fqdn="$2"
   stub_command hostname <<EOS
 #!/usr/bin/env bash
-case "$1" in
+case "\$1" in
   -f)
     echo "$fqdn"
     ;;
@@ -39,7 +39,7 @@ stub_ip_with_mac() {
   local mac="$1"
   stub_command ip <<EOS
 #!/usr/bin/env bash
-if [ "$1" = "-o" ] && [ "$2" = "link" ]; then
+if [ "\$1" = "-o" ] && [ "\$2" = "link" ]; then
   cat <<'OUT'
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00

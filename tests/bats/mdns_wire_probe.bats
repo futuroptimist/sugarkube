@@ -2,6 +2,8 @@
 
 load helpers/path_stub
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   setup_path_stub_dir
 }
@@ -56,7 +58,13 @@ EOS
   stub_command avahi-resolve-host-name <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s %s\n' "$1" "${SUGARKUBE_EXPECTED_IPV4}"
+target="${1:-}"
+hosts_file="${SUGARKUBE_AVAHI_HOSTS_PATH:-}"
+if [ -n "${hosts_file}" ] && [ -f "${hosts_file}" ] && grep -Fq "${target}" "${hosts_file}"; then
+  printf '%s %s\n' "${target}" "${SUGARKUBE_EXPECTED_IPV4}"
+  exit 0
+fi
+exit 1
 EOS
 
   stub_command avahi-resolve <<'EOS'
@@ -89,8 +97,12 @@ EOS
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "$1" = "hosts" ]; then
-  printf '%s %s\n' "${SUGARKUBE_EXPECTED_IPV4}" "$2"
-  exit 0
+  hosts_file="${SUGARKUBE_AVAHI_HOSTS_PATH:-}"
+  if [ -n "${hosts_file}" ] && [ -f "${hosts_file}" ] && grep -Fq "${2}" "${hosts_file}"; then
+    printf '%s %s\n' "${SUGARKUBE_EXPECTED_IPV4}" "$2"
+    exit 0
+  fi
+  exit 2
 fi
 exit 1
 EOS
@@ -123,7 +135,11 @@ if [ -n "${log_path}" ]; then
   printf '%s mode=%s\n' "${service_display}" "${mode}" >>"${log_path}"
 fi
 if [ "${mode}" = "600" ] || [ "${mode}" = "0600" ]; then
-  printf 'Service "%s" failed: Permission denied\n' "${service_display}"
+  message="Service \"${service_display}\" failed: Permission denied"
+  printf '%s\n' "${message}"
+  if [ -n "${log_path}" ]; then
+    printf '%s\n' "${message}" >>"${log_path}"
+  fi
   exit 0
 fi
 rename_state=""
@@ -131,9 +147,13 @@ if [ -n "${TEST_RENAME_MARKER:-}" ] && [ -f "${TEST_RENAME_MARKER}" ]; then
   rename_state="$(cat "${TEST_RENAME_MARKER}" 2>/dev/null || true)"
 fi
 if [ "${rename_state}" = "atomic" ]; then
-  printf 'Service "%s" successfully established.\n' "${service_display}"
+  message="Service \"${service_display}\" successfully established."
 else
-  printf 'Service "%s" vanished while publishing.\n' "${service_display}"
+  message="Service \"${service_display}\" vanished while publishing."
+fi
+printf '%s\n' "${message}"
+if [ -n "${log_path}" ]; then
+  printf '%s\n' "${message}" >>"${log_path}"
 fi
 exit 0
 EOS
@@ -142,27 +162,40 @@ EOS
 #!/usr/bin/env bash
 set -euo pipefail
 real_chmod="${real_chmod}"
-force="${TEST_CHMOD_FORCE_MODE:-}"
-mode="$1"
+force="\${TEST_CHMOD_FORCE_MODE:-}"
+mode="\$1"
 shift
-if [ -n "${force}" ]; then
-  mode="${force}"
+if [ -n "\${force}" ]; then
+  mode="\${force}"
 fi
-exec "${real_chmod}" "${mode}" "$@"
+exec "${real_chmod}" "\${mode}" "\$@"
 EOS
 
   stub_command mv <<EOS
 #!/usr/bin/env bash
 set -euo pipefail
 real_mv="${real_mv}"
-if [ "$#" -ge 2 ]; then
-  src="$1"
-  dest="$2"
-  if [ -n "${TEST_RENAME_MARKER:-}" ] && [ "${dest}" = "${SUGARKUBE_AVAHI_SERVICE_FILE:-}" ] && [[ "${src}" == "${SUGARKUBE_AVAHI_SERVICE_DIR:-}"/.k3s-mdns.* ]]; then
-    printf 'atomic' >"${TEST_RENAME_MARKER}"
+args=("\$@")
+shifted=("\$@")
+while [ "\${#shifted[@]}" -gt 0 ]; do
+  candidate="\${shifted[0]}"
+  case "\${candidate}" in
+    -*)
+      shifted=("\${shifted[@]:1}")
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+if [ "\${#shifted[@]}" -ge 2 ]; then
+  src="\${shifted[0]}"
+  dest="\${shifted[1]}"
+  if [ -n "\${TEST_RENAME_MARKER:-}" ] && [ "\${dest}" = "\${SUGARKUBE_AVAHI_SERVICE_FILE:-}" ] && [[ "\${src}" == "\${SUGARKUBE_AVAHI_SERVICE_DIR:-}"/.k3s-mdns.* ]]; then
+    printf 'atomic' >"\${TEST_RENAME_MARKER}"
   fi
 fi
-exec "${real_mv}" "$@"
+exec "${real_mv}" "\${args[@]}"
 EOS
 }
 
@@ -194,19 +227,29 @@ while [ "$#" -gt 0 ]; do
 if [ "${method}" = "org.freedesktop.DBus.Introspectable.Introspect" ]; then
   case "${path}" in
     /)
-      printf "('<node>\n  <node name=\"org/freedesktop/Avahi\"/>\n</node>',)\n"
+      cat <<'OUT'
+('<node>\n  <node name="org/freedesktop/Avahi"/>\n</node>',)
+OUT
       ;;
     /org/freedesktop/Avahi)
-      printf "('<node>\n  <node name=\"Server\"/>\n</node>',)\n"
+      cat <<'OUT'
+('<node>\n  <node name="Server"/>\n</node>',)
+OUT
       ;;
     /org/freedesktop/Avahi/Server)
-      printf "('<node>\n  <node name=\"EntryGroup0\"/>\n</node>',)\n"
+      cat <<'OUT'
+('<node>\n  <node name="EntryGroup0"/>\n</node>',)
+OUT
       ;;
     /org/freedesktop/Avahi/Server/EntryGroup0)
-      printf "('<node/>',)\n"
+      cat <<'OUT'
+('<node/>',)
+OUT
       ;;
     *)
-      printf "('<node/>',)\n"
+      cat <<'OUT'
+('<node/>',)
+OUT
       ;;
   esac
 elif [ "${method}" = "org.freedesktop.Avahi.EntryGroup.GetState" ]; then
@@ -258,10 +301,12 @@ STUB
   : >"${TEST_JOURNAL_LOG}"
   export TEST_CHMOD_FORCE_MODE=0600
 
-  run bash "${BATS_CWD}/scripts/mdns_publish_static.sh"
+  run --separate-stderr bash "${BATS_CWD}/scripts/mdns_publish_static.sh"
+  script_status=$status
+  script_stderr=$stderr
 
-  [ "$status" -ne 0 ]
-  [[ "$stderr" =~ Timed\ out\ waiting\ for\ Avahi\ to\ publish ]]
+  [ "$script_status" -ne 0 ]
+  [[ "$script_stderr" =~ Timed\ out\ waiting\ for\ Avahi\ to\ publish ]]
   run grep -F "Permission denied" "${TEST_JOURNAL_LOG}"
   [ "$status" -eq 0 ]
 }
@@ -273,9 +318,10 @@ STUB
   : >"${TEST_JOURNAL_LOG}"
   unset TEST_CHMOD_FORCE_MODE
 
-  run bash "${BATS_CWD}/scripts/mdns_publish_static.sh"
+  run --separate-stderr bash "${BATS_CWD}/scripts/mdns_publish_static.sh"
+  script_status=$status
 
-  [ "$status" -eq 0 ]
+  [ "$script_status" -eq 0 ]
   [ -f "${SERVICE_FILE}" ]
   [ -f "${HOSTS_PATH}" ]
   grep -F "successfully established" "${TEST_JOURNAL_LOG}"

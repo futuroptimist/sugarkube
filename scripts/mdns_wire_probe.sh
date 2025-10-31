@@ -186,6 +186,7 @@ def discover_entry_groups():
     queue = deque(["/"])
     seen = set()
     entry_groups = []
+    any_success = False
 
     while queue:
         path = queue.popleft()
@@ -205,6 +206,7 @@ def discover_entry_groups():
             continue
         if not xml_text:
             continue
+        any_success = True
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError:
@@ -220,6 +222,8 @@ def discover_entry_groups():
             queue.append(child)
             if any(segment.startswith("EntryGroup") for segment in child.split("/")):
                 entry_groups.append(child)
+    if not any_success:
+        raise RuntimeError("avahi_dbus_unavailable")
     return entry_groups
 
 def entry_group_state(path):

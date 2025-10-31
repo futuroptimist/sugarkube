@@ -1,0 +1,10 @@
+{
+  "id": "mdns-publish-static-stub-regression",
+  "date": "2025-10-31",
+  "component": "tests/bats/mdns_wire_probe.bats",
+  "rootCause": "Bats stubs for avahi tooling escaped runtime variables incorrectly and unconditionally reported successful name resolution, so the mdns_publish_static suite never exercised the host-file update path and journalctl expectations. The chmod/mv stubs also dropped options, preventing atomic rename markers.",
+  "resolution": "Re-quote the stubs to defer $ expansion, emulate resolver behaviour based on the generated hosts file, log journalctl messages to the fixture file, and handle mv -f so the tests observe atomic publication.",
+  "references": [
+    "tests/bats/mdns_wire_probe.bats"
+  ]
+}
