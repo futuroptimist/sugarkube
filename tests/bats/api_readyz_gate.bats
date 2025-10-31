@@ -12,6 +12,17 @@ teardown() {
   fi
 }
 
+find_free_port() {
+  python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+print(port)
+PY
+}
+
 start_readyz_server() {
   local port="$1"
   local cert="${BATS_TEST_TMPDIR}/server.crt"
@@ -80,7 +91,11 @@ PY
 }
 
 @test "api ready gate waits for readyz ok" {
-  local port=9443
+  local port
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
   start_readyz_server "${port}"
 
   run env \
