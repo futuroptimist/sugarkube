@@ -76,10 +76,21 @@ PY
 }
 
 validate_ready_body() {
-  python3 - <<'PY'
+  local body_path="$1"
+  python3 - "$body_path" <<'PY'
 import sys
+from pathlib import Path
 
-lines = [line.strip() for line in sys.stdin.read().splitlines()]
+if len(sys.argv) < 2:
+    sys.exit(1)
+
+path = Path(sys.argv[1])
+try:
+    text = path.read_text(encoding="utf-8")
+except OSError:
+    sys.exit(1)
+
+lines = [line.strip() for line in text.splitlines()]
 seen_ok = False
 for line in lines:
     if not line:
@@ -141,7 +152,7 @@ while :; do
   fi
 
   if [ "${curl_status}" -eq 0 ] && [ "${http_code}" = "200" ]; then
-    if validate_ready_body <"${body_file}"; then
+    if validate_ready_body "${body_file}"; then
       elapsed=$(( $(date +%s) - start_epoch ))
       log_fields=(
         "outcome=ok"
