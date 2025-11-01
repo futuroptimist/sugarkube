@@ -387,7 +387,7 @@ monitor-ssd-health:
 
 # Usage: sudo NVME_HEALTH_ARGS="--device /dev/nvme1n1" just nvme-health
 nvme-health:
-    "{{sugarkube_cli}}" nvme health {{ nvme_health_args }}
+    "{{ sugarkube_cli }}" nvme health {{ nvme_health_args }}
 
 # Run pi_node_verifier remotely over SSH
 
