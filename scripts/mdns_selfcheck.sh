@@ -859,8 +859,16 @@ self_resolve_handle_success() {
 mdns_liveness_probe() {
   local host="${SELF_LOCAL_HOST:-}"
   local signal="liveness"
+  local dbus_allowed=1
 
-  if command -v gdbus >/dev/null 2>&1; then
+  case "${dbus_mode:-auto}" in
+    0|false|False|FALSE|no|No|NO|off|Off|OFF)
+      dbus_allowed=0
+      ;;
+  esac
+
+  if [ "${dbus_allowed}" -eq 1 ]; then
+    if command -v gdbus >/dev/null 2>&1; then
     local dbus_output
     if dbus_output="$(run_command_capture avahi_dbus_hostname gdbus call --system --dest org.freedesktop.Avahi --object-path / --method org.freedesktop.Avahi.Server.GetHostNameFqdn)"; then
       local dbus_command_kv
@@ -878,8 +886,11 @@ mdns_liveness_probe() {
       dbus_duration_kv="command_duration_ms=${MDNS_LAST_CMD_DURATION_MS:-0}"
       log_debug mdns_liveness outcome=lag signal=dbus_hostname rc="${rc}" "${dbus_command_kv}" "${dbus_duration_kv}"
     fi
+    else
+      log_debug mdns_liveness outcome=skip signal=dbus_hostname reason=gdbus_missing
+    fi
   else
-    log_debug mdns_liveness outcome=skip signal=dbus_hostname reason=gdbus_missing
+    log_debug mdns_liveness outcome=skip signal=dbus_hostname reason=dbus_disabled
   fi
 
   if [ -n "${host}" ] && [ -n "${EXPECTED_IPV4}" ]; then
