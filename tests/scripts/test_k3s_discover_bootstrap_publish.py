@@ -66,13 +66,17 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.C
     avahi_resolve.chmod(0o755)
 
     env = os.environ.copy()
+    service_dir = tmp_path / "avahi"
+    service_path = service_dir / "k3s-sugar-dev.service"
+
     env.update(
         {
             "PATH": f"{bin_dir}:{env.get('PATH', '')}",
             "SUGARKUBE_CLUSTER": "sugar",
             "SUGARKUBE_ENV": "dev",
             "ALLOW_NON_ROOT": "1",
-            "SUGARKUBE_AVAHI_SERVICE_DIR": str(tmp_path / "avahi"),
+            "SUGARKUBE_AVAHI_SERVICE_DIR": str(service_dir),
+            "SUGARKUBE_AVAHI_SERVICE_FILE": str(service_path),
             "SUGARKUBE_TOKEN": "dummy",
             "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
             "SUGARKUBE_MDNS_BOOT_DELAY": "0",
@@ -94,7 +98,7 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.C
         check=True,
     )
 
-    service_file = tmp_path / "avahi" / "k3s-sugar-dev.service"
+    service_file = service_path
     tree = ET.parse(service_file)
     log_contents = systemctl_log.read_text(encoding="utf-8")
     return result, tree, log_contents, service_file, hosts_path, resolve_log
