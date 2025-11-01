@@ -26,6 +26,24 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.C
     )
     systemctl.chmod(0o755)
 
+    configure_avahi = bin_dir / "configure_avahi.sh"
+    configure_avahi.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    configure_avahi.chmod(0o755)
+
+    chown_stub = bin_dir / "chown"
+    chown_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "# no-op for tests running without root privileges\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    chown_stub.chmod(0o755)
+
     expected_host = mdns_host.rstrip(".")
     expected_ipv4 = "192.0.2.10"
     hosts_path = tmp_path / "avahi-hosts"
@@ -77,6 +95,7 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.C
             "ALLOW_NON_ROOT": "1",
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(service_dir),
             "SUGARKUBE_AVAHI_SERVICE_FILE": str(service_path),
+            "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(configure_avahi),
             "SUGARKUBE_TOKEN": "dummy",
             "SUGARKUBE_MDNS_BOOT_RETRIES": "1",
             "SUGARKUBE_MDNS_BOOT_DELAY": "0",
