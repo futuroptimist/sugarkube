@@ -7,6 +7,9 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,8 +76,10 @@ jobs:
 
       - name: Upload to Codecov
         if: always()
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
+          use_oidc: true
+          disable_search: true
           directory: coverage
           files: |
             coverage/python-coverage.xml

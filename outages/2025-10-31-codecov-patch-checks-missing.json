@@ -1,0 +1,10 @@
+{
+  "id": "codecov-patch-checks-missing",
+  "date": "2025-10-31",
+  "component": "github-actions",
+  "rootCause": "ci.yml/tests.yml uploaded to Codecov on push with tokens, so fork PRs lost checks.",
+  "resolution": "Switch uploads to GitHub OIDC, drop push-only guard, and add regression tests.",
+  "references": [
+    "https://docs.codecov.com/docs/codecov-uploader"
+  ]
+}
