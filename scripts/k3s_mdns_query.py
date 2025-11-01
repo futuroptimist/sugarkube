@@ -115,6 +115,25 @@ def _load_lines_from_fixture(fixture_path: str) -> Iterable[str]:
     return [line for line in text.splitlines() if line]
 
 
+def _normalize_record_lines(lines: Iterable[str]) -> List[str]:
+    """Collapse Avahi output so each record occupies a single line."""
+
+    collapsed: List[str] = []
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+
+        if line[0] in {"=", "+", "@"} or not collapsed:
+            collapsed.append(line)
+            continue
+
+        collapsed[-1] += line
+
+    return collapsed
+
+
 def _load_lines_from_avahi(
     mode: str,
     cluster: str,
@@ -135,7 +154,7 @@ def _load_lines_from_avahi(
             timeout,
             resolve=resolve,
         )
-        new_lines = [line for line in result.stdout.splitlines() if line]
+        new_lines = _normalize_record_lines(result.stdout.splitlines())
         if debug is not None and not new_lines and result.stdout:
             try:
                 _DUMP_PATH.write_text(result.stdout, encoding="utf-8")
