@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-01-flake8-mdns-regression",
+  "date": "2025-11-01",
+  "component": "linting (flake8)",
+  "rootCause": "Recent mDNS regression tests landed with 100+ character literals and an unused parse helper, tripping flake8's line-length and F841 checks in checks.sh.",
+  "resolution": "Split long fixture literals across concatenated segments, rewrote shell stubs with textwrap to keep lines under 100 characters, and dropped the unused fields assignment so flake8 passes again.",
+  "references": [
+    "checks.sh failure: ./scripts/checks.sh (chunk 9d95b7)",
+    "PR: scripts/mdns_helpers.py"
+  ]
+}

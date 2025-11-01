@@ -167,6 +167,8 @@ else
 fi
 JOIN_GATE_BIN="${SUGARKUBE_JOIN_GATE_BIN:-${SCRIPT_DIR}/join_gate.sh}"
 JOIN_GATE_HELD=0
+DISABLE_JOIN_GATE="${SUGARKUBE_DISABLE_JOIN_GATE:-0}"
+FAST_JOIN_MODE="${SUGARKUBE_TEST_FAST_JOIN:-0}"
 L4_PROBE_BIN="${SUGARKUBE_L4_PROBE_BIN:-${SCRIPT_DIR}/l4_probe.sh}"
 TIME_SYNC_CHECK_BIN="${SUGARKUBE_TIME_SYNC_BIN:-${SCRIPT_DIR}/check_time_sync.sh}"
 
@@ -1181,6 +1183,8 @@ render_avahi_service_xml() {
   local port="${1:-6443}"; shift || true
   local phase=""
   local leader=""
+  local state=""
+  local -a extra_txt=()
   local arg
   for arg in "$@"; do
     case "${arg}" in
@@ -1190,23 +1194,37 @@ render_avahi_service_xml() {
       leader=*)
         leader="${arg#leader=}"
         ;;
+      state=*)
+        state="${arg#state=}"
+        ;;
+      *)
+        extra_txt+=("${arg}")
+        ;;
     esac
   done
 
-  python3 - <<'PY' \
+  local extra_payload=""
+  if [ "${#extra_txt[@]}" -gt 0 ]; then
+    extra_payload="$(printf '%s\n' "${extra_txt[@]}")"
+  fi
+
+  EXTRA_TXT_RECORDS="${extra_payload}" python3 - <<'PY' \
     "${CLUSTER}" \
     "${ENVIRONMENT}" \
     "${role}" \
     "${port}" \
     "${phase}" \
-    "${leader}"
+    "${leader}" \
+    "${state}"
 import html
+import os
 import sys
 
-cluster, environment, role, port, phase, leader = sys.argv[1:7]
+cluster, environment, role, port, phase, leader, state = sys.argv[1:8]
 host = "%h"
 
-service_name = f"k3s-{cluster}-{environment}@{host} ({role})"
+role_label = "server" if role == "server" else role
+service_name = f"k3s API {cluster}/{environment} [{role_label}] on {host}"
 service_type = f"_k3s-{cluster}-{environment}._tcp"
 
 records = [
@@ -1214,12 +1232,29 @@ records = [
     ("cluster", cluster),
     ("env", environment),
     ("role", role),
-    ("phase", phase),
-    ("leader", leader),
 ]
+
+if state:
+    records.append(("state", state))
+if leader:
+    records.append(("leader", leader))
+if phase:
+    records.append(("phase", phase))
+
+extra_payload = os.environ.get("EXTRA_TXT_RECORDS", "")
+for line in extra_payload.splitlines():
+    if not line:
+        continue
+    if "=" in line:
+        key, value = line.split("=", 1)
+    else:
+        key, value = line, ""
+    records.append((key, value))
+
 
 def esc(value: str) -> str:
     return html.escape(value, quote=True)
+
 
 print("<?xml version=\"1.0\" standalone='no'?>")
 print("<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">")
@@ -2301,8 +2336,24 @@ wait_for_bootstrap_activity() {
   if [ "${require_activity}" -eq 1 ]; then
     effective_attempts="${activity_grace_attempts}"
   fi
+  if ! [[ "${effective_attempts}" =~ ^[0-9]+$ ]] || [ "${effective_attempts}" -le 0 ]; then
+    effective_attempts="${attempts}"
+  fi
   log_info discover phase=wait_bootstrap attempts="${attempts}" wait_secs="${wait_secs}" require_activity="${require_activity}" >&2
   for attempt in $(seq 1 "${attempts}"); do
+    local denominator="${effective_attempts}"
+    if ! [[ "${denominator}" =~ ^[0-9]+$ ]] || [ "${denominator}" -le 0 ]; then
+      denominator="${attempts}"
+    fi
+    if ! [[ "${denominator}" =~ ^[0-9]+$ ]] || [ "${denominator}" -le 0 ]; then
+      denominator="${attempt}"
+    fi
+    local attempt_label
+    attempt_label="${attempt}/${denominator}"
+    log_info_msg discover "Bootstrap wait attempt ${attempt_label}" \
+      "attempt=${attempt}" \
+      "total_attempts=${denominator}" \
+      "require_activity=${require_activity}"
     local server
     server="$(discover_server_host || true)"
     if [ -n "${server}" ]; then
@@ -2688,6 +2739,9 @@ acquire_join_gate() {
 }
 
 release_join_gate_if_needed() {
+  if [ "${DISABLE_JOIN_GATE}" = "1" ]; then
+    return 0
+  fi
   if [ "${JOIN_GATE_HELD:-0}" -ne 1 ]; then
     return 0
   fi
@@ -3124,15 +3178,19 @@ install_server_join() {
     exit 1
   fi
   check_remote_server_tls_sans "${server}"
-  if ! acquire_join_gate; then
-    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      local elapsed_ms
-      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
-      summary::section "k3s install"
-      summary::step FAIL "k3s install" "${summary_note} reason=join-gate elapsed_ms=${elapsed_ms}"
-      summary_recorded=1
+  if [ "${DISABLE_JOIN_GATE}" = "1" ]; then
+    log_info discover event=join_gate action=skip reason=disabled >&2
+  else
+    if ! acquire_join_gate; then
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=join-gate elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
     fi
-    exit 1
   fi
   ensure_iptables_tools
   local -a log_args=(
@@ -3145,6 +3203,17 @@ install_server_join() {
     log_args+=("discovered_server=${discovered_server}")
   fi
   log_info discover "${log_args[@]}" >&2
+  if [ "${FAST_JOIN_MODE}" = "1" ]; then
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "k3s install"
+      summary::step OK "k3s install" "${summary_note} mode=fast elapsed_ms=${elapsed_ms}"
+      summary_recorded=1
+    fi
+    log_info discover event=join outcome=fast_path host="${MDNS_HOST_RAW}" server="${server}" mode=fast >&2
+    return 0
+  fi
   local env_assignments
   build_install_env env_assignments
   curl -sfL https://get.k3s.io \

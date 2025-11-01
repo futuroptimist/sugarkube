@@ -5,6 +5,15 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Tuple
 
+BootstrapPublishResult = Tuple[
+    subprocess.CompletedProcess[str],
+    ET.ElementTree,
+    str,
+    Path,
+    Path,
+    Path,
+]
+
 SCRIPT = str(Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh")
 
 
@@ -12,7 +21,7 @@ def _hostname_short() -> str:
     return subprocess.check_output(["hostname", "-s"], text=True).strip()
 
 
-def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.CompletedProcess[str], ET.ElementTree, str, Path, Path, Path]:
+def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> BootstrapPublishResult:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
 
@@ -106,7 +115,14 @@ def _txt_records(tree: ET.ElementTree) -> List[str]:
 
 def test_bootstrap_publish_writes_static_service(tmp_path):
     hostname = f"{_hostname_short()}.local"
-    result, tree, systemctl_log, service_file, hosts_path, resolve_log = _run_bootstrap_publish(tmp_path, hostname)
+    (
+        result,
+        tree,
+        systemctl_log,
+        service_file,
+        hosts_path,
+        resolve_log,
+    ) = _run_bootstrap_publish(tmp_path, hostname)
 
     name = tree.findtext("./name")
     assert name == f"k3s-sugar-dev@{hostname} (bootstrap)"
@@ -130,7 +146,10 @@ def test_bootstrap_publish_writes_static_service(tmp_path):
         f"leader={hostname}",
     ]
 
-    assert "SYSTEMCTL:reload avahi-daemon" in systemctl_log or "SYSTEMCTL:restart avahi-daemon" in systemctl_log
+    assert (
+        "SYSTEMCTL:reload avahi-daemon" in systemctl_log
+        or "SYSTEMCTL:restart avahi-daemon" in systemctl_log
+    )
     assert result.returncode == 0
 
     service_text = service_file.read_text(encoding="utf-8")

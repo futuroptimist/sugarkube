@@ -18,7 +18,8 @@ def _render(role, *txt):
 def test_render_bootstrap_xml_has_required_txt_records():
     root = _render("bootstrap", "leader=host0.local", "state=pending")
     name = root.find("./name")
-    assert name is not None and "k3s-sugar-dev@%h" in name.text
+    assert name is not None
+    assert name.text == "k3s API sugar/dev [bootstrap] on %h"
 
     svc = root.find("./service")
     assert svc is not None
