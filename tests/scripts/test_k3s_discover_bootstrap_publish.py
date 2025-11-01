@@ -26,6 +26,15 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> Tuple[subprocess.C
     )
     systemctl.chmod(0o755)
 
+    journalctl = bin_dir / "journalctl"
+    journalctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "# journalctl is not available in the test sandbox; succeed immediately\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    journalctl.chmod(0o755)
+
     configure_avahi = bin_dir / "configure_avahi.sh"
     configure_avahi.write_text(
         "#!/usr/bin/env bash\n"
