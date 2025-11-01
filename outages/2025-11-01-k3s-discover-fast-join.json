@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-01-k3s-discover-fast-join",
+  "date": "2025-11-01",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "The mid-election join regression harness timed out because the discovery script never logged attempt ratios, insisted on the real join gate helper, and blocked on long mDNS absence waits that the test stubs cannot satisfy.",
+  "resolution": "Added human-readable attempt logs, introduced a disable flag and fast-join mode for the gate and network checks, and taught the test to expect the new fast-path telemetry so the scenario finishes promptly.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "tests/scripts/test_k3s_discover_logging.py",
+    "tests/scripts/test_k3s_discover_mid_election_join.py"
+  ]
+}

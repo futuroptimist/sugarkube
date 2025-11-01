@@ -13,8 +13,16 @@ from k3s_mdns_parser import MdnsRecord, parse_mdns_records  # noqa: E402
 @pytest.fixture()
 def sample_lines():
     return [
-        "+;eth0;IPv4;k3s API sugar/dev [server] on sugarkube0;_https._tcp;local;sugarkube0.local;192.168.86.41;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server",
-        "+;eth0;IPv6;k3s API sugar/dev [server] on sugarkube0;_https._tcp;local;sugarkube0.local;fd00::1;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server",
+        (
+            "+;eth0;IPv4;k3s API sugar/dev [server] on sugarkube0;_https._tcp;local;"
+            "sugarkube0.local;192.168.86.41;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
+        ),
+        (
+            "+;eth0;IPv6;k3s API sugar/dev [server] on sugarkube0;_https._tcp;local;"
+            "sugarkube0.local;fd00::1;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
+        ),
     ]
 
 
@@ -34,7 +42,11 @@ def test_parse_mdns_prefers_ipv4(sample_lines):
 
 def test_parse_mdns_accepts_ipv6_when_only_option():
     lines = [
-        "+;eth0;IPv6;k3s API sugar/dev [server] on sugarkube1;_https._tcp;local;sugarkube1.local;fd00::2;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
+        (
+            "+;eth0;IPv6;k3s API sugar/dev [server] on sugarkube1;_https._tcp;local;"
+            "sugarkube1.local;fd00::2;6443;"
+            "txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server"
+        )
     ]
     records = parse_mdns_records(lines, "sugar", "dev")
     assert len(records) == 1

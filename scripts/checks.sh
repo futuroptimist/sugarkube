@@ -435,7 +435,7 @@ else
         exit 1
       fi
     else
-      if ! pip_install flake8 isort black pytest pytest-cov coverage pyspelling linkchecker \
+      if ! pip_install flake8 'isort<6' black pytest pytest-cov coverage pyspelling linkchecker \
         >/dev/null 2>&1; then
         echo "Failed to install lint/test dependencies; aborting" >&2
         exit 1

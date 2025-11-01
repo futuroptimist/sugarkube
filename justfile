@@ -313,7 +313,7 @@ eeprom-nvme-first:
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running clone-ssd." >&2; exit 1; fi
     sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 show-disks:
     lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS

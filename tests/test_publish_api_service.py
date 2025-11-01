@@ -54,4 +54,6 @@ def test_render_api_service_generates_expected_xml(tmp_path):
         "cluster=sugar",
         "env=dev",
         "role=server",
+        "leader=%h.local",
+        "phase=server",
     }
