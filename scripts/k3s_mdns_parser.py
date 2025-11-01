@@ -219,7 +219,6 @@ def parse_mdns_records(
         if not parsed:
             continue
 
-        fields = parsed["fields"]
         service_type = parsed["type"]
         type_cluster: Optional[str] = None
         type_environment: Optional[str] = None

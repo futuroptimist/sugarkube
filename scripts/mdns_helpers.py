@@ -200,17 +200,20 @@ def _describe_addr_mismatch(
     if ipv4 and expect_addr not in ipv4:
         return (
             "Advertisement reported IPv4 address(es) %s that do not include expected %s. "
-            "Multiple interfaces (e.g. wlan0 vs eth0) or stale Avahi cache entries are likely."
+            "Multiple interfaces (e.g. wlan0 vs eth0) or stale Avahi cache entries are "
+            "likely."
         ) % (", ".join(ipv4), expect_addr)
 
     if not ipv4 and ipv6:
         return (
-            "Advertisement only reported IPv6 address(es) %s. Ensure IPv4 is configured or allow IPv6 discovery."
+            "Advertisement only reported IPv6 address(es) %s. Ensure IPv4 is configured "
+            "or allow IPv6 discovery."
         ) % (", ".join(ipv6))
 
     if other:
         return (
-            "Advertisement reported non-IP address value(s) %s. Verify avahi-publish-address advertises IPv4."
+            "Advertisement reported non-IP address value(s) %s. Verify "
+            "avahi-publish-address advertises IPv4."
         ) % (", ".join(other))
 
     return "Advertisement addresses did not match the expected value."
@@ -352,7 +355,8 @@ def ensure_self_ad_is_visible(
         records = _collect_mdns_records(cluster, env, runner)
         if not records:
             _log(
-                "[k3s-discover mdns] Attempt %d/%d: no mDNS records discovered for cluster=%s env=%s"
+                "[k3s-discover mdns] Attempt %d/%d: no mDNS records discovered for "
+                "cluster=%s env=%s"
                 % (attempt, attempts, cluster, env)
             )
             if attempt < attempts and delay > 0:

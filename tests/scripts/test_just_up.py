@@ -442,7 +442,8 @@ def test_just_up_dev_two_nodes(tmp_path):
     )
     assert result_assume.returncode == 0, result_assume.stderr
     assert (
-        "WARN: bootstrap advertisement for pi2.local not visible via mDNS; Avahi publish logs report service establishment; assuming success."
+        "WARN: bootstrap advertisement for pi2.local not visible via mDNS; "
+        "Avahi publish logs report service establishment; assuming success."
         in result_assume.stderr
     )
     assert (

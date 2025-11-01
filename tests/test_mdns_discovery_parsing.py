@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -24,50 +25,56 @@ def mdns_env(tmp_path):
     bin_dir.mkdir()
     browse = bin_dir / "avahi-browse"
     browse.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
 
-if [[ "$#" -lt 4 || "$#" -gt 5 ]]; then
-  echo "unexpected argument count: $#" >&2
-  exit 1
-fi
+            if [[ "$#" -lt 4 || "$#" -gt 5 ]]; then
+              echo "unexpected argument count: $#" >&2
+              exit 1
+            fi
 
-if [[ "$1" != "--parsable" || "$2" != "--terminate" ]]; then
-  echo "unexpected arguments: $*" >&2
-  exit 1
-fi
+            if [[ "$1" != "--parsable" || "$2" != "--terminate" ]]; then
+              echo "unexpected arguments: $*" >&2
+              exit 1
+            fi
 
-shift 2
+            shift 2
 
-if [[ "$1" != "--resolve" ]]; then
-  echo "missing --resolve flag" >&2
-  exit 1
-fi
+            if [[ "$1" != "--resolve" ]]; then
+              echo "missing --resolve flag" >&2
+              exit 1
+            fi
 
-shift
+            shift
 
-if [[ "$1" == "--ignore-local" ]]; then
-  shift
-fi
+            if [[ "$1" == "--ignore-local" ]]; then
+              shift
+            fi
 
-if [[ "$#" -ne 1 ]]; then
-  echo "unexpected trailing arguments: $*" >&2
-  exit 1
-fi
+            if [[ "$#" -ne 1 ]]; then
+              echo "unexpected trailing arguments: $*" >&2
+              exit 1
+            fi
 
-service="$1"
+            service="$1"
 
-if [[ "$service" != "_k3s-sugar-dev._tcp" && "$service" != "_https._tcp" ]]; then
-  echo "unexpected service type: $service" >&2
-  exit 1
-fi
+            if [[ "$service" != "_k3s-sugar-dev._tcp" && "$service" != "_https._tcp" ]]; then
+              echo "unexpected service type: $service" >&2
+              exit 1
+            fi
 
-cat <<'EOF'
-=;eth0;IPv4;k3s-sugar-dev@sugar-control-0 (server);_k3s-sugar-dev._tcp;local;sugar-control-0.local;192.168.50.10;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
-=;eth0;IPv4;k3s-sugar-dev@sugar-control-1 (server);_k3s-sugar-dev._tcp;local;sugar-control-1.local;192.168.50.11;6443;txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
-=;eth0;IPv4;broken;_k3s-sugar-dev._tcp;local;sugar-control-2.local
-EOF
-""",
+            printf '%s\n' \
+              '=;eth0;IPv4;k3s-sugar-dev@sugar-control-0 (server);_k3s-sugar-dev._tcp;local;' \
+              'sugar-control-0.local;192.168.50.10;6443;'\
+              'txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server' \
+              '=;eth0;IPv4;k3s-sugar-dev@sugar-control-1 (server);_k3s-sugar-dev._tcp;local;' \
+              'sugar-control-1.local;192.168.50.11;6443;'\
+              'txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server' \
+              '=;eth0;IPv4;broken;_k3s-sugar-dev._tcp;local;sugar-control-2.local'
+            """
+        ),
         encoding="utf-8",
     )
     browse.chmod(0o755)

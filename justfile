@@ -282,7 +282,7 @@ doctor:
 
 # Usage: just start-here START_HERE_ARGS="--path-only"
 start-here:
-    "{{ sugarkube_cli }}" docs start-here {{ start_here_args }}
+    "{{sugarkube_cli}}" docs start-here {{start_here_args}}
 
 # Revert cmdline.txt and fstab entries back to the SD card defaults
 # Usage: sudo just rollback-to-sd
@@ -313,7 +313,7 @@ eeprom-nvme-first:
 clone-ssd:
     if [ -z "{{ clone_target }}" ]; then echo "Set TARGET to the destination device (e.g. /dev/nvme0n1) before running clone-ssd." >&2; exit 1; fi
     sudo --preserve-env=TARGET,WIPE,ALLOW_NON_ROOT,ALLOW_FAKE_BLOCK \
-    "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
+        "{{ clone_cmd }}" --target "{{ clone_target }}" {{ clone_args }}
 
 show-disks:
     lsblk -e7 -o NAME,MAJ:MIN,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
@@ -387,7 +387,7 @@ monitor-ssd-health:
 
 # Usage: sudo NVME_HEALTH_ARGS="--device /dev/nvme1n1" just nvme-health
 nvme-health:
-    "{{ sugarkube_cli }}" nvme health {{ nvme_health_args }}
+    "{{sugarkube_cli}}" nvme health {{nvme_health_args}}
 
 # Run pi_node_verifier remotely over SSH
 
@@ -467,13 +467,13 @@ codespaces-bootstrap:
 
 # Usage: just docs-verify
 docs-verify:
-    "{{ sugarkube_cli }}" docs verify {{ docs_verify_args }}
+    "{{sugarkube_cli}}" docs verify {{docs_verify_args}}
 
 # Install documentation prerequisites and run spell/link checks without touching
 
 # code linters. Usage: just simplify-docs (forwards to sugarkube docs simplify)
 simplify-docs:
-    "{{ sugarkube_cli }}" docs simplify {{ simplify_docs_args }}
+    "{{sugarkube_cli}}" docs simplify {{simplify_docs_args}}
 
 # Generate printable QR codes that link to the quickstart and troubleshooting docs
 
@@ -485,7 +485,7 @@ qr-codes:
 
 # Usage: just token-place-samples TOKEN_PLACE_SAMPLE_ARGS="--dry-run"
 token-place-samples:
-    "{{ sugarkube_cli }}" token-place samples {{ token_place_sample_args }}
+    "{{sugarkube_cli}}" token-place samples {{token_place_sample_args}}
 
 # Run the macOS setup wizard to install brew formulas and scaffold directories
 
