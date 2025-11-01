@@ -643,6 +643,7 @@ def _run_build_script(tmp_path, env):
         ("scripts/clone_to_nvme.sh", 0o755),
         ("scripts/post_clone_verify.sh", 0o755),
         ("scripts/k3s_preflight.sh", 0o755),
+        ("scripts/k3s-install-iptables.sh", 0o755),
         ("systemd/first-boot-prepare.sh", 0o755),
         ("systemd/first-boot-prepare.service", 0o644),
     ]

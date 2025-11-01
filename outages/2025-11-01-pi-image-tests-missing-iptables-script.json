@@ -1,0 +1,11 @@
+{
+  "id": "pi-image-tests-missing-iptables-script",
+  "date": "2025-11-01",
+  "component": "pi-image",
+  "rootCause": "Fixture omitted scripts/k3s-install-iptables.sh, so the build script exited ENOENT",
+  "resolution": "Stage scripts/k3s-install-iptables.sh in the fixture with execute perms pre-run",
+  "references": [
+    "tests/build_pi_image_test.py",
+    "scripts/build_pi_image.sh"
+  ]
+}
