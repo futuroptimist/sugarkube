@@ -20,5 +20,8 @@ def test_tests_workflow_uses_oidc_for_codecov_upload():
     workflow = _load_workflow(".github/workflows/tests.yml")
     assert "codecov/codecov-action@v5" in workflow
     assert "use_oidc: true" in workflow
-    assert "id-token: write" in workflow
+    assert "upload-coverage:" in workflow
+    upload_job = workflow.split("upload-coverage:", maxsplit=1)[1]
+    assert "id-token: write" in upload_job
     assert "hashFiles('coverage.xml') != ''" in workflow
+    assert "actions/upload-artifact@v4" in workflow

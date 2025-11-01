@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -21,6 +20,8 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
+    outputs:
+      coverage_present: ${{ steps.coverage_check.outputs.present }}
     steps:
       - name: Checkout repository
         if: github.event_name != 'pull_request_target'
@@ -47,6 +48,40 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest --cov=. --cov-report=xml --cov-report=term --maxfail=1 --disable-warnings -q
+      - name: Check for coverage report
+        id: coverage_check
+        run: |
+          if [ -f coverage.xml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload coverage artifact
+        if: steps.coverage_check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  upload-coverage:
+    name: Upload coverage to Codecov
+    needs: test
+    if: >-
+      needs.test.outputs.coverage_present == 'true' && (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository)
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
+          path: .
       - name: Upload coverage
         if: hashFiles('coverage.xml') != ''
         uses: codecov/codecov-action@v5
