@@ -57,6 +57,7 @@ def render_tls_config(tmp_path, regaddr):
     env.update(
         {
             "LOG_DIR": str(tmp_path / "log"),
+            "SUGARKUBE_LOG_DIR": str(tmp_path / "log"),
             "TLS_SAN_TEMPLATE_PATH": str(TLS_TEMPLATE),
             "K3S_CONFIG_DIR": str(tmp_path / "etc" / "rancher" / "k3s"),
         }
