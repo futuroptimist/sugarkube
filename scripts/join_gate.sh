@@ -19,6 +19,7 @@ publisher_pid=""
 owner_id=""
 HOSTNAME=""
 AVAHI_LIVENESS_CONFIRMED=0
+MDNS_DBUS_ENABLED="${SUGARKUBE_MDNS_DBUS:-1}"
 
 log_join_gate() {
   log_info join_gate "$@"
@@ -51,6 +52,10 @@ ensure_runtime_dir() {
 }
 
 wait_for_avahi_bus() {
+  if [ "${MDNS_DBUS_ENABLED}" = "0" ]; then
+    log_join_gate action=dbus_wait outcome=skip reason=disabled
+    return 0
+  fi
   if ! command -v gdbus >/dev/null 2>&1; then
     return 0
   fi

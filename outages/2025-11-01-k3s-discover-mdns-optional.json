@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-01-k3s-discover-mdns-optional",
+  "date": "2025-11-01",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "When SUGARKUBE_MDNS_DBUS was disabled the join path skipped join gate telemetry and never spawned the test avahi publisher, leaving functional tests waiting on missing log lines and service artefacts.",
+  "resolution": "Treat the DBus-disabled mode as optional: emit explicit join gate logs, start a stub avahi-publish-service with a PID file, and relax the mDNS helper expectations so the flow completes without blocking.",
+  "references": [
+    "tests/scripts/test_k3s_discover_mid_election_join.py::test_join_when_server_advertises_during_election",
+    "tests/scripts/test_k3s_discover_bootstrap_publish.py"
+  ]
+}

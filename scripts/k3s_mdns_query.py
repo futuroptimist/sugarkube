@@ -153,6 +153,12 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
                 return [record.host]
         return []
 
+    if mode == "server-address":
+        for record in records:
+            if record.txt.get("role") == "server" and record.address:
+                return [record.address]
+        return []
+
     if mode == "server-count":
         count = sum(1 for record in records if record.txt.get("role") == "server")
         return [str(count)]

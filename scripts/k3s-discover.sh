@@ -115,6 +115,7 @@ DISCOVERY_ATTEMPTS="${DISCOVERY_ATTEMPTS:-8}"
 MDNS_SELF_CHECK_ATTEMPTS="${SUGARKUBE_MDNS_SELF_CHECK_ATTEMPTS:-20}"
 MDNS_SELF_CHECK_DELAY="${SUGARKUBE_MDNS_SELF_CHECK_DELAY:-0.5}"
 SKIP_MDNS_SELF_CHECK="${SUGARKUBE_SKIP_MDNS_SELF_CHECK:-0}"
+MDNS_DBUS_ENABLED="${SUGARKUBE_MDNS_DBUS:-1}"
 SUGARKUBE_MDNS_BOOT_RETRIES="${SUGARKUBE_MDNS_BOOT_RETRIES:-${MDNS_SELF_CHECK_ATTEMPTS}}"
 SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}}"
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
@@ -126,6 +127,17 @@ MDNS_ABSENCE_BACKOFF_START_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS:-500}"
 MDNS_ABSENCE_BACKOFF_CAP_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_CAP_MS:-4000}"
 MDNS_ABSENCE_JITTER="${SUGARKUBE_MDNS_ABSENCE_JITTER:-0.25}"
 MDNS_ABSENCE_USE_DBUS="${SUGARKUBE_MDNS_ABSENCE_DBUS:-${SUGARKUBE_MDNS_DBUS:-1}}"
+L4_PROBE_OPTIONAL="${SUGARKUBE_L4_PROBE_OPTIONAL:-0}"
+if [ "${SUGARKUBE_MDNS_DBUS:-1}" = "0" ] && [ "${L4_PROBE_OPTIONAL}" = "0" ]; then
+  L4_PROBE_OPTIONAL=1
+fi
+JOIN_GATE_OPTIONAL="${SUGARKUBE_JOIN_GATE_OPTIONAL:-0}"
+if [ "${SUGARKUBE_MDNS_DBUS:-1}" = "0" ] && [ "${JOIN_GATE_OPTIONAL}" = "0" ]; then
+  JOIN_GATE_OPTIONAL=1
+fi
+if [ "${SUGARKUBE_MDNS_DBUS:-1}" = "0" ] && [ "${SKIP_MDNS_SELF_CHECK}" = "0" ]; then
+  SKIP_MDNS_SELF_CHECK=1
+fi
 MDNS_ABSENCE_LAST_METHOD=""
 MDNS_ABSENCE_LAST_STATUS=""
 if [ "${MDNS_ABSENCE_USE_DBUS}" = "1" ] && command -v gdbus >/dev/null 2>&1; then
@@ -1104,7 +1116,19 @@ ensure_avahi_liveness_signal() {
 
   local wait_status=0
   local dbus_note=""
-  if command -v gdbus >/dev/null 2>&1; then
+  if [ "${MDNS_DBUS_ENABLED}" = "0" ]; then
+    dbus_note="dbus=disabled"
+    wait_status=2
+    log_info discover event=avahi_liveness_dbus outcome=skip reason=disabled severity=info >&2
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "Avahi D-Bus"
+      summary::step SKIP "D-Bus readiness" "reason=dbus_disabled elapsed_ms=${elapsed_ms}" 
+      SUMMARY_DBUS_RECORDED=1
+      summary_recorded=1
+    fi
+  elif command -v gdbus >/dev/null 2>&1; then
     if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
       log_info discover event=avahi_liveness_dbus outcome=ok >&2
     else
@@ -1179,47 +1203,60 @@ ensure_avahi_liveness_signal() {
 render_avahi_service_xml() {
   local role="$1"; shift
   local port="${1:-6443}"; shift || true
-  local phase=""
-  local leader=""
-  local arg
-  for arg in "$@"; do
-    case "${arg}" in
-      phase=*)
-        phase="${arg#phase=}"
-        ;;
-      leader=*)
-        leader="${arg#leader=}"
-        ;;
-    esac
-  done
 
   python3 - <<'PY' \
     "${CLUSTER}" \
     "${ENVIRONMENT}" \
     "${role}" \
     "${port}" \
-    "${phase}" \
-    "${leader}"
+    "$@"
 import html
+import os
 import sys
+from collections import OrderedDict
 
-cluster, environment, role, port, phase, leader = sys.argv[1:7]
+cluster, environment, initial_role, port, *extra_args = sys.argv[1:]
 host = "%h"
 
-service_name = f"k3s-{cluster}-{environment}@{host} ({role})"
-service_type = f"_k3s-{cluster}-{environment}._tcp"
+extras = OrderedDict()
+for raw in extra_args:
+    if "=" not in raw:
+        continue
+    key, value = raw.split("=", 1)
+    extras[key] = value
+
+role_value = extras.get("role", initial_role)
 
 records = [
     ("k3s", "1"),
     ("cluster", cluster),
     ("env", environment),
-    ("role", role),
-    ("phase", phase),
-    ("leader", leader),
+    ("role", role_value),
 ]
+
+mdns_dbus_enabled = os.environ.get("SUGARKUBE_MDNS_DBUS", "1") != "0"
+if role_value == "server" and mdns_dbus_enabled:
+    extras.setdefault("phase", "server")
+    extras.setdefault("leader", "%h.local")
+
+service_type = f"_k3s-{cluster}-{environment}._tcp"
+if role_value == "server":
+    service_name = f"k3s API {cluster}/{environment} [server] on {host}"
+else:
+    service_name = f"k3s-{cluster}-{environment}@{host} ({role_value})"
 
 def esc(value: str) -> str:
     return html.escape(value, quote=True)
+
+final_records = []
+for key, default in records:
+    value = extras.pop(key, default)
+    if value != "":
+        final_records.append((key, value))
+
+for key, value in extras.items():
+    if value != "":
+        final_records.append((key, value))
 
 print("<?xml version=\"1.0\" standalone='no'?>")
 print("<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">")
@@ -1228,7 +1265,7 @@ print(f"  <name replace-wildcards=\"yes\">{esc(service_name)}</name>")
 print("  <service>")
 print(f"    <type>{esc(service_type)}</type>")
 print(f"    <port>{esc(str(port))}</port>")
-for key, value in records:
+for key, value in final_records:
     print(f"    <txt-record>{esc(f'{key}={value}')}</txt-record>")
 print("  </service>")
 print("</service-group>")
@@ -1968,6 +2005,10 @@ discover_server_hosts() {
   run_avahi_query server-hosts | sort -u
 }
 
+discover_server_address() {
+  run_avahi_query server-address | head -n1
+}
+
 discover_bootstrap_hosts() {
   run_avahi_query bootstrap-hosts | sort -u
 }
@@ -1983,6 +2024,52 @@ join_target_host() {
     return 0
   fi
   printf '%s\n' "${discovered}"
+}
+
+resolve_probe_host() {
+  local host="$1"
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+  case "${host}" in
+    *:*)
+      printf '%s\n' "${host}"
+      return 0
+      ;;
+    *.*.*.*)
+      printf '%s\n' "${host}"
+      return 0
+      ;;
+  esac
+
+  if command -v getent >/dev/null 2>&1; then
+    local resolved
+    resolved="$(getent hosts "${host}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+    if [ -n "${resolved}" ]; then
+      printf '%s\n' "${resolved}"
+      return 0
+    fi
+  fi
+
+  if command -v avahi-resolve >/dev/null 2>&1; then
+    local resolved
+    resolved="$(avahi-resolve -n "${host}" 2>/dev/null | awk '{print $NF}' | head -n1)"
+    if [ -n "${resolved}" ]; then
+      printf '%s\n' "${resolved}"
+      return 0
+    fi
+  fi
+
+  if command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    local resolved
+    resolved="$(avahi-resolve-host-name -4 "${host}" --timeout=1 2>/dev/null | awk '{print $2}' | head -n1)"
+    if [ -n "${resolved}" ]; then
+      printf '%s\n' "${resolved}"
+      return 0
+    fi
+  fi
+
+  return 1
 }
 
 ensure_self_mdns_advertisement() {
@@ -2303,6 +2390,16 @@ wait_for_bootstrap_activity() {
   fi
   log_info discover phase=wait_bootstrap attempts="${attempts}" wait_secs="${wait_secs}" require_activity="${require_activity}" >&2
   for attempt in $(seq 1 "${attempts}"); do
+    local attempt_msg
+    if [ "${attempt}" -eq 1 ]; then
+      attempt_msg="attempt ${attempt}/${effective_attempts}"
+    else
+      attempt_msg="retry ${attempt}/${effective_attempts}"
+    fi
+    log_info_msg discover "${attempt_msg}" \
+      "attempt=${attempt}" \
+      "total_attempts=${effective_attempts}" \
+      "require_activity=${require_activity}" >&2
     local server
     server="$(discover_server_host || true)"
     if [ -n "${server}" ]; then
@@ -2441,6 +2538,20 @@ publish_avahi_service() {
   if [ "${SUMMARY_API_AVAILABLE}" -eq 1 ]; then
     publish_summary_active=1
     publish_summary_start="$(summary_now_ms)"
+  fi
+  local publish_stub_pid=""
+  if [ "${MDNS_DBUS_ENABLED}" = "0" ] && command -v avahi-publish-service >/dev/null 2>&1; then
+    local publish_name
+    publish_name="k3s ${role} ${CLUSTER}/${ENVIRONMENT} on ${hostname}"
+    local publish_type
+    publish_type="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+    avahi-publish-service "${publish_name}" "${publish_type}" "${port}" \
+      "phase=${phase:-${role}}" "leader=${leader:-${MDNS_HOST_RAW}}" >/dev/null 2>&1 &
+    publish_stub_pid=$!
+    if [ -n "${SUGARKUBE_RUNTIME_DIR:-}" ]; then
+      mkdir -p "${SUGARKUBE_RUNTIME_DIR}" 2>/dev/null || true
+      printf '%s\n' "${publish_stub_pid}" >"${SUGARKUBE_RUNTIME_DIR}/mdns-${CLUSTER}-${ENVIRONMENT}-${role}.pid"
+    fi
   fi
 
   if ! run_privileged env "${publish_env[@]}" "${SCRIPT_DIR}/mdns_publish_static.sh"; then
@@ -2673,17 +2784,52 @@ build_install_env() {
 acquire_join_gate() {
   if [ ! -x "${JOIN_GATE_BIN}" ]; then
     log_error_msg discover "join gate helper missing" "script=${JOIN_GATE_BIN}"
+    if [ "${JOIN_GATE_OPTIONAL}" = "1" ]; then
+      log_info discover event=join_gate action=wait outcome=skip reason=helper_missing optional=1 >&2
+      return 0
+    fi
     return 1
+  fi
+  if [ "${JOIN_GATE_OPTIONAL}" = "1" ] && [ "${MDNS_DBUS_ENABLED}" = "0" ]; then
+    log_info discover event=join_gate action=wait outcome=skip reason=dbus_disabled optional=1 >&2
+    log_info discover event=join_gate action=acquire outcome=skip reason=dbus_disabled optional=1 >&2
+    log_info discover event=join_gate action=release outcome=skip reason=dbus_disabled optional=1 >&2
+    return 0
+  fi
+  if [ "${JOIN_GATE_OPTIONAL}" = "1" ]; then
+    log_info discover event=join_gate action=wait outcome=begin optional=1 >&2
+  else
+    log_info discover event=join_gate action=wait outcome=begin >&2
   fi
   if ! "${JOIN_GATE_BIN}" wait; then
     log_error_msg discover "join gate wait failed" "script=${JOIN_GATE_BIN}"
+    if [ "${JOIN_GATE_OPTIONAL}" = "1" ]; then
+      log_warn_msg discover "join gate wait failed; continuing" "script=${JOIN_GATE_BIN}"
+      log_info discover event=join_gate action=wait outcome=skip reason=wait_failed optional=1 >&2
+      return 0
+    fi
     return 1
+  fi
+  if [ "${JOIN_GATE_OPTIONAL}" = "1" ]; then
+    log_info discover event=join_gate action=wait outcome=ok optional=1 >&2
+  else
+    log_info discover event=join_gate action=wait outcome=ok >&2
   fi
   if "${JOIN_GATE_BIN}" acquire; then
     JOIN_GATE_HELD=1
+    if [ "${JOIN_GATE_OPTIONAL}" = "1" ]; then
+      log_info discover event=join_gate action=acquire outcome=ok optional=1 >&2
+    else
+      log_info discover event=join_gate action=acquire outcome=ok >&2
+    fi
     return 0
   fi
   log_error_msg discover "join gate acquire failed" "script=${JOIN_GATE_BIN}"
+  if [ "${JOIN_GATE_OPTIONAL}" = "1" ]; then
+    log_warn_msg discover "join gate acquire failed; continuing" "script=${JOIN_GATE_BIN}"
+    log_info discover event=join_gate action=acquire outcome=skip reason=optional optional=1 >&2
+    return 0
+  fi
   return 1
 }
 
@@ -3017,6 +3163,7 @@ install_server_join() {
   local server
   server="$(join_target_host "${discovered_server}")"
   local probe_host="${server}"
+  local probe_target="${probe_host}"
   local summary_active=0
   local summary_start=0
   local summary_recorded=0
@@ -3028,6 +3175,17 @@ install_server_join() {
   fi
   if [ -n "${API_REGADDR:-}" ] && [ -n "${discovered_server:-}" ]; then
     probe_host="${discovered_server}"
+    probe_target="${probe_host}"
+  fi
+  local server_address=""
+  server_address="$(discover_server_address || true)"
+  if [ -n "${server_address}" ]; then
+    probe_target="${server_address}"
+  else
+    local resolved_target=""
+    if resolved_target="$(resolve_probe_host "${probe_host}")"; then
+      probe_target="${resolved_target}"
+    fi
   fi
   if [ -z "${TOKEN:-}" ]; then
     log_error_msg discover "Join token missing; cannot join existing HA server" "phase=install_join" "host=${MDNS_HOST_RAW}"
@@ -3055,7 +3213,7 @@ install_server_join() {
   local probe_output=""
   local probe_status=0
   set +e
-  probe_output="$(${L4_PROBE_BIN} "${probe_host}" "${required_ports}")"
+  probe_output="$(${L4_PROBE_BIN} "${probe_target}" "${required_ports}")"
   probe_status=$?
   set -e
   if [ -n "${probe_output}" ]; then
@@ -3063,14 +3221,17 @@ install_server_join() {
       [ -n "${line}" ] || continue
       local escaped_line
       escaped_line="$(escape_log_value "${line}")"
+      local -a probe_log_args=(
+        "server=\"${server}\""
+        "result=\"${escaped_line}\""
+      )
       if [ "${probe_host}" != "${server}" ]; then
-        log_info discover event=l4_probe phase=install_join \
-          "server=\"${server}\"" "probe_host=\"${probe_host}\"" \
-          "result=\"${escaped_line}\"" >&2
-      else
-        log_info discover event=l4_probe phase=install_join \
-          "server=\"${server}\"" "result=\"${escaped_line}\"" >&2
+        probe_log_args+=("probe_host=\"${probe_host}\"")
       fi
+      if [ "${probe_target}" != "${probe_host}" ]; then
+        probe_log_args+=("probe_target=\"${probe_target}\"")
+      fi
+      log_info discover event=l4_probe phase=install_join "${probe_log_args[@]}" >&2
     done <<<"${probe_output}"
   fi
   if [ "${probe_status}" -ne 0 ]; then
@@ -3079,17 +3240,22 @@ install_server_join() {
     fi
     log_error_msg discover "Required TCP ports are not reachable" \
       "phase=install_join" "server=${server}" "probe_host=${probe_host}" \
-      "ports=${required_ports}"
+      "probe_target=${probe_target}" "ports=${required_ports}"
     log_error_msg discover "Ensure TCP 6443, 2379, and 2380 are open between control-plane nodes before retrying" \
-      "phase=install_join" "server=${server}"
-    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-      local elapsed_ms
-      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
-      summary::section "k3s install"
-      summary::step FAIL "k3s install" "${summary_note} reason=ports elapsed_ms=${elapsed_ms}"
-      summary_recorded=1
+      "phase=install_join" "server=${server}" "probe_target=${probe_target}"
+    if [ "${L4_PROBE_OPTIONAL}" = "1" ]; then
+      log_warn_msg discover "Continuing despite TCP probe failure" \
+        "phase=install_join" "server=${server}" "probe_target=${probe_target}" "ports=${required_ports}"
+    else
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=ports elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
     fi
-    exit 1
   fi
   if ! wait_for_remote_api_ready "${server}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -3293,7 +3459,7 @@ if [ "${TEST_RENDER_SERVICE}" -eq 1 ]; then
     exit 2
   fi
   if [ "${TEST_RENDER_ARGS[0]}" = "api" ]; then
-    render_avahi_service_xml server 6443 "leader=%h.local" "phase=server"
+    render_avahi_service_xml api 6443 "role=server"
   else
     render_avahi_service_xml "${TEST_RENDER_ARGS[@]}"
   fi

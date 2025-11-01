@@ -48,6 +48,8 @@ fi
 service_dir="$(dirname "${service_file}")"
 SERVICE_TYPE="_k3s-${cluster}-${environment}._tcp"
 
+MDNS_DBUS_ENABLED="${SUGARKUBE_MDNS_DBUS:-1}"
+
 install -d -m 755 "${service_dir}"
 
 service_tmp_file=""
@@ -570,6 +572,10 @@ reload_avahi_daemon() {
       echo "Failed to reload or restart avahi-daemon" >&2
       return 1
     fi
+  fi
+
+  if [ "${MDNS_DBUS_ENABLED}" = "0" ]; then
+    return 0
   fi
 
   wait_for_avahi_publication "${service_display}" "${timeout_seconds}" "${start_epoch}"
