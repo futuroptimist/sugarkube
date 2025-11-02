@@ -1,0 +1,12 @@
+{
+  "id": "ci-workflow-node24-incompatibility-20251101",
+  "date": "2025-11-01",
+  "component": "GitHub Actions CI workflow",
+  "rootCause": "ci.yml workflow used actions/checkout@v4 and actions/setup-python@v5 which are incompatible with Node24 environment forced by FORCE_JAVASCRIPT_ACTIONS_TO_NODE24.",
+  "resolution": "Upgraded actions/checkout@v4 to v5 and actions/setup-python@v5 to v6 in ci.yml to match other workflows and ensure Node24 compatibility.",
+  "references": [
+    ".github/workflows/ci.yml",
+    "outages/2025-10-13-pi-image-checkout-node24.json"
+  ]
+}
+

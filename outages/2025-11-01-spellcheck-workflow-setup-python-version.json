@@ -1,0 +1,13 @@
+{
+  "id": "spellcheck-setup-python-version-20251101",
+  "date": "2025-11-01",
+  "component": "GitHub Actions spellcheck workflow",
+  "rootCause": "spellcheck.yml workflow used actions/setup-python@v5 while other workflows (tests.yml, docs.yml) were upgraded to v6, creating version inconsistency.",
+  "resolution": "Upgraded actions/setup-python@v5 to v6 in spellcheck.yml to match other workflows and maintain consistency.",
+  "references": [
+    ".github/workflows/spellcheck.yml",
+    ".github/workflows/tests.yml",
+    ".github/workflows/docs.yml"
+  ]
+}
+
