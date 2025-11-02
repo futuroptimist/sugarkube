@@ -11,6 +11,22 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh"
 
 
 def _write_stub(path: Path, content: str) -> None:
+    content = content.lstrip("\n")
+    if content.startswith("\\\n"):
+        content = content[2:]
+    lines = content.splitlines()
+    indents = [
+        len(line) - len(line.lstrip(" \t"))
+        for line in lines
+        if line.strip() and line[0] in (" ", "\t")
+    ]
+    if indents:
+        trim = min(indents)
+        prefix = " " * trim
+        lines = [line[len(prefix) :] if line.startswith(prefix) else line for line in lines]
+    content = "\n".join(lines)
+    if content and content[-1] != "\n":
+        content += "\n"
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
 
