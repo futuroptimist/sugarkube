@@ -1,0 +1,12 @@
+{
+  "id": "justfile-cli-whitespace-regression",
+  "date": "2025-11-02",
+  "component": "justfile docs automation",
+  "rootCause": "Whitespace-inside moustache placeholders in the docs and CLI recipes hid the sugarkube_cli helper and argument forwards, so the enforcement tests for docs-verify and start-here failed to detect the unified CLI wrappers.",
+  "resolution": "Normalized the docs and workflow recipes to invoke the CLI as \"{{sugarkube_cli}}\" and tightened argument placeholders (e.g. {{start_here_args}}) so the guard tests recognize the wrappers again.",
+  "references": [
+    "justfile",
+    "tests/test_docs_verify_wrapper.py",
+    "tests/test_start_here_command.py"
+  ]
+}
