@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+json_warnings=()
+
+json_escape() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//"/\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
 warn() {
-  printf 'warning: %s\n' "$1" >&2
+  if $JSON && ! $FULL; then
+    json_warnings+=("\"$(json_escape "$1")\"")
+  else
+    printf 'warning: %s\n' "$1" >&2
+  fi
 }
 
 JSON=false
@@ -437,5 +453,11 @@ if $ENABLE_LOG && [[ -n "$REPORT_PATH" ]]; then
 fi
 
 if $JSON; then
-  printf '{"checks":[%s]}\n' "$(IFS=,; echo "${json_parts[*]}")"
+  checks_payload=$(IFS=,; printf '%s' "${json_parts[*]}")
+  if [[ ${#json_warnings[@]} -gt 0 ]]; then
+    warnings_payload=$(IFS=,; printf '%s' "${json_warnings[*]}")
+    printf '{"warnings":[%s], "checks":[%s]}\n' "$warnings_payload" "$checks_payload"
+  else
+    printf '{"checks":[%s]}\n' "$checks_payload"
+  fi
 fi

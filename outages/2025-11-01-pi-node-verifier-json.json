@@ -1,0 +1,11 @@
+{
+  "id": "pi-node-verifier-json",
+  "date": "2025-11-01",
+  "component": "scripts/pi_node_verifier.sh",
+  "rootCause": "The pi_node_verifier --json mode interleaved human-readable warnings on stderr, which Bats captures, causing invalid JSON output and failing jq assertions.",
+  "resolution": "When JSON output is requested, accumulate warnings in-memory and emit them inside a warnings array alongside the checks payload, keeping stdout valid JSON while preserving diagnostics.",
+  "references": [
+    "scripts/pi_node_verifier.sh",
+    "tests/pi_node_verifier_json_test.bats"
+  ]
+}
