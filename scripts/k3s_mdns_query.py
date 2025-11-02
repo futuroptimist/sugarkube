@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import errno
 import subprocess
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
@@ -98,6 +99,16 @@ def _invoke_avahi(
             stdout="",
             stderr="",
         )
+    except OSError as exc:
+        if exc.errno == errno.ENOEXEC:
+            fallback = ["bash", *command]
+            if debug is not None:
+                debug(
+                    "avahi-browse returned ENOEXEC; retrying with Bash fallback"
+                )
+            result = runner(fallback, **run_kwargs)
+        else:
+            raise
     if result.returncode != 0 and debug is not None:
         debug(
             f"avahi-browse exited with {result.returncode}; continuing with available data"
