@@ -1,0 +1,14 @@
+{
+  "id": "justfile-cli-whitespace-revival",
+  "date": "2025-11-02",
+  "component": "automation.justfile",
+  "rootCause": "Whitespace inside moustache expressions for the sugarkube_cli helper and START_HERE_ARGS was reintroduced, so the justfile no longer matched the exact strings asserted by the CLI alignment tests and the wrappers stopped routing through the unified CLI.",
+  "resolution": "Removed the padding inside the moustache expressions so the docs, nvme-health, token-place, pi cluster, and start-here recipes once again shell through \"{{sugarkube_cli}}\" and forward {{start_here_args}} without extra spaces.",
+  "references": [
+    "tests/test_docs_verify_wrapper.py",
+    "tests/test_nvme_health_workflow.py",
+    "tests/test_start_here_command.py",
+    "tests/test_token_place_wrappers.py",
+    "justfile"
+  ]
+}
