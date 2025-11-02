@@ -1,0 +1,13 @@
+{
+  "id": "ci-setup-python-version-inconsistency",
+  "date": "2025-11-01",
+  "component": "ci and spellcheck GitHub workflows",
+  "rootCause": "ci.yml and spellcheck.yml workflows use actions/setup-python@v5 while other workflows (tests.yml, docs.yml) use v6, creating inconsistency and potential compatibility issues.",
+  "resolution": "Updated ci.yml and spellcheck.yml to use actions/setup-python@v6 for consistency with other workflows.",
+  "references": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/spellcheck.yml",
+    ".github/workflows/tests.yml",
+    ".github/workflows/docs.yml"
+  ]
+}
