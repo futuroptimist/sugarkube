@@ -123,7 +123,7 @@ summary__setup_colors_impl() {
 }
 
 summary__setup_colors() {
-  summary__with_strict summary__setup_colors_impl
+  summary__setup_colors_impl
 }
 
 summary__register_exit_trap_impl() {
