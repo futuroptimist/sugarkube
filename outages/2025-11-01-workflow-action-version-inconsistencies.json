@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-01-workflow-action-version-inconsistencies",
+  "date": "2025-11-01",
+  "component": "GitHub Actions workflows",
+  "rootCause": "Inconsistent action versions across workflows: actions/cache@v4 vs @v4.3.0, and actions/upload-artifact@v4 vs @v4.6.2. This inconsistency makes maintenance harder and could lead to subtle compatibility issues.",
+  "resolution": "Standardized action versions across all workflows: actions/cache@v4.3.0 (matching pi-image.yml) and actions/upload-artifact@v4.6.2 (using the more specific pinned version).",
+  "references": [
+    ".github/workflows/pi-image-release.yml",
+    ".github/workflows/scad-to-stl.yml",
+    ".github/workflows/kicad-export.yml"
+  ]
+}

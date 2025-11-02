@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-01-ci-workflow-checkout-v4-node24",
+  "date": "2025-11-01",
+  "component": "ci workflow",
+  "rootCause": "The ci.yml workflow was using actions/checkout@v4, which bundles a Node 20 runtime. With FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true set across workflows, this could cause failures when GitHub runners execute JavaScript actions on Node 24.",
+  "resolution": "Upgraded ci.yml to use actions/checkout@v5, which bundles a Node 24-compatible runtime, matching the pattern used in other workflows.",
+  "references": [
+    ".github/workflows/ci.yml"
+  ]
+}
