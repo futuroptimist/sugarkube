@@ -15,6 +15,9 @@ default: up
     @true
 
 up env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
     # Select per-environment token if available
     if [ "{{ env }}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
     if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
@@ -24,72 +27,76 @@ up env='dev':
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
-    export SUGARKUBE_SUMMARY_LIB="{{ invocation_directory() }}/scripts/lib/summary.sh"
-    if [ ! -f "${SUGARKUBE_SUMMARY_LIB}" ] && [ -f "{{ scripts_dir }}/lib/summary.sh" ]; then
-    export SUGARKUBE_SUMMARY_LIB="{{ scripts_dir }}/lib/summary.sh"
-    fi
 
-    # Load summary lib if present; otherwise define no-ops.
+    if [ -z "${SUGARKUBE_SUMMARY_LIB:-}" ] && [ -f "{{ invocation_directory() }}/scripts/lib/summary.sh" ]; then
+        SUGARKUBE_SUMMARY_LIB="{{ invocation_directory() }}/scripts/lib/summary.sh"
+    fi
+    : "${SUGARKUBE_SUMMARY_LIB:=/home/pi/sugarkube/scripts/lib/summary.sh}"
+    if [ ! -f "${SUGARKUBE_SUMMARY_LIB}" ] && [ -f "/home/pi/sugarkube/scripts/lib/summary.sh" ]; then
+        SUGARKUBE_SUMMARY_LIB="/home/pi/sugarkube/scripts/lib/summary.sh"
+    fi
+    export SUGARKUBE_SUMMARY_LIB
+
     if [ -f "${SUGARKUBE_SUMMARY_LIB}" ]; then
-    # shellcheck disable=SC1090
-    . "${SUGARKUBE_SUMMARY_LIB}"
+        # shellcheck disable=SC1090
+        source "${SUGARKUBE_SUMMARY_LIB}"
     else
-    summary::init() { :; }
-    summary::section() { :; }
-    summary::step() { :; }
-    summary::kv() { :; }
-    summary::emit() { :; }
+        summary::init() { :; }
+        summary::section() { :; }
+        summary::step() { :; }
+        summary::kv() { :; }
+        summary::emit() { :; }
     fi
 
     # Always emit summary on exit (best-effort)
     trap 'summary::emit || true' EXIT
 
     if ! command -v summary_run >/dev/null 2>&1; then
-    summary_run() {
-    local _label="$1"
-    shift || true
-    "$@"
-    return "$?"
-    }
+        summary_run() {
+            local _label="$1"
+            shift || true
+            "$@"
+            return "$?"
+        }
     fi
     if ! command -v summary_skip >/dev/null 2>&1; then
-    summary_skip() { :; }
+        summary_skip() { :; }
     fi
     if ! command -v summary_finalize >/dev/null 2>&1; then
-    summary_finalize() { :; }
+        summary_finalize() { :; }
     fi
 
     __sugarkube_up_cleanup_common() {
-    local status="$1"
-    if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
-    [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
-    sudo -E bash scripts/toggle_wlan.sh --restore || true
-    fi
-    if command -v summary::emit >/dev/null 2>&1; then
-    summary::emit || true
-    elif command -v summary_finalize >/dev/null 2>&1; then
-    summary_finalize
-    fi
-    if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
-    rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
-    fi
-    return "${status}"
+        local status="$1"
+        if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
+            [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
+            sudo -E bash scripts/toggle_wlan.sh --restore || true
+        fi
+        if command -v summary::emit >/dev/null 2>&1; then
+            summary::emit || true
+        elif command -v summary_finalize >/dev/null 2>&1; then
+            summary_finalize
+        fi
+        if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
+            rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
+        fi
+        return "${status}"
     }
 
     __sugarkube_up_exit_trap() {
-    local status="$?"
-    __sugarkube_up_cleanup_common "${status}"
+        local status="$?"
+        __sugarkube_up_cleanup_common "${status}"
     }
 
     __sugarkube_up_signal_trap() {
-    local signal="$1"
-    local status="$?"
-    trap - EXIT INT TERM
-    __sugarkube_up_cleanup_common "${status}"
-    case "${signal}" in
-    INT) exit 130 ;;
-    TERM) exit 143 ;;
-    esac
+        local signal="$1"
+        local status="$?"
+        trap - EXIT INT TERM
+        __sugarkube_up_cleanup_common "${status}"
+        case "${signal}" in
+            INT) exit 130 ;;
+            TERM) exit 143 ;;
+        esac
     }
 
     trap '__sugarkube_up_exit_trap' EXIT
@@ -104,22 +111,22 @@ up env='dev':
 
     # Preflight network/mDNS configuration
     if [ "${SUGARKUBE_CONFIGURE_AVAHI:-1}" = "1" ]; then
-    summary_run "Avahi configure" sudo -E bash scripts/configure_avahi.sh
+        summary_run "Avahi configure" sudo -E bash scripts/configure_avahi.sh
     else
-    summary_skip "Avahi configure" "disabled"
+        summary_skip "Avahi configure" "disabled"
     fi
 
     # Optionally bring WLAN down for deterministic bootstrap
     if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ]; then
-    summary_run "WLAN disable" sudo -E bash scripts/toggle_wlan.sh --down
+        summary_run "WLAN disable" sudo -E bash scripts/toggle_wlan.sh --down
     else
-    summary_skip "WLAN disable" "disabled"
+        summary_skip "WLAN disable" "disabled"
     fi
 
     if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then
-    summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh
+        summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh
     else
-    summary_skip "Node IP configure" "disabled"
+        summary_skip "Node IP configure" "disabled"
     fi
 
     # Proceed with discovery/join for subsequent nodes
