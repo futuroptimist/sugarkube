@@ -1,0 +1,12 @@
+{
+  "id": "justfile-cli-brace-spacing",
+  "date": "2025-11-02",
+  "component": "justfile",
+  "rootCause": "Docs automation expected the justfile to call the sugarkube CLI without whitespace inside moustache placeholders, but the start-here and docs verify recipes still used the older spaced form, so the detection guard in tests/test_docs_verify_wrapper.py and tests/test_start_here_command.py failed.",
+  "resolution": "Normalized the CLI recipes to use \"{{sugarkube_cli}}\" and tightened argument placeholders so START_HERE_ARGS and other forwards stay visible to the guard tests.",
+  "references": [
+    "justfile",
+    "tests/test_docs_verify_wrapper.py",
+    "tests/test_start_here_command.py"
+  ]
+}
