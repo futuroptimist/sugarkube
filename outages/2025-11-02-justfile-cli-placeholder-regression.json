@@ -1,0 +1,14 @@
+{
+  "id": "justfile-cli-placeholder-regression",
+  "date": "2025-11-02",
+  "component": "automation.justfile",
+  "rootCause": "Whitespace crept back into the moustache placeholders for the sugarkube CLI recipes, so the docs, nvme-health, start-here, and token-place just commands no longer matched the guard rails in their tests and caused pytest failures.",
+  "resolution": "Normalized the justfile recipes to call \"{{sugarkube_cli}}\" and forward START_HERE_ARGS without surrounding spaces so the CLI helper is detected and argument passthrough stays intact.",
+  "references": [
+    "justfile",
+    "tests/test_docs_verify_wrapper.py",
+    "tests/test_nvme_health_workflow.py",
+    "tests/test_start_here_command.py",
+    "tests/test_token_place_wrappers.py"
+  ]
+}
