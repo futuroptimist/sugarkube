@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-02-justfile-cli-wrapper-spacing-again",
+  "date": "2025-11-02",
+  "component": "justfile CLI wrappers",
+  "rootCause": "Recent edits reintroduced spaces inside the {{sugarkube_cli}} placeholders for docs, nvme-health, start-here, and token-place recipes. The spacing meant the regression guards could not find the CLI invocation, so pytest flagged the recipes as missing the unified wrapper.",
+  "resolution": "Normalized every recipe that shells out to the sugarkube CLI to use the \"{{sugarkube_cli}}\" pattern again so the guards recognise the delegated commands.",
+  "references": [
+    "justfile",
+    "tests/test_docs_verify_wrapper.py",
+    "tests/test_nvme_health_workflow.py",
+    "tests/test_start_here_command.py",
+    "tests/test_token_place_wrappers.py"
+  ]
+}
