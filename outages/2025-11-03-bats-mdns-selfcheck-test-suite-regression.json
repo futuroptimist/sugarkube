@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-bats-mdns-selfcheck-test-suite-regression",
+  "date": "2025-11-03",
+  "component": "k3s-mdns-self-check-tests",
+  "rootCause": "The mdns_selfcheck.bats test suite experienced wholesale failures across 18 test cases after changes to hostname alias iteration and service type discovery. Tests expecting status code 0 received non-zero exits, and tests checking for specific log output patterns failed to match, indicating the script is encountering runtime errors or producing different output than expected.",
+  "resolution": "Investigate mdns_selfcheck.sh runtime errors by running individual failing tests with debug logging enabled. Verify that the hostname alias iteration fix using 'while IFS= read -r' is compatible with the test fixtures, and confirm that the service type discovery logic correctly populates available_types for all discovered service types including the requested SERVICE_TYPE.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}

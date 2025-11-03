@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-bats-join-gate-test-failures",
+  "date": "2025-11-03",
+  "component": "k3s-join-gate-tests",
+  "rootCause": "The join_gate.bats tests 14 and 15 (acquire/release state management and wait retries) failed with exit code 0 expected but received non-zero. These tests manage the publisher state during cluster join operations and may be affected by upstream mdns_selfcheck or test stub configuration issues.",
+  "resolution": "Verify that join gate lock file management and retry logic are working correctly. Check if mdns_selfcheck or test fixture issues are causing cascade failures. Debug the specific exit codes and error messages from the failing tests.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}

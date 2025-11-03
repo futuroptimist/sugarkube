@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-summary-non-tty-color-detection",
+  "date": "2025-11-03",
+  "component": "summary-script",
+  "rootCause": "Tests 40 and 41 in summary.bats failed with exit code 0 expected but received non-zero. These tests verify that the summary script correctly detects non-tty environments and dumb terminals to avoid emitting ANSI escape codes, but the script is exiting with errors instead of producing the expected output.",
+  "resolution": "Investigate the summary script's tty detection logic and TERM environment variable handling. Verify that the script can run successfully in non-interactive environments and properly suppresses color codes when appropriate. Check for syntax errors or missing dependencies that might cause the script to fail.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}
