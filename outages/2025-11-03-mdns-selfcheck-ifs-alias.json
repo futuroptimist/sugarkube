@@ -1,0 +1,13 @@
+{
+  "id": "mdns-selfcheck-ifs-alias",
+  "date": "2025-11-03",
+  "component": "scripts/mdns_selfcheck.sh",
+  "rootCause": "mdns_selfcheck.sh populated SELF_HOSTNAME_ALIASES by splitting on newlines with IFS=\"$(printf '\\n')\", but command substitution stripped the newline, leaving an empty field separator. The alias loop therefore saw the entire list as a single token and never matched the expected hostname, so every browse attempt reported srv_target_mismatch and the discover/join gates bailed out immediately.",
+  "resolution": "Assign the newline separator with Bash's $'\\n' syntax so host alias iteration works again and the expected advertisement is accepted.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ],
+  "tests": [
+    "AVAHI_BROWSE_MAIN_FIXTURE=$(pwd)/tests/fixtures/avahi_browse_ok.txt AVAHI_BROWSE_SERVICES_FIXTURE=$(pwd)/tests/fixtures/avahi_browse_services_with_k3s.txt SUGARKUBE_CLUSTER=sugar SUGARKUBE_ENV=dev SUGARKUBE_EXPECTED_HOST=sugarkube0.local SUGARKUBE_EXPECTED_IPV4=192.168.3.10 SUGARKUBE_EXPECTED_ROLE=server SUGARKUBE_EXPECTED_PHASE=server SUGARKUBE_SELFCHK_ATTEMPTS=2 SUGARKUBE_SELFCHK_BACKOFF_START_MS=100 SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=100 LOG_LEVEL=debug SUGARKUBE_MDNS_DBUS=0 scripts/mdns_selfcheck.sh"
+  ]
+}
