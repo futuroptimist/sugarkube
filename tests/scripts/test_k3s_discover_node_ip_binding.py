@@ -90,7 +90,7 @@ exit 0
             "SYSTEMCTL_BIN": str(systemctl_stub),
             "SYSTEMD_SYSTEM_DIR": str(systemd_dir),
             "UNIT_SEARCH_PATHS": str(systemd_dir),
-            "LOG_DIR": str(tmp_path / "log"),
+            "SUGARKUBE_LOG_DIR": str(tmp_path / "log"),
             "K3S_CONFIG_DIR": str(tmp_path / "etc" / "rancher" / "k3s"),
             "TLS_SAN_TEMPLATE_PATH": str(TLS_TEMPLATE),
             "SUGARKUBE_FLANNEL_IFACE": "eth0",

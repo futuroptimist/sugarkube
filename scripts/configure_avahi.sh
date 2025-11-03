@@ -43,8 +43,12 @@ TMP_AVAHI_TMPFILE=""
 log() {
   local ts
   ts="$(date --iso-8601=seconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
-  mkdir -p "${LOG_DIR}"
-  printf '%s %s\n' "${ts}" "$*" | tee -a "${LOG_FILE}" >/dev/null
+  if mkdir -p "${LOG_DIR}" 2>/dev/null; then
+    printf '%s %s\n' "${ts}" "$*" | tee -a "${LOG_FILE}" >/dev/null
+  else
+    # Log directory not writable; log to stderr only
+    printf '%s %s\n' "${ts}" "$*" >&2
+  fi
 }
 
 log_kv() {
