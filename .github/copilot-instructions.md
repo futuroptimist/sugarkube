@@ -113,8 +113,9 @@ See `AGENTS.md` for automated agent workflows:
 When documenting failures:
 1. Create JSON file in `outages/` following `outages/schema.json`
 2. Use reliable timestamp source (worldtimeapi.org or `date -u +%F`)
-3. Filename format: `YYYY-MM-DD-description.md`
+3. Filename format: `YYYY-MM-DD-description.json`
 4. Include root cause and resolution
+5. Optional: Create companion `.md` file for detailed reports (referenced via `longForm` field)
 
 ## Dependencies
 
