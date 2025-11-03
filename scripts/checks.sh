@@ -195,9 +195,7 @@ detect_kicad_activity() {
       if is_kicad_path "$path"; then
         return 0
       fi
-    done <<EOF
-$status_output
-EOF
+    done <<<"$status_output"
   fi
 
   if [ -n "${CI:-}" ]; then

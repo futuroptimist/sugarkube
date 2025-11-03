@@ -227,12 +227,8 @@ wait_for_clear() {
 
 write_state() {
   umask 077
-  cat <<EOF >"${STATE_FILE}"
-pid=${publisher_pid}
-host=${HOSTNAME}
-owner=${owner_id}
-port=${publish_port}
-EOF
+  printf 'pid=%s\nhost=%s\nowner=%s\nport=%s\n' \
+    "${publisher_pid}" "${HOSTNAME}" "${owner_id}" "${publish_port}" >"${STATE_FILE}"
 }
 
 start_publisher() {
