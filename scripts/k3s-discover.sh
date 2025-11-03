@@ -103,6 +103,10 @@ ensure_systemd_unit_active() {
   if [ -z "${unit}" ]; then
     return 0
   fi
+  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    log_debug discover_systemd outcome=skip reason=skip_flag unit="${unit}" >&2
+    return 0
+  fi
   if ! command -v systemctl >/dev/null 2>&1; then
     log_debug discover_systemd outcome=skip reason=systemctl_missing unit="${unit}" >&2
     return 0
@@ -117,11 +121,9 @@ ensure_systemd_unit_active() {
     start_cmd=("${SUDO_CMD}" systemctl start "${unit}")
   elif [ "${EUID}" -eq 0 ]; then
     start_cmd=(systemctl start "${unit}")
-  elif command -v sudo >/dev/null 2>&1; then
-    start_cmd=(sudo systemctl start "${unit}")
   else
-    log_warn_msg discover "Unable to start ${unit} via systemctl" "unit=${unit}" "reason=sudo_missing"
-    return 1
+    log_debug discover_systemd outcome=skip reason=non_root_disabled unit="${unit}" >&2
+    return 0
   fi
 
   if "${start_cmd[@]}" >/dev/null 2>&1; then
