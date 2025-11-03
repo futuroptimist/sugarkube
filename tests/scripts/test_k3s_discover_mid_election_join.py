@@ -164,6 +164,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
     )
 
     _write_stub(bin_dir / "l4_probe.sh", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
 
     _write_stub(
         bin_dir / "join_gate_stub.sh",
@@ -272,6 +273,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "SUGARKUBE_API_READY_CHECK_BIN": str(bin_dir / "check_apiready.sh"),
             "SUGARKUBE_SERVER_FLAG_PARITY_BIN": str(bin_dir / "parity-check.sh"),
             "SUGARKUBE_L4_PROBE_BIN": str(bin_dir / "l4_probe.sh"),
+            "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
             "SUGARKUBE_JOIN_GATE_BIN": str(bin_dir / "join_gate_stub.sh"),
             "SUGARKUBE_DISABLE_JOIN_GATE": "1",
             "SUGARKUBE_MDNS_ABSENCE_GATE": "0",

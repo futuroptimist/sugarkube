@@ -1040,12 +1040,13 @@ run_configure_avahi() {
     command=("${SUDO_CMD}" "${configure_script}")
   fi
 
-  if "${command[@]}" >/dev/null 2>&1; then
+  local status=0
+  "${command[@]}" >/dev/null 2>&1 || status=$?
+  if [ "${status}" -eq 0 ]; then
     log_info discover event=configure_avahi outcome=ok script="${configure_script}" >&2
     return 0
   fi
 
-  local status=$?
   log_error_msg discover "configure_avahi.sh failed" "status=${status}" "script=${configure_script}"
   exit "${status}"
 }
@@ -2487,12 +2488,13 @@ wait_for_api() {
 
   local parse_output=""
   parse_output="$(
-    printf '%s\n' "${output}" \
-      | python3 - <<'PY'
+    API_READY_OUTPUT="${output}" python3 - <<'PY'
+import os
 import sys
 
+output = os.environ.get("API_READY_OUTPUT", "")
 selected = {}
-for raw in sys.stdin:
+for raw in output.splitlines():
     raw = raw.strip()
     if "event=apiready" not in raw:
         continue

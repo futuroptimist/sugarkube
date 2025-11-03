@@ -60,7 +60,12 @@ fs::apply_metadata() {
   fi
 
   if [ -n "${spec}" ]; then
-    chown "${spec}" "${path}"
+    if [ "${ALLOW_NON_ROOT:-0}" = "1" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+      # Skip chown in test mode when not running as root
+      :
+    else
+      chown "${spec}" "${path}"
+    fi
   fi
 }
 

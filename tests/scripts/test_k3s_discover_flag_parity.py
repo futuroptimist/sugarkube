@@ -72,6 +72,7 @@ def test_join_aborts_when_flag_parity_fails(tmp_path: Path) -> None:
     _write_stub(bin_dir / "avahi-browse", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ss", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "l4_probe.sh", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
 
     server_config = tmp_path / "server-config.yaml"
     server_config.write_text(
@@ -134,6 +135,7 @@ def test_join_aborts_when_flag_parity_fails(tmp_path: Path) -> None:
             "SUGARKUBE_MDNS_DBUS": "0",
             "SUGARKUBE_MDNS_WIRE_PROOF": "0",
             "SUGARKUBE_L4_PROBE_BIN": str(bin_dir / "l4_probe.sh"),
+            "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
             "SUGARKUBE_SERVER_CONFIG_PATH": str(server_config),
             "SUGARKUBE_SERVER_SERVICE_PATH": str(server_service),
             "SUGARKUBE_INTENDED_K3S_CONFIG_PATH": str(intended_config),
