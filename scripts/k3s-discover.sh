@@ -2488,12 +2488,13 @@ wait_for_api() {
 
   local parse_output=""
   parse_output="$(
-    printf '%s\n' "${output}" \
-      | python3 - <<'PY'
+    API_READY_OUTPUT="${output}" python3 - <<'PY'
+import os
 import sys
 
+output = os.environ.get("API_READY_OUTPUT", "")
 selected = {}
-for raw in sys.stdin:
+for raw in output.splitlines():
     raw = raw.strip()
     if "event=apiready" not in raw:
         continue
