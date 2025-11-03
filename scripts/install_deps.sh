@@ -22,9 +22,11 @@ apt_packages=(
   avahi-utils
   libnss-mdns
   dbus
+  libglib2.0-bin
   jq
   curl
   python3
+  tcpdump
 )
 
 check_apt_support() {
