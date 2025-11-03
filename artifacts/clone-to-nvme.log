@@ -1,7 +1,0 @@
-[warn] Target /dev/testdisk is not a block device, continuing due to ALLOW_FAKE_BLOCK=1
-Running rpi-clone -f -u /dev/testdisk
-[31mUnattended: -u option not allowed when initializing[0m
-rpi-clone reported unattended initialization restriction; retrying with -U
-Mounted /dev/testdiskp2 to /tmp/bats-run-lpat1p/test/5/clone
-Mounted /dev/testdiskp1 to /tmp/bats-run-lpat1p/test/5/clone/boot/firmware
-✅ Clone complete: target=/dev/testdisk, root=root-uuid,  boot=boot-uuid, bytes=55360397312
