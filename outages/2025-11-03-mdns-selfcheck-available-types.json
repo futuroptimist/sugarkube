@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-mdns-selfcheck-available-types",
+  "date": "2025-11-03",
+  "component": "k3s-mdns-self-check",
+  "rootCause": "The service type discovery step marked the requested mDNS type as present but failed to add it to the available_types list because the case statement exited before the wildcard branch ran, so downstream assertions never saw _k3s-sugar-dev._tcp in the catalog.",
+  "resolution": "Record service types separately from the presence flag so the catalog always includes the requested type alongside other advertised protocols.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}

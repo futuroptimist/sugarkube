@@ -475,18 +475,15 @@ fi
 
 SELF_LOCAL_HOST=""
 if [ -n "${SELF_HOSTNAME_ALIASES}" ]; then
-  local_self_aliases="${SELF_HOSTNAME_ALIASES}"
-  old_ifs="${IFS}"
-  IFS="$(printf '\n')"
-  for self_alias in ${local_self_aliases}; do
+  while IFS= read -r self_alias; do
+    [ -n "${self_alias}" ] || continue
     case "${self_alias}" in
       *.local)
         SELF_LOCAL_HOST="${self_alias}"
         break
         ;;
     esac
-  done
-  IFS="${old_ifs}"
+  done <<<"${SELF_HOSTNAME_ALIASES}"
 fi
 if [ -z "${SELF_LOCAL_HOST}" ]; then
   raw_self_host="$(hostname 2>/dev/null || true)"
@@ -519,15 +516,12 @@ host_matches_self() {
     return 1
   fi
   local alias
-  local old_ifs="${IFS}"
-  IFS="$(printf '\n')"
-  for alias in ${SELF_HOSTNAME_ALIASES}; do
+  while IFS= read -r alias; do
+    [ -n "${alias}" ] || continue
     if [ "${lowered}" = "${alias}" ]; then
-      IFS="${old_ifs}"
       return 0
     fi
-  done
-  IFS="${old_ifs}"
+  done <<<"${SELF_HOSTNAME_ALIASES}"
   return 1
 }
 
@@ -1237,10 +1231,11 @@ mdns_selfcheck__service_type_check() {
       set -- ${browse_line}
       IFS="${old_ifs}"
       for field in "$@"; do
+        [ -n "${field}" ] || continue
+        if [ "${field}" = "${SERVICE_TYPE}" ]; then
+          type_present=1
+        fi
         case "${field}" in
-          "${SERVICE_TYPE}")
-            type_present=1
-            ;;
           _*._tcp|_*._udp)
             case "${available_seen}" in
               *,"${field}",*)
