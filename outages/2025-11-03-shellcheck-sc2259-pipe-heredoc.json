@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-03-shellcheck-sc2259-pipe-heredoc",
+  "date": "2025-11-03",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "ShellCheck SC2259 error: piping to 'python3 - <<PY' appeared to override piped input, though the heredoc is the script itself and pipe provides data to script's stdin",
+  "resolution": "Refactored to pass data via API_READY_OUTPUT environment variable instead of pipe, eliminating false positive while maintaining functionality",
+  "references": [
+    "scripts/k3s-discover.sh",
+    ".github/workflows/pi-image.yml"
+  ]
+}
