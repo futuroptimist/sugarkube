@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-mdns-publish-static-atomic-write-test",
+  "date": "2025-11-03",
+  "component": "k3s-mdns-publish-static-tests",
+  "rootCause": "Test 39 'mdns_publish_static writes atomically without journal churn' expected script_status to equal 0 but received a non-zero exit code. This test verifies that service file writes are atomic and don't create unnecessary systemd journal entries, but the script is failing before completing successfully.",
+  "resolution": "Debug the mdns_publish_static script execution in the test environment to identify why it's exiting with a non-zero status. Check for permission issues, missing dependencies, or stub configuration problems that might cause premature script termination.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}

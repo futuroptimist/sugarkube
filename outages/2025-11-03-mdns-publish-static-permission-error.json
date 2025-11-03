@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-mdns-publish-static-permission-error",
+  "date": "2025-11-03",
+  "component": "k3s-mdns-publish-static",
+  "rootCause": "Test 38 'mdns_publish_static surfaces permission denied when service unreadable' failed because it expected stderr to contain 'Timed out waiting for Avahi to publish' but instead encountered a chown permission error 'chown: changing ownership of '/tmp/bats-run-Cx9AOg/test/38/services/.k3s-mdns.n6G7Wq': Operation not permitted'. The test is attempting to verify permission error handling but the actual error occurs earlier during file ownership changes.",
+  "resolution": "Modify the test to avoid chown operations in non-root test environments, or adjust mdns_publish_static to handle permission errors more gracefully without attempting ownership changes that will fail. Consider using test fixtures that don't require chown or mocking the ownership change operations.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}

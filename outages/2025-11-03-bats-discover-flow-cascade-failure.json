@@ -1,0 +1,10 @@
+{
+  "id": "2025-11-03-bats-discover-flow-cascade-failure",
+  "date": "2025-11-03",
+  "component": "k3s-discover-flow-tests",
+  "rootCause": "The discover_flow.bats test suite failed tests 6, 7, and 8 (join existing server, elect winner, remain follower) with exit code mismatches. These tests depend on mdns_selfcheck.sh functioning correctly, so failures in mdns_selfcheck cascaded to cause discover flow test failures.",
+  "resolution": "Fix the underlying mdns_selfcheck.sh issues first, then re-run discover flow tests to verify they pass once the dependency is resolved. If failures persist after mdns_selfcheck is fixed, investigate discover-specific logic for regressions.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19026011519/job/54329923153?pr=1663"
+  ]
+}
