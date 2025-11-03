@@ -1024,10 +1024,6 @@ remove_privileged_file() {
   fi
 }
 
-run_configure_avahi
-
-iptables_preflight
-
 reload_avahi_daemon() {
   if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
     return 0
@@ -3401,6 +3397,10 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
   fi
   exit "${status}"
 fi
+
+run_configure_avahi
+
+iptables_preflight
 
 ensure_mdns_absence_gate
 
