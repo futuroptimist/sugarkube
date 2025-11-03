@@ -103,7 +103,7 @@ up env='dev':
     trap '__sugarkube_up_signal_trap INT' INT
     trap '__sugarkube_up_signal_trap TERM' TERM
 
-    summary_run "Preflight (apt)" just prereqs
+    summary_run "Dependencies" sudo -E scripts/install_deps.sh
 
     summary_run "Ensure unique hostname" sudo -E bash "{{ scripts_dir }}/ensure_unique_hostname.sh"
 
@@ -132,11 +132,12 @@ up env='dev':
     # Proceed with discovery/join for subsequent nodes
     summary_run "k3s discover/install" sudo -E bash scripts/k3s-discover.sh
 
+deps:
+    sudo -E scripts/install_deps.sh
+
 prereqs:
-    sudo apt-get update
-    sudo apt-get install -y avahi-daemon avahi-utils libnss-mdns libglib2.0-bin tcpdump curl jq
-    sudo systemctl enable --now avahi-daemon
-    if ! grep -q 'mdns4_minimal' /etc/nsswitch.conf; then sudo sed -i 's/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf; fi
+    @echo "[deprecated] Use 'just deps' instead of 'just prereqs'." >&2
+    sudo -E scripts/install_deps.sh
 
 status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
