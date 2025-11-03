@@ -2479,7 +2479,9 @@ wait_for_api() {
 
   local output=""
   local status=0
-  if ! output="$(env "${check_env[@]}" "${API_READY_CHECK_BIN}")"; then
+  if output="$(env "${check_env[@]}" "${API_READY_CHECK_BIN}")"; then
+    status=0
+  else
     status=$?
   fi
 
