@@ -1,0 +1,10 @@
+{
+  "id": "kcov-bash-xtrace-output",
+  "date": "2025-11-03",
+  "component": "CI / test workflow",
+  "rootCause": "Running BATS tests under kcov for code coverage causes bash's xtrace mode to be enabled or test assertions to be echoed. This results in test conditions like '[[ \"$output\" == *pattern* ]]' appearing in the captured output with each character escaped (e.g., '*\\e\\v\\e\\n\\t\\=\\a\\v\\a\\h\\i' for 'event='). The escaped test assertions get mixed with normal log output, breaking test expectations.",
+  "resolution": "Disable xtrace during kcov execution, or configure kcov to exclude test framework code from tracing, or adjust BATS test assertions to account for the presence of debug output.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19027073016/job/54332570834?pr=1664"
+  ]
+}
