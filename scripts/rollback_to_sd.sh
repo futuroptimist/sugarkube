@@ -278,26 +278,71 @@ if [ "$DRY_RUN" -ne 1 ]; then
 fi
 
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-read -r -d '' REPORT <<EOF_REPORT || true
-# Sugarkube SD Rollback
+previous_root_source="${CURRENT_ROOT_SOURCE:-unknown}"
+previous_root_uuid="${CURRENT_ROOT_UUID:-unknown}"
+previous_boot_source="${CURRENT_BOOT_SOURCE:-unknown}"
+previous_boot_uuid="${CURRENT_BOOT_UUID:-unknown}"
+REPORT="$(python3 - <<'PY' \
+  "$timestamp" \
+  "$BACKUP_DIR" \
+  "$previous_root_source" \
+  "$previous_root_uuid" \
+  "$previous_boot_source" \
+  "$previous_boot_uuid" \
+  "$SD_BOOT_UUID" \
+  "$SD_ROOT_UUID" \
+  "$CMDLINE_FILE" \
+  "$FSTAB_FILE"
+)
+from __future__ import annotations
 
-- Timestamp: $timestamp UTC
-- Backup directory: $BACKUP_DIR
-- Previous root source: ${CURRENT_ROOT_SOURCE:-unknown}
-- Previous root PARTUUID: ${CURRENT_ROOT_UUID:-unknown}
-- Previous boot source: ${CURRENT_BOOT_SOURCE:-unknown}
-- Previous boot PARTUUID: ${CURRENT_BOOT_UUID:-unknown}
-- Target SD boot PARTUUID: $SD_BOOT_UUID
-- Target SD root PARTUUID: $SD_ROOT_UUID
-- Updated files:
-  - $CMDLINE_FILE
-  - $FSTAB_FILE
+import sys
+import textwrap
 
-Next steps:
-1. Reboot the Raspberry Pi.
-2. Confirm the system is running from the SD card with \$(findmnt /).
-3. Investigate SSD health before attempting another migration.
-EOF_REPORT
+
+def main() -> None:
+    (
+        timestamp,
+        backup_dir,
+        prev_root_source,
+        prev_root_uuid,
+        prev_boot_source,
+        prev_boot_uuid,
+        sd_boot_uuid,
+        sd_root_uuid,
+        cmdline_file,
+        fstab_file,
+    ) = sys.argv[1:]
+
+    report = textwrap.dedent(
+        f"""\
+        # Sugarkube SD Rollback
+
+        - Timestamp: {timestamp} UTC
+        - Backup directory: {backup_dir}
+        - Previous root source: {prev_root_source}
+        - Previous root PARTUUID: {prev_root_uuid}
+        - Previous boot source: {prev_boot_source}
+        - Previous boot PARTUUID: {prev_boot_uuid}
+        - Target SD boot PARTUUID: {sd_boot_uuid}
+        - Target SD root PARTUUID: {sd_root_uuid}
+        - Updated files:
+          - {cmdline_file}
+          - {fstab_file}
+
+        Next steps:
+        1. Reboot the Raspberry Pi.
+        2. Confirm the system is running from the SD card with $(findmnt /).
+        3. Investigate SSD health before attempting another migration."""
+    )
+
+    print(report, end="")
+
+
+if __name__ == "__main__":
+    main()
+PY
+)"
 
 write_report "$REPORT_PATH" "$REPORT"
 

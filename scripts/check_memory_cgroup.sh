@@ -213,25 +213,42 @@ install_resume_service() {
 
   install -d -m 0755 -o root -g root "$SYSTEMD_DIR"
 
-  cat >"$SYSTEMD_DIR/$svc" <<EOF
-[Unit]
+  python3 - <<'PY' "$SYSTEMD_DIR" "$svc" "$user" "$home" "$ENV_FILE" "$wd"
+from __future__ import annotations
+
+import pathlib
+import sys
+
+
+def main() -> None:
+    systemd_dir, service_name, user, home, env_file, working_dir = sys.argv[1:]
+    path = pathlib.Path(systemd_dir) / service_name
+    path.write_text(
+        f"""[Unit]
 Description=Resume Sugarkube bootstrap after cgroup change
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=$user
-Group=$user
-Environment=HOME=$home
-EnvironmentFile=$ENV_FILE
-WorkingDirectory=$wd
+User={user}
+Group={user}
+Environment=HOME={home}
+EnvironmentFile={env_file}
+WorkingDirectory={working_dir}
 ExecStart=/usr/bin/just up dev
-ExecStartPost=/bin/systemctl disable --now $svc
+ExecStartPost=/bin/systemctl disable --now {service_name}
 
 [Install]
 WantedBy=multi-user.target
-EOF
+""",
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    main()
+PY
 
   systemctl daemon-reload
   systemctl enable "$svc"
