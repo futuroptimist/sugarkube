@@ -117,13 +117,13 @@ def test_justfile_exposes_start_here_target() -> None:
         "start-here:" in text
     ), "Add a start-here recipe to the justfile so automation can call it"
     assert (
-        '"{{sugarkube_cli}}" docs start-here' in text
+        '"{{ sugarkube_cli }}" docs start-here' in text
     ), "Just start-here recipe should invoke the sugarkube CLI subcommand"
     assert (
-        '"{{ sugarkube_cli }}" docs start-here' not in text
-    ), "Whitespace inside the moustache braces hides the CLI helper"
+        '"{{sugarkube_cli}}" docs start-here' not in text
+    ), "Justfile formatter requires spaces around variables in interpolation"
     assert (
-        "{{start_here_args}}" in text
+        "{{ start_here_args }}" in text
     ), "The recipe should continue forwarding START_HERE_ARGS to the CLI"
 
 

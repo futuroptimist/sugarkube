@@ -1,0 +1,15 @@
+{
+  "id": "2025-11-03-justfile-cli-whitespace-test-mismatch",
+  "date": "2025-11-03",
+  "component": "tests",
+  "rootCause": "Tests incorrectly enforced compact {{sugarkube_cli}} syntax without spaces, conflicting with justfile formatter's requirement for {{ sugarkube_cli }} with spaces around variables",
+  "resolution": "Updated test assertions to expect formatted syntax with spaces and reject compact syntax, aligning with justfile --fmt requirements",
+  "references": [
+    "tests/test_docs_verify_wrapper.py::test_docs_verify_wrappers_invoke_unified_cli",
+    "tests/test_docs_verify_wrapper.py::test_docs_simplify_wrappers_invoke_unified_cli",
+    "tests/test_nvme_health_workflow.py::test_justfile_exposes_nvme_health_recipe",
+    "tests/test_start_here_command.py::test_justfile_exposes_start_here_target",
+    "tests/test_token_place_wrappers.py::test_justfile_token_place_samples_invokes_cli",
+    ".github/workflows/verify-justfile.yml"
+  ]
+}

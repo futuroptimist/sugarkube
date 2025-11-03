@@ -25,11 +25,11 @@ def test_justfile_exposes_nvme_health_recipe() -> None:
         "nvme-health:" in justfile_text
     ), "Expose a nvme-health recipe so contributors can run checks via just"
     assert (
-        '"{{sugarkube_cli}}" nvme health' in justfile_text
+        '"{{ sugarkube_cli }}" nvme health' in justfile_text
     ), "Route the nvme-health recipe through the sugarkube CLI wrapper"
     assert (
-        '"{{ sugarkube_cli }}" nvme health' not in justfile_text
-    ), "Whitespace inside moustache braces hides CLI detection logic"
+        '"{{sugarkube_cli}}" nvme health' not in justfile_text
+    ), "Justfile formatter requires spaces around variables in interpolation"
 
 
 def test_makefile_exposes_nvme_health_target() -> None:
