@@ -1,8 +1,9 @@
 """Helpers for querying k3s mDNS advertisements via Avahi."""
+
 from __future__ import annotations
 
-import os
 import errno
+import os
 import subprocess
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
@@ -76,10 +77,7 @@ def _invoke_avahi(
         result = runner(command, **run_kwargs)
     except subprocess.TimeoutExpired as exc:
         if debug is not None and timeout is not None:
-            debug(
-                "avahi-browse timed out after "
-                f"{timeout:g}s; continuing without mDNS results"
-            )
+            debug("avahi-browse timed out after " f"{timeout:g}s; continuing without mDNS results")
         stdout = exc.stdout or exc.output or ""
         stderr = exc.stderr or ""
         return subprocess.CompletedProcess(
@@ -90,9 +88,7 @@ def _invoke_avahi(
         )
     except FileNotFoundError:
         if debug is not None:
-            debug(
-                "avahi-browse executable not found; continuing without mDNS results"
-            )
+            debug("avahi-browse executable not found; continuing without mDNS results")
         return subprocess.CompletedProcess(
             command,
             returncode=127,
@@ -103,16 +99,12 @@ def _invoke_avahi(
         if exc.errno == errno.ENOEXEC:
             fallback = ["bash", *command]
             if debug is not None:
-                debug(
-                    "avahi-browse returned ENOEXEC; retrying with Bash fallback"
-                )
+                debug("avahi-browse returned ENOEXEC; retrying with Bash fallback")
             result = runner(fallback, **run_kwargs)
         else:
             raise
     if result.returncode != 0 and debug is not None:
-        debug(
-            f"avahi-browse exited with {result.returncode}; continuing with available data"
-        )
+        debug(f"avahi-browse exited with {result.returncode}; continuing with available data")
         if result.stderr:
             debug(result.stderr.strip())
     return result

@@ -28,8 +28,14 @@ def test_render_bootstrap_xml_has_required_txt_records():
 
     txts = [e.text for e in svc.findall("./txt-record")]
     # Must include required baseline and our extras
-    for expected in ["k3s=1", "cluster=sugar", "env=dev", "role=bootstrap",
-                     "leader=host0.local", "state=pending"]:
+    for expected in [
+        "k3s=1",
+        "cluster=sugar",
+        "env=dev",
+        "role=bootstrap",
+        "leader=host0.local",
+        "state=pending",
+    ]:
         assert expected in txts
 
 

@@ -26,10 +26,7 @@ def test_happy_path_commands_present(doc_text: str) -> None:
 
 def test_double_run_explained(doc_text: str) -> None:
     assert "Each additional Pi repeats the same two `just up dev` runs" in doc_text
-    assert (
-        "runs `just up dev` twice" in doc_text
-        or "Run `just up dev` twice" in doc_text
-    )
+    assert "runs `just up dev` twice" in doc_text or "Run `just up dev` twice" in doc_text
 
 
 def test_doc_mentions_automatic_cgroup_fix(doc_text: str) -> None:

@@ -378,9 +378,7 @@ def _coerce_int(value: object, *, field: str, path: Path) -> int:
     if isinstance(value, str):
         text = value.strip()
         if not text:
-            raise TelemetryError(
-                f"NVMe SMART JSON field '{field}' was empty at {path}"
-            )
+            raise TelemetryError(f"NVMe SMART JSON field '{field}' was empty at {path}")
         base = 16 if text.lower().startswith("0x") else 10
         try:
             return int(text, base)
@@ -388,9 +386,7 @@ def _coerce_int(value: object, *, field: str, path: Path) -> int:
             raise TelemetryError(
                 f"NVMe SMART JSON field '{field}' was not a number at {path}"
             ) from exc
-    raise TelemetryError(
-        f"NVMe SMART JSON field '{field}' had unexpected type at {path}"
-    )
+    raise TelemetryError(f"NVMe SMART JSON field '{field}' had unexpected type at {path}")
 
 
 def parse_nvme_smart_log(path: os.PathLike[str] | str) -> MutableMapping[str, object]:
@@ -398,9 +394,7 @@ def parse_nvme_smart_log(path: os.PathLike[str] | str) -> MutableMapping[str, ob
     try:
         raw = target.read_text(encoding="utf-8")
     except OSError as exc:
-        raise TelemetryError(
-            f"failed to read NVMe SMART JSON at {target}: {exc}"
-        ) from exc
+        raise TelemetryError(f"failed to read NVMe SMART JSON at {target}: {exc}") from exc
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -416,22 +410,16 @@ def parse_nvme_smart_log(path: os.PathLike[str] | str) -> MutableMapping[str, ob
     missing = [field for field in required if field not in payload]
     if missing:
         joined = ", ".join(sorted(missing))
-        raise TelemetryError(
-            f"NVMe SMART JSON missing {joined} at {target}"
-        )
+        raise TelemetryError(f"NVMe SMART JSON missing {joined} at {target}")
 
     critical_warning = _coerce_int(
         payload["critical_warning"], field="critical_warning", path=target
     )
-    percentage_used = _coerce_int(
-        payload["percentage_used"], field="percentage_used", path=target
-    )
+    percentage_used = _coerce_int(payload["percentage_used"], field="percentage_used", path=target)
     data_units_written = _coerce_int(
         payload["data_units_written"], field="data_units_written", path=target
     )
-    media_errors = _coerce_int(
-        payload["media_errors"], field="media_errors", path=target
-    )
+    media_errors = _coerce_int(payload["media_errors"], field="media_errors", path=target)
     unsafe_shutdowns = _coerce_int(
         payload["unsafe_shutdowns"], field="unsafe_shutdowns", path=target
     )

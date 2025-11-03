@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "wipe_node.sh"
 
 
@@ -47,7 +46,7 @@ def test_wipe_invokes_uninstallers_when_available(tmp_path):
 
     sudo_stub = fakebin / "sudo"
     sudo_stub.write_text(
-        "#!/usr/bin/env bash\nset -euo pipefail\nexec \"$@\"\n",
+        '#!/usr/bin/env bash\nset -euo pipefail\nexec "$@"\n',
         encoding="utf-8",
     )
     sudo_stub.chmod(0o755)
@@ -60,6 +59,7 @@ def test_wipe_invokes_uninstallers_when_available(tmp_path):
             encoding="utf-8",
         )
         script_path.chmod(0o755)
+
     for stub in (
         "k3s-uninstall.sh",
         "k3s-killall.sh",

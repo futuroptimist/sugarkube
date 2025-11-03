@@ -29,7 +29,7 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
     bash_env = tmp_path / "bypass-block-check.sh"
     bash_env.write_text(
         "function [ {\n"
-        "  local args=(\"$@\")\n"
+        '  local args=("$@")\n'
         "  local last_index=$((${#args[@]} - 1))\n"
         "  if [[ ${args[$last_index]} == ']' ]]; then\n"
         "    unset 'args[$last_index]'\n"
@@ -38,13 +38,13 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
         "    if [[ ${args[1]} == '-b' && ${args[2]} == \"$TARGET\" ]]; then\n"
         "      return 1\n"
         "    fi\n"
-        "    builtin test \"${args[@]}\"\n"
+        '    builtin test "${args[@]}"\n'
         "    return $?\n"
         "  fi\n"
         "  if [[ ${args[0]} == '-b' && ${args[1]} == \"$TARGET\" ]]; then\n"
         "    return 0\n"
         "  fi\n"
-        "  builtin test \"${args[@]}\"\n"
+        '  builtin test "${args[@]}"\n'
         "  return $?\n"
         "}\n",
         encoding="utf-8",
@@ -55,7 +55,7 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
         bin_dir / "findmnt",
         (
             "#!/usr/bin/env bash\n"
-            "if [ \"$1\" = \"-no\" ] && [ \"$2\" = \"SOURCE\" ] && [ \"$3\" = \"/\" ]; then\n"
+            'if [ "$1" = "-no" ] && [ "$2" = "SOURCE" ] && [ "$3" = "/" ]; then\n'
             "  printf '/dev/mmcblk0p2\\n'\n"
             "  exit 0\n"
             "fi\n"
@@ -69,7 +69,7 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
         bin_dir / "readlink",
         (
             "#!/usr/bin/env bash\n"
-            "if [ \"$1\" = \"-f\" ]; then\n"
+            'if [ "$1" = "-f" ]; then\n'
             "  printf '%s\\n' \"$2\"\n"
             "  exit 0\n"
             "fi\n"
@@ -89,7 +89,7 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
             "target = Path(os.environ['STUB_TARGET'])\n"
             "args = sys.argv[1:]\n\n"
             "def _print(value: str = '') -> None:\n"
-            "    sys.stdout.write(f\"{value}\\n\")\n\n"
+            '    sys.stdout.write(f"{value}\\n")\n\n'
             "if args[:2] == ['-no', 'pkname']:\n"
             "    device = args[2]\n"
             "    if device == '/dev/mmcblk0p2':\n"
@@ -130,10 +130,10 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
         bin_dir / "blkid",
         (
             "#!/usr/bin/env bash\n"
-            "if [ \"$1\" = \"-s\" ] \\\n"
-            "  && [ \"$2\" = \"PARTUUID\" ] \\\n"
-            "  && [ \"$3\" = \"-o\" ] \\\n"
-            "  && [ \"$4\" = \"value\" ]; then\n"
+            'if [ "$1" = "-s" ] \\\n'
+            '  && [ "$2" = "PARTUUID" ] \\\n'
+            '  && [ "$3" = "-o" ] \\\n'
+            '  && [ "$4" = "value" ]; then\n'
             "  printf '1234-ABCD\\n'\n"
             "  exit 0\n"
             "fi\n"
@@ -146,10 +146,10 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
         bin_dir / "wipefs",
         (
             "#!/usr/bin/env bash\n"
-            "if [ \"$1\" = \"--noheadings\" ]; then\n"
+            'if [ "$1" = "--noheadings" ]; then\n'
             "  exit 0\n"
             "fi\n"
-            "if [ \"$1\" = \"-a\" ]; then\n"
+            'if [ "$1" = "-a" ]; then\n'
             "  exit 0\n"
             "fi\n"
             "exit 0\n"
@@ -161,9 +161,9 @@ def test_preflight_unmounts_mounted_partitions(tmp_path: Path) -> None:
         bin_dir / "umount",
         (
             "#!/usr/bin/env bash\n"
-            "log_file=\"${STUB_UMOUNT_LOG}\"\n"
-            "state_file=\"${STUB_MOUNT_STATE}\"\n"
-            "printf '%s\\n' \"$*\" >>\"${log_file}\"\n"
+            'log_file="${STUB_UMOUNT_LOG}"\n'
+            'state_file="${STUB_MOUNT_STATE}"\n'
+            'printf \'%s\\n\' "$*" >>"${log_file}"\n'
             "printf 'unmounted\\n' >\"${state_file}\"\n"
             "exit 0\n"
         ),

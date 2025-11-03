@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "nvme_health_check.sh"
 DOC_PATH = REPO_ROOT / "docs" / "nvme-health-check.md"
@@ -61,9 +60,7 @@ def test_nvme_health_doc_references_cli_wrappers() -> None:
     assert (
         "`sugarkube nvme health`" in text
     ), "Document the sugarkube CLI helper so readers do not recreate the script"
-    assert (
-        "just nvme-health" in text
-    ), "Document the just wrapper so automation matches the guide"
+    assert "just nvme-health" in text, "Document the just wrapper so automation matches the guide"
     assert (
         "just nvme-alerts" not in text
     ), "Future enhancements should no longer list just nvme-health as unshipped"

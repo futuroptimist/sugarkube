@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "k3s-discover.sh"
 
 
