@@ -98,6 +98,47 @@ if [ -n "${SUDO_CMD:-}" ]; then
   fi
 fi
 
+ensure_systemd_unit_active() {
+  local unit="$1"
+  if [ -z "${unit}" ]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_debug discover_systemd outcome=skip reason=systemctl_missing unit="${unit}" >&2
+    return 0
+  fi
+  if systemctl is-active --quiet "${unit}"; then
+    log_debug discover_systemd outcome=ok state=active unit="${unit}" >&2
+    return 0
+  fi
+
+  local start_cmd
+  if [ -n "${SUDO_CMD:-}" ]; then
+    start_cmd=("${SUDO_CMD}" systemctl start "${unit}")
+  elif [ "${EUID}" -eq 0 ]; then
+    start_cmd=(systemctl start "${unit}")
+  elif command -v sudo >/dev/null 2>&1; then
+    start_cmd=(sudo systemctl start "${unit}")
+  else
+    log_warn_msg discover "Unable to start ${unit} via systemctl" "unit=${unit}" "reason=sudo_missing"
+    return 1
+  fi
+
+  if "${start_cmd[@]}" >/dev/null 2>&1; then
+    log_info discover_systemd outcome=started unit="${unit}" >&2
+    return 0
+  fi
+
+  local rc=$?
+  log_warn_msg discover "systemctl start ${unit} failed" "unit=${unit}" "status=${rc}"
+  return "${rc}"
+}
+
+ensure_avahi_systemd_units() {
+  ensure_systemd_unit_active dbus || true
+  ensure_systemd_unit_active avahi-daemon || true
+}
+
 if [ -n "${PYTHONPATH:-}" ]; then
   export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 else
@@ -1082,6 +1123,8 @@ ensure_avahi_liveness_signal() {
   local summary_start=0
   local summary_recorded=0
   local summary_note=""
+
+  ensure_avahi_systemd_units || true
 
   if [ "${SUMMARY_API_AVAILABLE}" -eq 1 ] && [ "${SUMMARY_DBUS_RECORDED}" -eq 0 ]; then
     summary_active=1
