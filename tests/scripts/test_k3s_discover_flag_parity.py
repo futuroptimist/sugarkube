@@ -1,4 +1,5 @@
 """Validate flag parity enforcement in k3s-discover join flows."""
+
 from __future__ import annotations
 
 import os

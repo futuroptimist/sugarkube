@@ -610,9 +610,7 @@ def _select_partition(
     expected_info = next((p for p in partitions if p.get("NAME") == expected_device), None)
     if label_candidates:
         label_matches = [
-            part
-            for part in partitions
-            if (part.get("LABEL") or "").casefold() in label_candidates
+            part for part in partitions if (part.get("LABEL") or "").casefold() in label_candidates
         ]
         if len(label_matches) == 1:
             return label_matches[0]["NAME"]
@@ -633,9 +631,7 @@ def _select_partition(
         if actual_fs == normalized_fs or not expected_info.get("FSTYPE"):
             return expected_device
     fs_matches = [
-        part
-        for part in partitions
-        if canonical_fs(part.get("FSTYPE", "")) == normalized_fs
+        part for part in partitions if canonical_fs(part.get("FSTYPE", "")) == normalized_fs
     ]
     if len(fs_matches) == 1:
         return fs_matches[0]["NAME"]

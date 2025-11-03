@@ -1,18 +1,12 @@
 import os
+import shlex
 import subprocess
 from pathlib import Path
-import shlex
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "configure_k3s_node_ip.sh"
 TLS_TEMPLATE = (
-    REPO_ROOT
-    / "systemd"
-    / "etc"
-    / "rancher"
-    / "k3s"
-    / "config.yaml.d"
-    / "10-sugarkube-tls.yaml"
+    REPO_ROOT / "systemd" / "etc" / "rancher" / "k3s" / "config.yaml.d" / "10-sugarkube-tls.yaml"
 )
 
 
@@ -64,10 +58,7 @@ def render_tls_config(tmp_path, regaddr):
     env.pop("SUGARKUBE_API_REGADDR", None)
     if regaddr is not None:
         env["SUGARKUBE_API_REGADDR"] = regaddr
-    command = (
-        f"source {shlex.quote(str(SCRIPT_PATH))} >/dev/null 2>&1; "
-        "render_tls_san_config"
-    )
+    command = f"source {shlex.quote(str(SCRIPT_PATH))} >/dev/null 2>&1; " "render_tls_san_config"
     subprocess.run(
         ["bash", "-euo", "pipefail", "-c", command],
         check=True,

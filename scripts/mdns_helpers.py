@@ -1,4 +1,5 @@
 """Utilities for normalising and comparing mDNS hostnames."""
+
 from __future__ import annotations
 
 import argparse
@@ -7,16 +8,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Final,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    TextIO,
-)
+from typing import TYPE_CHECKING, Callable, Final, Iterable, List, Mapping, Optional, TextIO
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from k3s_mdns_parser import MdnsRecord
@@ -250,10 +242,7 @@ def _browse_service_type(
     except subprocess.TimeoutExpired as exc:
         duration = exc.timeout if isinstance(exc.timeout, (int, float)) else timeout
         _log(
-            (
-                "[k3s-discover mdns] WARN: avahi-browse timed out after %.1fs "
-                "while resolving %s"
-            )
+            ("[k3s-discover mdns] WARN: avahi-browse timed out after %.1fs " "while resolving %s")
             % (duration, service_type)
         )
         return []
@@ -273,6 +262,7 @@ def _collect_mdns_records(
     runner: Runner,
 ) -> List["MdnsRecord"]:
     from k3s_mdns_parser import parse_mdns_records
+
     service_types = _service_types(cluster, environment)
 
     resolved_lines: List[str] = []
@@ -356,8 +346,7 @@ def ensure_self_ad_is_visible(
         if not records:
             _log(
                 "[k3s-discover mdns] Attempt %d/%d: no mDNS records discovered for "
-                "cluster=%s env=%s"
-                % (attempt, attempts, cluster, env)
+                "cluster=%s env=%s" % (attempt, attempts, cluster, env)
             )
             if attempt < attempts and delay > 0:
                 _log(
@@ -434,9 +423,7 @@ def ensure_self_ad_is_visible(
                 record_addr = record.address.strip()
                 txt_addr = txt.get("a", "").strip()
                 txt_addr_alt = txt.get("addr", "").strip()
-                observed_addrs = [
-                    addr for addr in (record_addr, txt_addr, txt_addr_alt) if addr
-                ]
+                observed_addrs = [addr for addr in (record_addr, txt_addr, txt_addr_alt) if addr]
                 if expect_addr in observed_addrs:
                     return record.host
 
@@ -485,9 +472,7 @@ def ensure_self_ad_is_visible(
             _log(message)
 
         if not host_match_found:
-            unique_hosts = sorted({
-                norm_host(host) for host in observed_hosts if host
-            })
+            unique_hosts = sorted({norm_host(host) for host in observed_hosts if host})
             observed_text = ", ".join(unique_hosts) if unique_hosts else "<none>"
             _log(
                 "[k3s-discover mdns] Attempt %d/%d: observed hosts %s but none matched expected %s"

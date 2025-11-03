@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "render_pi_cluster_variants.py"
 SCAD_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
@@ -44,9 +43,9 @@ with log_path.open(\"a\", encoding=\"utf-8\") as handle:
 def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The helper should invoke OpenSCAD for each column_mode/fan_size pair."""
 
-    assert SCRIPT_PATH.exists(), (
-        "Add scripts/render_pi_cluster_variants.py so CI can render the documented STL matrix"
-    )
+    assert (
+        SCRIPT_PATH.exists()
+    ), "Add scripts/render_pi_cluster_variants.py so CI can render the documented STL matrix"
 
     log_file = tmp_path / "openscad.log"
     stub_bin = tmp_path / "openscad"

@@ -22,7 +22,9 @@ def stub_env(tmp_path: Path) -> dict[str, str]:
     rpi_eeprom.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
-APPLY_PATH=""" + str(apply_path) + """
+APPLY_PATH="""
+        + str(apply_path)
+        + """
 if [[ $# -gt 0 && $1 == --apply ]]; then
   cp "$2" "${APPLY_PATH}"
   exit 0
@@ -37,7 +39,7 @@ CFG
     rpi_eeprom.chmod(stat.S_IRWXU)
 
     sudo = bin_dir / "sudo"
-    sudo.write_text("#!/usr/bin/env bash\nexec \"$@\"\n", encoding="utf-8")
+    sudo.write_text('#!/usr/bin/env bash\nexec "$@"\n', encoding="utf-8")
     sudo.chmod(stat.S_IRWXU)
 
     env = os.environ.copy()

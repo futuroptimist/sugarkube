@@ -1,4 +1,5 @@
 """Regression tests for mid-election server discovery in k3s-discover."""
+
 from __future__ import annotations
 
 import os
@@ -288,10 +289,7 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     fast_mode = "mode=fast" in result.stderr
-    assert (
-        "event=mdns_selfcheck outcome=confirmed" in result.stderr
-        or fast_mode
-    )
+    assert "event=mdns_selfcheck outcome=confirmed" in result.stderr or fast_mode
     assert "phase=install_join" in result.stderr
 
     if "event=join_gate action=skip" in result.stderr:

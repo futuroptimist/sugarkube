@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "k3s-discover.sh"
 
 
@@ -15,7 +14,7 @@ def avahi_env(tmp_path):
     bin_dir.mkdir()
 
     sudo = bin_dir / "sudo"
-    sudo.write_text("#!/usr/bin/env bash\nexec \"$@\"\n", encoding="utf-8")
+    sudo.write_text('#!/usr/bin/env bash\nexec "$@"\n', encoding="utf-8")
     sudo.chmod(0o755)
 
     systemctl = bin_dir / "systemctl"
@@ -59,8 +58,8 @@ def test_publish_avahi_service_creates_valid_xml(avahi_env):
     assert result.returncode == 0, result.stderr
 
     xml_text = result.stdout
-    assert "<?xml version=\"1.0\"" in xml_text
-    assert "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">" in xml_text
+    assert '<?xml version="1.0"' in xml_text
+    assert '<!DOCTYPE service-group SYSTEM "avahi-service.dtd">' in xml_text
 
     root = ET.fromstring(xml_text)
 

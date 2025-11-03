@@ -78,9 +78,9 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
         )
 
     make_stub("uname", "echo Linux")
-    make_stub("systemctl", "echo \"systemctl:$*\" >>\"${CALL_LOG}\"")
-    make_stub("sleep", "echo \"sleep:$*\" >>\"${CALL_LOG}\"")
-    make_stub("sync", "echo sync >>\"${CALL_LOG}\"")
+    make_stub("systemctl", 'echo "systemctl:$*" >>"${CALL_LOG}"')
+    make_stub("sleep", 'echo "sleep:$*" >>"${CALL_LOG}"')
+    make_stub("sync", 'echo sync >>"${CALL_LOG}"')
 
     state_dir = tmp_path / "state"
     systemd_dir = tmp_path / "systemd"
@@ -191,9 +191,9 @@ def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
         )
 
     make_stub("uname", "echo Linux")
-    make_stub("systemctl", "echo \"systemctl:$*\" >>\"${CALL_LOG}\"")
-    make_stub("sleep", "echo \"sleep:$*\" >>\"${CALL_LOG}\"")
-    make_stub("sync", "echo sync >>\"${CALL_LOG}\"")
+    make_stub("systemctl", 'echo "systemctl:$*" >>"${CALL_LOG}"')
+    make_stub("sleep", 'echo "sleep:$*" >>"${CALL_LOG}"')
+    make_stub("sync", 'echo sync >>"${CALL_LOG}"')
 
     state_dir = tmp_path / "state"
     systemd_dir = tmp_path / "systemd"
@@ -281,8 +281,8 @@ def test_reboots_when_runtime_cmdline_still_disables_memory(tmp_path: Path) -> N
         )
 
     make_stub("uname", "echo Linux")
-    make_stub("systemctl", "echo \"systemctl:$*\" >>\"${CALL_LOG}\"")
-    make_stub("sleep", "echo \"sleep:$*\" >>\"${CALL_LOG}\"")
+    make_stub("systemctl", 'echo "systemctl:$*" >>"${CALL_LOG}"')
+    make_stub("sleep", 'echo "sleep:$*" >>"${CALL_LOG}"')
 
     state_dir = tmp_path / "state"
     systemd_dir = tmp_path / "systemd"

@@ -1,13 +1,13 @@
 """Helpers for parsing resolved Avahi browse output for k3s services."""
+
 from __future__ import annotations
 
 import ipaddress
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from mdns_helpers import _norm_host
-
 
 _SERVICE_NAME_RE = re.compile(
     r"^k3s API (?P<cluster>[^/]+)/(?P<environment>\S+)"
@@ -188,9 +188,7 @@ def _txt_is_richer(existing: Dict[str, str], new: Dict[str, str]) -> bool:
     return False
 
 
-def parse_mdns_records(
-    lines: Iterable[str], cluster: str, environment: str
-) -> List[MdnsRecord]:
+def parse_mdns_records(lines: Iterable[str], cluster: str, environment: str) -> List[MdnsRecord]:
     """Parse Avahi browse output into structured records.
 
     Parameters
@@ -226,7 +224,7 @@ def parse_mdns_records(
         if service_type == "_https._tcp":
             pass
         elif service_type.startswith("_k3s-") and service_type.endswith("._tcp"):
-            slug = service_type[len("_k3s-"):-len("._tcp")]
+            slug = service_type[len("_k3s-") : -len("._tcp")]
             if "-" in slug:
                 type_cluster, type_environment = slug.rsplit("-", 1)
         else:
@@ -265,9 +263,7 @@ def parse_mdns_records(
         cluster_value = txt.get("cluster") or service_cluster or type_cluster
         environment_value = txt.get("env") or service_env or type_environment
         cluster_value_norm = cluster_value.strip().lower() if cluster_value else ""
-        environment_value_norm = (
-            environment_value.strip().lower() if environment_value else ""
-        )
+        environment_value_norm = environment_value.strip().lower() if environment_value else ""
         if cluster_value_norm != expected_cluster or environment_value_norm != expected_env:
             continue
 

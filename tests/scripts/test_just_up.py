@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -443,8 +442,7 @@ def test_just_up_dev_two_nodes(tmp_path):
     assert result_assume.returncode == 0, result_assume.stderr
     assert (
         "WARN: bootstrap advertisement for pi2.local not visible via mDNS; "
-        "Avahi publish logs report service establishment; assuming success."
-        in result_assume.stderr
+        "Avahi publish logs report service establishment; assuming success." in result_assume.stderr
     )
     assert (
         "Bootstrap advertisement assumed visible for pi2.local based on Avahi publish logs."
