@@ -115,6 +115,49 @@ MDNS_LAST_CMD_RC=""
 MDNS_LAST_CMD_PARSED_IPV4=""
 MDNS_LAST_FAILURE_COMMAND=""
 MDNS_LAST_FAILURE_DURATION=""
+DBUS_SCRIPT_PATH="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
+DBUS_CLI_FALLBACK_ENABLED=0
+DBUS_CLI_FALLBACK_DISABLED=0
+DBUS_CLI_FALLBACK_ATTEMPTS=0
+
+ensure_systemd_unit_active() {
+  local unit="$1"
+  if [ -z "${unit}" ]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_debug mdns_systemd outcome=skip reason=systemctl_missing unit="${unit}"
+    return 0
+  fi
+  if systemctl is-active --quiet "${unit}"; then
+    log_debug mdns_systemd outcome=ok state=active unit="${unit}"
+    return 0
+  fi
+
+  local start_cmd=(systemctl start "${unit}")
+  if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      start_cmd=(sudo "${start_cmd[@]}")
+    else
+      log_info mdns_systemd outcome=skip reason=sudo_missing unit="${unit}" severity=warn
+      return 1
+    fi
+  fi
+
+  if "${start_cmd[@]}" >/dev/null 2>&1; then
+    log_info mdns_systemd outcome=started unit="${unit}" severity=info
+    return 0
+  fi
+
+  local rc=$?
+  log_info mdns_systemd outcome=error unit="${unit}" status="${rc}" severity=warn
+  return "${rc}"
+}
+
+ensure_avahi_systemd_units() {
+  ensure_systemd_unit_active dbus || true
+  ensure_systemd_unit_active avahi-daemon || true
+}
 
 run_command_capture() {
   if [ "$#" -lt 2 ]; then
@@ -253,12 +296,15 @@ if [ -z "${EXPECTED_HOST}" ]; then
   exit 2
 fi
 
+ensure_avahi_systemd_units || true
+
 AVAHI_WAIT_ATTEMPTED=0
 
 dbus_mode="${SUGARKUBE_MDNS_DBUS:-auto}"
+dbus_script="${DBUS_SCRIPT_PATH}"
 if [ "${dbus_mode}" != "0" ]; then
-  dbus_script="${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"
   if [ -x "${dbus_script}" ]; then
+    DBUS_CLI_FALLBACK_ENABLED=1
     AVAHI_WAIT_ATTEMPTED=1
     if SUGARKUBE_MDNS_DBUS=1 "${dbus_script}"; then
       exit 0
@@ -281,9 +327,11 @@ if [ "${dbus_mode}" != "0" ]; then
     esac
   else
     log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_script_missing fallback=cli
+    DBUS_CLI_FALLBACK_DISABLED=1
   fi
 else
   log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_disabled fallback=cli
+  DBUS_CLI_FALLBACK_DISABLED=1
 fi
 
 if [ "${AVAHI_WAIT_ATTEMPTED}" -eq 0 ] && [ "${dbus_mode}" != "0" ]; then
@@ -900,6 +948,78 @@ mdns_liveness_probe() {
   fi
 }
 
+mdns_cli_dbus_fallback() {
+  local cli_rc="$1"
+  local attempt_num="$2"
+
+  if [ "${DBUS_CLI_FALLBACK_ENABLED}" -ne 1 ]; then
+    return 1
+  fi
+  if [ "${DBUS_CLI_FALLBACK_DISABLED}" -eq 1 ]; then
+    return 1
+  fi
+
+  DBUS_CLI_FALLBACK_ATTEMPTS=$((DBUS_CLI_FALLBACK_ATTEMPTS + 1))
+  log_debug mdns_selfcheck_dbus outcome=retry reason=cli_failure cli_rc="${cli_rc}" attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+
+  ensure_avahi_systemd_units || true
+
+  if [ -x "${SCRIPT_DIR}/wait_for_avahi_dbus.sh" ]; then
+    local wait_output=""
+    local wait_status=0
+    if ! wait_output="$("${SCRIPT_DIR}/wait_for_avahi_dbus.sh" 2>&1)"; then
+      wait_status=$?
+      if [ -n "${wait_output}" ]; then
+        printf '%s\n' "${wait_output}"
+      fi
+      case "${wait_status}" in
+        2)
+          DBUS_CLI_FALLBACK_DISABLED=1
+          log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_wait_disabled attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+          ;;
+        0)
+          ;;
+        *)
+          log_debug mdns_selfcheck_dbus outcome=lag reason=dbus_wait_failed status="${wait_status}" attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+          ;;
+      esac
+    elif [ -n "${wait_output}" ]; then
+      printf '%s\n' "${wait_output}"
+    fi
+    if [ "${DBUS_CLI_FALLBACK_DISABLED}" -eq 1 ]; then
+      return 1
+    fi
+  fi
+
+  local dbus_script="${DBUS_SCRIPT_PATH}"
+  if [ ! -x "${dbus_script}" ]; then
+    DBUS_CLI_FALLBACK_DISABLED=1
+    log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_script_missing attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+    return 1
+  fi
+
+  if SUGARKUBE_MDNS_DBUS=1 "${dbus_script}"; then
+    log_info mdns_selfcheck outcome=recovered method=dbus attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+    return 0
+  fi
+
+  local status=$?
+  case "${status}" in
+    2)
+      DBUS_CLI_FALLBACK_DISABLED=1
+      log_debug mdns_selfcheck_dbus outcome=skip reason=dbus_unsupported attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+      ;;
+    1)
+      log_debug mdns_selfcheck_dbus outcome=retry reason=dbus_attempt_failed status="${status}" attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+      ;;
+    *)
+      log_debug mdns_selfcheck_dbus outcome=error reason=dbus_attempt_failed status="${status}" attempt="${attempt_num}" fallback_attempt="${DBUS_CLI_FALLBACK_ATTEMPTS}"
+      ;;
+  esac
+
+  return 1
+}
+
 resolve_srv_target_cli() {
   local target="$1"
   local expected_ipv4="$2"
@@ -1383,6 +1503,19 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     browse_command="${MDNS_LAST_CMD_DISPLAY:-}"
     browse_duration="${MDNS_LAST_CMD_DURATION_MS:-}"
   fi
+  browse_rc="${MDNS_LAST_CMD_RC:-0}"
+  browse_error=0
+  if [ "${INITIAL_BROWSE_READY}" -eq 0 ]; then
+    case "${browse_rc}" in
+      ''|*[!0-9-]*) browse_rc=0 ;;
+    esac
+    if [ "${browse_rc}" -ne 0 ]; then
+      browse_error=1
+      if mdns_cli_dbus_fallback "${browse_rc}" "${attempt}"; then
+        exit 0
+      fi
+    fi
+  fi
   parsed="$(printf '%s\n' "${browse_output}" | parse_browse || true)"
   browse_for_trace="$(printf '%s' "${browse_output}" | tr '\n' ' ' | tr -s ' ' | sed 's/"/\\"/g')"
   browse_command_kv=""
@@ -1554,7 +1687,9 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       fi
     fi
   else
-    if [ -z "${browse_output}" ]; then
+    if [ "${browse_error}" -eq 1 ]; then
+      browse_reason="browse_error"
+    elif [ -z "${browse_output}" ]; then
       browse_reason="browse_empty"
     else
       browse_reason="instance_not_found"

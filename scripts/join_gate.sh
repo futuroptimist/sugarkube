@@ -28,6 +28,45 @@ log_join_gate_error() {
   log_kv info join_gate "$@"
 }
 
+ensure_systemd_unit_active() {
+  local unit="$1"
+  if [ -z "${unit}" ]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_debug join_gate_systemd outcome=skip reason=systemctl_missing unit="${unit}"
+    return 0
+  fi
+  if systemctl is-active --quiet "${unit}"; then
+    log_debug join_gate_systemd outcome=ok state=active unit="${unit}"
+    return 0
+  fi
+
+  local start_cmd
+  if [ "${EUID}" -eq 0 ]; then
+    start_cmd=(systemctl start "${unit}")
+  elif command -v sudo >/dev/null 2>&1; then
+    start_cmd=(sudo systemctl start "${unit}")
+  else
+    log_info join_gate_systemd outcome=skip reason=sudo_missing unit="${unit}" severity=warn
+    return 1
+  fi
+
+  if "${start_cmd[@]}" >/dev/null 2>&1; then
+    log_info join_gate_systemd outcome=started unit="${unit}" severity=info
+    return 0
+  fi
+
+  local rc=$?
+  log_info join_gate_systemd outcome=error unit="${unit}" status="${rc}" severity=warn
+  return "${rc}"
+}
+
+ensure_avahi_systemd_units() {
+  ensure_systemd_unit_active dbus || true
+  ensure_systemd_unit_active avahi-daemon || true
+}
+
 ensure_tools() {
   local missing=0
   local tool
@@ -51,6 +90,7 @@ ensure_runtime_dir() {
 }
 
 wait_for_avahi_bus() {
+  ensure_avahi_systemd_units || true
   if ! command -v gdbus >/dev/null 2>&1; then
     return 0
   fi
