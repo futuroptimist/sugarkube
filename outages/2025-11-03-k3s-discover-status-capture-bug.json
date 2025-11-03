@@ -2,7 +2,7 @@
   "id": "2025-11-03-k3s-discover-status-capture-bug",
   "date": "2025-11-03",
   "component": "scripts/k3s-discover.sh",
-  "rootCause": "run_configure_avahi() function was capturing $? after an if statement completed, which always returns 0 regardless of the command exit status, causing failures to be logged with status=0",
+  "rootCause": "run_configure_avahi() function was capturing exit status ($?) after the if statement had already evaluated, which always yields 0, causing actual command failures to be incorrectly logged with status=0",
   "resolution": "Refactored to capture exit status immediately using '|| status=$?' pattern before the if statement completes, ensuring accurate error reporting",
   "references": [
     "scripts/k3s-discover.sh",
