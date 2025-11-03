@@ -1,14 +1,8 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # shellcheck disable=SC3040,SC3041,SC3043
-set -eu
+set -euo pipefail
 
-if (set -o pipefail) 2>/dev/null; then
-  set -o pipefail
-fi
-
-if (set -E) 2>/dev/null; then
-  set -E
-fi
+set -E
 
 SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 # shellcheck source=scripts/log.sh

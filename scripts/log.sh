@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-# shellcheck shell=sh
+#!/usr/bin/env bash
+# shellcheck shell=bash
 
 # Shared structured logging helper for shell scripts.
 # Provides level-aware logging helpers that emit key=value pairs with
