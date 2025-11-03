@@ -15,7 +15,7 @@ def fake_k3s(tmp_path):
     k3s_bin = bin_dir / "k3s"
     k3s_bin.write_text(
         "#!/usr/bin/env bash\n"
-        "if [ \"$1\" = \"token\" ] && [ \"$2\" = \"create\" ]; then\n"
+        'if [ "$1" = "token" ] && [ "$2" = "create" ]; then\n'
         "  echo 'K10-test-secure-token'\n"
         "  exit 0\n"
         "fi\n"

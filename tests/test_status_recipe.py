@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 JUSTFILE = Path(__file__).resolve().parent.parent / "justfile"
 
 

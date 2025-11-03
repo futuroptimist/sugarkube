@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
 from urllib.request import urlopen
-
 
 _TIME_API_URL = "https://worldtimeapi.org/api/timezone/Etc/UTC"
 
@@ -77,16 +76,14 @@ def test_markdown_outages_have_json_counterparts() -> None:
     assert outages_dir.is_dir(), "outages/ directory must exist for outage records"
 
     json_records = {
-        path.name: path
-        for path in outages_dir.glob("*.json")
-        if path.name != "schema.json"
+        path.name: path for path in outages_dir.glob("*.json") if path.name != "schema.json"
     }
 
     for markdown_file in sorted(outages_dir.glob("*.md")):
         json_name = markdown_file.with_suffix(".json").name
-        assert json_name in json_records, (
-            f"Missing JSON outage record for {markdown_file.name}; add {json_name}"
-        )
+        assert (
+            json_name in json_records
+        ), f"Missing JSON outage record for {markdown_file.name}; add {json_name}"
 
         record = json.loads(json_records[json_name].read_text(encoding="utf-8"))
         long_form = record.get("longForm")

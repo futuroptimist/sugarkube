@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 
@@ -55,9 +55,7 @@ def test_doc_command_blocks(doc_text: str) -> None:
 
 
 def test_clone_commands_do_not_use_shell_semicolon_assignment(doc_text: str) -> None:
-    semicolon_pattern = re.compile(
-        r"TARGET=/dev[^\n]*;|WIPE=1;[ ]*sudo [^\n]*just clone-ssd"
-    )
+    semicolon_pattern = re.compile(r"TARGET=/dev[^\n]*;|WIPE=1;[ ]*sudo [^\n]*just clone-ssd")
     assignment_after_recipe = re.compile(r"just clone-ssd[^`\n]*\b[A-Z][A-Z0-9_]*=")
     assert not semicolon_pattern.search(
         doc_text
@@ -79,8 +77,8 @@ def test_boot_order_recipe_uses_preset() -> None:
 
 def test_migrate_recipe_delegates_to_script() -> None:
     text = JUSTFILE.read_text(encoding="utf-8")
-    assert 'migrate-to-nvme:' in text
-    assert 'scripts/migrate_to_nvme.sh' in text
+    assert "migrate-to-nvme:" in text
+    assert "scripts/migrate_to_nvme.sh" in text
 
 
 def test_doc_mentions_artifacts_paths(doc_text: str) -> None:

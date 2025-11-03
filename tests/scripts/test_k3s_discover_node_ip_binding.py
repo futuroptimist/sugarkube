@@ -10,13 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "configure_k3s_node_ip.sh"
 TLS_TEMPLATE = (
-    REPO_ROOT
-    / "systemd"
-    / "etc"
-    / "rancher"
-    / "k3s"
-    / "config.yaml.d"
-    / "10-sugarkube-tls.yaml"
+    REPO_ROOT / "systemd" / "etc" / "rancher" / "k3s" / "config.yaml.d" / "10-sugarkube-tls.yaml"
 )
 
 

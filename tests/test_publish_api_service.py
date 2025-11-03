@@ -3,7 +3,6 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "k3s-discover.sh"
 
 
@@ -12,7 +11,7 @@ def test_render_api_service_generates_expected_xml(tmp_path):
     bin_dir.mkdir()
 
     sudo = bin_dir / "sudo"
-    sudo.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexec \"$@\"\n", encoding="utf-8")
+    sudo.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec "$@"\n', encoding="utf-8")
     sudo.chmod(0o755)
 
     systemctl = bin_dir / "systemctl"

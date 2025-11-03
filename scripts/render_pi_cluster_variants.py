@@ -7,7 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 DEFAULT_COLUMN_MODES = ("printed", "brass_chain")
 DEFAULT_FAN_SIZES = (80, 92, 120)
 
@@ -57,10 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scad-path",
         type=Path,
         default=(
-            Path(__file__).resolve().parents[1]
-            / "cad"
-            / "pi_cluster"
-            / "pi_carrier_stack.scad"
+            Path(__file__).resolve().parents[1] / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
         ),
         help="Path to pi_carrier_stack.scad (default: repository copy).",
     )

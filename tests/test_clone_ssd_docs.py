@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 
@@ -32,14 +32,10 @@ CLONE_SSD_EXPECTATIONS: list[tuple[str, list[str]]] = [
 
 
 @pytest.mark.parametrize("doc_path, expected_commands", CLONE_SSD_EXPECTATIONS)
-def test_docs_document_expected_clone_wrappers(
-    doc_path: str, expected_commands: list[str]
-) -> None:
+def test_docs_document_expected_clone_wrappers(doc_path: str, expected_commands: list[str]) -> None:
     doc_text = (REPO_ROOT / doc_path).read_text(encoding="utf-8")
     for command in expected_commands:
-        assert (
-            command in doc_text
-        ), f"{doc_path} should document the '{command}' wrapper"
+        assert command in doc_text, f"{doc_path} should document the '{command}' wrapper"
 
 
 @pytest.mark.parametrize("doc_path", [item[0] for item in CLONE_SSD_EXPECTATIONS])
@@ -52,6 +48,4 @@ def test_clone_wrappers_do_not_use_semicolon_assignments(doc_path: str) -> None:
     ), f"{doc_path} should not rely on ';' to pass environment variables"
     assert not assignment_after_recipe.search(
         doc_text
-    ), (
-        f"{doc_path} should export environment variables before invoking 'just clone-ssd'"
-    )
+    ), f"{doc_path} should export environment variables before invoking 'just clone-ssd'"

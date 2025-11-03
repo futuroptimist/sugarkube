@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "k3s-discover.sh"
 
 
@@ -62,9 +61,7 @@ def test_reads_node_token_file(default_env, tmp_path):
 
 def test_reads_boot_token_file(default_env, tmp_path):
     boot_token_path = tmp_path / "boot-token"
-    boot_token_path.write_text(
-        "# header\nNODE_TOKEN=K10boot::server:def456\n", encoding="utf-8"
-    )
+    boot_token_path.write_text("# header\nNODE_TOKEN=K10boot::server:def456\n", encoding="utf-8")
 
     env = dict(default_env)
     env["SUGARKUBE_NODE_TOKEN_PATH"] = str(tmp_path / "missing-node-token")
@@ -93,9 +90,7 @@ def test_missing_token_allowed_for_multi_server_first_bootstrap(default_env):
     assert result.stdout == ""
 
 
-def test_placeholder_boot_token_does_not_block_multi_server_bootstrap(
-    default_env, tmp_path
-):
+def test_placeholder_boot_token_does_not_block_multi_server_bootstrap(default_env, tmp_path):
     boot_token_path = tmp_path / "boot-token"
     boot_token_path.write_text(
         (
@@ -116,9 +111,7 @@ def test_placeholder_boot_token_does_not_block_multi_server_bootstrap(
     assert result.stdout == ""
 
 
-def test_missing_token_rejected_for_multi_server_when_token_file_present(
-    default_env, tmp_path
-):
+def test_missing_token_rejected_for_multi_server_when_token_file_present(default_env, tmp_path):
     boot_token_path = tmp_path / "boot-token"
     boot_token_path.write_text("NODE_TOKEN=\n", encoding="utf-8")
 
