@@ -1463,11 +1463,19 @@ mdns_absence_check_dbus() {
 }
 
 mdns_absence_check_cli() {
-  python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
+  local -a absence_env=(
+    "SUGARKUBE_CLUSTER=${CLUSTER}"
+    "SUGARKUBE_ENV=${ENVIRONMENT}"
+  )
+  if [ -n "${TOKEN:-}" ]; then
+    absence_env+=("SUGARKUBE_TOKEN=${TOKEN}")
+  fi
+  env "${absence_env[@]}" python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
 import subprocess
 import sys
 
 from k3s_mdns_parser import parse_mdns_records
+from k3s_mdns_query import _normalize_record_lines
 from mdns_helpers import _norm_host
 
 service_type, cluster, environment, target = sys.argv[1:5]
@@ -1482,7 +1490,7 @@ try:
 except FileNotFoundError:
     sys.exit(2)
 
-lines = [line for line in proc.stdout.splitlines() if line]
+lines = _normalize_record_lines(proc.stdout.splitlines())
 records = parse_mdns_records(lines, cluster, environment)
 target_norm = _norm_host(target)
 
@@ -2005,7 +2013,14 @@ same_host() {
 
 run_avahi_query() {
   local mode="$1"
-  python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+  local -a query_env=(
+    "SUGARKUBE_CLUSTER=${CLUSTER}"
+    "SUGARKUBE_ENV=${ENVIRONMENT}"
+  )
+  if [ -n "${TOKEN:-}" ]; then
+    query_env+=("SUGARKUBE_TOKEN=${TOKEN}")
+  fi
+  env "${query_env[@]}" python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
 import sys
 
@@ -2444,33 +2459,143 @@ wait_for_bootstrap_activity() {
   return 1
 }
 
-check_api_listen() {
-  if command -v ss >/dev/null 2>&1; then
-    if ss -ltn '( sport = :6443 )' 2>/dev/null | grep -q LISTEN; then
-      return 0
-    fi
+wait_for_api() {
+  if [ -z "${API_READY_CHECK_BIN}" ] || [ ! -x "${API_READY_CHECK_BIN}" ]; then
+    log_error_msg discover "Local API readiness helper missing" "script=${API_READY_CHECK_BIN}" "phase=api_ready_local"
+    return 1
   fi
 
-  if command -v timeout >/dev/null 2>&1; then
-    if timeout 1 bash -c '</dev/tcp/127.0.0.1/6443' >/dev/null 2>&1; then
-      return 0
+  local host="${MDNS_HOST_RAW:-${MDNS_HOST:-localhost}}"
+  local port="6443"
+  local -a check_env=(
+    "SERVER_HOST=${host}"
+    "SERVER_PORT=${port}"
+    "TIMEOUT=${API_READY_TIMEOUT}"
+    "SERVER_IP=127.0.0.1"
+  )
+  if [ -n "${API_READY_POLL_INTERVAL}" ]; then
+    check_env+=("POLL_INTERVAL=${API_READY_POLL_INTERVAL}")
+  fi
+
+  local output=""
+  local status=0
+  if ! output="$(env "${check_env[@]}" "${API_READY_CHECK_BIN}")"; then
+    status=$?
+  fi
+
+  local parse_output=""
+  parse_output="$(
+    printf '%s\n' "${output}" \
+      | python3 - <<'PY'
+import sys
+
+selected = {}
+for raw in sys.stdin:
+    raw = raw.strip()
+    if "event=apiready" not in raw:
+        continue
+    current = {}
+    for token in raw.split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        current[key] = value
+    if current:
+        selected = current
+
+if not selected:
+    sys.exit(1)
+
+keys = ("outcome", "attempts", "elapsed", "status", "reason", "last_status", "host", "port", "ip")
+for key in keys:
+    if key in selected:
+        print(f"{key}={selected[key]}")
+PY
+  )" || parse_output=""
+
+  local outcome=""
+  local attempts=""
+  local elapsed=""
+  local http_status=""
+  local reason=""
+  local last_status=""
+  local parsed_host=""
+  local parsed_port=""
+  local parsed_ip=""
+
+  if [ -n "${parse_output}" ]; then
+    while IFS='=' read -r key value; do
+      case "${key}" in
+        outcome) outcome="${value}" ;;
+        attempts) attempts="${value}" ;;
+        elapsed) elapsed="${value}" ;;
+        status) http_status="${value}" ;;
+        reason) reason="${value}" ;;
+        last_status) last_status="${value}" ;;
+        host) parsed_host="${value}" ;;
+        port) parsed_port="${value}" ;;
+        ip) parsed_ip="${value}" ;;
+      esac
+    done <<<"${parse_output}"
+  fi
+
+  if [ "${status}" -eq 0 ]; then
+    local display_host="${parsed_host:-${host}}"
+    local display_port="${parsed_port:-${port}}"
+    local -a log_fields=(
+      "event=api_ready_local"
+      "outcome=${outcome:-ok}"
+      "host=\"$(escape_log_value "${display_host}")\""
+      "port=\"$(escape_log_value "${display_port}")\""
+    )
+    if [ -n "${parsed_ip}" ]; then
+      log_fields+=("ip=\"$(escape_log_value "${parsed_ip}")\"")
     fi
-  elif bash -c '</dev/tcp/127.0.0.1/6443' >/dev/null 2>&1; then
+    if [ -n "${attempts}" ]; then
+      log_fields+=("attempts=${attempts}")
+    fi
+    if [ -n "${elapsed}" ]; then
+      log_fields+=("elapsed=${elapsed}")
+    fi
+    if [ -n "${http_status}" ]; then
+      log_fields+=("status=${http_status}")
+    fi
+    log_info discover "${log_fields[@]}" >&2
     return 0
   fi
 
-  return 1
-}
-
-wait_for_api() {
-  local attempt
-  for attempt in $(seq 1 60); do
-    if check_api_listen; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
+  local -a warn_fields=(
+    "phase=api_ready_local"
+    "status=${status}"
+  )
+  if [ -n "${outcome}" ]; then
+    warn_fields+=("outcome=${outcome}")
+  fi
+  if [ -n "${reason}" ]; then
+    warn_fields+=("reason=${reason}")
+  fi
+  if [ -n "${last_status}" ]; then
+    warn_fields+=("last_status=${last_status}")
+  fi
+  if [ -n "${attempts}" ]; then
+    warn_fields+=("attempts=${attempts}")
+  fi
+  if [ -n "${elapsed}" ]; then
+    warn_fields+=("elapsed=${elapsed}")
+  fi
+  if [ -n "${parsed_host}" ]; then
+    warn_fields+=("host=\"$(escape_log_value "${parsed_host}")\"")
+  fi
+  if [ -n "${parsed_port}" ]; then
+    warn_fields+=("port=\"$(escape_log_value "${parsed_port}")\"")
+  fi
+  if [ -n "${parsed_ip}" ]; then
+    warn_fields+=("ip=\"$(escape_log_value "${parsed_ip}")\"")
+  fi
+  log_warn_msg discover "Local API readiness helper failed" "${warn_fields[@]}"
+  return "${status}"
 }
 
 publish_avahi_service() {
@@ -3044,7 +3169,7 @@ install_server_single() {
       exit 1
     fi
   else
-    log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_single" "host=${MDNS_HOST_RAW}"
+    log_warn_msg discover "k3s API did not become ready within ${API_READY_TIMEOUT}s; skipping Avahi publish" "phase=install_single" "host=${MDNS_HOST_RAW}"
     summary_status="WARN"
     summary_note+=" reason=api-timeout"
   fi
@@ -3094,7 +3219,7 @@ install_server_cluster_init() {
       exit 1
     fi
   else
-    log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_cluster_init" "host=${MDNS_HOST_RAW}"
+    log_warn_msg discover "k3s API did not become ready within ${API_READY_TIMEOUT}s; skipping Avahi publish" "phase=install_cluster_init" "host=${MDNS_HOST_RAW}"
     summary_status="WARN"
     summary_note+=" reason=api-timeout"
   fi
@@ -3292,7 +3417,7 @@ install_server_join() {
       exit 1
     fi
   else
-    log_warn_msg discover "k3s API did not become ready within 60s; skipping Avahi publish" "phase=install_join" "host=${MDNS_HOST_RAW}"
+    log_warn_msg discover "k3s API did not become ready within ${API_READY_TIMEOUT}s; skipping Avahi publish" "phase=install_join" "host=${MDNS_HOST_RAW}"
     summary_status="WARN"
     summary_note+=" reason=api-timeout"
   fi
