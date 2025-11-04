@@ -177,6 +177,7 @@ __MDNS_TYPES__
         while IFS= read -r browse_line; do
           [ -n "${browse_line}" ] || continue
           IFS=';'
+          # shellcheck disable=SC2086
           set -- ${browse_line}
           IFS="${old_ifs}"
           if [ "$1" = "=" ]; then
@@ -199,6 +200,8 @@ __MDNS_TYPES__
         INITIAL_BROWSE_OUTPUT="${active_output}"
         # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
         INITIAL_BROWSE_READY=1
+        # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
+        INITIAL_BROWSE_ATTEMPTS="${active_attempts}"
         active_found=1
         log_debug mdns_selfcheck event=mdns_type_active outcome=hit attempts="${active_attempts}" instances="${active_count}"
         break

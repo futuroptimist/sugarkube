@@ -140,6 +140,7 @@ fi
 
 INITIAL_BROWSE_OUTPUT=""
 INITIAL_BROWSE_READY=0
+INITIAL_BROWSE_ATTEMPTS=0
 
 SELF_HOSTNAME_SOURCE=""
 if [ "${HOSTNAME+set}" = "set" ] && [ -n "${HOSTNAME}" ]; then
@@ -485,10 +486,14 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
   # Use parsable semicolon-delimited output with resolution and terminate flags
   MDNS_LAST_FAILURE_COMMAND=""
   MDNS_LAST_FAILURE_DURATION=""
+  effective_attempts="${attempt}"
   if [ "${INITIAL_BROWSE_READY}" -eq 1 ]; then
     browse_output="${INITIAL_BROWSE_OUTPUT}"
     browse_command="${active_command:-}"
     browse_duration="${active_duration:-}"
+    if [ "${INITIAL_BROWSE_ATTEMPTS}" -gt 0 ]; then
+      effective_attempts="${INITIAL_BROWSE_ATTEMPTS}"
+    fi
     INITIAL_BROWSE_READY=0
   else
     browse_output="$(run_command_capture mdns_browse avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" || true)"
@@ -639,8 +644,8 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
             MDNS_LAST_FAILURE_COMMAND="${browse_command:-}"
             MDNS_LAST_FAILURE_DURATION="${browse_duration:-}"
           else
-            mdns_resolution_status_emit ok attempt="${attempt}" host="${srv_host}" resolve_method="${resolution_method}"
-            log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${attempt}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
+            mdns_resolution_status_emit ok attempt="${effective_attempts}" host="${srv_host}" resolve_method="${resolution_method}"
+            log_info mdns_selfcheck outcome=ok host="${srv_host}" ipv4="${resolved_ipv4}" port="${srv_port}" attempts="${effective_attempts}" ms_elapsed="${elapsed_ms}" resolve_method="${resolution_method}"
             exit 0
           fi
         fi

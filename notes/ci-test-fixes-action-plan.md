@@ -950,9 +950,9 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - [x] Run test to confirm passes
   - [x] Create outage: 2025-11-04-mdns-selfcheck-test-03-enum-warn.json
 
-- [ ] **Test 4**: Verify attempt logging works
-  - [ ] Run test to confirm `attempts=3` in output
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-04-active-window.json
+- [x] **Test 4**: Verify attempt logging works
+  - [x] Run test to confirm `attempts=3` in output
+  - [x] Create outage: 2025-11-04-mdns-selfcheck-test-04-active-window.json
 
 - [ ] **Test 8**: Add resolution lag warning path
   - [ ] Implement browse-success-but-resolve-fail handling

@@ -32,7 +32,7 @@ EOS
 ```
 
 **Tests needing this fix:**
-1. Line 202: "mdns self-check waits for active queries when instance appears within window"
+1. ~~Line 202: "mdns self-check waits for active queries when instance appears within window"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-04-active-window.json)
 2. Line 254: "mdns self-check strips surrounding quotes before matching"
 3. Line 293: "mdns self-check accepts short host when EXPECTED_HOST has .local"
 4. Line 370: "mdns self-check warns when browse succeeds but resolution lags"
