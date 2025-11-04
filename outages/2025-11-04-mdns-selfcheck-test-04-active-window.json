@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-04-active-window",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:202",
+  "rootCause": "Test expected 'attempts=3' in output when active query window succeeds on 3rd retry. The test was using wrong fixture (avahi_browse_services_with_k3s.txt) which included the service type, causing active query window to be skipped. Additionally, the active query retry count was not being propagated to the final success log message.",
+  "resolution": "Fixed by: (1) Changing test to use avahi_browse_services_without_k3s.txt fixture so service type is missing from enumeration, triggering active query window. (2) Added curl stub to prevent API readiness check from failing. (3) Added INITIAL_BROWSE_ATTEMPTS variable to track active query retry count and propagate it to final success log via effective_attempts variable.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:202-257",
+    "scripts/mdns_type_check.sh:197-205",
+    "scripts/mdns_selfcheck.sh:141-143",
+    "scripts/mdns_selfcheck.sh:486-497",
+    "scripts/mdns_selfcheck.sh:647-649"
+  ]
+}

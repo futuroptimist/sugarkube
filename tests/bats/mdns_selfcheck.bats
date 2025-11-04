@@ -202,7 +202,7 @@ EOS
 @test "mdns self-check waits for active queries when instance appears within window" {
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
-services_fixture="${BATS_CWD}/tests/fixtures/avahi_browse_services_with_k3s.txt"
+services_fixture="${BATS_CWD}/tests/fixtures/avahi_browse_services_without_k3s.txt"
 if [ "$#" -gt 0 ] && [ "${!#}" = "_services._dns-sd._udp" ]; then
   cat "${services_fixture}"
   exit 0
@@ -231,6 +231,12 @@ if [ "$1" = "-n" ]; then
   shift
 fi
 printf '%s %s\n' "$1" "10.0.0.5"
+EOS
+
+  stub_command curl <<'EOS'
+#!/usr/bin/env bash
+# Stub curl to simulate successful API readiness check
+exit 0
 EOS
 
   run env \
