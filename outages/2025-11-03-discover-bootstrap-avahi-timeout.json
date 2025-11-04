@@ -1,0 +1,10 @@
+{
+  "id": "discover-bootstrap-avahi-timeout",
+  "date": "2025-11-03",
+  "component": "tests/bats/discover_flow.bats",
+  "rootCause": "The 'discover flow waits for Avahi liveness after reload' test does not stub journalctl. When mdns_publish_static.sh calls wait_for_avahi_publication, it queries the real journalctl for avahi-daemon logs containing 'Service ... successfully established'. In the CI environment, journalctl either has no avahi logs or the expected message never appears, causing a 20-second timeout and test failure.",
+  "resolution": "Add journalctl stub to the test that returns the expected 'Service ... successfully established' message when queried for avahi-daemon logs.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/actions/runs/19027073016/job/54332570834?pr=1664"
+  ]
+}

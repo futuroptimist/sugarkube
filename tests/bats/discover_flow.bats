@@ -345,6 +345,18 @@ fi
 exit 0
 EOS
 
+  stub_command journalctl <<'EOS'
+#!/usr/bin/env bash
+# Stub journalctl to return successful Avahi service establishment
+if [ "$1" = "-u" ] && [ "$2" = "avahi-daemon" ]; then
+  cat <<JOURNAL
+Service "k3s-demo-test@demo.local (bootstrap)" successfully established.
+JOURNAL
+  exit 0
+fi
+exit 0
+EOS
+
   stub_command sleep <<'EOS'
 #!/usr/bin/env bash
 echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"

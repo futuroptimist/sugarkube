@@ -60,8 +60,10 @@ jobs:
           mkdir -p "$KCOV_OUT"
           # Run bats via kcov so executed shell scripts are tracked.
           # Limit to our repo to avoid measuring system files.
+          # Use --bash-dont-parse-binary-dir to prevent xtrace pollution
           kcov --include-path="${GITHUB_WORKSPACE}/scripts" \
-               --exclude-pattern="/usr,/opt,/lib,/bin,/sbin" \
+               --exclude-pattern="/usr,/opt,/lib,/bin,/sbin,${GITHUB_WORKSPACE}/tests" \
+               --bash-dont-parse-binary-dir \
                "$KCOV_OUT" \
                bats --recursive tests/bats
 

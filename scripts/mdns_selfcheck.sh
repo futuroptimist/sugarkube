@@ -477,7 +477,7 @@ SELF_LOCAL_HOST=""
 if [ -n "${SELF_HOSTNAME_ALIASES}" ]; then
   local_self_aliases="${SELF_HOSTNAME_ALIASES}"
   old_ifs="${IFS}"
-  IFS="$(printf '\n')"
+  IFS=$'\n'
   for self_alias in ${local_self_aliases}; do
     case "${self_alias}" in
       *.local)
@@ -520,7 +520,7 @@ host_matches_self() {
   fi
   local alias
   local old_ifs="${IFS}"
-  IFS="$(printf '\n')"
+  IFS=$'\n'
   for alias in ${SELF_HOSTNAME_ALIASES}; do
     if [ "${lowered}" = "${alias}" ]; then
       IFS="${old_ifs}"
@@ -1240,7 +1240,7 @@ mdns_selfcheck__service_type_check() {
         case "${field}" in
           "${SERVICE_TYPE}")
             type_present=1
-            ;;
+            ;;&
           _*._tcp|_*._udp)
             case "${available_seen}" in
               *,"${field}",*)
