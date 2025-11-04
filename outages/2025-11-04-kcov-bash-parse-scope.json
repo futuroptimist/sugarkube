@@ -1,0 +1,11 @@
+{
+  "id": "kcov-bash-parse-scope",
+  "date": "2025-11-04",
+  "component": "CI / test workflow",
+  "rootCause": "The kcov --bash-dont-parse-binary-dir flag alone is insufficient to prevent xtrace pollution in BATS test output. kcov was still instrumenting bash scripts outside the intended scope (scripts/ directory), causing test assertions like '[[ \"$output\" =~ pattern ]]' to be echoed to stderr with backslash-escaped characters. This broke 26+ BATS tests that check for specific log patterns.",
+  "resolution": "Added --bash-parse-files-in-dir flag to kcov invocation to explicitly limit bash instrumentation to only files in the scripts/ directory. This prevents kcov from instrumenting BATS test files and other bash code outside our target scripts. Also added explicit 'set +x' in summary__with_strict() function to prevent xtrace from being re-enabled when restoring shell options.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/blob/main/.github/workflows/ci.yml",
+    "https://github.com/futuroptimist/sugarkube/blob/main/outages/2025-11-03-kcov-bash-xtrace-output.json"
+  ]
+}

@@ -61,9 +61,11 @@ jobs:
           # Run bats via kcov so executed shell scripts are tracked.
           # Limit to our repo to avoid measuring system files.
           # Use --bash-dont-parse-binary-dir to prevent xtrace pollution
+          # Use --bash-parse-files-in-dir to only instrument our scripts
           kcov --include-path="${GITHUB_WORKSPACE}/scripts" \
                --exclude-pattern="/usr,/opt,/lib,/bin,/sbin,${GITHUB_WORKSPACE}/tests" \
                --bash-dont-parse-binary-dir \
+               --bash-parse-files-in-dir="${GITHUB_WORKSPACE}/scripts" \
                "$KCOV_OUT" \
                bats --recursive tests/bats
 
