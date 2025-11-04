@@ -28,15 +28,8 @@ jobs:
             avahi-daemon \
             avahi-utils \
             bats \
-            build-essential \
-            cmake \
             dbus \
-            libcurl4-openssl-dev \
-            libdw-dev \
-            libnss-mdns \
-            zlib1g-dev \
-            binutils-dev \
-            libiberty-dev
+            libnss-mdns
 
       - name: Ensure Avahi services are running
         run: |
@@ -44,30 +37,14 @@ jobs:
           sudo systemctl start avahi-daemon
           sudo systemctl status avahi-daemon --no-pager
 
-      - name: Build and install kcov
-        run: |
-          git clone --depth=1 https://github.com/SimonKagstrom/kcov.git
-          cd kcov
-          cmake -B build
-          cmake --build build
-          sudo cmake --install build
-
-      - name: Run Bash tests under kcov
+      - name: Run Bash tests
         env:
-          KCOV_OUT: ${{ github.workspace }}/coverage/kcov
           BATS_LIB_PATH: ${{ github.workspace }}/tests/bats
         run: |
-          mkdir -p "$KCOV_OUT"
-          # Run bats via kcov so executed shell scripts are tracked.
-          # Limit to our repo to avoid measuring system files.
-          # Use --bash-dont-parse-binary-dir to prevent xtrace pollution
-          # Use --bash-parse-files-in-dir to only instrument our scripts
-          kcov --include-path="${GITHUB_WORKSPACE}/scripts" \
-               --exclude-pattern="/usr,/opt,/lib,/bin,/sbin,${GITHUB_WORKSPACE}/tests" \
-               --bash-dont-parse-binary-dir \
-               --bash-parse-files-in-dir="${GITHUB_WORKSPACE}/scripts" \
-               "$KCOV_OUT" \
-               bats --recursive tests/bats
+          # Run bats tests directly without kcov to avoid xtrace pollution
+          # kcov's bash instrumentation interferes with test assertions
+          # See outages/2025-11-04-kcov-bash-parse-scope.json
+          bats --recursive tests/bats
 
       - name: Run Python tests with coverage
         id: pytest

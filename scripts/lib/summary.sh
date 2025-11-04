@@ -31,8 +31,6 @@ summary__with_strict() {
   "$@"
   local status=$?
   eval "${previous}"
-  # Explicitly disable xtrace to prevent kcov pollution in test output
-  set +x 2>/dev/null || true
   return "${status}"
 }
 

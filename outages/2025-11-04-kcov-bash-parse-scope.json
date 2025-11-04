@@ -2,8 +2,8 @@
   "id": "kcov-bash-parse-scope",
   "date": "2025-11-04",
   "component": "CI / test workflow",
-  "rootCause": "The kcov --bash-dont-parse-binary-dir flag alone is insufficient to prevent xtrace pollution in BATS test output. kcov was still instrumenting bash scripts outside the intended scope (scripts/ directory), causing test assertions like '[[ \"$output\" =~ pattern ]]' to be echoed to stderr with backslash-escaped characters. This broke 26+ BATS tests that check for specific log patterns.",
-  "resolution": "Added --bash-parse-files-in-dir flag to kcov invocation to explicitly limit bash instrumentation to only files in the scripts/ directory. This prevents kcov from instrumenting BATS test files and other bash code outside our target scripts. Also added explicit 'set +x' in summary__with_strict() function to prevent xtrace from being re-enabled when restoring shell options.",
+  "rootCause": "kcov's bash instrumentation uses xtrace (set -x) to track code coverage, which pollutes test output with backslash-escaped command traces. When BATS tests run under kcov, test assertions like '[[ \"$output\" =~ pattern ]]' are echoed to stderr with each character backslash-escaped (e.g., *\\e\\v\\e\\n\\t\\=\\a\\v\\a\\h\\i*), breaking pattern matching assertions. The --bash-dont-parse-binary-dir and --bash-parse-files-in-dir flags were insufficient to prevent kcov from instrumenting bash subprocesses spawned by BATS, leading to 26+ test failures.",
+  "resolution": "Removed kcov instrumentation from BATS test execution entirely. BATS tests now run directly without coverage tracking to avoid xtrace pollution. Python test coverage is still collected via pytest-cov. This trade-off prioritizes test reliability over bash code coverage metrics. Removed unnecessary kcov build dependencies from CI workflow.",
   "references": [
     "https://github.com/futuroptimist/sugarkube/blob/main/.github/workflows/ci.yml",
     "https://github.com/futuroptimist/sugarkube/blob/main/outages/2025-11-03-kcov-bash-xtrace-output.json"
