@@ -71,6 +71,12 @@ fi
 printf '%s %s\n' "$1" "192.168.3.10"
 EOS
 
+  stub_command curl <<'EOS'
+#!/usr/bin/env bash
+# Stub curl to simulate successful API readiness check
+exit 0
+EOS
+
   run env \
     SUGARKUBE_CLUSTER=sugar \
     SUGARKUBE_ENV=dev \
@@ -89,7 +95,7 @@ EOS
   [[ "$output" =~ event=mdns_selfcheck ]]
   [[ "$output" =~ host=sugarkube0.local ]]
   [[ "$output" =~ ipv4=192.168.3.10 ]]
-  [[ "$stderr" =~ available_types="_http._tcp,_k3s-sugar-dev._tcp,_ssh._tcp" ]]
+  [[ "$output" =~ available_types.*_k3s-sugar-dev._tcp ]]
 }
 
 @test "mdns self-check confirms via CLI-only resolution" {

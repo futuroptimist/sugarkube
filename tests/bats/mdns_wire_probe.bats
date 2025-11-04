@@ -35,6 +35,7 @@ prepare_mdns_publish_static_environment() {
   export SUGARKUBE_AVAHI_HOSTS_PATH="${HOSTS_PATH}"
   export TEST_JOURNAL_LOG="${JOURNAL_LOG}"
   export TEST_RENAME_MARKER="${RENAME_MARKER}"
+  export ALLOW_NON_ROOT=1
 
   real_mv="$(command -v mv)"
   real_chmod="$(command -v chmod)"
