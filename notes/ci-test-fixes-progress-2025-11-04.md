@@ -110,3 +110,31 @@ Plus:
 - join_gate.bats: 2-4 hours
 
 **Grand Total**: 12-23 hours for complete CI green
+
+## Update: Additional Investigation
+
+### Test 9 Attempted Fix
+
+Attempted to add `reason=browse_empty` by setting `last_reason="browse_empty"` when miss_count >= ATTEMPTS and last_reason is empty. However, discovered that:
+
+1. The script has multiple exit points within the main loop (lines 507, 577, 612, 626, 644, 671, 697, 733)
+2. When browse is truly empty, the script may be exiting via one of these earlier paths
+3. The final failure logging section (line 855+) may not be reached in all failure scenarios
+4. Need deeper investigation of control flow to understand which exit path is taken when browse returns no records
+
+**Recommendation**: Test 9 requires more detailed flow analysis to identify which exit path is used for browse_empty scenario, then add appropriate reason logging at that exit point.
+
+## Summary
+
+Successfully fixed 1 of 8 failing mdns_selfcheck tests (Test 3). Remaining tests require deeper code analysis and architectural decisions (especially around stdout/stderr routing). Each test is more complex than initially estimated.
+
+**Time Invested**: ~3 hours  
+**Tests Fixed**: 1 (Test 3)  
+**Outages Documented**: 2  
+**Progress Documentation**: Complete analysis of all remaining failures
+
+**Next Steps** for future PRs:
+1. Map all exit paths in mdns_selfcheck.sh main loop
+2. Identify which path is taken for each test scenario
+3. Add appropriate reason/logging at each relevant exit point
+4. Consider refactoring to simplify control flow
