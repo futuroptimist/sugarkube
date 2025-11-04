@@ -1480,6 +1480,52 @@ PY
       fi
     fi
   fi
+
+  echo "DEBUG_BEFORE_EXPORTS: About to export variables" >&2
+
+  # Export key variables for use outside the function
+  SERVICE_TYPE_PRESENT="${type_present}"
+  SERVICE_TYPE_ACTIVE_FOUND="${active_found}"
+  SERVICE_TYPE_AVAILABLE_KV="${available_kv}"
+  SERVICE_TYPE_CMD="${type_command}"
+  SERVICE_TYPE_DURATION="${type_duration}"
+
+  echo "DEBUG_FUNC_END: type_present=${type_present} active_found=${active_found}" >&2
+
+  # Fail fast with exit code 4 when service type is not present
+  if [ "${type_present}" -eq 0 ] && [ "${active_found}" -eq 0 ]; then
+    echo "DEBUG_BEFORE_EXIT4: Exiting with code 4" >&2
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+    case "${elapsed_ms}" in
+      ''|*[!0-9]*) elapsed_ms=0 ;;
+    esac
+    fail_command_kv=""
+    fail_duration_kv=""
+    if [ -n "${type_command}" ]; then
+      fail_command_kv="command=\"$(kv_escape "${type_command}")\""
+    fi
+    if [ -n "${type_duration}" ]; then
+      fail_duration_kv="command_duration_ms=${type_duration}"
+    fi
+    if [ -n "${fail_command_kv}" ] && [ -n "${fail_duration_kv}" ] && [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}" "${fail_command_kv}" "${fail_duration_kv}"
+    elif [ -n "${fail_command_kv}" ] && [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}" "${fail_command_kv}"
+    elif [ -n "${fail_duration_kv}" ] && [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}" "${fail_duration_kv}"
+    elif [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}"
+    elif [ -n "${fail_command_kv}" ] && [ -n "${fail_duration_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}" "${fail_duration_kv}"
+    elif [ -n "${fail_command_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${fail_command_kv}"
+    elif [ -n "${fail_duration_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${fail_duration_kv}"
+    else
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}"
+    fi
+    exit 4
+  fi
 }
 
 mdns_liveness_probe
