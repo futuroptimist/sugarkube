@@ -1480,6 +1480,34 @@ PY
       fi
     fi
   fi
+  
+  # Fail fast with exit code 4 when service type is missing (test 27)
+  # Exit here before returning from function to ensure we tried both enumeration and active query
+  if [ "${type_present}" -eq 0 ] && [ "${active_found}" -eq 0 ]; then
+    elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+    case "${elapsed_ms}" in
+      ''|*[!0-9]*) elapsed_ms=0 ;;
+    esac
+    
+    if [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ] && [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}" "${type_command_kv}" "${type_duration_kv}"
+    elif [ -n "${type_command_kv}" ] && [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}" "${type_command_kv}"
+    elif [ -n "${type_duration_kv}" ] && [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}" "${type_duration_kv}"
+    elif [ -n "${available_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}"
+    elif [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${type_command_kv}" "${type_duration_kv}"
+    elif [ -n "${type_command_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${type_command_kv}"
+    elif [ -n "${type_duration_kv}" ]; then
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${type_duration_kv}"
+    else
+      log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}"
+    fi
+    exit 4
+  fi
 }
 
 mdns_liveness_probe
