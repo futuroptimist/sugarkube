@@ -16,11 +16,16 @@
   },
   "resolution": {
     "action": "Added curl stub to server role tests to simulate successful API readiness",
-    "example": "stub_command curl <<'EOS'\\n#!/usr/bin/env bash\\nexit 0\\nEOS",
+    "exampleLines": [
+      "stub_command curl <<'EOS'",
+      "#!/usr/bin/env bash",
+      "exit 0",
+      "EOS"
+    ],
     "files": [
       "tests/bats/mdns_selfcheck.bats"
     ],
-    "commits": ["1dd9e69", "271784c"]
+    "commits": ["1dd9e69", "271784c", "cd64613"]
   },
   "timeline": [
     {

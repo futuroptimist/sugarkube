@@ -95,7 +95,7 @@ EOS
   [[ "$output" =~ event=mdns_selfcheck ]]
   [[ "$output" =~ host=sugarkube0.local ]]
   [[ "$output" =~ ipv4=192.168.3.10 ]]
-  [[ "$output" =~ available_types.*_k3s-sugar-dev._tcp ]]
+  [[ "$output" =~ available_types=\"[^\"]*_k3s-sugar-dev._tcp[^\"]*\" ]]
 }
 
 @test "mdns self-check confirms via CLI-only resolution" {

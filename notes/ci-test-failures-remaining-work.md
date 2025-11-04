@@ -4,15 +4,14 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Summary of Fixes Applied
 
-### ✅ Completed (6 tests fixed)
-1. **mdns_wire_probe.bats** - 2/2 tests now passing
+### ✅ Completed (14 tests fixed)
+1. **mdns_wire_probe.bats** - 4/4 tests now passing
    - Fixed by adding `ALLOW_NON_ROOT=1` environment variable
    - Root cause documented in `outages/2025-11-04-mdns-test-missing-allow-non-root.json`
 
-2. **mdns_selfcheck.bats** - 3/18 tests now passing
-   - Test 1: Added curl stub for socket readiness check
-   - Test 2: Removed incorrect assertion about avahi-resolve
-   - Test 3: Added curl stub
+2. **mdns_selfcheck.bats** - 10/18 tests now passing
+   - Tests 1-3: Added curl stubs and fixed assertions
+   - Tests 5-7, 11, 14, 17: Added curl stubs for server socket checks
    - Root causes documented in:
      - `outages/2025-11-04-mdns-test-missing-curl-stub.json`
      - `outages/2025-11-04-mdns-test-incorrect-assertion.json`
