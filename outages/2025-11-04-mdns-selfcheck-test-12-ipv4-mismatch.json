@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-12-ipv4-mismatch",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:541",
+  "rootCause": "Test 'mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry' expects exit code 5 when discovered IPv4 address (10.0.0.5) doesn't match EXPECTED_IPV4 (10.0.0.99). The script should return a specific exit code to allow callers to distinguish IP mismatch from other failures and potentially retry with relaxed matching.",
+  "resolution": "Investigation needed in IP validation logic. The script should compare resolved IPv4 against EXPECTED_IPV4 and exit with code 5 on mismatch. This is likely in the main retry loop after resolution succeeds but before final validation. Check mdns_selfcheck.sh lines 550-700 for IPv4 comparison and exit code logic.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:541-583",
+    "scripts/mdns_selfcheck.sh:550-700",
+    "notes/final-summary.md:53-56"
+  ]
+}

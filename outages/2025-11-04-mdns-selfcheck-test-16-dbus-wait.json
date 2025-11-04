@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-16-dbus-wait",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:722",
+  "rootCause": "Test 'mdns dbus self-check waits for avahi bus before browsing' fails with non-zero exit status. Test stubs gdbus to fail with ServiceUnknown error for first 2 introspect calls, then succeed on 3rd attempt. The mdns_selfcheck_dbus.sh script should wait/retry for Avahi dbus service to become ready before attempting to browse.",
+  "resolution": "Investigation needed in wait_for_avahi_dbus logic. The script should retry gdbus introspect calls when ServiceUnknown error occurs, with backoff between attempts. After Avahi becomes ready, should proceed with ServiceBrowserNew and complete successfully. Check mdns_selfcheck_dbus.sh or wait_for_avahi_dbus helper function.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:722-828",
+    "scripts/mdns_selfcheck_dbus.sh",
+    "notes/final-summary.md:65-68"
+  ]
+}

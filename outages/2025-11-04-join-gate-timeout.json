@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-join-gate-timeout",
+  "date": "2025-11-04",
+  "component": "tests/bats/join_gate.bats",
+  "rootCause": "Tests in join_gate.bats time out during execution. Similar to discover_flow, tests likely missing curl stubs for API checks or have dependencies on external services that cause indefinite waits.",
+  "resolution": "Investigation needed: 1) Add curl stubs similar to discover_flow fixes, 2) Review test logic for network operation dependencies, 3) Ensure avahi-publish-service and avahi-browse stubs are working correctly, 4) Add timeout handling where appropriate.",
+  "references": [
+    "tests/bats/join_gate.bats",
+    "notes/ci-test-failures-remaining-work.md:69-77",
+    "https://github.com/futuroptimist/sugarkube/issues/1672"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-08-resolution-lag",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:381",
+  "rootCause": "Test 'mdns self-check warns when browse succeeds but resolution lags' fails with non-zero exit status. Test stubs avahi-resolve, avahi-resolve-host-name, and getent to all fail (exit 1 or 2), expecting the script to succeed with outcome=warn and reason=resolve_failed. The script should complete successfully but warn that resolution failed while browse succeeded.",
+  "resolution": "Investigation needed in mdns resolution logic (mdns_resolution.sh or mdns_selfcheck.sh main loop). When browse finds an instance but all resolution methods fail, the script should return exit code 0 with a warning outcome, not fail completely.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:381-419",
+    "scripts/mdns_selfcheck.sh:530-800",
+    "notes/final-summary.md:41-44"
+  ]
+}

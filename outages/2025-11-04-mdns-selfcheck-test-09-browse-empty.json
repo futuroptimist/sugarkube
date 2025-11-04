@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-09-browse-empty",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:421",
+  "rootCause": "Test 'mdns self-check reports failure when no records appear' fails because expected 'reason=browse_empty' is not found in output. Test uses avahi_browse_empty.txt fixture which contains no service records. The script should detect this condition and exit with code 1 and reason=browse_empty in the log output.",
+  "resolution": "Investigation needed in browse result parsing logic. The script should detect when browse returns no matching records after all retry attempts and log the specific failure reason. May need to check the miss_count tracking and final failure reporting in mdns_selfcheck.sh main loop (lines 484-900).",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:421-452",
+    "tests/fixtures/avahi_browse_empty.txt",
+    "scripts/mdns_selfcheck.sh:484-900",
+    "notes/final-summary.md:45-48"
+  ]
+}

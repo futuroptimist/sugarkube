@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-04-active-window",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:202",
+  "rootCause": "Test 'mdns self-check waits for active queries when instance appears within window' fails with assertion error - expected 'attempts=3' in output but not found. The test configures SUGARKUBE_SELFCHK_ATTEMPTS=5 and stubs avahi-browse to return empty results for first 2 calls, then return instances on the 3rd call. The active query retry logic should log attempts=3 when it succeeds.",
+  "resolution": "Investigation needed for active query retry logic in mdns_type_check.sh. The loop at line 168 should increment active_attempts and log it when instances are found. May be related to the awk hang issue preventing the loop from completing properly.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:202-252",
+    "scripts/mdns_type_check.sh:168-196",
+    "notes/final-summary.md:37-40"
+  ]
+}

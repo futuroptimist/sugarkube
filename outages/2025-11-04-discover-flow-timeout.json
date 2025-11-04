@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-discover-flow-timeout",
+  "date": "2025-11-04",
+  "component": "tests/bats/discover_flow.bats",
+  "rootCause": "Tests in discover_flow.bats time out during execution, particularly around test 5-6. Tests hang waiting for network operations or missing service stubs (likely curl for API readiness checks or avahi commands).",
+  "resolution": "Investigation needed: 1) Add curl stubs for API readiness checks, 2) Review test timeouts and adjust if needed, 3) Check for missing command stubs that cause the script to wait indefinitely, 4) Ensure proper test isolation and cleanup.",
+  "references": [
+    "tests/bats/discover_flow.bats",
+    "notes/ci-test-failures-remaining-work.md:53-67",
+    "https://github.com/futuroptimist/sugarkube/issues/1672"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-active-query-hang",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats",
+  "rootCause": "Active query awk processing hangs or fails in certain test environments when counting service instances during type enumeration fallback. The awk command that processes avahi-browse output to count matching service types appears to hang indefinitely in some execution contexts, preventing the active query window logic from completing.",
+  "resolution": "Investigation ongoing. The active query window logic in mdns_type_check.sh successfully finds instances during the active browse, but the awk processing to count these instances may be encountering environment-specific issues. May need to add timeout handling or alternative counting mechanism.",
+  "references": [
+    "notes/ci-test-failures-remaining-work.md",
+    "notes/final-summary.md",
+    "scripts/mdns_type_check.sh:173-184",
+    "https://github.com/futuroptimist/sugarkube/issues/1672"
+  ]
+}
