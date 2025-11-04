@@ -151,6 +151,7 @@ __MDNS_TYPES__
     ''|*[!0-9]*) active_window_ms=0 ;;
   esac
 
+  # shellcheck disable=SC2154  # script_start_ms is defined in sourcing script (mdns_selfcheck.sh)
   active_start_elapsed="$(elapsed_since_start_ms "${script_start_ms}")"
   case "${active_start_elapsed}" in
     ''|*[!0-9]*) active_start_elapsed=0 ;;
@@ -158,7 +159,9 @@ __MDNS_TYPES__
 
   active_attempts=0
   active_found=0
+  # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
   INITIAL_BROWSE_OUTPUT=""
+  # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
   INITIAL_BROWSE_READY=0
 
   if [ "${type_present}" -eq 0 ]; then
@@ -184,7 +187,9 @@ END { print count }
       esac
 
       if [ "${active_count}" -gt 0 ]; then
+        # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
         INITIAL_BROWSE_OUTPUT="${active_output}"
+        # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
         INITIAL_BROWSE_READY=1
         active_found=1
         log_debug mdns_selfcheck event=mdns_type_active outcome=hit attempts="${active_attempts}" instances="${active_count}"
@@ -192,10 +197,12 @@ END { print count }
       fi
 
       if [ "${active_window_ms}" -le 0 ]; then
+        # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
         INITIAL_BROWSE_OUTPUT="${active_output}"
         break
       fi
 
+      # shellcheck disable=SC2154  # script_start_ms is defined in sourcing script (mdns_selfcheck.sh)
       current_elapsed="$(elapsed_since_start_ms "${script_start_ms}")"
       case "${current_elapsed}" in
         ''|*[!0-9]*) current_elapsed=0 ;;
@@ -205,6 +212,7 @@ END { print count }
         delta_ms=0
       fi
       if [ "${delta_ms}" -ge "${active_window_ms}" ]; then
+        # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
         INITIAL_BROWSE_OUTPUT="${active_output}"
         break
       fi

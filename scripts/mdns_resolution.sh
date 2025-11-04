@@ -114,6 +114,7 @@ resolve_self_ipv4() {
     return 1
   fi
 
+  # shellcheck disable=SC2034  # Used externally by sourcing scripts
   MDNS_LAST_CMD_PARSED_IPV4="${ipv4}"
 
   if [ -n "${expected_ipv4}" ] && [ "${ipv4}" != "${expected_ipv4}" ]; then
@@ -274,6 +275,7 @@ self_resolve_handle_success() {
   fi
 
   local elapsed_ms
+  # shellcheck disable=SC2154  # script_start_ms is defined in sourcing script
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}" 2>/dev/null || printf '%s' 0)"
   case "${elapsed_ms}" in
     ''|*[!0-9]*) elapsed_ms=0 ;;

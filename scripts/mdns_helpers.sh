@@ -64,11 +64,15 @@ run_command_capture() {
   case "${duration_ms}" in
     ''|*[!0-9]*) duration_ms=0 ;;
   esac
+  # shellcheck disable=SC2034  # Used externally by sourcing scripts
   MDNS_LAST_CMD_DISPLAY="${cmd_display}"
+  # shellcheck disable=SC2034  # Used externally by sourcing scripts
   MDNS_LAST_CMD_DURATION_MS="${duration_ms}"
-  # shellcheck disable=SC2034
+  # shellcheck disable=SC2034  # Used externally by sourcing scripts
   MDNS_LAST_CMD_OUTPUT="${output}"
+  # shellcheck disable=SC2034  # Used externally by sourcing scripts
   MDNS_LAST_CMD_RC="${rc}"
+  # shellcheck disable=SC2034  # Used externally by sourcing scripts
   MDNS_LAST_CMD_PARSED_IPV4=""
   local outcome
   if [ "${rc}" -eq 0 ]; then
