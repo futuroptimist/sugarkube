@@ -941,14 +941,14 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
 
 ## Implementation Checklist
 
-- [ ] **PRIORITY 1**: Fix awk hang in mdns_type_check.sh:173-184
-  - [ ] Apply timeout wrapper or pure bash replacement
-  - [ ] Test that active_found gets set correctly
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-active-query-awk-hang.json
+- [x] **PRIORITY 1**: Fix awk hang in mdns_type_check.sh:173-184
+  - [x] Apply timeout wrapper or pure bash replacement
+  - [x] Test that active_found gets set correctly
+  - [x] Create outage: 2025-11-04-mdns-selfcheck-active-query-awk-hang.json
 
-- [ ] **Test 3**: Verify fix after awk change
-  - [ ] Run test to confirm passes
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-03-enum-warn.json
+- [x] **Test 3**: Verify fix after awk change
+  - [x] Run test to confirm passes
+  - [x] Create outage: 2025-11-04-mdns-selfcheck-test-03-enum-warn.json
 
 - [ ] **Test 4**: Verify attempt logging works
   - [ ] Run test to confirm `attempts=3` in output
