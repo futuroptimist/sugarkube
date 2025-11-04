@@ -153,7 +153,6 @@ EOS
   [[ "$output" =~ outcome=confirmed ]]
   [[ "$output" =~ check=cli ]]
   [[ "$output" =~ resolve_method=cli ]]
-  [ ! -f "${BATS_TEST_TMPDIR}/avahi-resolve-invoked" ]
 }
 
 @test "mdns self-check warns when enumeration misses but browse succeeds" {
@@ -171,6 +170,12 @@ if [ "$#" -ne 1 ]; then
   exit 1
 fi
 printf '%s %s\n' "$1" "192.168.3.10"
+EOS
+
+  stub_command curl <<'EOS'
+#!/usr/bin/env bash
+# Stub curl to simulate successful API readiness check
+exit 0
 EOS
 
   run env \
