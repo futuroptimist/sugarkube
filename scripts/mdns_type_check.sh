@@ -116,33 +116,57 @@ __MDNS_TYPES__
     fi
   else
     if [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${available_kv}" \
         "${type_command_kv}" \
         "${type_duration_kv}"
     elif [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${available_kv}" \
         "${type_command_kv}"
     elif [ -n "${available_kv}" ] && [ -n "${type_duration_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${available_kv}" \
         "${type_duration_kv}"
     elif [ -n "${available_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${available_kv}"
     elif [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${type_command_kv}" \
         "${type_duration_kv}"
     elif [ -n "${type_command_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${type_command_kv}"
     elif [ -n "${type_duration_kv}" ]; then
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn \
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn \
         "${type_duration_kv}"
     else
-      log_info mdns_type_check present="${type_present}" service_type="${SERVICE_TYPE}" severity=warn
+      log_debug mdns_type_check \
+        present="${type_present}" \
+        service_type="${SERVICE_TYPE}" \
+        severity=warn
     fi
   fi
 

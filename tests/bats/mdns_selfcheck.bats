@@ -465,8 +465,8 @@ if [ "$#" -gt 0 ] && [ "${!#}" = "_services._dns-sd._udp" ]; then
   cat "${services_fixture}"
   exit 0
 fi
-echo "unexpected browse invocation: $*" >&2
-exit 2
+# For active query attempts, return empty and exit success
+exit 0
 EOS
 
   stub_command avahi-resolve <<'EOS'
@@ -489,15 +489,16 @@ EOS
     SUGARKUBE_SELFCHK_ATTEMPTS=2 \
     SUGARKUBE_SELFCHK_BACKOFF_START_MS=10 \
     SUGARKUBE_SELFCHK_BACKOFF_CAP_MS=10 \
+    LOG_LEVEL=debug \
     SUGARKUBE_MDNS_DBUS=0 \
     "${BATS_CWD}/scripts/mdns_selfcheck.sh"
 
   [ "$status" -eq 4 ]
   [[ "$output" =~ reason=service_type_missing ]]
   [[ "$output" =~ service_type=_k3s-sugar-dev._tcp ]]
-  [[ "$stderr" =~ event=mdns_type_check ]]
-  [[ "$stderr" =~ present=0 ]]
-  [[ "$output" =~ available_types="_http._tcp,_ssh._tcp" ]]
+  [[ "$output" =~ event=mdns_type_check ]]
+  [[ "$output" =~ present=0 ]]
+  [[ "$output" =~ available_types=\"_http._tcp,_ssh._tcp\" ]]
 }
 
 @test "mdns self-check tolerates extra avahi-browse fields and anchors by type" {
