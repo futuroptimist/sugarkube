@@ -170,18 +170,26 @@ __MDNS_TYPES__
       active_output="$(run_command_capture mdns_browse_active avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" || true)"
       active_command="${MDNS_LAST_CMD_DISPLAY:-}"
       active_duration="${MDNS_LAST_CMD_DURATION_MS:-}"
-      active_count="$(printf '%s\n' "${active_output}" | awk -v svc="${SERVICE_TYPE}" '
-BEGIN { FS = ";"; count = 0 }
-$1 == "=" {
-  for (i = 1; i <= NF; i++) {
-    if ($i == svc) {
-      count++
-      break
-    }
-  }
-}
-END { print count }
-"' 2>/dev/null | tr -d '\n' | tr -d '\r')"
+      # Count service instances using pure bash (more robust than awk in test contexts)
+      active_count=0
+      if [ -n "${active_output}" ]; then
+        local old_ifs="${IFS}"
+        while IFS= read -r browse_line; do
+          [ -n "${browse_line}" ] || continue
+          IFS=';'
+          set -- ${browse_line}
+          IFS="${old_ifs}"
+          if [ "$1" = "=" ]; then
+            for field in "$@"; do
+              if [ "${field}" = "${SERVICE_TYPE}" ]; then
+                active_count=$((active_count + 1))
+                break
+              fi
+            done
+          fi
+        done <<< "${active_output}"
+        IFS="${old_ifs}"
+      fi
       case "${active_count}" in
         ''|*[!0-9]*) active_count=0 ;;
       esac

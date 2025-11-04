@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-03-enum-warn",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:158",
+  "rootCause": "Test failed because active query awk hang prevented active_found=1 from being set. When service type missing from enumeration but instances found via active browse, script should warn (severity=warn) and continue (exit 0), but instead exited early with code 4 due to active_found=0.",
+  "resolution": "Fixed by resolving awk hang issue in mdns_type_check.sh:173-184. Active query now properly sets active_found=1 when instances discovered, allowing script to continue to main loop despite type_present=0.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:158-200",
+    "scripts/mdns_type_check.sh:167-196",
+    "outages/2025-11-04-mdns-selfcheck-active-query-awk-hang.json"
+  ]
+}
