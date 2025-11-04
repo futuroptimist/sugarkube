@@ -78,8 +78,10 @@ PY
 
 MDNS_LAST_CMD_DISPLAY=""
 MDNS_LAST_CMD_DURATION_MS=""
+# shellcheck disable=SC2034  # Set by run_command_capture in mdns_helpers.sh
 MDNS_LAST_CMD_OUTPUT=""
 MDNS_LAST_CMD_RC=""
+# shellcheck disable=SC2034  # Set by resolve functions in mdns_resolution.sh
 MDNS_LAST_CMD_PARSED_IPV4=""
 MDNS_LAST_FAILURE_COMMAND=""
 MDNS_LAST_FAILURE_DURATION=""

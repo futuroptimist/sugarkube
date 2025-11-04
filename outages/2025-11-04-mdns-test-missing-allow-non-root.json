@@ -1,0 +1,13 @@
+{
+  "id": "mdns-test-missing-allow-non-root",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_wire_probe.bats",
+  "rootCause": "The prepare_mdns_publish_static_environment() function did not export ALLOW_NON_ROOT=1, which is required when running tests as a non-root user. The fs::apply_metadata function in scripts/lib/fs.sh checks this variable and skips chown operations when set, but the test environment didn't configure it, causing 'Operation not permitted' errors.",
+  "resolution": "Added export ALLOW_NON_ROOT=1 to prepare_mdns_publish_static_environment() function in tests/bats/mdns_wire_probe.bats (line 38). This allows the tests to run successfully as non-root by skipping chown operations that would fail.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/pull/1672",
+    "https://github.com/futuroptimist/sugarkube/pull/1669",
+    "https://github.com/futuroptimist/sugarkube/pull/1671",
+    "scripts/lib/fs.sh#L63"
+  ]
+}
