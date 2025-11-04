@@ -177,6 +177,7 @@ __MDNS_TYPES__
         while IFS= read -r browse_line; do
           [ -n "${browse_line}" ] || continue
           IFS=';'
+          # shellcheck disable=SC2086
           set -- ${browse_line}
           IFS="${old_ifs}"
           if [ "$1" = "=" ]; then
