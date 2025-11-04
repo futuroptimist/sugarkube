@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-11-04T05:18:00Z",
+  "severity": "medium",
+  "component": "tests",
+  "subsystem": "mdns_wire_probe_bats",
+  "summary": "mdns_wire_probe.bats tests failing due to missing ALLOW_NON_ROOT environment variable",
+  "description": "Two tests in mdns_wire_probe.bats were failing because the fs::apply_metadata function attempted to chown files when running as non-root user, resulting in 'Operation not permitted' errors. The ALLOW_NON_ROOT=1 environment variable was not set in the test environment, causing the tests to fail during file permission operations.",
+  "rootCause": "The prepare_mdns_publish_static_environment() function in tests/bats/mdns_wire_probe.bats did not export ALLOW_NON_ROOT=1, which is required when running tests as a non-root user. The fs::apply_metadata function in scripts/lib/fs.sh checks this variable (line 63) and skips chown operations when set, but the test environment didn't configure it.",
+  "impact": {
+    "affected": [
+      "tests/bats/mdns_wire_probe.bats::mdns_publish_static surfaces permission denied when service unreadable",
+      "tests/bats/mdns_wire_probe.bats::mdns_publish_static writes atomically without journal churn"
+    ],
+    "scope": "CI/CD pipeline - test failures blocking PR merges"
+  },
+  "resolution": {
+    "action": "Added export ALLOW_NON_ROOT=1 to prepare_mdns_publish_static_environment() function",
+    "file": "tests/bats/mdns_wire_probe.bats",
+    "line": 38,
+    "commit": "1dd9e69"
+  },
+  "timeline": [
+    {
+      "timestamp": "2025-11-04T05:18:00Z",
+      "event": "Investigation started after PR #1669 and #1671 refactoring"
+    },
+    {
+      "timestamp": "2025-11-04T05:30:00Z",
+      "event": "Root cause identified through test output analysis"
+    },
+    {
+      "timestamp": "2025-11-04T05:35:00Z",
+      "event": "Fix applied and tests verified passing"
+    }
+  ],
+  "preventionMeasures": [
+    "Document ALLOW_NON_ROOT requirement in test writing guidelines",
+    "Consider adding ALLOW_NON_ROOT=1 to common test setup functions",
+    "Add pre-commit check to verify test environment variables"
+  ]
+}

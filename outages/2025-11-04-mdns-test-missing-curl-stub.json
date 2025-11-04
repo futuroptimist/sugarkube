@@ -1,0 +1,66 @@
+{
+  "timestamp": "2025-11-04T05:18:00Z",
+  "severity": "medium",
+  "component": "tests",
+  "subsystem": "mdns_selfcheck_bats",
+  "summary": "mdns_selfcheck.bats server role tests failing due to missing curl stub for socket readiness checks",
+  "description": "Multiple tests in mdns_selfcheck.bats that test server roles were failing because the mdns_selfcheck.sh script attempts to verify API socket readiness on port 6443 using curl/python/devtcp probes. Without a curl stub returning success, the socket check failed with 'server_socket_unready', causing the overall test to fail.",
+  "rootCause": "The server_socket_ready() function in scripts/mdns_selfcheck.sh (line 425) performs socket readiness checks when validating server nodes. It tries multiple probe methods in order: curl (line 443), python (line 451), and devtcp (line 459). In test environments without a stubbed curl command, these probes fail because no actual k3s API server is listening on port 6443. The tests were not providing stubs for these probe commands.",
+  "impact": {
+    "affected": [
+      "tests/bats/mdns_selfcheck.bats::mdns self-check succeeds when instance is discoverable",
+      "tests/bats/mdns_selfcheck.bats::mdns self-check warns when enumeration misses but browse succeeds",
+      "Potentially 11+ other tests with SUGARKUBE_EXPECTED_ROLE=server"
+    ],
+    "scope": "CI/CD pipeline - server role validation tests failing"
+  },
+  "resolution": {
+    "action": "Added curl stub to server role tests to simulate successful API readiness",
+    "example": "stub_command curl <<'EOS'\\n#!/usr/bin/env bash\\nexit 0\\nEOS",
+    "files": [
+      "tests/bats/mdns_selfcheck.bats"
+    ],
+    "commits": ["1dd9e69", "271784c"]
+  },
+  "timeline": [
+    {
+      "timestamp": "2025-11-04T05:18:00Z",
+      "event": "Investigation started - first test showing server_socket_unready"
+    },
+    {
+      "timestamp": "2025-11-04T05:37:00Z",
+      "event": "Root cause identified in server_socket_ready() function"
+    },
+    {
+      "timestamp": "2025-11-04T05:39:00Z",
+      "event": "Fix applied to first test and verified"
+    },
+    {
+      "timestamp": "2025-11-04T05:48:00Z",
+      "event": "Fix applied to second and third tests"
+    }
+  ],
+  "remainingWork": {
+    "description": "Approximately 10-11 additional server role tests need curl stubs added",
+    "estimatedEffort": "Low - systematic application of same fix pattern",
+    "tests": [
+      "mdns self-check waits for active queries when instance appears within window",
+      "mdns self-check strips surrounding quotes before matching",
+      "mdns self-check accepts short host when EXPECTED_HOST has .local",
+      "mdns self-check warns when browse succeeds but resolution lags",
+      "mdns self-check reports failure when no records appear",
+      "mdns self-check fails fast when service type is missing",
+      "mdns self-check tolerates extra avahi-browse fields and anchors by type",
+      "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry",
+      "mdns self-check ignores bootstrap advertisement when server required",
+      "mdns self-check falls back to CLI when dbus unsupported",
+      "mdns self-check falls back to CLI when dbus browser creation fails",
+      "mdns dbus self-check waits for avahi bus before browsing"
+    ]
+  },
+  "preventionMeasures": [
+    "Create reusable test helper function for server socket stubbing",
+    "Document socket readiness check requirements in test guidelines",
+    "Consider making socket checks optional via environment variable in test mode"
+  ]
+}
