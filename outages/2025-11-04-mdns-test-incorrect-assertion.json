@@ -1,45 +1,14 @@
 {
-  "timestamp": "2025-11-04T05:18:00Z",
-  "severity": "low",
-  "component": "tests",
-  "subsystem": "mdns_selfcheck_bats",
-  "summary": "mdns_selfcheck.bats test has incorrect assertion about avahi-resolve invocation",
-  "description": "The test 'mdns self-check confirms via CLI-only resolution' had an assertion checking that avahi-resolve was not invoked during CLI-only resolution. However, avahi-resolve is legitimately called during the liveness probe phase for self-resolution, making the assertion incorrect.",
-  "rootCause": "The test expected that when using CLI-only resolution (via avahi-resolve-host-name), the avahi-resolve command would never be called. However, during the mdns_liveness_probe phase (scripts/mdns_selfcheck.sh line 301), the self_resolve_attempt function is called, which invokes resolve_self_ipv4 (scripts/mdns_resolution.sh line 106), which in turn calls avahi-resolve for self-resolution. This is correct behavior, but the test assertion was checking [ ! -f \"${BATS_TEST_TMPDIR}/avahi-resolve-invoked\" ], expecting the file to not exist.",
-  "impact": {
-    "affected": [
-      "tests/bats/mdns_selfcheck.bats::mdns self-check confirms via CLI-only resolution"
-    ],
-    "scope": "Single test failure - test assertion was overly restrictive"
-  },
-  "resolution": {
-    "action": "Removed the incorrect assertion from the test",
-    "file": "tests/bats/mdns_selfcheck.bats",
-    "line": 156,
-    "commit": "271784c",
-    "rationale": "The test correctly validates that CLI resolution is used for the main resolution (checking resolve_method=cli), which is the actual intent of the test. The fact that avahi-resolve is also called for self-resolution during liveness checks is expected behavior and not a bug."
-  },
-  "timeline": [
-    {
-      "timestamp": "2025-11-04T05:18:00Z",
-      "event": "Test failure identified"
-    },
-    {
-      "timestamp": "2025-11-04T05:43:00Z",
-      "event": "Investigation of code flow revealed avahi-resolve usage in liveness probe"
-    },
-    {
-      "timestamp": "2025-11-04T05:45:00Z",
-      "event": "Determined assertion was incorrect, removed it"
-    },
-    {
-      "timestamp": "2025-11-04T05:47:00Z",
-      "event": "Test verified passing"
-    }
-  ],
-  "lessonsLearned": [
-    "Test assertions should align with actual code behavior, not idealized expectations",
-    "When testing specific code paths, focus on the primary behavior being tested rather than side effects",
-    "Liveness probes and self-resolution are separate concerns from main resolution flow"
+  "id": "mdns-test-incorrect-assertion",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats",
+  "rootCause": "The test 'mdns self-check confirms via CLI-only resolution' had an assertion checking that avahi-resolve was not invoked. However, avahi-resolve is legitimately called during the mdns_liveness_probe phase for self-resolution (via self_resolve_attempt -> resolve_self_ipv4 -> avahi-resolve). The test assertion was overly restrictive and didn't account for this expected behavior.",
+  "resolution": "Removed the incorrect assertion '[ ! -f \"${BATS_TEST_TMPDIR}/avahi-resolve-invoked\" ]' from line 156. The test correctly validates that CLI resolution is used for the main resolution by checking resolve_method=cli, which is the actual intent. The fact that avahi-resolve is also called for self-resolution during liveness checks is expected and not a bug.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/pull/1672",
+    "https://github.com/futuroptimist/sugarkube/pull/1669",
+    "https://github.com/futuroptimist/sugarkube/pull/1671",
+    "scripts/mdns_selfcheck.sh#L301",
+    "scripts/mdns_resolution.sh#L106"
   ]
 }
