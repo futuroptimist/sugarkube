@@ -987,10 +987,10 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - **Status (2025-11-05)**: ✅ COMPLETED - Implemented dbus-first preference logic + fallback logging in ~20 min
 
 - [x] **Test 16**: Add dbus wait/retry logic
-  - [ ] Implement wait_for_avahi_dbus with retry
-  - [ ] Run test to confirm retries on ServiceUnknown
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-16-dbus-wait.json
-  - **Status (2025-11-05)**: ⏭️ SKIPPED - Test times out, needs retry implementation (est. 20-30 min)
+  - [x] Implement wait_for_avahi_dbus with retry
+  - [x] Run test to confirm retries on ServiceUnknown
+  - [x] Create outage: 2025-11-05-mdns-selfcheck-test-33-dbus-wait-retry.json
+  - **Status (2025-11-05)**: ✅ COMPLETED - Implemented gdbus introspect retry logic with ServiceUnknown detection in ~45 min
 
 - [x] **discover_flow.bats**: Investigate and fix timeouts
   - [x] Identify hanging tests (5, 6, 7)
