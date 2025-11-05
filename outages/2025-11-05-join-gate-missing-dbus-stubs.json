@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-05-join-gate-missing-dbus-stubs",
+  "date": "2025-11-05",
+  "component": "tests/bats/join_gate.bats",
+  "rootCause": "Tests in join_gate.bats timed out because they invoked wait_for_avahi_dbus.sh which attempts to query systemd and D-Bus services (systemctl, gdbus, busctl) that were not stubbed. The script waited 20+ seconds for avahi-daemon to become active via systemctl before timing out, causing test failures.",
+  "resolution": "Added command stubs for systemctl, gdbus, and busctl to both join_gate tests. The systemctl stub returns 'active' for is-active queries and exits 0 for start commands. The gdbus and busctl stubs return success (exit 0) immediately, allowing wait_for_avahi_dbus.sh to complete quickly without needing actual D-Bus infrastructure.",
+  "references": [
+    "tests/bats/join_gate.bats:16-73",
+    "tests/bats/join_gate.bats:75-115",
+    "scripts/join_gate.sh:92-104",
+    "scripts/wait_for_avahi_dbus.sh:146-269"
+  ]
+}

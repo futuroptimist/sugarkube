@@ -4,7 +4,7 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Summary of Fixes Applied
 
-### ✅ Completed (15 tests fixed - updated 2025-11-05)
+### ✅ Completed (17 tests fixed - updated 2025-11-05)
 1. **mdns_wire_probe.bats** - 4/4 tests now passing
    - Fixed by adding `ALLOW_NON_ROOT=1` environment variable
    - Root cause documented in `outages/2025-11-04-mdns-test-missing-allow-non-root.json`
@@ -16,6 +16,11 @@ This document tracks the remaining test failures that need to be addressed after
      - `outages/2025-11-04-mdns-test-missing-curl-stub.json`
      - `outages/2025-11-04-mdns-test-incorrect-assertion.json`
      - `outages/2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json` (NEW)
+
+3. **join_gate.bats** - 2/2 tests now passing (NEW 2025-11-05)
+   - Both tests fixed by adding systemctl, gdbus, and busctl stubs
+   - Tests were timing out waiting for avahi-daemon via systemctl
+   - Root cause documented in `outages/2025-11-05-join-gate-missing-dbus-stubs.json`
 
 ## Remaining Test Failures
 
@@ -36,30 +41,68 @@ See action plan for detailed root cause analysis and recommended approaches.
 3. ✅ Line 293 (Test 6): "mdns self-check accepts short host when EXPECTED_HOST has .local" - Already passing
 4. ✅ Line 476 (Test 11): "mdns self-check tolerates extra avahi-browse fields and anchors by type" - Already passing
 
-### 🔍 discover_flow.bats (status unknown)
+### ✅ join_gate.bats (2 tests - COMPLETED 2025-11-05)
+
+**Status**: All tests now passing
+
+**Root Cause**: Tests timed out waiting for avahi-daemon via systemctl because systemctl, gdbus, and busctl commands were not stubbed. The wait_for_avahi_dbus.sh script attempted to query real system services, waiting 20+ seconds before timing out.
+
+**Fix Applied**: Added stubs for systemctl, gdbus, and busctl to both test cases:
+- systemctl stub returns "active" for is-active queries and success for start commands
+- gdbus and busctl stubs return immediate success (exit 0)
+- This allows wait_for_avahi_dbus.sh to complete without needing actual D-Bus infrastructure
+
+**Outage Documented**: `outages/2025-11-05-join-gate-missing-dbus-stubs.json`
+
+**Tests now passing**:
+1. ✅ "join gate acquire and release manage publisher state"
+2. ✅ "join gate wait retries while lock is present"
+
+### 🔍 discover_flow.bats (investigation done, needs dedicated PR)
+
+**Status**: Test 5 fails - complexity higher than expected
 
 **Symptoms:**
-- Tests timing out during execution
-- Timeout occurs around test 5-6
+- Test 5 ("discover flow joins existing server when discovery succeeds") times out
+- Tests 1-4 pass successfully
 
-**Investigation needed:**
-1. Check if curl stubs are needed
-2. Investigate why tests hang - possibly waiting for network operations
-3. May need additional environment variables or shorter timeouts
+**Investigation done (2025-11-05)**:
+1. Confirmed tests 1-4 pass (they include their own gdbus/busctl stubs)
+2. Test 5 calls k3s-discover.sh which invokes join_gate.sh
+3. Attempted fixes:
+   - Added gdbus and busctl stubs (partial help)
+   - Added l4_probe stub to avoid DNS resolution failures
+   - Test still times out - likely needs more investigation of k3s install flow
 
-**Tests to investigate:**
-- "discover flow joins existing server when discovery succeeds" (line 6 in output)
-- Any subsequent tests
+**Root Cause (partial)**:
+- Test 5 attempts to run full k3s-discover.sh flow including join gate and l4 probing
+- More stubs likely needed (k3s install itself, additional network tools)
+- May need DISABLE_JOIN_GATE=1 or other skip flags
+- Requires dedicated debugging session with full output capture
 
-### 🔍 join_gate.bats (status unknown)
+**Recommended Next Steps**:
+1. Run test 5 with LOG_LEVEL=debug and capture full output
+2. Identify exactly where it hangs (likely during k3s install attempt)
+3. Add appropriate stubs or skip flags
+4. May need to stub the k3s installation process itself
+5. Consider if this test should use a mock install approach
 
-**Symptoms:**
-- Tests timing out during execution
+**Scope Assessment**: 
+- Initial estimate: 2-4 hours
+- Actual complexity: Higher - needs dedicated PR with full investigation
+- Dropped from this PR per scope constraints
 
-**Investigation needed:**
-1. Similar to discover_flow.bats - likely needs curl stubs
-2. May have dependency on external services or network operations
-3. Timeouts may need adjustment
+**Repro Steps**:
+```bash
+export BATS_LIB_PATH="${PWD}/tests/bats"
+bats -f "discover flow joins existing server when discovery succeeds" tests/bats/discover_flow.bats
+# Times out after ~60 seconds
+```
+
+**Tests status**:
+- ✅ Tests 1-4: Passing
+- ❌ Test 5: Times out (needs dedicated PR)
+- ⏸️ Tests 6-8: Not tested (blocked by test 5 failure)
 
 ## Recommended Approach (UPDATED 2025-11-05)
 
@@ -116,11 +159,11 @@ For each test fix:
 - [ ] Check for any additional errors
 - [ ] Update this document with results
 
-## Files Modified
-- `tests/bats/mdns_wire_probe.bats` - ✅ Complete
-- `tests/bats/mdns_selfcheck.bats` - 🔄 In Progress (3/18)
-- `tests/bats/discover_flow.bats` - ⏸️ Not Started
-- `tests/bats/join_gate.bats` - ⏸️ Not Started
+## Files Modified (2025-11-05 update)
+- `tests/bats/mdns_wire_probe.bats` - ✅ Complete (4/4 passing)
+- `tests/bats/mdns_selfcheck.bats` - 🔄 In Progress (15/18 passing)
+- `tests/bats/join_gate.bats` - ✅ Complete (2/2 passing) - **FIXED THIS PR**
+- `tests/bats/discover_flow.bats` - 🔄 Investigated (tests 1-4 passing, test 5 needs dedicated PR)
 
 ## Success Criteria
 

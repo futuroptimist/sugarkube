@@ -14,6 +14,28 @@ teardown() {
 }
 
 @test "join gate acquire and release manage publisher state" {
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "is-active" ]; then
+  echo "active"
+  exit 0
+fi
+if [ "$1" = "start" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -73,6 +95,28 @@ EOS
 }
 
 @test "join gate wait retries while lock is present" {
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "is-active" ]; then
+  echo "active"
+  exit 0
+fi
+if [ "$1" = "start" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
   stub_command avahi-publish-service <<'EOS'
 #!/usr/bin/env bash
 exit 0
