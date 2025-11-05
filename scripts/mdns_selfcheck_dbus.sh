@@ -280,10 +280,9 @@ PY
 # Returns 0 if Avahi is ready, 1 if ServiceUnknown persists, 2 if other error/skip
 wait_for_avahi_dbus_gdbus() {
   local max_attempts="${1:-10}"
-  local attempt=0
+  local attempt=1
   
-  while [ "${attempt}" -lt "${max_attempts}" ]; do
-    attempt=$((attempt + 1))
+  while [ "${attempt}" -le "${max_attempts}" ]; do
     
     # Try gdbus introspect to check if Avahi service is available
     # Capture both stdout and stderr to check for ServiceUnknown error
@@ -300,10 +299,11 @@ wait_for_avahi_dbus_gdbus() {
     fi
     
     # Command failed - check if it's a retryable ServiceUnknown error
-    if [[ "${error_output}" =~ ServiceUnknown ]]; then
+    if [[ "${error_output}" =~ "ServiceUnknown" ]]; then
       # Service not ready yet, retry after brief sleep
       log_debug mdns_selfcheck event=avahi_dbus_wait attempt="${attempt}" status=not_ready
       sleep 0.5
+      attempt=$((attempt + 1))
       continue
     fi
     
