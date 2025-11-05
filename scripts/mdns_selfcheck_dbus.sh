@@ -275,6 +275,43 @@ print(json.dumps({
 PY
 }
 
+# Check if Avahi DBus is disabled in configuration
+dbus_disabled() {
+  local avahi_conf_path="${AVAHI_CONF_PATH:-/etc/avahi/avahi-daemon.conf}"
+  if [ ! -f "${avahi_conf_path}" ]; then
+    return 1
+  fi
+  if LC_ALL=C grep -Eiq '^[[:space:]]*enable-dbus[[:space:]]*=[[:space:]]*no([[:space:]]|$)' \
+    "${avahi_conf_path}"; then
+    return 0
+  fi
+  return 1
+}
+
+# Check if Avahi DBus is disabled before attempting gdbus operations
+if dbus_disabled; then
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info \
+    avahi_dbus_ready \
+    outcome=disabled \
+    reason=enable_dbus_no \
+    severity=info \
+    ms_elapsed="${elapsed_ms}"
+  exit 2
+fi
+
+# Check if required commands are available
+if ! command -v systemctl >/dev/null 2>&1; then
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info \
+    avahi_dbus_ready \
+    outcome=skip \
+    reason=systemctl_missing \
+    severity=info \
+    ms_elapsed="${elapsed_ms}"
+  exit 2
+fi
+
 # Wait for Avahi dbus service using gdbus introspect with retry logic
 # Detects ServiceUnknown errors and retries until service is available  
 # Returns 0 if Avahi is ready, 1 if ServiceUnknown persists, 2 if other error/skip
