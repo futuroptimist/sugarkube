@@ -36,8 +36,8 @@ EOS
 2. Line 254: "mdns self-check strips surrounding quotes before matching"
 3. Line 293: "mdns self-check accepts short host when EXPECTED_HOST has .local"
 4. Line 370: "mdns self-check warns when browse succeeds but resolution lags"
-5. Line 410: "mdns self-check reports failure when no records appear"
-6. Line 438: "mdns self-check fails fast when service type is missing"
+5. ~~Line 410: "mdns self-check reports failure when no records appear"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-09-browse-empty.json)
+6. ~~Line 438: "mdns self-check fails fast when service type is missing"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-10-type-missing-logging.json)
 7. Line 476: "mdns self-check tolerates extra avahi-browse fields and anchors by type"
 8. Line 515: "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry"
 9. Line 554: "mdns self-check ignores bootstrap advertisement when server required"

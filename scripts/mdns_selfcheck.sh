@@ -738,7 +738,10 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
         exit 5
         ;;
       *)
-        if [ -n "${SELF_RESOLVE_REASON}" ] && [ "${SELF_RESOLVE_STATUS}" -ne 3 ]; then
+        # When browse is empty or has errors, prioritize that reason over resolution failures
+        if [ "${browse_reason}" = "browse_empty" ] || [ "${browse_reason}" = "browse_error" ]; then
+          last_reason="${browse_reason}"
+        elif [ -n "${SELF_RESOLVE_REASON}" ] && [ "${SELF_RESOLVE_STATUS}" -ne 3 ]; then
           last_reason="${SELF_RESOLVE_REASON}"
         else
           last_reason="${browse_reason}"

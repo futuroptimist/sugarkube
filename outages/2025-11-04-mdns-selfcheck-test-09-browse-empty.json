@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-04-mdns-selfcheck-test-09-browse-empty",
+  "date": "2025-11-04",
+  "component": "tests/bats/mdns_selfcheck.bats:427",
+  "rootCause": "When avahi-browse returns no service records after all retry attempts, the final failure logging did not include reason=browse_empty. The script tracked browse_reason and set it to 'browse_empty' when browse output was empty, but this reason was overridden by resolve_failed when self-resolution also failed. The code prioritized resolution failure over browse failure in the final reason determination.",
+  "resolution": "Updated final failure handling in mdns_selfcheck.sh to prioritize browse_empty and browse_error reasons over resolution failures. When browse is fundamentally empty or has errors, that is the more important diagnostic signal compared to a subsequent resolution attempt failure. The fix checks if browse_reason is 'browse_empty' or 'browse_error' and uses that as last_reason instead of SELF_RESOLVE_REASON.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:427-458",
+    "tests/fixtures/avahi_browse_empty.txt",
+    "scripts/mdns_selfcheck.sh:686-750"
+  ]
+}

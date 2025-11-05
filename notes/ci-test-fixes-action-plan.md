@@ -959,14 +959,14 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - [ ] Run test to confirm exit 0 with outcome=warn
   - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-08-resolution-lag.json
 
-- [ ] **Test 9**: Add browse_empty reason logging
-  - [ ] Implement empty browse result detection
-  - [ ] Run test to confirm reason=browse_empty
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-09-browse-empty.json
+- [x] **Test 9**: Add browse_empty reason logging
+  - [x] Implement empty browse result detection
+  - [x] Run test to confirm reason=browse_empty
+  - [x] Create outage: 2025-11-04-mdns-selfcheck-test-09-browse-empty.json
 
-- [ ] **Test 10**: Verify exit code 4 after awk fix
-  - [ ] Run test to confirm exit code 4
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-10-type-missing-exit.json
+- [x] **Test 10**: Verify exit code 4 after awk fix
+  - [x] Run test to confirm exit code 4
+  - [x] Create outage: 2025-11-04-mdns-selfcheck-test-10-type-missing-logging.json
 
 - [ ] **Test 12**: Add IPv4 mismatch exit code 5
   - [ ] Implement IPv4 validation with exit 5
