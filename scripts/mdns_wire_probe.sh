@@ -54,11 +54,10 @@ run_command_capture() {
   start="$(now_ms)"
   local output
   local rc
-  if ! output="$("$@" 2>&1)"; then
-    rc=$?
-  else
-    rc=0
-  fi
+  # Capture output and exit code without triggering errexit
+  # The || captures the exit code when the command fails
+  output="$("$@" 2>&1)" || rc=$?
+  rc=${rc:-0}
   local duration
   duration="$(elapsed_since_ms "${start}" 2>/dev/null || printf '%s' 0)"
   case "${duration}" in
