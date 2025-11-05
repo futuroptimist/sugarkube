@@ -499,7 +499,8 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     # When SUGARKUBE_MDNS_DBUS=1, prefer dbus method and fall back to CLI on failure
     if [ "${SUGARKUBE_MDNS_DBUS:-0}" -eq 1 ] && [ -x "${SCRIPT_DIR}/mdns_selfcheck_dbus.sh" ]; then
       if SUGARKUBE_MDNS_DBUS=1 "${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"; then
-        # DBus mode succeeded - exit with success
+        # DBus mode succeeded - emit status and exit with success
+        mdns_resolution_status_emit ok attempt="${attempt}" host="${EXPECTED_HOST}" resolve_method="dbus"
         exit 0
       fi
       # DBus failed, log fallback and continue with CLI
