@@ -5,22 +5,26 @@
 
 ## Summary
 
-As of 2025-11-05, there are **7 skipped tests** in the BATS test suite:
+As of 2025-11-05 (Updated PR #4), there are **5 skipped tests** in the BATS test suite:
 - 3 complex k3s integration tests (discover_flow.bats)
-- 2 network tool dependency tests (l4_probe.bats)
-- 2 mdns advanced feature tests (mdns_selfcheck.bats)
+- 2 mdns advanced feature tests (mdns_selfcheck.bats tests 33-34)
 
 All Python tests pass without skips (850+ tests).
+
+**Test Count Impact of This PR**:
+- Before PR #4: 34 pass, 7 skip (l4_probe tests were skipped)
+- After PR #4: 36 pass, 5 skip (l4_probe tests now passing)
+- Net improvement: +2 passing tests
 
 ## Test Suite Status
 
 | Test File | Total | Pass | Skip | Fail |
 |-----------|-------|------|------|------|
 | discover_flow.bats | 9 | 6 | 3 | 0 |
-| l4_probe.bats | 2 | 0 | 2 | 0 |
+| l4_probe.bats | 2 | 2 | 0 | 0 |
 | mdns_selfcheck.bats | 18 | 16 | 2 | 0 |
 | Other BATS | 12 | 12 | 0 | 0 |
-| **Total BATS** | **41** | **34** | **7** | **0** |
+| **Total BATS** | **41** | **36** | **5** | **0** |
 | **Python tests** | **850+** | **850+** | **0** | **0** |
 
 ## Detailed Skip Analysis
@@ -90,51 +94,44 @@ All Python tests pass without skips (850+ tests).
 
 ---
 
-### 2. l4_probe.bats - Network Tool Tests (2 skipped)
+### 2. l4_probe.bats - Network Tool Tests (FIXED - 2025-11-05 PR #4)
 
 **Tests**:
-- Test 1: "l4_probe reports open port as open"
-- Test 2: "l4_probe exits non-zero when a port is closed"
+- ~~Test 1: "l4_probe reports open port as open"~~ ✅ NOW PASSING
+- ~~Test 2: "l4_probe exits non-zero when a port is closed"~~ ✅ NOW PASSING
 
-**Skip Reason**: Missing `ncat` (netcat) binary in test environment
+**Original Skip Reason**: Missing `ncat` (netcat) binary in test environment
 
 **Root Cause**:
 - Tests conditionally skip if `ncat` is not available: `command -v ncat >/dev/null 2>&1 || skip "ncat not available"`
 - `l4_probe.sh` script uses `ncat` for TCP port connectivity checks
-- GitHub Actions runners don't have `ncat` installed by default
+- GitHub Actions runners didn't have `ncat` installed by default
 
-**Complexity**: LOW
-- Simply need to install ncat package
-- Tests are well-written and should pass once tool is available
+**Fix Applied (2025-11-05 PR #4)**:
+- Added `ncat` to package installation list in `.github/workflows/ci.yml`
+- Tests automatically enabled via conditional skip logic (no test file changes needed)
+- Both tests now pass in local and CI environments
 
-**Estimated Effort**: 30 minutes
-- Add `ncat` to CI dependencies: 10 minutes
-- Run tests to verify: 10 minutes  
-- Fix any issues (if any): 10 minutes
+**Complexity**: LOW (as predicted)
 
-**Recommended Approach**:
-1. **Install ncat in CI** (preferred):
-   - Add to `.github/workflows/ci.yml`: `sudo apt-get install -y ncat`
-   - Or use `nmap` package which includes ncat: `sudo apt-get install -y nmap`
-   - Update workflow before BATS test step
+**Actual Effort**: ~15 minutes (faster than 30 minute estimate)
+- Add `ncat` to CI dependencies: 5 minutes
+- Run tests to verify: 5 minutes
+- Create outage documentation: 5 minutes
 
-2. **Alternative - Stub ncat** (if installation blocked):
-   - Create mock ncat that simulates success/failure
-   - Less ideal as it doesn't test real network behavior
-
-**Next Steps**:
-1. Add ncat installation to CI workflow
-2. Verify tests pass
-3. Remove skip directives
+**Outage Documentation**: `outages/2025-11-05-l4-probe-tests-ncat-missing.json`
 
 **References**:
-- `tests/bats/l4_probe.bats:39-60`
+- `tests/bats/l4_probe.bats:39-68`
 - `scripts/l4_probe.sh`
-- `.github/workflows/ci.yml`
+- `.github/workflows/ci.yml:24-39`
+- `notes/ci-test-failures-remaining-work.md`
 
 ---
 
-### 3. mdns_selfcheck.bats - Test 33: DBus Wait Logic (1 skipped)
+### 3. mdns_selfcheck.bats - Tests 33-34: Advanced Features (2 skipped)
+
+#### Test 33: DBus Wait Logic
 
 **Test**: "mdns dbus self-check waits for avahi bus before browsing"
 
@@ -199,7 +196,7 @@ All Python tests pass without skips (850+ tests).
 
 ---
 
-### 4. mdns_selfcheck.bats - Test 34: Absence Gate (1 skipped)
+#### Test 34: Absence Gate
 
 **Test**: "mdns absence gate confirms wipe leaves no advertisements"
 
@@ -254,10 +251,12 @@ All Python tests pass without skips (850+ tests).
 
 ### Immediate (Next 1-2 PRs)
 
-**PR 1: Quick Win - ncat Installation** (30 minutes)
-- **Impact**: Enables 2 tests, simple CI change
+**~~PR 1: Quick Win - ncat Installation~~ ✅ COMPLETED (PR #4 - 2025-11-05)**
+- **Impact**: Enabled 2 tests, simple CI change
 - **Risk**: Very low
 - **Tests**: l4_probe.bats tests 1-2
+- **Actual time**: 15 minutes (vs 30 min estimated)
+- **Outage**: `outages/2025-11-05-l4-probe-tests-ncat-missing.json`
 
 **PR 2: DBus Wait Retry Logic** (30 minutes)
 - **Impact**: Enables 1 test, well-scoped feature
@@ -281,20 +280,20 @@ All Python tests pass without skips (850+ tests).
 - **Tests**: discover_flow.bats tests 6-8
 - **Deliverable**: Decision document on Option A/B/C + implementation plan
 - **Recommendation**: Break into multiple PRs:
-  - PR 4: Investigation and approach decision (4-6 hours)
-  - PR 5: Test 6 implementation (6-8 hours)
-  - PR 6: Tests 7-8 implementation (8-10 hours)
+  - PR 5: Investigation and approach decision (4-6 hours)
+  - PR 6: Test 6 implementation (6-8 hours)
+  - PR 7: Tests 7-8 implementation (8-10 hours)
 
 ---
 
 ## Success Metrics
 
-**Current State** (2025-11-05):
-- BATS: 34/41 passing (82.9%)
+**Current State** (2025-11-05 - After PR #4):
+- BATS: 36/41 passing (87.8%)
 - Python: 850+/850+ passing (100%)
 - **Overall**: ~88% pass rate
 
-Note: "Passing" means tests that run and pass. 7 tests are skipped conditionally.
+Note: "Passing" means tests that run and pass. 5 tests are skipped conditionally.
 
 **Target State** (after all skipped tests addressed):
 - BATS: 41/41 passing (100%)
@@ -302,10 +301,10 @@ Note: "Passing" means tests that run and pass. 7 tests are skipped conditionally
 - **Overall**: 100% pass rate
 
 **Intermediate Milestones**:
-- After PR 1 (ncat): 36/41 passing (87.8%)
-- After PR 2 (dbus retry): 37/41 passing (90.2%)
-- After PR 3 (absence gate): 38/41 passing (92.7%)
-- After PRs 4-6 (k3s integration): 41/41 passing (100%)
+- ✅ After PR #4 (ncat - THIS PR): 36/41 passing (87.8%)
+- After PR #5 (dbus retry): 37/41 passing (90.2%)
+- After PR #6 (absence gate): 38/41 passing (92.7%)
+- After PRs #7-9 (k3s integration): 41/41 passing (100%)
 
 ---
 
