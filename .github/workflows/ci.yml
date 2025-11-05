@@ -80,8 +80,10 @@ jobs:
           directory: coverage
           files: |
             coverage/python-coverage.xml
+            coverage/kcov/*/cobertura.xml
           fail_ci_if_error: true
           verbose: true
+          flags: python,shell
 
       - name: Fail if Python tests failed
         if: steps.pytest.outcome == 'failure'
