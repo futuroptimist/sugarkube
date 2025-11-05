@@ -4,7 +4,7 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Summary of Fixes Applied
 
-### ✅ Completed (15 tests fixed - updated 2025-11-05)
+### ✅ Completed (17 tests fixed - updated 2025-11-05)
 1. **mdns_wire_probe.bats** - 4/4 tests now passing
    - Fixed by adding `ALLOW_NON_ROOT=1` environment variable
    - Root cause documented in `outages/2025-11-04-mdns-test-missing-allow-non-root.json`
@@ -16,6 +16,11 @@ This document tracks the remaining test failures that need to be addressed after
      - `outages/2025-11-04-mdns-test-missing-curl-stub.json`
      - `outages/2025-11-04-mdns-test-incorrect-assertion.json`
      - `outages/2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json` (NEW)
+
+3. **join_gate.bats** - 2/2 tests now passing (NEW 2025-11-05)
+   - Both tests fixed by adding systemctl, gdbus, and busctl stubs
+   - Tests were timing out waiting for avahi-daemon via systemctl
+   - Root cause documented in `outages/2025-11-05-join-gate-missing-dbus-stubs.json`
 
 ## Remaining Test Failures
 
@@ -36,30 +41,55 @@ See action plan for detailed root cause analysis and recommended approaches.
 3. ✅ Line 293 (Test 6): "mdns self-check accepts short host when EXPECTED_HOST has .local" - Already passing
 4. ✅ Line 476 (Test 11): "mdns self-check tolerates extra avahi-browse fields and anchors by type" - Already passing
 
-### 🔍 discover_flow.bats (status unknown)
+### ✅ join_gate.bats (2 tests - COMPLETED 2025-11-05)
+
+**Status**: All tests now passing
+
+**Root Cause**: Tests timed out waiting for avahi-daemon via systemctl because systemctl, gdbus, and busctl commands were not stubbed. The wait_for_avahi_dbus.sh script attempted to query real system services, waiting 20+ seconds before timing out.
+
+**Fix Applied**: Added stubs for systemctl, gdbus, and busctl to both test cases:
+- systemctl stub returns "active" for is-active queries and success for start commands
+- gdbus and busctl stubs return immediate success (exit 0)
+- This allows wait_for_avahi_dbus.sh to complete without needing actual D-Bus infrastructure
+
+**Outage Documented**: `outages/2025-11-05-join-gate-missing-dbus-stubs.json`
+
+**Tests now passing**:
+1. ✅ "join gate acquire and release manage publisher state"
+2. ✅ "join gate wait retries while lock is present"
+
+### 🔍 discover_flow.bats (status: partial fix attempted)
 
 **Symptoms:**
-- Tests timing out during execution
-- Timeout occurs around test 5-6
+- Test 5 ("discover flow joins existing server when discovery succeeds") fails
+- Tests timeout during execution
 
-**Investigation needed:**
-1. Check if curl stubs are needed
-2. Investigate why tests hang - possibly waiting for network operations
-3. May need additional environment variables or shorter timeouts
+**Investigation done (2025-11-05)**:
+1. Added gdbus and busctl stubs (similar to join_gate fix)  
+2. Added l4_probe stub to avoid network connectivity failures
+3. Tests 1-4 pass; test 5 still times out
+
+**Root Cause (partial)**:
+- Missing systemd/dbus stubs (fixed)
+- Missing l4_probe stub to avoid DNS resolution failures (attempted)
+- Additional investigation needed to understand why test 5 still hangs
+
+**Recommended Next Steps**:
+1. Run test 5 with full debug output to see where it hangs
+2. Check if additional stubs are needed (k3s install, etc.)
+3. Consider if DISABLE_JOIN_GATE or other skip flags are needed
+4. May need to stub k3s installation process itself
+
+**Estimated Complexity**: Higher than initially assessed - needs dedicated PR
+
+**Tests status**:
+- ✅ Tests 1-4: Passing
+- ❌ Test 5: Still times out (needs further investigation)
+- ⚠️ Tests 6-8: Not yet tested (blocked by test 5)
 
 **Tests to investigate:**
-- "discover flow joins existing server when discovery succeeds" (line 6 in output)
+- "discover flow joins existing server when discovery succeeds" (test 5)
 - Any subsequent tests
-
-### 🔍 join_gate.bats (status unknown)
-
-**Symptoms:**
-- Tests timing out during execution
-
-**Investigation needed:**
-1. Similar to discover_flow.bats - likely needs curl stubs
-2. May have dependency on external services or network operations
-3. Timeouts may need adjustment
 
 ## Recommended Approach (UPDATED 2025-11-05)
 
@@ -118,9 +148,9 @@ For each test fix:
 
 ## Files Modified
 - `tests/bats/mdns_wire_probe.bats` - ✅ Complete
-- `tests/bats/mdns_selfcheck.bats` - 🔄 In Progress (3/18)
-- `tests/bats/discover_flow.bats` - ⏸️ Not Started
-- `tests/bats/join_gate.bats` - ⏸️ Not Started
+- `tests/bats/mdns_selfcheck.bats` - 🔄 In Progress (15/18 passing)
+- `tests/bats/discover_flow.bats` - 🔄 Partial (tests 1-4 passing, test 5+ need investigation)
+- `tests/bats/join_gate.bats` - ✅ Complete (2/2 passing)
 
 ## Success Criteria
 

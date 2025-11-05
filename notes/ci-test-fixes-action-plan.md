@@ -996,10 +996,10 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - [ ] Create outage: 2025-11-04-discover-flow-missing-stubs.json
 
 - [ ] **join_gate.bats**: Investigate and fix timeouts
-  - [ ] Identify missing stubs in test 1
-  - [ ] Add stubs
-  - [ ] Run tests to confirm no hangs
-  - [ ] Create outage: 2025-11-04-join-gate-missing-stubs.json
+  - [x] Identify missing stubs in test 1
+  - [x] Add stubs
+  - [x] Run tests to confirm no hangs
+  - [x] Create outage: 2025-11-05-join-gate-missing-dbus-stubs.json
 
 - [ ] **Final validation**:
   - [ ] Run full BATS suite locally

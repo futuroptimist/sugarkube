@@ -439,7 +439,30 @@ CONF
 exit 0
 EOS
 
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+
   api_ready_stub="$(create_api_ready_stub)"
+
+  l4_probe_stub="${BATS_TEST_TMPDIR}/l4-probe-stub.sh"
+  cat <<'EOS' > "$l4_probe_stub"
+#!/usr/bin/env bash
+# Stub l4_probe that reports all ports as open
+cat <<'JSON'
+{"host":"$1","port":6443,"status":"open","latency_ms":1}
+{"host":"$1","port":2379,"status":"open","latency_ms":1}
+{"host":"$1","port":2380,"status":"open","latency_ms":1}
+JSON
+exit 0
+EOS
+  chmod +x "$l4_probe_stub"
 
   configure_stub="$(create_configure_stub)"
   token_path="${BATS_TEST_TMPDIR}/node-token"
@@ -448,6 +471,7 @@ EOS
   run env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
+    SUGARKUBE_L4_PROBE_BIN="${l4_probe_stub}" \
     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
     AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
