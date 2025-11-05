@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-05-mdns-selfcheck-dbus-fallback-logging",
+  "date": "2025-11-05",
+  "component": "tests/bats/mdns_selfcheck.bats:671, scripts/mdns_selfcheck.sh:490-510",
+  "rootCause": "When SUGARKUBE_MDNS_DBUS=1, mdns_selfcheck.sh did not prefer dbus method first. It always used avahi-browse directly, never attempting dbus or logging fallback events. Additionally, Test 15 was missing systemctl and busctl stubs needed for wait_for_avahi_dbus.sh to succeed quickly without timing out.",
+  "resolution": "Added dbus-first preference logic in mdns_selfcheck.sh main browse loop (lines 490-510). When SUGARKUBE_MDNS_DBUS=1, script now tries mdns_selfcheck_dbus.sh first, logs 'event=dbus_fallback fallback=cli' on failure, then continues with CLI avahi-browse. Also added systemctl and busctl stubs to Test 15, and changed gdbus stub to exit 0 for non-ServiceBrowserNew calls (instead of exit 2) so wait_for_avahi_dbus.sh can succeed.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:671-727",
+    "scripts/mdns_selfcheck.sh:490-510",
+    "scripts/mdns_selfcheck_dbus.sh",
+    "scripts/wait_for_avahi_dbus.sh",
+    "notes/ci-test-fixes-action-plan.md:Test 15"
+  ]
+}

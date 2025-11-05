@@ -496,6 +496,18 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
     fi
     INITIAL_BROWSE_READY=0
   else
+    # When SUGARKUBE_MDNS_DBUS=1, prefer dbus method and fall back to CLI on failure
+    if [ "${SUGARKUBE_MDNS_DBUS:-0}" -eq 1 ] && [ -x "${SCRIPT_DIR}/mdns_selfcheck_dbus.sh" ]; then
+      if SUGARKUBE_MDNS_DBUS=1 "${SCRIPT_DIR}/mdns_selfcheck_dbus.sh"; then
+        # DBus mode succeeded - emit status and exit with success
+        mdns_resolution_status_emit ok attempt="${attempt}" host="${EXPECTED_HOST}" resolve_method="dbus"
+        exit 0
+      fi
+      # DBus failed, log fallback and continue with CLI
+      log_info mdns_selfcheck event=dbus_fallback fallback=cli reason=dbus_browse_failed attempt="${attempt}"
+    fi
+
+    # Use CLI method (avahi-browse) - either as primary or fallback
     browse_output="$(run_command_capture mdns_browse avahi-browse --parsable --resolve --terminate "${SERVICE_TYPE}" || true)"
     browse_command="${MDNS_LAST_CMD_DISPLAY:-}"
     browse_duration="${MDNS_LAST_CMD_DURATION_MS:-}"
