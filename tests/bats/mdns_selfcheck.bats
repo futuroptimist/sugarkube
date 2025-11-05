@@ -750,7 +750,7 @@ EOS
   # See notes/ci-test-fixes-action-plan.md Test 16
   # Estimated: 20-30 min to implement wait_for_avahi_dbus retry with ServiceUnknown detection
   skip "Needs retry logic implementation - small scope, separate PR recommended"
-  
+
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -862,7 +862,7 @@ EOS
   # TODO: Test times out - needs investigation of wipe/absence detection flow
   # Likely needs additional stubs for cleanup/verification commands
   skip "Times out - needs dedicated investigation"
-  
+
   stub_command hostname <<'EOS'
 #!/usr/bin/env bash
 if [ "$1" = "-s" ]; then
