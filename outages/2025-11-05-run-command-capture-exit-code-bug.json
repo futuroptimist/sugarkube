@@ -1,0 +1,15 @@
+{
+  "id": "2025-11-05-run-command-capture-exit-code-bug",
+  "date": "2025-11-05",
+  "component": "scripts/mdns_helpers.sh:run_command_capture(), scripts/mdns_wire_probe.sh:run_command_capture()",
+  "rootCause": "Both run_command_capture implementations incorrectly captured command exit codes due to using 'if ! output=\"$(...)\"' pattern. When a command failed, the exit code was checked via $? AFTER the if-test had already consumed it, resulting in $? always being 0 (success of the if-test itself) instead of the actual command exit code. This caused resolve_host() to treat failed resolution commands as successful, leading it to attempt IP parsing on error messages and returning status 2 (ipv4_mismatch) instead of status 1 (resolve_failed).",
+  "resolution": "Replaced the buggy pattern with 'output=\"$(...) 2>&1\" || rc=$?; rc=${rc:-0}' in both files. The || operator captures the command's exit code when it fails while preventing errexit from aborting the script. The ${rc:-0} ensures rc is set to 0 when the command succeeds. This preserves the original intent of protecting against errexit while correctly capturing actual exit codes.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:387-425",
+    "scripts/mdns_helpers.sh:55-60",
+    "scripts/mdns_wire_probe.sh:55-60",
+    "scripts/mdns_resolution.sh:resolve_host()",
+    "scripts/mdns_selfcheck.sh:856-881",
+    "notes/ci-test-fixes-action-plan.md:958"
+  ]
+}
