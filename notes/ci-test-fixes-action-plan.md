@@ -955,10 +955,11 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - [x] Run test to confirm `attempts=3` in output
   - [x] Create outage: 2025-11-04-mdns-selfcheck-test-04-active-window.json
 
-- [ ] **Test 8**: Add resolution lag warning path
-  - [ ] Implement browse-success-but-resolve-fail handling
-  - [ ] Run test to confirm exit 0 with outcome=warn
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-08-resolution-lag.json
+- [x] **Test 8**: Add resolution lag warning path
+  - [x] Fixed run_command_capture exit code bug in mdns_helpers.sh
+  - [x] Run test to confirm exit 0 with outcome=warn
+  - [x] Create outage: 2025-11-05-run-command-capture-exit-code-bug.json
+  - **Status (2025-11-05)**: ✅ COMPLETED - Fixed bug where $? was consumed by if-test, causing incorrect exit code capture
 
 - [x] **Test 9**: Add browse_empty reason logging
   - [x] Implement empty browse result detection
