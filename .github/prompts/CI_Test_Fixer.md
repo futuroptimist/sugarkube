@@ -6,16 +6,20 @@ description: >-
 tools: ['github', 'playwright']
 ---
 
-**Goal**  
+**Goal**
 Fix a small, independent batch of remaining CI/test failures documented under `notes/`.
 Document each fix with a conformant `outages/` entry (only if the fix lands in the same PR),
 update the checkboxes in `notes/`, and open a focused PR.
+While working, clean up the related `nodes/` entries by pruning stale diagnostics, removing
+dead links, and adding clarifying breadcrumbs so future investigators inherit better context
+than before.
 
 **Plan**
-1) Parse:  
-   - #file:notes/ci-test-fixes-action-plan.md  
-   - #file:notes/ci-test-failures-remaining-work.md  
-   Enumerate all **unchecked** checkboxes.
+1) Parse:
+   - #file:notes/ci-test-fixes-action-plan.md
+   - #file:notes/ci-test-failures-remaining-work.md
+   Enumerate all **unchecked** checkboxes and note any missing investigative details that
+   make reproduction difficult (e.g., absent log snippets, unknown owners, fuzzy repro steps).
 
 2) Select 1–2 items that can be implemented together with minimal risk and without broad
    refactors. Write a brief execution plan and proceed.
@@ -27,12 +31,17 @@ update the checkboxes in `notes/`, and open a focused PR.
    - Identify test commands from the Makefile and `.github/workflows/*.yml`. Run locally the
      same suites CI runs (BATS, Playwright E2E, QEMU smoke, etc.) and iterate until green for
      the affected areas.
+   - As you touch a `nodes/` entry, remove obsolete context and enrich the record with the
+     freshest evidence (log excerpts, repro commands, owners) so unresolved failures have a
+     clearer investigative trail.
 
 **Definition of Done**
 - `scripts/ci_commands.sh` passes locally end-to-end.
 - All `outages/*.json` added in this PR pass `scripts/validate_outages.py`.
 - PR body uses the provided template verbatim and quotes the exact `notes/` checkboxes checked.
 - Total diff ≤ ~300 LOC excluding lockfiles/snapshots.
+- `notes/` and `nodes/` reflect the freshest findings, with open items carrying actionable next
+  steps and unsolved failures capturing the latest hypotheses.
 
 4) Outages:
    - For each fixed failure, create `outages/<yyyy-mm-dd>-<short-slug>.json` describing the
@@ -133,3 +142,5 @@ Remaining unchecked boxes (verbatim from notes/)
 - Keep scope tight (≈1–3 items; ≤ ~300 changed lines excluding generated/snapshot files).
 - Preserve logging semantics unless a specific test requires changes.
 - Do not modify `outages/schema.json`.
+- Always leave `notes/` and `nodes/` better than found: clarify owners, surface fresh log
+  links, and record next investigative steps for anything still failing.
