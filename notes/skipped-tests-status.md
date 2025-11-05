@@ -12,8 +12,8 @@ As of 2025-11-05 (Updated PR #4), there are **5 skipped tests** in the BATS test
 All Python tests pass without skips (850+ tests).
 
 **Test Count Impact of This PR**:
-- Before PR #4: 36 pass, 5 skip (l4_probe tests were skipped)
-- After PR #4: 38 pass, 5 skip (l4_probe tests now passing)
+- Before PR #4: 34 pass, 7 skip (l4_probe tests were skipped)
+- After PR #4: 36 pass, 5 skip (l4_probe tests now passing)
 - Net improvement: +2 passing tests
 
 ## Test Suite Status
