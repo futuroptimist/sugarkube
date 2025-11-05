@@ -315,7 +315,9 @@ PY
   # Fail fast with exit code 4 when service type is missing
   # This check is after the function completes to ensure we tried both
   # initial enumeration and active query window
-  if [ "${type_present}" -eq 0 ] && [ "${active_found}" -eq 0 ]; then
+  # Skip this check when DBUS mode is enabled - DBUS can browse services
+  # directly without requiring service type enumeration
+  if [ "${type_present}" -eq 0 ] && [ "${active_found}" -eq 0 ] && [ "${SUGARKUBE_MDNS_DBUS:-0}" -ne 1 ]; then
     elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
     case "${elapsed_ms}" in
       ''|*[!0-9]*) elapsed_ms=0 ;;

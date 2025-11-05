@@ -974,6 +974,25 @@ EOS
 }
 
 @test "mdns self-check succeeds via dbus backend" {
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+# Stub systemctl for avahi-daemon queries
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
+if [ "$1" = "start" ] && [ "$2" = "avahi-daemon.socket" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+# Stub busctl to succeed immediately
+exit 0
+EOS
+
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
