@@ -34,6 +34,7 @@ jobs:
             libcurl4-openssl-dev \
             libdw-dev \
             libnss-mdns \
+            ncat \
             zlib1g-dev \
             binutils-dev \
             libiberty-dev
