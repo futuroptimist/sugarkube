@@ -386,7 +386,7 @@ EOS
 
 @test "mdns self-check warns when browse succeeds but resolution lags" {
   stub_avahi_browse_with_fixtures \
-    "${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt" \
+    "${BATS_CWD}/tests/fixtures/avahi_browse_agent_ok.txt" \
     "${BATS_CWD}/tests/fixtures/avahi_browse_services_with_k3s.txt"
 
   stub_command avahi-resolve-host-name <<'EOS'

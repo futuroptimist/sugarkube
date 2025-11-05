@@ -18,37 +18,21 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Remaining Test Failures
 
-### 🔄 mdns_selfcheck.bats (15 tests remaining)
+### 🔄 mdns_selfcheck.bats (8 tests remaining - COMPLEXITY UPDATED)
 
-Most failures are due to missing curl stubs for server role tests. The fix is systematic and low-risk:
+**Status as of 2025-11-05**: After investigation of remaining tests, discovered higher complexity than initially assessed. See `ci-test-fixes-action-plan.md` section "Investigation Findings (2025-11-05)" for detailed analysis.
 
-**Pattern to apply:**
-```bash
-stub_command curl <<'EOS'
-#!/usr/bin/env bash
-# Stub curl to simulate successful API readiness check
-exit 0
-EOS
-```
+**Critical Discovery**: Tests 8, 15, and 16 require non-trivial changes:
+- **Test 8** (line 370): Fixture role mismatch + resolution status code issues (2-3 hrs)
+- **Test 15** (line 582): Requires browse flow restructuring for dbus preference (3-4 hrs)
+- **Test 16** (line 623): Requires new gdbus-based wait implementation (3-4 hrs)
 
-**Tests needing this fix:**
-1. ~~Line 202: "mdns self-check waits for active queries when instance appears within window"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-04-active-window.json)
-2. Line 254: "mdns self-check strips surrounding quotes before matching"
-3. Line 293: "mdns self-check accepts short host when EXPECTED_HOST has .local"
-4. Line 370: "mdns self-check warns when browse succeeds but resolution lags"
-5. ~~Line 410: "mdns self-check reports failure when no records appear"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-09-browse-empty.json)
-6. ~~Line 438: "mdns self-check fails fast when service type is missing"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-10-type-missing-logging.json)
-7. Line 476: "mdns self-check tolerates extra avahi-browse fields and anchors by type"
-8. ~~Line 515: "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry"~~ - **FIXED** (see outages/2025-11-05-mdns-selfcheck-ipv4-mismatch-status.json)
-9. ~~Line 554: "mdns self-check ignores bootstrap advertisement when server required"~~ - **FIXED** (see outages/2025-11-05-mdns-selfcheck-bootstrap-filter-reason.json)
-10. Line 582: "mdns self-check falls back to CLI when dbus unsupported"
-11. Line 623: "mdns self-check falls back to CLI when dbus browser creation fails"
-12. Line 676: "mdns dbus self-check waits for avahi bus before browsing"
+See action plan for detailed root cause analysis and recommended approaches.
 
-**Other potential issues:**
-- Some tests may have additional root causes beyond missing curl stubs
-- Tests 159 ("warns when enumeration misses") may need investigation of service type checking logic
-- DBus-related tests may need additional stubs
+**Tests still needing investigation:**
+1. Line 254: "mdns self-check strips surrounding quotes before matching"
+2. Line 293: "mdns self-check accepts short host when EXPECTED_HOST has .local"
+3. Line 476: "mdns self-check tolerates extra avahi-browse fields and anchors by type"
 
 ### 🔍 discover_flow.bats (status unknown)
 
@@ -75,18 +59,39 @@ EOS
 2. May have dependency on external services or network operations
 3. Timeouts may need adjustment
 
-## Recommended Approach
+## Recommended Approach (UPDATED 2025-11-05)
 
-### Phase 1: Complete mdns_selfcheck.bats fixes (Est: 30 minutes)
-1. Add curl stub to each of the 12 remaining server role tests listed above
-2. Run tests individually to verify each fix
-3. Handle any edge cases that emerge
-4. This should get mdns_selfcheck.bats to 15+/18 passing
+### Current Status
+- ✅ 10/18 mdns_selfcheck tests passing
+- 🔴 8 tests remaining - 3 are high complexity, 3 need investigation
 
-### Phase 2: Investigate remaining mdns_selfcheck failures (Est: 1-2 hours)
-1. For any tests still failing after Phase 1, analyze output
-2. May need additional stubs or test logic fixes
-3. Document any new root causes found
+### Revised Priority Order
+
+#### Phase 1: Investigate Simple Tests First (Est: 1-2 hours)
+Tests that may be simpler than the complex 3:
+1. Line 254: "strips surrounding quotes before matching" - May just need test fix
+2. Line 293: "accepts short host when EXPECTED_HOST has .local" - May need hostname parsing fix  
+3. Line 476: "tolerates extra avahi-browse fields and anchors by type" - May need awk pattern fix
+
+Run each test with DEBUG logging to understand actual vs expected behavior.
+
+#### Phase 2: Complex Test Fixes (Est: 8-11 hours total)
+Each should be its own focused PR:
+
+1. **Test 8: Resolution Lag Warning** (2-3 hours)
+   - Start by investigating why stubbed resolution returns status 2
+   - See action plan "Investigation Findings" for detailed analysis
+   - Consider creating agent fixtures as reusable test infrastructure
+   
+2. **Test 15: DBus Fallback Logging** (3-4 hours)
+   - Requires implementing dbus preference when SUGARKUBE_MDNS_DBUS=1
+   - Alternative: Discuss with maintainer if test expectations should change
+   - See action plan for flow restructuring details
+
+3. **Test 16: DBus Wait Logic** (3-4 hours)
+   - Implement new gdbus introspect wait function
+   - Coordinate with existing busctl wait logic
+   - See action plan for implementation approach
 
 ### Phase 3: Fix discover_flow.bats and join_gate.bats (Est: 2-4 hours)
 1. Run tests with verbose output to see where they hang
@@ -129,13 +134,32 @@ For each test fix:
 - join_gate.bats: All passing
 - Complete CI green
 
-## Time Estimate
+## Time Estimate (REVISED 2025-11-05)
 
-- Remaining mdns_selfcheck curl stubs: **30 minutes**
-- Remaining mdns_selfcheck edge cases: **1-2 hours**
+Based on deep investigation findings:
+
+### Simple Tests (if they exist)
+- Lines 254, 293, 476 investigation: **1-2 hours**
+- Fixes for simple tests (if any): **30 min - 1 hour each**
+
+### Complex Tests (confirmed high effort)
+- Test 8 (Resolution lag warning): **2-3 hours**
+- Test 15 (DBus fallback logging): **3-4 hours**  
+- Test 16 (DBus wait logic): **3-4 hours**
+
+### Other Test Suites
 - discover_flow + join_gate investigation and fixes: **2-4 hours**
 
-**Total for full CI green: 3.5-6.5 hours**
+**Revised Total for mdns_selfcheck.bats 18/18**: 9-15 hours  
+**Total for full CI green**: 11-19 hours
+
+**Key Learning**: Original estimates were 3-5x too optimistic due to:
+- Hidden fixture incompatibilities
+- Tool/command mismatches in test stubs
+- Complex status code semantics in resolution logic
+- Need to restructure execution flows, not just add code
+
+**Recommendation**: Each complex test should be its own PR with comprehensive testing.
 
 ## Notes
 
@@ -143,3 +167,50 @@ For each test fix:
 - All root causes identified so far have simple, systematic fixes
 - No code changes to core scripts needed - only test stubs
 - Good test coverage exists, just needs proper mocking
+
+## Investigation Lessons Learned (2025-11-05)
+
+After deep-dive investigation of Tests 8, 15, and 16:
+
+### What Looked Simple But Wasn't
+
+1. **"Add a log line"** often means **"restructure execution flow"**
+   - Test 15 requires implementing dbus-first preference, not just logging
+   - Need to add new code path before existing browse logic
+
+2. **"Add retry logic"** often means **"implement new wait function with different tool"**
+   - Test 16 expects gdbus introspect, but existing code uses busctl
+   - Can't just modify existing wait function - need parallel implementation
+
+3. **"Fix test fixture"** can uncover **deeper semantic mismatches**
+   - Test 8 fixture role fixed, but revealed status code issues
+   - Resolution returns status 2 (ipv4_mismatch) not status 1 (resolve_failed)
+   - Code exits early before warning logic can trigger
+
+### Investigation Best Practices
+
+1. **Run test manually with DEBUG first** - Don't trust the test description
+2. **Check test fixtures match expectations** - Roles, IPs, service types
+3. **Trace full execution path** - Follow code with test stubs to see actual flow
+4. **Understand status code semantics** - Exit codes often have specific meanings
+5. **Read test setup carefully** - Stubs reveal assumptions about how code should work
+6. **Verify stub tools match code** - gdbus vs busctl, avahi-browse vs avahi-resolve
+7. **Budget 3-5x initial estimate** - Hidden complexity is the norm, not exception
+
+### Red Flags for Scope Inflation
+
+- Test expects behavior that doesn't exist in current code
+- Test fixtures don't match test parameters
+- Stubbed commands don't match what code actually calls
+- Multiple early exit paths before expected logic
+- Status codes with special semantics (not just 0/1)
+
+### Recommended Approach for Complex Tests
+
+1. **One test per PR** - Don't batch complex fixes
+2. **Investigate thoroughly first** - Spend time understanding before coding
+3. **Test beyond the failing test** - Ensure fix doesn't break other paths
+4. **Document complexity** - Update notes with findings for next developer
+5. **Consider test intent** - Sometimes test expectations should change vs code
+
+See `ci-test-fixes-action-plan.md` "Investigation Findings (2025-11-05)" section for detailed analysis of each test's complexity.

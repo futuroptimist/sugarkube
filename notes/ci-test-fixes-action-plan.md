@@ -1014,3 +1014,251 @@ This action plan provides step-by-step instructions to fix all remaining CI test
 Each fix should be accompanied by its corresponding outage JSON file following the repository convention. The outage files document the root cause and resolution for future reference.
 
 Total estimated time: 4-6 hours for complete implementation and testing.
+
+---
+
+## Investigation Findings (2025-11-05)
+
+**Context**: Deep investigation of the 3 remaining unchecked test failures (Tests 8, 15, 16) revealed significantly higher complexity than initial assessment. This section documents those findings to inform future work.
+
+### Test 8: Resolution Lag Warning - Higher Complexity Than Expected
+
+**Initial Assessment**: Simple conditional check at line 844  
+**Actual Complexity**: Test fixture incompatibility + resolution status code mismatch
+
+#### Issues Discovered
+
+1. **Fixture Role Mismatch**
+   - Test expects `EXPECTED_ROLE=agent` and `EXPECTED_PHASE=agent`
+   - Existing fixture `avahi_browse_ok.txt` has `role=server` and `phase=server`
+   - The `parse_browse()` function filters instances by role (lines 227-228 in mdns_helpers.sh)
+   - No matching instance found → test fails with `instance_not_found` instead of proceeding to resolution
+
+2. **Created Artifact**
+   - Added `tests/fixtures/avahi_browse_agent_ok.txt` with correct agent role
+   - Updated test to reference new fixture
+
+3. **Second Issue: Resolution Status Code**
+   - Even with correct fixture, test fails with `reason=ipv4_mismatch` (status=2)
+   - Test expects `reason=resolve_failed` (status=1)
+   - Code exits early at line 678 with exit code 5 when status=2
+   - Never reaches the warning check at line 844
+
+4. **Root Cause Analysis**
+   - The resolution logic returns different status codes:
+     - Status 0: Success
+     - Status 1: General resolution failure
+     - Status 2: IPv4 mismatch
+   - When all resolution methods are stubbed to fail, the code path may return status 2 instead of status 1
+   - The warning logic only handles status 1 (browse success + resolve failure)
+   - Status 2 triggers early exit before warning can be logged
+
+#### Recommended Fix Approach
+
+**Option 1: Extend warning logic to handle status 2**
+- Add additional check before line 678 to detect browse success + IPv4 mismatch
+- Log warning and exit 0 for this case as well
+- Risk: May hide genuine IPv4 mismatches that should fail
+
+**Option 2: Adjust test stubs to return status 1**
+- Investigate why stubbed resolution returns status 2
+- Adjust stubs or resolution logic to return status 1 for general failure
+- Risk: May require understanding complex resolution path in mdns_resolution.sh
+
+**Option 3: Fix resolution status code logic**
+- Audit `resolve_srv_target_cli` and `resolve_host` functions in mdns_resolution.sh
+- Ensure status codes are consistent with expectations
+- Risk: High - touches core resolution logic used across multiple paths
+
+**Estimated Effort**: 2-3 hours including testing and verification
+
+**Recommendation**: Start with Option 2 (investigate stub behavior) as it's least invasive
+
+---
+
+### Test 15: DBus Fallback Logging - Requires Flow Restructuring
+
+**Initial Assessment**: Add logging to mdns_cli_dbus_fallback function  
+**Actual Complexity**: Test expects different execution flow than currently implemented
+
+#### Issues Discovered
+
+1. **Test Expectation vs Current Flow**
+   - Test sets `SUGARKUBE_MDNS_DBUS=1` expecting script to try dbus FIRST
+   - Current mdns_selfcheck.sh uses avahi-browse directly (line 499)
+   - mdns_cli_dbus_fallback is called when CLI (avahi-browse) FAILS, to retry with dbus
+   - Test expects OPPOSITE flow: try dbus, fall back to CLI on failure
+
+2. **Missing Initial Dbus Preference**
+   - No logic exists to prefer dbus when `SUGARKUBE_MDNS_DBUS=1`
+   - mdns_selfcheck.sh always starts with avahi-browse
+   - mdns_selfcheck_dbus.sh is only called via fallback function (line 360)
+
+3. **What Test Actually Tests**
+   - Test stubs gdbus to fail (ServiceBrowserNew returns error)
+   - Test stubs avahi-browse to succeed
+   - Test expects: try dbus → fails → log `fallback=cli` → try avahi-browse → succeeds
+   - Current: try avahi-browse → succeeds immediately (never tries dbus)
+
+#### Required Changes
+
+To make test pass as written, need to:
+
+1. **Add dbus preference logic** (before line 499 in mdns_selfcheck.sh):
+   ```bash
+   if [ "${SUGARKUBE_MDNS_DBUS:-0}" -eq 1 ] && [ "${INITIAL_BROWSE_READY}" -eq 0 ]; then
+     # Try dbus first when flag is set
+     if [ -x "${DBUS_SCRIPT_PATH}" ]; then
+       if SUGARKUBE_MDNS_DBUS=1 "${DBUS_SCRIPT_PATH}" 2>/dev/null; then
+         exit 0
+       fi
+       # Dbus failed, log fallback and continue with CLI
+       log_info mdns_selfcheck event=dbus_fallback fallback=cli reason=dbus_browse_failed attempt="${attempt}"
+     fi
+   fi
+   # Continue with regular avahi-browse...
+   ```
+
+2. **Risk Assessment**
+   - Changes main browse flow (medium risk)
+   - Adds new code path that could introduce race conditions
+   - May affect performance (extra dbus attempt before CLI)
+   - Need to handle all dbus exit codes (0, 1, 2)
+
+3. **Alternative: Rewrite Test**
+   - Change test to match current flow (CLI fails → dbus fallback)
+   - Less invasive but changes test semantics
+   - Original test intent may be to validate dbus preference
+
+**Estimated Effort**: 3-4 hours including edge case handling and testing
+
+**Recommendation**: Discuss with maintainer whether dbus preference is desired behavior or if test should be adjusted
+
+---
+
+### Test 16: DBus Wait Logic - New Implementation Required
+
+**Initial Assessment**: Add retry loop with ServiceUnknown detection  
+**Actual Complexity**: Requires new wait function using different tool than existing implementation
+
+#### Issues Discovered
+
+1. **Tool Mismatch**
+   - Existing `wait_for_avahi_dbus.sh` uses `busctl` for dbus readiness check
+   - Test expects `gdbus introspect` with ServiceUnknown error retry
+   - Test stubs gdbus, not busctl
+
+2. **Test Stub Behavior**
+   - Stub returns ServiceUnknown error for first 2 `gdbus introspect` calls
+   - Succeeds on 3rd call
+   - Expects script to retry and log `event=avahi_dbus_ready outcome=ok`
+
+3. **Current Flow**
+   - mdns_selfcheck_dbus.sh calls wait_for_avahi_dbus.sh at line 278
+   - wait_for_avahi_dbus.sh uses busctl (lines 218-269)
+   - No gdbus introspect retry logic exists
+
+#### Required Changes
+
+Need to add new wait function in mdns_selfcheck_dbus.sh:
+
+```bash
+wait_for_avahi_dbus_gdbus() {
+  local max_attempts="${1:-10}"
+  local attempt=0
+  
+  while [ "${attempt}" -lt "${max_attempts}" ]; do
+    attempt=$((attempt + 1))
+    
+    # Try gdbus introspect
+    if gdbus introspect --system --dest org.freedesktop.Avahi --object-path / >/dev/null 2>&1; then
+      log_info mdns_selfcheck event=avahi_dbus_ready outcome=ok attempts="${attempt}"
+      return 0
+    fi
+    
+    # Check error type
+    local error_output
+    error_output="$(gdbus introspect --system --dest org.freedesktop.Avahi --object-path / 2>&1 || true)"
+    
+    if [[ "${error_output}" =~ ServiceUnknown ]]; then
+      # Service not ready, retry
+      log_debug mdns_selfcheck event=avahi_dbus_wait attempt="${attempt}" status=not_ready
+      sleep 0.5
+      continue
+    fi
+    
+    # Other error, fail fast
+    log_error mdns_selfcheck event=avahi_dbus_error attempt="${attempt}"
+    return 1
+  done
+  
+  log_error mdns_selfcheck event=avahi_dbus_timeout attempts="${max_attempts}"
+  return 1
+}
+```
+
+Then call it before ServiceBrowserNew attempt (before line 314).
+
+**Coordination with Existing Wait**
+- Need to decide: replace wait_for_avahi_dbus.sh call or add gdbus check?
+- If both: which runs first? busctl or gdbus?
+- Should gdbus check be conditional on tool availability?
+
+**Risk Assessment**
+- Medium risk: new retry logic with timing implications
+- Could introduce flakiness if timing is wrong
+- Need to handle multiple error types from gdbus
+- May conflict with existing busctl wait logic
+
+**Estimated Effort**: 3-4 hours including testing retry scenarios and error handling
+
+**Recommendation**: Implement as separate function, call conditionally when gdbus available, fall back to busctl wait
+
+---
+
+## Key Takeaways from Investigation
+
+1. **Scope Inflation Pattern**: Tests that initially appear simple often have hidden complexities:
+   - Test fixture dependencies
+   - Tool/command mismatches between test stubs and actual code
+   - Multiple exit paths in complex scripts
+   - Status code semantics not matching test expectations
+
+2. **Test vs Code Intent**: Sometimes tests encode expectations that differ from current implementation:
+   - Test 15 expects dbus preference that doesn't exist
+   - May indicate missing feature vs broken test
+
+3. **Resolution is Complex**: The mdns_resolution.sh and related functions have intricate status code semantics:
+   - Status 0, 1, 2 mean different things
+   - Multiple resolution methods with different failure modes
+   - Early exits before warning checks can trigger
+
+4. **Testing Infrastructure Gaps**:
+   - No agent role fixtures (only server fixtures exist)
+   - Stub tools (gdbus vs busctl) don't always match actual code paths
+   - Tests may be testing future/desired behavior vs current behavior
+
+5. **Documentation Helps**: This investigation found that:
+   - Simple "add a log line" often means "restructure execution flow"
+   - "Add retry logic" often means "implement new wait function with different tool"
+   - Estimated times in original plan were 3-5x too optimistic
+
+## Recommendations for Future Test Fixes
+
+1. **Always investigate first**: Run test manually with debug output before coding
+2. **Check fixtures**: Verify test fixtures match test expectations (roles, IPs, etc.)
+3. **Trace execution path**: Use LOG_LEVEL=debug to see actual vs expected flow
+4. **Verify status codes**: Understand what each exit code means in context
+5. **Read the test**: Test setup often reveals assumptions about execution flow
+6. **Check tool availability**: Verify stubs match actual tools called by code
+7. **Budget 3x time**: Initial estimates are typically optimistic by 3-5x factor
+
+## Next Steps
+
+For future PRs addressing these tests:
+
+1. **Test 8**: Start by investigating why stubbed resolution returns status 2
+2. **Test 15**: Decide with maintainer if dbus preference is desired before implementing
+3. **Test 16**: Implement gdbus wait as separate function, make it conditional
+
+Each should be its own focused PR with comprehensive testing beyond just the failing test.
