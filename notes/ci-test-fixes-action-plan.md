@@ -948,7 +948,8 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
 
 - [x] **Test 3**: Verify fix after awk change
   - [x] Run test to confirm passes
-  - [x] Create outage: 2025-11-04-mdns-selfcheck-test-03-enum-warn.json
+  - [x] Create outage: 2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json
+  - **Status (2025-11-05)**: ✅ COMPLETED - Changed log_debug to log_info for enumeration warnings
 
 - [x] **Test 4**: Verify attempt logging works
   - [x] Run test to confirm `attempts=3` in output

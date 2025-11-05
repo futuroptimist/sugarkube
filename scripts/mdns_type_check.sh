@@ -115,8 +115,10 @@ __MDNS_TYPES__
         service_type="${SERVICE_TYPE}"
     fi
   else
+    # When service type is not in enumeration (present=0), log at INFO level with severity=warn
+    # so the warning is visible without LOG_LEVEL=debug
     if [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
@@ -124,46 +126,46 @@ __MDNS_TYPES__
         "${type_command_kv}" \
         "${type_duration_kv}"
     elif [ -n "${available_kv}" ] && [ -n "${type_command_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
         "${available_kv}" \
         "${type_command_kv}"
     elif [ -n "${available_kv}" ] && [ -n "${type_duration_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
         "${available_kv}" \
         "${type_duration_kv}"
     elif [ -n "${available_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
         "${available_kv}"
     elif [ -n "${type_command_kv}" ] && [ -n "${type_duration_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
         "${type_command_kv}" \
         "${type_duration_kv}"
     elif [ -n "${type_command_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
         "${type_command_kv}"
     elif [ -n "${type_duration_kv}" ]; then
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn \
         "${type_duration_kv}"
     else
-      log_debug mdns_type_check \
+      log_info mdns_selfcheck event=mdns_type_check \
         present="${type_present}" \
         service_type="${SERVICE_TYPE}" \
         severity=warn
