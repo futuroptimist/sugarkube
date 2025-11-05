@@ -590,8 +590,10 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
           status=0
           resolution_method="cli"
         else
-          resolved="$(resolve_host "${srv_host}" || true)"
+          set +e
+          resolved="$(resolve_host "${srv_host}")"
           status=$?
+          set -e
         fi
         resolved_for_trace="$(printf '%s' "${resolved}" | tr '\n' ' ' | sed 's/"/\\"/g')"
         log_trace mdns_selfcheck_resolve attempt="${attempt}" host="${srv_host}" status="${status}" method="${resolution_method}" "resolved=\"${resolved_for_trace}\""
@@ -740,6 +742,9 @@ while [ "${attempt}" -le "${ATTEMPTS}" ]; do
       *)
         # When browse is empty or has errors, prioritize that reason over resolution failures
         if [ "${browse_reason}" = "browse_empty" ] || [ "${browse_reason}" = "browse_error" ]; then
+          last_reason="${browse_reason}"
+        elif [ "${browse_reason}" = "instance_not_found" ]; then
+          # Prioritize instance_not_found when browse had output but no matching instances
           last_reason="${browse_reason}"
         elif [ -n "${SELF_RESOLVE_REASON}" ] && [ "${SELF_RESOLVE_STATUS}" -ne 3 ]; then
           last_reason="${SELF_RESOLVE_REASON}"

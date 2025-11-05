@@ -39,8 +39,8 @@ EOS
 5. ~~Line 410: "mdns self-check reports failure when no records appear"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-09-browse-empty.json)
 6. ~~Line 438: "mdns self-check fails fast when service type is missing"~~ - **FIXED** (see outages/2025-11-04-mdns-selfcheck-test-10-type-missing-logging.json)
 7. Line 476: "mdns self-check tolerates extra avahi-browse fields and anchors by type"
-8. Line 515: "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry"
-9. Line 554: "mdns self-check ignores bootstrap advertisement when server required"
+8. ~~Line 515: "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry"~~ - **FIXED** (see outages/2025-11-05-mdns-selfcheck-ipv4-mismatch-status.json)
+9. ~~Line 554: "mdns self-check ignores bootstrap advertisement when server required"~~ - **FIXED** (see outages/2025-11-05-mdns-selfcheck-bootstrap-filter-reason.json)
 10. Line 582: "mdns self-check falls back to CLI when dbus unsupported"
 11. Line 623: "mdns self-check falls back to CLI when dbus browser creation fails"
 12. Line 676: "mdns dbus self-check waits for avahi bus before browsing"
