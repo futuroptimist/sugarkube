@@ -54,11 +54,8 @@ run_command_capture() {
   start_ms="$(now_ms)"
   local output
   local rc
-  if ! output="$("$@" 2>&1)"; then
-    rc=$?
-  else
-    rc=0
-  fi
+  output="$("$@" 2>&1)"
+  rc=$?
   local duration_ms
   duration_ms="$(elapsed_since_start_ms "${start_ms}" 2>/dev/null || printf '%s' 0)"
   case "${duration_ms}" in
