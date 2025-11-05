@@ -4,17 +4,18 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Summary of Fixes Applied
 
-### ✅ Completed (14 tests fixed)
+### ✅ Completed (15 tests fixed - updated 2025-11-05)
 1. **mdns_wire_probe.bats** - 4/4 tests now passing
    - Fixed by adding `ALLOW_NON_ROOT=1` environment variable
    - Root cause documented in `outages/2025-11-04-mdns-test-missing-allow-non-root.json`
 
-2. **mdns_selfcheck.bats** - 10/18 tests now passing
-   - Tests 1-3: Added curl stubs and fixed assertions
-   - Tests 5-7, 11, 14, 17: Added curl stubs for server socket checks
+2. **mdns_selfcheck.bats** - 15/18 tests now passing (was 10/18)
+   - Tests 1-7, 9-14: Previously fixed with curl stubs and assertions
+   - Test 3 (NEW): Fixed by changing log level from debug to info for enumeration warnings
    - Root causes documented in:
      - `outages/2025-11-04-mdns-test-missing-curl-stub.json`
      - `outages/2025-11-04-mdns-test-incorrect-assertion.json`
+     - `outages/2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json` (NEW)
 
 ## Remaining Test Failures
 
@@ -29,10 +30,11 @@ This document tracks the remaining test failures that need to be addressed after
 
 See action plan for detailed root cause analysis and recommended approaches.
 
-**Tests still needing investigation:**
-1. Line 254: "mdns self-check strips surrounding quotes before matching"
-2. Line 293: "mdns self-check accepts short host when EXPECTED_HOST has .local"
-3. Line 476: "mdns self-check tolerates extra avahi-browse fields and anchors by type"
+**Tests now passing (as of 2025-11-05):**
+1. ✅ Line 158 (Test 3): "mdns self-check warns when enumeration misses but browse succeeds" - Fixed by changing log level from debug to info
+2. ✅ Line 254 (Test 5): "mdns self-check strips surrounding quotes before matching" - Already passing
+3. ✅ Line 293 (Test 6): "mdns self-check accepts short host when EXPECTED_HOST has .local" - Already passing
+4. ✅ Line 476 (Test 11): "mdns self-check tolerates extra avahi-browse fields and anchors by type" - Already passing
 
 ### 🔍 discover_flow.bats (status unknown)
 
@@ -61,9 +63,9 @@ See action plan for detailed root cause analysis and recommended approaches.
 
 ## Recommended Approach (UPDATED 2025-11-05)
 
-### Current Status
-- ✅ 10/18 mdns_selfcheck tests passing
-- 🔴 8 tests remaining - 3 are high complexity, 3 need investigation
+### Current Status (Updated 2025-11-05)
+- ✅ 15/18 mdns_selfcheck tests passing (was 10/18)
+- 🔴 3 tests remaining - Test 8 and Test 15 are complex (2-4 hrs each), Test 16 appears to hang
 
 ### Revised Priority Order
 

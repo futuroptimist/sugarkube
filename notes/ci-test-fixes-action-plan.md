@@ -948,7 +948,8 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
 
 - [x] **Test 3**: Verify fix after awk change
   - [x] Run test to confirm passes
-  - [x] Create outage: 2025-11-04-mdns-selfcheck-test-03-enum-warn.json
+  - [x] Create outage: 2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json
+  - **Status (2025-11-05)**: ✅ COMPLETED - Changed log_debug to log_info for enumeration warnings
 
 - [x] **Test 4**: Verify attempt logging works
   - [x] Run test to confirm `attempts=3` in output
@@ -1020,6 +1021,94 @@ Total estimated time: 4-6 hours for complete implementation and testing.
 ## Investigation Findings (2025-11-05)
 
 **Context**: Deep investigation of the 3 remaining unchecked test failures (Tests 8, 15, 16) revealed significantly higher complexity than initial assessment. This section documents those findings to inform future work.
+
+## Investigation Findings (2025-11-05)
+
+**Context**: Deep investigation of the 3 remaining unchecked test failures (Tests 8, 15, 16) revealed significantly higher complexity than initial assessment. This section documents those findings to inform future work.
+
+### Test 3: Enum Warning Log Level - FIXED ✅
+
+**Issue**: Test expected `event=mdns_type_check` and `severity=warn` at INFO level when service type missing from enumeration but found via active browse.
+
+**Root Cause**: Warning messages were logged at DEBUG level only (`log_debug mdns_type_check`).
+
+**Fix Applied**: Changed `log_debug` to `log_info` for all enumeration warning messages in `scripts/mdns_type_check.sh` lines 119-170.
+
+**Result**: Test now passes. Outage created: `outages/2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json`
+
+---
+
+### Test 8: Resolution Lag Warning - IN PROGRESS ⚠️
+
+**Investigation Summary** (2025-11-05):
+
+**Test Expectation**:
+- Browse succeeds (finds agent instance)
+- All resolution methods fail (avahi-resolve, avahi-resolve-host-name, getent all exit with errors)
+- Script should exit 0 with `outcome=warn` and `reason=resolve_failed`
+
+**Current Behavior**:
+- Test fails with exit status != 0
+- Investigation reveals script exits with `reason=ipv4_mismatch` instead of `reason=resolve_failed`
+
+**Root Cause Analysis**:
+
+1. **Fixture Created**: `tests/fixtures/avahi_browse_agent_ok.txt` exists with correct agent role/phase
+2. **Resolution Stub Behavior**: Test stubs all resolution to fail:
+   - `avahi-resolve` → exit 1
+   - `avahi-resolve-host-name` → exit 1
+   - `getent` → exit 2
+
+3. **Exit Code Semantics**:
+   - Status 0: Resolution succeeded
+   - Status 1: Resolution failed (tool failed or no result)
+   - Status 2: IPv4 mismatch (resolution succeeded but wrong IP)
+
+4. **Problem**: When resolution fails, code may return status 2 instead of status 1 in some paths
+   - Script exits early at line 678 with `exit 5` when status=2
+   - Never reaches warning check at line 844
+
+5. **Warning Check Logic** (line 844):
+   ```bash
+   if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] &&  
+      [ "${MDNS_RESOLUTION_STATUS_RESOLVE}" = "0" ] &&
+      [ "${last_reason}" = "resolve_failed" ]; then
+   ```
+   - Updated to also accept `ipv4_mismatch` as a warning condition
+   - BUT: Need to prevent early exit at line 678 OR ensure status != 2 when all resolution fails
+
+6. **Conflict with Test 12**:
+   - Test 12 expects exit code 5 when resolution SUCCEEDS but IPv4 mismatches
+   - Test 8 expects exit code 0 when resolution FAILS entirely
+   - Need to distinguish between these two scenarios
+
+**Attempted Fixes**:
+1. ✅ Updated line 844-867 to accept `ipv4_mismatch` in addition to `resolve_failed` in warning check
+2. ❌ Tried removing early exit at line 678 - breaks Test 12
+3. ❌ Tried conditional exit based on browse success and last attempt - Test 8 still expects `reason=resolve_failed` not `ipv4_mismatch`
+4. ⏸️ Root issue: Need to understand why stubbed resolution returns status 2 instead of status 1
+
+**Key Finding**:
+- Test expects `reason=resolve_failed` when all resolution fails
+- Code is setting `reason=ipv4_mismatch` (status=2) instead
+- Need to trace through resolution helper to find where status 2 is being returned when all methods fail
+- Likely in `scripts/mdns_resolution.sh` - possibly in `resolve_srv_target_cli` or `mdns_check_nss_host`
+
+**Recommendation for Next PR**:
+1. Add debug logging to resolution helper to see which method returns status 2
+2. Check if getent exit code 2 is being propagated incorrectly
+3. May need to adjust stub or fix resolution logic to ensure status 1 when all methods fail
+
+**Estimated Remaining Effort**: 1-2 hours  
+**Complexity**: Medium-High - requires debugging resolution helper logic
+
+**Files Modified So Far**:
+- `scripts/mdns_selfcheck.sh` line 844-867: Updated warning check to accept ipv4_mismatch (helps but not sufficient)
+- Changes reverted: Early exit prevention didn't work correctly
+
+**Test Status**: ❌ Still failing - deferred to next PR
+
+---
 
 ### Test 8: Resolution Lag Warning - Higher Complexity Than Expected
 

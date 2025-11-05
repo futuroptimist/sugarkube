@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level",
+  "date": "2025-11-05",
+  "component": "scripts/mdns_type_check.sh:117-171",
+  "rootCause": "When service type was missing from mDNS enumeration (_services._dns-sd._udp) but instances were found via active browse, the warning event was logged at DEBUG level only. Test expected event=mdns_type_check and severity=warn to be visible at INFO level without requiring LOG_LEVEL=debug, causing test failure on line 195.",
+  "resolution": "Changed log level from log_debug to log_info for all mdns_type_check warning messages when present=0 (lines 119-170). This ensures enumeration miss warnings are visible by default, improving observability of mDNS discovery issues during cluster startup.",
+  "references": [
+    "tests/bats/mdns_selfcheck.bats:158-200",
+    "scripts/mdns_type_check.sh:117-171"
+  ]
+}
