@@ -281,7 +281,7 @@ For each test fix:
 - ✅ Notes updated with completion status
 
 **Achieved (this PR):**
-- ✅ BATS test count improved from 38/41 to 40/41 (97.6% pass rate)
+- ✅ BATS test count improved from 34/41 to 36/41 (87.8% pass rate)
 - ✅ Simple, low-risk fix (package installation only)
 - ✅ No code changes required (tests use conditional skip logic)
 - ✅ Immediate impact (2 more tests passing)

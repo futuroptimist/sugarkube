@@ -129,7 +129,9 @@ All Python tests pass without skips (850+ tests).
 
 ---
 
-### 3. mdns_selfcheck.bats - Test 33: DBus Wait Logic (1 skipped - REMOVED)
+### 3. mdns_selfcheck.bats - Tests 33-34: Advanced Features (2 skipped)
+
+#### Test 33: DBus Wait Logic
 
 **Test**: "mdns dbus self-check waits for avahi bus before browsing"
 
@@ -194,7 +196,7 @@ All Python tests pass without skips (850+ tests).
 
 ---
 
-### 4. mdns_selfcheck.bats - Test 34: Absence Gate (1 skipped)
+#### Test 34: Absence Gate
 
 **Test**: "mdns absence gate confirms wipe leaves no advertisements"
 
@@ -249,10 +251,12 @@ All Python tests pass without skips (850+ tests).
 
 ### Immediate (Next 1-2 PRs)
 
-**PR 1: Quick Win - ncat Installation** (30 minutes)
-- **Impact**: Enables 2 tests, simple CI change
+**~~PR 1: Quick Win - ncat Installation~~ ✅ COMPLETED (PR #4 - 2025-11-05)**
+- **Impact**: Enabled 2 tests, simple CI change
 - **Risk**: Very low
 - **Tests**: l4_probe.bats tests 1-2
+- **Actual time**: 15 minutes (vs 30 min estimated)
+- **Outage**: `outages/2025-11-05-l4-probe-tests-ncat-missing.json`
 
 **PR 2: DBus Wait Retry Logic** (30 minutes)
 - **Impact**: Enables 1 test, well-scoped feature
@@ -276,20 +280,20 @@ All Python tests pass without skips (850+ tests).
 - **Tests**: discover_flow.bats tests 6-8
 - **Deliverable**: Decision document on Option A/B/C + implementation plan
 - **Recommendation**: Break into multiple PRs:
-  - PR 4: Investigation and approach decision (4-6 hours)
-  - PR 5: Test 6 implementation (6-8 hours)
-  - PR 6: Tests 7-8 implementation (8-10 hours)
+  - PR 5: Investigation and approach decision (4-6 hours)
+  - PR 6: Test 6 implementation (6-8 hours)
+  - PR 7: Tests 7-8 implementation (8-10 hours)
 
 ---
 
 ## Success Metrics
 
-**Current State** (2025-11-05):
-- BATS: 34/41 passing (82.9%)
+**Current State** (2025-11-05 - After PR #4):
+- BATS: 36/41 passing (87.8%)
 - Python: 850+/850+ passing (100%)
 - **Overall**: ~88% pass rate
 
-Note: "Passing" means tests that run and pass. 7 tests are skipped conditionally.
+Note: "Passing" means tests that run and pass. 5 tests are skipped conditionally.
 
 **Target State** (after all skipped tests addressed):
 - BATS: 41/41 passing (100%)
@@ -297,10 +301,10 @@ Note: "Passing" means tests that run and pass. 7 tests are skipped conditionally
 - **Overall**: 100% pass rate
 
 **Intermediate Milestones**:
-- After PR 1 (ncat): 36/41 passing (87.8%)
-- After PR 2 (dbus retry): 37/41 passing (90.2%)
-- After PR 3 (absence gate): 38/41 passing (92.7%)
-- After PRs 4-6 (k3s integration): 41/41 passing (100%)
+- ✅ After PR #4 (ncat - THIS PR): 36/41 passing (87.8%)
+- After PR #5 (dbus retry): 37/41 passing (90.2%)
+- After PR #6 (absence gate): 38/41 passing (92.7%)
+- After PRs #7-9 (k3s integration): 41/41 passing (100%)
 
 ---
 
