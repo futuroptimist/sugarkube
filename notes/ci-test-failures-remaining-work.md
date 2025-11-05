@@ -58,38 +58,51 @@ See action plan for detailed root cause analysis and recommended approaches.
 1. ✅ "join gate acquire and release manage publisher state"
 2. ✅ "join gate wait retries while lock is present"
 
-### 🔍 discover_flow.bats (status: partial fix attempted)
+### 🔍 discover_flow.bats (investigation done, needs dedicated PR)
+
+**Status**: Test 5 fails - complexity higher than expected
 
 **Symptoms:**
-- Test 5 ("discover flow joins existing server when discovery succeeds") fails
-- Tests timeout during execution
+- Test 5 ("discover flow joins existing server when discovery succeeds") times out
+- Tests 1-4 pass successfully
 
 **Investigation done (2025-11-05)**:
-1. Added gdbus and busctl stubs (similar to join_gate fix)  
-2. Added l4_probe stub to avoid network connectivity failures
-3. Tests 1-4 pass; test 5 still times out
+1. Confirmed tests 1-4 pass (they include their own gdbus/busctl stubs)
+2. Test 5 calls k3s-discover.sh which invokes join_gate.sh
+3. Attempted fixes:
+   - Added gdbus and busctl stubs (partial help)
+   - Added l4_probe stub to avoid DNS resolution failures
+   - Test still times out - likely needs more investigation of k3s install flow
 
 **Root Cause (partial)**:
-- Missing systemd/dbus stubs (fixed)
-- Missing l4_probe stub to avoid DNS resolution failures (attempted)
-- Additional investigation needed to understand why test 5 still hangs
+- Test 5 attempts to run full k3s-discover.sh flow including join gate and l4 probing
+- More stubs likely needed (k3s install itself, additional network tools)
+- May need DISABLE_JOIN_GATE=1 or other skip flags
+- Requires dedicated debugging session with full output capture
 
 **Recommended Next Steps**:
-1. Run test 5 with full debug output to see where it hangs
-2. Check if additional stubs are needed (k3s install, etc.)
-3. Consider if DISABLE_JOIN_GATE or other skip flags are needed
-4. May need to stub k3s installation process itself
+1. Run test 5 with LOG_LEVEL=debug and capture full output
+2. Identify exactly where it hangs (likely during k3s install attempt)
+3. Add appropriate stubs or skip flags
+4. May need to stub the k3s installation process itself
+5. Consider if this test should use a mock install approach
 
-**Estimated Complexity**: Higher than initially assessed - needs dedicated PR
+**Scope Assessment**: 
+- Initial estimate: 2-4 hours
+- Actual complexity: Higher - needs dedicated PR with full investigation
+- Dropped from this PR per scope constraints
+
+**Repro Steps**:
+```bash
+export BATS_LIB_PATH="${PWD}/tests/bats"
+bats -f "discover flow joins existing server when discovery succeeds" tests/bats/discover_flow.bats
+# Times out after ~60 seconds
+```
 
 **Tests status**:
 - ✅ Tests 1-4: Passing
-- ❌ Test 5: Still times out (needs further investigation)
-- ⚠️ Tests 6-8: Not yet tested (blocked by test 5)
-
-**Tests to investigate:**
-- "discover flow joins existing server when discovery succeeds" (test 5)
-- Any subsequent tests
+- ❌ Test 5: Times out (needs dedicated PR)
+- ⏸️ Tests 6-8: Not tested (blocked by test 5 failure)
 
 ## Recommended Approach (UPDATED 2025-11-05)
 
@@ -146,11 +159,11 @@ For each test fix:
 - [ ] Check for any additional errors
 - [ ] Update this document with results
 
-## Files Modified
-- `tests/bats/mdns_wire_probe.bats` - ✅ Complete
+## Files Modified (2025-11-05 update)
+- `tests/bats/mdns_wire_probe.bats` - ✅ Complete (4/4 passing)
 - `tests/bats/mdns_selfcheck.bats` - 🔄 In Progress (15/18 passing)
-- `tests/bats/discover_flow.bats` - 🔄 Partial (tests 1-4 passing, test 5+ need investigation)
-- `tests/bats/join_gate.bats` - ✅ Complete (2/2 passing)
+- `tests/bats/join_gate.bats` - ✅ Complete (2/2 passing) - **FIXED THIS PR**
+- `tests/bats/discover_flow.bats` - 🔄 Investigated (tests 1-4 passing, test 5 needs dedicated PR)
 
 ## Success Criteria
 
