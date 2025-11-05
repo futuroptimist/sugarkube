@@ -968,15 +968,15 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - [x] Run test to confirm exit code 4
   - [x] Create outage: 2025-11-04-mdns-selfcheck-test-10-type-missing-logging.json
 
-- [ ] **Test 12**: Add IPv4 mismatch exit code 5
-  - [ ] Implement IPv4 validation with exit 5
-  - [ ] Run test to confirm exit code 5
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-12-ipv4-mismatch.json
+- [x] **Test 12**: Add IPv4 mismatch exit code 5
+  - [x] Implement IPv4 validation with exit 5
+  - [x] Run test to confirm exit code 5
+  - [x] Create outage: 2025-11-05-mdns-selfcheck-ipv4-mismatch-status.json
 
-- [ ] **Test 13**: Add bootstrap role filtering
-  - [ ] Implement role matching and filtering
-  - [ ] Run test to confirm bootstrap ignored
-  - [ ] Create outage: 2025-11-04-mdns-selfcheck-test-13-bootstrap-filter.json
+- [x] **Test 13**: Add bootstrap role filtering
+  - [x] Implement role matching and filtering
+  - [x] Run test to confirm bootstrap ignored
+  - [x] Create outage: 2025-11-05-mdns-selfcheck-bootstrap-filter-reason.json
 
 - [ ] **Test 15**: Add dbus fallback logging
   - [ ] Add log_info call in mdns_cli_dbus_fallback
