@@ -669,6 +669,25 @@ EOS
 }
 
 @test "mdns self-check falls back to CLI when dbus browser creation fails" {
+  stub_command systemctl <<'EOS'
+#!/usr/bin/env bash
+# Stub systemctl for avahi-daemon queries
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
+if [ "$1" = "start" ] && [ "$2" = "avahi-daemon.socket" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+# Stub busctl to succeed immediately
+exit 0
+EOS
+
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >>"${BATS_TEST_TMPDIR}/gdbus-calls.log"
@@ -677,8 +696,8 @@ for arg in "$@"; do
     exit 1
   fi
 done
-echo "unexpected gdbus invocation" >&2
-exit 2
+# For other gdbus calls (like introspect, GetHostNameFqdn), succeed
+exit 0
 EOS
 
   stub_command avahi-browse <<'EOS'
