@@ -696,7 +696,7 @@ for arg in "$@"; do
     exit 1
   fi
 done
-# For other gdbus calls (like introspect, GetHostNameFqdn), succeed
+# For other gdbus calls not explicitly handled above, succeed
 exit 0
 EOS
 
