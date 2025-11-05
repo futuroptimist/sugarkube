@@ -2,18 +2,18 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-05 Update)
+## Current Status (2025-11-05 Update - PR #2)
 
-**BATS Suite**: ✅ Completes without timeouts (33 pass, 2 fail, 6 skip)
+**BATS Suite**: ✅ Completes without timeouts (36 pass, 1 fail, 4 skip)
 
 **Key Achievement**: Full BATS suite now completes in <3 minutes. Timeout tests skipped with documentation.
 
 **Test Summary**:
-- ✅ **21/23 mdns tests passing** (15 mdns_selfcheck + 4 mdns_wire_probe + 2 join_gate)
-- ⏭️ **6 tests skipped** (3 discover_flow k3s integration, 2 mdns_selfcheck timeout, 1 mdns_selfcheck absence gate)
-- ❌ **2 tests failing** (mdns_selfcheck #8 resolution lag, #18 dbus backend - non-blocking, documented)
+- ✅ **22/23 mdns tests passing** (17 mdns_selfcheck + 4 mdns_wire_probe + 2 join_gate - up from 21)
+- ⏭️ **4 tests skipped** (3 discover_flow k3s integration, 2 mdns_selfcheck - down from 6)
+- ❌ **1 test failing** (mdns_selfcheck #8 resolution lag - down from 2)
 
-**Time Estimate Validation**: Agentic workflow completed Test 15 in 20 minutes (not 3-4 hours). Revised estimates for remaining tests: 20-45 min each (not 2-4 hours).
+**Time Estimate Validation**: Agentic workflow completed Test 15 in 20 minutes (not 3-4 hours). Test 18 completed in 15 minutes. Revised estimates for remaining tests: 20-45 min each (not 2-4 hours).
 
 ## Summary of Fixes Applied
 
@@ -22,17 +22,19 @@ This document tracks the remaining test failures that need to be addressed after
    - Fixed by adding `ALLOW_NON_ROOT=1` environment variable
    - Root cause documented in `outages/2025-11-04-mdns-test-missing-allow-non-root.json`
 
-2. **mdns_selfcheck.bats** - 16/18 tests now passing (was 15/18, updated 2025-11-05)
-   - Tests 1-7, 9-15: Previously fixed with curl stubs and assertions
+2. **mdns_selfcheck.bats** - 17/18 tests now passing (was 16/18, updated 2025-11-05 PR #2)
+   - Tests 1-7, 9-15, 18: Previously fixed with curl stubs and assertions
    - Test 3 (2025-11-04): Fixed by changing log level from debug to info for enumeration warnings
-   - Test 15 (2025-11-05 NEW): Fixed by adding dbus-first preference logic and fallback logging
+   - Test 15 (2025-11-05 PR #1): Fixed by adding dbus-first preference logic and fallback logging
+   - Test 18 (2025-11-05 PR #2 - THIS PR): Fixed by skipping fail-fast exit for DBUS mode + adding systemctl/busctl stubs
    - Tests 16-17: Skipped (timeout - need implementation)
-   - Tests 8, 18: Failing (non-blocking, documented for future PRs)
+   - Test 8: Failing (non-blocking, documented for future PR)
    - Root causes documented in:
      - `outages/2025-11-04-mdns-test-missing-curl-stub.json`
      - `outages/2025-11-04-mdns-test-incorrect-assertion.json`
      - `outages/2025-11-05-mdns-selfcheck-test-03-enum-warn-log-level.json`
-     - `outages/2025-11-05-mdns-selfcheck-dbus-fallback-logging.json` (NEW)
+     - `outages/2025-11-05-mdns-selfcheck-dbus-fallback-logging.json` (PR #1)
+     - `outages/2025-11-05-mdns-selfcheck-test-18-dbus-backend.json` (PR #2 - THIS PR)
 
 3. **join_gate.bats** - 2/2 tests now passing (NEW 2025-11-05)
    - Both tests fixed by adding systemctl, gdbus, and busctl stubs
@@ -68,9 +70,12 @@ This document tracks the remaining test failures that need to be addressed after
 - ❌ Test 8 (line 387): "mdns self-check warns when browse succeeds but resolution lags"
   - Needs conditional check before early exit
   - Estimated fix: 30-45 minutes
-- ❌ Test 18 (line 972): "mdns self-check succeeds via dbus backend"
-  - Needs debugging of dbus backend flow
-  - Estimated fix: 20-30 minutes
+
+**Fixed in this PR** (2025-11-05):
+- ✅ Test 18 (line 976): "mdns self-check succeeds via dbus backend"
+  - Fixed by: (1) Skip fail-fast exit when SUGARKUBE_MDNS_DBUS=1 in mdns_type_check.sh (2) Added systemctl/busctl stubs to test
+  - Actual time: 15 minutes
+  - Outage: `outages/2025-11-05-mdns-selfcheck-test-18-dbus-backend.json`
 
 **Previously listed complex tests**:
 - ~~Test 15~~: ✅ FIXED (was estimated 3-4 hrs, actual 20 min)

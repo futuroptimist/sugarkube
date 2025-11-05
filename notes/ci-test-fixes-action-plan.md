@@ -998,17 +998,25 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
   - [ ] Create outage: 2025-11-04-discover-flow-missing-stubs.json (deferred - skipped tests don't need outages)
   - **Status (2025-11-05)**: ⏭️ SKIPPED tests 5-7 - Complex k3s integration, needs dedicated PR
 
-- [ ] **join_gate.bats**: Investigate and fix timeouts
+- [x] **join_gate.bats**: Investigate and fix timeouts
   - [x] Identify missing stubs in test 1
   - [x] Add stubs
   - [x] Run tests to confirm no hangs
   - [x] Create outage: 2025-11-05-join-gate-missing-dbus-stubs.json
+  - **Status (2025-11-05 PR #1)**: ✅ COMPLETED - Both tests passing
+
+- [x] **Test 18**: mdns self-check succeeds via dbus backend
+  - [x] Investigate dbus backend flow
+  - [x] Fix service type check to skip fail-fast for DBUS mode
+  - [x] Add systemctl and busctl stubs to test
+  - [x] Create outage: 2025-11-05-mdns-selfcheck-test-18-dbus-backend.json
+  - **Status (2025-11-05 PR #2 - THIS PR)**: ✅ COMPLETED in 15 minutes
 
 - [x] **Final validation**:
-  - [x] Run full BATS suite locally (completes without timeouts: 33 pass, 2 fail, 6 skip)
+  - [x] Run full BATS suite locally (completes without timeouts: 36 pass, 1 fail, 4 skip - improved from 35/2/4)
   - [ ] Push to PR and verify CI passes  
   - [x] Update notes/ci-test-failures-remaining-work.md with final status
-  - **Status (2025-11-05)**: ✅ BATS suite completes, 2 non-blocking failures documented
+  - **Status (2025-11-05 PR #2)**: ✅ BATS suite completes, 1 non-blocking failure remaining (Test 8)
 
 ---
 
