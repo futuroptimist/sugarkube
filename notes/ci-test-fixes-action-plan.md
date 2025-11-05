@@ -1083,24 +1083,30 @@ Total estimated time: 4-6 hours for complete implementation and testing.
    - Need to distinguish between these two scenarios
 
 **Attempted Fixes**:
-1. ✅ Updated line 844 to accept `ipv4_mismatch` in addition to `resolve_failed`
+1. ✅ Updated line 844-867 to accept `ipv4_mismatch` in addition to `resolve_failed` in warning check
 2. ❌ Tried removing early exit at line 678 - breaks Test 12
-3. ⏸️ Need to investigate why stubbed resolution returns status 2 instead of status 1
+3. ❌ Tried conditional exit based on browse success and last attempt - Test 8 still expects `reason=resolve_failed` not `ipv4_mismatch`
+4. ⏸️ Root issue: Need to understand why stubbed resolution returns status 2 instead of status 1
 
-**Next Steps for Test 8**:
-1. Investigate resolution helper (`scripts/mdns_resolution.sh`) to understand when it returns status 2 vs 1
-2. Possible approaches:
-   - **Option A**: Fix resolution logic to return status 1 when all methods fail
-   - **Option B**: Add check before line 678 to detect if browse succeeded and warn instead of fail
-   - **Option C**: Adjust test stubs to ensure they trigger status 1 not status 2
+**Key Finding**:
+- Test expects `reason=resolve_failed` when all resolution fails
+- Code is setting `reason=ipv4_mismatch` (status=2) instead
+- Need to trace through resolution helper to find where status 2 is being returned when all methods fail
+- Likely in `scripts/mdns_resolution.sh` - possibly in `resolve_srv_target_cli` or `mdns_check_nss_host`
 
-**Estimated Remaining Effort**: 1-2 hours
-**Complexity**: Medium - requires understanding resolution status code semantics and ensuring Test 12 doesn't break
+**Recommendation for Next PR**:
+1. Add debug logging to resolution helper to see which method returns status 2
+2. Check if getent exit code 2 is being propagated incorrectly
+3. May need to adjust stub or fix resolution logic to ensure status 1 when all methods fail
+
+**Estimated Remaining Effort**: 1-2 hours  
+**Complexity**: Medium-High - requires debugging resolution helper logic
 
 **Files Modified So Far**:
-- `scripts/mdns_selfcheck.sh` line 844-867: Updated warning check to accept ipv4_mismatch (PARTIAL)
+- `scripts/mdns_selfcheck.sh` line 844-867: Updated warning check to accept ipv4_mismatch (helps but not sufficient)
+- Changes reverted: Early exit prevention didn't work correctly
 
-**Test Status**: ❌ Still failing - needs more work
+**Test Status**: ❌ Still failing - deferred to next PR
 
 ---
 
