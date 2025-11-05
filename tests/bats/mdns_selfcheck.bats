@@ -746,11 +746,6 @@ EOS
 }
 
 @test "mdns dbus self-check waits for avahi bus before browsing" {
-  # TODO: Test hangs/times out - needs gdbus introspect retry logic implementation
-  # See notes/ci-test-fixes-action-plan.md Test 16
-  # Estimated: 20-30 min to implement wait_for_avahi_dbus retry with ServiceUnknown detection
-  skip "Needs retry logic implementation - small scope, separate PR recommended"
-
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail

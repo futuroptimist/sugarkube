@@ -275,35 +275,107 @@ print(json.dumps({
 PY
 }
 
-"${SCRIPT_DIR}/wait_for_avahi_dbus.sh"
-status=$?
-if [ "${status}" -ne 0 ]; then
+# Check if Avahi DBus is disabled in configuration
+dbus_disabled() {
+  local avahi_conf_path="${AVAHI_CONF_PATH:-/etc/avahi/avahi-daemon.conf}"
+  if [ ! -f "${avahi_conf_path}" ]; then
+    return 1
+  fi
+  if LC_ALL=C grep -Eiq '^[[:space:]]*enable-dbus[[:space:]]*=[[:space:]]*no([[:space:]]|$)' \
+    "${avahi_conf_path}"; then
+    return 0
+  fi
+  return 1
+}
+
+# Check if Avahi DBus is disabled before attempting gdbus operations
+if dbus_disabled; then
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-  case "${status}" in
-    1)
-      log_info mdns_selfcheck \
-        outcome=miss \
-        reason=avahi_dbus_wait_timeout \
-        attempt=0 \
-        ms_elapsed="${elapsed_ms}" >&2
-      ;;
-    2)
-      log_info mdns_selfcheck_dbus \
-        outcome=skip \
-        reason=avahi_dbus_disabled \
-        severity=info \
-        ms_elapsed="${elapsed_ms}" >&2
-      ;;
-    *)
-      log_info mdns_selfcheck \
-        outcome=miss \
-        reason=avahi_dbus_wait_failed \
-        attempt=0 \
-        ms_elapsed="${elapsed_ms}" >&2
-      ;;
-  esac
-  exit "${status}"
+  log_info \
+    avahi_dbus_ready \
+    outcome=disabled \
+    reason=enable_dbus_no \
+    severity=info \
+    ms_elapsed="${elapsed_ms}"
+  exit 2
 fi
+
+# Check if required commands are available
+if ! command -v systemctl >/dev/null 2>&1; then
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info \
+    avahi_dbus_ready \
+    outcome=skip \
+    reason=systemctl_missing \
+    severity=info \
+    ms_elapsed="${elapsed_ms}"
+  exit 2
+fi
+
+# Wait for Avahi dbus service using gdbus introspect with retry logic
+# Detects ServiceUnknown errors and retries until service is available  
+# Returns 0 if Avahi is ready, 1 if ServiceUnknown persists, 2 if other error/skip
+wait_for_avahi_dbus_gdbus() {
+  local max_attempts="${1:-10}"
+  local attempt=1
+  
+  while [ "${attempt}" -le "${max_attempts}" ]; do
+    
+    # Try gdbus introspect to check if Avahi service is available
+    # Capture both stdout and stderr to check for ServiceUnknown error
+    local error_output
+    error_output="$(gdbus introspect --system --dest org.freedesktop.Avahi --object-path / 2>&1)"
+    local gdbus_status=$?
+    
+    if [ "${gdbus_status}" -eq 0 ]; then
+      # Success - Avahi is ready
+      local elapsed_ms
+      elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+      log_info mdns_selfcheck event=avahi_dbus_ready outcome=ok attempts="${attempt}" ms_elapsed="${elapsed_ms}"
+      return 0
+    fi
+    
+    # Command failed - check if it's a retryable ServiceUnknown error
+    if [[ "${error_output}" =~ "ServiceUnknown" ]]; then
+      # Service not ready yet, retry after brief sleep
+      log_debug mdns_selfcheck event=avahi_dbus_wait attempt="${attempt}" status=not_ready
+      sleep 0.5
+      attempt=$((attempt + 1))
+      continue
+    fi
+    
+    # Other error (gdbus not available, introspect not supported, etc) - skip this check
+    # Log debug and return 2 to indicate we should skip this check method
+    log_debug mdns_selfcheck event=avahi_dbus_introspect_unsupported attempt="${attempt}"
+    return 2
+  done
+  
+  # Max attempts reached without success
+  local elapsed_ms
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck event=avahi_dbus_timeout attempts="${max_attempts}" ms_elapsed="${elapsed_ms}" severity=error
+  return 1
+}
+
+# Try gdbus introspect to wait for Avahi service if it's supported
+# This handles the case where Avahi is starting up and returns ServiceUnknown
+wait_status=0
+wait_for_avahi_dbus_gdbus 10 || wait_status=$?
+
+if [ "${wait_status}" -eq 1 ]; then
+  # ServiceUnknown persisted - Avahi not starting up
+  elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+  log_info mdns_selfcheck outcome=miss reason=avahi_dbus_wait_failed attempt=0 ms_elapsed="${elapsed_ms}" >&2
+  exit 1
+elif [ "${wait_status}" -eq 2 ]; then
+  # Introspect not supported/available - this is OK, continue without it
+  # The gdbus call methods will be used directly
+  log_debug mdns_selfcheck event=skipping_introspect_wait reason=not_supported
+fi
+
+# If wait_status is 0, gdbus introspect succeeded and Avahi is ready
+# If wait_status is 2, introspect not supported but we can proceed
+# Either way, continue with the rest of the script
 
 script_start_ms="$(python3 - <<'PY'
 import time

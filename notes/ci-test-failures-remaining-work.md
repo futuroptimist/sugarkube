@@ -2,18 +2,18 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-05 Update - PR #4)
+## Current Status (2025-11-05 Update - PR #5 - THIS PR)
 
-**BATS Suite**: ✅ Completes without failures (36 pass, 0 fail, 5 skip)
+**BATS Suite**: ✅ Completes without failures (37 pass, 0 fail, 4 skip)
 
-**Key Achievement**: L4 probe tests enabled by adding ncat to CI dependencies. Simple fix with immediate impact.
+**Key Achievement**: Test 33 (mdns dbus wait retry logic) enabled by implementing gdbus introspect retry with ServiceUnknown detection.
 
 **Test Summary**:
-- ✅ **36/41 BATS tests passing** (actually execute and pass, excluding skipped)
-- ⏭️ **5 tests skipped** (3 discover_flow k3s integration + 2 mdns_selfcheck advanced features)
+- ✅ **37/41 BATS tests passing** (actually execute and pass, excluding skipped)
+- ⏭️ **4 tests skipped** (3 discover_flow k3s integration + 1 mdns_selfcheck advanced feature)
 - ❌ **0 tests failing**
 
-**Improvement from PR #4**: +2 passing tests (l4_probe tests now enabled)
+**Improvement from PR #5**: +1 passing test (Test 33 now passing, was previously skipped)
 
 **Time Estimate Validation**: Test 8 was documented as "2-3 hours" but actual fix took ~1 hour including investigation, due to finding root cause in helper function rather than test-specific logic.
 
