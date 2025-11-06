@@ -1464,20 +1464,14 @@ mdns_absence_check_dbus() {
 }
 
 mdns_absence_check_cli() {
-  local -a absence_env=(
-    "SUGARKUBE_CLUSTER=${CLUSTER}"
-    "SUGARKUBE_ENV=${ENVIRONMENT}"
-  )
+  # Export variables needed by the inline Python script
+  export SUGARKUBE_CLUSTER="${CLUSTER}"
+  export SUGARKUBE_ENV="${ENVIRONMENT}"
   if [ -n "${TOKEN:-}" ]; then
-    absence_env+=("SUGARKUBE_TOKEN=${TOKEN}")
+    export SUGARKUBE_TOKEN="${TOKEN}"
   fi
-  if [ -n "${PYTHONPATH:-}" ]; then
-    absence_env+=("PYTHONPATH=${PYTHONPATH}")
-  fi
-  if [ -n "${PATH:-}" ]; then
-    absence_env+=("PATH=${PATH}")
-  fi
-  env "${absence_env[@]}" SCRIPT_DIR="${SCRIPT_DIR}" python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
+  export SCRIPT_DIR="${SCRIPT_DIR}"
+  python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
 import os
 import subprocess
 import sys
@@ -2026,20 +2020,14 @@ same_host() {
 
 run_avahi_query() {
   local mode="$1"
-  local -a query_env=(
-    "SUGARKUBE_CLUSTER=${CLUSTER}"
-    "SUGARKUBE_ENV=${ENVIRONMENT}"
-  )
+  # Export variables needed by the inline Python script
+  export SUGARKUBE_CLUSTER="${CLUSTER}"
+  export SUGARKUBE_ENV="${ENVIRONMENT}"
   if [ -n "${TOKEN:-}" ]; then
-    query_env+=("SUGARKUBE_TOKEN=${TOKEN}")
+    export SUGARKUBE_TOKEN="${TOKEN}"
   fi
-  if [ -n "${PYTHONPATH:-}" ]; then
-    query_env+=("PYTHONPATH=${PYTHONPATH}")
-  fi
-  if [ -n "${PATH:-}" ]; then
-    query_env+=("PATH=${PATH}")
-  fi
-  env "${query_env[@]}" SCRIPT_DIR="${SCRIPT_DIR}" python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+  export SCRIPT_DIR="${SCRIPT_DIR}"
+  python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
 import sys
 
