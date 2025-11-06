@@ -1,5 +1,10 @@
 #!/usr/bin/env bats
 
+setup() {
+  # Set BATS_CWD to repository root for sourcing scripts
+  BATS_CWD="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
+}
+
 @test "summary emits output without color when non-tty" {
   run bash -c '
     set -euo pipefail
