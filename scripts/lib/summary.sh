@@ -25,13 +25,12 @@ summary_enabled() {
 }
 
 summary__with_strict() {
-  local previous
-  previous="$(set +o)"
-  set -Eeuo pipefail
-  "$@"
-  local status=$?
-  eval "${previous}"
-  return "${status}"
+  # Run command with strict error handling
+  # Simplified for kcov compatibility - avoid set +o / eval pattern
+  (
+    set -Eeuo pipefail 2>/dev/null || set -euo pipefail
+    "$@"
+  )
 }
 
 summary__now_impl() {
