@@ -284,10 +284,9 @@ run_pytest_simulation() {
   echo ""
   
   if pytest -q "${pytest_targets[@]}"; then
-    print_success "Python tests passed (${#pytest_targets[@]} test files)"
     
     # Note about coverage
-    print_info ""
+    echo ""
     print_info "Note: Running without coverage for speed. CI runs with coverage:"
     echo "  pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml"
     
