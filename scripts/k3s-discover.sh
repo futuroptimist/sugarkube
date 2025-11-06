@@ -1471,6 +1471,9 @@ mdns_absence_check_cli() {
   if [ -n "${TOKEN:-}" ]; then
     absence_env+=("SUGARKUBE_TOKEN=${TOKEN}")
   fi
+  if [ -n "${PYTHONPATH:-}" ]; then
+    absence_env+=("PYTHONPATH=${PYTHONPATH}")
+  fi
   env "${absence_env[@]}" SCRIPT_DIR="${SCRIPT_DIR}" python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
 import os
 import subprocess
@@ -2026,6 +2029,9 @@ run_avahi_query() {
   )
   if [ -n "${TOKEN:-}" ]; then
     query_env+=("SUGARKUBE_TOKEN=${TOKEN}")
+  fi
+  if [ -n "${PYTHONPATH:-}" ]; then
+    query_env+=("PYTHONPATH=${PYTHONPATH}")
   fi
   env "${query_env[@]}" SCRIPT_DIR="${SCRIPT_DIR}" python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
