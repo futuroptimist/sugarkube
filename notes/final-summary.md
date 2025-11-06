@@ -1,13 +1,17 @@
-# CI Test Failures Fix - Final Summary
+# CI Test Failures Fix - Final Summary (2025-11-04 Initial PR)
 
-## Overall Progress
+**Note**: This file documents the initial PR from 2025-11-04 which fixed 14 tests. For current status, see `notes/2025-11-05-ci-test-status-verified.md`. All test failures have since been resolved through PRs #1-#5.
 
-### Tests Fixed: 14 total
+## Overall Progress (As of 2025-11-04 Initial PR)
+
+### Tests Fixed: 14 total (Initial PR Only)
 - **mdns_wire_probe.bats**: 4/4 passing (100%) ✅
 - **mdns_selfcheck.bats**: 10/18 passing (56%) 🚀
   - Was: 0/18 passing
   - Now: 10/18 passing
   - Improvement: +10 tests fixed
+
+**Update 2025-11-05**: Subsequent PRs #2-#5 fixed the remaining 8 mdns_selfcheck tests. Current status: 18/18 passing (100%). See `notes/ci-test-failures-remaining-work.md` for details.
 
 ### Root Causes Identified and Documented
 
@@ -26,9 +30,11 @@
    - Fix: Removed overly restrictive assertion
    - Status: ✅ FIXED
 
-### Remaining Work (8 mdns_selfcheck tests)
+### Remaining Work (8 mdns_selfcheck tests - Initial Assessment 2025-11-04)
 
-These failures have different root causes that need investigation:
+**Status Update 2025-11-05**: All 8 tests below have been fixed in PRs #2-#5. See `notes/ci-test-failures-remaining-work.md` for full details and outage documentation.
+
+These failures were initially identified as having different root causes that needed investigation:
 
 1. **mdns self-check warns when enumeration misses but browse succeeds**
    - Issue: Service type checking logic
@@ -70,8 +76,13 @@ These failures have different root causes that need investigation:
     - Issue: Exit status not 0
     - Needs: DBus-specific investigation
 
-### Not Started
+### Not Started (Initial Assessment 2025-11-04)
 
+**Status Update 2025-11-05**: Both test files below have been addressed in subsequent PRs:
+- **discover_flow.bats**: 6/9 passing (3 skipped - k3s integration tests)
+- **join_gate.bats**: 2/2 passing (100%) ✅
+
+Original notes:
 - **discover_flow.bats**: Timeout issues
 - **join_gate.bats**: Timeout issues
 

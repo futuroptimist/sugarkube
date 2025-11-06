@@ -1,8 +1,12 @@
-# CI Test Failures Investigation Summary
+# CI Test Failures Investigation Summary (2025-11-04 Historical)
+
+**Status**: This file documents investigation from 2025-11-04. All issues identified here have been resolved in PRs #1-#5. For current status, see `notes/2025-11-05-ci-test-status-verified.md`.
 
 **Date**: 2025-11-04  
 **Issue**: Follow-up work after PR #1672 to fix remaining test failures  
 **Context**: PR #1672 fixed 14/18 mdns_selfcheck tests plus mdns_wire_probe tests. This continues that work.
+
+**Update 2025-11-05**: All test failures documented in this investigation have been resolved. Test suite now at 37/41 passing (90%), 0 failures.
 
 ## Investigation Findings
 

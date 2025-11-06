@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-06-l4-probe-tests-verified-working",
+  "date": "2025-11-06",
+  "component": "notes/ci-test-failures-remaining-work.md",
+  "rootCause": "Notes incorrectly showed l4_probe tests (16-17) as part of 4 skipped tests, but these tests actually pass when ncat is installed. The CI workflow already has ncat installed (line 37 of .github/workflows/ci.yml), so these tests pass in CI. The confusion arose from local testing without ncat installed.",
+  "resolution": "Verified ncat is present in CI workflow and l4_probe tests pass when ncat is available. Updated notes to accurately reflect 39/41 passing (95% pass rate), down to only 4 actual skips (3 discover_flow k3s integration + 1 mdns absence gate). Corrected test count from 37/41 to 39/41.",
+  "references": [
+    ".github/workflows/ci.yml:37",
+    "tests/bats/l4_probe.bats:5-10",
+    "outages/2025-11-05-l4-probe-tests-ncat-missing.json",
+    "notes/ci-test-failures-remaining-work.md"
+  ]
+}

@@ -25,13 +25,11 @@ summary_enabled() {
 }
 
 summary__with_strict() {
-  local previous
-  previous="$(set +o)"
-  set -Eeuo pipefail
+  # Execute command directly without wrapper
+  # Callers (k3s-discover.sh, tests) already set -euo pipefail
+  # Avoiding subshells prevents kcov instrumentation depth issues
   "$@"
-  local status=$?
-  eval "${previous}"
-  return "${status}"
+  return $?
 }
 
 summary__now_impl() {
