@@ -1,9 +1,13 @@
-# CI Test Fixes Progress - 2025-11-04
+# CI Test Fixes Progress - 2025-11-04 (Historical)
 
-## Summary
+**Status**: This file documents intermediate progress from 2025-11-04. All work described here has been completed in PRs #1-#5. For current status, see `notes/2025-11-05-ci-test-status-verified.md`.
+
+## Summary (2025-11-04 Snapshot)
 
 Fixed 1 of 8 failing mdns_selfcheck.bats tests by resolving an awk hang issue.  
 Identified root causes for remaining 7 tests, but implementations require more complex changes than initially estimated.
+
+**Update 2025-11-05**: All 8 tests have been fixed. See outages directory for detailed resolution documentation.
 
 ## Completed
 
