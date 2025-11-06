@@ -172,6 +172,51 @@ install_kcov() {
   fi
 }
 
+
+validate_test_patterns() {
+  print_header "Validating Test Patterns"
+  
+  local issues_found=0
+  
+  # Check if summary.sh properly skips EXIT trap in BATS environments
+  print_info "Checking summary.sh EXIT trap handling..."
+  
+  if grep -q 'BATS_TEST_DIRNAME\|BATS_VERSION' scripts/lib/summary.sh; then
+    print_success "summary.sh detects BATS environment to skip EXIT trap"
+  else
+    print_warning "summary.sh may not handle BATS environment correctly"
+    print_info "  EXIT traps can cause issues under kcov instrumentation"
+    ((issues_found++)) || true
+  fi
+  
+  # Check if BATS tests using summary.sh call emit explicitly
+  print_info "Checking for explicit summary::emit calls in tests..."
+  
+  local test_files
+  mapfile -t test_files < <(find tests/bats -name "*.bats" -type f 2>/dev/null)
+  
+  for file in "${test_files[@]}"; do
+    if grep -q 'source.*summary\.sh' "$file" 2>/dev/null; then
+      if ! grep -q 'summary::emit' "$file" 2>/dev/null; then
+        print_warning "File $file: Uses summary.sh but no explicit summary::emit"
+        print_info "  Relying on EXIT trap may fail under kcov"
+        ((issues_found++)) || true
+      fi
+    fi
+  done
+  
+  if [ "$issues_found" -eq 0 ]; then
+    print_success "All test patterns validated"
+    return 0
+  else
+    print_warning "Found $issues_found potential issue(s)"
+    print_info "Recommendation: Tests should either:"
+    echo "    1. Call summary::emit explicitly, OR"
+    echo "    2. summary.sh should skip EXIT trap in BATS (check for BATS_TEST_DIRNAME)"
+    return 0  # Warning, not error
+  fi
+}
+
 run_basic_simulation() {
   print_header "Running Basic CI Simulation"
   
@@ -248,6 +293,10 @@ run_kcov_simulation() {
 # Main execution
 main() {
   local exit_code=0
+  
+  # Validate test patterns first
+  validate_test_patterns
+  echo ""
   
   if [ "$SKIP_INSTALL_CHECK" = false ]; then
     if ! check_dependencies; then

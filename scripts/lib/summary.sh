@@ -125,6 +125,11 @@ summary__setup_colors() {
 }
 
 summary__register_exit_trap_impl() {
+  # Skip EXIT trap in BATS tests to avoid kcov instrumentation issues
+  # Tests will call summary::emit explicitly
+  if [ -n "${BATS_TEST_DIRNAME:-}" ] || [ -n "${BATS_VERSION:-}" ]; then
+    return 0
+  fi
   trap 'summary::emit' EXIT
 }
 
