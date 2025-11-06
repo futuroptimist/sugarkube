@@ -25,6 +25,10 @@ than before.
    refactors. Write a brief execution plan and proceed.
    - **Select 1–2 unchecked items maximum** that can be completed together without
      cross-cutting refactors or public API changes.
+   - **Time estimation guidance**: When estimating task complexity, lean toward smaller time
+     estimates (minutes to ~1 hour for agentic workflows) rather than longer human-scale
+     estimates. Most test fixes that appear to require "2-4 hours" for humans can typically
+     be completed in 15-30 minutes with focused agentic iteration.
 
 3) Implement:
    - Make the minimal code/test changes needed to resolve each selected item.
@@ -74,6 +78,13 @@ than before.
 
 If any chosen item balloons in scope, **drop it from this PR**, restore/append an unchecked
 box in `notes/…` with repro details and a brief scope estimate.
+
+**Time Estimation Guidelines for Agentic Workflows**:
+- Simple test stub additions: ~5-10 minutes
+- Test fixture corrections: ~10-15 minutes  
+- Logic bugs requiring code changes: ~15-30 minutes
+- Complex integration scenarios: ~30-60 minutes
+- Lean toward smaller estimates; most fixes complete faster than human-scale time estimates suggest.
 
 Reproduce suspected flakes **3× locally** and apply the **least-invasive** stabilization
 (timeouts/retries/backoff) only. Document evidence under **Stabilizations** in the PR body

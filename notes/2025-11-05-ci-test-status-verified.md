@@ -45,7 +45,7 @@ The 4 skipped tests are not failures - they are intentionally skipped with docum
 4. **Test 34** (mdns_selfcheck.bats): "mdns absence gate confirms wipe leaves no advertisements"
    - Skip reason: Times out - needs dedicated investigation
    - Root cause: Test stubs use `sleep 60` which causes timeout
-   - Action: Requires dedicated investigation (2-4 hours estimated)
+   - Action: Requires dedicated investigation (~15-25 minutes estimated for agentic workflow)
 
 ### Outages Validation
 
@@ -100,12 +100,12 @@ The 4 skipped tests are documented as requiring dedicated investigation/PRs.
 
 **Note**: Test numbers refer to global test index (1-41) when running `bats --recursive tests/bats`.
 
-1. **Tests 6-8** (discover_flow.bats) - estimated 4-8 hours each
+1. **Tests 6-8** (discover_flow.bats) - estimated ~25-50 minutes each for agentic workflow
    - Requires k3s installation stubbing
    - Complex integration test scenarios
    - See `notes/skipped-tests-status.md` for details
 
-2. **Test 34** (mdns_selfcheck.bats) - estimated 2-4 hours
+2. **Test 34** (mdns_selfcheck.bats) - estimated ~15-25 minutes for agentic workflow
    - Requires investigation of timeout cause
    - avahi-publish stubs use `sleep 60`
    - May need rework of test approach
