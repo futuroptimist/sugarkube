@@ -21,8 +21,15 @@ than before.
    Enumerate all **unchecked** checkboxes and note any missing investigative details that
    make reproduction difficult (e.g., absent log snippets, unknown owners, fuzzy repro steps).
 
-2) Select 1–2 items that can be implemented together with minimal risk. If no items are
-   fully fixable, choose a **partial progress strategy** from the playbook below.
+2) **Prioritize tangible progress**: Select 1–2 items that can be implemented together with minimal risk. 
+   **IMPORTANT**: Even if all checkboxes are complete, look for at least one small improvement that moves 
+   the needle toward 0 CI failures. Examples:
+   - Enable a skipped test by installing missing dependencies
+   - Fix environment configuration issues
+   - Update stale notes/documentation that could confuse future work
+   - Implement timeout overrides for hanging tests
+   
+   If no items are fully fixable, choose a **partial progress strategy** from the playbook below.
    
    - **Select 1–2 unchecked items maximum** that can be completed together.
    - **Time estimation guidance**: When estimating task complexity, lean toward smaller time
