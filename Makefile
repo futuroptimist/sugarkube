@@ -194,9 +194,9 @@ mac-setup:
 	$(MAC_SETUP_CMD) $(MAC_SETUP_ARGS)
 
 ci-simulate:
-@echo "Simulating CI workflow environment locally..."
-@$(CURDIR)/scripts/ci_simulate.sh
+	@echo "Simulating CI workflow environment locally..."
+	@$(CURDIR)/scripts/ci_simulate.sh
 
 ci-simulate-kcov:
-@echo "Simulating CI workflow with kcov instrumentation..."
-@$(CURDIR)/scripts/ci_simulate.sh --with-kcov
+	@echo "Simulating CI workflow with kcov instrumentation..."
+	@$(CURDIR)/scripts/ci_simulate.sh --with-kcov
