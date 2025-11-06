@@ -2,11 +2,12 @@
   "id": "2025-11-06-summary-bats-missing-setup",
   "date": "2025-11-06",
   "component": "tests/bats/summary.bats",
-  "rootCause": "The summary.bats test file was missing a setup() function to initialize BATS_CWD variable. Tests 40 and 41 used ${BATS_CWD}/scripts/lib/summary.sh to source the summary library, but when BATS_CWD was unset, the path resolved to /scripts/lib/summary.sh (absolute path from root), which doesn't exist. This caused the source command to fail silently and the tests to fail with exit status != 0.",
-  "resolution": "Added setup() function to summary.bats that sets BATS_CWD to the repository root by calculating it from BATS_TEST_DIRNAME (which BATS provides automatically). The setup function uses: BATS_CWD=\"$(cd \"${BATS_TEST_DIRNAME}/../..\" && pwd)\" to navigate from tests/bats/ up to the repository root, following the pattern used in other test files.",
+  "rootCause": "Tests 40-41 (summary tests) failed in CI because the BATS_CWD environment variable was not set. The tests use ${BATS_CWD}/scripts/lib/summary.sh to source the summary library, relying on BATS_CWD being set to the repository root. While other test files in the project also use BATS_CWD, the CI workflow (.github/workflows/ci.yml) only set BATS_LIB_PATH but not BATS_CWD, causing the path to resolve to /scripts/lib/summary.sh (absolute path) which doesn't exist.",
+  "resolution": "Added BATS_CWD environment variable to the CI workflow's 'Run Bash tests under kcov' step, setting it to ${{ github.workspace }}. This makes BATS_CWD available to all BATS tests consistently, matching the pattern used for BATS_LIB_PATH. The variable is exported by the CI runner, making it available to all test subprocesses without needing individual setup() functions in each test file.",
   "references": [
-    "tests/bats/summary.bats:3-6",
-    "tests/bats/mdns_selfcheck.bats:5-6",
-    ".github/workflows/ci.yml"
+    "tests/bats/summary.bats:6",
+    "tests/bats/summary.bats:25",
+    "tests/bats/api_readyz_gate.bats:33",
+    ".github/workflows/ci.yml:56-60"
   ]
 }

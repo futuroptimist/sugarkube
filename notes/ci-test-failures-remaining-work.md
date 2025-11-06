@@ -59,10 +59,11 @@ This document tracks the remaining test failures that need to be addressed after
    - See `notes/skipped-tests-status.md` for detailed analysis
 
 6. **summary.bats** - 2/2 tests now passing (NEW 2025-11-06 PR #5 - THIS PR)
-   - Both tests fixed by adding missing setup() function
-   - Tests were failing because BATS_CWD variable was not initialized
+   - Both tests fixed by adding BATS_CWD environment variable to CI workflow
+   - Tests were failing because BATS_CWD variable was not set in .github/workflows/ci.yml
    - Root cause documented in `outages/2025-11-06-summary-bats-missing-setup.json`
-   - Fix: Added setup() function that sets BATS_CWD to repository root using BATS_TEST_DIRNAME
+   - Fix: Added `BATS_CWD: ${{ github.workspace }}` to CI workflow env section
+
 
 ## Remaining Test Skips (Not Failures)
 
