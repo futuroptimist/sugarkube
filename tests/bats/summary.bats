@@ -1,7 +1,10 @@
 #!/usr/bin/env bats
 
-@test "summary emits output without color when non-tty" {
+setup() {
   export IN_BATS_TEST=1
+}
+
+@test "summary emits output without color when non-tty" {
   run bash -c '
     set -euo pipefail
     source "'"${BATS_CWD}/scripts/lib/summary.sh"'"
@@ -21,7 +24,6 @@
 }
 
 @test "summary avoids ANSI escapes when TERM is dumb" {
-  export IN_BATS_TEST=1
   run env TERM=dumb bash -c '
     set -euo pipefail
     source "'"${BATS_CWD}/scripts/lib/summary.sh"'"

@@ -2,12 +2,11 @@
   "id": "2025-11-06-summary-bats-missing-setup",
   "date": "2025-11-06",
   "component": "tests/bats/summary.bats",
-  "rootCause": "Tests 40-41 (summary tests) failed in CI under kcov instrumentation. The root issue was that summary::init registers an EXIT trap that calls summary::emit when scripts exit. Under kcov's code coverage instrumentation, EXIT traps in bash -c subshells interfere with exit status tracking. The initial fix attempted to detect BATS environment using BATS_TEST_DIRNAME or BATS_VERSION variables, but these variables are not exported by BATS and therefore not available inside bash -c subshells, making the detection ineffective.",
-  "resolution": "Modified tests to explicitly export IN_BATS_TEST=1 before running bash -c commands. Updated summary__register_exit_trap_impl() to check for IN_BATS_TEST environment variable (which IS available in subshells) and skip EXIT trap registration when set. Tests now explicitly call summary::emit at the end of their bash -c commands, avoiding kcov instrumentation issues with EXIT traps. Non-test scripts continue to use EXIT trap for automatic cleanup. Also added BATS_CWD: ${{ github.workspace }} to .github/workflows/ci.yml to ensure the environment variable is available to all tests.",
+  "rootCause": "Tests 40-41 (summary tests) failed in CI under kcov instrumentation. The root issue was that summary::init registers an EXIT trap that calls summary::emit when scripts exit. Under kcov's code coverage instrumentation, EXIT traps in bash -c subshells interfere with exit status tracking. The initial fix attempted to detect BATS environment using BATS_TEST_DIRNAME or BATS_VERSION variables, but these variables are not exported by BATS and therefore not available inside bash -c subshells. Second attempt to export IN_BATS_TEST=1 within each test function may have had timing/scope issues where the export wasn't reliably available before the run command executed, or kcov interference prevented proper propagation.",
+  "resolution": "Moved IN_BATS_TEST=1 export to a setup() function that runs before each test, ensuring the variable is properly exported in the test environment before any run commands execute. The setup() function guarantees IN_BATS_TEST is in the environment for all test commands. Tests explicitly call summary::emit at the end of their bash -c commands. summary__register_exit_trap_impl() checks for IN_BATS_TEST environment variable and skips EXIT trap registration when set. Non-test scripts continue to use EXIT trap for automatic cleanup. Also added BATS_CWD: ${{ github.workspace }} to .github/workflows/ci.yml to ensure the environment variable is available to all tests.",
   "references": [
-    "tests/bats/summary.bats:3-20",
-    "tests/bats/summary.bats:22-36",
-    "scripts/lib/summary.sh:127-134",
+    "tests/bats/summary.bats:1-38",
+    "scripts/lib/summary.sh:127-135",
     "scripts/lib/summary.sh:144-159",
     ".github/workflows/ci.yml:56-60"
   ]
