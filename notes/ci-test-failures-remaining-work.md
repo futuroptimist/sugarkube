@@ -252,25 +252,28 @@ Each should be its own focused PR:
 3. Adjust timeouts if needed
 4. May require deeper investigation of test logic
 
-## Quick Win Strategy
+## All Test Fixes Complete ✅
 
-If time is limited, prioritize this order:
-1. ✅ Apply curl stub fix to all 12 server role tests (LOW EFFORT, HIGH IMPACT)
-2. Investigate and fix any remaining mdns_selfcheck failures
-3. Create separate PR for discover_flow and join_gate timeout issues
+All actionable CI test failures have been resolved through PRs #1-#5:
+1. ✅ Applied curl stub fix to all 12 server role tests
+2. ✅ Fixed all mdns_selfcheck test failures (18/18 passing)
+3. ✅ Fixed join_gate timeout issues (2/2 passing)
+4. ✅ Enabled l4_probe tests via ncat installation (2/2 passing)
+5. ✅ Fixed discover_flow tests 1-5, 9 (6/9 passing)
 
-## Code Changes Checklist
+**Final Test Status (2025-11-05)**:
+- 37/41 BATS tests passing (90% pass rate)
+- 0 test failures
+- 4 tests skipped (all documented as needing dedicated investigation/PRs)
 
-For each test fix:
-- [ ] Add curl stub before the `run env` command
-- [ ] Run test individually to verify fix
-- [ ] Check for any additional errors
-- [ ] Update this document with results
-
-## Files Modified (2025-11-05 PR #4 - THIS PR)
+## Files Modified (Previous PRs #1-#5)
 - `.github/workflows/ci.yml` - ✅ Added ncat package installation
 - `tests/bats/l4_probe.bats` - ✅ Complete (2/2 passing) - uses conditional skip logic
-- `outages/2025-11-05-l4-probe-tests-ncat-missing.json` - ✅ Created
+- `tests/bats/mdns_selfcheck.bats` - ✅ Complete (18/18 passing)
+- `tests/bats/join_gate.bats` - ✅ Complete (2/2 passing)
+- `tests/bats/discover_flow.bats` - ✅ 6/9 passing (3 skipped k3s integration tests)
+- `scripts/mdns_*.sh` - ✅ Multiple fixes for resolution, logging, dbus handling
+- Multiple outage files created (2025-11-04 and 2025-11-05 dates)
 
 ## Success Criteria
 
