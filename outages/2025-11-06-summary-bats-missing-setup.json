@@ -2,12 +2,12 @@
   "id": "2025-11-06-summary-bats-missing-setup",
   "date": "2025-11-06",
   "component": "tests/bats/summary.bats",
-  "rootCause": "Tests 40-41 (summary tests) failed in CI under kcov instrumentation. The root issue was that summary::init registers an EXIT trap that calls summary::emit when scripts exit. Under kcov's code coverage instrumentation, EXIT traps in bash -c subshells interfere with exit status tracking. The initial fix attempted to detect BATS environment using BATS_TEST_DIRNAME or BATS_VERSION variables, but these variables are not exported by BATS and therefore not available inside bash -c subshells. Second attempt to export IN_BATS_TEST=1 within each test function may have had timing/scope issues where the export wasn't reliably available before the run command executed, or kcov interference prevented proper propagation.",
-  "resolution": "Moved IN_BATS_TEST=1 export to a setup() function that runs before each test, ensuring the variable is properly exported in the test environment before any run commands execute. The setup() function guarantees IN_BATS_TEST is in the environment for all test commands. Tests explicitly call summary::emit at the end of their bash -c commands. summary__register_exit_trap_impl() checks for IN_BATS_TEST environment variable and skips EXIT trap registration when set. Non-test scripts continue to use EXIT trap for automatic cleanup. Also added BATS_CWD: ${{ github.workspace }} to .github/workflows/ci.yml to ensure the environment variable is available to all tests.",
+  "rootCause": "Tests 40-41 (summary tests) failed in CI under kcov instrumentation due to EXIT trap issues. Multiple attempts to detect and skip EXIT trap in BATS environments failed: BATS_TEST_DIRNAME/BATS_VERSION aren't exported to subshells, and IN_BATS_TEST export approaches had reliability issues. The fundamental problem is that EXIT traps in bash -c subshells interfere with kcov's instrumentation and exit status tracking, regardless of detection mechanism.",
+  "resolution": "Changed EXIT trap registration to be opt-in via SUMMARY_AUTO_EMIT=1 environment variable, disabled by default. This eliminates all EXIT trap issues in tests and kcov environments while still allowing production scripts to enable auto-emit if desired. Tests and most scripts explicitly call summary::emit, which is clearer and more predictable than relying on EXIT traps. Production scripts that need auto-emit can set SUMMARY_AUTO_EMIT=1. Also added BATS_CWD: ${{ github.workspace }} to .github/workflows/ci.yml.",
   "references": [
-    "tests/bats/summary.bats:1-38",
+    "tests/bats/summary.bats:1-34",
     "scripts/lib/summary.sh:127-135",
-    "scripts/lib/summary.sh:144-159",
+    "scripts/lib/summary.sh:150-165",
     ".github/workflows/ci.yml:56-60"
   ]
 }

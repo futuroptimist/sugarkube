@@ -1,9 +1,5 @@
 #!/usr/bin/env bats
 
-setup() {
-  export IN_BATS_TEST=1
-}
-
 @test "summary emits output without color when non-tty" {
   run bash -c '
     set -euo pipefail

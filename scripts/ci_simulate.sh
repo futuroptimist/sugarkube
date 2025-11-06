@@ -178,35 +178,29 @@ validate_test_patterns() {
   
   local issues_found=0
   
-  # Check if summary.sh properly skips EXIT trap in BATS environments
+  # Check if summary.sh has EXIT trap disabled by default
   print_info "Checking summary.sh EXIT trap handling..."
   
-  if grep -q 'IN_BATS_TEST' scripts/lib/summary.sh; then
-    print_success "summary.sh detects BATS environment via IN_BATS_TEST"
+  if grep -q 'SUMMARY_AUTO_EMIT' scripts/lib/summary.sh; then
+    print_success "summary.sh uses opt-in EXIT trap (SUMMARY_AUTO_EMIT)"
   else
-    print_warning "summary.sh may not handle BATS environment correctly"
-    print_info "  EXIT traps can cause issues under kcov instrumentation"
+    print_warning "summary.sh may not have proper EXIT trap control"
+    print_info "  EXIT traps should be opt-in to avoid kcov issues"
     ((issues_found++)) || true
   fi
   
-  # Check if BATS tests using summary.sh export IN_BATS_TEST and call emit explicitly
-  print_info "Checking for IN_BATS_TEST export and explicit summary::emit calls..."
+  # Check if BATS tests using summary.sh call emit explicitly
+  print_info "Checking for explicit summary::emit calls in tests..."
   
   local test_files
   mapfile -t test_files < <(find tests/bats -name "*.bats" -type f 2>/dev/null)
   
   for file in "${test_files[@]}"; do
     if grep -q 'source.*summary\.sh' "$file" 2>/dev/null; then
-      # Check if test exports IN_BATS_TEST
-      if ! grep -q 'export IN_BATS_TEST' "$file" 2>/dev/null; then
-        print_warning "File $file: Uses summary.sh but doesn't export IN_BATS_TEST"
-        print_info "  EXIT trap may be registered, causing kcov issues"
-        ((issues_found++)) || true
-      fi
       # Check if test calls emit explicitly
       if ! grep -q 'summary::emit' "$file" 2>/dev/null; then
         print_warning "File $file: Uses summary.sh but no explicit summary::emit"
-        print_info "  Should call summary::emit explicitly in tests"
+        print_info "  Should call summary::emit explicitly (EXIT trap disabled by default)"
         ((issues_found++)) || true
       fi
     fi
@@ -218,9 +212,9 @@ validate_test_patterns() {
   else
     print_warning "Found $issues_found potential issue(s)"
     print_info "Recommendation: BATS tests using summary.sh should:"
-    echo "    1. Export IN_BATS_TEST=1 before running bash -c, AND"
-    echo "    2. Call summary::emit explicitly inside bash -c"
-    echo "    3. summary.sh checks IN_BATS_TEST to skip EXIT trap"
+    echo "    1. Call summary::emit explicitly (EXIT trap opt-in only)"
+    echo "    2. Don't rely on EXIT trap for tests (disabled by default)"
+    echo "    3. Production scripts can use SUMMARY_AUTO_EMIT=1 if needed"
     return 0  # Warning, not error
   fi
 }
