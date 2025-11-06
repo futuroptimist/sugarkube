@@ -295,9 +295,9 @@ run_pytest_simulation() {
   else
     print_error "Python tests failed"
     print_warning "This indicates an issue that would fail in CI!"
-    print_info "Note: CI runs Python 3.14, local version may differ"
+    print_info "Note: CI may run a different Python version than local environment"
     print_info "Check for:"
-    echo "  - Python version compatibility issues (3.12 vs 3.14)"
+    echo "  - Python version compatibility issues"
     echo "  - Import path problems (sys.path configuration)"
     echo "  - Test fixture issues"
     return 1
