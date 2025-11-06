@@ -29,6 +29,7 @@ summary__with_strict() {
   # Callers (k3s-discover.sh, tests) already set -euo pipefail
   # Avoiding subshells prevents kcov instrumentation depth issues
   "$@"
+  return $?
 }
 
 summary__now_impl() {
