@@ -1471,9 +1471,15 @@ mdns_absence_check_cli() {
   if [ -n "${TOKEN:-}" ]; then
     absence_env+=("SUGARKUBE_TOKEN=${TOKEN}")
   fi
-  env "${absence_env[@]}" python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
+  env "${absence_env[@]}" SCRIPT_DIR="${SCRIPT_DIR}" python3 - "${MDNS_SERVICE_TYPE}" "${CLUSTER}" "${ENVIRONMENT}" "${MDNS_HOST_RAW}" <<'PY'
+import os
 import subprocess
 import sys
+
+# Ensure scripts directory is in path for Python 3.14+ compatibility
+scripts_dir = os.environ.get("SCRIPT_DIR")
+if scripts_dir and scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
 
 from k3s_mdns_parser import parse_mdns_records
 from k3s_mdns_query import _normalize_record_lines
@@ -2021,9 +2027,14 @@ run_avahi_query() {
   if [ -n "${TOKEN:-}" ]; then
     query_env+=("SUGARKUBE_TOKEN=${TOKEN}")
   fi
-  env "${query_env[@]}" python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+  env "${query_env[@]}" SCRIPT_DIR="${SCRIPT_DIR}" python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
 import sys
+
+# Ensure scripts directory is in path for Python 3.14+ compatibility
+scripts_dir = os.environ.get("SCRIPT_DIR")
+if scripts_dir and scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
 
 from k3s_mdns_query import query_mdns
 
