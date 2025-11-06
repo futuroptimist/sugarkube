@@ -26,21 +26,23 @@ $ bash scripts/ci_commands.sh
 
 ### Skipped Tests (Not Failures)
 
-The 4 skipped tests are not failures - they are intentionally skipped with documentation:
+The 4 skipped tests are not failures - they are intentionally skipped with documentation.
 
-1. **Test 6**: "discover flow joins existing server when discovery succeeds"
+**Note**: Test numbers below refer to the global test index when running `bats --recursive tests/bats` (tests across all BATS files numbered sequentially 1-41).
+
+1. **Test 6** (discover_flow.bats): "discover flow joins existing server when discovery succeeds"
    - Skip reason: Complex k3s integration test - needs dedicated PR
    - Reference: `notes/ci-test-failures-remaining-work.md` section 1
 
-2. **Test 7**: "discover flow elects winner after self-check failure"
+2. **Test 7** (discover_flow.bats): "discover flow elects winner after self-check failure"
    - Skip reason: Complex k3s integration test - needs dedicated PR
    - Reference: `notes/ci-test-failures-remaining-work.md` section 1
 
-3. **Test 8**: "discover flow remains follower after self-check failure"
+3. **Test 8** (discover_flow.bats): "discover flow remains follower after self-check failure"
    - Skip reason: Complex k3s integration test - needs dedicated PR
    - Reference: `notes/ci-test-failures-remaining-work.md` section 1
 
-4. **Test 34**: "mdns absence gate confirms wipe leaves no advertisements"
+4. **Test 34** (mdns_selfcheck.bats): "mdns absence gate confirms wipe leaves no advertisements"
    - Skip reason: Times out - needs dedicated investigation
    - Root cause: Test stubs use `sleep 60` which causes timeout
    - Action: Requires dedicated investigation (2-4 hours estimated)
@@ -94,14 +96,16 @@ All actionable CI/test failures have been resolved. The problem statement assume
 
 ### Future Work (Outside Current Scope)
 
-The 4 skipped tests are documented as requiring dedicated investigation/PRs:
+The 4 skipped tests are documented as requiring dedicated investigation/PRs.
 
-1. **discover_flow.bats tests 6-8** (estimated 4-8 hours each)
+**Note**: Test numbers refer to global test index (1-41) when running `bats --recursive tests/bats`.
+
+1. **Tests 6-8** (discover_flow.bats) - estimated 4-8 hours each
    - Requires k3s installation stubbing
    - Complex integration test scenarios
    - See `notes/skipped-tests-status.md` for details
 
-2. **mdns_selfcheck.bats test 34** (estimated 2-4 hours)
+2. **Test 34** (mdns_selfcheck.bats) - estimated 2-4 hours
    - Requires investigation of timeout cause
    - avahi-publish stubs use `sleep 60`
    - May need rework of test approach
