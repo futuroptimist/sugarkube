@@ -62,7 +62,7 @@ NVME_HEALTH_ARGS ?=
         clone-ssd validate-ssd-clone docs-verify docs-simplify qr-codes monitor-ssd-health nvme-health smoke-test-pi qemu-smoke field-guide \
         publish-telemetry notify-teams notify-workflow update-hardware-badge rehearse-join \
         token-place-samples support-bundle mac-setup cluster-up cluster-bootstrap codespaces-bootstrap \
-        show-disks preflight verify-clone finalize-nvme clean-mounts-hard
+        show-disks preflight verify-clone finalize-nvme clean-mounts-hard ci-simulate ci-simulate-kcov
 
 install-pi-image:
 	$(INSTALL_CMD) --dir '$(IMAGE_DIR)' --image '$(IMAGE_PATH)' $(DOWNLOAD_ARGS)
@@ -192,3 +192,11 @@ support-bundle:
 
 mac-setup:
 	$(MAC_SETUP_CMD) $(MAC_SETUP_ARGS)
+
+ci-simulate:
+@echo "Simulating CI workflow environment locally..."
+@$(CURDIR)/scripts/ci_simulate.sh
+
+ci-simulate-kcov:
+@echo "Simulating CI workflow with kcov instrumentation..."
+@$(CURDIR)/scripts/ci_simulate.sh --with-kcov

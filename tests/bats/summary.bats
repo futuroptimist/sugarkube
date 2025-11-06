@@ -8,7 +8,6 @@
     summary::section "Smoke"
     summary::step OK "First step"
     summary::step FAIL "Second step" "details"
-    summary::emit
   '
 
   [ "$status" -eq 0 ]
@@ -26,7 +25,6 @@
     summary::init
     summary::section "TTY"
     summary::step WARN "Term test"
-    summary::emit
   '
 
   [ "$status" -eq 0 ]

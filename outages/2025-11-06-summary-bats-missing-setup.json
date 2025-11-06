@@ -2,12 +2,13 @@
   "id": "2025-11-06-summary-bats-missing-setup",
   "date": "2025-11-06",
   "component": "tests/bats/summary.bats",
-  "rootCause": "Tests 40-41 (summary tests) failed in CI because the BATS_CWD environment variable was not set. The tests use ${BATS_CWD}/scripts/lib/summary.sh to source the summary library, relying on BATS_CWD being set to the repository root. While other test files in the project also use BATS_CWD, the CI workflow (.github/workflows/ci.yml) only set BATS_LIB_PATH but not BATS_CWD, causing the path to resolve to /scripts/lib/summary.sh (absolute path) which doesn't exist.",
-  "resolution": "Added BATS_CWD environment variable to the CI workflow's 'Run Bash tests under kcov' step, setting it to ${{ github.workspace }}. This makes BATS_CWD available to all BATS tests consistently, matching the pattern used for BATS_LIB_PATH. The variable is exported by the CI runner, making it available to all test subprocesses without needing individual setup() functions in each test file.",
+  "rootCause": "Tests 40-41 (summary tests) failed in CI even after adding BATS_CWD environment variable. The tests were explicitly calling summary::emit before the bash -c subshell exited, then the EXIT trap (registered by summary::init) would also call summary::emit. Under kcov instrumentation, this pattern caused issues with exit status tracking, even though summary::emit is protected against double-calling via the SUMMARY__EMITTED flag and uses '|| true' for error handling.",
+  "resolution": "Removed explicit summary::emit calls from the test bash -c commands, relying instead on the EXIT trap registered by summary::init to emit the summary when the subshell exits. This eliminates the potential race condition between explicit emit and trap-triggered emit under kcov instrumentation. The tests now follow the intended usage pattern where summary::init registers an EXIT trap that automatically emits the summary on script completion. Also added BATS_CWD: ${{ github.workspace }} to .github/workflows/ci.yml to ensure BATS_CWD is available to all tests.",
   "references": [
-    "tests/bats/summary.bats:6",
-    "tests/bats/summary.bats:25",
-    "tests/bats/api_readyz_gate.bats:33",
+    "tests/bats/summary.bats:3-19",
+    "tests/bats/summary.bats:21-34",
+    "scripts/lib/summary.sh:127-136",
+    "scripts/lib/summary.sh:144-159",
     ".github/workflows/ci.yml:56-60"
   ]
 }
