@@ -25,12 +25,10 @@ summary_enabled() {
 }
 
 summary__with_strict() {
-  # Run command with strict error handling
-  # Simplified for kcov compatibility - avoid set +o / eval pattern
-  (
-    set -Eeuo pipefail 2>/dev/null || set -euo pipefail
-    "$@"
-  )
+  # Execute command directly without wrapper
+  # Callers (k3s-discover.sh, tests) already set -euo pipefail
+  # Avoiding subshells prevents kcov instrumentation depth issues
+  "$@"
 }
 
 summary__now_impl() {
