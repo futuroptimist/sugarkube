@@ -58,7 +58,7 @@ OPTIONS:
   -h, --help          Show this help message
 
 EXAMPLES:
-  # Basic simulation (sets CI environment variables, runs BATS)
+  # Basic simulation (BATS tests + pytest)
   $0
 
   # Full CI simulation with kcov (requires kcov to be installed)
@@ -68,8 +68,10 @@ EXAMPLES:
   $0 --install-kcov --with-kcov
 
 NOTES:
-  - Basic mode sets BATS_CWD and BATS_LIB_PATH like CI does
-  - kcov mode runs tests under code coverage (catches instrumentation issues)
+  - Basic mode runs both BATS and pytest tests (matching CI workflow)
+  - pytest requires: pip install pytest pytest-cov
+  - BATS tests set BATS_CWD and BATS_LIB_PATH like CI does
+  - kcov mode runs BATS tests under code coverage (catches instrumentation issues)
   - Installing kcov requires sudo and takes ~2-3 minutes
 
 EOF
@@ -119,6 +121,10 @@ check_dependencies() {
     missing+=("bats")
   fi
   
+  if ! command -v python3 >/dev/null 2>&1; then
+    missing+=("python3")
+  fi
+  
   if [ "$USE_KCOV" = true ] && ! command -v kcov >/dev/null 2>&1; then
     if [ "$INSTALL_KCOV" = false ]; then
       print_warning "kcov not found. Use --install-kcov to install it."
@@ -131,6 +137,13 @@ check_dependencies() {
     echo "Install with:"
     echo "  sudo apt-get install ${missing[*]}"
     return 1
+  fi
+  
+  # Check for pytest
+  if ! python3 -m pytest --version >/dev/null 2>&1; then
+    print_warning "pytest not found. Install with: pip install pytest pytest-cov"
+    print_info "Python tests will be skipped"
+    return 0  # Don't fail, just warn
   fi
   
   return 0
@@ -243,6 +256,54 @@ run_basic_simulation() {
   fi
 }
 
+run_pytest_simulation() {
+  print_header "Running pytest CI Simulation"
+  
+  # Check if pytest is available
+  if ! python3 -m pytest --version >/dev/null 2>&1; then
+    print_warning "pytest not available - skipping Python tests"
+    print_info "Install with: pip install pytest pytest-cov"
+    return 0  # Don't fail if pytest is missing
+  fi
+  
+  print_info "Python version: $(python3 --version)"
+  echo ""
+  
+  # Discover test files (exclude test_qemu_pi_smoke_test.py like ci_commands.sh does)
+  local -a pytest_targets
+  mapfile -t pytest_targets < <(find tests -name 'test_*.py' ! -name 'test_qemu_pi_smoke_test.py' -print | LC_ALL=C sort)
+  
+  if [ "${#pytest_targets[@]}" -eq 0 ]; then
+    print_error "No pytest targets discovered"
+    return 1
+  fi
+  
+  print_info "Running pytest on ${#pytest_targets[@]} test files..."
+  echo "Command:"
+  echo "  pytest -q <${#pytest_targets[@]} test files>"
+  echo ""
+  
+  if pytest -q "${pytest_targets[@]}"; then
+    print_success "Python tests passed (${#pytest_targets[@]} test files)"
+    
+    # Note about coverage
+    print_info ""
+    print_info "Note: Running without coverage for speed. CI runs with coverage:"
+    echo "  pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml"
+    
+    return 0
+  else
+    print_error "Python tests failed"
+    print_warning "This indicates an issue that would fail in CI!"
+    print_info "Note: CI runs Python 3.14, local version may differ"
+    print_info "Check for:"
+    echo "  - Python version compatibility issues (3.12 vs 3.14)"
+    echo "  - Import path problems (sys.path configuration)"
+    echo "  - Test fixture issues"
+    return 1
+  fi
+}
+
 run_kcov_simulation() {
   print_header "Running kcov CI Simulation"
   
@@ -313,7 +374,14 @@ main() {
   fi
   
   if [ "$KCOV_ONLY" = false ]; then
+    # Run BATS tests
     if ! run_basic_simulation; then
+      exit_code=1
+    fi
+    echo ""
+    
+    # Run pytest tests
+    if ! run_pytest_simulation; then
       exit_code=1
     fi
     echo ""
