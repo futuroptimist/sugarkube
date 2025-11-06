@@ -1,20 +1,20 @@
 # Skipped Tests Status and Roadmap
 
-**Date**: 2025-11-05  
+**Date**: 2025-11-06 (Updated)  
 **Context**: Documentation of all skipped tests in the repository and recommendations for future PRs
 
 ## Summary
 
-As of 2025-11-05 (Updated PR #4), there are **5 skipped tests** in the BATS test suite:
+As of 2025-11-06, there are **4 skipped tests** in the BATS test suite:
 - 3 complex k3s integration tests (discover_flow.bats)
-- 2 mdns advanced feature tests (mdns_selfcheck.bats tests 33-34)
+- 1 mdns advanced feature test (mdns_selfcheck.bats test 34)
 
 All Python tests pass without skips (850+ tests).
 
-**Test Count Impact of This PR**:
-- Before PR #4: 34 pass, 7 skip (l4_probe tests were skipped)
-- After PR #4: 36 pass, 5 skip (l4_probe tests now passing)
-- Net improvement: +2 passing tests
+**Test Count History**:
+- After PR #4 (2025-11-05): 36 pass, 5 skip (l4_probe tests enabled via ncat installation)
+- After PR #5 (2025-11-05): 37 pass, 4 skip (Test 33 dbus wait retry logic implemented)
+- Current (2025-11-06): 37 pass, 4 skip (no changes)
 
 ## Test Suite Status
 
@@ -22,9 +22,9 @@ All Python tests pass without skips (850+ tests).
 |-----------|-------|------|------|------|
 | discover_flow.bats | 9 | 6 | 3 | 0 |
 | l4_probe.bats | 2 | 2 | 0 | 0 |
-| mdns_selfcheck.bats | 18 | 16 | 2 | 0 |
+| mdns_selfcheck.bats | 18 | 17 | 1 | 0 |
 | Other BATS | 12 | 12 | 0 | 0 |
-| **Total BATS** | **41** | **36** | **5** | **0** |
+| **Total BATS** | **41** | **37** | **4** | **0** |
 | **Python tests** | **850+** | **850+** | **0** | **0** |
 
 ## Detailed Skip Analysis
@@ -129,148 +129,138 @@ All Python tests pass without skips (850+ tests).
 
 ---
 
-### 3. mdns_selfcheck.bats - Tests 33-34: Advanced Features (2 skipped)
-
-#### Test 33: DBus Wait Logic
+### 3. mdns_selfcheck.bats - Test 33: DBus Wait Logic (FIXED - 2025-11-05 PR #5)
 
 **Test**: "mdns dbus self-check waits for avahi bus before browsing"
 
-**Skip Reason**: Needs `wait_for_avahi_dbus` retry logic with ServiceUnknown error detection
+**Status**: ✅ NOW PASSING
+
+**Original Skip Reason**: Needed `wait_for_avahi_dbus_gdbus` retry logic with ServiceUnknown error detection
 
 **Root Cause**:
-- Test expects script to retry when `gdbus introspect` returns ServiceUnknown error
-- Current implementation may not have retry logic or uses different tool (busctl)
+- Test expects script to retry when `gdbus introspect` returns ServiceUnknown error during Avahi startup
+- Original implementation used busctl-based wait logic which didn't detect ServiceUnknown errors
 - Test stubs gdbus to fail with ServiceUnknown on first 2 attempts, succeed on 3rd
-- Script doesn't implement the expected retry behavior
 
-**Complexity**: MEDIUM
-- Need to implement new wait function using gdbus
-- Coordinate with existing busctl-based wait logic
-- Handle multiple gdbus error types (ServiceUnknown vs others)
+**Fix Applied (2025-11-05 PR #5)**:
+- Implemented `wait_for_avahi_dbus_gdbus()` function in `scripts/mdns_selfcheck_dbus.sh`
+- Added ServiceUnknown error detection and retry logic with 0.5s sleep between attempts
+- Function logs `event=avahi_dbus_ready outcome=ok` when service becomes available
+- Integrated into mdns_selfcheck_dbus.sh startup sequence (lines 318-374)
 
-**Estimated Effort**: 20-30 minutes (per notes investigation)
-- Implement `wait_for_avahi_dbus_gdbus()` function: 10 minutes
-- Add ServiceUnknown error detection and retry: 10 minutes
+**Complexity**: MEDIUM (as predicted)
+
+**Actual Effort**: ~45 minutes
+- Implement wait_for_avahi_dbus_gdbus() function: 20 minutes
+- Add ServiceUnknown error detection and retry: 15 minutes
 - Test and validate: 10 minutes
 
-**Recommended Approach**:
-1. Add new retry function in `scripts/mdns_selfcheck_dbus.sh`:
-   ```bash
-   wait_for_avahi_dbus_gdbus() {
-     local max_attempts=10
-     local attempt=0
-     while [ $attempt -lt $max_attempts ]; do
-       attempt=$((attempt + 1))
-       if gdbus introspect --system --dest org.freedesktop.Avahi --object-path / >/dev/null 2>&1; then
-         log_info mdns_selfcheck event=avahi_dbus_ready outcome=ok attempts=$attempt
-         return 0
-       fi
-       local error_output
-       error_output="$(gdbus introspect --system --dest org.freedesktop.Avahi --object-path / 2>&1 || true)"
-       if [[ "$error_output" =~ ServiceUnknown ]]; then
-         log_debug mdns_selfcheck event=avahi_dbus_wait attempt=$attempt status=not_ready
-         sleep 0.5
-         continue
-       fi
-       log_error mdns_selfcheck event=avahi_dbus_error attempt=$attempt
-       return 1
-     done
-     log_error mdns_selfcheck event=avahi_dbus_timeout attempts=$max_attempts
-     return 1
-   }
-   ```
-
-2. Call before ServiceBrowserNew attempt
-3. Make conditional on gdbus availability
-
-**Next Steps**:
-1. Create focused PR implementing just this retry logic
-2. Reference `notes/ci-test-fixes-action-plan.md` lines 650-731 for detailed implementation
-3. Test with both success and failure scenarios
+**Outage Documentation**: See `outages/2025-11-05-mdns-selfcheck-test-33-dbus-wait-retry.json` (if created in PR #5)
 
 **References**:
-- `tests/bats/mdns_selfcheck.bats:748-860`
-- `scripts/mdns_selfcheck_dbus.sh`
-- `scripts/wait_for_avahi_dbus.sh`
-- `notes/ci-test-fixes-action-plan.md:650-731`
+- `tests/bats/mdns_selfcheck.bats:748-854`
+- `scripts/mdns_selfcheck_dbus.sh:315-374`
+- `notes/ci-test-failures-remaining-work.md`
 
 ---
 
-#### Test 34: Absence Gate
+### 4. mdns_selfcheck.bats - Test 34: Absence Gate (STILL SKIPPED)
 
 **Test**: "mdns absence gate confirms wipe leaves no advertisements"
 
-**Skip Reason**: Test times out - needs investigation of wipe/cleanup flow
+**Status**: ⏭️ STILL SKIPPED
 
-**Root Cause**:
-- Test verifies that after node wipe, no mDNS advertisements remain
-- Timeout suggests missing stubs for cleanup/verification commands
-- May require stubbing wipe scripts or cleanup verification tools
+**Skip Reason**: Test times out waiting for mdns_absence_gate logic to complete
 
-**Complexity**: MEDIUM-HIGH
-- Need to trace full wipe and verification flow
-- Identify which commands cause timeout
-- Understand expected vs actual wipe behavior
+**Root Cause (Updated 2025-11-06 Investigation)**:
+- Test runs `k3s-discover.sh` which calls `ensure_mdns_absence_gate()` function
+- The absence gate has complex retry logic with timeouts and backoffs (default 15 seconds)
+- Initial suspicion was avahi-publish stubs using `sleep 60`, but fixing those to use trap+loop didn't resolve timeout
+- Actual issue: mdns_absence_gate function needs environment variables to speed up its retry/backoff logic
+- Missing timeout overrides: `MDNS_ABSENCE_TIMEOUT_MS`, `MDNS_ABSENCE_BACKOFF_START_MS`, `MDNS_ABSENCE_BACKOFF_CAP_MS`
+- Test verifies that after node wipe, no mDNS advertisements remain (expects `mdns_absence_confirmed=1`)
 
-**Estimated Effort**: 2-3 hours
-- Investigation: 1-1.5 hours (trace execution, identify hanging commands)
-- Implementation: 45-60 minutes (add missing stubs)
-- Validation: 30 minutes (verify test logic is sound)
+**Complexity**: MEDIUM-HIGH (higher than initially estimated)
+- Not just stub issue - requires understanding full absence gate logic flow
+- Need to configure multiple timeout/backoff environment variables
+- Must ensure absence gate completes within test timeout (30s)
 
-**Recommended Approach**:
-1. **Investigation Phase**:
-   - Run test with `timeout 30` and capture output
-   - Add debug logging to wipe scripts
-   - Identify which command hangs (likely avahi or systemctl operations)
+**Estimated Effort**: 2-3 hours (confirmed after investigation)
+- Investigation: 1 hour (✅ completed 2025-11-06 - traced to absence gate timeouts)
+- Implementation: 45-60 minutes (add environment variable overrides, possibly adjust stubs)
+- Validation: 30-45 minutes (verify test logic validates actual absence vs just passing)
 
-2. **Implementation Phase**:
-   - Add stubs for wipe-related commands (likely similar to join_gate fixes)
-   - Ensure cleanup verification commands are stubbed
-   - May need to stub file system operations if wipe checks files
+**Recommended Approach (Updated 2025-11-06)**:
+1. **Add timeout overrides to test environment** (lines 944-963 in mdns_selfcheck.bats):
+   ```bash
+   MDNS_ABSENCE_TIMEOUT_MS=2000 \        # Reduce from 15000ms to 2s
+   MDNS_ABSENCE_BACKOFF_START_MS=100 \   # Reduce from 500ms to 100ms
+   MDNS_ABSENCE_BACKOFF_CAP_MS=500 \     # Reduce from 4000ms to 500ms
+   ```
 
-3. **Validation Phase**:
-   - Verify test actually validates wipe behavior (not just passing)
-   - Consider if test expectations match implementation
-   - Document any assumptions about wipe completeness
+2. **Verify avahi-publish stubs** are interruptible (already set correctly in test):
+   - Use trap for TERM/INT signals
+   - Loop with short sleep (0.1s) instead of long sleep (60s)
 
-**Next Steps**:
-1. Create investigation PR focused only on Test 34
-2. Run with verbose logging and capture full output
-3. Document findings and update this file
-4. Implement stubs based on findings
-5. Consider if test should be part of E2E suite instead
+3. **Test with reduced timeouts**:
+   - Ensure absence gate completes within 30s test timeout
+   - Verify test actually validates absence behavior vs just passing
+
+4. **Document findings**:
+   - Add comments explaining why specific timeout values are needed
+   - Reference k3s-discover.sh:1760-1850 for absence gate logic
+
+**Investigation Notes (2025-11-06)**:
+- ✅ Identified `sleep 60` in avahi-publish stubs - attempted fix with trap+loop pattern
+- ✅ Test still timed out after stub fix - traced to absence gate retry logic
+- ✅ Found default MDNS_ABSENCE_TIMEOUT_MS=15000ms causing long waits
+- 🔲 Need to add environment overrides to test setup
+- 🔲 May need to verify restart_avahi_daemon_service stub is correct
+
+**Next Steps** (for future PR):
+1. Add timeout environment variables to test setup (estimated 15 minutes)
+2. Run test with verbose logging to verify absence gate completes (10 minutes)
+3. Adjust timeout values if needed to balance speed vs reliability (10 minutes)
+4. Validate test actually checks for advertisement absence vs just passing (15 minutes)
+5. Consider if absence gate default timeouts should be configurable via env vars (architecture decision)
 
 **References**:
-- `tests/bats/mdns_selfcheck.bats:861-900`
-- `scripts/wipe_node.sh`
-- Related scripts that handle cleanup
+- `tests/bats/mdns_selfcheck.bats:856-969` (test code)
+- `scripts/k3s-discover.sh:1760-1965` (ensure_mdns_absence_gate function)
+- `scripts/k3s-discover.sh:1720-1758` (check_mdns_absence_once function)
+- Investigation notes above (2025-11-06)
 
 ---
 
 ## Prioritization for Future PRs
 
-### Immediate (Next 1-2 PRs)
+### Completed
 
 **~~PR 1: Quick Win - ncat Installation~~ ✅ COMPLETED (PR #4 - 2025-11-05)**
-- **Impact**: Enabled 2 tests, simple CI change
+- **Impact**: Enabled 2 tests (l4_probe.bats), simple CI change
 - **Risk**: Very low
-- **Tests**: l4_probe.bats tests 1-2
+- **Tests**: l4_probe.bats tests 16-17
 - **Actual time**: 15 minutes (vs 30 min estimated)
 - **Outage**: `outages/2025-11-05-l4-probe-tests-ncat-missing.json`
 
-**PR 2: DBus Wait Retry Logic** (30 minutes)
-- **Impact**: Enables 1 test, well-scoped feature
+**~~PR 2: DBus Wait Retry Logic~~ ✅ COMPLETED (PR #5 - 2025-11-05)**
+- **Impact**: Enabled 1 test (mdns_selfcheck.bats test 33)
 - **Risk**: Low (isolated change)
 - **Tests**: mdns_selfcheck.bats test 33
-- **Deliverable**: Documented in action plan with exact implementation
+- **Actual time**: ~45 minutes (vs 20-30 min estimated)
+- **Outage**: Expected `outages/2025-11-05-mdns-selfcheck-test-33-dbus-wait-retry.json`
+- **Implementation**: Added `wait_for_avahi_dbus_gdbus()` in `scripts/mdns_selfcheck_dbus.sh:318-374`
 
-### Short-term (Next 2-4 weeks)
+### Immediate (Next PR)
 
-**PR 3: Absence Gate Investigation** (3 hours)
-- **Impact**: Enables 1 test
-- **Risk**: Medium (may reveal design issues)
+**PR 3: Absence Gate Timeout Configuration** (1-2 hours)
+- **Impact**: Enables 1 test, improves absence gate configurability
+- **Risk**: Low-Medium (test-only changes, may reveal configuration gaps)
 - **Tests**: mdns_selfcheck.bats test 34
-- **Deliverable**: Either fix + test pass, or documented decision to move to E2E
+- **Deliverable**: Test passes with timeout overrides + documentation of findings
+- **Investigation**: ✅ Completed 2025-11-06 (root cause identified - see Test 34 notes above)
+- **Implementation**: Add `MDNS_ABSENCE_TIMEOUT_MS`, `MDNS_ABSENCE_BACKOFF_START_MS`, `MDNS_ABSENCE_BACKOFF_CAP_MS` to test environment
+- **Estimated time**: 50-75 minutes (investigation already done, implementation + validation remaining)
 
 ### Long-term (Next 1-2 months)
 
@@ -288,12 +278,12 @@ All Python tests pass without skips (850+ tests).
 
 ## Success Metrics
 
-**Current State** (2025-11-05 - After PR #4):
-- BATS: 36/41 passing (87.8%)
+**Current State** (2025-11-06 - After PR #5):
+- BATS: 37/41 passing (90.2%)
 - Python: 850+/850+ passing (100%)
-- **Overall**: ~88% pass rate
+- **Overall**: ~90% pass rate
 
-Note: "Passing" means tests that run and pass. 5 tests are skipped conditionally.
+Note: "Passing" means tests that run and pass. 4 tests are skipped conditionally.
 
 **Target State** (after all skipped tests addressed):
 - BATS: 41/41 passing (100%)
@@ -301,10 +291,10 @@ Note: "Passing" means tests that run and pass. 5 tests are skipped conditionally
 - **Overall**: 100% pass rate
 
 **Intermediate Milestones**:
-- ✅ After PR #4 (ncat - THIS PR): 36/41 passing (87.8%)
-- After PR #5 (dbus retry): 37/41 passing (90.2%)
-- After PR #6 (absence gate): 38/41 passing (92.7%)
-- After PRs #7-9 (k3s integration): 41/41 passing (100%)
+- ✅ After PR #4 (ncat): 36/41 passing (87.8%)
+- ✅ After PR #5 (dbus retry - current): 37/41 passing (90.2%)
+- 🔲 After PR #6 (absence gate): 38/41 passing (92.7%)
+- 🔲 After PRs #7-9 (k3s integration): 41/41 passing (100%)
 
 ---
 
