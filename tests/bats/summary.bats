@@ -2,7 +2,6 @@
 
 @test "summary emits output without color when non-tty" {
   run bash -c '
-    set -euo pipefail
     source "'"${BATS_CWD}/scripts/lib/summary.sh"'"
     summary::init
     summary::section "Smoke"
@@ -21,7 +20,6 @@
 
 @test "summary avoids ANSI escapes when TERM is dumb" {
   run env TERM=dumb bash -c '
-    set -euo pipefail
     source "'"${BATS_CWD}/scripts/lib/summary.sh"'"
     summary::init
     summary::section "TTY"

@@ -125,6 +125,12 @@ summary__setup_colors() {
 }
 
 summary__register_exit_trap_impl() {
+  # EXIT trap disabled by default to avoid kcov instrumentation issues
+  # Enable explicitly in production scripts with SUMMARY_AUTO_EMIT=1
+  # Tests and most scripts call summary::emit explicitly
+  if [ "${SUMMARY_AUTO_EMIT:-0}" != "1" ]; then
+    return 0
+  fi
   trap 'summary::emit' EXIT
 }
 

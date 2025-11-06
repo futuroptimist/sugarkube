@@ -57,6 +57,7 @@ jobs:
         env:
           KCOV_OUT: ${{ github.workspace }}/coverage/kcov
           BATS_LIB_PATH: ${{ github.workspace }}/tests/bats
+          BATS_CWD: ${{ github.workspace }}
         run: |
           mkdir -p "$KCOV_OUT"
           # Run bats via kcov so executed shell scripts are tracked.
