@@ -266,8 +266,24 @@ run_pytest_simulation() {
     return 0  # Don't fail if pytest is missing
   fi
   
-  print_info "Python version: $(python3 --version)"
-  echo ""
+  local python_version
+  python_version=$(python3 --version 2>&1 | awk '{print $2}')
+  print_info "Python version: $python_version"
+  
+  # Warn about Python version differences with CI
+  local python_major_minor
+  python_major_minor=$(echo "$python_version" | cut -d. -f1,2)
+  if [[ "$python_major_minor" != "3.14" && "$python_major_minor" != "3.13" ]]; then
+    print_warning "Local Python $python_version differs from CI (Python 3.14+)"
+    print_info "CI environment differences to be aware of:"
+    echo "  - Python 3.14+ changed subprocess.run environment inheritance"
+    echo "  - sys.path behavior changed for stdin scripts (python3 - )"
+    echo "  - Tests may pass locally but fail in CI with newer Python"
+    print_info "Known issues fixed:"
+    echo "  ✓ subprocess.run now explicitly passes env=os.environ.copy()"
+    echo "  ✓ PYTHONPATH explicitly set for stdin Python scripts"
+    echo ""
+  fi
   
   # Discover test files (exclude test_qemu_pi_smoke_test.py like ci_commands.sh does)
   local -a pytest_targets
@@ -296,9 +312,10 @@ run_pytest_simulation() {
     print_warning "This indicates an issue that would fail in CI!"
     print_info "Note: CI may run a different Python version than local environment"
     print_info "Check for:"
-    echo "  - Python version compatibility issues"
-    echo "  - Import path problems (sys.path configuration)"
-    echo "  - Test fixture issues"
+    echo "  - Python version compatibility issues (3.14+ behavior changes)"
+    echo "  - subprocess environment inheritance (explicit env parameter needed)"
+    echo "  - Import path problems (sys.path configuration for stdin scripts)"
+    echo "  - Test fixture environment variable inheritance"
     return 1
   fi
 }

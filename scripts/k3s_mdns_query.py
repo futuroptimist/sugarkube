@@ -71,6 +71,13 @@ def _invoke_avahi(
         "text": True,
         "check": False,
     }
+    # Python 3.14+ changed subprocess behavior: when calling subprocess.run without
+    # an explicit env parameter, it may not inherit all environment variables correctly,
+    # particularly PATH modifications from test fixtures. We now ALWAYS pass env explicitly.
+    # For test mocks that don't accept env parameter, we rely on them not being subprocess.run.
+    if runner is subprocess.run:
+        # Build env dict explicitly to work around Python 3.14 subprocess.run issues
+        run_kwargs["env"] = dict(os.environ)
     if timeout is not None:
         run_kwargs["timeout"] = timeout
     try:
