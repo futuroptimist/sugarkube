@@ -2,12 +2,15 @@
   "id": "2025-11-07-python314-mdns-test-fixture-approach",
   "date": "2025-11-07",
   "component": "tests/test_mdns_discovery_parsing.py:22-94",
+  "longForm": "outages/2025-11-07-python314-mdns-test-fixture-approach.md",
   "rootCause": "Python 3.14 changed subprocess.run behavior when calling executables. The test fixture created a mock avahi-browse binary in a temporary directory and modified PATH, but subprocess.run in Python 3.14 was not reliably finding the mocked binary even when env parameter was explicitly passed with os.environ.copy() or dict(os.environ). This appears to be related to how subprocess.run resolves executables when called from inline Python scripts (python3 -) with a custom env parameter.",
   "resolution": "Changed test strategy to use SUGARKUBE_MDNS_FIXTURE_FILE environment variable instead of mocking avahi-browse via PATH. The mdns_env fixture now creates a fixture file with the expected avahi-browse output and sets SUGARKUBE_MDNS_FIXTURE_FILE to point to it. The k3s_mdns_query module already had support for loading data from fixture files, so this change leverages existing functionality and completely sidesteps the Python 3.14 subprocess PATH resolution issue. This is a more robust testing approach that doesn't rely on subprocess behavior.",
   "references": [
     "tests/test_mdns_discovery_parsing.py:22-94",
     "scripts/k3s_mdns_query.py:125-132 (_load_lines_from_fixture)",
     "scripts/k3s-discover.sh:2077 (SUGARKUBE_MDNS_FIXTURE_FILE support)",
+    "outages/2025-11-06-python314-mdns-query-import-path.json",
+    "outages/2025-11-07-python314-mdns-query-sys-path-fix.json",
     "https://docs.python.org/3/library/subprocess.html#subprocess.run"
   ]
 }
