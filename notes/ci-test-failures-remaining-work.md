@@ -2,26 +2,36 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-07 Update - After Skipped Tests Revival)
+## Current Status (2025-11-07 Update - After CI Parity Improvements)
 
 **BATS Suite**: ✅ Completes without failures (38 pass, 0 fail, 3 skip)
 
 **Python Suite**: ✅ All tests passing (850+ pass, 11 skip, 0 fail)
 
-**Key Achievement**: Revived 2 previously skipped tests (l4_probe + absence gate)! Now at 92.7% BATS pass rate.
+**CI Parity**: ✅ All dependencies explicitly declared (ncat, libglib2.0-bin for gdbus)
+
+**Key Achievement**: All conditional test skips now pass! 38/41 tests passing (92.7% pass rate).
 
 **Test Summary**:
-- ✅ **38/41 BATS tests passing** (92.7% pass rate) - up from 37/41
-- ⏭️ **3 tests skipped** (Tests 6-8: discover_flow k3s integration)
+- ✅ **38/41 BATS tests passing** (92.7% pass rate)
+- ⏭️ **3 tests skipped** (Tests 6-8: discover_flow k3s integration - appropriately complex)
 - ❌ **0 BATS tests failing**
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
 - ❌ **0 Python tests failing**
+
+**Latest Improvements (2025-11-07 PR #8 - THIS PR)**:
+- **CI Parity**: Added `libglib2.0-bin` to CI workflow for explicit gdbus availability
+- **Verification**: Confirmed tests 16-17 (l4_probe with ncat) and test 31 (mdns gdbus fallback) pass in both local and CI environments  
+- **Documentation**: Corrected notes to reflect that conditional skips are passing, not actually skipped
+- **Outage**: `outages/2025-11-07-ci-parity-gdbus-dependency.json`
 
 **Improvement from Previous (2025-11-07 PR #7)**: 
 - +1 passing BATS test (Test 34: mdns absence gate - fixed timeout issues)
 - +0 tests (l4_probe tests 16-17 were already passing in CI, just skipped locally)
 
 **Time Estimate Validation**: 
+- CI parity improvement: ~15 minutes (adding dependency + validation)
+- K3s integration tests investigation: Attempted but confirmed 4-8 hour estimates accurate
 - Test 8 was documented as "2-3 hours" but actual fix took ~1 hour including investigation, due to finding root cause in helper function rather than test-specific logic.
 - summary.bats fix took ~15 minutes, matching the estimated 15-20 minutes for simple test infrastructure fixes.
 

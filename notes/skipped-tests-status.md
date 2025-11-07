@@ -6,7 +6,7 @@
 ## Summary
 
 As of 2025-11-07, there are **3 skipped tests** in the BATS test suite:
-- 3 complex k3s integration tests (discover_flow.bats)
+- 3 complex k3s integration tests (discover_flow.bats Tests 6-8)
 
 All Python tests pass without skips (850+ tests).
 
@@ -15,6 +15,7 @@ All Python tests pass without skips (850+ tests).
 - After PR #5 (2025-11-05): 37 pass, 4 skip (Test 33 dbus wait retry logic implemented)
 - After PR #6 (2025-11-07): 37 pass, 4 skip (Python 3.14 fixes)
 - After PR #7 (2025-11-07): 38 pass, 3 skip (Test 34 absence gate + l4_probe confirmation)
+- After PR #8 (2025-11-07): 38 pass, 3 skip (CI parity improvements - gdbus explicitly installed)
 
 ## Test Suite Status
 
@@ -43,10 +44,17 @@ All Python tests pass without skips (850+ tests).
 - Test 6 calls `k3s-discover.sh` which attempts to:
   - Acquire join gate lock
   - Run L4 network probes
-  - Execute actual k3s installation
+  - Execute actual k3s installation (downloads from https://get.k3s.io)
   - Perform multi-node cluster joining
 - Current stub infrastructure doesn't mock k3s installation process
 - Tests time out after 60+ seconds waiting for k3s operations
+
+**Investigation Results (2025-11-07 PR #8)**:
+- Attempted to add `SUGARKUBE_SKIP_K3S_INSTALL` environment variable to skip actual installation
+- Test 6 initially passed with this approach
+- Tests 7-8 entered infinite loops in bootstrap election and follower state machines
+- Changes broke existing Test 5 (bootstrap publish flow - a previously passing test)
+- **Conclusion**: Original 4-8 hour estimates per test are accurate; these require careful refactoring of control flow logic
 
 **Complexity**: HIGH
 - Requires stubbing k3s installation binaries
