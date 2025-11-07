@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -101,6 +102,9 @@ def run_query(mode: str, env: dict[str, str]) -> list[str]:
         text=True,
         check=False,
     )
+    # DEBUG: Always print stderr to help diagnose Python 3.14 issues
+    if result.stderr:
+        print(f"\n=== STDERR from run_query('{mode}') ===\n{result.stderr}\n=== END STDERR ===\n", file=sys.stderr)
     assert result.returncode == 0, result.stderr
     return [line for line in result.stdout.splitlines() if line]
 
