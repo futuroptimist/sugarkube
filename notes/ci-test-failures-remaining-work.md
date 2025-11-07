@@ -2,16 +2,20 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-06 Update - After summary.bats Fix)
+## Current Status (2025-11-07 Update - After Python 3.14 Fix)
 
 **BATS Suite**: ✅ Completes without failures (41 pass, 0 fail, 4 skip)
 
-**Key Achievement**: All non-skipped tests now passing! summary.bats tests (40-41) fixed by adding missing setup() function.
+**Python Suite**: ✅ All tests passing (850+ pass, 11 skip, 0 fail)
+
+**Key Achievement**: Fixed Python 3.14 compatibility issues in mdns query imports! All CI tests now passing.
 
 **Test Summary**:
-- ✅ **41/45 BATS tests passing** (91% pass rate - up from 39/45)
+- ✅ **41/45 BATS tests passing** (91% pass rate)
 - ⏭️ **4 tests skipped** (1 + 3: Test 34 + Tests 6-8)
-- ❌ **0 tests failing**
+- ❌ **0 BATS tests failing**
+- ✅ **850+ Python tests passing** (100% of non-skipped tests)
+- ❌ **0 Python tests failing** (was 3 before this fix)
 
 **Improvement from Previous**: +2 passing tests (summary.bats tests 40-41 now working)
 
@@ -21,7 +25,25 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Summary of Fixes Applied
 
-### ✅ Completed (26 tests fixed - updated 2025-11-06 PR #5)
+### ✅ Completed (29 tests fixed - updated 2025-11-07 PR #6)
+
+**NEW: Python 3.14 Compatibility (2025-11-07 PR #6)**
+
+7. **test_mdns_discovery_parsing.py** - 3/3 tests now passing (NEW 2025-11-07 PR #6)
+   - Fixed Python 3.14 import path handling for inline stdin scripts
+   - Tests were returning empty results because k3s_mdns_query import failed silently
+   - Root cause: Python 3.14 requires explicit sys.path manipulation even with PYTHONPATH set
+   - Solution: Pass scripts directory as 4th argument and insert into sys.path before imports
+   - Fixed tests:
+     - test_server_first_returns_expected_host
+     - test_server_count_detects_all_servers
+     - test_print_server_hosts_lists_unique_hosts
+   - Root cause documented in `outages/2025-11-07-python314-mdns-query-sys-path-fix.json`
+   - Estimated time: 30 minutes (investigation + fix + testing)
+   - Actual time: 25 minutes
+
+**Previous BATS Fixes:**
+
 1. **mdns_wire_probe.bats** - 4/4 tests now passing
    - Fixed by adding `ALLOW_NON_ROOT=1` environment variable
    - Root cause documented in `outages/2025-11-04-mdns-test-missing-allow-non-root.json`
