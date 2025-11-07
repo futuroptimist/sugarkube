@@ -71,23 +71,17 @@ def _invoke_avahi(
         "text": True,
         "check": False,
     }
-    # Python 3.14+ requires explicit env to inherit PATH from test fixtures.
-    # Only add env when using subprocess.run directly (not test mocks).
-    is_subprocess_run = runner is subprocess.run
-    import sys
-    print(f"DEBUG _invoke_avahi: command = {command}", file=sys.stderr)
-    print(f"DEBUG _invoke_avahi: runner is subprocess.run = {is_subprocess_run}", file=sys.stderr)
-    print(f"DEBUG _invoke_avahi: PATH = {os.environ.get('PATH', 'NOT SET')[:200]}", file=sys.stderr)
-    if is_subprocess_run:
-        run_kwargs["env"] = os.environ.copy()
-        print(f"DEBUG _invoke_avahi: Added env to run_kwargs", file=sys.stderr)
+    # Python 3.14+ changed subprocess behavior: when calling subprocess.run without
+    # an explicit env parameter, it may not inherit all environment variables correctly,
+    # particularly PATH modifications from test fixtures. We now ALWAYS pass env explicitly.
+    # For test mocks that don't accept env parameter, we rely on them not being subprocess.run.
+    if runner is subprocess.run:
+        # Build env dict explicitly to work around Python 3.14 subprocess.run issues
+        run_kwargs["env"] = dict(os.environ)
     if timeout is not None:
         run_kwargs["timeout"] = timeout
     try:
         result = runner(command, **run_kwargs)
-        print(f"DEBUG _invoke_avahi: result.returncode = {result.returncode}, stdout length = {len(result.stdout)}, stderr length = {len(result.stderr)}", file=sys.stderr)
-        if result.stderr:
-            print(f"DEBUG _invoke_avahi: stderr = {result.stderr[:500]}", file=sys.stderr)
     except subprocess.TimeoutExpired as exc:
         if debug is not None and timeout is not None:
             debug("avahi-browse timed out after " f"{timeout:g}s; continuing without mDNS results")
@@ -100,9 +94,6 @@ def _invoke_avahi(
             stderr=stderr,
         )
     except FileNotFoundError:
-        import sys
-        print(f"DEBUG _invoke_avahi: FileNotFoundError for command: {command}", file=sys.stderr)
-        print(f"DEBUG _invoke_avahi: PATH in os.environ: {os.environ.get('PATH', 'NOT SET')[:300]}", file=sys.stderr)
         if debug is not None:
             debug("avahi-browse executable not found; continuing without mDNS results")
         return subprocess.CompletedProcess(

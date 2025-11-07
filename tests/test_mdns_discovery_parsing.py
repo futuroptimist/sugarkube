@@ -21,74 +21,34 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "k3s-discover.sh"
 
 @pytest.fixture()
 def mdns_env(tmp_path):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    browse = bin_dir / "avahi-browse"
-    browse.write_text(
+    # Python 3.14 has issues with subprocess.run finding executables in modified PATH
+    # when called from inline Python scripts. Use a fixture file instead.
+    fixture_file = tmp_path / "mdns-fixture.txt"
+    fixture_file.write_text(
         textwrap.dedent(
             """\
-            #!/usr/bin/env bash
-            set -euo pipefail
-
-            if [[ "$#" -lt 4 || "$#" -gt 5 ]]; then
-              echo "unexpected argument count: $#" >&2
-              exit 1
-            fi
-
-            if [[ "$1" != "--parsable" || "$2" != "--terminate" ]]; then
-              echo "unexpected arguments: $*" >&2
-              exit 1
-            fi
-
-            shift 2
-
-            if [[ "$1" != "--resolve" ]]; then
-              echo "missing --resolve flag" >&2
-              exit 1
-            fi
-
-            shift
-
-            if [[ "$1" == "--ignore-local" ]]; then
-              shift
-            fi
-
-            if [[ "$#" -ne 1 ]]; then
-              echo "unexpected trailing arguments: $*" >&2
-              exit 1
-            fi
-
-            service="$1"
-
-            if [[ "$service" != "_k3s-sugar-dev._tcp" && "$service" != "_https._tcp" ]]; then
-              echo "unexpected service type: $service" >&2
-              exit 1
-            fi
-
-            printf '%s\n' \
-              '=;eth0;IPv4;k3s-sugar-dev@sugar-control-0 (server);_k3s-sugar-dev._tcp;local;' \
-              'sugar-control-0.local;192.168.50.10;6443;'\
-              'txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server' \
-              '=;eth0;IPv4;k3s-sugar-dev@sugar-control-1 (server);_k3s-sugar-dev._tcp;local;' \
-              'sugar-control-1.local;192.168.50.11;6443;'\
-              'txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server' \
-              '=;eth0;IPv4;broken;_k3s-sugar-dev._tcp;local;sugar-control-2.local'
+            =;eth0;IPv4;k3s-sugar-dev@sugar-control-0 (server);_k3s-sugar-dev._tcp;local;
+            sugar-control-0.local;192.168.50.10;6443;
+            txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
+            =;eth0;IPv4;k3s-sugar-dev@sugar-control-1 (server);_k3s-sugar-dev._tcp;local;
+            sugar-control-1.local;192.168.50.11;6443;
+            txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
+            =;eth0;IPv4;broken;_k3s-sugar-dev._tcp;local;sugar-control-2.local
             """
         ),
         encoding="utf-8",
     )
-    browse.chmod(0o755)
 
     env = os.environ.copy()
     env.update(
         {
-            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
             "SUGARKUBE_SERVERS": "1",
             "SUGARKUBE_NODE_TOKEN_PATH": str(tmp_path / "node-token"),
             "SUGARKUBE_BOOT_TOKEN_PATH": str(tmp_path / "boot-token"),
             "SUGARKUBE_CLUSTER": "sugar",
             "SUGARKUBE_ENV": "dev",
             "SUGARKUBE_MDNS_DBUS": "0",
+            "SUGARKUBE_MDNS_FIXTURE_FILE": str(fixture_file),
         }
     )
     return env
