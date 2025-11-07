@@ -2034,14 +2034,20 @@ run_avahi_query() {
 import os
 import sys
 
-# Python 3.14+ requires explicit sys.path manipulation even with PYTHONPATH set
-# for stdin scripts. Add scripts directory before any imports.
-if len(sys.argv) > 4:
+# Python 3.14+ appears to require explicit sys.path manipulation for stdin scripts,
+# even with PYTHONPATH set. Add scripts directory before any imports.
+if len(sys.argv) >= 5:
     scripts_dir = sys.argv[4]
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
 
-from k3s_mdns_query import query_mdns
+try:
+    from k3s_mdns_query import query_mdns
+except ImportError as e:
+    print(f"ERROR: Failed to import k3s_mdns_query: {e}", file=sys.stderr)
+    print(f"sys.path: {sys.path}", file=sys.stderr)
+    print(f"sys.argv: {sys.argv}", file=sys.stderr)
+    raise
 
 
 mode, cluster, environment = sys.argv[1:4]

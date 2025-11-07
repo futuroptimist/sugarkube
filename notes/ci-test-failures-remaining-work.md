@@ -17,7 +17,7 @@ This document tracks the remaining test failures that need to be addressed after
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
 - ❌ **0 Python tests failing** (was 3 before this fix)
 
-**Improvement from Previous**: +2 passing tests (summary.bats tests 40-41 now working)
+**Improvement from Previous**: +3 passing Python tests (test_server_first_returns_expected_host, test_server_count_detects_all_servers, test_print_server_hosts_lists_unique_hosts now working with Python 3.14)
 
 **Time Estimate Validation**: 
 - Test 8 was documented as "2-3 hours" but actual fix took ~1 hour including investigation, due to finding root cause in helper function rather than test-specific logic.
