@@ -73,8 +73,13 @@ def _invoke_avahi(
     }
     # Python 3.14+ requires explicit env to inherit PATH from test fixtures.
     # Only add env when using subprocess.run directly (not test mocks).
-    if runner is subprocess.run:
+    is_subprocess_run = runner is subprocess.run
+    import sys
+    print(f"DEBUG _invoke_avahi: runner is subprocess.run = {is_subprocess_run}", file=sys.stderr)
+    print(f"DEBUG _invoke_avahi: PATH = {os.environ.get('PATH', 'NOT SET')[:200]}", file=sys.stderr)
+    if is_subprocess_run:
         run_kwargs["env"] = os.environ.copy()
+        print(f"DEBUG _invoke_avahi: Added env to run_kwargs", file=sys.stderr)
     if timeout is not None:
         run_kwargs["timeout"] = timeout
     try:
@@ -91,6 +96,9 @@ def _invoke_avahi(
             stderr=stderr,
         )
     except FileNotFoundError:
+        import sys
+        print(f"DEBUG _invoke_avahi: FileNotFoundError for command: {command}", file=sys.stderr)
+        print(f"DEBUG _invoke_avahi: PATH in os.environ: {os.environ.get('PATH', 'NOT SET')[:300]}", file=sys.stderr)
         if debug is not None:
             debug("avahi-browse executable not found; continuing without mDNS results")
         return subprocess.CompletedProcess(
