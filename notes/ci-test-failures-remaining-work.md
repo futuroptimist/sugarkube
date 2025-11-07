@@ -313,21 +313,28 @@ Each should be its own focused PR:
 
 ## All Test Fixes Complete ✅
 
-All actionable CI test failures have been resolved through PRs #1-#5:
+All actionable CI test failures have been resolved through PRs #1-#7:
 1. ✅ Applied curl stub fix to all 12 server role tests
 2. ✅ Fixed all mdns_selfcheck test failures (18/18 passing)
 3. ✅ Fixed join_gate timeout issues (2/2 passing)
-4. ✅ Enabled l4_probe tests via ncat installation (2/2 passing)
+4. ✅ Enabled l4_probe tests via ncat verification (2/2 passing)
 5. ✅ Fixed discover_flow tests 1-5, 9 (6/9 passing)
+6. ✅ Fixed Python 3.14 compatibility (3/3 tests passing)
+7. ✅ Revived Test 34 absence gate (1/1 test passing)
 
-**Final Test Status (2025-11-06 - After Note Cleanup)**:
-- 39/41 BATS tests passing (95% pass rate) - up from 37/41
+**Final Test Status (2025-11-07 - After PR #7)**:
+- 38/41 BATS tests passing (92.7% pass rate) - up from 37/41
 - 0 test failures
-- 4 tests skipped (down from 6 - l4_probe tests now confirmed working)
-  - 1 skipped: Test 34 (mdns absence gate - timeout issues)  
-  - 3 skipped: Tests 6-8 (discover_flow k3s integration - counted as 3 individual tests)
+- 3 tests skipped (complex k3s integration tests 6-8)
 
-## Files Modified (Previous PRs #1-#5)
+**Improvement**: +1 BATS test passing (Test 34 absence gate now works!)
+
+## Files Modified (This PR - #7)
+- `tests/bats/mdns_selfcheck.bats` - ✅ Removed skip directive from Test 34, added timeout overrides, refactored stubs
+- `outages/2025-11-07-mdns-absence-gate-timeout-fix.json` - ✅ Documented absence gate fix
+- `outages/2025-11-07-l4-probe-ncat-already-available.json` - ✅ Documented l4_probe working status
+- `notes/ci-test-failures-remaining-work.md` - ✅ Updated with completion status
+- `notes/skipped-tests-status.md` - ✅ Updated with Test 34 completion
 - `.github/workflows/ci.yml` - ✅ Added ncat package installation
 - `tests/bats/l4_probe.bats` - ✅ Complete (2/2 passing) - uses conditional skip logic
 - `tests/bats/mdns_selfcheck.bats` - ✅ Complete (18/18 passing)
