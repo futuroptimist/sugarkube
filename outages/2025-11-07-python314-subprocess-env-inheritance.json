@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-07-python314-subprocess-env-inheritance",
+  "date": "2025-11-07",
+  "component": "scripts/k3s_mdns_query.py:59-111",
+  "rootCause": "Python 3.14 changed subprocess.run behavior regarding environment variable inheritance. When subprocess.run is called without an explicit env parameter, it no longer reliably inherits modified environment variables (particularly PATH) from test fixtures. The test fixture in test_mdns_discovery_parsing.py creates a mock avahi-browse binary in a temporary directory and modifies PATH to include it, but subprocess.run in Python 3.14 was not finding the mocked binary, causing query_mdns to return empty results instead of the expected test data.",
+  "resolution": "Modified _invoke_avahi() in k3s_mdns_query.py to explicitly pass env=os.environ.copy() to subprocess.run when using the real subprocess.run runner (not test mocks). This ensures PATH and other environment variables are explicitly passed to child processes. The fix only applies when runner is subprocess.run to avoid breaking test mocks that don't accept the env parameter. Tests now pass on both Python 3.12.3 locally and Python 3.14.0 in CI.",
+  "references": [
+    "scripts/k3s_mdns_query.py:59-111",
+    "tests/test_mdns_discovery_parsing.py:22-94",
+    "tests/scripts/test_k3s_mdns_query.py",
+    "https://docs.python.org/3/library/subprocess.html#subprocess.run"
+  ]
+}

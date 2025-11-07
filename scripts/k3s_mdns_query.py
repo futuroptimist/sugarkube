@@ -71,6 +71,10 @@ def _invoke_avahi(
         "text": True,
         "check": False,
     }
+    # Python 3.14+ requires explicit env to inherit PATH from test fixtures.
+    # Only add env when using subprocess.run directly (not test mocks).
+    if runner is subprocess.run:
+        run_kwargs["env"] = os.environ.copy()
     if timeout is not None:
         run_kwargs["timeout"] = timeout
     try:
