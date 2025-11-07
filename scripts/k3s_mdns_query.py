@@ -75,6 +75,7 @@ def _invoke_avahi(
     # Only add env when using subprocess.run directly (not test mocks).
     is_subprocess_run = runner is subprocess.run
     import sys
+    print(f"DEBUG _invoke_avahi: command = {command}", file=sys.stderr)
     print(f"DEBUG _invoke_avahi: runner is subprocess.run = {is_subprocess_run}", file=sys.stderr)
     print(f"DEBUG _invoke_avahi: PATH = {os.environ.get('PATH', 'NOT SET')[:200]}", file=sys.stderr)
     if is_subprocess_run:
@@ -84,6 +85,9 @@ def _invoke_avahi(
         run_kwargs["timeout"] = timeout
     try:
         result = runner(command, **run_kwargs)
+        print(f"DEBUG _invoke_avahi: result.returncode = {result.returncode}, stdout length = {len(result.stdout)}, stderr length = {len(result.stderr)}", file=sys.stderr)
+        if result.stderr:
+            print(f"DEBUG _invoke_avahi: stderr = {result.stderr[:500]}", file=sys.stderr)
     except subprocess.TimeoutExpired as exc:
         if debug is not None and timeout is not None:
             debug("avahi-browse timed out after " f"{timeout:g}s; continuing without mDNS results")
