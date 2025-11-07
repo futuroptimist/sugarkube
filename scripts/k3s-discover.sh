@@ -3626,6 +3626,11 @@ iptables_preflight
 
 ensure_mdns_absence_gate
 
+# Support test mode: exit after absence gate for testing absence detection without k3s installation
+if [ "${SUGARKUBE_EXIT_AFTER_ABSENCE_GATE:-0}" = "1" ]; then
+  exit 0
+fi
+
 log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
 server_host=""
 bootstrap_selected="false"

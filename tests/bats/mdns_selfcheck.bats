@@ -959,17 +959,18 @@ EOS
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
     SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
     SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10 \
-    SUGARKUBE_SERVERS=0 \
+    SUGARKUBE_SERVERS=1 \
     SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
     DISCOVERY_WAIT_SECS=0 \
     DISCOVERY_ATTEMPTS=1 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
+    SUGARKUBE_EXIT_AFTER_ABSENCE_GATE=1 \
     MDNS_ABSENCE_TIMEOUT_MS=2000 \
     MDNS_ABSENCE_BACKOFF_START_MS=100 \
     MDNS_ABSENCE_BACKOFF_CAP_MS=500 \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ mdns_absence_confirmed=1 ]]
   calls=$(wc -l <"${BATS_TEST_TMPDIR}/avahi-browse.log")
   [ "${calls}" -ge 2 ]
