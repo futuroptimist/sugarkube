@@ -2026,16 +2026,16 @@ run_avahi_query() {
   if [ -n "${TOKEN:-}" ]; then
     export SUGARKUBE_TOKEN="${TOKEN}"
   fi
-  export SCRIPT_DIR="${SCRIPT_DIR}"
+  # Set PYTHONPATH to ensure scripts directory is importable (Python 3.13+ compatibility)
+  # Python 3.13+ no longer adds current dir to sys.path for stdin scripts
+  export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
 import os
 import sys
 
-# Ensure scripts directory is in path for Python 3.14+ compatibility
-scripts_dir = os.environ.get("SCRIPT_DIR")
-if scripts_dir and scripts_dir not in sys.path:
-    sys.path.insert(0, scripts_dir)
-
+# Note: PYTHONPATH is used instead of sys.path.insert for Python 3.13+ compatibility
+# Python 3.13+ changed behavior: stdin scripts no longer include the current directory in sys.path
+# See: https://github.com/python/cpython/issues/111710
 from k3s_mdns_query import query_mdns
 
 
