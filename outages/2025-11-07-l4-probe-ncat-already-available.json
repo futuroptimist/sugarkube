@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-07-l4-probe-ncat-already-available",
+  "date": "2025-11-07",
+  "component": "tests/bats/l4_probe.bats",
+  "rootCause": "Tests 16-17 in l4_probe.bats were skipped locally due to missing ncat binary, but the CI workflow (.github/workflows/ci.yml:37) already installs ncat. Tests use conditional skip logic 'command -v ncat >/dev/null 2>&1 || skip' which automatically enables tests when ncat is available. This was a documentation issue rather than a test failure - the tests were already passing in CI.",
+  "resolution": "Verified that ncat is already installed in CI environment and tests pass without code changes. Updated documentation in notes/ to reflect that l4_probe tests are working in CI. No outage occurred - this was a local environment configuration issue only.",
+  "references": [
+    "tests/bats/l4_probe.bats:39-68",
+    ".github/workflows/ci.yml:24-40",
+    "notes/skipped-tests-status.md:97-129"
+  ]
+}
+

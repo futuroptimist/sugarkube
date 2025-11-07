@@ -854,10 +854,6 @@ EOS
 }
 
 @test "mdns absence gate confirms wipe leaves no advertisements" {
-  # TODO: Test times out - needs investigation of wipe/absence detection flow
-  # Likely needs additional stubs for cleanup/verification commands
-  skip "Times out - needs dedicated investigation"
-
   stub_command hostname <<'EOS'
 #!/usr/bin/env bash
 if [ "$1" = "-s" ]; then
@@ -915,18 +911,26 @@ EOS
 
   stub_command avahi-publish <<'EOS'
 #!/usr/bin/env bash
-sleep 60 &
-pid=$!
-echo "${pid}" >>"${BATS_TEST_TMPDIR}/publish.log"
-wait "$pid"
+# Use trap to make interruptible for absence gate testing
+# Infinite loop is safe: trap handler exits immediately on TERM/INT signals
+# sent by absence gate cleanup logic. Short sleep (0.1s) prevents CPU spin.
+echo "$$" >>"${BATS_TEST_TMPDIR}/publish.log"
+trap 'exit 0' TERM INT
+while true; do
+  sleep 0.1
+done
 EOS
 
   stub_command avahi-publish-address <<'EOS'
 #!/usr/bin/env bash
-sleep 60 &
-pid=$!
-echo "${pid}" >>"${BATS_TEST_TMPDIR}/publish.log"
-wait "$pid"
+# Use trap to make interruptible for absence gate testing
+# Infinite loop is safe: trap handler exits immediately on TERM/INT signals
+# sent by absence gate cleanup logic. Short sleep (0.1s) prevents CPU spin.
+echo "$$" >>"${BATS_TEST_TMPDIR}/publish.log"
+trap 'exit 0' TERM INT
+while true; do
+  sleep 0.1
+done
 EOS
 
   mkdir -p "${BATS_TEST_TMPDIR}/run" "${BATS_TEST_TMPDIR}/avahi/services"
@@ -955,14 +959,18 @@ EOS
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
     SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
     SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10 \
-    SUGARKUBE_SERVERS=0 \
+    SUGARKUBE_SERVERS=3 \
     SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
     DISCOVERY_WAIT_SECS=0 \
     DISCOVERY_ATTEMPTS=1 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
+    SUGARKUBE_EXIT_AFTER_ABSENCE_GATE=1 \
+    MDNS_ABSENCE_TIMEOUT_MS=2000 \
+    MDNS_ABSENCE_BACKOFF_START_MS=100 \
+    MDNS_ABSENCE_BACKOFF_CAP_MS=500 \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   [[ "$output" =~ mdns_absence_confirmed=1 ]]
   calls=$(wc -l <"${BATS_TEST_TMPDIR}/avahi-browse.log")
   [ "${calls}" -ge 2 ]
