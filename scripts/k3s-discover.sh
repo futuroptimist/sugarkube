@@ -2029,6 +2029,12 @@ run_avahi_query() {
   # Set PYTHONPATH to ensure scripts directory is importable (Python 3.13+ compatibility)
   # Python 3.13+ no longer adds current dir to sys.path for stdin scripts
   export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
+  
+  # DEBUG: Log bash environment before calling Python
+  echo "BASH_DEBUG: mode=${mode}, CLUSTER=${CLUSTER}, ENVIRONMENT=${ENVIRONMENT}, SCRIPT_DIR=${SCRIPT_DIR}" >&2
+  echo "BASH_DEBUG: PYTHONPATH=${PYTHONPATH}" >&2
+  echo "BASH_DEBUG: About to call python3 with args: - ${mode} ${CLUSTER} ${ENVIRONMENT} ${SCRIPT_DIR}" >&2
+  
   # Pass SCRIPT_DIR as argument to inline script for Python 3.14+ compatibility
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" "${SCRIPT_DIR}" <<'PY'
 import os
