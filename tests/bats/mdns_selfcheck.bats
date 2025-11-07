@@ -912,6 +912,8 @@ EOS
   stub_command avahi-publish <<'EOS'
 #!/usr/bin/env bash
 # Use trap to make interruptible for absence gate testing
+# Infinite loop is safe: trap handler exits immediately on TERM/INT signals
+# sent by absence gate cleanup logic. Short sleep (0.1s) prevents CPU spin.
 echo "$$" >>"${BATS_TEST_TMPDIR}/publish.log"
 trap 'exit 0' TERM INT
 while true; do
@@ -922,6 +924,8 @@ EOS
   stub_command avahi-publish-address <<'EOS'
 #!/usr/bin/env bash
 # Use trap to make interruptible for absence gate testing
+# Infinite loop is safe: trap handler exits immediately on TERM/INT signals
+# sent by absence gate cleanup logic. Short sleep (0.1s) prevents CPU spin.
 echo "$$" >>"${BATS_TEST_TMPDIR}/publish.log"
 trap 'exit 0' TERM INT
 while true; do
