@@ -2034,15 +2034,29 @@ run_avahi_query() {
 import os
 import sys
 
+# Debug output to help diagnose Python 3.14 issues
+print(f"DEBUG: Python version: {sys.version}", file=sys.stderr)
+print(f"DEBUG: sys.argv: {sys.argv}", file=sys.stderr)
+print(f"DEBUG: PYTHONPATH: {os.environ.get('PYTHONPATH', 'NOT SET')}", file=sys.stderr)
+
 # Python 3.14+ appears to require explicit sys.path manipulation for stdin scripts,
 # even with PYTHONPATH set. Add scripts directory before any imports.
 if len(sys.argv) >= 5:
     scripts_dir = sys.argv[4]
+    print(f"DEBUG: scripts_dir from argv[4]: {scripts_dir}", file=sys.stderr)
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
+        print(f"DEBUG: Inserted {scripts_dir} into sys.path", file=sys.stderr)
+    else:
+        print(f"DEBUG: {scripts_dir} already in sys.path", file=sys.stderr)
+else:
+    print(f"DEBUG: WARNING - len(sys.argv) = {len(sys.argv)}, not >= 5", file=sys.stderr)
+
+print(f"DEBUG: sys.path[:3]: {sys.path[:3]}", file=sys.stderr)
 
 try:
     from k3s_mdns_query import query_mdns
+    print("DEBUG: Successfully imported k3s_mdns_query", file=sys.stderr)
 except ImportError as e:
     print(f"ERROR: Failed to import k3s_mdns_query: {e}", file=sys.stderr)
     print(f"sys.path: {sys.path}", file=sys.stderr)
@@ -2052,8 +2066,12 @@ except ImportError as e:
 
 mode, cluster, environment = sys.argv[1:4]
 
+print(f"DEBUG: mode={mode}, cluster={cluster}, environment={environment}", file=sys.stderr)
+
 fixture_path = os.environ.get("SUGARKUBE_MDNS_FIXTURE_FILE")
 debug_enabled = bool(os.environ.get("SUGARKUBE_DEBUG"))
+
+print(f"DEBUG: fixture_path={fixture_path}, debug_enabled={debug_enabled}", file=sys.stderr)
 
 
 def debug(message: str) -> None:
@@ -2061,6 +2079,7 @@ def debug(message: str) -> None:
         print(f"[k3s-discover mdns] {message}", file=sys.stderr)
 
 
+print(f"DEBUG: About to call query_mdns", file=sys.stderr)
 results = query_mdns(
     mode,
     cluster,
@@ -2068,6 +2087,7 @@ results = query_mdns(
     fixture_path=fixture_path,
     debug=debug if debug_enabled else None,
 )
+print(f"DEBUG: query_mdns returned {len(results)} results: {results}", file=sys.stderr)
 
 for line in results:
     print(line)
