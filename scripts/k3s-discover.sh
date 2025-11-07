@@ -2029,13 +2029,18 @@ run_avahi_query() {
   # Set PYTHONPATH to ensure scripts directory is importable (Python 3.13+ compatibility)
   # Python 3.13+ no longer adds current dir to sys.path for stdin scripts
   export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
-  python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" <<'PY'
+  # Pass SCRIPT_DIR as argument to inline script for Python 3.14+ compatibility
+  python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" "${SCRIPT_DIR}" <<'PY'
 import os
 import sys
 
-# Note: PYTHONPATH is used instead of sys.path.insert for Python 3.13+ compatibility
-# Python 3.13+ changed behavior: stdin scripts no longer include the current directory in sys.path
-# See: https://github.com/python/cpython/issues/111710
+# Python 3.14+ requires explicit sys.path manipulation even with PYTHONPATH set
+# for stdin scripts. Add scripts directory before any imports.
+if len(sys.argv) > 4:
+    scripts_dir = sys.argv[4]
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+
 from k3s_mdns_query import query_mdns
 
 
