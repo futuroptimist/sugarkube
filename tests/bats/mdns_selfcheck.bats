@@ -854,10 +854,6 @@ EOS
 }
 
 @test "mdns absence gate confirms wipe leaves no advertisements" {
-  # TODO: Test times out - needs investigation of wipe/absence detection flow
-  # Likely needs additional stubs for cleanup/verification commands
-  skip "Times out - needs dedicated investigation"
-
   stub_command hostname <<'EOS'
 #!/usr/bin/env bash
 if [ "$1" = "-s" ]; then
@@ -915,18 +911,22 @@ EOS
 
   stub_command avahi-publish <<'EOS'
 #!/usr/bin/env bash
-sleep 60 &
-pid=$!
-echo "${pid}" >>"${BATS_TEST_TMPDIR}/publish.log"
-wait "$pid"
+# Use trap to make interruptible for absence gate testing
+echo "$$" >>"${BATS_TEST_TMPDIR}/publish.log"
+trap 'exit 0' TERM INT
+while true; do
+  sleep 0.1
+done
 EOS
 
   stub_command avahi-publish-address <<'EOS'
 #!/usr/bin/env bash
-sleep 60 &
-pid=$!
-echo "${pid}" >>"${BATS_TEST_TMPDIR}/publish.log"
-wait "$pid"
+# Use trap to make interruptible for absence gate testing
+echo "$$" >>"${BATS_TEST_TMPDIR}/publish.log"
+trap 'exit 0' TERM INT
+while true; do
+  sleep 0.1
+done
 EOS
 
   mkdir -p "${BATS_TEST_TMPDIR}/run" "${BATS_TEST_TMPDIR}/avahi/services"
@@ -960,6 +960,9 @@ EOS
     DISCOVERY_WAIT_SECS=0 \
     DISCOVERY_ATTEMPTS=1 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
+    MDNS_ABSENCE_TIMEOUT_MS=2000 \
+    MDNS_ABSENCE_BACKOFF_START_MS=100 \
+    MDNS_ABSENCE_BACKOFF_CAP_MS=500 \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -ne 0 ]
