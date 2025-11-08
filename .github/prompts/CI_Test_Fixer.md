@@ -66,6 +66,13 @@ than before.
    - Adding skip flags without understanding what should be tested
    - Trying to mock entire subsystems (k3s, systemd) in unit tests
    - Missing the forest for the trees (fixing timeouts without understanding scenarios)
+   
+   **Test Suite Quality Reference:**
+   - See #file:notes/test-suite-xy-analysis-20251108.md for comprehensive analysis of all 41 BATS tests
+   - This analysis validates that 39/41 tests (95%) have strong use case alignment
+   - Use this as a reference when questioning whether a test makes sense
+   - The only XY problem found was Tests 6-8 (k3s integration) - already fixed
+   - All other tests validate documented scenarios, prerequisites, or error handling
 
 2) **Prioritize tangible progress**: Select 1–2 items that can be implemented together with minimal risk. 
    **IMPORTANT**: Even if all checkboxes are complete, look for at least one small improvement that moves 
