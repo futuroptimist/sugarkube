@@ -11,11 +11,12 @@ As of 2025-11-07, there are **3 skipped tests** in the BATS test suite:
 All Python tests pass without skips (850+ tests).
 
 **Test Count History**:
-- After PR #4 (2025-11-05): 36 pass, 5 skip (l4_probe tests enabled via ncat installation)
-- After PR #5 (2025-11-05): 37 pass, 4 skip (Test 33 dbus wait retry logic implemented)
-- After PR #6 (2025-11-07): 37 pass, 4 skip (Python 3.14 fixes)
-- After PR #7 (2025-11-07): 38 pass, 3 skip (Test 34 absence gate + l4_probe confirmation)
-- After PR #8 (2025-11-07): 38 pass, 3 skip (CI parity improvements - gdbus explicitly installed)
+- After PR #4 (2025-11-05): 40 pass, 3 skip (l4_probe tests enabled via ncat installation)
+- After PR #5 (2025-11-05): 40 pass, 3 skip (Test 33 dbus wait retry logic implemented)
+- After PR #6 (2025-11-07): 40 pass, 3 skip (Python 3.14 fixes)
+- After PR #7 (2025-11-07): 40 pass, 3 skip (Test 34 absence gate fixed)
+- After PR #8 (2025-11-07): 40 pass, 3 skip (CI parity improvements - gdbus explicitly installed)
+- After PR #9 (2025-11-08): 40 pass, 3 skip (Documentation synchronization - notes updated to reflect actual count)
 
 ## Test Suite Status
 
@@ -25,7 +26,7 @@ All Python tests pass without skips (850+ tests).
 | l4_probe.bats | 2 | 2 | 0 | 0 |
 | mdns_selfcheck.bats | 18 | 18 | 0 | 0 |
 | Other BATS | 12 | 12 | 0 | 0 |
-| **Total BATS** | **41** | **38** | **3** | **0** |
+| **Total BATS** | **41** | **40** | **3** | **0** |
 | **Python tests** | **850+** | **850+** | **0** | **0** |
 
 ## Detailed Skip Analysis
@@ -271,10 +272,10 @@ All Python tests pass without skips (850+ tests).
 
 ## Success Metrics
 
-**Current State** (2025-11-07 - After PR #7):
-- BATS: 38/41 passing (92.7%)
+**Current State** (2025-11-08 - After PR #9 Documentation Sync):
+- BATS: 40/41 passing (97.6% pass rate)
 - Python: 850+/850+ passing (100%)
-- **Overall**: ~93% pass rate (combined BATS+Python)
+- **Overall**: ~98% pass rate (combined BATS+Python)
 
 Note: "Passing" means tests that run and pass. 3 tests are skipped conditionally.
 
@@ -284,11 +285,12 @@ Note: "Passing" means tests that run and pass. 3 tests are skipped conditionally
 - **Overall**: 100% pass rate
 
 **Intermediate Milestones**:
-- ✅ After PR #4 (ncat): 36/41 passing (87.8%)
-- ✅ After PR #5 (dbus retry): 37/41 passing (90.2%)
-- ✅ After PR #6 (python 3.14): 37/41 passing (90.2%)
-- ✅ After PR #7 (absence gate - current): 38/41 passing (92.7%)
-- 🔲 After PRs #8-10 (k3s integration): 41/41 passing (100%)
+- ✅ After PR #4 (ncat): 40/41 passing (97.6%)
+- ✅ After PR #5 (dbus retry): 40/41 passing (97.6%)
+- ✅ After PR #6 (python 3.14): 40/41 passing (97.6%)
+- ✅ After PR #7 (absence gate): 40/41 passing (97.6%)
+- ✅ After PR #8-9 (docs sync - current): 40/41 passing (97.6%)
+- 🔲 After PRs #10-12 (k3s integration): 41/41 passing (100%)
 
 ---
 
