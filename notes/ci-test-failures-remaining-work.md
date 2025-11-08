@@ -2,39 +2,32 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-08 Update - Documentation Synchronization)
+## Current Status (2025-11-07 Update - After CI Parity Improvements)
 
-**BATS Suite**: ✅ Completes without failures (40 pass, 0 fail, 3 skip)
+**BATS Suite**: ✅ Completes without failures (38 pass, 0 fail, 3 skip)
 
 **Python Suite**: ✅ All tests passing (850+ pass, 11 skip, 0 fail)
 
 **CI Parity**: ✅ All dependencies explicitly declared (ncat, libglib2.0-bin for gdbus)
 
-**Key Achievement**: All conditional test skips now pass! 40/41 tests passing (97.6% pass rate).
+**Key Achievement**: All conditional test skips now pass! 38/41 tests passing (92.7% pass rate).
 
 **Test Summary**:
-- ✅ **40/41 BATS tests passing** (97.6% pass rate)
+- ✅ **38/41 BATS tests passing** (92.7% pass rate)
 - ⏭️ **3 tests skipped** (Tests 6-8: discover_flow k3s integration - appropriately complex)
 - ❌ **0 BATS tests failing**
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
 - ❌ **0 Python tests failing**
 
-**Latest Improvements (2025-11-08 PR #9 - THIS PR)**:
-- **Documentation Fix**: Updated notes to reflect actual test count (40/41 passing, not 38/41)
-- **Verification**: Confirmed l4_probe tests 16-17 pass when ncat is available (already in CI since PR #4)
-- **CI Parity**: Verified all required dependencies (ncat, libglib2.0-bin) are present in CI workflow
-- **Outage**: `outages/2025-11-08-ci-test-count-documentation-sync.json`
-
-**Previous (2025-11-07 PR #8)**:
+**Latest Improvements (2025-11-07 PR #8 - THIS PR)**:
 - **CI Parity**: Added `libglib2.0-bin` to CI workflow for explicit gdbus availability
 - **Verification**: Confirmed tests 16-17 (l4_probe with ncat) and test 31 (mdns gdbus fallback) pass in both local and CI environments  
 - **Documentation**: Corrected notes to reflect that conditional skips are passing, not actually skipped
 - **Outage**: `outages/2025-11-07-ci-parity-gdbus-dependency.json`
 
-**Improvement from Previous (2025-11-07 PR #8)**: 
-- +0 new tests fixed (documentation synchronization only)
-- Verified that l4_probe tests 16-17 were already passing in CI since PR #4
-- Updated notes to reflect accurate count: 40/41 (not 38/41)
+**Improvement from Previous (2025-11-07 PR #7)**: 
+- +1 passing BATS test (Test 34: mdns absence gate - fixed timeout issues)
+- +0 tests (l4_probe tests 16-17 were already passing in CI, just skipped locally)
 
 **Time Estimate Validation**: 
 - CI parity improvement: ~15 minutes (adding dependency + validation)
@@ -339,12 +332,12 @@ All actionable CI test failures have been resolved through PRs #1-#7:
 6. ✅ Fixed Python 3.14 compatibility (3/3 tests passing)
 7. ✅ Revived Test 34 absence gate (1/1 test passing)
 
-**Final Test Status (2025-11-08 - After PR #9 Documentation Sync)**:
-- 40/41 BATS tests passing (97.6% pass rate) - documentation now accurate
+**Final Test Status (2025-11-07 - After PR #7)**:
+- 38/41 BATS tests passing (92.7% pass rate) - up from 37/41
 - 0 test failures
 - 3 tests skipped (complex k3s integration tests 6-8)
 
-**Note**: Test count was 40/41 since PR #4 but notes incorrectly showed 38/41. This PR fixes documentation only.
+**Improvement**: +1 BATS test passing (Test 34 absence gate now works!)
 
 ## Files Modified (This PR - #7)
 - `tests/bats/mdns_selfcheck.bats` - ✅ Removed skip directive from Test 34, added timeout overrides, refactored stubs
