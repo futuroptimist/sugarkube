@@ -125,12 +125,31 @@ This document tracks the remaining test failures that need to be addressed after
 
 All remaining skipped tests are documented in `notes/skipped-tests-status.md`:
 
-### ⏭️ discover_flow.bats (3 skipped - k3s integration) - UPDATED COUNT
-- Test 6: "discover flow joins existing server when discovery succeeds"
-- Test 7: "discover flow elects winner after self-check failure"  
-- Test 8: "discover flow remains follower after self-check failure"
-- **Status**: Complex k3s integration tests requiring dedicated PR
-- **Estimated effort**: 4-8 hours per test
+### ⏭️ discover_flow.bats (3 skipped - k3s integration) - UPDATED 2025-11-08
+
+#### Test 6: "discover flow joins existing server when discovery succeeds" - ⚙️ PARTIAL (90% complete)
+- **Status**: 90% infrastructure implemented, hangs after k3s install (~10-15 min remaining)
+- **Progress (2025-11-08)**:
+  - ✅ Added avahi-publish-service stub (trap-based for clean termination)
+  - ✅ Added gdbus/busctl stubs for D-Bus interactions
+  - ✅ Fixed avahi-browse --all flag handling for liveness check
+  - ✅ Fixed run_k3s_install function calls (env → subshell with eval)
+  - ⚠️ Test reaches k3s install phase but hangs after completion (>30s timeout)
+- **Root cause**: Likely post-install step blocking (API ready check, Avahi publish, or cleanup)
+- **Next steps**: Add LOG_LEVEL=debug, identify blocking call, add missing timeout/stub
+- **Outage**: `outages/2025-11-08-discover-flow-test6-partial-progress.json`
+
+#### Test 7: "discover flow elects winner after self-check failure" - ⏭️ SKIPPED (70% infrastructure complete)
+- **Status**: Stub infrastructure in place from Test 6 work, needs validation (~10-15 min)
+- **Infrastructure**: run_k3s_install wrapper, k3s_install_stub, election_stub
+- **See**: notes/skipped-tests-status.md
+
+#### Test 8: "discover flow remains follower after self-check failure" - ⏭️ SKIPPED (70% infrastructure complete)
+- **Status**: Stub infrastructure in place from Test 6 work, needs validation (~10-15 min)
+- **Infrastructure**: run_k3s_install wrapper, k3s_install_stub, election_stub
+- **See**: notes/skipped-tests-status.md
+
+- **Overall estimated effort**: ~30-45 min to complete all 3 tests (infrastructure mostly done)
 - **See**: `notes/skipped-tests-status.md` section 1
 
 ### ✅ l4_probe.bats (COMPLETED - 2025-11-07 PR #7)

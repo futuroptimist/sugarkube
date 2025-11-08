@@ -3220,7 +3220,11 @@ install_server_single() {
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
   local env_assignments
   build_install_env env_assignments
-  env "${env_assignments[@]}" \
+  (
+    for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
+      export "$_assignment"
+    done
     run_k3s_install server \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -3228,6 +3232,7 @@ install_server_single() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
   if wait_for_api; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_single"
@@ -3268,7 +3273,11 @@ install_server_cluster_init() {
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
   local env_assignments
   build_install_env env_assignments
-  env "${env_assignments[@]}" \
+  (
+    for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
+      export "$_assignment"
+    done
     run_k3s_install server \
       --cluster-init \
       --tls-san "${MDNS_HOST}" \
@@ -3277,6 +3286,7 @@ install_server_cluster_init() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
   if wait_for_api; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
@@ -3453,7 +3463,11 @@ install_server_join() {
   fi
   local env_assignments
   build_install_env env_assignments
-  env "${env_assignments[@]}" \
+  (
+    for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
+      export "$_assignment"
+    done
     run_k3s_install server \
       --server "https://${server}:6443" \
       --tls-san "${server}" \
@@ -3463,6 +3477,7 @@ install_server_join() {
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
   if wait_for_api; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_join"
@@ -3568,10 +3583,15 @@ install_agent() {
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server}:6443")
-  env "${env_assignments[@]}" \
+  (
+    for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
+      export "$_assignment"
+    done
     run_k3s_install agent \
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
+  )
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
     local elapsed_ms
     elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
