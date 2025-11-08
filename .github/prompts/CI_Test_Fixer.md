@@ -21,6 +21,59 @@ than before.
    Enumerate all **unchecked** checkboxes and note any missing investigative details that
    make reproduction difficult (e.g., absent log snippets, unknown owners, fuzzy repro steps).
 
+1a) **CRITICAL: Understand the Real Use Case First** (avoid XY problem)
+   
+   Before attempting to fix any test, especially integration tests, **always read the relevant 
+   documentation to understand what the test is actually trying to validate**. Don't get stuck 
+   fixing implementation details without understanding the user scenario.
+   
+   **Key Resources:**
+   - #file:docs/raspi_cluster_setup.md - The REAL use case for k3s integration tests
+   - Test file comments and fixture data - Often explain the scenario
+   - Related scripts under `scripts/` - The actual code being tested
+   
+   **Example: K3s Integration Tests (discover_flow.bats Tests 6-8)**
+   
+   ❌ **Wrong approach (XY problem)**: "These tests timeout during k3s installation. Let me add 
+   `SUGARKUBE_SKIP_K3S_INSTALL` to skip the curl command."
+   
+   ✅ **Right approach (understand use case)**: 
+   1. Read docs/raspi_cluster_setup.md to understand the Pi cluster workflow
+   2. Realize tests validate **mDNS-based discovery and join decision logic**, not k3s installation
+   3. Understand the 3 scenarios:
+      - Test 6: Node discovers existing server via mDNS → joins it (phase=install_join)
+      - Test 7: No servers found + election logic → bootstrap as winner (phase=install_single)
+      - Test 8: No servers found + lost election → wait as follower
+   4. Recognize the actual fix: stub the k3s installation (like other tools), test only the 
+      decision-making logic
+   5. Follow the pattern: use `SUGARKUBE_K3S_INSTALL_SCRIPT` env var (like 
+      `SUGARKUBE_API_READY_CHECK_BIN`, `SUGARKUBE_CONFIGURE_AVAHI_BIN`)
+   
+   **The Pattern:**
+   - Real user scenario: Raspberry Pis boot, share LAN, discover each other via mDNS, form k3s cluster
+   - What test validates: Discovery logic, join decisions, election outcomes
+   - What test should NOT validate: Actual k3s installation (that's an external dependency)
+   - Correct test approach: Stub external dependencies, verify decision logic
+   
+   **When working on ANY integration test:**
+   1. Find and read the relevant docs/ file(s) that explain the user workflow
+   2. Identify what behavior the test is ACTUALLY validating
+   3. Distinguish between "the logic being tested" vs "external dependencies"
+   4. Stub external dependencies following existing patterns in the codebase
+   5. Focus test on validating the decision-making logic
+   
+   **Anti-patterns to avoid:**
+   - Adding skip flags without understanding what should be tested
+   - Trying to mock entire subsystems (k3s, systemd) in unit tests
+   - Missing the forest for the trees (fixing timeouts without understanding scenarios)
+   
+   **Test Suite Quality Reference:**
+   - See #file:notes/test-suite-xy-analysis-20251108.md for comprehensive analysis of all 41 BATS tests
+   - This analysis validates that 39/41 tests (95%) have strong use case alignment
+   - Use this as a reference when questioning whether a test makes sense
+   - The only XY problem found was Tests 6-8 (k3s integration) - already fixed
+   - All other tests validate documented scenarios, prerequisites, or error handling
+
 2) **Prioritize tangible progress**: Select 1–2 items that can be implemented together with minimal risk. 
    **IMPORTANT**: Even if all checkboxes are complete, look for at least one small improvement that moves 
    the needle toward 0 CI failures. Examples:

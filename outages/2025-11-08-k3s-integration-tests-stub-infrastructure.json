@@ -1,0 +1,16 @@
+{
+  "id": "2025-11-08-k3s-integration-tests-stub-infrastructure",
+  "date": "2025-11-08",
+  "component": "tests/bats/discover_flow.bats:Tests 6-8",
+  "rootCause": "K3s integration tests (Tests 6-8 in discover_flow.bats) were skipped because they attempted to run actual k3s installation via `curl -sfL https://get.k3s.io | sh`, which would hang indefinitely in test environment. Tests needed to validate mDNS discovery and join decision logic without requiring actual k3s installation. Previous investigation (2025-11-08-k3s-integration-tests-investigation.json) confirmed complexity but didn't implement solution.",
+  "resolution": "Partial: Added comprehensive stubbing infrastructure following 'understand real use case first' principle. Created run_k3s_install() wrapper function in k3s-discover.sh with SUGARKUBE_K3S_INSTALL_SCRIPT override (following pattern of SUGARKUBE_API_READY_CHECK_BIN, etc). Updated all 4 k3s installation call sites to use wrapper. Created create_k3s_install_stub() and create_l4_probe_stub() test helpers. Removed skip directives from Tests 6-8. Added environment variable overrides (SUGARKUBE_TOKEN_DEV, SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS=500). Tests now run without hanging (improved from 20+ seconds to <5 seconds). Remaining: Debug Test 6 non-zero exit (est. 15-20 min), validate Tests 7-8 (est. 10-15 min), total remaining ~30 min.",
+  "references": [
+    "tests/bats/discover_flow.bats:434-525",
+    "scripts/k3s-discover.sh:226-247",
+    "scripts/k3s-discover.sh:3220-3231",
+    "docs/raspi_cluster_setup.md",
+    ".github/prompts/CI_Test_Fixer.md:1a",
+    "notes/k3s-integration-tests-investigation-20251108.md",
+    "outages/2025-11-08-k3s-integration-tests-investigation.json"
+  ]
+}
