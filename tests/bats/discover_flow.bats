@@ -640,8 +640,6 @@ EOS
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
-  echo "# DEBUG: Status was: $status" >&3
-  echo "# DEBUG: Output was: $output" >&3
   [ "$status" -eq 0 ]
   [[ "$output" =~ event=bootstrap_selfcheck_election ]] || false
   [[ "$output" =~ outcome=winner ]]

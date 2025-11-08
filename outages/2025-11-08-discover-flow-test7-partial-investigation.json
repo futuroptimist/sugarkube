@@ -2,8 +2,9 @@
   "id": "2025-11-08-discover-flow-test7-partial-investigation",
   "date": "2025-11-08",
   "component": "tests/bats/discover_flow.bats:595",
-  "rootCause": "Test 7 'discover flow elects winner after self-check failure' was skipped with 70% infrastructure complete. Investigation revealed: (1) Test validates bootstrap election resilience scenario where initial mDNS publish fails but node wins re-election, (2) Test completes quickly (within timeout) but produces no output, suggesting BATS output capture issue or missing test mode flag, (3) Script has multiple test modes (--test-bootstrap-server-flow, --test-claim-bootstrap) that may be needed, (4) Real use case documented: first Pi in cluster discovers no servers, runs election, wins, bootstraps k3s with --cluster-init per docs/raspi_cluster_setup.md",
-  "resolution": "Partial: Removed skip directive, added real use case documentation, fixed environment variables (SUGARKUBE_SKIP_MDNS_SELF_CHECK=1, SUGARKUBE_API_READY_TIMEOUT=2), added timeout wrapper to prevent hangs. Test now runs without indefinite hang (completes in <10s). Remaining: Debug why BATS run doesn't capture script output (stderr goes to >&2), verify stub paths/execution in BATS environment, possibly add test mode flag like --test-bootstrap-server-flow or --test-claim-bootstrap to isolate scenario being tested (est. 15-20 min).",
+  "rootCause": "Test was incomplete with only stub infrastructure in place, lacking proper environment configuration and output capture handling for BATS test execution.",
+  "resolution": "Partial: Removed skip directive, added real use case documentation, fixed environment variables (SUGARKUBE_SKIP_MDNS_SELF_CHECK=1, SUGARKUBE_API_READY_TIMEOUT=2), added timeout wrapper to prevent hangs. Test now runs without indefinite hang (completes in <10s). Remaining: Debug why BATS run doesn't capture script output (stderr goes to >&2), verify stub paths/execution in BATS environment, possibly add test mode flag like --test-bootstrap-server-flow (est. 15-20 min).",
+  "longForm": "outages/2025-11-08-discover-flow-test7-partial-investigation.md",
   "references": [
     "tests/bats/discover_flow.bats:595-654",
     "scripts/k3s-discover.sh:3640-3750",
