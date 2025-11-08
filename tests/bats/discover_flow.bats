@@ -593,11 +593,11 @@ EOS
 }
 
 @test "discover flow elects winner after self-check failure" {
-  # TODO: Stub infrastructure implemented but needs validation (~10-15 min remaining)
-  # Infrastructure: run_k3s_install() wrapper, k3s_install_stub, election_stub (commit a320bda)
-  # Status: Stubs in place, needs validation that bootstrap election works correctly
-  # See: notes/k3s-integration-tests-investigation-20251108.md, outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
-  skip "Stub infrastructure complete but needs validation (70% done, ~10-15 min remaining)"
+  # Test validates bootstrap election scenario: first node in cluster discovers no servers,
+  # runs election, wins, and bootstraps k3s as initial control-plane server.
+  # Real use case: User boots first Pi with SUGARKUBE_SERVERS=3, node elects itself as winner,
+  # starts k3s with --cluster-init (embedded etcd), publishes mDNS advertisement.
+  # See: docs/raspi_cluster_setup.md section "Happy Path: 3-server dev cluster"
 
   stub_common_network_tools
   create_curl_stub
@@ -616,7 +616,7 @@ EOS
 
   api_ready_stub="$(create_api_ready_stub)"
 
-  run env \
+  run timeout 10 env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
@@ -633,11 +633,15 @@ EOS
     SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
     SUGARKUBE_MDNS_BOOT_RETRIES=1 \
     SUGARKUBE_MDNS_BOOT_DELAY=0 \
+    SUGARKUBE_SKIP_MDNS_SELF_CHECK=1 \
     DISCOVERY_WAIT_SECS=0 \
     ELECTION_HOLDOFF=0 \
+    SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
+  echo "# DEBUG: Status was: $status" >&3
+  echo "# DEBUG: Output was: $output" >&3
   [ "$status" -eq 0 ]
   [[ "$output" =~ event=bootstrap_selfcheck_election ]] || false
   [[ "$output" =~ outcome=winner ]]
