@@ -3222,6 +3222,7 @@ install_server_single() {
   build_install_env env_assignments
   (
     for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
     run_k3s_install server \
@@ -3274,6 +3275,7 @@ install_server_cluster_init() {
   build_install_env env_assignments
   (
     for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
     run_k3s_install server \
@@ -3463,6 +3465,7 @@ install_server_join() {
   build_install_env env_assignments
   (
     for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
     run_k3s_install server \
@@ -3582,6 +3585,7 @@ install_agent() {
   env_assignments+=("K3S_URL=https://${server}:6443")
   (
     for _assignment in "${env_assignments[@]}"; do
+      # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
     run_k3s_install agent \
