@@ -61,10 +61,20 @@ All Python tests pass without skips (850+ tests).
   - Added environment variable overrides (tokens, timeouts)
 - **Result**: Tests now run without hanging (20+ seconds → <5 seconds) but Test 6 exits non-zero
 - **Progress**: 70% infrastructure complete, tests are testable now
+- **Third attempt (45 min - Test 7)**: Focused on Test 7 (bootstrap election scenario)
+  - ✅ Removed skip directive from Test 7
+  - ✅ Added real use case documentation from docs/raspi_cluster_setup.md
+  - ✅ Fixed environment variables (SUGARKUBE_SKIP_MDNS_SELF_CHECK=1, SUGARKUBE_API_READY_TIMEOUT=2)
+  - ✅ Added timeout wrapper (timeout 10) to prevent indefinite hangs
+  - ✅ Test completes in <10s without hanging
+  - ⚠️ Test exits status=0 but BATS run captures no output (stderr issue)
+  - **Status**: 85% complete, needs BATS output capture debugging (est. 15-20 min)
+  - **Outage**: outages/2025-11-08-discover-flow-test7-partial-investigation.json
 - **Documentation**: 
   - Full investigation: notes/k3s-integration-tests-investigation-20251108.md
   - Outages: outages/2025-11-08-k3s-integration-tests-investigation.json
   - Stub implementation: outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
+  - Test 7 partial: outages/2025-11-08-discover-flow-test7-partial-investigation.json
 - **Changes**: Committed to enable future work
 
 **Revised Estimated Effort** (based on actual progress):
