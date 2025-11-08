@@ -33,6 +33,7 @@ jobs:
             dbus \
             libcurl4-openssl-dev \
             libdw-dev \
+            libglib2.0-bin \
             libnss-mdns \
             ncat \
             zlib1g-dev \
