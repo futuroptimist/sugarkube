@@ -3221,7 +3221,9 @@ install_server_single() {
   local env_assignments
   build_install_env env_assignments
   (
-    eval "$(printf 'export %s\n' "${env_assignments[@]}")"
+    for _assignment in "${env_assignments[@]}"; do
+      export "$_assignment"
+    done
     run_k3s_install server \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -3271,7 +3273,9 @@ install_server_cluster_init() {
   local env_assignments
   build_install_env env_assignments
   (
-    eval "$(printf 'export %s\n' "${env_assignments[@]}")"
+    for _assignment in "${env_assignments[@]}"; do
+      export "$_assignment"
+    done
     run_k3s_install server \
       --cluster-init \
       --tls-san "${MDNS_HOST}" \
@@ -3458,7 +3462,9 @@ install_server_join() {
   local env_assignments
   build_install_env env_assignments
   (
-    eval "$(printf 'export %s\n' "${env_assignments[@]}")"
+    for _assignment in "${env_assignments[@]}"; do
+      export "$_assignment"
+    done
     run_k3s_install server \
       --server "https://${server}:6443" \
       --tls-san "${server}" \
@@ -3575,7 +3581,9 @@ install_agent() {
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server}:6443")
   (
-    eval "$(printf 'export %s\n' "${env_assignments[@]}")"
+    for _assignment in "${env_assignments[@]}"; do
+      export "$_assignment"
+    done
     run_k3s_install agent \
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
