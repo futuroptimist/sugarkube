@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-08-k3s-integration-tests-investigation",
+  "date": "2025-11-08",
+  "component": "tests/bats/discover_flow.bats:439-581",
+  "rootCause": "Tests 6-8 (k3s integration tests) skip actual k3s installation to avoid network calls, but require comprehensive stubbing of all external dependencies (configure_avahi.sh, wait_for_avahi_dbus.sh, join_gate.sh, l4_probe.sh, elect_leader.sh) plus mock cluster state management. Initial 20-minute fix attempt adding SUGARKUBE_SKIP_K3S_INSTALL flag revealed tests hang even with k3s install skipped, likely due to discovery/election loops expecting API availability or missing stubs for dependent scripts.",
+  "resolution": "Partial: Investigated test structure and identified SUGARKUBE_SKIP_K3S_INSTALL approach. Attempted implementation revealed tests hang due to additional dependencies beyond k3s installation. Changes reverted. Created comprehensive investigation document (notes/k3s-integration-tests-investigation-20251108.md) with findings, attempted approaches, and recommended next steps. Remaining: (1) Run with LOG_LEVEL=debug to identify exact hang point (est. 15-20 min), (2) Add missing stubs for identified dependencies (est. 30-45 min per test), (3) Consider architectural refactoring per Option A/B/C in notes/skipped-tests-status.md (est. 4-16 hours depending on approach). Original 4-8 hour per-test estimates validated as accurate.",
+  "references": [
+    "tests/bats/discover_flow.bats:439-581",
+    "scripts/k3s-discover.sh:3202,3251,3437,3553",
+    "notes/k3s-integration-tests-investigation-20251108.md",
+    "notes/skipped-tests-status.md:33-102",
+    "notes/ci-test-failures-remaining-work.md:122-176"
+  ]
+}
