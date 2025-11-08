@@ -233,7 +233,7 @@ run_k3s_install() {
   # Run k3s installation
   # Args: All arguments are passed to the k3s install script
   # When SUGARKUBE_K3S_INSTALL_SCRIPT is set, uses that script instead of downloading from get.k3s.io
-  
+
   if [ -n "${K3S_INSTALL_SCRIPT}" ] && [ -x "${K3S_INSTALL_SCRIPT}" ]; then
     # Test mode: use provided install script stub
     log_debug discover event=k3s_install mode=test script="${K3S_INSTALL_SCRIPT}"
