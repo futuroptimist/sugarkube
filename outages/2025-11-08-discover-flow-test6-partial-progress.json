@@ -1,0 +1,15 @@
+{
+  "id": "2025-11-08-discover-flow-test6-partial-progress",
+  "date": "2025-11-08",
+  "component": "tests/bats/discover_flow.bats:Test 6",
+  "rootCause": "Test 6 'discover flow joins existing server when discovery succeeds' was 70% complete with stub infrastructure but failing due to missing command stubs and incorrect function invocation pattern. The test validates k3s join workflow when discovering existing server via mDNS, requiring comprehensive stubbing of system dependencies (avahi-publish-service, gdbus, busctl) and proper shell function handling in environment-setting contexts.",
+  "resolution": "Partial: Implemented 90% of required infrastructure. Added avahi-publish-service stub with trap handler for clean termination. Added gdbus/busctl stubs for D-Bus interactions (matching pattern from Test 4 wait_for_avahi_dbus). Fixed avahi-browse stub to handle --all flag with additional options (--terminate, --timeout) for liveness checks. Fixed run_k3s_install invocation pattern - changed from `env ... run_k3s_install` (fails because env cannot execute shell functions) to subshell with eval exports: `( eval \"$(printf 'export %s\\n' \"${env_assignments[@]}\")\" ; run_k3s_install ... )`. Updated all 4 call sites (lines 3223-3230, 3273-3281, 3460-3469, 3577-3580). Test now reaches k3s install phase successfully but hangs after completion (>30s timeout). Remaining: Debug post-install hang (~10-15 min). Likely causes: (1) avahi-publish background process not terminating properly, (2) wait_for_api stub may be blocking, (3) cleanup operations waiting on resources. Next steps: Add LOG_LEVEL=debug to test run, use timeout with different value to capture exact hang point, check if test needs additional environment variable to skip post-install validation steps.",
+  "references": [
+    "tests/bats/discover_flow.bats:478-594",
+    "tests/bats/discover_flow.bats:124-140 (avahi-publish-service stub)",
+    "scripts/k3s-discover.sh:232-246 (run_k3s_install function)",
+    "scripts/k3s-discover.sh:3223-3230,3273-3281,3460-3469,3577-3580 (call sites)",
+    "scripts/join_gate.sh:73,287 (avahi-publish-service usage)",
+    "outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json"
+  ]
+}

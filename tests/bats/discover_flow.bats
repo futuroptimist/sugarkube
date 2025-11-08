@@ -100,9 +100,22 @@ else:
 PY
 }
 
-if [ "$#" -gt 0 ] && [ "$1" = "--all" ]; then
+# Check for --all flag (may have other flags like --terminate, --timeout, -prt, etc.)
+has_all_flag=0
+for arg in "$@"; do
+  if [ "$arg" = "--all" ]; then
+    has_all_flag=1
+    break
+  fi
+done
+
+if [ "$has_all_flag" -eq 1 ]; then
+  # For liveness check, return dummy service output even if service file doesn't exist
+  # join_gate just wants to see that Avahi is responding
   if [ ! -f "${service_file}" ]; then
-    exit 1
+    # Return minimal dummy output to confirm Avahi is alive
+    echo "=;eth0;IPv4;dummy;_dummy._tcp;local;dummy.local;192.0.2.1;1234;"
+    exit 0
   fi
   emit_from_service "all"
   exit 0
@@ -123,6 +136,20 @@ fi
 
 echo "unexpected avahi-browse invocation: $*" >&2
 exit 1
+EOS
+
+  stub_command avahi-publish-service <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+# Stub for avahi-publish-service used by join_gate
+# Background process that responds to TERM/INT signals
+if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
+  echo "avahi-publish-service called with: $*" >> "$BATS_TEST_TMPDIR/avahi-publish.log"
+fi
+trap 'exit 0' TERM INT
+while true; do
+  sleep 0.1
+done
 EOS
 }
 
@@ -476,17 +503,51 @@ CONF
 }
 
 @test "discover flow joins existing server when discovery succeeds" {
-  # TODO: Stub infrastructure implemented but test exits non-zero (~15-20 min debug remaining)
-  # Infrastructure: run_k3s_install() wrapper, k3s_install_stub, l4_probe_stub (commit a320bda)
-  # Issue: Script exits non-zero despite infrastructure in place - needs debugging
-  # See: notes/k3s-integration-tests-investigation-20251108.md, outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
-  skip "Stub infrastructure complete but needs debugging (70% done, ~15-20 min remaining)"
+  # TODO: 90% complete - test hangs after successful k3s install (~10-15 min debug remaining)
+  # Progress (2025-11-08):
+  # - ✅ Added avahi-publish-service stub (trap-based for clean termination)
+  # - ✅ Added gdbus/busctl stubs for D-Bus interactions
+  # - ✅ Fixed avahi-browse --all flag handling for liveness check
+  # - ✅ Fixed run_k3s_install function calls (env → subshell with eval)
+  # - ⚠️ Test reaches k3s install phase but hangs afterwards (timeout >30s)
+  # - Root cause: Likely waiting on post-install step (API ready, Avahi publish, or cleanup)
+  # - Next: Add LOG_LEVEL=debug, capture hung process state, identify blocking call
+  # See: notes/k3s-integration-tests-investigation-20251108.md
+  skip "90% complete - hangs after k3s install (~10-15 min to complete)"
 
   stub_common_network_tools
   create_curl_stub
   stub_command timeout <<'EOS'
 #!/usr/bin/env bash
 exit 0
+EOS
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "--system" ]; then
+  shift
+fi
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo 's "stub"'
+  exit 0
+fi
+if [ "$1" = "list" ]; then
+  echo "org.freedesktop.Avahi 100 200"
+  exit 0
+fi
+echo "unexpected busctl call: $*" >&2
+exit 1
 EOS
 
   api_ready_stub="$(create_api_ready_stub)"
