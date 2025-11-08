@@ -203,6 +203,50 @@ EOS
   echo "${target}"
 }
 
+create_k3s_install_stub() {
+  # Creates a stub for k3s installation that validates it was called with expected args
+  # but doesn't actually install k3s (which would hang in test environment)
+  local target="$BATS_TEST_TMPDIR/k3s-install-stub.sh"
+  cat <<'EOS' >"${target}"
+#!/usr/bin/env bash
+set -euo pipefail
+# Log the k3s install stub invocation
+if [ -n "$BATS_TEST_TMPDIR" ]; then
+  {
+    echo "k3s-install-stub called with args: $*"
+    echo "  mode: ${1:-<none>}"
+    echo "  server flag: ${2:-<none>}"
+  } >> "$BATS_TEST_TMPDIR/k3s-install.log"
+fi
+# Simulate successful k3s install without actually installing
+exit 0
+EOS
+  chmod +x "${target}"
+  echo "${target}"
+}
+
+create_l4_probe_stub() {
+  # Creates a stub for L4 probe that reports ports as open
+  local target="$BATS_TEST_TMPDIR/l4-probe-stub.sh"
+  cat <<'EOS' >"${target}"
+#!/usr/bin/env bash
+set -euo pipefail
+# Stub for l4_probe.sh that simulates successful port connectivity
+# Args: host port1,port2,port3
+host="${1:-localhost}"
+ports="${2:-6443,2379,2380}"
+
+# Return JSON indicating all ports are open
+IFS=',' read -ra port_array <<< "$ports"
+for port in "${port_array[@]}"; do
+  echo "{\"host\":\"${host}\",\"port\":${port},\"status\":\"open\",\"latency_ms\":1}"
+done
+exit 0
+EOS
+  chmod +x "${target}"
+  echo "${target}"
+}
+
 @test "wait_for_avahi_dbus reports ready when Avahi registers quickly" {
   stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
@@ -432,12 +476,6 @@ CONF
 }
 
 @test "discover flow joins existing server when discovery succeeds" {
-  # TODO: This test times out during k3s install flow. Needs dedicated investigation.
-  # See notes/ci-test-failures-remaining-work.md discover_flow.bats section.
-  # Scope: Requires stubbing k3s installation, additional network tools, or skip flags.
-  # Estimated effort: 2-4 hours. Target: Separate PR per notes recommendation.
-  skip "Complex integration test - needs dedicated PR (see notes/ci-test-failures-remaining-work.md)"
-
   stub_common_network_tools
   create_curl_stub
   stub_command timeout <<'EOS'
@@ -446,6 +484,8 @@ exit 0
 EOS
 
   api_ready_stub="$(create_api_ready_stub)"
+  k3s_install_stub="$(create_k3s_install_stub)"
+  l4_probe_stub="$(create_l4_probe_stub)"
 
   configure_stub="$(create_configure_stub)"
   token_path="${BATS_TEST_TMPDIR}/node-token"
@@ -454,6 +494,10 @@ EOS
   run env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
+    SUGARKUBE_K3S_INSTALL_SCRIPT="${k3s_install_stub}" \
+    SUGARKUBE_L4_PROBE_BIN="${l4_probe_stub}" \
+    SUGARKUBE_TOKEN_DEV="demo-token" \
+    SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS=500 \
     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
     AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
@@ -482,10 +526,6 @@ EOS
 }
 
 @test "discover flow elects winner after self-check failure" {
-  # TODO: This test times out during k3s discovery/election flow
-  # See notes/ci-test-failures-remaining-work.md discover_flow.bats section
-  skip "Complex integration test - needs dedicated PR (see notes/ci-test-failures-remaining-work.md)"
-
   stub_common_network_tools
   create_curl_stub
   stub_command timeout <<'EOS'
@@ -497,6 +537,7 @@ EOS
   mdns_stub="$(create_mdns_stub 94)"
   election_stub="$(create_election_stub yes)"
   net_diag_stub="$(create_net_diag_stub)"
+  k3s_install_stub="$(create_k3s_install_stub)"
   token_path="${BATS_TEST_TMPDIR}/node-token"
   printf %s\n "demo-token" > "$token_path"
 
@@ -508,6 +549,7 @@ EOS
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
     SUGARKUBE_NET_DIAG_BIN="${net_diag_stub}" \
+    SUGARKUBE_K3S_INSTALL_SCRIPT="${k3s_install_stub}" \
     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
     AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
@@ -539,10 +581,6 @@ EOS
 }
 
 @test "discover flow remains follower after self-check failure" {
-  # TODO: This test times out during k3s discovery flow
-  # See notes/ci-test-failures-remaining-work.md discover_flow.bats section
-  skip "Complex integration test - needs dedicated PR (see notes/ci-test-failures-remaining-work.md)"
-
   stub_common_network_tools
   create_curl_stub
 
@@ -550,6 +588,7 @@ EOS
   mdns_stub="$(create_mdns_stub 94)"
   election_stub="$(create_election_stub no)"
   net_diag_stub="$(create_net_diag_stub)"
+  k3s_install_stub="$(create_k3s_install_stub)"
   token_path="${BATS_TEST_TMPDIR}/node-token"
   printf %s\n "demo-token" > "$token_path"
 
@@ -561,6 +600,7 @@ EOS
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
     SUGARKUBE_NET_DIAG_BIN="${net_diag_stub}" \
+    SUGARKUBE_K3S_INSTALL_SCRIPT="${k3s_install_stub}" \
     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
     AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \

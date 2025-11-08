@@ -224,6 +224,27 @@ else
   SERVER_FLAG_PARITY_BIN="${SCRIPT_DIR}/check_server_flag_parity.sh"
 fi
 
+# K3s installation script wrapper - allows tests to stub the actual installation
+# Usage in tests: export SUGARKUBE_K3S_INSTALL_SCRIPT=/path/to/stub/script
+# The stub should accept the same arguments as `sh -s -` after curl
+K3S_INSTALL_SCRIPT="${SUGARKUBE_K3S_INSTALL_SCRIPT:-}"
+
+run_k3s_install() {
+  # Run k3s installation
+  # Args: All arguments are passed to the k3s install script
+  # When SUGARKUBE_K3S_INSTALL_SCRIPT is set, uses that script instead of downloading from get.k3s.io
+  
+  if [ -n "${K3S_INSTALL_SCRIPT}" ] && [ -x "${K3S_INSTALL_SCRIPT}" ]; then
+    # Test mode: use provided install script stub
+    log_debug discover event=k3s_install mode=test script="${K3S_INSTALL_SCRIPT}"
+    "${K3S_INSTALL_SCRIPT}" "$@"
+  else
+    # Production mode: download and run official install script
+    log_debug discover event=k3s_install mode=production source=get.k3s.io
+    curl -sfL https://get.k3s.io | sh -s - "$@"
+  fi
+}
+
 SUMMARY_API_AVAILABLE=0
 if command -v summary::init >/dev/null 2>&1 && summary_enabled; then
   summary::init
@@ -3199,9 +3220,8 @@ install_server_single() {
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
   local env_assignments
   build_install_env env_assignments
-  curl -sfL https://get.k3s.io \
-    | env "${env_assignments[@]}" \
-      sh -s - server \
+  env "${env_assignments[@]}" \
+    run_k3s_install server \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
       --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}" \
@@ -3248,9 +3268,8 @@ install_server_cluster_init() {
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
   local env_assignments
   build_install_env env_assignments
-  curl -sfL https://get.k3s.io \
-    | env "${env_assignments[@]}" \
-      sh -s - server \
+  env "${env_assignments[@]}" \
+    run_k3s_install server \
       --cluster-init \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -3434,9 +3453,8 @@ install_server_join() {
   fi
   local env_assignments
   build_install_env env_assignments
-  curl -sfL https://get.k3s.io \
-    | env "${env_assignments[@]}" \
-      sh -s - server \
+  env "${env_assignments[@]}" \
+    run_k3s_install server \
       --server "https://${server}:6443" \
       --tls-san "${server}" \
       --tls-san "${MDNS_HOST}" \
@@ -3550,9 +3568,8 @@ install_agent() {
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server}:6443")
-  curl -sfL https://get.k3s.io \
-    | env "${env_assignments[@]}" \
-      sh -s - agent \
+  env "${env_assignments[@]}" \
+    run_k3s_install agent \
       --node-label "sugarkube.cluster=${CLUSTER}" \
       --node-label "sugarkube.env=${ENVIRONMENT}"
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
