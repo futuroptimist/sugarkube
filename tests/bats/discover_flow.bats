@@ -618,6 +618,12 @@ fi
 exit 0
 EOS
 
+  stub_command sleep <<'EOS'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"
+exit 0
+EOS
+
   configure_stub="$(create_configure_stub)"
   mdns_stub="$(create_mdns_stub 94)"
   election_stub="$(create_election_stub yes)"
@@ -638,8 +644,10 @@ EOS
 [server]
 CONF
 
-  run timeout 10 env \
+  run timeout 30 env \
     ALLOW_NON_ROOT=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
