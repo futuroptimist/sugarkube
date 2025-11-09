@@ -33,12 +33,12 @@ if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
   echo "active"
   exit 0
 fi
-if [ "$1" = "reload" ] || [ "$1" = "restart" ]; then
-  # Stub reload/restart to succeed immediately
-  exit 0
-fi
-if [ "$1" = "start" ]; then
-  # Stub start to succeed immediately
+if [ "$1" = "reload" ] || [ "$1" = "restart" ] || [ "$1" = "start" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "systemctl: error: service name required for $1" >&2
+    exit 1
+  fi
+  # Stub reload/restart/start to succeed immediately
   exit 0
 fi
 exit 0
