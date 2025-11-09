@@ -1,3 +1,0 @@
-varReference:
-  - path: data/values.yaml
-    kind: ConfigMap
