@@ -33,6 +33,14 @@ if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
   echo "active"
   exit 0
 fi
+if [ "$1" = "reload" ] || [ "$1" = "restart" ]; then
+  # Stub reload/restart to succeed immediately
+  exit 0
+fi
+if [ "$1" = "start" ]; then
+  # Stub start to succeed immediately
+  exit 0
+fi
 exit 0
 EOS
 
