@@ -1,0 +1,16 @@
+{
+  "id": "test7-discover-flow-follower-missing-stubs",
+  "date": "2025-11-09",
+  "component": "tests/bats/discover_flow.bats::Test 7",
+  "rootCause": "Test 7 'discover flow remains follower after self-check failure' (line 788) was hanging indefinitely instead of timing out after 1 second. Root causes discovered through multiple iterations: (1) Missing timeout, journalctl, sleep, gdbus, busctl stubs from Test 6 pattern, (2) Missing directories (avahi/services, run, mdns) and avahi.conf file, (3) Missing environment variables (SUGARKUBE_CLUSTER, SUGARKUBE_ENV, SUGARKUBE_MDNS_ABSENCE_GATE=0, SUGARKUBE_API_READY_TIMEOUT=2), (4) CRITICAL: timeout stub was removing the timeout effect by just shifting and exec'ing the command directly. The stub 'shift; exec \"$@\"' removed the timeout argument and ran the script without any timeout, causing it to run indefinitely instead of timing out after 1 second. The test needs the ACTUAL timeout command to work, not a stub.",
+  "resolution": "Fixed through multiple iterations: (1) Added all missing stubs (journalctl, sleep, gdbus, busctl), (2) Created required directories and avahi.conf, (3) Added missing environment variables including SUGARKUBE_MDNS_ABSENCE_GATE=0 to prevent absence gate hang, (4) CRITICAL FIX: Removed timeout stub entirely and moved 'timeout 1' to after the env vars following Test 5/6 pattern. Changed from 'run timeout 1 env \\' to 'run env \\' with 'timeout 1' placed after env block. This allows the REAL timeout command to kill the script after 1 second when follower is waiting, producing exit status 124 as expected. Test now times out correctly, validating that when node loses bootstrap election (election_stub returns winner=no), it logs outcome=follower and waits indefinitely (until killed by timeout).",
+  "references": [
+    "tests/bats/discover_flow.bats:788-915 (Test 7: remains follower - final working version)",
+    "tests/bats/discover_flow.bats:646-787 (Test 6: pattern source showing timeout placement)",
+    "tests/bats/discover_flow.bats:513-645 (Test 5: pattern showing timeout after env)",
+    "outages/2025-11-09-discover-flow-test6-missing-stubs.json (Test 5 similar issue)",
+    "scripts/k3s-discover.sh:3754 (where outcome=follower is logged)",
+    "scripts/k3s-discover.sh:166 (SUGARKUBE_MDNS_ABSENCE_GATE variable check)",
+    "docs/raspi_cluster_setup.md (real-world Pi cluster use case)"
+  ]
+}

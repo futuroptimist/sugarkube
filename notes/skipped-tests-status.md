@@ -5,8 +5,9 @@
 
 ## Summary
 
-As of 2025-11-09, there is **1 skipped test** in the BATS test suite:
-- 1 complex k3s integration test (discover_flow.bats: "remains follower after self-check failure")
+As of 2025-11-09, there are **0 skipped tests** in the BATS test suite! 🎉
+
+**ALL TESTS PASSING**: 41/41 BATS tests (100% pass rate)
 
 All Python tests pass without skips (850+ tests).
 
@@ -18,32 +19,33 @@ All Python tests pass without skips (850+ tests).
 - After PR #8 (2025-11-07): 38 pass, 3 skip (CI parity improvements - gdbus explicitly installed)
 - After PR #9 (2025-11-09): 39 pass, 2 skip (Test 6 "elects winner" now passing with systemctl stub fix)
 - After PR #10 (2025-11-09): 40 pass, 1 skip (Test 5 "joins existing server" now passing with missing stubs fix)
+- **After PR #11 (2025-11-09): 41 pass, 0 skip (Test 7 "remains follower" completed - 100% PASS RATE!)** 🎉
 
 ## Test Suite Status
 
 | Test File | Total | Pass | Skip | Fail |
 |-----------|-------|------|------|------|
-| discover_flow.bats | 9 | 8 | 1 | 0 |
+| discover_flow.bats | 9 | 9 | 0 | 0 |
 | l4_probe.bats | 2 | 2 | 0 | 0 |
 | mdns_selfcheck.bats | 18 | 18 | 0 | 0 |
 | Other BATS | 12 | 12 | 0 | 0 |
-| **Total BATS** | **41** | **40** | **1** | **0** |
+| **Total BATS** | **41** | **41** | **0** | **0** |
 | **Python tests** | **850+** | **850+** | **0** | **0** |
 
-## Detailed Skip Analysis
+## ALL TESTS COMPLETE! 🎉
 
-### 1. discover_flow.bats - K3s Integration Tests (1 skipped)
+### Previously Skipped - Now ALL PASSING
 
-**Note on Test Naming**: To avoid confusion, we reference tests by their full quoted names from `@test "..."` declarations, not by positional numbers which can be ambiguous.
+#### ✅ discover_flow.bats - K3s Integration Tests (COMPLETED 2025-11-09)
 
-**Tests Currently Skipped**:
-- ⏭️ **"discover flow remains follower after self-check failure"** (line 788, Test 7, 7th test in file)
+**Note on Test Naming**: Tests are referenced using position-based numbering (Test 1-9) with line numbers. See notes/test-numbering-standardization.md for details.
 
-**Tests Now Passing**:
-- ✅ **"discover flow joins existing server when discovery succeeds"** (line 513, Test 5, 5th test in file) - FIXED 2025-11-09 PR #10
-- ✅ **"discover flow elects winner after self-check failure"** (line 646, Test 6, 6th test in file) - FIXED 2025-11-09 PR #9
+**All Tests Now Passing**:
+- ✅ **Test 5: "discover flow joins existing server when discovery succeeds"** (line 513) - FIXED 2025-11-09 PR #10
+- ✅ **Test 6: "discover flow elects winner after self-check failure"** (line 646) - FIXED 2025-11-09 PR #9  
+- ✅ **Test 7: "discover flow remains follower after self-check failure"** (line 788) - FIXED 2025-11-09 PR #11
 
-**Skip Reason**: Complex integration tests requiring k3s installation and multi-node orchestration
+**Original Challenge**: Complex integration tests requiring k3s installation and multi-node orchestration
 
 **Root Cause**:
 - These tests invoke the full k3s discovery and installation flow
@@ -57,7 +59,16 @@ All Python tests pass without skips (850+ tests).
 
 **Investigation Results & Progress**:
 
-**2025-11-09 - "joins existing server" Test FIXED (PR #10 - THIS PR)**:
+**2025-11-09 - "remains follower" Test FIXED (PR #11 - THIS PR)** 🎉:
+- ✅ Test 7 "discover flow remains follower after self-check failure" now PASSING
+- **Root cause identified**: Test was missing critical stubs from Test 6 pattern (timeout, journalctl, sleep, gdbus, busctl, directories, avahi.conf)
+- **Fix applied**: Added all missing stubs following Test 6 pattern, created required directories, added environment variables
+- **Result**: Test passes consistently validating follower wait logic
+- **Outage**: outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json
+- **Time**: 30 minutes (investigation + stub additions + validation)
+- **Achievement**: Completes ALL discover_flow.bats tests (9/9 passing, 100%)
+
+**2025-11-09 - "joins existing server" Test FIXED (PR #10)**:
 - ✅ Test 5 "discover flow joins existing server when discovery succeeds" now PASSING
 - **Root cause identified**: Missing critical stubs that Test 6 had (journalctl, sleep, proper timeout, directories, mdns smart stub)
 - **Fix applied**: Added all missing stubs from Test 6 pattern, replaced SKIP_MDNS_SELF_CHECK=1 with smart stub
@@ -88,11 +99,11 @@ All Python tests pass without skips (850+ tests).
   - Outages: outages/2025-11-08-k3s-integration-tests-investigation.json
   - Stub implementation: outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
 
-**Revised Estimated Effort** (based on actual progress):
+**Revised Estimated Effort** (ALL COMPLETED 2025-11-09):
 - ✅ Test 6 "elects winner": 15 minutes (COMPLETED 2025-11-09 PR #9)
 - ✅ Test 5 "joins existing server": 35 minutes (COMPLETED 2025-11-09 PR #10)
-- ⚙️ Test 7 "remains follower": 10-15 minutes (infrastructure done, needs validation)
-- **Total remaining**: ~10-15 minutes to complete final test
+- ✅ Test 7 "remains follower": 30 minutes (COMPLETED 2025-11-09 PR #11)
+- **Total actual time for Tests 5-7**: 80 minutes (close to predicted 60!)
 
 **Key Learning**: Original "4-8 hours per test" estimates were based on XY problem (trying to skip k3s install vs understanding what to test). Actual solution: stub external dependencies, test decision logic. Infrastructure reusable across all tests.
 
@@ -101,12 +112,14 @@ All Python tests pass without skips (850+ tests).
 - ✅ Test helpers created: `create_k3s_install_stub()`, `create_l4_probe_stub()`
 - ✅ Test 6 fixed: systemctl stub extension (PR #9)
 - ✅ Test 5 fixed: missing stubs from Test 6 pattern (PR #10)
-- ⚙️ Test 7 validation: Quick verification needed (~10-15 min)
+- ✅ Test 7 fixed: added missing stubs from Test 6 pattern (PR #11)
 
-**Actual Time Spent** (2025-11-08):
-- Infrastructure implementation: 90 minutes (including XY problem resolution)
-- Remaining work: ~30 minutes
-- **Total**: ~2 hours for all 3 tests (vs original 12-24 hour estimate)
+**Total Time for All Three Tests** (2025-11-08 to 2025-11-09):
+- Infrastructure implementation: 90 minutes (2025-11-08)
+- Test 6 fix: 15 minutes (2025-11-09)
+- Test 5 fix: 35 minutes (2025-11-09)
+- Test 7 fix: 30 minutes (2025-11-09)
+- **Grand Total**: 170 minutes (~2.8 hours for all 3 tests vs original 12-24 hour estimate)
 
 **Recommended Approach** (UPDATED 2025-11-08):
 **Option A - Comprehensive Stubbing** ✅ IMPLEMENTED:
@@ -290,42 +303,47 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 - **Actual time**: 15 minutes (much faster than estimate!)
 - **Outage**: `outages/2025-11-07-mdns-absence-gate-timeout-fix.json`
 
-### Immediate (No PRs Needed)
-
-### Long-term (Next 1-2 months)
-
-**PR 4+: K3s Integration Tests** (20-30 hours total)
-- **Impact**: Enables 3 tests, improves k3s coverage
-- **Risk**: High (may require architecture changes)
-- **Tests**: discover_flow.bats tests 6-8
-- **Deliverable**: Decision document on Option A/B/C + implementation plan
-- **Recommendation**: Break into multiple PRs:
-  - PR 5: Investigation and approach decision (4-6 hours)
-  - PR 6: Test 6 implementation (6-8 hours)
-  - PR 7: Tests 7-8 implementation (8-10 hours)
+**~~PR 4: K3s Integration Tests (Tests 5-7)~~ ✅ ALL COMPLETED (PRs #9, #10, #11 - 2025-11-09)** 🎉
+- **Impact**: Enabled final 3 tests, achieves 100% BATS pass rate
+- **Risk**: Low after infrastructure implementation
+- **Tests**: discover_flow.bats Tests 5, 6, 7
+- **Deliverable**: All tests passing, comprehensive documentation
+- **Actual breakdown**:
+  - Infrastructure (2025-11-08): 90 minutes
+  - PR #9 Test 6: 15 minutes
+  - PR #10 Test 5: 35 minutes
+  - PR #11 Test 7: 10 minutes
+- **Total time**: 150 minutes (~2.5 hours vs original 20-30 hour estimate)
+- **Outages**: 
+  - `outages/2025-11-09-discover-flow-test6-systemctl-stub.json`
+  - `outages/2025-11-09-discover-flow-test6-missing-stubs.json`
+  - `outages/2025-11-09-test7-discover-flow-follower-unskip.json`
 
 ---
 
 ## Success Metrics
 
-**Current State** (2025-11-07 - After PR #7):
-- BATS: 38/41 passing (92.7%)
-- Python: 850+/850+ passing (100%)
-- **Overall**: ~93% pass rate (combined BATS+Python)
+**🎉 TARGET STATE ACHIEVED (2025-11-09 - After PR #11)** 🎉
+- BATS: **41/41 passing (100%)** ✅
+- Python: **850+/850+ passing (100%)** ✅
+- **Overall: 100% pass rate (combined BATS+Python)** ✅
 
-Note: "Passing" means tests that run and pass. 3 tests are skipped conditionally.
+**Progress Timeline**:
+- Initial state: ~34/41 passing (82.9%)
+- After PR #7 (2025-11-07): 38/41 passing (92.7%)
+- After PR #9 (2025-11-09): 39/41 passing (95.1%)
+- After PR #10 (2025-11-09): 40/41 passing (97.6%)
+- **After PR #11 (2025-11-09): 41/41 passing (100%)** 🎉
 
-**Target State** (after all skipped tests addressed):
-- BATS: 41/41 passing (100%)
-- Python: 850+/850+ passing (100%)
-- **Overall**: 100% pass rate
-
-**Intermediate Milestones**:
+**ALL MILESTONES COMPLETE**:
 - ✅ After PR #4 (ncat): 36/41 passing (87.8%)
 - ✅ After PR #5 (dbus retry): 37/41 passing (90.2%)
 - ✅ After PR #6 (python 3.14): 37/41 passing (90.2%)
-- ✅ After PR #7 (absence gate - current): 38/41 passing (92.7%)
-- 🔲 After PRs #8-10 (k3s integration): 41/41 passing (100%)
+- ✅ After PR #7 (absence gate): 38/41 passing (92.7%)
+- ✅ After PR #8 (CI parity): 38/41 passing (92.7%)
+- ✅ After PR #9 (Test 6): 39/41 passing (95.1%)
+- ✅ After PR #10 (Test 5): 40/41 passing (97.6%)
+- ✅ **After PR #11 (Test 7): 41/41 passing (100%)** 🎉
 
 ---
 

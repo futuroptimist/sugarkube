@@ -1,0 +1,14 @@
+{
+  "id": "test-numbering-standardization",
+  "date": "2025-11-09",
+  "component": "notes/ci-test-failures-remaining-work.md, notes/skipped-tests-status.md",
+  "rootCause": "An off-by-one test numbering discrepancy existed across documentation and outage files for discover_flow.bats tests. Two different numbering systems were used inconsistently: (1) Old system from 2025-11-05 notes numbered k3s integration tests as Test 6/7/8 ('joins existing server', 'discover flow elects winner after self-check failure', 'remains follower'), (2) New system from 2025-11-09 outages numbered by file position as Test 5/6/7 for the same tests. This caused confusion where outage file '2025-11-09-test7-discover-flow-election-fix.json' actually documents Test 6 ('discover flow elects winner after self-check failure' at line 646), not Test 7. Line numbers in notes were also incorrect (e.g., line 505 instead of 513, line 595 instead of 646, line 737 instead of 788).",
+  "resolution": "Standardized ALL documentation to use position-based numbering (Test 1-9) matching the sequential @test declarations in discover_flow.bats. Created notes/test-numbering-standardization.md documenting the authoritative mapping with exact line numbers and test names. Fixed incorrect line numbers throughout notes/ci-test-failures-remaining-work.md (513 not 505, 646 not 595, 788 not 737). Updated test counts and status descriptions to reflect current state (8/9 passing before Test 7 fix, 9/9 after). Established standard reference format: 'Test N \"full quoted name\" (line XXX)' to prevent future confusion. Left outage filename '2025-11-09-test7-discover-flow-election-fix.json' as-is to preserve git history, but documented that it incorrectly names Test 6.",
+  "references": [
+    "notes/test-numbering-standardization.md (authoritative mapping created)",
+    "notes/ci-test-failures-remaining-work.md (line numbers and test numbers corrected)",
+    "notes/skipped-tests-status.md (already correct, validated)",
+    "tests/bats/discover_flow.bats:285-863 (9 @test declarations)",
+    "outages/2025-11-09-test7-discover-flow-election-fix.json (filename error documented)"
+  ]
+}
