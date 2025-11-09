@@ -54,6 +54,23 @@ jobs:
           cmake --build build
           sudo cmake --install build
 
+      - name: Debug Test 7 output capture
+        env:
+          BATS_LIB_PATH: ${{ github.workspace }}/tests/bats
+          BATS_CWD: ${{ github.workspace }}
+          LOG_LEVEL: debug
+        run: |
+          echo "=== Running Test 7 with debugging ===" >&2
+          set +e
+          output=$(bats -f "discover flow elects winner after self-check failure" tests/bats/discover_flow.bats 2>&1)
+          status=$?
+          set -e
+          echo "Exit status: $status" >&2
+          echo "Output length: ${#output}" >&2
+          echo "Output (first 2000 chars):" >&2
+          echo "${output:0:2000}" >&2
+          echo "=== End Test 7 debug ===" >&2
+
       - name: Run Bash tests under kcov
         env:
           KCOV_OUT: ${{ github.workspace }}/coverage/kcov
