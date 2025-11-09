@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-09-discover-flow-test6-missing-stubs",
+  "date": "2025-11-09",
+  "component": "tests/bats/discover_flow.bats:513",
+  "rootCause": "Test 'discover flow joins existing server when discovery succeeds' was missing critical stubs that Test 7 had: journalctl stub, sleep stub, proper timeout stub (that runs command vs just exiting 0), directory setup (avahi/services, run, mdns), and mdns_selfcheck smart stub for post-install verification. The test hung or failed because: (1) timeout stub exited immediately without running k3s-discover.sh, (2) missing journalctl stub caused Avahi service verification to fail, (3) missing directories caused file operation errors, (4) SKIP_MDNS_SELF_CHECK=1 only skipped initial check but not post-install mDNS advertisement confirmation, causing exit code 4 (service_type_missing).",
+  "resolution": "Added missing stubs from Test 7 pattern: journalctl stub returning 'Service successfully established', sleep stub logging to file, timeout stub that actually executes command (shift then exec), directory creation (mkdir -p for avahi/services, run, mdns), avahi.conf file creation, and mdns_selfcheck smart stub that always succeeds. Replaced SKIP_MDNS_SELF_CHECK=1 with SUGARKUBE_MDNS_SELF_CHECK_BIN pointing to smart stub. Added SUGARKUBE_CLUSTER=sugar and SUGARKUBE_ENV=dev environment variables. Test now passes in <5 seconds validating mDNS discovery and join decision logic.",
+  "references": [
+    "tests/bats/discover_flow.bats:513-629",
+    "tests/bats/discover_flow.bats:631-743 (Test 7 pattern)",
+    "notes/k3s-integration-tests-investigation-20251108.md",
+    "notes/skipped-tests-status.md"
+  ]
+}
