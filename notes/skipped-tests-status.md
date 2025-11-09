@@ -5,8 +5,8 @@
 
 ## Summary
 
-As of 2025-11-09, there are **2 skipped tests** in the BATS test suite:
-- 2 complex k3s integration tests (discover_flow.bats: "joins existing server", "remains follower")
+As of 2025-11-09, there is **1 skipped test** in the BATS test suite:
+- 1 complex k3s integration test (discover_flow.bats: "remains follower after self-check failure")
 
 All Python tests pass without skips (850+ tests).
 
@@ -16,31 +16,32 @@ All Python tests pass without skips (850+ tests).
 - After PR #6 (2025-11-07): 37 pass, 4 skip (Python 3.14 fixes)
 - After PR #7 (2025-11-07): 38 pass, 3 skip (Test 34 absence gate + l4_probe confirmation)
 - After PR #8 (2025-11-07): 38 pass, 3 skip (CI parity improvements - gdbus explicitly installed)
-- After PR #9 (2025-11-09): 39 pass, 2 skip (Test "elects winner" now passing with systemctl stub fix)
+- After PR #9 (2025-11-09): 39 pass, 2 skip (Test 6 "elects winner" now passing with systemctl stub fix)
+- After PR #10 (2025-11-09): 40 pass, 1 skip (Test 5 "joins existing server" now passing with missing stubs fix)
 
 ## Test Suite Status
 
 | Test File | Total | Pass | Skip | Fail |
 |-----------|-------|------|------|------|
-| discover_flow.bats | 9 | 7 | 2 | 0 |
+| discover_flow.bats | 9 | 8 | 1 | 0 |
 | l4_probe.bats | 2 | 2 | 0 | 0 |
 | mdns_selfcheck.bats | 18 | 18 | 0 | 0 |
 | Other BATS | 12 | 12 | 0 | 0 |
-| **Total BATS** | **41** | **39** | **2** | **0** |
+| **Total BATS** | **41** | **40** | **1** | **0** |
 | **Python tests** | **850+** | **850+** | **0** | **0** |
 
 ## Detailed Skip Analysis
 
-### 1. discover_flow.bats - K3s Integration Tests (2 skipped)
+### 1. discover_flow.bats - K3s Integration Tests (1 skipped)
 
 **Note on Test Naming**: To avoid confusion, we reference tests by their full quoted names from `@test "..."` declarations, not by positional numbers which can be ambiguous.
 
 **Tests Currently Skipped**:
-- ⏭️ **"discover flow joins existing server when discovery succeeds"** (line 505, 5th test in file)
-- ⏭️ **"discover flow remains follower after self-check failure"** (line 737, 7th test in file)
+- ⏭️ **"discover flow remains follower after self-check failure"** (line 788, Test 7, 7th test in file)
 
 **Tests Now Passing**:
-- ✅ **"discover flow elects winner after self-check failure"** (line 595, 6th test in file) - FIXED 2025-11-09 PR #9
+- ✅ **"discover flow joins existing server when discovery succeeds"** (line 513, Test 5, 5th test in file) - FIXED 2025-11-09 PR #10
+- ✅ **"discover flow elects winner after self-check failure"** (line 646, Test 6, 6th test in file) - FIXED 2025-11-09 PR #9
 
 **Skip Reason**: Complex integration tests requiring k3s installation and multi-node orchestration
 
@@ -56,8 +57,16 @@ All Python tests pass without skips (850+ tests).
 
 **Investigation Results & Progress**:
 
+**2025-11-09 - "joins existing server" Test FIXED (PR #10 - THIS PR)**:
+- ✅ Test 5 "discover flow joins existing server when discovery succeeds" now PASSING
+- **Root cause identified**: Missing critical stubs that Test 6 had (journalctl, sleep, proper timeout, directories, mdns smart stub)
+- **Fix applied**: Added all missing stubs from Test 6 pattern, replaced SKIP_MDNS_SELF_CHECK=1 with smart stub
+- **Result**: Test passes consistently in <5 seconds
+- **Outage**: outages/2025-11-09-discover-flow-test6-missing-stubs.json
+- **Time**: 35 minutes (investigation + fix + validation + documentation)
+
 **2025-11-09 - "elects winner" Test FIXED (PR #9)**:
-- ✅ Test "discover flow elects winner after self-check failure" now PASSING
+- ✅ Test 6 "discover flow elects winner after self-check failure" now PASSING
 - **Root cause identified**: systemctl stub missing 'reload' and 'restart' command handling
 - **Fix applied**: Extended stub_common_network_tools() to handle all systemctl operations
 - **Result**: Test passes consistently in <5 seconds
@@ -80,25 +89,19 @@ All Python tests pass without skips (850+ tests).
   - Stub implementation: outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
 
 **Revised Estimated Effort** (based on actual progress):
-- ✅ "elects winner" test: 15 minutes (COMPLETED 2025-11-09)
-- ⚙️ "joins existing server" test: 15-20 minutes (infrastructure done, needs debugging)
-- ⚙️ "remains follower" test: 10-15 minutes (infrastructure done, needs validation)
-- **Total remaining**: ~25-35 minutes to complete remaining 2 tests
+- ✅ Test 6 "elects winner": 15 minutes (COMPLETED 2025-11-09 PR #9)
+- ✅ Test 5 "joins existing server": 35 minutes (COMPLETED 2025-11-09 PR #10)
+- ⚙️ Test 7 "remains follower": 10-15 minutes (infrastructure done, needs validation)
+- **Total remaining**: ~10-15 minutes to complete final test
 
 **Key Learning**: Original "4-8 hours per test" estimates were based on XY problem (trying to skip k3s install vs understanding what to test). Actual solution: stub external dependencies, test decision logic. Infrastructure reusable across all tests.
 
-**Previous Investigation Results (2025-11-07 PR #8)**:
-- Different approach attempted (details not fully documented)
-- Test 6 initially passed
-- Tests 7-8 entered infinite loops in bootstrap election and follower state machines
-- Changes broke existing Test 5 (bootstrap publish flow)
-- Conclusion: Careful refactoring of control flow logic required
-
-**Complexity**: MEDIUM (revised down from HIGH after infrastructure implementation)
+**Complexity**: LOW (revised down from HIGH after infrastructure implementation)
 - ✅ k3s installation stubbing: DONE via `run_k3s_install()` wrapper
 - ✅ Test helpers created: `create_k3s_install_stub()`, `create_l4_probe_stub()`
-- ⚙️ Additional debugging needed: Test 6 exit code issue (~15-20 min)
-- ⚙️ Tests 7-8 validation: Quick verification needed (~10-15 min)
+- ✅ Test 6 fixed: systemctl stub extension (PR #9)
+- ✅ Test 5 fixed: missing stubs from Test 6 pattern (PR #10)
+- ⚙️ Test 7 validation: Quick verification needed (~10-15 min)
 
 **Actual Time Spent** (2025-11-08):
 - Infrastructure implementation: 90 minutes (including XY problem resolution)

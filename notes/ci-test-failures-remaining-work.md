@@ -2,25 +2,33 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-09 Update - After Test 7 Fix)
+## Current Status (2025-11-09 Update - After Test 5 Fix)
 
-**BATS Suite**: ✅ Completes without failures (39 pass, 0 fail, 2 skip)
+**BATS Suite**: ✅ Completes without failures (40 pass, 0 fail, 1 skip)
 
 **Python Suite**: ✅ All tests passing (850+ pass, 11 skip, 0 fail)
 
 **CI Parity**: ✅ All dependencies explicitly declared (ncat, libglib2.0-bin for gdbus)
 
-**Key Achievement**: All conditional test skips now pass! 39/41 tests passing (95.1% pass rate).
+**Key Achievement**: 40/41 BATS tests passing (97.6% pass rate) - only 1 test remaining!
 
 **Test Summary**:
-- ✅ **39/41 BATS tests passing** (95.1% pass rate) - up from 38/41
-- ⏭️ **2 tests skipped** (Tests 6, 8: discover_flow k3s integration - need dedicated PR)
+- ✅ **40/41 BATS tests passing** (97.6% pass rate) - up from 39/41
+- ⏭️ **1 test skipped** (Test 7 "remains follower" in discover_flow - ~10-15 min remaining)
 - ❌ **0 BATS tests failing**
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
 - ❌ **0 Python tests failing**
 
-**Latest Fix (2025-11-09 PR #9 - THIS PR)**:
-- **Test Fixed**: Test 7 "discover flow elects winner after self-check failure"
+**Latest Fix (2025-11-09 PR #10 - THIS PR)**:
+- **Test Fixed**: Test 5 "discover flow joins existing server when discovery succeeds"
+- **Root Cause**: Missing critical stubs that Test 6 had - journalctl, sleep, proper timeout (exec vs exit 0), directory setup, mdns smart stub for post-install check
+- **Fix**: Added all missing stubs following Test 6 pattern, replaced SKIP_MDNS_SELF_CHECK=1 with smart stub
+- **Result**: Test now passes consistently in <5 seconds
+- **Outage**: `outages/2025-11-09-discover-flow-test6-missing-stubs.json`
+- **Time**: 35 minutes (investigation + fix + validation + documentation)
+
+**Previous Fix (2025-11-09 PR #9)**:
+- **Test Fixed**: Test 6 "discover flow elects winner after self-check failure"
 - **Root Cause**: systemctl stub only handled 'is-active', missing 'reload'/'restart' commands
 - **Fix**: Extended stub_common_network_tools() systemctl stub to handle all systemd operations
 - **Result**: Test now passes consistently in <5 seconds
