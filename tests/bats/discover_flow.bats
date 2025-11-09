@@ -603,7 +603,10 @@ EOS
   create_curl_stub
   stub_command timeout <<'EOS'
 #!/usr/bin/env bash
-exit 0
+# Stub timeout to actually run the command with a timeout
+# First arg is the timeout value, rest are the command and args
+shift
+exec "$@"
 EOS
 
   stub_command journalctl <<'EOS'
@@ -653,7 +656,21 @@ exit 1
 EOS
 
   configure_stub="$(create_configure_stub)"
-  mdns_stub="$(create_mdns_stub 94)"
+  # Create mdns stub that fails on first call (bootstrap), succeeds on subsequent calls (server)
+  mdns_stub="${BATS_TEST_TMPDIR}/mdns-selfcheck-smart.sh"
+  cat <<'EOS' > "${mdns_stub}"
+#!/usr/bin/env bash
+# Smart stub: fail on bootstrap role, succeed on server role
+if [ "${SUGARKUBE_EXPECTED_ROLE:-}" = "bootstrap" ]; then
+  # Fail bootstrap self-check to trigger election
+  exit 94
+fi
+# Succeed for server role (after election and k3s install)
+echo "host=${SUGARKUBE_EXPECTED_HOST:-stub.local} attempts=1 ms_elapsed=5"
+exit 0
+EOS
+  chmod +x "${mdns_stub}"
+
   election_stub="$(create_election_stub yes)"
   net_diag_stub="$(create_net_diag_stub)"
   k3s_install_stub="$(create_k3s_install_stub)"
@@ -696,17 +713,7 @@ CONF
     ELECTION_HOLDOFF=0 \
     SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
-    LOG_LEVEL=debug \
     timeout 30 "${BATS_CWD}/scripts/k3s-discover.sh"
-
-  echo "Test 7 Debug:" >&2
-  echo "  Status: $status" >&2
-  echo "  Output length: ${#output}" >&2
-  if [ "${#output}" -gt 0 ]; then
-    echo "  First 1000 chars: ${output:0:1000}" >&2
-  else
-    echo "  NO OUTPUT CAPTURED!" >&2
-  fi
 
   [ "$status" -eq 0 ]
   [[ "$output" =~ event=bootstrap_selfcheck_election ]] || false
@@ -716,10 +723,14 @@ CONF
   local service_file
   service_file="${BATS_TEST_TMPDIR}/avahi/services/k3s-sugar-dev.service"
   if [ -f "${service_file}" ]; then
-    run avahi-browse -rtp _k3s-sugar-dev._tcp
+    run env \
+      SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
+      SUGARKUBE_CLUSTER=sugar \
+      SUGARKUBE_ENV=dev \
+      avahi-browse -rtp _k3s-sugar-dev._tcp
     [ "$status" -eq 0 ]
-    [[ "$output" =~ txt=role=bootstrap ]]
-    [[ "$output" =~ txt=phase=bootstrap ]]
+    [[ "$output" =~ txt=role=server ]]
+    [[ "$output" =~ txt=phase=server ]]
   fi
 }
 
