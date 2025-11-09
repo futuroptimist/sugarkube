@@ -676,6 +676,7 @@ CONF
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CLUSTER=sugar \
     SUGARKUBE_ENV=dev \
+    MDNS_ABSENCE_GATE=0 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
