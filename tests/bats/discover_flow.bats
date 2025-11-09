@@ -888,6 +888,7 @@ CONF
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CLUSTER=sugar \
     SUGARKUBE_ENV=dev \
+    SUGARKUBE_MDNS_ABSENCE_GATE=0 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
@@ -905,6 +906,7 @@ CONF
     SUGARKUBE_MDNS_BOOT_DELAY=0 \
     DISCOVERY_WAIT_SECS=0 \
     ELECTION_HOLDOFF=0 \
+    SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 
