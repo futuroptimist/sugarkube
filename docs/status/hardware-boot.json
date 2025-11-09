@@ -1,8 +1,0 @@
-{
-  "cacheSeconds": 900,
-  "color": "brightgreen",
-  "label": "hardware boot",
-  "message": "passing \u2022 2025-02-15 16:00 UTC \u2022 Pi 4B cluster",
-  "namedLogo": "raspberry-pi",
-  "schemaVersion": 1
-}
