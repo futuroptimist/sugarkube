@@ -1,9 +1,0 @@
-creation_rules:
-  - path_regex: ^clusters/.*/secrets/.*\.yaml$
-    encrypted_regex: '^(data|stringData)$'
-    age:
-      - age1sugarkubeexample0syg4kktq0js0d9f0g7au5l5rlqedukzpc75q0ys4lc
-  - path_regex: ^platform/.*/secrets/.*\.yaml$
-    encrypted_regex: '^(data|stringData)$'
-    age:
-      - age1sugarkubeexample0syg4kktq0js0d9f0g7au5l5rlqedukzpc75q0ys4lc
