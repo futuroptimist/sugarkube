@@ -1,0 +1,14 @@
+{
+  "id": "test7-discover-flow-follower-missing-stubs",
+  "date": "2025-11-09",
+  "component": "tests/bats/discover_flow.bats::Test 7",
+  "rootCause": "Test 7 'discover flow remains follower after self-check failure' (line 788) was failing with assertion error '[[ \"$output\" =~ outcome=follower ]]' because critical test infrastructure stubs were missing. Initial PR incorrectly assumed all stubs from Tests 5 & 6 were in place, but Test 7 was missing: (1) timeout stub that actually executes commands (vs just exiting 0), (2) journalctl stub for Avahi service verification, (3) sleep stub for timing operations, (4) gdbus stub for D-Bus introspection, (5) busctl stub for Avahi D-Bus interactions, (6) directory creation for avahi/services, run, mdns, (7) avahi.conf file creation, (8) SUGARKUBE_CLUSTER and SUGARKUBE_ENV environment variables. Without these stubs, the script either hung or failed before reaching the follower wait logic that logs 'outcome=follower'.",
+  "resolution": "Added all missing stubs following Test 6 pattern: (1) timeout stub that shifts first arg and execs remaining command, (2) journalctl stub returning 'Service successfully established' for avahi-daemon queries, (3) sleep stub logging to file, (4) gdbus stub succeeding on introspect calls, (5) busctl stub handling system/timeout flags and returning stub responses for Avahi D-Bus calls, (6) mkdir -p for required directories, (7) minimal avahi.conf with [server] section, (8) added SUGARKUBE_CLUSTER=sugar and SUGARKUBE_ENV=dev environment variables. Test now passes consistently, validating that when node loses bootstrap election (election_stub returns winner=no), it correctly enters follower wait state (outcome=follower logged) and times out after 1 second (exit status 124).",
+  "references": [
+    "tests/bats/discover_flow.bats:788-915 (Test 7: remains follower - now with complete stubs)",
+    "tests/bats/discover_flow.bats:646-787 (Test 6: pattern source for missing stubs)",
+    "outages/2025-11-09-discover-flow-test6-missing-stubs.json (Test 5 similar issue)",
+    "scripts/k3s-discover.sh:3754 (where outcome=follower is logged)",
+    "docs/raspi_cluster_setup.md (real-world Pi cluster use case)"
+  ]
+}

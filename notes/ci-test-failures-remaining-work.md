@@ -176,17 +176,17 @@ All remaining skipped tests are documented in `notes/skipped-tests-status.md`:
 
 #### Test 7: "discover flow remains follower after self-check failure" (line 788) - ✅ FIXED (2025-11-09 PR #11 - THIS PR)
 - **Status**: ✅ NOW PASSING  
-- **Root Cause**: Test was marked as skipped with note "70% complete" but all infrastructure was actually in place from Tests 5 & 6 work
+- **Root Cause**: Test was marked as skipped but was actually missing critical stubs from Test 6 pattern (timeout, journalctl, sleep, gdbus, busctl, directories, avahi.conf, env vars)
 - **Fix Applied (2025-11-09)**:
-  - Removed skip directive
-  - Added comprehensive use case documentation per docs/raspi_cluster_setup.md
-  - No code changes needed - all stubs already functional
-  - Test passes immediately validating follower wait logic
-- **Outage**: `outages/2025-11-09-test7-discover-flow-follower-unskip.json`
-- **Actual Time**: 10 minutes (documentation + validation as estimated!)
+  - Added all missing stubs following Test 6 pattern
+  - Created directories (avahi/services, run, mdns) and avahi.conf
+  - Added SUGARKUBE_CLUSTER=sugar and SUGARKUBE_ENV=dev environment variables
+  - Test now passes consistently validating follower wait logic
+- **Outage**: `outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json`
+- **Actual Time**: 30 minutes (investigation + stub additions + validation)
 - **Note**: This completes ALL discover_flow.bats tests (9/9 passing, 100%)
 
-- **Overall effort for Tests 5-7**: ~60 minutes total (Test 5: 35 min, Test 6: 15 min, Test 7: 10 min)
+- **Overall effort for Tests 5-7**: ~90 minutes total (Test 5: 35 min, Test 6: 15 min, Test 7: 30 min initially claimed 10 but actually 30)
 
 ### ✅ l4_probe.bats (COMPLETED - 2025-11-07 PR #7)
 - ~~Test 16: "l4_probe reports open port as open"~~ ✅ PASSING (ncat in CI)

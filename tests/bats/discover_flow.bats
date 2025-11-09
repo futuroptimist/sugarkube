@@ -801,9 +801,70 @@ CONF
 
   stub_common_network_tools
   create_curl_stub
+  
+  # Stub timeout to actually execute the command (critical for test to run)
+  stub_command timeout <<'EOS'
+#!/usr/bin/env bash
+# First arg is the timeout value, rest are the command and args
+shift
+exec "$@"
+EOS
+
+  # Stub journalctl for Avahi service verification
+  stub_command journalctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "-u" ] && [ "$2" = "avahi-daemon" ]; then
+  cat <<JOURNAL
+Service "k3s-sugar-dev" successfully established.
+JOURNAL
+  exit 0
+fi
+exit 0
+EOS
+
+  # Stub sleep for timing operations
+  stub_command sleep <<'EOS'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"
+exit 0
+EOS
+
+  # Stub gdbus for D-Bus introspection
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  # Stub busctl for Avahi D-Bus interactions
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "--system" ]; then
+  shift
+fi
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo 's "stub"'
+  exit 0
+fi
+if [ "$1" = "list" ]; then
+  echo "org.freedesktop.Avahi 100 200"
+  exit 0
+fi
+echo "unexpected busctl call: $*" >&2
+exit 1
+EOS
 
   configure_stub="$(create_configure_stub)"
+  
+  # Smart mdns stub that always fails (no servers found, triggering election)
   mdns_stub="$(create_mdns_stub 94)"
+  
+  # Election stub returns winner=no (this node loses election)
   election_stub="$(create_election_stub no)"
   net_diag_stub="$(create_net_diag_stub)"
   k3s_install_stub="$(create_k3s_install_stub)"
@@ -812,8 +873,21 @@ CONF
 
   api_ready_stub="$(create_api_ready_stub)"
 
+  # Create necessary directories for script operations
+  mkdir -p "${BATS_TEST_TMPDIR}/avahi/services"
+  mkdir -p "${BATS_TEST_TMPDIR}/run"
+  mkdir -p "${BATS_TEST_TMPDIR}/mdns"
+  
+  # Create minimal avahi.conf
+  avahi_conf="${BATS_TEST_TMPDIR}/avahi.conf"
+  cat <<'CONF' >"${avahi_conf}"
+[server]
+CONF
+
   run timeout 1 env \
     ALLOW_NON_ROOT=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \

@@ -14,7 +14,7 @@ An off-by-one numbering discrepancy was discovered in documentation and outage f
 - Test 6 = "elects winner"
 - Test 7 = "remains follower"
 
-This caused confusion where outage file `2025-11-09-test7-discover-flow-election-fix.json` actually documents Test 6 ("elects winner"), not Test 7.
+This caused confusion where outage file `2025-11-09-test7-discover-flow-election-fix.json` actually documents Test 6 ("discover flow elects winner after self-check failure"), not Test 7.
 
 ## Authoritative Mapping
 

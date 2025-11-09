@@ -61,11 +61,11 @@ All Python tests pass without skips (850+ tests).
 
 **2025-11-09 - "remains follower" Test FIXED (PR #11 - THIS PR)** 🎉:
 - ✅ Test 7 "discover flow remains follower after self-check failure" now PASSING
-- **Root cause identified**: Test was marked as skipped with "70% complete" but all infrastructure was actually in place
-- **Fix applied**: Removed skip directive, added comprehensive use case documentation
-- **Result**: Test passes immediately - NO CODE CHANGES NEEDED!
-- **Outage**: outages/2025-11-09-test7-discover-flow-follower-unskip.json
-- **Time**: 10 minutes (exactly as estimated!)
+- **Root cause identified**: Test was missing critical stubs from Test 6 pattern (timeout, journalctl, sleep, gdbus, busctl, directories, avahi.conf)
+- **Fix applied**: Added all missing stubs following Test 6 pattern, created required directories, added environment variables
+- **Result**: Test passes consistently validating follower wait logic
+- **Outage**: outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json
+- **Time**: 30 minutes (investigation + stub additions + validation)
 - **Achievement**: Completes ALL discover_flow.bats tests (9/9 passing, 100%)
 
 **2025-11-09 - "joins existing server" Test FIXED (PR #10)**:
@@ -102,8 +102,8 @@ All Python tests pass without skips (850+ tests).
 **Revised Estimated Effort** (ALL COMPLETED 2025-11-09):
 - ✅ Test 6 "elects winner": 15 minutes (COMPLETED 2025-11-09 PR #9)
 - ✅ Test 5 "joins existing server": 35 minutes (COMPLETED 2025-11-09 PR #10)
-- ✅ Test 7 "remains follower": 10 minutes (COMPLETED 2025-11-09 PR #11)
-- **Total actual time for Tests 5-7**: 60 minutes (exactly as predicted!)
+- ✅ Test 7 "remains follower": 30 minutes (COMPLETED 2025-11-09 PR #11)
+- **Total actual time for Tests 5-7**: 80 minutes (close to predicted 60!)
 
 **Key Learning**: Original "4-8 hours per test" estimates were based on XY problem (trying to skip k3s install vs understanding what to test). Actual solution: stub external dependencies, test decision logic. Infrastructure reusable across all tests.
 
@@ -112,15 +112,14 @@ All Python tests pass without skips (850+ tests).
 - ✅ Test helpers created: `create_k3s_install_stub()`, `create_l4_probe_stub()`
 - ✅ Test 6 fixed: systemctl stub extension (PR #9)
 - ✅ Test 5 fixed: missing stubs from Test 6 pattern (PR #10)
-- ✅ Test 7 fixed: unskipped and validated (PR #11)
+- ✅ Test 7 fixed: added missing stubs from Test 6 pattern (PR #11)
 
 **Total Time for All Three Tests** (2025-11-08 to 2025-11-09):
 - Infrastructure implementation: 90 minutes (2025-11-08)
 - Test 6 fix: 15 minutes (2025-11-09)
 - Test 5 fix: 35 minutes (2025-11-09)
-- Test 7 fix: 10 minutes (2025-11-09)
-- **Grand Total**: 150 minutes (~2.5 hours for all 3 tests vs original 12-24 hour estimate)
-- **Total**: ~2 hours for all 3 tests (vs original 12-24 hour estimate)
+- Test 7 fix: 30 minutes (2025-11-09)
+- **Grand Total**: 170 minutes (~2.8 hours for all 3 tests vs original 12-24 hour estimate)
 
 **Recommended Approach** (UPDATED 2025-11-08):
 **Option A - Comprehensive Stubbing** ✅ IMPLEMENTED:
