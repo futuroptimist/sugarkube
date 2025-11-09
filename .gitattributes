@@ -1,2 +1,0 @@
-# Treat STL meshes as binary artefacts and avoid interactive merge conflicts
-*.stl -text -diff merge=ours
