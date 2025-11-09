@@ -672,11 +672,11 @@ EOS
 [server]
 CONF
 
-  run timeout 30 env \
+  run env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CLUSTER=sugar \
     SUGARKUBE_ENV=dev \
-    MDNS_ABSENCE_GATE=0 \
+    SUGARKUBE_MDNS_ABSENCE_GATE=0 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
@@ -696,7 +696,17 @@ CONF
     ELECTION_HOLDOFF=0 \
     SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
-    "${BATS_CWD}/scripts/k3s-discover.sh"
+    LOG_LEVEL=debug \
+    timeout 30 "${BATS_CWD}/scripts/k3s-discover.sh"
+
+  echo "Test 7 Debug:" >&2
+  echo "  Status: $status" >&2
+  echo "  Output length: ${#output}" >&2
+  if [ "${#output}" -gt 0 ]; then
+    echo "  First 1000 chars: ${output:0:1000}" >&2
+  else
+    echo "  NO OUTPUT CAPTURED!" >&2
+  fi
 
   [ "$status" -eq 0 ]
   [[ "$output" =~ event=bootstrap_selfcheck_election ]] || false
