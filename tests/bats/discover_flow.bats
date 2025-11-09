@@ -801,14 +801,6 @@ CONF
 
   stub_common_network_tools
   create_curl_stub
-  
-  # Stub timeout to actually execute the command (critical for test to run)
-  stub_command timeout <<'EOS'
-#!/usr/bin/env bash
-# First arg is the timeout value, rest are the command and args
-shift
-exec "$@"
-EOS
 
   # Stub journalctl for Avahi service verification
   stub_command journalctl <<'EOS'
@@ -884,7 +876,7 @@ EOS
 [server]
 CONF
 
-  run timeout 1 env \
+  run env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CLUSTER=sugar \
     SUGARKUBE_ENV=dev \
@@ -908,7 +900,7 @@ CONF
     ELECTION_HOLDOFF=0 \
     SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
-    "${BATS_CWD}/scripts/k3s-discover.sh"
+    timeout 1 "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 124 ]
   [[ "$output" =~ outcome=follower ]]
