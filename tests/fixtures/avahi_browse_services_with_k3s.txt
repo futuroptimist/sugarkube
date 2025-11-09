@@ -1,3 +1,0 @@
-+;eth0;IPv4;_http._tcp;local
-+;eth0;IPv4;_k3s-sugar-dev._tcp;local
-+;eth0;IPv4;_ssh._tcp;local

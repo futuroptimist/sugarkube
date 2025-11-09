@@ -1,4 +1,0 @@
-ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", \
-  RUN+="/bin/systemctl start ssd-clone.service"
-ACTION=="add", SUBSYSTEM=="block", KERNEL=="nvme*n1", ENV{DEVTYPE}=="disk", \
-  RUN+="/bin/systemctl start ssd-clone.service"

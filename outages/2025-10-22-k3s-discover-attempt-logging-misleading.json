@@ -1,8 +1,0 @@
-{
-  "id": "2025-10-22-k3s-discover-attempt-logging-misleading",
-  "date": "2025-10-22",
-  "component": "scripts/k3s-discover.sh",
-  "rootCause": "The '--require-activity' grace window only probes twice but logs as if it had a 15-attempt budget, confusing operators.",
-  "resolution": "Log effective attempts (2) for the grace window and keep 15 for full discovery and leadership-election loops.",
-  "references": ["scripts/k3s-discover.sh"]
-}
