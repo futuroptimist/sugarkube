@@ -624,6 +624,34 @@ echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"
 exit 0
 EOS
 
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "--system" ]; then
+  shift
+fi
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo 's "stub"'
+  exit 0
+fi
+if [ "$1" = "list" ]; then
+  echo "org.freedesktop.Avahi 100 200"
+  exit 0
+fi
+echo "unexpected busctl call: $*" >&2
+exit 1
+EOS
+
   configure_stub="$(create_configure_stub)"
   mdns_stub="$(create_mdns_stub 94)"
   election_stub="$(create_election_stub yes)"
