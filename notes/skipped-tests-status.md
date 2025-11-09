@@ -1,12 +1,12 @@
 # Skipped Tests Status and Roadmap
 
-**Date**: 2025-11-07 (Updated)  
+**Date**: 2025-11-09 (Updated)  
 **Context**: Documentation of all skipped tests in the repository and recommendations for future PRs
 
 ## Summary
 
-As of 2025-11-07, there are **3 skipped tests** in the BATS test suite:
-- 3 complex k3s integration tests (discover_flow.bats Tests 6-8)
+As of 2025-11-09, there are **2 skipped tests** in the BATS test suite:
+- 2 complex k3s integration tests (discover_flow.bats: "joins existing server", "remains follower")
 
 All Python tests pass without skips (850+ tests).
 
@@ -16,40 +16,55 @@ All Python tests pass without skips (850+ tests).
 - After PR #6 (2025-11-07): 37 pass, 4 skip (Python 3.14 fixes)
 - After PR #7 (2025-11-07): 38 pass, 3 skip (Test 34 absence gate + l4_probe confirmation)
 - After PR #8 (2025-11-07): 38 pass, 3 skip (CI parity improvements - gdbus explicitly installed)
+- After PR #9 (2025-11-09): 39 pass, 2 skip (Test "elects winner" now passing with systemctl stub fix)
 
 ## Test Suite Status
 
 | Test File | Total | Pass | Skip | Fail |
 |-----------|-------|------|------|------|
-| discover_flow.bats | 9 | 6 | 3 | 0 |
+| discover_flow.bats | 9 | 7 | 2 | 0 |
 | l4_probe.bats | 2 | 2 | 0 | 0 |
 | mdns_selfcheck.bats | 18 | 18 | 0 | 0 |
 | Other BATS | 12 | 12 | 0 | 0 |
-| **Total BATS** | **41** | **38** | **3** | **0** |
+| **Total BATS** | **41** | **39** | **2** | **0** |
 | **Python tests** | **850+** | **850+** | **0** | **0** |
 
 ## Detailed Skip Analysis
 
-### 1. discover_flow.bats - K3s Integration Tests (3 skipped)
+### 1. discover_flow.bats - K3s Integration Tests (2 skipped)
 
-**Tests**:
-- Test 6: "discover flow joins existing server when discovery succeeds"
-- Test 7: "discover flow elects winner after self-check failure"
-- Test 8: "discover flow remains follower after self-check failure"
+**Note on Test Naming**: To avoid confusion, we reference tests by their full quoted names from `@test "..."` declarations, not by positional numbers which can be ambiguous.
+
+**Tests Currently Skipped**:
+- ⏭️ **"discover flow joins existing server when discovery succeeds"** (line 505, 5th test in file)
+- ⏭️ **"discover flow remains follower after self-check failure"** (line 737, 7th test in file)
+
+**Tests Now Passing**:
+- ✅ **"discover flow elects winner after self-check failure"** (line 595, 6th test in file) - FIXED 2025-11-09 PR #9
 
 **Skip Reason**: Complex integration tests requiring k3s installation and multi-node orchestration
 
 **Root Cause**:
 - These tests invoke the full k3s discovery and installation flow
-- Test 6 calls `k3s-discover.sh` which attempts to:
+- "joins existing server" test calls `k3s-discover.sh` which attempts to:
   - Acquire join gate lock
   - Run L4 network probes
   - Execute actual k3s installation (downloads from https://get.k3s.io)
   - Perform multi-node cluster joining
-- Current stub infrastructure doesn't mock k3s installation process
+- Current stub infrastructure doesn't fully mock k3s installation process
 - Tests time out after 60+ seconds waiting for k3s operations
 
-**Investigation Results (2025-11-08 - Stub Infrastructure Implementation)**:
+**Investigation Results & Progress**:
+
+**2025-11-09 - "elects winner" Test FIXED (PR #9)**:
+- ✅ Test "discover flow elects winner after self-check failure" now PASSING
+- **Root cause identified**: systemctl stub missing 'reload' and 'restart' command handling
+- **Fix applied**: Extended stub_common_network_tools() to handle all systemctl operations
+- **Result**: Test passes consistently in <5 seconds
+- **Outage**: outages/2025-11-09-discover-flow-test6-systemctl-stub.json
+- **Time**: 15 minutes (building on 2025-11-08 investigation)
+
+**2025-11-08 - Stub Infrastructure Implementation**:
 - **First attempt (20 min)**: Added `SUGARKUBE_SKIP_K3S_INSTALL` flag - tests still hung
 - **Second attempt (90 min)**: Implemented proper stubbing infrastructure following "understand real use case" principle
   - Read docs/raspi_cluster_setup.md to understand actual Pi cluster workflow
@@ -57,31 +72,18 @@ All Python tests pass without skips (850+ tests).
   - Created `run_k3s_install()` wrapper function with `SUGARKUBE_K3S_INSTALL_SCRIPT` override
   - Added `create_k3s_install_stub()` and `create_l4_probe_stub()` test helpers
   - Updated all 4 k3s installation call sites to use new wrapper
-  - Removed skip directives from Tests 6-8
   - Added environment variable overrides (tokens, timeouts)
-- **Result**: Tests now run without hanging (20+ seconds → <5 seconds) but Test 6 exits non-zero
-- **Progress**: 70% infrastructure complete, tests are testable now
-- **Third attempt (45 min - Test 7)**: Focused on Test 7 (bootstrap election scenario)
-  - ✅ Removed skip directive from Test 7
-  - ✅ Added real use case documentation from docs/raspi_cluster_setup.md
-  - ✅ Fixed environment variables (SUGARKUBE_SKIP_MDNS_SELF_CHECK=1, SUGARKUBE_API_READY_TIMEOUT=2)
-  - ✅ Added timeout wrapper (timeout 10) to prevent indefinite hangs
-  - ✅ Test completes in <10s without hanging
-  - ⚠️ Test exits status=0 but BATS run captures no output (stderr issue)
-  - **Status**: 85% complete, needs BATS output capture debugging (est. 15-20 min)
-  - **Outage**: outages/2025-11-08-discover-flow-test7-partial-investigation.json
+- **Result**: Infrastructure reusable across all 3 tests
 - **Documentation**: 
   - Full investigation: notes/k3s-integration-tests-investigation-20251108.md
   - Outages: outages/2025-11-08-k3s-integration-tests-investigation.json
   - Stub implementation: outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
-  - Test 7 partial: outages/2025-11-08-discover-flow-test7-partial-investigation.json
-- **Changes**: Committed to enable future work
 
 **Revised Estimated Effort** (based on actual progress):
-- ✅ Infrastructure setup: 90 minutes (COMPLETED - was estimated 4-8 hours)
-- ⚙️ Debug Test 6 failure: 15-20 minutes (partially complete)
-- ⚙️ Validate Tests 7-8: 10-15 minutes (stubs in place)
-- **Total remaining**: ~30 minutes to complete all 3 tests
+- ✅ "elects winner" test: 15 minutes (COMPLETED 2025-11-09)
+- ⚙️ "joins existing server" test: 15-20 minutes (infrastructure done, needs debugging)
+- ⚙️ "remains follower" test: 10-15 minutes (infrastructure done, needs validation)
+- **Total remaining**: ~25-35 minutes to complete remaining 2 tests
 
 **Key Learning**: Original "4-8 hours per test" estimates were based on XY problem (trying to skip k3s install vs understanding what to test). Actual solution: stub external dependencies, test decision logic. Infrastructure reusable across all tests.
 

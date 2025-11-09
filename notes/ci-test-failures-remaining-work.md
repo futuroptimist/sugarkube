@@ -2,30 +2,30 @@
 
 This document tracks the remaining test failures that need to be addressed after the initial fixes in this PR.
 
-## Current Status (2025-11-08 Update - After K3s Integration Investigation)
+## Current Status (2025-11-09 Update - After Test 7 Fix)
 
-**BATS Suite**: ✅ Completes without failures (38 pass, 0 fail, 3 skip)
+**BATS Suite**: ✅ Completes without failures (39 pass, 0 fail, 2 skip)
 
 **Python Suite**: ✅ All tests passing (850+ pass, 11 skip, 0 fail)
 
 **CI Parity**: ✅ All dependencies explicitly declared (ncat, libglib2.0-bin for gdbus)
 
-**Key Achievement**: All conditional test skips now pass! 38/41 tests passing (92.7% pass rate).
+**Key Achievement**: All conditional test skips now pass! 39/41 tests passing (95.1% pass rate).
 
 **Test Summary**:
-- ✅ **38/41 BATS tests passing** (92.7% pass rate)
-- ⏭️ **3 tests skipped** (Tests 6-8: discover_flow k3s integration - validated as appropriately complex)
+- ✅ **39/41 BATS tests passing** (95.1% pass rate) - up from 38/41
+- ⏭️ **2 tests skipped** (Tests 6, 8: discover_flow k3s integration - need dedicated PR)
 - ❌ **0 BATS tests failing**
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
 - ❌ **0 Python tests failing**
 
-**Latest Investigation (2025-11-08 - K3s Integration Tests)**:
-- **Investigation**: Attempted 20-minute fix for skipped k3s integration tests (Tests 6-8)
-- **Approach**: Added SUGARKUBE_SKIP_K3S_INSTALL flag to skip actual k3s installation
-- **Result**: Tests still hang due to additional dependencies beyond k3s install
-- **Validation**: Original 4-8 hour per-test estimates confirmed accurate
-- **Documentation**: Created comprehensive investigation report (notes/k3s-integration-tests-investigation-20251108.md)
-- **Outage**: `outages/2025-11-08-k3s-integration-tests-investigation.json`
+**Latest Fix (2025-11-09 PR #9 - THIS PR)**:
+- **Test Fixed**: Test 7 "discover flow elects winner after self-check failure"
+- **Root Cause**: systemctl stub only handled 'is-active', missing 'reload'/'restart' commands
+- **Fix**: Extended stub_common_network_tools() systemctl stub to handle all systemd operations
+- **Result**: Test now passes consistently in <5 seconds
+- **Outage**: `outages/2025-11-09-discover-flow-test6-systemctl-stub.json`
+- **Time**: 15 minutes (investigation + fix + validation)
 
 **Previous Improvements (2025-11-07 PR #8)**:
 - **CI Parity**: Added `libglib2.0-bin` to CI workflow for explicit gdbus availability
@@ -125,9 +125,11 @@ This document tracks the remaining test failures that need to be addressed after
 
 All remaining skipped tests are documented in `notes/skipped-tests-status.md`:
 
-### ⏭️ discover_flow.bats (3 skipped - k3s integration) - UPDATED 2025-11-08
+**Note on Test Naming**: We reference tests by their full quoted names from `@test "..."` to avoid confusion with positional numbers.
 
-#### Test 6: "discover flow joins existing server when discovery succeeds" - ⚙️ PARTIAL (90% complete)
+### ⏭️ discover_flow.bats (2 skipped - k3s integration) - UPDATED 2025-11-09
+
+#### Test: "discover flow joins existing server when discovery succeeds" (line 505) - ⚙️ PARTIAL (90% complete)
 - **Status**: 90% infrastructure implemented, hangs after k3s install (~10-15 min remaining)
 - **Progress (2025-11-08)**:
   - ✅ Added avahi-publish-service stub (trap-based for clean termination)
@@ -139,29 +141,28 @@ All remaining skipped tests are documented in `notes/skipped-tests-status.md`:
 - **Next steps**: Add LOG_LEVEL=debug, identify blocking call, add missing timeout/stub
 - **Outage**: `outages/2025-11-08-discover-flow-test6-partial-progress.json`
 
-#### Test 7: "discover flow elects winner after self-check failure" - ⚙️ PARTIAL (85% complete - 2025-11-08)
-- **Status**: 85% complete, test runs without hanging but output capture needs debugging
-- **Progress (2025-11-08)**:
+#### Test: "discover flow elects winner after self-check failure" (line 595) - ✅ FIXED (2025-11-09 PR #9)
+- **Status**: ✅ NOW PASSING
+- **Root Cause**: systemctl stub in stub_common_network_tools() only handled 'is-active' command. When k3s-discover.sh attempted to reload/restart avahi-daemon during bootstrap publish flow, it called real systemctl requiring interactive authentication, causing test to hang.
+- **Fix Applied (2025-11-09)**:
+  - Extended systemctl stub to handle 'reload', 'restart', and 'start' commands
+  - Stub now returns exit 0 immediately for systemd operations
+  - Test completes bootstrap election flow in <5 seconds
+- **Outage**: `outages/2025-11-09-discover-flow-test6-systemctl-stub.json`
+- **Actual Time**: 15 minutes (stub investigation + fix + validation)
+- **Previous Investigation (2025-11-08)**:
   - ✅ Understood real use case from docs/raspi_cluster_setup.md
   - ✅ Removed skip directive and added use case documentation
   - ✅ Fixed environment variables (SUGARKUBE_SKIP_MDNS_SELF_CHECK=1, SUGARKUBE_API_READY_TIMEOUT=2)
   - ✅ Added timeout wrapper (timeout 10) to prevent indefinite hangs
-  - ✅ Test completes in <10 seconds (was hanging indefinitely)
-  - ⚠️ Test exits with status=0 but produces no output
-- **Root cause**: BATS `run` command not capturing stderr output (logs use `>&2`)
-- **Next steps** (est. 15-20 min):
-  - Debug BATS output capture (may need test mode flag like --test-bootstrap-server-flow)
-  - Verify stub paths work in BATS test environment
-  - Add missing environment variables or test mode flags
-- **Outage**: `outages/2025-11-08-discover-flow-test7-partial-investigation.json`
-- **Key learning**: Test validates resilience scenario where initial mDNS publish fails, node re-runs election, wins again, proceeds with bootstrap
+  - ⚠️ Original issue was missing systemctl reload/restart stubs (now resolved)
 
-#### Test 8: "discover flow remains follower after self-check failure" - ⏭️ SKIPPED (70% infrastructure complete)
-- **Status**: Stub infrastructure in place from Test 6 work, needs validation (~10-15 min)
+#### Test: "discover flow remains follower after self-check failure" (line 737) - ⏭️ SKIPPED (70% infrastructure complete)
+- **Status**: Stub infrastructure in place from previous work, needs validation (~10-15 min)
 - **Infrastructure**: run_k3s_install wrapper, k3s_install_stub, election_stub
 - **See**: notes/skipped-tests-status.md
 
-- **Overall estimated effort**: ~30-45 min to complete all 3 tests (infrastructure mostly done)
+- **Overall estimated effort**: ~25-35 min to complete remaining 2 tests (infrastructure mostly done)
 - **See**: `notes/skipped-tests-status.md` section 1
 
 ### ✅ l4_probe.bats (COMPLETED - 2025-11-07 PR #7)
