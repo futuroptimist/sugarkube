@@ -75,9 +75,12 @@ From `docs/raspi_cluster_setup.md`:
 
 ## Overall Assessment
 
-### Tests with Strong Use Case Alignment: 39/41 (95%)
+### Tests with Strong Use Case Alignment: 41/41 (100%) 🎉
+
+**Update 2025-11-09**: All tests now passing! Tests 5-7 fixed in PRs #9, #10, #11.
+
 - api_readyz_gate: 1/1 ✅
-- discover_flow: 9/9 ✅
+- discover_flow: 9/9 ✅ (Tests 5-7 now fixed!)
 - election: 2/2 ✅
 - hostname_uniqueness: 2/2 ✅
 - join_gate: 2/2 ✅
@@ -90,14 +93,16 @@ From `docs/raspi_cluster_setup.md`:
 
 ## XY Problem Detection Results
 
-**ZERO XY problems detected** in 39/41 tests.
+**ZERO XY problems detected** in 41/41 tests (updated 2025-11-09).
 
-**Only XY problem identified**: 
-- **Tests 6-8 in discover_flow.bats** (already fixed in this PR)
-- **Issue**: Tests invoked actual `curl -sfL https://get.k3s.io | sh` instead of stubbing
-- **Root cause**: Trying to test "can k3s install" instead of "does discovery logic make correct join decision"
-- **Fix**: Added `run_k3s_install()` wrapper with `SUGARKUBE_K3S_INSTALL_SCRIPT` override, created stubs
-- **Result**: Tests now validate discovery/join decision logic in <5 seconds vs 60+ second hangs
+**Previously identified XY problem (now FIXED)**:
+- **Tests 5-7 in discover_flow.bats** (FIXED in PRs #9, #10, #11 - 2025-11-09)
+- **Issue**: Tests hung due to missing stubs for systemctl, journalctl, sleep, etc.
+- **Root cause**: Infrastructure gap in test setup, not fundamental test design issue
+- **Fix**: Added comprehensive stubs following Test 6 pattern
+- **Result**: All tests now pass in <5 seconds, validating discovery/join decision logic
+
+**Conclusion**: The XY problem wasn't with the test design itself, but with incomplete stubbing infrastructure. Once proper stubs were added, tests validated exactly what they should: mDNS discovery and cluster join decision logic.
 
 ## Test Suite Quality Assessment
 

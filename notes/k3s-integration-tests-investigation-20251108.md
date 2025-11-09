@@ -1,11 +1,28 @@
 # K3s Integration Tests Investigation - 2025-11-08
 
-**Context**: Investigation attempt to enable Tests 6-8 in discover_flow.bats  
+**Context**: Investigation attempt to enable Tests 5-7 in discover_flow.bats  
 **Time spent**: 20 minutes  
-**Result**: Partial progress - identified approach but tests still hang  
-**Next steps**: Document findings for future work
+**Result**: ✅ COMPLETED (2025-11-09) - All tests now passing!  
+**Next steps**: ~~Document findings for future work~~ DONE - Tests fixed in PRs #9, #10, #11
 
-## Investigation Summary
+## Final Outcome (2025-11-09)
+
+**ALL 3 TESTS NOW PASSING!** 🎉
+
+This investigation (conducted 2025-11-08) identified the correct approach:
+1. Stub k3s installation (via `SUGARKUBE_K3S_INSTALL_SCRIPT`)
+2. Add missing stubs for external dependencies
+3. Test decision logic, not installation
+
+**Actual implementation time** (2025-11-09):
+- PR #9 (Test 6): 15 minutes - extended systemctl stub
+- PR #10 (Test 5): 35 minutes - added missing stubs from Test 6 pattern
+- PR #11 (Test 7): 30 minutes - added missing stubs, removed timeout stub
+- **Total**: ~80 minutes vs originally estimated 12-24 hours
+
+---
+
+## Original Investigation Summary (2025-11-08)
 
 ### Approach Taken
 
