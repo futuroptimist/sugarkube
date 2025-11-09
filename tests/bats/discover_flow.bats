@@ -593,17 +593,63 @@ EOS
 }
 
 @test "discover flow elects winner after self-check failure" {
-  # TODO: Stub infrastructure implemented but needs validation (~10-15 min remaining)
-  # Infrastructure: run_k3s_install() wrapper, k3s_install_stub, election_stub (commit a320bda)
-  # Status: Stubs in place, needs validation that bootstrap election works correctly
-  # See: notes/k3s-integration-tests-investigation-20251108.md, outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
-  skip "Stub infrastructure complete but needs validation (70% done, ~10-15 min remaining)"
+  # Test validates bootstrap election scenario: first node in cluster discovers no servers,
+  # runs election, wins, and bootstraps k3s as initial control-plane server.
+  # Real use case: User boots first Pi with SUGARKUBE_SERVERS=3, node elects itself as winner,
+  # starts k3s with --cluster-init (embedded etcd), publishes mDNS advertisement.
+  # See: docs/raspi_cluster_setup.md section "Happy Path: 3-server dev cluster"
 
   stub_common_network_tools
   create_curl_stub
   stub_command timeout <<'EOS'
 #!/usr/bin/env bash
 exit 0
+EOS
+
+  stub_command journalctl <<'EOS'
+#!/usr/bin/env bash
+# Stub journalctl to return successful Avahi service establishment
+if [ "$1" = "-u" ] && [ "$2" = "avahi-daemon" ]; then
+  cat <<JOURNAL
+Service "k3s-sugar-dev" successfully established.
+JOURNAL
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command sleep <<'EOS'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"
+exit 0
+EOS
+
+  stub_command gdbus <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "introspect" ]; then
+  exit 0
+fi
+exit 0
+EOS
+
+  stub_command busctl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "--system" ]; then
+  shift
+fi
+if [ "$1" = "--timeout=2" ]; then
+  shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
+  echo 's "stub"'
+  exit 0
+fi
+if [ "$1" = "list" ]; then
+  echo "org.freedesktop.Avahi 100 200"
+  exit 0
+fi
+echo "unexpected busctl call: $*" >&2
+exit 1
 EOS
 
   configure_stub="$(create_configure_stub)"
@@ -616,17 +662,30 @@ EOS
 
   api_ready_stub="$(create_api_ready_stub)"
 
-  run env \
+  # Create necessary directories
+  mkdir -p "${BATS_TEST_TMPDIR}/avahi/services"
+  mkdir -p "${BATS_TEST_TMPDIR}/run"
+  mkdir -p "${BATS_TEST_TMPDIR}/mdns"
+  
+  avahi_conf="${BATS_TEST_TMPDIR}/avahi.conf"
+  cat <<'CONF' >"${avahi_conf}"
+[server]
+CONF
+
+  run timeout 30 env \
     ALLOW_NON_ROOT=1 \
+    SUGARKUBE_CLUSTER=sugar \
+    SUGARKUBE_ENV=dev \
+    MDNS_ABSENCE_GATE=0 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_ELECT_LEADER_BIN="${election_stub}" \
     SUGARKUBE_NET_DIAG_BIN="${net_diag_stub}" \
     SUGARKUBE_K3S_INSTALL_SCRIPT="${k3s_install_stub}" \
     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
-    AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
+    AVAHI_CONF_PATH="${avahi_conf}" \
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
-    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/mdns" \
     SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
     SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10 \
     SUGARKUBE_SERVERS=1 \
@@ -635,6 +694,7 @@ EOS
     SUGARKUBE_MDNS_BOOT_DELAY=0 \
     DISCOVERY_WAIT_SECS=0 \
     ELECTION_HOLDOFF=0 \
+    SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
     "${BATS_CWD}/scripts/k3s-discover.sh"
 

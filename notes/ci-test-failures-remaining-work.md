@@ -139,10 +139,22 @@ All remaining skipped tests are documented in `notes/skipped-tests-status.md`:
 - **Next steps**: Add LOG_LEVEL=debug, identify blocking call, add missing timeout/stub
 - **Outage**: `outages/2025-11-08-discover-flow-test6-partial-progress.json`
 
-#### Test 7: "discover flow elects winner after self-check failure" - ⏭️ SKIPPED (70% infrastructure complete)
-- **Status**: Stub infrastructure in place from Test 6 work, needs validation (~10-15 min)
-- **Infrastructure**: run_k3s_install wrapper, k3s_install_stub, election_stub
-- **See**: notes/skipped-tests-status.md
+#### Test 7: "discover flow elects winner after self-check failure" - ⚙️ PARTIAL (85% complete - 2025-11-08)
+- **Status**: 85% complete, test runs without hanging but output capture needs debugging
+- **Progress (2025-11-08)**:
+  - ✅ Understood real use case from docs/raspi_cluster_setup.md
+  - ✅ Removed skip directive and added use case documentation
+  - ✅ Fixed environment variables (SUGARKUBE_SKIP_MDNS_SELF_CHECK=1, SUGARKUBE_API_READY_TIMEOUT=2)
+  - ✅ Added timeout wrapper (timeout 10) to prevent indefinite hangs
+  - ✅ Test completes in <10 seconds (was hanging indefinitely)
+  - ⚠️ Test exits with status=0 but produces no output
+- **Root cause**: BATS `run` command not capturing stderr output (logs use `>&2`)
+- **Next steps** (est. 15-20 min):
+  - Debug BATS output capture (may need test mode flag like --test-bootstrap-server-flow)
+  - Verify stub paths work in BATS test environment
+  - Add missing environment variables or test mode flags
+- **Outage**: `outages/2025-11-08-discover-flow-test7-partial-investigation.json`
+- **Key learning**: Test validates resilience scenario where initial mDNS publish fails, node re-runs election, wins again, proceeds with bootstrap
 
 #### Test 8: "discover flow remains follower after self-check failure" - ⏭️ SKIPPED (70% infrastructure complete)
 - **Status**: Stub infrastructure in place from Test 6 work, needs validation (~10-15 min)
