@@ -606,6 +606,18 @@ EOS
 exit 0
 EOS
 
+  stub_command journalctl <<'EOS'
+#!/usr/bin/env bash
+# Stub journalctl to return successful Avahi service establishment
+if [ "$1" = "-u" ] && [ "$2" = "avahi-daemon" ]; then
+  cat <<JOURNAL
+Service "k3s-sugar-dev" successfully established.
+JOURNAL
+  exit 0
+fi
+exit 0
+EOS
+
   configure_stub="$(create_configure_stub)"
   mdns_stub="$(create_mdns_stub 94)"
   election_stub="$(create_election_stub yes)"
@@ -616,6 +628,16 @@ EOS
 
   api_ready_stub="$(create_api_ready_stub)"
 
+  # Create necessary directories
+  mkdir -p "${BATS_TEST_TMPDIR}/avahi/services"
+  mkdir -p "${BATS_TEST_TMPDIR}/run"
+  mkdir -p "${BATS_TEST_TMPDIR}/mdns"
+  
+  avahi_conf="${BATS_TEST_TMPDIR}/avahi.conf"
+  cat <<'CONF' >"${avahi_conf}"
+[server]
+CONF
+
   run timeout 10 env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}" \
@@ -624,9 +646,9 @@ EOS
     SUGARKUBE_NET_DIAG_BIN="${net_diag_stub}" \
     SUGARKUBE_K3S_INSTALL_SCRIPT="${k3s_install_stub}" \
     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
-    AVAHI_CONF_PATH="${BATS_TEST_TMPDIR}/avahi.conf" \
+    AVAHI_CONF_PATH="${avahi_conf}" \
     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services" \
-    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run" \
+    SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/mdns" \
     SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_empty.txt" \
     SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10 \
     SUGARKUBE_SERVERS=1 \
