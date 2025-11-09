@@ -1,8 +1,8 @@
-# 2025-11-09: Test 7 "discover flow elects winner after self-check failure" CI failures (4-bug cascade fix)
+# 2025-11-09: Test 6 "discover flow elects winner after self-check failure" CI failures (4-bug cascade fix)
 
 ## Background
 
-Test 7 in `tests/bats/discover_flow.bats` was consistently failing in CI under kcov code coverage instrumentation, despite the test scenario being correctly designed. The test validates the bootstrap election resilience scenario where a node becomes the first server in a k3s cluster after handling a transient mDNS publish failure.
+Test 6 (line 646) in `tests/bats/discover_flow.bats` was consistently failing in CI under kcov code coverage instrumentation, despite the test scenario being correctly designed. The test validates the bootstrap election resilience scenario where a node becomes the first server in a k3s cluster after handling a transient mDNS publish failure.
 
 The test is designed to validate decision-making logic for this real-world use case (per `docs/raspi_cluster_setup.md`):
 1. Node discovers no existing k3s servers via mDNS
