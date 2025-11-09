@@ -786,11 +786,18 @@ CONF
 }
 
 @test "discover flow remains follower after self-check failure" {
-  # TODO: Stub infrastructure implemented but needs validation (~10-15 min remaining)
-  # Infrastructure: run_k3s_install() wrapper, k3s_install_stub, election_stub (commit a320bda)
-  # Status: Stubs in place, needs validation that follower wait logic works correctly
-  # See: notes/k3s-integration-tests-investigation-20251108.md, outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
-  skip "Stub infrastructure complete but needs validation (70% done, ~10-15 min remaining)"
+  # Real-world scenario (per docs/raspi_cluster_setup.md):
+  # 1. Node boots with no existing k3s servers found via mDNS
+  # 2. Node runs bootstrap election to decide who initializes cluster
+  # 3. Election completes - THIS NODE LOSES (winner=no from election stub)
+  # 4. Node should remain as follower and wait for winner to complete bootstrap
+  # 5. Test expects timeout after 1 second with outcome=follower logged
+  #
+  # This test validates the decision-making logic for the follower wait scenario,
+  # NOT the actual k3s installation (which is stubbed via SUGARKUBE_K3S_INSTALL_SCRIPT).
+  #
+  # Infrastructure: All stubs implemented (Tests 5 & 6 pattern applied)
+  # See: notes/test-numbering-standardization.md, notes/k3s-integration-tests-investigation-20251108.md
 
   stub_common_network_tools
   create_curl_stub
