@@ -38,6 +38,35 @@ print_info() {
   echo -e "${BLUE}ℹ $1${NC}"
 }
 
+resolve_python_executable() {
+  local candidate="$1"
+  local resolved=""
+
+  if [[ "$candidate" == */* ]]; then
+    if [ -x "$candidate" ]; then
+      if [[ "$candidate" == /* ]]; then
+        resolved="$candidate"
+      else
+        local base_name
+        local candidate_dir
+        base_name="$(basename "$candidate")"
+        candidate_dir="$(cd "$(dirname "$candidate")" && pwd)"
+        resolved="${candidate_dir}/${base_name}"
+      fi
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+    return 2
+  fi
+
+  if resolved="$(command -v "$candidate" 2>/dev/null)"; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+
+  return 1
+}
+
 # Parse command line arguments
 USE_KCOV=false
 INSTALL_KCOV=false
@@ -138,8 +167,11 @@ check_dependencies() {
     missing+=("bats")
   fi
 
-  if ! command -v python3 >/dev/null 2>&1 && [ "$CUSTOM_PYTHON_SET" = false ]; then
-    missing+=("python3")
+  if [ "$CUSTOM_PYTHON_SET" = false ]; then
+    local default_python="${PYTHON_BINARIES[0]}"
+    if ! command -v "$default_python" >/dev/null 2>&1; then
+      missing+=("$default_python")
+    fi
   fi
 
   if [ "$USE_KCOV" = true ] && ! command -v kcov >/dev/null 2>&1; then
@@ -158,16 +190,21 @@ check_dependencies() {
 
   # Check for pytest using the first configured interpreter
   local python_check="${PYTHON_BINARIES[0]}"
-  local python_exec="$python_check"
-  if [[ "$python_check" != /* && "$python_check" != .* ]]; then
-    if ! command -v "$python_check" >/dev/null 2>&1; then
-      print_warning "Python interpreter not found: $python_check"
-      print_info "Install Python or provide --python /path/to/python"
-      return 0
-    fi
-    python_exec="$(command -v "$python_check")"
-  elif [ ! -x "$python_check" ]; then
-    print_warning "Python interpreter not executable: $python_check"
+  local python_exec=""
+  if ! python_exec="$(resolve_python_executable "$python_check")"; then
+    local resolve_status=$?
+    case $resolve_status in
+      1)
+        print_warning "Python interpreter not found: $python_check"
+        print_info "Install Python or provide --python /path/to/python"
+        ;;
+      2)
+        print_warning "Python interpreter not executable: $python_check"
+        ;;
+      *)
+        print_warning "Unable to resolve Python interpreter: $python_check"
+        ;;
+    esac
     return 0
   fi
 
@@ -302,22 +339,26 @@ run_pytest_simulation() {
   local overall_status=0
 
   for python_bin in "${PYTHON_BINARIES[@]}"; do
-    local resolved_bin="$python_bin"
-    if [[ "$python_bin" != /* && "$python_bin" != .* ]]; then
-      if ! command -v "$python_bin" >/dev/null 2>&1; then
-        print_error "Python interpreter not found: $python_bin"
-        overall_status=1
-        continue
-      fi
-      resolved_bin="$(command -v "$python_bin")"
-    elif [ ! -x "$python_bin" ]; then
-      print_error "Python interpreter not executable: $python_bin"
+    local resolved_bin=""
+    if ! resolved_bin="$(resolve_python_executable "$python_bin")"; then
+      local resolve_status=$?
+      case $resolve_status in
+        1)
+          print_error "Python interpreter not found: $python_bin"
+          ;;
+        2)
+          print_error "Python interpreter not executable: $python_bin"
+          ;;
+        *)
+          print_error "Failed to resolve Python interpreter: $python_bin"
+          ;;
+      esac
       overall_status=1
       continue
     fi
 
     local version_output
-    if ! version_output="$($resolved_bin --version 2>&1)"; then
+    if ! version_output="$("$resolved_bin" --version 2>&1)"; then
       print_error "Failed to determine version for $python_bin"
       overall_status=1
       continue
@@ -327,7 +368,7 @@ run_pytest_simulation() {
     python_version=$(echo "$version_output" | awk '{print $2}')
     print_info "Using $python_bin ($python_version) for pytest"
 
-    if ! $resolved_bin -m pytest --version >/dev/null 2>&1; then
+    if ! "$resolved_bin" -m pytest --version >/dev/null 2>&1; then
       print_warning "pytest not available for $python_bin - skipping"
       print_info "Install with: $python_bin -m pip install pytest pytest-cov"
       continue
@@ -352,7 +393,7 @@ run_pytest_simulation() {
     echo "  $python_bin -m pytest -q <${#pytest_targets[@]} test files>"
     echo ""
 
-    if $resolved_bin -m pytest -q "${pytest_targets[@]}"; then
+    if "$resolved_bin" -m pytest -q "${pytest_targets[@]}"; then
       echo ""
       print_info "Note: Running without coverage for speed. CI runs with coverage:"
       echo "  pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml"
