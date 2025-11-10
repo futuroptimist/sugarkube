@@ -19,6 +19,7 @@ def test_happy_path_section_exists(doc_text: str) -> None:
 
 def test_happy_path_commands_present(doc_text: str) -> None:
     assert "export SUGARKUBE_SERVERS=3" in doc_text
+    assert "export SUGARKUBE_SAVE_DEBUG_LOGS=1" in doc_text
     # ensure the guidance to rerun just up is copyable and explicit
     assert "just up dev              # 1st run patches memory cgroups and reboots" in doc_text
     assert "just up dev              # 2nd run bootstraps or joins k3s" in doc_text
@@ -32,6 +33,10 @@ def test_double_run_explained(doc_text: str) -> None:
 def test_doc_mentions_automatic_cgroup_fix(doc_text: str) -> None:
     assert "scripts/check_memory_cgroup.sh" in doc_text
     assert "No manual editing of `/boot/cmdline.txt`" in doc_text
+
+
+def test_debug_log_opt_out_documented(doc_text: str) -> None:
+    assert "unset SUGARKUBE_SAVE_DEBUG_LOGS" in doc_text
 
 
 def test_manual_cmdline_edits_removed(doc_text: str) -> None:

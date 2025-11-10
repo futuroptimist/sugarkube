@@ -18,6 +18,16 @@ up env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    if [ -z "${SUGARKUBE_DEBUG_LOG_LIB:-}" ] && [ -f "{{ invocation_directory() }}/scripts/lib/debug_logs.sh" ]; then
+        SUGARKUBE_DEBUG_LOG_LIB="{{ invocation_directory() }}/scripts/lib/debug_logs.sh"
+    fi
+    : "${SUGARKUBE_DEBUG_LOG_LIB:=/home/pi/sugarkube/scripts/lib/debug_logs.sh}"
+    if [ -f "${SUGARKUBE_DEBUG_LOG_LIB}" ]; then
+        # shellcheck disable=SC1090
+        source "${SUGARKUBE_DEBUG_LOG_LIB}"
+        debug_logs::start "{{ invocation_directory() }}" "just-up-dev" || true
+    fi
+
     # Select per-environment token if available
     if [ "{{ env }}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
     if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
@@ -71,6 +81,9 @@ up env='dev':
         if [ "${SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP:-1}" = "1" ] && \
             [ -f "${SUGARKUBE_RUNTIME_DIR:-${SUGARKUBE_RUN_DIR:-/run/sugarkube}}/wlan-disabled" ]; then
             sudo -E bash scripts/toggle_wlan.sh --restore || true
+        fi
+        if command -v debug_logs::finalize >/dev/null 2>&1; then
+            debug_logs::finalize "${status}" || true
         fi
         if command -v summary::emit >/dev/null 2>&1; then
             summary::emit || true

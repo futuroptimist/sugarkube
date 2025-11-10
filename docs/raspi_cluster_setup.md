@@ -22,10 +22,12 @@ Every Raspberry Pi follows the same rhythm:
 
 ```bash
 export SUGARKUBE_SERVERS=3
+export SUGARKUBE_SAVE_DEBUG_LOGS=1   # optional: capture sanitized run logs
 just up dev              # 1st run patches memory cgroups and reboots
 
 # after the Pi comes back and you SSH in again
 export SUGARKUBE_SERVERS=3
+export SUGARKUBE_SAVE_DEBUG_LOGS=1   # optional: capture sanitized run logs
 just up dev              # 2nd run bootstraps or joins k3s
 ```
 
@@ -52,6 +54,14 @@ Copy the long `K10…` string to a safe place—you will export it on every join
 > so the API certificate covers `sugarkube0.local`. Set `SUGARKUBE_API_REGADDR`
 > before running `just up` if you advertise a VIP or load balancer—the address is
 > added as an extra SAN to avoid TLS warnings when joining via that endpoint.
+
+> **Optional debug logs**
+> Set `SUGARKUBE_SAVE_DEBUG_LOGS=1` in the shell **before** running `just up` to
+> write a sanitized transcript for the current node under
+> `debug-logs/just-up/just-up-dev-<hostname>-<commit>-<timestamp>.log`. Each file
+> captures both stdout and stderr even if you interrupt the run with `Ctrl+C`, and
+> secrets or external IPs are redacted automatically. Disable capture at any time
+> with `unset SUGARKUBE_SAVE_DEBUG_LOGS` (or `export SUGARKUBE_SAVE_DEBUG_LOGS=0`).
 
 ### Registration address (optional)
 

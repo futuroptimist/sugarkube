@@ -21,3 +21,4 @@ def test_up_recipe_runs_checks_and_discovery():
     body = _extract_recipe(lines, "up env='dev':")
     assert any("check_memory_cgroup.sh" in line for line in body)
     assert any("sudo -E bash scripts/k3s-discover.sh" in line for line in body)
+    assert any("debug_logs::start" in line for line in body)
