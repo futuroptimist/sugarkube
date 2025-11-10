@@ -1065,7 +1065,7 @@ Total estimated time: 4-6 hours for complete implementation and testing.
 
 ---
 
-### Test 8: Resolution Lag Warning - IN PROGRESS ⚠️
+### Test 8: Resolution Lag Warning — Completed 2025-11-10 ✅
 
 **Investigation Summary** (2025-11-05):
 
@@ -1133,7 +1133,12 @@ Total estimated time: 4-6 hours for complete implementation and testing.
 - `scripts/mdns_selfcheck.sh` line 844-867: Updated warning check to accept ipv4_mismatch (helps but not sufficient)
 - Changes reverted: Early exit prevention didn't work correctly
 
-**Test Status**: ❌ Still failing - deferred to next PR
+**Update (2025-11-10)**: `mdns_selfcheck.sh` now forwards the final `last_reason`
+value to the `mdns_resolution_status` warning event so downstream tooling can
+see `reason=resolve_failed`. Regression coverage lives in
+`tests/scripts/test_mdns_selfcheck_warn_status.py`.
+
+**Test Status**: ✅ Passing with warning reason propagated
 
 ---
 
