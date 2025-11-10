@@ -6,10 +6,7 @@ setup() {
 }
 
 teardown() {
-  if [ -n "${SERVER_PID:-}" ]; then
-    kill "${SERVER_PID}" 2>/dev/null || true
-    wait "${SERVER_PID}" 2>/dev/null || true
-  fi
+  stop_readyz_server
 }
 
 find_free_port() {
@@ -106,6 +103,14 @@ PY
   sleep 0.5
 }
 
+stop_readyz_server() {
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    wait "${SERVER_PID}" 2>/dev/null || true
+    SERVER_PID=""
+  fi
+}
+
 @test "api ready gate waits for readyz ok" {
   local port
   port="$(find_free_port)"
@@ -165,11 +170,7 @@ EOF
   [ -f "${ATTEMPT_FILE}" ]
   [ "$(cat "${ATTEMPT_FILE}")" -eq 1 ]
 
-  if [ -n "${SERVER_PID:-}" ]; then
-    kill "${SERVER_PID}" 2>/dev/null || true
-    wait "${SERVER_PID}" 2>/dev/null || true
-    SERVER_PID=""
-  fi
+  stop_readyz_server
   rm -f "${ATTEMPT_FILE}"
 
   local port_fail

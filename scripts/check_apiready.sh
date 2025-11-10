@@ -189,7 +189,7 @@ while :; do
       log_kv info apiready "${log_fields[@]}"
       exit 0
     else
-      last_reason="curl_failed"
+      last_reason="http_error"
     fi
   else
     last_reason="curl_failed"

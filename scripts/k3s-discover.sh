@@ -2530,6 +2530,7 @@ wait_for_bootstrap_activity() {
 }
 
 wait_for_api() {
+  local allow_http_401="${1:-0}"
   if [ -z "${API_READY_CHECK_BIN}" ] || [ ! -x "${API_READY_CHECK_BIN}" ]; then
     log_error_msg discover "Local API readiness helper missing" "script=${API_READY_CHECK_BIN}" "phase=api_ready_local"
     return 1
@@ -2542,8 +2543,10 @@ wait_for_api() {
     "SERVER_PORT=${port}"
     "TIMEOUT=${API_READY_TIMEOUT}"
     "SERVER_IP=127.0.0.1"
-    "ALLOW_HTTP_401=1"
   )
+  if [ "${allow_http_401}" = "1" ]; then
+    check_env+=("ALLOW_HTTP_401=1")
+  fi
   if [ -n "${API_READY_POLL_INTERVAL}" ]; then
     check_env+=("POLL_INTERVAL=${API_READY_POLL_INTERVAL}")
   fi
@@ -3242,7 +3245,7 @@ install_server_single() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   )
-  if wait_for_api; then
+  if wait_for_api 1; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_single"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -3296,7 +3299,7 @@ install_server_cluster_init() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   )
-  if wait_for_api; then
+  if wait_for_api 1; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
