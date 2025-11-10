@@ -32,16 +32,34 @@ start_readyz_server() {
     -keyout "${key}" -out "${cert}" -days 1 >/dev/null 2>&1
   cat <<'PY' >"${BATS_TEST_TMPDIR}/ready_server.py"
 import http.server
+import json
 import os
 import ssl
 import sys
 from pathlib import Path
 
-RESPONSES = [
+DEFAULT_RESPONSES = [
     (503, "service unavailable"),
     (200, "[+]etcd failed\n"),
     (200, "[+]etcd ok\n[+]log ok\nreadyz check passed\n"),
 ]
+
+RESPONSES = DEFAULT_RESPONSES
+
+responses_raw = os.environ.get("READYZ_RESPONSES")
+if responses_raw:
+    try:
+        loaded = json.loads(responses_raw)
+        RESPONSES = []
+        for item in loaded:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError("invalid response entry")
+            status, body = item
+            RESPONSES.append((int(status), str(body)))
+        if not RESPONSES:
+            RESPONSES = DEFAULT_RESPONSES
+    except Exception:
+        RESPONSES = DEFAULT_RESPONSES
 
 attempts = 0
 
@@ -112,4 +130,59 @@ PY
   [[ "$output" =~ attempts=3 ]]
   [ -f "${ATTEMPT_FILE}" ]
   [ "$(cat "${ATTEMPT_FILE}")" -eq 3 ]
+}
+
+@test "401 is treated as alive when ALLOW_HTTP_401=1" {
+  local port
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+
+  rm -f "${ATTEMPT_FILE}"
+  local responses='[[401,"auth required"],[200,"readyz check passed\n"]]'
+  READYZ_RESPONSES="${responses}" start_readyz_server "${port}"
+
+  run env \
+    ALLOW_HTTP_401=1 \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=5 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=alive ]]
+  [[ "$output" =~ mode=alive ]]
+  [[ "$output" =~ status=401 ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -eq 1 ]
+
+  kill "${SERVER_PID}" 2>/dev/null || true
+  wait "${SERVER_PID}" 2>/dev/null || true
+  SERVER_PID=""
+
+  rm -f "${ATTEMPT_FILE}"
+  responses='[[401,"auth required"],[200,"readyz check passed\n"]]'
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+  READYZ_RESPONSES="${responses}" start_readyz_server "${port}"
+
+  run env \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=5 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ mode=ready ]]
+  [[ "$output" =~ status=200 ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -ge 2 ]
 }

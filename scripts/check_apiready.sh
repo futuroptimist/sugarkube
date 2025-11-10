@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
 
+ALLOW_HTTP_401="${ALLOW_HTTP_401:-0}"
+
 SERVER_HOST="${SERVER_HOST:-${1:-}}"
 if [ -n "${SERVER_HOST}" ] && [ "$#" -gt 0 ]; then
   shift || true
@@ -151,6 +153,24 @@ while :; do
     http_code="000"
   fi
 
+  if [ "${curl_status}" -eq 0 ] && [ "${http_code}" = "401" ] && [ "${ALLOW_HTTP_401}" = "1" ]; then
+    elapsed=$(( $(date +%s) - start_epoch ))
+    log_fields=(
+      "outcome=alive"
+      "host=\"$(escape_log_value "${SERVER_HOST}")\""
+      "port=\"$(escape_log_value "${SERVER_PORT}")\""
+      "attempts=${attempt}"
+      "elapsed=${elapsed}"
+      "status=${http_code}"
+      "mode=alive"
+    )
+    if [ -n "${SERVER_IP}" ]; then
+      log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
+    fi
+    log_kv info apiready "${log_fields[@]}"
+    exit 0
+  fi
+
   if [ "${curl_status}" -eq 0 ] && [ "${http_code}" = "200" ]; then
     if validate_ready_body "${body_file}"; then
       elapsed=$(( $(date +%s) - start_epoch ))
@@ -161,6 +181,7 @@ while :; do
         "attempts=${attempt}"
         "elapsed=${elapsed}"
         "status=${http_code}"
+        "mode=ready"
       )
       if [ -n "${SERVER_IP}" ]; then
         log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
