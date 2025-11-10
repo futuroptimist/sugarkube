@@ -169,8 +169,8 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 ### l4_probe.bats - Network Tool Tests (Conditionally Skip - ncat dependency)
 
 **Tests**:
-- Test 17: "l4_probe reports open port as open" (line 39)
-- Test 18: "l4_probe exits non-zero when a port is closed" (line 54)
+- Test 16: "l4_probe reports open port as open" (line 38)
+- Test 17: "l4_probe exits non-zero when a port is closed" (line 53)
 
 **Status**: ✅ PASSING IN CI (conditionally skip locally without ncat)
 
@@ -198,7 +198,8 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 **Outage Documentation**: `outages/2025-11-07-l4-probe-ncat-already-available.json`
 
 **References**:
-- `tests/bats/l4_probe.bats:39-68`
+- `tests/bats/l4_probe.bats:38-51`
+- `tests/bats/l4_probe.bats:53-68`
 - `scripts/l4_probe.sh`
 - `.github/workflows/ci.yml:38`
 - `notes/ci-test-failures-remaining-work.md`

@@ -7,7 +7,8 @@
   "references": [
     "notes/ci-test-failures-remaining-work.md",
     "notes/skipped-tests-status.md",
-    "tests/bats/l4_probe.bats:39-68",
+    "tests/bats/l4_probe.bats:38-51",
+    "tests/bats/l4_probe.bats:53-68",
     ".github/workflows/ci.yml:38"
   ]
 }

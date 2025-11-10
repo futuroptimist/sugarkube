@@ -15,7 +15,7 @@ This document tracks the remaining test failures that need to be addressed after
 **Test Summary**:
 - ✅ **42/42 BATS tests total** - ALL COMPLETE!
 - ✅ **40 tests passing locally** (95.2% when ncat unavailable)
-- ⏭️ **2 tests conditionally skipped locally** (l4_probe tests 17-18: pass when ncat installed)
+- ⏭️ **2 tests conditionally skipped locally** (l4_probe tests 16-17: pass when ncat installed)
 - ✅ **42/42 tests passing in CI** (100% - ncat installed)
 - ❌ **0 BATS tests failing**
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
@@ -24,7 +24,7 @@ This document tracks the remaining test failures that need to be addressed after
 **Latest Update (2025-11-10 - Documentation Correction)**:
 - **Issue**: Notes incorrectly stated "41/41 tests" when actual count is 42 tests
 - **Correction**: Updated all test counts to accurately reflect 42 total tests
-- **Clarification**: 2 l4_probe tests (17-18) are "conditionally skipped" (not broken - they pass when ncat installed)
+- **Clarification**: 2 l4_probe tests (16-17) are "conditionally skipped" (not broken - they pass when ncat installed)
 - **CI Status**: 100% pass rate (42/42) achieved - ncat is installed in CI environment
 - **Outage**: `outages/2025-11-10-test-count-documentation-correction.json`
 
@@ -403,14 +403,14 @@ All actionable CI test failures have been resolved through PRs #1-#7:
 **Final Test Status (2025-11-10 - Test Count Corrected)** 🎉:
 - 42/42 BATS tests total (100% pass rate in CI) - ALL TESTS COMPLETE!
 - 40/42 tests passing locally (95.2% when ncat unavailable)
-- 2/42 tests conditionally skipped locally (l4_probe tests 17-18)
+- 2/42 tests conditionally skipped locally (l4_probe tests 16-17)
 - 0 test failures
 - CI environment: 42/42 passing (100%) - ncat installed
 
 **Note on Test Count Correction (2025-11-10)**:
 - Previous documentation stated "41/41 tests" - this was incorrect
 - Actual test count: 42 total tests across all .bats files
-- The 2 l4_probe tests (17-18) were not counted because they conditionally skip without ncat
+- The 2 l4_probe tests (16-17) were not counted because they conditionally skip without ncat
 - These tests pass in CI where ncat is installed (.github/workflows/ci.yml:38)
 - Updated count: 42 tests total, all passing in CI (100% achievement maintained!)
 
