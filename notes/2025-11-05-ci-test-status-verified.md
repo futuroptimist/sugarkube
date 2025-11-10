@@ -135,10 +135,10 @@ The 3 remaining skipped tests are documented as requiring dedicated PRs.
 ## Conclusion
 
 The repository test suite is in excellent health:
-- ✅ **100% pass rate (41/41)** - updated 2025-11-09 🎉
+- ✅ **100% pass rate (42/42 in CI)** - updated 2025-11-10 🎉
+- ✅ **40/42 passing locally + 2 conditional skips** (l4_probe tests require ncat)
 - ✅ **0 failures**
-- ✅ **0 skipped tests** (all tests now passing!)
 - ✅ All outages documented and validated
 - ✅ Full CI pipeline passes locally
 
-**All test failures have been resolved!** The journey from 38/41 (92.7%) to 41/41 (100%) was completed through focused PRs #9, #10, and #11 in November 2025.
+**All test failures have been resolved!** The journey from 38/42 (90.5%) to 42/42 (100% in CI) was completed through focused PRs #9, #10, and #11 in November 2025. Test count corrected to 42 (was documented as 41) on 2025-11-10.

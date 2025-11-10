@@ -75,9 +75,9 @@ From `docs/raspi_cluster_setup.md`:
 
 ## Overall Assessment
 
-### Tests with Strong Use Case Alignment: 41/41 (100%) 🎉
+### Tests with Strong Use Case Alignment: 42/42 (100%) 🎉
 
-**Update 2025-11-09**: All tests now passing! Tests 5-7 fixed in PRs #9, #10, #11.
+**Update 2025-11-10**: All tests now passing! Tests 5-7 fixed in PRs #9, #10, #11. Test count corrected from 41 to 42 (l4_probe tests 17-18 were miscounted).
 
 - api_readyz_gate: 1/1 ✅
 - discover_flow: 9/9 ✅ (Tests 5-7 now fixed!)
@@ -88,12 +88,12 @@ From `docs/raspi_cluster_setup.md`:
 - mdns_selfcheck: 18/18 ✅
 - mdns_wire_probe: 4/4 ✅
 
-### Tests with Marginal Alignment: 2/41 (5%)
+### Tests with Marginal Alignment: 2/42 (5%)
 - summary: 2/2 ⚠️ (cosmetic, but useful for debugging)
 
 ## XY Problem Detection Results
 
-**ZERO XY problems detected** in 41/41 tests (updated 2025-11-09).
+**ZERO XY problems detected** in 42/42 tests (updated 2025-11-10).
 
 **Previously identified XY problem (now FIXED)**:
 - **Tests 5-7 in discover_flow.bats** (FIXED in PRs #9, #10, #11 - 2025-11-09)
