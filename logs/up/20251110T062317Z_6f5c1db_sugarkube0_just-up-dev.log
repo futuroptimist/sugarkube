@@ -1,0 +1,89 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-10T06:23:17Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+ensure_unique_hostname hostname is already unique hostname=sugarkube0
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-09T22:23:27-08:00 level=info event=discover event=token_resolution token_present=0 allow_bootstrap=1 node_token_state=missing boot_token_state=missing
+ts=2025-11-09T22:23:27-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-09T22:23:27-08:00 level=info event=iptables_preflight msg="iptables is using the nf_tables backend; enable kube-proxy nft mode (GA in Kubernetes v1.33) or select iptables-legacy" severity=warn outcome=warn details="variant=nf_tables,version=v1.8.9,nft=yes,kube-proxy=iptables,kube-proxy-source=default,path=/usr/sbin/iptables" variant=nf_tables version=v1.8.9 nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="enable_kube-proxy_nft_mode_or_select_iptables-legacy"
+ts=2025-11-09T22:23:27-08:00 level=info event=discover event=mdns_absence_gate phase=start host=sugarkube0.local service=_k3s-sugar-dev._tcp timeout_ms=15000
+ts=2025-11-09T22:23:27-08:00 level=info event=discover event=mdns_absence_gate action=restart_avahi outcome=ok
+ts=2025-11-09T22:23:47-08:00 level=info event=avahi_dbus_ready outcome=timeout ms_elapsed=20070 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-09T22:23:49-08:00 level=info event=discover msg="mDNS absence gate timed out" severity=warn mdns_absence_confirmed=0 attempts=1 ms_elapsed=21250 reason=timeout last_method=cli consecutive_dbus_absent=0 wire_proof_status=skipped
+ts=2025-11-09T22:23:49-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:23:53-08:00 level=info event=discover event=election outcome=winner key=sugarkube0
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:24:07-08:00 level=info event=mdns_publish phase=bootstrap_attempt cluster=sugar environment=dev host=sugarkube0.local
+mdns resolution status action=ok nss_ok=1 resolve_ok=0 browse_ok=0 hosts_updated=0
+Timed out waiting for Avahi to publish k3s-sugar-dev@sugarkube0.local (bootstrap)
+ts=2025-11-09T22:24:50-08:00 level=info event=avahi_dbus_ready outcome=timeout ms_elapsed=20300 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-09T22:24:50-08:00 level=info event=discover msg="Avahi D-Bus wait failed" severity=warn event=avahi_liveness status=1
+ts=2025-11-09T22:24:50-08:00 level=info event=discover msg="Avahi liveness probe retry" severity=warn attempt=1 status=0 lines=0
+ts=2025-11-09T22:24:51-08:00 level=info event=discover msg="Avahi liveness probe retry" severity=warn attempt=2 status=0 lines=0
+ts=2025-11-09T22:24:51-08:00 level=info event=discover msg="Avahi liveness probe failed" severity=error event=avahi_liveness
+ts=2025-11-09T22:24:52-08:00 level=info event=mdns_selfcheck phase=start role=bootstrap host=sugarkube0.local attempts=20
+ts=2025-11-09T22:24:54-08:00 level=info event=mdns_selfcheck outcome=ok role=bootstrap host=sugarkube0.local observed=sugarkube0.local attempts=1 ms_elapsed=2415
+ts=2025-11-09T22:24:54-08:00 level=info event=mdns_selfcheck outcome=confirmed role=bootstrap host=sugarkube0.local observed=sugarkube0.local phase=bootstrap check=initial
+event=iptables_check installed=no mode=nft version="v1.8.9 (nf_tables)"
+ts=2025-11-09T22:24:54-08:00 level=info event=discover phase=install_cluster_init cluster=sugar environment=dev host=sugarkube0.local datastore=etcd
+[INFO]  Finding release for channel stable
+[INFO]  Using v1.33.5+k3s1 as release
+[INFO]  Downloading hash https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/sha256sum-arm64.txt
+[INFO]  Downloading binary https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/k3s-arm64
+[INFO]  Verifying binary download
+[INFO]  Installing k3s to /usr/local/bin/k3s
+[INFO]  Skipping installation of SELinux RPM
+[INFO]  Creating /usr/local/bin/kubectl symlink to k3s
+[INFO]  Creating /usr/local/bin/crictl symlink to k3s
+[INFO]  Creating /usr/local/bin/ctr symlink to k3s
+[INFO]  Creating killall script /usr/local/bin/k3s-killall.sh
+[INFO]  Creating uninstall script /usr/local/bin/k3s-uninstall.sh
+[INFO]  env: Creating environment file /etc/systemd/system/k3s.service.env
+[INFO]  systemd: Creating service file /etc/systemd/system/k3s.service
+[INFO]  systemd: Enabling k3s unit
+Created symlink /etc/systemd/system/multi-user.target.wants/k3s.service → /etc/systemd/system/k3s.service.
+[INFO]  systemd: Starting k3s
+ts=2025-11-09T22:27:20-08:00 level=info event=discover msg="Local API readiness helper failed" severity=warn phase=api_ready_local status=1 outcome=timeout reason=curl_failed last_status=401:0 attempts=60 elapsed=120 host="sugarkube0.local" port="6443" ip="127.0.0.1"
+ts=2025-11-09T22:27:20-08:00 level=info event=discover msg="k3s API did not become ready within 120s; skipping Avahi publish" severity=warn phase=install_cluster_init host=sugarkube0.local
+Summary:
+  Dependencies elapsed_ms=660
+  Ensure unique hostname elapsed_ms=8238
+  Memory cgroup elapsed_ms=45
+  Avahi configure elapsed_ms=137
+  WLAN disable elapsed_ms=551
+  Node IP configure elapsed_ms=64
+  k3s discover/install elapsed_ms=233437
+
+[debug] Log saved to logs/up/20251110T062317Z_6f5c1db_sugarkube0_just-up-dev.log
