@@ -1,0 +1,1153 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-10T06:29:09Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+ensure_unique_hostname hostname is already unique hostname=sugarkube1
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-09T22:29:15-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=missing boot_token_state=missing token_source="/home/pi/sugarkube/scripts/resolve_server_token.sh"
+ts=2025-11-09T22:29:15-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-09T22:29:15-08:00 level=info event=iptables_preflight msg="iptables binary is missing" severity=warn outcome=warn details="variant=missing,version=unavailable,nft=yes,kube-proxy=iptables,kube-proxy-source=default" variant=missing version=unavailable nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="install_iptables_package"
+ts=2025-11-09T22:29:15-08:00 level=info event=discover event=mdns_absence_gate phase=start host=sugarkube1.local service=_k3s-sugar-dev._tcp timeout_ms=15000
+ts=2025-11-09T22:29:15-08:00 level=info event=discover event=mdns_absence_gate action=restart_avahi outcome=ok
+ts=2025-11-09T22:29:36-08:00 level=info event=avahi_dbus_ready outcome=timeout ms_elapsed=20088 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-09T22:29:37-08:00 level=info event=discover msg="mDNS absence gate timed out" severity=warn mdns_absence_confirmed=0 attempts=1 ms_elapsed=21308 reason=timeout last_method=cli consecutive_dbus_absent=0 wire_proof_status=skipped
+ts=2025-11-09T22:29:37-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:29:39-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:30:40-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:30:40-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:31:41-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:31:41-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:32:42-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:32:42-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:33:44-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:33:44-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:34:45-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:34:45-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:35:46-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:35:46-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+ts=2025-11-09T22:36:47-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-09T22:36:47-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
+BASH_DEBUG: mode=server-first, CLUSTER=sugar, ENVIRONMENT=dev, SCRIPT_DIR=/home/pi/sugarkube/scripts
+BASH_DEBUG: PYTHONPATH=/home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+BASH_DEBUG: About to call python3 with args: - server-first sugar dev /home/pi/sugarkube/scripts
+DEBUG: Python version: 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0]
+DEBUG: sys.argv: ['-', 'server-first', 'sugar', 'dev', '/home/pi/sugarkube/scripts']
+DEBUG: PYTHONPATH: /home/pi/sugarkube/scripts:/home/pi/sugarkube/scripts
+DEBUG: scripts_dir from argv[4]: /home/pi/sugarkube/scripts
+DEBUG: /home/pi/sugarkube/scripts already in sys.path
+DEBUG: sys.path[:3]: ['', '/home/pi/sugarkube/scripts', '/usr/lib/python311.zip']
+DEBUG: Successfully imported k3s_mdns_query
+DEBUG: mode=server-first, cluster=sugar, environment=dev
+DEBUG: fixture_path=None, debug_enabled=False
+DEBUG: About to call query_mdns
+DEBUG: query_mdns returned 0 results: []
