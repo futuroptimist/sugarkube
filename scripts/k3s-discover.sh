@@ -2542,6 +2542,7 @@ wait_for_api() {
     "SERVER_PORT=${port}"
     "TIMEOUT=${API_READY_TIMEOUT}"
     "SERVER_IP=127.0.0.1"
+    "ALLOW_HTTP_401=1"
   )
   if [ -n "${API_READY_POLL_INTERVAL}" ]; then
     check_env+=("POLL_INTERVAL=${API_READY_POLL_INTERVAL}")
@@ -2581,7 +2582,7 @@ for raw in output.splitlines():
 if not selected:
     sys.exit(1)
 
-keys = ("outcome", "attempts", "elapsed", "status", "reason", "last_status", "host", "port", "ip")
+keys = ("outcome", "attempts", "elapsed", "status", "reason", "last_status", "host", "port", "ip", "mode")
 for key in keys:
     if key in selected:
         print(f"{key}={selected[key]}")
@@ -2597,6 +2598,7 @@ PY
   local parsed_host=""
   local parsed_port=""
   local parsed_ip=""
+  local mode=""
 
   if [ -n "${parse_output}" ]; then
     while IFS='=' read -r key value; do
@@ -2610,6 +2612,7 @@ PY
         host) parsed_host="${value}" ;;
         port) parsed_port="${value}" ;;
         ip) parsed_ip="${value}" ;;
+        mode) mode="${value}" ;;
       esac
     done <<<"${parse_output}"
   fi
@@ -2634,6 +2637,9 @@ PY
     fi
     if [ -n "${http_status}" ]; then
       log_fields+=("status=${http_status}")
+    fi
+    if [ -n "${mode}" ]; then
+      log_fields+=("mode=${mode}")
     fi
     log_info discover "${log_fields[@]}" >&2
     return 0

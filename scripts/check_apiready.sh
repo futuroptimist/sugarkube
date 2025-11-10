@@ -14,6 +14,7 @@ if [ "$#" -gt 0 ]; then
   shift || true
 fi
 SERVER_IP="${SERVER_IP:-}"
+ALLOW_HTTP_401="${ALLOW_HTTP_401:-0}"
 TIMEOUT_RAW="${TIMEOUT:-120}"
 POLL_INTERVAL_RAW="${POLL_INTERVAL:-2}"
 
@@ -151,24 +152,52 @@ while :; do
     http_code="000"
   fi
 
-  if [ "${curl_status}" -eq 0 ] && [ "${http_code}" = "200" ]; then
-    if validate_ready_body "${body_file}"; then
+  if [ "${curl_status}" -eq 0 ]; then
+    if [ "${http_code}" = "200" ]; then
+      if validate_ready_body "${body_file}"; then
+        elapsed=$(( $(date +%s) - start_epoch ))
+        log_fields=(
+          "outcome=ok"
+          "host=\"$(escape_log_value "${SERVER_HOST}")\""
+          "port=\"$(escape_log_value "${SERVER_PORT}")\""
+          "attempts=${attempt}"
+          "elapsed=${elapsed}"
+          "status=${http_code}"
+          "mode=ready"
+        )
+        if [ -n "${SERVER_IP}" ]; then
+          log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
+        fi
+        log_kv info apiready "${log_fields[@]}"
+        exit 0
+      fi
+      last_reason="body_not_ok"
+    elif [ "${http_code}" = "401" ] && [ "${ALLOW_HTTP_401}" = "1" ]; then
       elapsed=$(( $(date +%s) - start_epoch ))
       log_fields=(
-        "outcome=ok"
+        "outcome=alive"
         "host=\"$(escape_log_value "${SERVER_HOST}")\""
         "port=\"$(escape_log_value "${SERVER_PORT}")\""
         "attempts=${attempt}"
         "elapsed=${elapsed}"
         "status=${http_code}"
+        "mode=alive"
       )
       if [ -n "${SERVER_IP}" ]; then
         log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
       fi
       log_kv info apiready "${log_fields[@]}"
       exit 0
+    else
+      case "${http_code}" in
+        401)
+          last_reason="http_401"
+          ;;
+        *)
+          last_reason="unexpected_status"
+          ;;
+      esac
     fi
-    last_reason="body_not_ok"
   else
     last_reason="curl_failed"
   fi

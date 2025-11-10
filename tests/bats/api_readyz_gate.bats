@@ -25,23 +25,35 @@ PY
 
 start_readyz_server() {
   local port="$1"
+  local responses_override="${2:-}"
   local cert="${BATS_TEST_TMPDIR}/server.crt"
   local key="${BATS_TEST_TMPDIR}/server.key"
   openssl req -x509 -nodes -newkey rsa:2048 \
     -subj '/CN=localhost' \
     -keyout "${key}" -out "${cert}" -days 1 >/dev/null 2>&1
   cat <<'PY' >"${BATS_TEST_TMPDIR}/ready_server.py"
+import ast
 import http.server
 import os
 import ssl
 import sys
 from pathlib import Path
 
-RESPONSES = [
+DEFAULT_RESPONSES = [
     (503, "service unavailable"),
     (200, "[+]etcd failed\n"),
     (200, "[+]etcd ok\n[+]log ok\nreadyz check passed\n"),
 ]
+
+raw_override = os.environ.get("READYZ_RESPONSES_OVERRIDE", "")
+if raw_override:
+    try:
+        parsed = ast.literal_eval(raw_override)
+        RESPONSES = [(int(code), str(body)) for code, body in parsed]
+    except Exception:  # pragma: no cover - defensive fallback
+        RESPONSES = DEFAULT_RESPONSES
+else:
+    RESPONSES = DEFAULT_RESPONSES
 
 attempts = 0
 
@@ -85,9 +97,18 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 PY
-  python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" &
+  if [ -n "${responses_override}" ]; then
+    READYZ_RESPONSES_OVERRIDE="${responses_override}" \
+      python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" &
+  else
+    python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" &
+  fi
   SERVER_PID=$!
   sleep 0.5
+}
+
+reset_readyz_attempts() {
+  : >"${ATTEMPT_FILE}"
 }
 
 @test "api ready gate waits for readyz ok" {
@@ -97,6 +118,7 @@ PY
     skip "unable to allocate ephemeral port"
   fi
   start_readyz_server "${port}"
+  reset_readyz_attempts
 
   run env \
     SERVER_HOST=localhost \
@@ -112,4 +134,65 @@ PY
   [[ "$output" =~ attempts=3 ]]
   [ -f "${ATTEMPT_FILE}" ]
   [ "$(cat "${ATTEMPT_FILE}")" -eq 3 ]
+}
+
+@test "401 is treated as alive when ALLOW_HTTP_401=1" {
+  local responses
+  responses="$(python3 - <<'PY'
+import json
+print(json.dumps([(401, "auth required"), (200, "readyz check passed\n")]))
+PY
+)"
+
+  local port
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+  start_readyz_server "${port}" "${responses}"
+  reset_readyz_attempts
+
+  run env \
+    ALLOW_HTTP_401=1 \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=5 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=apiready ]]
+  [[ "$output" =~ outcome=alive ]]
+  [[ "$output" =~ mode=alive ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -eq 1 ]
+
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    wait "${SERVER_PID}" 2>/dev/null || true
+    SERVER_PID=""
+  fi
+
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+  start_readyz_server "${port}" "${responses}"
+  reset_readyz_attempts
+
+  run env \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=5 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=apiready ]]
+  [[ "$output" =~ outcome=ok ]]
+  [[ ! "$output" =~ mode=alive ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -ge 2 ]
 }
