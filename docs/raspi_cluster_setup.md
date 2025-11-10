@@ -29,6 +29,14 @@ export SUGARKUBE_SERVERS=3
 just up dev              # 2nd run bootstraps or joins k3s
 ```
 
+- **Capture logs when debugging.** If you need to persist long `just up dev` transcripts for later
+  analysis, export `SAVE_DEBUG_LOGS=1` before running the command. Each invocation writes a sanitized
+  log to `debug-logs/` named `<hostname>_<commit-hash>_<YYYYMMDDTHHMMSSZ>_just-up-dev.log`. The file
+  includes the hostname, commit that was checked out, and a UTC timestamp so you can keep
+  `sugarkube0`/`sugarkube1` runs in sync. The sanitizer strips external IPs, bearer tokens, and other
+  credentials before the log is saved. When you finish debugging, run `unset SAVE_DEBUG_LOGS` (or
+  `export SAVE_DEBUG_LOGS=0`) in the same shell to stop capturing new logs.
+
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
 - **HA by default.** Exporting `SUGARKUBE_SERVERS=3` before each run tells `just up` to form an embedded-etcd quorum. Keep it at an odd number (3, 5, …) for resilient control planes.
 

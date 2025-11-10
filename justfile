@@ -48,6 +48,19 @@ up env='dev':
         summary::emit() { :; }
     fi
 
+    if [ -z "${SUGARKUBE_DEBUG_LOG_LIB:-}" ] && [ -f "{{ invocation_directory() }}/scripts/lib/debug_log_capture.sh" ]; then
+        SUGARKUBE_DEBUG_LOG_LIB="{{ invocation_directory() }}/scripts/lib/debug_log_capture.sh"
+    fi
+    : "${SUGARKUBE_DEBUG_LOG_LIB:=/home/pi/sugarkube/scripts/lib/debug_log_capture.sh}"
+    if [ -f "${SUGARKUBE_DEBUG_LOG_LIB}" ]; then
+        # shellcheck disable=SC1090
+        source "${SUGARKUBE_DEBUG_LOG_LIB}"
+    fi
+
+    if command -v debug_logs::start >/dev/null 2>&1; then
+        debug_logs::start "{{ invocation_directory() }}" "just-up-dev" || true
+    fi
+
     # Always emit summary on exit (best-effort)
     trap 'summary::emit || true' EXIT
 
@@ -76,6 +89,10 @@ up env='dev':
             summary::emit || true
         elif command -v summary_finalize >/dev/null 2>&1; then
             summary_finalize
+        fi
+        if command -v debug_logs::finalize >/dev/null 2>&1; then
+            debug_logs::finalize "${status}"
+            status="$?"
         fi
         if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
             rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
