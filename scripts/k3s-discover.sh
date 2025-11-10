@@ -2530,6 +2530,7 @@ wait_for_bootstrap_activity() {
 }
 
 wait_for_api() {
+  local allow_http_401="${1:-0}"
   if [ -z "${API_READY_CHECK_BIN}" ] || [ ! -x "${API_READY_CHECK_BIN}" ]; then
     log_error_msg discover "Local API readiness helper missing" "script=${API_READY_CHECK_BIN}" "phase=api_ready_local"
     return 1
@@ -2543,6 +2544,9 @@ wait_for_api() {
     "TIMEOUT=${API_READY_TIMEOUT}"
     "SERVER_IP=127.0.0.1"
   )
+  if [ "${allow_http_401}" = "1" ]; then
+    check_env+=("ALLOW_HTTP_401=1")
+  fi
   if [ -n "${API_READY_POLL_INTERVAL}" ]; then
     check_env+=("POLL_INTERVAL=${API_READY_POLL_INTERVAL}")
   fi
@@ -2581,7 +2585,7 @@ for raw in output.splitlines():
 if not selected:
     sys.exit(1)
 
-keys = ("outcome", "attempts", "elapsed", "status", "reason", "last_status", "host", "port", "ip")
+keys = ("outcome", "attempts", "elapsed", "status", "reason", "last_status", "host", "port", "ip", "mode")
 for key in keys:
     if key in selected:
         print(f"{key}={selected[key]}")
@@ -2597,6 +2601,7 @@ PY
   local parsed_host=""
   local parsed_port=""
   local parsed_ip=""
+  local mode=""
 
   if [ -n "${parse_output}" ]; then
     while IFS='=' read -r key value; do
@@ -2610,6 +2615,7 @@ PY
         host) parsed_host="${value}" ;;
         port) parsed_port="${value}" ;;
         ip) parsed_ip="${value}" ;;
+        mode) mode="${value}" ;;
       esac
     done <<<"${parse_output}"
   fi
@@ -2634,6 +2640,9 @@ PY
     fi
     if [ -n "${http_status}" ]; then
       log_fields+=("status=${http_status}")
+    fi
+    if [ -n "${mode}" ]; then
+      log_fields+=("mode=${mode}")
     fi
     log_info discover "${log_fields[@]}" >&2
     return 0
@@ -2666,6 +2675,9 @@ PY
   fi
   if [ -n "${parsed_ip}" ]; then
     warn_fields+=("ip=\"$(escape_log_value "${parsed_ip}")\"")
+  fi
+  if [ -n "${mode}" ]; then
+    warn_fields+=("mode=${mode}")
   fi
   log_warn_msg discover "Local API readiness helper failed" "${warn_fields[@]}"
   return "${status}"
@@ -3233,7 +3245,7 @@ install_server_single() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   )
-  if wait_for_api; then
+  if wait_for_api 1; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_single"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -3287,7 +3299,7 @@ install_server_cluster_init() {
       --node-label "sugarkube.env=${ENVIRONMENT}" \
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   )
-  if wait_for_api; then
+  if wait_for_api 1; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then

@@ -6,10 +6,7 @@ setup() {
 }
 
 teardown() {
-  if [ -n "${SERVER_PID:-}" ]; then
-    kill "${SERVER_PID}" 2>/dev/null || true
-    wait "${SERVER_PID}" 2>/dev/null || true
-  fi
+  stop_readyz_server
 }
 
 find_free_port() {
@@ -25,25 +22,39 @@ PY
 
 start_readyz_server() {
   local port="$1"
+  local responses_file="${2:-}"
   local cert="${BATS_TEST_TMPDIR}/server.crt"
   local key="${BATS_TEST_TMPDIR}/server.key"
   openssl req -x509 -nodes -newkey rsa:2048 \
     -subj '/CN=localhost' \
     -keyout "${key}" -out "${cert}" -days 1 >/dev/null 2>&1
+  if [ -z "${responses_file}" ]; then
+    responses_file="${BATS_TEST_TMPDIR}/readyz_responses.pydata"
+    cat <<'EOF' >"${responses_file}"
+[
+    (503, "service unavailable"),
+    (200, "[+]etcd failed\n"),
+    (200, "[+]etcd ok\n[+]log ok\nreadyz check passed\n"),
+]
+EOF
+  fi
   cat <<'PY' >"${BATS_TEST_TMPDIR}/ready_server.py"
+import ast
 import http.server
 import os
 import ssl
 import sys
 from pathlib import Path
 
-RESPONSES = [
-    (503, "service unavailable"),
-    (200, "[+]etcd failed\n"),
-    (200, "[+]etcd ok\n[+]log ok\nreadyz check passed\n"),
-]
-
 attempts = 0
+RESPONSES = []
+
+
+def load_responses(responses_path: str) -> None:
+    global RESPONSES
+    text = Path(responses_path).read_text(encoding="utf-8")
+    RESPONSES = ast.literal_eval(text)
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -74,7 +85,9 @@ def main() -> None:
     cert = sys.argv[2]
     key = sys.argv[3]
     attempt_file = sys.argv[4]
+    responses_path = sys.argv[5]
     os.environ["ATTEMPT_FILE"] = attempt_file
+    load_responses(responses_path)
     server = http.server.HTTPServer(("127.0.0.1", port), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=cert, keyfile=key)
@@ -85,9 +98,17 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 PY
-  python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" &
+  python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" "${responses_file}" &
   SERVER_PID=$!
   sleep 0.5
+}
+
+stop_readyz_server() {
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    wait "${SERVER_PID}" 2>/dev/null || true
+    SERVER_PID=""
+  fi
 }
 
 @test "api ready gate waits for readyz ok" {
@@ -112,4 +133,71 @@ PY
   [[ "$output" =~ attempts=3 ]]
   [ -f "${ATTEMPT_FILE}" ]
   [ "$(cat "${ATTEMPT_FILE}")" -eq 3 ]
+}
+
+@test "401 is treated as alive when ALLOW_HTTP_401=1" {
+  local port
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+
+  local responses_file
+  responses_file="${BATS_TEST_TMPDIR}/readyz_responses_401.pydata"
+  cat <<'EOF' >"${responses_file}"
+[
+    (401, "auth required"),
+    (200, "readyz check passed\n"),
+]
+EOF
+  start_readyz_server "${port}" "${responses_file}"
+
+  run env \
+    ALLOW_HTTP_401=1 \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=5 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=apiready ]]
+  [[ "$output" =~ outcome=alive ]]
+  [[ "$output" =~ mode=alive ]]
+  [[ "$output" =~ status=401 ]]
+  [[ "$output" =~ attempts=1 ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -eq 1 ]
+
+  stop_readyz_server
+  rm -f "${ATTEMPT_FILE}"
+
+  local port_fail
+  port_fail="$(find_free_port)"
+  if [ -z "${port_fail}" ]; then
+    skip "unable to allocate ephemeral port for failure case"
+  fi
+
+  local responses_fail
+  responses_fail="${BATS_TEST_TMPDIR}/readyz_responses_401_only.pydata"
+  cat <<'EOF' >"${responses_fail}"
+[
+    (401, "auth required"),
+]
+EOF
+  start_readyz_server "${port_fail}" "${responses_fail}"
+
+  run env \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port_fail}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=3 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ event=apiready ]]
+  [[ "$output" =~ outcome=timeout ]]
+  [[ "$output" =~ last_status="401:0" ]]
 }
