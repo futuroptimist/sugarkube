@@ -2,7 +2,7 @@
 
 **Context**: Review requested by @futuroptimist to scan all existing tests for potential XY problems after discovering k3s integration tests (Tests 6-8) were attempting to run actual k3s installation instead of testing discovery logic.
 
-**Methodology**: Analyzed all 41 BATS tests against the real use case documented in `docs/raspi_cluster_setup.md`.
+**Methodology**: Analyzed all 42 BATS tests against the real use case documented in `docs/raspi_cluster_setup.md`.
 
 ## Real Use Case Summary
 
