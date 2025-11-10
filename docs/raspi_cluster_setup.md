@@ -29,6 +29,27 @@ export SUGARKUBE_SERVERS=3
 just up dev              # 2nd run bootstraps or joins k3s
 ```
 
+### Optional: capture sanitized debug logs for Codex sessions
+
+When `SAVE_DEBUG_LOGS` is exported, `just up` mirrors its output into
+`logs/debug/just-up/` with filenames that include the node hostname, the checked-out
+commit hash, and a UTC timestamp. The stream is sanitised before hitting disk: Pi
+join tokens and external IPs are replaced with `<REDACTED>` placeholders so the
+logs stay safe to commit.
+
+```bash
+export SAVE_DEBUG_LOGS=1
+just up dev
+
+# Once you've grabbed the logs, stop capturing in this shell
+unset SAVE_DEBUG_LOGS
+```
+
+Each invocation writes a new file even if you interrupt the run with `Ctrl+C`, so
+you can collect paired logs from `sugarkube0` and `sugarkube1` for debugging in a
+later Codex session. Commit the resulting files when you need to share them with
+future LLM runs.
+
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
 - **HA by default.** Exporting `SUGARKUBE_SERVERS=3` before each run tells `just up` to form an embedded-etcd quorum. Keep it at an odd number (3, 5, …) for resilient control planes.
 

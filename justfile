@@ -23,6 +23,48 @@ up env='dev':
     if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
     if [ "{{ env }}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_PROD"; fi
 
+    if [ -n "${SAVE_DEBUG_LOGS:-}" ]; then
+        if [ -z "${SUGARKUBE_DEBUG_LOG_CAPTURE_BIN:-}" ]; then
+            if [ -x "{{ invocation_directory() }}/scripts/lib/capture_debug_log.py" ]; then
+                SUGARKUBE_DEBUG_LOG_CAPTURE_BIN="{{ invocation_directory() }}/scripts/lib/capture_debug_log.py"
+            else
+                SUGARKUBE_DEBUG_LOG_CAPTURE_BIN="/home/pi/sugarkube/scripts/lib/capture_debug_log.py"
+            fi
+        fi
+        export SUGARKUBE_DEBUG_LOG_CAPTURE_BIN
+
+        export SUGARKUBE_DEBUG_LOG_ROOT="${SUGARKUBE_DEBUG_LOG_ROOT:-{{ invocation_directory() }}/logs/debug}"
+        export SUGARKUBE_DEBUG_LOG_DIR="${SUGARKUBE_DEBUG_LOG_DIR:-${SUGARKUBE_DEBUG_LOG_ROOT}/just-up}"
+        mkdir -p "${SUGARKUBE_DEBUG_LOG_DIR}"
+
+        commit_hash="$(git -C "{{ invocation_directory() }}" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+        timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+        hostname_raw="$(hostname 2>/dev/null || echo 'unknown-host')"
+        hostname_sanitized="$(printf '%s' "${hostname_raw}" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]-_' '-')"
+        hostname_sanitized="${hostname_sanitized##-}"
+        hostname_sanitized="${hostname_sanitized%%-}"
+        if [ -z "${hostname_sanitized}" ]; then
+            hostname_sanitized="unknown-host"
+        fi
+
+        export SUGARKUBE_DEBUG_LOG_FILE="${SUGARKUBE_DEBUG_LOG_DIR}/${hostname_sanitized}-${commit_hash}-${timestamp}.log"
+        : > "${SUGARKUBE_DEBUG_LOG_FILE}"
+
+        export SUGARKUBE_DEBUG_MASK_FILE="$(mktemp -t sugarkube-debug-mask.XXXXXX)"
+        for candidate in SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_INT SUGARKUBE_TOKEN_PROD; do
+            if [ -n "${!candidate:-}" ]; then
+                printf '%s\n' "${!candidate}" >> "${SUGARKUBE_DEBUG_MASK_FILE}"
+            fi
+        done
+
+        if [ -x "${SUGARKUBE_DEBUG_LOG_CAPTURE_BIN}" ]; then
+            exec > >("${SUGARKUBE_DEBUG_LOG_CAPTURE_BIN}" "${SUGARKUBE_DEBUG_LOG_FILE}") 2>&1
+            printf 'Debug logs enabled. Saving to %s\n' "${SUGARKUBE_DEBUG_LOG_FILE}"
+        else
+            printf 'SAVE_DEBUG_LOGS was set but %s is not executable.\n' "${SUGARKUBE_DEBUG_LOG_CAPTURE_BIN}" >&2
+        fi
+    fi
+
     export SUGARKUBE_ENV="{{ env }}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
@@ -79,6 +121,9 @@ up env='dev':
         fi
         if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
             rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
+        fi
+        if [ -n "${SUGARKUBE_DEBUG_MASK_FILE:-}" ]; then
+            rm -f "${SUGARKUBE_DEBUG_MASK_FILE}" 2>/dev/null || true
         fi
         return "${status}"
     }
