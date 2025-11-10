@@ -153,7 +153,7 @@ The 20-minute attempt confirms that these tests are genuinely complex integratio
 
 **Recommendation**: Do not attempt these tests in time-constrained PRs. Instead, focus on:
 1. Documentation improvements (like this investigation report)
-2. Low-hanging fruit fixes (already completed - 38/41 tests passing)
+2. Low-hanging fruit fixes (already completed - 38/42 tests passing, now 42/42 as of 2025-11-10)
 3. Infrastructure improvements that make future work easier
 
 This investigation provides a foundation for future work and validates the "partial progress" approach outlined in the problem statement.

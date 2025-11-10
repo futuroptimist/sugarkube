@@ -1,0 +1,16 @@
+{
+  "id": "2025-11-10-test-count-documentation-synchronization",
+  "date": "2025-11-10",
+  "component": "notes/2025-11-05-ci-test-status-verified.md, notes/ci-test-fixes-action-plan.md, notes/test-suite-xy-analysis-20251108.md, notes/k3s-integration-tests-investigation-20251108.md",
+  "rootCause": "Multiple documentation files still referenced the incorrect test count of '41/41 tests' when the actual count is 42 tests. The 2 l4_probe tests (Tests 17-18) were previously miscounted as non-existent because they use conditional skip patterns (command -v ncat || skip). In CI where ncat is installed, all 42 tests pass. Locally without ncat, 40 tests pass and 2 conditionally skip. This led to documentation inconsistencies across multiple notes files after the 2025-11-10 test count correction was documented in ci-test-failures-remaining-work.md and skipped-tests-status.md but not propagated to all related documents.",
+  "resolution": "Updated all references to '41/41 tests' to '42/42 tests' (or '40/42 locally + 2 conditional skips' where appropriate) across 4 documentation files: 2025-11-05-ci-test-status-verified.md (lines 138, 144), ci-test-fixes-action-plan.md (line 1034), test-suite-xy-analysis-20251108.md (lines 78, 96), and k3s-integration-tests-investigation-20251108.md (line 156). Added clarifying notes that CI achieves 100% pass rate (42/42) while local environments may have 2 conditional skips when ncat is unavailable. This ensures documentation accurately reflects the test suite composition and prevents future confusion.",
+  "references": [
+    "notes/2025-11-05-ci-test-status-verified.md",
+    "notes/ci-test-fixes-action-plan.md",
+    "notes/test-suite-xy-analysis-20251108.md",
+    "notes/k3s-integration-tests-investigation-20251108.md",
+    "notes/ci-test-failures-remaining-work.md:25-29",
+    "notes/skipped-tests-status.md:27-34",
+    "outages/2025-11-10-test-count-documentation-correction.json"
+  ]
+}
