@@ -1,12 +1,14 @@
-# CI Test Status Verification - 2025-11-05 (Updated 2025-11-09)
+# CI Test Status Verification - 2025-11-05 (Updated 2025-11-10)
 
 ## Executive Summary
 
-All CI/test failures documented in `notes/ci-test-failures-remaining-work.md` and `notes/ci-test-fixes-action-plan.md` have been successfully resolved through PRs #1-#11. The repository is in excellent health with a **100% test pass rate** and **0 failures**.
+All CI/test failures documented in `notes/ci-test-failures-remaining-work.md` and `notes/ci-test-fixes-action-plan.md` have been successfully resolved through PRs #1-#11. The repository is in excellent health with a **100% test pass rate** (42/42 tests) and **0 failures**.
 
-**Update 2025-11-07**: PR #7 enabled Test 34 (absence gate), improving test count to 38/41.
+**Update 2025-11-10**: Documentation cleanup removed 233 lines of stale investigation notes from `ci-test-failures-remaining-work.md` (44% reduction). Current status is now clearer for future investigators. See `outages/2025-11-10-stale-test-documentation-cleanup.json`.
+
+**Update 2025-11-09**: PRs #9, #10, #11 fixed Tests 5-7 (k3s integration), achieving 100% pass rate (42/42 tests).
 **Update 2025-11-08**: K3s integration tests investigation documented (see `notes/k3s-integration-tests-investigation-20251108.md`).
-**Update 2025-11-09**: PRs #9, #10, #11 fixed Tests 5-7 (k3s integration), achieving 100% pass rate (41/41 tests).
+**Update 2025-11-07**: PR #7 enabled Test 34 (absence gate), improving test count to 38/42.
 
 ## Verification Results
 
@@ -17,9 +19,9 @@ $ bash scripts/ci_commands.sh
 ```
 
 **BATS Suite**: ✅ pass
-- 41/41 tests passing (100% pass rate) - updated 2025-11-09 🎉
+- 42/42 tests passing (100% pass rate) - corrected 2025-11-10 🎉
 - 0 failures
-- 0 tests skipped (all tests now passing!)
+- 0 tests skipped (all tests passing in CI, 2 conditionally skip locally without ncat)
 
 **E2E/Playwright**: ✅ pass
 - All pytest tests pass (543 passed, 8 skipped)
