@@ -857,27 +857,15 @@ if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] && [ "${MDNS_RESOLUTION_STATUS_R
   # Browse succeeded but resolution failed (either resolve_failed or ipv4_mismatch)
   # Treat this as a warning since the service was found but couldn't be validated
   if [ "${last_reason}" = "resolve_failed" ] || [ "${last_reason}" = "ipv4_mismatch" ]; then
-    warn_command_kv=""
-    warn_duration_kv=""
+    warn_kv_args=()
     if [ -n "${MDNS_LAST_FAILURE_COMMAND}" ]; then
-      warn_command_kv="command=\"$(kv_escape "${MDNS_LAST_FAILURE_COMMAND}")\""
+      warn_kv_args+=("command=\"$(kv_escape "${MDNS_LAST_FAILURE_COMMAND}")\"")
     fi
     if [ -n "${MDNS_LAST_FAILURE_DURATION}" ]; then
-      warn_duration_kv="command_duration_ms=${MDNS_LAST_FAILURE_DURATION}"
+      warn_kv_args+=("command_duration_ms=${MDNS_LAST_FAILURE_DURATION}")
     fi
-    if [ -n "${warn_command_kv}" ] && [ -n "${warn_duration_kv}" ]; then
-      mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_command_kv}" "${warn_duration_kv}"
-      log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}" "${warn_duration_kv}"
-    elif [ -n "${warn_command_kv}" ]; then
-      mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_command_kv}"
-      log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_command_kv}"
-    elif [ -n "${warn_duration_kv}" ]; then
-      mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" "${warn_duration_kv}"
-      log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_duration_kv}"
-    else
-      mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}"
-      log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}"
-    fi
+    mdns_resolution_status_emit warn attempts="${ATTEMPTS}" misses="${miss_count}" ms_elapsed="${elapsed_ms}" host="${EXPECTED_HOST}" reason="${last_reason}" "${warn_kv_args[@]}"
+    log_info mdns_selfcheck outcome=warn attempts="${ATTEMPTS}" misses="${miss_count}" reason="${last_reason}" ms_elapsed="${elapsed_ms}" "${warn_kv_args[@]}"
     exit 0
   fi
 fi
