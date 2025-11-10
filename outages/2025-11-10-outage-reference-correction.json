@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-10-outage-reference-correction",
+  "date": "2025-11-10",
+  "component": "notes/ci-test-failures-remaining-work.md, notes/skipped-tests-status.md",
+  "rootCause": "Documentation contained broken references to a non-existent outage file '2025-11-09-test7-discover-flow-follower-unskip.json'. The actual outage file created for Test 7 was named '2025-11-09-test7-discover-flow-follower-missing-stubs.json' (focusing on the missing stubs root cause), not 'unskip'. This naming discrepancy occurred because the initial investigation revealed Test 7 was missing critical stub infrastructure from Test 6, not simply a skip directive removal. The references were found in ci-test-failures-remaining-work.md line 57 and skipped-tests-status.md line 338.",
+  "resolution": "Updated both documentation files to reference the correct outage filename '2025-11-09-test7-discover-flow-follower-missing-stubs.json'. This aligns with the actual fix that was implemented - adding missing stubs (timeout, journalctl, sleep, gdbus, busctl, directories, avahi.conf) following the Test 6 pattern. The correct filename better reflects the root cause (missing infrastructure) rather than just removing a skip directive. Verified all other outage references in notes/*.md point to existing files.",
+  "references": [
+    "notes/ci-test-failures-remaining-work.md:57",
+    "notes/skipped-tests-status.md:338",
+    "outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json"
+  ]
+}

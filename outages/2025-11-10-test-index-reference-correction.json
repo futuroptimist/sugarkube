@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-10-test-index-reference-correction",
+  "date": "2025-11-10",
+  "component": "notes/2025-11-05-ci-test-status-verified.md",
+  "rootCause": "After multiple rounds of test count corrections and documentation synchronization (2025-11-10), one outdated reference remained in notes/2025-11-05-ci-test-status-verified.md line 126. The note stated 'Test numbers refer to global test index (1-41)' when the correct count is 42 tests. This reference also used an outdated 'global test index' terminology that was replaced with position-based numbering in notes/test-numbering-standardization.md. The reference was in a 'Future Work' section discussing previously-skipped tests that have since been fixed, making the outdated terminology more problematic for future readers.",
+  "resolution": "Updated line 126 of notes/2025-11-05-ci-test-status-verified.md to use the current position-based numbering convention: 'Test numbers refer to position in discover_flow.bats (see notes/test-numbering-standardization.md)'. This removes the outdated '1-41' reference and aligns with the standardized test numbering approach documented in 2025-11-09. Verified no other documentation files contain outdated test index references using grep search across all notes/*.md files. This completes the final synchronization of test numbering documentation started with the test count correction effort on 2025-11-10.",
+  "references": [
+    "notes/2025-11-05-ci-test-status-verified.md:126",
+    "notes/test-numbering-standardization.md",
+    "outages/2025-11-10-test-count-final-synchronization.json",
+    "outages/2025-11-09-test-numbering-standardization.json"
+  ]
+}

@@ -28,7 +28,7 @@ Based on position of `@test` declarations in `tests/bats/discover_flow.bats`:
 | Test 4 | 386 | "discover flow waits for Avahi liveness after reload" | ✅ Passing |
 | **Test 5** | **513** | **"discover flow joins existing server when discovery succeeds"** | ✅ FIXED 2025-11-09 |
 | **Test 6** | **646** | **"discover flow elects winner after self-check failure"** | ✅ FIXED 2025-11-09 |
-| **Test 7** | **788** | **"discover flow remains follower after self-check failure"** | ⏭️ SKIPPED (CURRENT WORK) |
+| **Test 7** | **788** | **"discover flow remains follower after self-check failure"** | ✅ FIXED 2025-11-09 |
 | Test 8 | 834 | "run_k3s_install uses stub when SUGARKUBE_K3S_INSTALL_SCRIPT is set" | ✅ Passing |
 | Test 9 | 863 | "Avahi check warns on IPv4 suffix and can auto-fix" | ✅ Passing |
 
