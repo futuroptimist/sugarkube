@@ -222,7 +222,7 @@ while :; do
       "port=\"$(escape_log_value "${SERVER_PORT}")\""
       "attempts=${attempt}"
       "elapsed=${elapsed}"
-      "last_status=\"$(escape_log_value "${last_status}")\""
+      "last_status=${last_status}"
       "reason=${last_reason}"
     )
     if [ -n "${SERVER_IP}" ]; then
