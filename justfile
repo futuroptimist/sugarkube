@@ -45,7 +45,7 @@ up env='dev':
         if [ ! -f "${SUGARKUBE_LOG_FILTER}" ] && [ -f "/home/pi/sugarkube/scripts/filter_debug_log.py" ]; then
             SUGARKUBE_LOG_FILTER="/home/pi/sugarkube/scripts/filter_debug_log.py"
         fi
-        if [ -x "${SUGARKUBE_LOG_FILTER}" ]; then
+        if [ -f "${SUGARKUBE_LOG_FILTER}" ]; then
             : "${SAVE_DEBUG_LOGS_DIR:=logs/up}"
             if mkdir -p "${SAVE_DEBUG_LOGS_DIR}" 2>/dev/null; then
                 commit_hash="$(git -C "{{ invocation_directory() }}" rev-parse --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -55,12 +55,12 @@ up env='dev':
                 log_dir="${SAVE_DEBUG_LOGS_DIR%/}"
                 log_path="${log_dir}/${log_basename}"
                 export SUGARKUBE_DEBUG_LOG_FILE="${log_path}"
-                exec > >("${SUGARKUBE_LOG_FILTER}" --log "${log_path}" --source "just up ${SUGARKUBE_ENV}") 2>&1
+                exec > >(python3 "${SUGARKUBE_LOG_FILTER}" --log "${log_path}" --source "just up ${SUGARKUBE_ENV}") 2>&1
             else
                 printf 'WARNING: SAVE_DEBUG_LOGS=1 but unable to create %s\n' "${SAVE_DEBUG_LOGS_DIR}" >&2
             fi
         else
-            printf 'WARNING: SAVE_DEBUG_LOGS=1 but %s is not executable\n' "${SUGARKUBE_LOG_FILTER}" >&2
+            printf 'WARNING: SAVE_DEBUG_LOGS=1 but %s is missing\n' "${SUGARKUBE_LOG_FILTER}" >&2
         fi
     fi
 

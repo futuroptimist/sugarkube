@@ -60,14 +60,34 @@ def _is_external_ip(candidate: str) -> bool:
 
 
 def _sanitize_ips(line: str) -> str:
-    def replacer(match: re.Match[str]) -> str:
-        token = match.group(0)
+    def replace_ipv4(match: re.Match[str]) -> str:
+        token = match.group(1)
         if _is_external_ip(token):
             return REDACTED_IP
         return token
 
-    ip_pattern = re.compile(r"(?<![:\d])((?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]+:[0-9a-fA-F:]+)")
-    return ip_pattern.sub(replacer, line)
+    def replace_ipv6(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if not any(char.isalnum() for char in token):
+            return token
+        if _is_external_ip(token):
+            return REDACTED_IP
+        return token
+
+    ipv4_pattern = re.compile(
+        r"(?<![:\d])("  # avoid matching timestamps or IPv6 segments
+        r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+        r"(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}"
+        r")"
+    )
+    line = ipv4_pattern.sub(replace_ipv4, line)
+
+    ipv6_candidates = re.compile(
+        r"(?<![0-9A-Fa-f:.])"  # ensure we start at a boundary
+        r"([0-9A-Fa-f:.]*:[0-9A-Fa-f:.]+)"  # require at least one colon
+        r"(?![0-9A-Fa-f:.])"
+    )
+    return ipv6_candidates.sub(replace_ipv6, line)
 
 
 def sanitize_line(line: str, secret_patterns: list[tuple[Pattern[str], str]]) -> str:
@@ -94,7 +114,7 @@ def main() -> int:
 
     secret_patterns = _build_secret_patterns(os.environ.items())
 
-    now = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    now = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     header = [
         "# Sugarkube debug log (sanitized)",
         f"# Source: {args.source}",

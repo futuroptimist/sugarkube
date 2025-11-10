@@ -95,7 +95,7 @@ just up dev
 unset SAVE_DEBUG_LOGS
 ```
 
-With `SAVE_DEBUG_LOGS=1`, Sugarkube streams the console output through a sanitizer that removes secrets and public IP addresses before writing them to `logs/up/`. Each run creates a file named like `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`, combining the UTC timestamp, the checked-out commit, the hostname, and the environment. Logs are still emitted live to the terminal, and a final summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+With `SAVE_DEBUG_LOGS=1`, Sugarkube streams console output through a sanitizer that removes secrets and public IP addresses before writing to `logs/up/`. Each run creates a timestamped file combining the UTC timestamp, commit hash, hostname, and environment (for example, `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`). Logs are emitted live to the terminal, and a summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 
 ### Switch environments as needed
 
