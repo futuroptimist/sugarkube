@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-10-test-count-documentation-correction",
+  "date": "2025-11-10",
+  "component": "notes/ci-test-failures-remaining-work.md",
+  "rootCause": "Documentation across notes/ files incorrectly stated '41/41 BATS tests passing (100%)' when the actual test count is 42 tests total. The confusion arose from treating 2 conditionally-skipped tests (l4_probe tests 17-18 that require ncat) as non-existent rather than recognizing them as part of the test suite. The repository has 42 @test declarations across all .bats files, and all 42 pass in CI where ncat is installed.",
+  "resolution": "Updated test counts throughout notes/ documentation from 41 to 42 total tests. Clarified that the test suite has: (a) 42 tests total, (b) 40 passing + 2 conditionally skipped when running locally without ncat, (c) 42/42 passing (100%) in CI where ncat is installed. Added clear distinction between 'skipped' (needs fixing) vs 'conditionally skipped' (passes when dependencies available). This accurately reflects that the CI test suite has achieved 100% pass rate goal.",
+  "references": [
+    "notes/ci-test-failures-remaining-work.md",
+    "notes/skipped-tests-status.md",
+    "tests/bats/l4_probe.bats:39-68",
+    ".github/workflows/ci.yml:38"
+  ]
+}
