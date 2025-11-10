@@ -2542,6 +2542,7 @@ wait_for_api() {
     "SERVER_PORT=${port}"
     "TIMEOUT=${API_READY_TIMEOUT}"
     "SERVER_IP=127.0.0.1"
+    "ALLOW_HTTP_401=1"
   )
   if [ -n "${API_READY_POLL_INTERVAL}" ]; then
     check_env+=("POLL_INTERVAL=${API_READY_POLL_INTERVAL}")

@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
 
+ALLOW_HTTP_401="${ALLOW_HTTP_401:-0}"
+
 SERVER_HOST="${SERVER_HOST:-${1:-}}"
 if [ -n "${SERVER_HOST}" ] && [ "$#" -gt 0 ]; then
   shift || true
@@ -136,6 +138,7 @@ last_reason=""
 
 while :; do
   attempt=$((attempt + 1))
+  current_reason=""
   : >"${body_file}"
   : >"${error_file}"
 
@@ -151,27 +154,56 @@ while :; do
     http_code="000"
   fi
 
-  if [ "${curl_status}" -eq 0 ] && [ "${http_code}" = "200" ]; then
-    if validate_ready_body "${body_file}"; then
-      elapsed=$(( $(date +%s) - start_epoch ))
-      log_fields=(
-        "outcome=ok"
-        "host=\"$(escape_log_value "${SERVER_HOST}")\""
-        "port=\"$(escape_log_value "${SERVER_PORT}")\""
-        "attempts=${attempt}"
-        "elapsed=${elapsed}"
-        "status=${http_code}"
-      )
-      if [ -n "${SERVER_IP}" ]; then
-        log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
+  success=0
+  outcome=""
+  mode=""
+  if [ "${curl_status}" -eq 0 ]; then
+    if [ "${http_code}" = "200" ]; then
+      if validate_ready_body "${body_file}"; then
+        success=1
+        outcome="ok"
+      else
+        current_reason="body_not_ok"
       fi
-      log_kv info apiready "${log_fields[@]}"
-      exit 0
+    elif [ "${http_code}" = "401" ] && [ "${ALLOW_HTTP_401}" = "1" ]; then
+      success=1
+      outcome="alive"
+      mode="alive"
+    else
+      if [ "${http_code}" = "401" ]; then
+        current_reason="unauthorized"
+      else
+        current_reason="curl_failed"
+      fi
     fi
-    last_reason="body_not_ok"
   else
-    last_reason="curl_failed"
+    current_reason="curl_failed"
   fi
+
+  if [ "${success}" -eq 1 ]; then
+    elapsed=$(( $(date +%s) - start_epoch ))
+    log_fields=(
+      "outcome=${outcome:-ok}"
+      "host=\"$(escape_log_value "${SERVER_HOST}")\""
+      "port=\"$(escape_log_value "${SERVER_PORT}")\""
+      "attempts=${attempt}"
+      "elapsed=${elapsed}"
+      "status=${http_code}"
+    )
+    if [ -n "${mode}" ]; then
+      log_fields+=("mode=${mode}")
+    fi
+    if [ -n "${SERVER_IP}" ]; then
+      log_fields+=("ip=\"$(escape_log_value "${SERVER_IP}")\"")
+    fi
+    log_kv info apiready "${log_fields[@]}"
+    exit 0
+  fi
+
+  if [ -z "${current_reason}" ]; then
+    current_reason="curl_failed"
+  fi
+  last_reason="${current_reason}"
   last_status="${http_code}:${curl_status}"
 
   retry_fields=(

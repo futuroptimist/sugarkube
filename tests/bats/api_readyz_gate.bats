@@ -25,23 +25,48 @@ PY
 
 start_readyz_server() {
   local port="$1"
+  local responses_json="${2:-}"
   local cert="${BATS_TEST_TMPDIR}/server.crt"
   local key="${BATS_TEST_TMPDIR}/server.key"
+  : >"${ATTEMPT_FILE}"
   openssl req -x509 -nodes -newkey rsa:2048 \
     -subj '/CN=localhost' \
     -keyout "${key}" -out "${cert}" -days 1 >/dev/null 2>&1
   cat <<'PY' >"${BATS_TEST_TMPDIR}/ready_server.py"
 import http.server
+import json
 import os
 import ssl
 import sys
 from pathlib import Path
 
-RESPONSES = [
+DEFAULT_RESPONSES = [
     (503, "service unavailable"),
     (200, "[+]etcd failed\n"),
     (200, "[+]etcd ok\n[+]log ok\nreadyz check passed\n"),
 ]
+
+RAW_RESPONSES = os.environ.get("READY_RESPONSES_JSON", "")
+RESPONSES = DEFAULT_RESPONSES
+if RAW_RESPONSES:
+    try:
+        loaded = json.loads(RAW_RESPONSES)
+    except json.JSONDecodeError:
+        loaded = []
+    if isinstance(loaded, list):
+        parsed = []
+        for entry in loaded:
+            if not isinstance(entry, dict):
+                continue
+            status = entry.get("status", 200)
+            body = entry.get("body", "")
+            try:
+                status_int = int(status)
+            except (TypeError, ValueError):
+                continue
+            parsed.append((status_int, str(body)))
+        if parsed:
+            RESPONSES = parsed
 
 attempts = 0
 
@@ -85,7 +110,8 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 PY
-  python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" &
+  READY_RESPONSES_JSON="${responses_json}" \
+    python3 "${BATS_TEST_TMPDIR}/ready_server.py" "${port}" "${cert}" "${key}" "${ATTEMPT_FILE}" &
   SERVER_PID=$!
   sleep 0.5
 }
@@ -112,4 +138,60 @@ PY
   [[ "$output" =~ attempts=3 ]]
   [ -f "${ATTEMPT_FILE}" ]
   [ "$(cat "${ATTEMPT_FILE}")" -eq 3 ]
+}
+
+@test "401 is treated as alive when ALLOW_HTTP_401=1" {
+  local port
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+  local responses
+  responses='[{"status":401,"body":"denied"},{"status":200,"body":"readyz check passed"}]'
+  start_readyz_server "${port}" "${responses}"
+
+  run env \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=10 \
+    POLL_INTERVAL=0.2 \
+    ALLOW_HTTP_401=1 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=apiready ]]
+  [[ "$output" =~ outcome=alive ]]
+  [[ "$output" =~ mode=alive ]]
+  [[ "$output" =~ status=401 ]]
+  [[ "$output" =~ attempts=1 ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -eq 1 ]
+}
+
+@test "401 requires readyz ok when ALLOW_HTTP_401 is unset" {
+  local port
+  port="$(find_free_port)"
+  if [ -z "${port}" ]; then
+    skip "unable to allocate ephemeral port"
+  fi
+  local responses
+  responses='[{"status":401,"body":"denied"},{"status":200,"body":"readyz check passed"}]'
+  start_readyz_server "${port}" "${responses}"
+
+  run env \
+    SERVER_HOST=localhost \
+    SERVER_PORT="${port}" \
+    SERVER_IP=127.0.0.1 \
+    TIMEOUT=10 \
+    POLL_INTERVAL=0.2 \
+    "${BATS_CWD}/scripts/check_apiready.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ event=apiready ]]
+  [[ "$output" =~ outcome=ok ]]
+  [[ "$output" =~ attempts=2 ]]
+  [[ ! "$output" =~ mode=alive ]]
+  [ -f "${ATTEMPT_FILE}" ]
+  [ "$(cat "${ATTEMPT_FILE}")" -eq 2 ]
 }
