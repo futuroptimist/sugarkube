@@ -37,6 +37,33 @@ up env='dev':
     fi
     export SUGARKUBE_SUMMARY_LIB
 
+    if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
+        if [ -z "${SUGARKUBE_LOG_FILTER:-}" ] && [ -f "{{ invocation_directory() }}/scripts/filter_debug_log.py" ]; then
+            SUGARKUBE_LOG_FILTER="{{ invocation_directory() }}/scripts/filter_debug_log.py"
+        fi
+        : "${SUGARKUBE_LOG_FILTER:=/home/pi/sugarkube/scripts/filter_debug_log.py}"
+        if [ ! -f "${SUGARKUBE_LOG_FILTER}" ] && [ -f "/home/pi/sugarkube/scripts/filter_debug_log.py" ]; then
+            SUGARKUBE_LOG_FILTER="/home/pi/sugarkube/scripts/filter_debug_log.py"
+        fi
+        if [ -f "${SUGARKUBE_LOG_FILTER}" ]; then
+            : "${SAVE_DEBUG_LOGS_DIR:=logs/up}"
+            if mkdir -p "${SAVE_DEBUG_LOGS_DIR}" 2>/dev/null; then
+                commit_hash="$(git -C "{{ invocation_directory() }}" rev-parse --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+                timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                hostname_safe="$(hostname | tr ' ' '-' | tr -cd '[:alnum:]._-')"
+                log_basename="${timestamp}_${commit_hash}_${hostname_safe}_just-up-${SUGARKUBE_ENV}.log"
+                log_dir="${SAVE_DEBUG_LOGS_DIR%/}"
+                log_path="${log_dir}/${log_basename}"
+                export SUGARKUBE_DEBUG_LOG_FILE="${log_path}"
+                exec > >(python3 "${SUGARKUBE_LOG_FILTER}" --log "${log_path}" --source "just up ${SUGARKUBE_ENV}") 2>&1
+            else
+                printf 'WARNING: SAVE_DEBUG_LOGS=1 but unable to create %s\n' "${SAVE_DEBUG_LOGS_DIR}" >&2
+            fi
+        else
+            printf 'WARNING: SAVE_DEBUG_LOGS=1 but %s is missing\n' "${SUGARKUBE_LOG_FILTER}" >&2
+        fi
+    fi
+
     if [ -f "${SUGARKUBE_SUMMARY_LIB}" ]; then
         # shellcheck disable=SC1090
         source "${SUGARKUBE_SUMMARY_LIB}"
@@ -79,6 +106,9 @@ up env='dev':
         fi
         if [ -n "${SUGARKUBE_SUMMARY_FILE:-}" ]; then
             rm -f "${SUGARKUBE_SUMMARY_FILE}" 2>/dev/null || true
+        fi
+        if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ] && [ -n "${SUGARKUBE_DEBUG_LOG_FILE:-}" ] && [ -f "${SUGARKUBE_DEBUG_LOG_FILE}" ]; then
+            printf '\n[debug] Log saved to %s\n' "${SUGARKUBE_DEBUG_LOG_FILE}" >&2
         fi
         return "${status}"
     }

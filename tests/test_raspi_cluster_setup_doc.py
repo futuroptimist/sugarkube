@@ -48,3 +48,9 @@ def test_recovery_wipe_block_present(doc_text: str) -> None:
 
 def test_recovery_mdns_command_present(doc_text: str) -> None:
     assert "avahi-browse --all --resolve --terminate" in doc_text
+
+
+def test_save_debug_logs_documented(doc_text: str) -> None:
+    assert "SAVE_DEBUG_LOGS" in doc_text
+    assert "unset SAVE_DEBUG_LOGS" in doc_text
+    assert "logs/up/" in doc_text
