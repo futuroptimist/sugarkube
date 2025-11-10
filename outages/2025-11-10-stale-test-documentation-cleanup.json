@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-10-stale-test-documentation-cleanup",
+  "date": "2025-11-10",
+  "component": "notes/ci-test-failures-remaining-work.md",
+  "rootCause": "Documentation accumulated 233 lines (44% of file) of stale investigation notes from 2025-11-04 to 2025-11-05 describing test failures that have since been fixed. Sections included outdated status markers (Test 8: ❌ FAILING, Test 16: ⏭️ SKIPPED, discover_flow: 5/8 passing), detailed investigation approaches for resolved issues, time estimates for completed work, and verbose debugging instructions that no longer apply. This made it difficult for future investigators to quickly understand current status vs historical context.",
+  "resolution": "Cleaned up notes/ci-test-failures-remaining-work.md by: (1) Removing 150 lines of stale investigation sections (lines 252-391) about Test 8, join_gate.bats, and discover_flow.bats failures, (2) Archiving key investigation learnings into condensed 'Historical Investigation Notes' section with references to outage entries, (3) Removing 83 lines of outdated 'Success Criteria' and 'Time Estimate' sections that referenced incomplete PR #4 and estimated work for tests now complete, (4) Adding completion banner to ci-test-fixes-action-plan.md clarifying it's now a historical reference document. Reduced ci-test-failures-remaining-work.md from 524 to 291 lines (44% reduction). Future investigators now see current 100% pass rate status first, with historical investigation preserved but clearly marked as archived.",
+  "references": [
+    "notes/ci-test-failures-remaining-work.md",
+    "notes/ci-test-fixes-action-plan.md",
+    "outages/2025-11-04-*.json",
+    "outages/2025-11-05-*.json",
+    "outages/2025-11-09-*.json"
+  ]
+}
