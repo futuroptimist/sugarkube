@@ -142,11 +142,11 @@ tasks:
       FLASH_DEVICE: '{{default "" .FLASH_DEVICE}}'
     cmds:
       - |
-        if [ -z "{{.PI_FLASH_ARGS}}" ] && [ -z "{{.FLASH_DEVICE}}" ]; then
-          echo "Set FLASH_DEVICE (e.g. /dev/sdX) or provide PI_FLASH_ARGS to forward helper flags." >&2
+        if [ -z "{{.FLASH_DEVICE}}" ]; then
+          echo "Set FLASH_DEVICE (e.g. /dev/sdX) to run pi:flash." >&2
           exit 1
         fi
-        {{.SUGARKUBE_CLI}} pi flash{{if ne .PI_FLASH_ARGS ""}} {{.PI_FLASH_ARGS}}{{else}} -- --device {{.FLASH_DEVICE}}{{end}}
+        {{.SUGARKUBE_CLI}} pi flash -- --device {{.FLASH_DEVICE}}{{if ne .PI_FLASH_ARGS ""}} {{.PI_FLASH_ARGS}}{{end}}
 
   pi:report:
     desc: Generate flash reports through the unified CLI.
@@ -156,11 +156,11 @@ tasks:
       FLASH_DEVICE: '{{default "" .FLASH_DEVICE}}'
     cmds:
       - |
-        if [ -z "{{.PI_REPORT_ARGS}}" ] && [ -z "{{.FLASH_DEVICE}}" ]; then
-          echo "Set FLASH_DEVICE (e.g. /dev/sdX) or provide PI_REPORT_ARGS to forward helper flags." >&2
+        if [ -z "{{.FLASH_DEVICE}}" ]; then
+          echo "Set FLASH_DEVICE (e.g. /dev/sdX) to run pi:report." >&2
           exit 1
         fi
-        {{.SUGARKUBE_CLI}} pi report{{if ne .PI_REPORT_ARGS ""}} {{.PI_REPORT_ARGS}}{{else}} -- --device {{.FLASH_DEVICE}}{{end}}
+        {{.SUGARKUBE_CLI}} pi report -- --device {{.FLASH_DEVICE}}{{if ne .PI_REPORT_ARGS ""}} {{.PI_REPORT_ARGS}}{{end}}
 
   pi:smoke:
     desc: Run the Pi smoke-test helper from the unified CLI.

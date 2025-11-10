@@ -132,10 +132,10 @@ the manifest so you can verify the build inputs and commit hashes before
  download, verify, and expand the latest release. When you prefer a task runner,
 use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev/sdX just flash-pi` to
 chain download → verification → flashing with the streaming helper. Prefer go-task? Run
-`sudo task pi:flash FLASH_DEVICE=/dev/sdX` (or supply `PI_FLASH_ARGS="-- --device /dev/sdX"`
-when you need to forward additional helper flags) to reach the same helper via the new Taskfile.
-The recipe variables read `FLASH_DEVICE` (and optional `DOWNLOAD_ARGS`) from the environment, so prefix the
-variable as shown. Regression coverage:
+`sudo task pi:flash FLASH_DEVICE=/dev/sdX` to reach the same helper via the Taskfile. Need to forward
+additional helper flags? Append `PI_FLASH_ARGS="-- --force"` (or similar) alongside `FLASH_DEVICE`
+so both the device and extra arguments are preserved. The recipe variables read `FLASH_DEVICE`
+(and optional `DOWNLOAD_ARGS`) from the environment, so prefix the variable as shown. Regression coverage:
 `tests/test_taskfile.py::test_taskfile_pi_flash_forwards_flash_device` keeps the go-task wrapper aligned with
 these instructions. Both the Makefile, justfile, and Taskfile expose
 `download-pi-image`, `install-pi-image`,
