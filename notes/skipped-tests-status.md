@@ -335,7 +335,7 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 - **Outages**: 
   - `outages/2025-11-09-discover-flow-test6-systemctl-stub.json`
   - `outages/2025-11-09-discover-flow-test6-missing-stubs.json`
-  - `outages/2025-11-09-test7-discover-flow-follower-unskip.json`
+  - `outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json`
 
 ---
 
