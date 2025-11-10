@@ -39,6 +39,34 @@ def test_taskfile_exposes_cli_wrappers() -> None:
         assert snippet in text, f"Taskfile {task_name} command should include `{snippet}`"
 
 
+def test_taskfile_pi_flash_forwards_flash_device() -> None:
+    """Go-task users should be able to provide FLASH_DEVICE like other runners."""
+
+    text = TASKFILE.read_text(encoding="utf-8")
+
+    match = re.search(r"(?ms)^  pi:flash:\n(?P<body>(?: {4}.+\n)+)", text)
+    assert match, "Taskfile should define a pi:flash task"
+
+    body = match.group("body")
+    assert "FLASH_DEVICE" in body, "pi:flash should mention the FLASH_DEVICE environment variable"
+    assert "-- --device" in body, "pi:flash should forward --device when FLASH_DEVICE is set"
+    assert "{{else}} -- --device" not in body, "pi:flash should always forward --device, even with PI_FLASH_ARGS"
+
+
+def test_taskfile_pi_report_forwards_flash_device() -> None:
+    """Flash reports should also accept the FLASH_DEVICE environment variable."""
+
+    text = TASKFILE.read_text(encoding="utf-8")
+
+    match = re.search(r"(?ms)^  pi:report:\n(?P<body>(?: {4}.+\n)+)", text)
+    assert match, "Taskfile should define a pi:report task"
+
+    body = match.group("body")
+    assert "FLASH_DEVICE" in body, "pi:report should mention the FLASH_DEVICE environment variable"
+    assert "-- --device" in body, "pi:report should forward --device when FLASH_DEVICE is set"
+    assert "{{else}} -- --device" not in body, "pi:report should always forward --device, even with PI_REPORT_ARGS"
+
+
 def test_taskfile_includes_make_style_aliases() -> None:
     """Taskfile should mirror the download/install shortcuts documented in the README."""
 
