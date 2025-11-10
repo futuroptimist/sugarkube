@@ -139,18 +139,28 @@ tasks:
     dir: '{{.REPO_ROOT}}'
     vars:
       PI_FLASH_ARGS: '{{default "" .PI_FLASH_ARGS}}'
+      FLASH_DEVICE: '{{default "" .FLASH_DEVICE}}'
     cmds:
       - |
-        {{.SUGARKUBE_CLI}} pi flash{{if ne .PI_FLASH_ARGS ""}} {{.PI_FLASH_ARGS}}{{end}}
+        if [ -z "{{.PI_FLASH_ARGS}}" ] && [ -z "{{.FLASH_DEVICE}}" ]; then
+          echo "Set FLASH_DEVICE (e.g. /dev/sdX) or provide PI_FLASH_ARGS to forward helper flags." >&2
+          exit 1
+        fi
+        {{.SUGARKUBE_CLI}} pi flash{{if ne .PI_FLASH_ARGS ""}} {{.PI_FLASH_ARGS}}{{else}} -- --device {{.FLASH_DEVICE}}{{end}}
 
   pi:report:
     desc: Generate flash reports through the unified CLI.
     dir: '{{.REPO_ROOT}}'
     vars:
       PI_REPORT_ARGS: '{{default "" .PI_REPORT_ARGS}}'
+      FLASH_DEVICE: '{{default "" .FLASH_DEVICE}}'
     cmds:
       - |
-        {{.SUGARKUBE_CLI}} pi report{{if ne .PI_REPORT_ARGS ""}} {{.PI_REPORT_ARGS}}{{end}}
+        if [ -z "{{.PI_REPORT_ARGS}}" ] && [ -z "{{.FLASH_DEVICE}}" ]; then
+          echo "Set FLASH_DEVICE (e.g. /dev/sdX) or provide PI_REPORT_ARGS to forward helper flags." >&2
+          exit 1
+        fi
+        {{.SUGARKUBE_CLI}} pi report{{if ne .PI_REPORT_ARGS ""}} {{.PI_REPORT_ARGS}}{{else}} -- --device {{.FLASH_DEVICE}}{{end}}
 
   pi:smoke:
     desc: Run the Pi smoke-test helper from the unified CLI.
