@@ -1,11 +1,12 @@
-# CI Test Status Verification - 2025-11-05 (Updated 2025-11-08)
+# CI Test Status Verification - 2025-11-05 (Updated 2025-11-09)
 
 ## Executive Summary
 
-All CI/test failures documented in `notes/ci-test-failures-remaining-work.md` and `notes/ci-test-fixes-action-plan.md` have been successfully resolved through previous PRs. The repository is in excellent health with a **92.7% test pass rate** and **0 failures**.
+All CI/test failures documented in `notes/ci-test-failures-remaining-work.md` and `notes/ci-test-fixes-action-plan.md` have been successfully resolved through PRs #1-#11. The repository is in excellent health with a **100% test pass rate** and **0 failures**.
 
 **Update 2025-11-07**: PR #7 enabled Test 34 (absence gate), improving test count to 38/41.
 **Update 2025-11-08**: K3s integration tests investigation documented (see `notes/k3s-integration-tests-investigation-20251108.md`).
+**Update 2025-11-09**: PRs #9, #10, #11 fixed Tests 5-7 (k3s integration), achieving 100% pass rate (41/41 tests).
 
 ## Verification Results
 
@@ -16,9 +17,9 @@ $ bash scripts/ci_commands.sh
 ```
 
 **BATS Suite**: ✅ pass
-- 38/41 tests passing (92.7% pass rate) - updated 2025-11-07
+- 41/41 tests passing (100% pass rate) - updated 2025-11-09 🎉
 - 0 failures
-- 3 tests skipped (k3s integration tests - see investigation notes)
+- 0 tests skipped (all tests now passing!)
 
 **E2E/Playwright**: ✅ pass
 - All pytest tests pass (543 passed, 8 skipped)
@@ -27,26 +28,26 @@ $ bash scripts/ci_commands.sh
 **QEMU Smoke**: ✅ pass
 - All 22 QEMU smoke tests pass
 
-### Skipped Tests (Not Failures)
+### Previously Skipped Tests - Now FIXED! 🎉
 
-The 3 skipped tests are not failures - they are intentionally skipped with documentation.
+All 3 previously skipped k3s integration tests are now passing as of 2025-11-09:
 
-**Note**: Test numbers below refer to the global test index when running `bats --recursive tests/bats` (tests across all BATS files numbered sequentially 1-41).
+**Note**: Test numbers refer to position in discover_flow.bats (see `notes/test-numbering-standardization.md`).
 
-1. **Test 6** (discover_flow.bats): "discover flow joins existing server when discovery succeeds"
-   - Skip reason: Complex k3s integration test - needs dedicated PR (4-8 hours)
-   - Investigation: See `notes/k3s-integration-tests-investigation-20251108.md`
-   - Reference: `notes/ci-test-failures-remaining-work.md` section 1
+1. **Test 5** (discover_flow.bats line 513): "discover flow joins existing server when discovery succeeds"
+   - Status: ✅ FIXED in PR #10 (2025-11-09)
+   - Fix: Added missing stubs from Test 6 pattern (journalctl, sleep, proper timeout, etc.)
+   - Outage: `outages/2025-11-09-discover-flow-test6-missing-stubs.json`
 
-2. **Test 7** (discover_flow.bats): "discover flow elects winner after self-check failure"
-   - Skip reason: Complex k3s integration test - needs dedicated PR (4-8 hours)
-   - Investigation: See `notes/k3s-integration-tests-investigation-20251108.md`
-   - Reference: `notes/ci-test-failures-remaining-work.md` section 1
+2. **Test 6** (discover_flow.bats line 646): "discover flow elects winner after self-check failure"
+   - Status: ✅ FIXED in PR #9 (2025-11-09)
+   - Fix: Extended systemctl stub to handle reload/restart commands
+   - Outage: `outages/2025-11-09-discover-flow-test6-systemctl-stub.json`
 
-3. **Test 8** (discover_flow.bats): "discover flow remains follower after self-check failure"
-   - Skip reason: Complex k3s integration test - needs dedicated PR (4-8 hours)
-   - Investigation: See `notes/k3s-integration-tests-investigation-20251108.md`
-   - Reference: `notes/ci-test-failures-remaining-work.md` section 1
+3. **Test 7** (discover_flow.bats line 788): "discover flow remains follower after self-check failure"
+   - Status: ✅ FIXED in PR #11 (2025-11-09)
+   - Fix: Added missing stubs and removed broken timeout stub
+   - Outage: `outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json`
 
 ~~4. **Test 34** (mdns_selfcheck.bats): "mdns absence gate confirms wipe leaves no advertisements"~~ ✅ **FIXED in PR #7**
    - Was skipped due to timeout issues
@@ -132,9 +133,10 @@ The 3 remaining skipped tests are documented as requiring dedicated PRs.
 ## Conclusion
 
 The repository test suite is in excellent health:
-- ✅ **92.7% pass rate (38/41)** - updated 2025-11-07
+- ✅ **100% pass rate (41/41)** - updated 2025-11-09 🎉
 - ✅ **0 failures**
+- ✅ **0 skipped tests** (all tests now passing!)
 - ✅ All outages documented and validated
 - ✅ Full CI pipeline passes locally
 
-No additional fixes are needed at this time. The 3 remaining skipped tests are documented for future dedicated investigation (4-8 hours each based on 2025-11-08 investigation findings).
+**All test failures have been resolved!** The journey from 38/41 (92.7%) to 41/41 (100%) was completed through focused PRs #9, #10, and #11 in November 2025.
