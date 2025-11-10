@@ -58,6 +58,7 @@ OPTIONS:
   --install-kcov      Install kcov if not present (requires sudo)
   --kcov-only         Only run kcov simulation, skip basic tests
   --skip-install      Skip checking for missing dependencies
+  --python PATH       Run pytest using the specified interpreter (repeatable)
   -h, --help          Show this help message
 ```
 
@@ -77,6 +78,14 @@ make ci-simulate
 ```bash
 ./scripts/ci_simulate.sh --install-kcov --with-kcov
 ```
+
+**Run pytest under multiple Python interpreters:**
+```bash
+./scripts/ci_simulate.sh --python python3.12 --python python3.14
+```
+
+The helper executes pytest once per interpreter, surfacing version-specific
+failures before they land in CI.
 
 ## What It Tests
 

@@ -38,11 +38,42 @@ print_info() {
   echo -e "${BLUE}ℹ $1${NC}"
 }
 
+resolve_python_executable() {
+  local candidate="$1"
+  local resolved=""
+
+  if [[ "$candidate" == */* ]]; then
+    if [ -x "$candidate" ]; then
+      if [[ "$candidate" == /* ]]; then
+        resolved="$candidate"
+      else
+        local base_name
+        local candidate_dir
+        base_name="$(basename "$candidate")"
+        candidate_dir="$(cd "$(dirname "$candidate")" && pwd)"
+        resolved="${candidate_dir}/${base_name}"
+      fi
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+    return 2
+  fi
+
+  if resolved="$(command -v "$candidate" 2>/dev/null)"; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+
+  return 1
+}
+
 # Parse command line arguments
 USE_KCOV=false
 INSTALL_KCOV=false
 KCOV_ONLY=false
 SKIP_INSTALL_CHECK=false
+PYTHON_BINARIES=("python3")
+CUSTOM_PYTHON_SET=false
 
 usage() {
   cat << EOF
@@ -55,6 +86,7 @@ OPTIONS:
   --install-kcov      Install kcov if not present (requires sudo)
   --kcov-only         Only run kcov simulation, skip basic tests
   --skip-install      Skip checking for missing dependencies
+  --python PATH       Use the provided Python interpreter (repeatable)
   -h, --help          Show this help message
 
 EXAMPLES:
@@ -96,6 +128,20 @@ while [[ $# -gt 0 ]]; do
       SKIP_INSTALL_CHECK=true
       shift
       ;;
+    --python)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "--python requires an interpreter path" >&2
+        usage
+        exit 1
+      fi
+      if [ "$CUSTOM_PYTHON_SET" = false ]; then
+        PYTHON_BINARIES=()
+        CUSTOM_PYTHON_SET=true
+      fi
+      PYTHON_BINARIES+=("$1")
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -116,66 +162,88 @@ echo ""
 # Check for required tools
 check_dependencies() {
   local missing=()
-  
+
   if ! command -v bats >/dev/null 2>&1; then
     missing+=("bats")
   fi
-  
-  if ! command -v python3 >/dev/null 2>&1; then
-    missing+=("python3")
+
+  if [ "$CUSTOM_PYTHON_SET" = false ]; then
+    local default_python="${PYTHON_BINARIES[0]}"
+    if ! command -v "$default_python" >/dev/null 2>&1; then
+      missing+=("$default_python")
+    fi
   fi
-  
+
   if [ "$USE_KCOV" = true ] && ! command -v kcov >/dev/null 2>&1; then
     if [ "$INSTALL_KCOV" = false ]; then
       print_warning "kcov not found. Use --install-kcov to install it."
       return 1
     fi
   fi
-  
+
   if [ ${#missing[@]} -gt 0 ]; then
     print_error "Missing required tools: ${missing[*]}"
     echo "Install with:"
     echo "  sudo apt-get install ${missing[*]}"
     return 1
   fi
-  
-  # Check for pytest
-  if ! python3 -m pytest --version >/dev/null 2>&1; then
-    print_warning "pytest not found. Install with: pip install pytest pytest-cov"
+
+  # Check for pytest using the first configured interpreter
+  local python_check="${PYTHON_BINARIES[0]}"
+  local python_exec=""
+  if ! python_exec="$(resolve_python_executable "$python_check")"; then
+    local resolve_status=$?
+    case $resolve_status in
+      1)
+        print_warning "Python interpreter not found: $python_check"
+        print_info "Install Python or provide --python /path/to/python"
+        ;;
+      2)
+        print_warning "Python interpreter not executable: $python_check"
+        ;;
+      *)
+        print_warning "Unable to resolve Python interpreter: $python_check"
+        ;;
+    esac
+    return 0
+  fi
+
+  if ! "$python_exec" -m pytest --version >/dev/null 2>&1; then
+    print_warning "pytest not found for $python_check. Install with: $python_check -m pip install pytest pytest-cov"
     print_info "Python tests will be skipped"
     return 0  # Don't fail, just warn
   fi
-  
+
   return 0
 }
 
 install_kcov() {
   print_header "Installing kcov"
-  
+
   if command -v kcov >/dev/null 2>&1; then
     print_info "kcov already installed at $(which kcov)"
     kcov --version || true
     return 0
   fi
-  
+
   print_info "Cloning kcov repository..."
   local temp_dir
   temp_dir="$(mktemp -d)"
   trap 'rm -rf "$temp_dir"' EXIT
-  
+
   cd "$temp_dir"
   git clone --depth=1 https://github.com/SimonKagstrom/kcov.git
   cd kcov
-  
+
   print_info "Building kcov (this may take 2-3 minutes)..."
   cmake -B build
   cmake --build build
-  
+
   print_info "Installing kcov (requires sudo)..."
   sudo cmake --install build
-  
+
   cd "$ROOT_DIR"
-  
+
   if command -v kcov >/dev/null 2>&1; then
     print_success "kcov installed successfully"
     kcov --version
@@ -188,12 +256,12 @@ install_kcov() {
 
 validate_test_patterns() {
   print_header "Validating Test Patterns"
-  
+
   local issues_found=0
-  
+
   # Check if summary.sh has EXIT trap disabled by default
   print_info "Checking summary.sh EXIT trap handling..."
-  
+
   if grep -q 'SUMMARY_AUTO_EMIT' scripts/lib/summary.sh; then
     print_success "summary.sh uses opt-in EXIT trap (SUMMARY_AUTO_EMIT)"
   else
@@ -201,13 +269,13 @@ validate_test_patterns() {
     print_info "  EXIT traps should be opt-in to avoid kcov issues"
     ((issues_found++)) || true
   fi
-  
+
   # Check if BATS tests using summary.sh call emit explicitly
   print_info "Checking for explicit summary::emit calls in tests..."
-  
+
   local test_files
   mapfile -t test_files < <(find tests/bats -name "*.bats" -type f 2>/dev/null)
-  
+
   for file in "${test_files[@]}"; do
     if grep -q 'source.*summary\.sh' "$file" 2>/dev/null; then
       # Check if test calls emit explicitly
@@ -218,7 +286,7 @@ validate_test_patterns() {
       fi
     fi
   done
-  
+
   if [ "$issues_found" -eq 0 ]; then
     print_success "All test patterns validated"
     return 0
@@ -234,19 +302,19 @@ validate_test_patterns() {
 
 run_basic_simulation() {
   print_header "Running Basic CI Simulation"
-  
+
   # Set environment variables exactly as CI does
   export BATS_CWD="${ROOT_DIR}"
   export BATS_LIB_PATH="${ROOT_DIR}/tests/bats"
-  
+
   print_info "Environment variables set:"
   echo "  BATS_CWD=$BATS_CWD"
   echo "  BATS_LIB_PATH=$BATS_LIB_PATH"
   echo ""
-  
+
   print_info "Running: bats --recursive tests/bats"
   echo ""
-  
+
   if bats --recursive tests/bats; then
     print_success "BATS tests passed in CI-simulated environment"
     return 0
@@ -258,89 +326,114 @@ run_basic_simulation() {
 
 run_pytest_simulation() {
   print_header "Running pytest CI Simulation"
-  
-  # Check if pytest is available
-  if ! python3 -m pytest --version >/dev/null 2>&1; then
-    print_warning "pytest not available - skipping Python tests"
-    print_info "Install with: pip install pytest pytest-cov"
-    return 0  # Don't fail if pytest is missing
-  fi
-  
-  local python_version
-  python_version=$(python3 --version 2>&1 | awk '{print $2}')
-  print_info "Python version: $python_version"
-  
-  # Warn about Python version differences with CI
-  local python_major_minor
-  python_major_minor=$(echo "$python_version" | cut -d. -f1,2)
-  if [[ "$python_major_minor" != "3.14" && "$python_major_minor" != "3.13" ]]; then
-    print_warning "Local Python $python_version differs from CI (Python 3.14+)"
-    print_info "CI environment differences to be aware of:"
-    echo "  - Python 3.14+ changed subprocess.run environment inheritance"
-    echo "  - sys.path behavior changed for stdin scripts (python3 - )"
-    echo "  - Tests may pass locally but fail in CI with newer Python"
-    print_info "Known issues fixed:"
-    echo "  ✓ subprocess.run now explicitly passes env=os.environ.copy()"
-    echo "  ✓ PYTHONPATH explicitly set for stdin Python scripts"
-    echo ""
-  fi
-  
+
   # Discover test files (exclude test_qemu_pi_smoke_test.py like ci_commands.sh does)
   local -a pytest_targets
   mapfile -t pytest_targets < <(find tests -name 'test_*.py' ! -name 'test_qemu_pi_smoke_test.py' -print | LC_ALL=C sort)
-  
+
   if [ "${#pytest_targets[@]}" -eq 0 ]; then
     print_error "No pytest targets discovered"
     return 1
   fi
-  
-  print_info "Running pytest on ${#pytest_targets[@]} test files..."
-  echo "Command:"
-  echo "  pytest -q <${#pytest_targets[@]} test files>"
-  echo ""
-  
-  if pytest -q "${pytest_targets[@]}"; then
-    
-    # Note about coverage
+
+  local overall_status=0
+
+  for python_bin in "${PYTHON_BINARIES[@]}"; do
+    local resolved_bin=""
+    if ! resolved_bin="$(resolve_python_executable "$python_bin")"; then
+      local resolve_status=$?
+      case $resolve_status in
+        1)
+          print_error "Python interpreter not found: $python_bin"
+          ;;
+        2)
+          print_error "Python interpreter not executable: $python_bin"
+          ;;
+        *)
+          print_error "Failed to resolve Python interpreter: $python_bin"
+          ;;
+      esac
+      overall_status=1
+      continue
+    fi
+
+    local version_output
+    if ! version_output="$("$resolved_bin" --version 2>&1)"; then
+      print_error "Failed to determine version for $python_bin"
+      overall_status=1
+      continue
+    fi
+
+    local python_version
+    python_version=$(echo "$version_output" | awk '{print $2}')
+    print_info "Using $python_bin ($python_version) for pytest"
+
+    if ! "$resolved_bin" -m pytest --version >/dev/null 2>&1; then
+      print_warning "pytest not available for $python_bin - skipping"
+      print_info "Install with: $python_bin -m pip install pytest pytest-cov"
+      continue
+    fi
+
+    local python_major_minor
+    python_major_minor=$(echo "$python_version" | cut -d. -f1,2)
+    if [[ "$python_major_minor" != "3.14" && "$python_major_minor" != "3.13" ]]; then
+      print_warning "Python $python_version differs from CI (Python 3.14+)"
+      print_info "CI environment differences to be aware of:"
+      echo "  - Python 3.14+ changed subprocess.run environment inheritance"
+      echo "  - sys.path behavior changed for stdin scripts (python3 - )"
+      echo "  - Tests may pass locally but fail in CI with newer Python"
+      print_info "Known issues fixed:"
+      echo "  ✓ subprocess.run now explicitly passes env=os.environ.copy()"
+      echo "  ✓ PYTHONPATH explicitly set for stdin Python scripts"
+      echo ""
+    fi
+
+    print_info "Running pytest on ${#pytest_targets[@]} test files..."
+    echo "Command:"
+    echo "  $python_bin -m pytest -q <${#pytest_targets[@]} test files>"
     echo ""
-    print_info "Note: Running without coverage for speed. CI runs with coverage:"
-    echo "  pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml"
-    
-    return 0
-  else
-    print_error "Python tests failed"
-    print_warning "This indicates an issue that would fail in CI!"
-    print_info "Note: CI may run a different Python version than local environment"
-    print_info "Check for:"
-    echo "  - Python version compatibility issues (3.14+ behavior changes)"
-    echo "  - subprocess environment inheritance (explicit env parameter needed)"
-    echo "  - Import path problems (sys.path configuration for stdin scripts)"
-    echo "  - Test fixture environment variable inheritance"
-    return 1
-  fi
+
+    if "$resolved_bin" -m pytest -q "${pytest_targets[@]}"; then
+      echo ""
+      print_info "Note: Running without coverage for speed. CI runs with coverage:"
+      echo "  pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml"
+    else
+      print_error "Python tests failed for interpreter: $python_bin"
+      print_warning "This indicates an issue that would fail in CI!"
+      print_info "Note: CI may run a different Python version than local environment"
+      print_info "Check for:"
+      echo "  - Python version compatibility issues (3.14+ behavior changes)"
+      echo "  - subprocess environment inheritance (explicit env parameter needed)"
+      echo "  - Import path problems (sys.path configuration for stdin scripts)"
+      echo "  - Test fixture environment variable inheritance"
+      overall_status=1
+    fi
+  done
+
+  return $overall_status
 }
 
 run_kcov_simulation() {
   print_header "Running kcov CI Simulation"
-  
+
   if ! command -v kcov >/dev/null 2>&1; then
     print_error "kcov not found. Install it first with --install-kcov"
     return 1
   fi
-  
+
   # Set environment variables exactly as CI does
   export KCOV_OUT="${ROOT_DIR}/coverage/kcov"
   export BATS_CWD="${ROOT_DIR}"
   export BATS_LIB_PATH="${ROOT_DIR}/tests/bats"
-  
+
   print_info "Environment variables set:"
   echo "  KCOV_OUT=$KCOV_OUT"
   echo "  BATS_CWD=$BATS_CWD"
   echo "  BATS_LIB_PATH=$BATS_LIB_PATH"
   echo ""
-  
+
   mkdir -p "$KCOV_OUT"
-  
+
   print_info "Running BATS under kcov (exactly as CI does)..."
   echo "Command:"
   echo "  kcov --include-path=\"${ROOT_DIR}/scripts\" \\"
@@ -349,7 +442,7 @@ run_kcov_simulation() {
   echo "       \"$KCOV_OUT\" \\"
   echo "       bats --recursive tests/bats"
   echo ""
-  
+
   if kcov --include-path="${ROOT_DIR}/scripts" \
           --exclude-pattern="/usr,/opt,/lib,/bin,/sbin,${ROOT_DIR}/tests" \
           --bash-dont-parse-binary-dir \
@@ -372,44 +465,44 @@ run_kcov_simulation() {
 # Main execution
 main() {
   local exit_code=0
-  
+
   # Validate test patterns first
   validate_test_patterns
   echo ""
-  
+
   if [ "$SKIP_INSTALL_CHECK" = false ]; then
     if ! check_dependencies; then
       exit 1
     fi
   fi
-  
+
   if [ "$INSTALL_KCOV" = true ]; then
     if ! install_kcov; then
       exit 1
     fi
   fi
-  
+
   if [ "$KCOV_ONLY" = false ]; then
     # Run BATS tests
     if ! run_basic_simulation; then
       exit_code=1
     fi
     echo ""
-    
+
     # Run pytest tests
     if ! run_pytest_simulation; then
       exit_code=1
     fi
     echo ""
   fi
-  
+
   if [ "$USE_KCOV" = true ]; then
     if ! run_kcov_simulation; then
       exit_code=1
     fi
     echo ""
   fi
-  
+
   print_header "Summary"
   if [ $exit_code -eq 0 ]; then
     print_success "All CI simulations passed!"
@@ -420,7 +513,7 @@ main() {
     echo ""
     print_warning "Fix the issues above before pushing to avoid CI failures"
   fi
-  
+
   return $exit_code
 }
 

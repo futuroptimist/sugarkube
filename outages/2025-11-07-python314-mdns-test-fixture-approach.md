@@ -100,7 +100,7 @@ def mdns_env(tmp_path):
     browse = bin_dir / "avahi-browse"
     browse.write_text("#!/usr/bin/env bash\n...")  # Mock bash script
     browse.chmod(0o755)
-    
+
     env = os.environ.copy()
     env.update({
         "PATH": f"{bin_dir}:{env.get('PATH', '')}",  # Modified PATH
@@ -120,7 +120,7 @@ def mdns_env(tmp_path):
         txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=server
         ...
     """)
-    
+
     env = os.environ.copy()
     env.update({
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(fixture_file),  # Use fixture file
@@ -168,7 +168,7 @@ As part of this debugging journey, several code improvements were made:
    ```bash
    # Create a fixture file
    echo '=;eth0;IPv4;test;_k3s-sugar-dev._tcp;local;test.local' > /tmp/test-fixture.txt
-   
+
    # Run with fixture file
    SUGARKUBE_MDNS_FIXTURE_FILE=/tmp/test-fixture.txt bash scripts/k3s-discover.sh --run-avahi-query server-first
    # Should output: test.local
@@ -204,7 +204,8 @@ Audit codebase for similar patterns that might have Python 3.14 issues:
 Enhance local testing to catch Python version issues earlier:
 
 - **Add Python 3.14 to CI**: Ensure CI tests run on Python 3.14 to catch issues before release
-- **Update ci_simulate.sh**: Add option to test with different Python versions
+- **Update ci_simulate.sh**: Add option to test with different Python versions — ✅ Completed via the
+  new `--python` flag which runs pytest for each interpreter provided.
 - **Document version differences**: Create knowledge base entry about Python 3.13+ stdin script and subprocess changes
 
 ### 4. Monitor Python 3.14+ Releases
