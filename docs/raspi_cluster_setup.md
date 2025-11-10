@@ -83,6 +83,20 @@ just up dev
 
 When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
 
+### Capture sanitized debug logs from each run (optional)
+
+Long bootstrap logs can be committed for later analysis. Enable temporary log capture in the shell session before invoking `just up`:
+
+```bash
+export SAVE_DEBUG_LOGS=1
+just up dev
+
+# When you need to stop saving logs in this shell
+unset SAVE_DEBUG_LOGS
+```
+
+With `SAVE_DEBUG_LOGS=1`, Sugarkube streams the console output through a sanitizer that removes secrets and public IP addresses before writing them to `logs/up/`. Each run creates a file named like `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`, combining the UTC timestamp, the checked-out commit, the hostname, and the environment. Logs are still emitted live to the terminal, and a final summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+
 ### Switch environments as needed
 
 `just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.
