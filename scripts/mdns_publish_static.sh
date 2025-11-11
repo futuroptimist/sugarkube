@@ -58,6 +58,242 @@ cleanup_service_tmp() {
 }
 trap cleanup_service_tmp EXIT
 
+TXT_IP4=""
+TXT_IP6=""
+TXT_HOST="${HOSTNAME}"
+
+txt_ip_payload="$(python3 - <<'PY'
+import ipaddress
+import json
+import os
+import subprocess
+
+
+def run_command(command):
+    try:
+        return subprocess.check_output(command, text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return ""
+
+
+iface_hint = os.environ.get("SUGARKUBE_MDNS_INTERFACE", "").strip()
+hostname_tokens = []
+
+hostname_output = run_command(["hostname", "-I"])
+if hostname_output:
+    hostname_tokens = [token for token in hostname_output.split() if token]
+
+IGNORE_IFACE_NAMES = {"lo"}
+IGNORE_IFACE_PREFIXES = (
+    "docker",
+    "veth",
+    "virbr",
+    "cni",
+    "flannel",
+    "kube-",
+    "zt",
+    "tailscale",
+    "podman",
+    "br-",
+    "lxdbr",
+)
+IGNORE_IFACE_KINDS = {"bridge"}
+IGNORE_IFACE_FLAGS = {"LOOPBACK"}
+
+
+def gather_iface_metadata():
+    data = run_command(["ip", "-j", "link", "show"])
+    if not data:
+        return {}
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return {}
+    metadata = {}
+    for entry in payload:
+        iface_name = entry.get("ifname") or entry.get("name") or ""
+        if not iface_name:
+            continue
+        kind = ""
+        if isinstance(entry.get("linkinfo"), dict):
+            kind = entry["linkinfo"].get("info_kind") or ""
+        if not kind:
+            kind = entry.get("link_type") or ""
+        flags = entry.get("flags") or []
+        metadata[iface_name] = {
+            "kind": kind.lower() if isinstance(kind, str) else "",
+            "flags": {flag.upper() for flag in flags if isinstance(flag, str)},
+        }
+    return metadata
+
+
+IFACE_METADATA = gather_iface_metadata()
+
+
+def interface_blacklisted(name):
+    if not name:
+        return True
+    if name in IGNORE_IFACE_NAMES:
+        return True
+    for prefix in IGNORE_IFACE_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    meta = IFACE_METADATA.get(name, {})
+    kind = meta.get("kind", "")
+    if kind in IGNORE_IFACE_KINDS:
+        return True
+    flags = meta.get("flags") or set()
+    if flags.intersection(IGNORE_IFACE_FLAGS):
+        return True
+    return False
+
+
+def interface_allowed(name, default_iface):
+    if not name:
+        return False
+    if name == iface_hint:
+        return True
+    if default_iface and name == default_iface and not interface_blacklisted(name):
+        return True
+    return not interface_blacklisted(name)
+
+
+def gather_addr_entries(family):
+    flag = "-4" if family == 4 else "-6"
+    try:
+        data = subprocess.check_output(
+            ["ip", flag, "-j", "addr", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return []
+    entries = []
+    for entry in payload:
+        iface_name = entry.get("ifname", "")
+        for addr_info in entry.get("addr_info", []):
+            family_name = addr_info.get("family")
+            if family == 4 and family_name != "inet":
+                continue
+            if family == 6 and family_name != "inet6":
+                continue
+            local_ip = addr_info.get("local")
+            if not local_ip:
+                continue
+            try:
+                ip_obj = ipaddress.ip_address(local_ip)
+            except ValueError:
+                continue
+            if family == 4 and not isinstance(ip_obj, ipaddress.IPv4Address):
+                continue
+            if family == 6 and not isinstance(ip_obj, ipaddress.IPv6Address):
+                continue
+            if ip_obj.is_unspecified or ip_obj.is_multicast:
+                continue
+            if isinstance(ip_obj, ipaddress.IPv4Address):
+                if ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+                    continue
+            if isinstance(ip_obj, ipaddress.IPv6Address):
+                if ip_obj.is_loopback:
+                    continue
+            entries.append((iface_name, str(ip_obj)))
+    return entries
+
+
+def pick_from_interface(entries, target_iface, allow_blacklisted=False):
+    if not target_iface:
+        return ""
+    for iface_name, candidate in entries:
+        if iface_name != target_iface:
+            continue
+        if allow_blacklisted or not interface_blacklisted(iface_name):
+            return candidate
+    return ""
+
+
+def default_interface(family):
+    flag = "-4" if family == 4 else "-6"
+    output = run_command(["ip", flag, "route", "show", "default"])
+    if not output:
+        return ""
+    for line in output.splitlines():
+        parts = line.split()
+        if "dev" in parts:
+            try:
+                return parts[parts.index("dev") + 1]
+            except (IndexError, ValueError):
+                continue
+    return ""
+
+
+def choose_ip(family):
+    entries = gather_addr_entries(family)
+    default_iface_name = default_interface(family)
+
+    if iface_hint:
+        candidate = pick_from_interface(entries, iface_hint, allow_blacklisted=True)
+        if candidate:
+            return candidate
+
+    if default_iface_name:
+        candidate = pick_from_interface(entries, default_iface_name)
+        if candidate:
+            return candidate
+
+    allowed_candidates = []
+    disallowed = set()
+    for iface_name, candidate in entries:
+        if interface_allowed(iface_name, default_iface_name):
+            allowed_candidates.append(candidate)
+        else:
+            disallowed.add(candidate)
+
+    if allowed_candidates:
+        return allowed_candidates[0]
+
+    if entries:
+        return ""
+
+    for token in hostname_tokens:
+        try:
+            ip_obj = ipaddress.ip_address(token)
+        except ValueError:
+            continue
+        if family == 4 and isinstance(ip_obj, ipaddress.IPv4Address):
+            if ip_obj.is_unspecified or ip_obj.is_multicast or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+                continue
+            return str(ip_obj)
+        if family == 6 and isinstance(ip_obj, ipaddress.IPv6Address):
+            if ip_obj.is_unspecified or ip_obj.is_multicast or ip_obj.is_loopback:
+                continue
+            return str(ip_obj)
+    return ""
+
+
+ip4 = choose_ip(4)
+ip6 = choose_ip(6)
+
+if ip4:
+    print(f"ip4={ip4}")
+if ip6:
+    print(f"ip6={ip6}")
+PY
+)"
+if [ -n "${txt_ip_payload}" ]; then
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      ip4) TXT_IP4="${value}" ;;
+      ip6) TXT_IP6="${value}" ;;
+    esac
+  done <<<"${txt_ip_payload}"
+fi
+
+export TXT_IP4 TXT_IP6 TXT_HOST
+
 ensure_mdns_target_resolvable() {
   if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
     echo "avahi-resolve-host-name not found; skipping SRV target preflight" >&2
@@ -594,6 +830,9 @@ role = os.environ["ROLE"]
 port = os.environ.get("PORT", "6443")
 phase = os.environ.get("PHASE", "")
 leader = os.environ.get("LEADER", "")
+txt_ip4 = os.environ.get("TXT_IP4", "")
+txt_ip6 = os.environ.get("TXT_IP6", "")
+txt_host = os.environ.get("TXT_HOST", "")
 
 service_name = f"k3s-{cluster}-{environment}@{srv_host} ({role})"
 service_type = f"_k3s-{cluster}-{environment}._tcp"
@@ -609,6 +848,13 @@ records = [
     ("phase", phase),
     ("leader", leader),
 ]
+
+if txt_host:
+    records.append(("host", txt_host))
+if txt_ip4:
+    records.append(("ip4", txt_ip4))
+if txt_ip6:
+    records.append(("ip6", txt_ip6))
 
 with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write("<?xml version=\"1.0\" standalone='no'?>\n")

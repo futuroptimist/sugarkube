@@ -2192,6 +2192,7 @@ mdns_reset_selection() {
 
 mdns_lookup_nss_ip() {
   local host="$1"
+
   if [ -z "${host}" ]; then
     return 1
   fi
@@ -2227,15 +2228,22 @@ select_server_candidate() {
 
   MDNS_SELECTED_BROWSE_OK=1
 
-  local token host="" port="" mode="" address=""
+  local token host="" port="" mode="" address="" txt_ip4="" txt_ip6="" txt_host=""
   for token in ${selection_line}; do
     case "${token}" in
       mode=*) mode="${token#mode=}" ;;
       host=*) host="${token#host=}" ;;
       port=*) port="${token#port=}" ;;
       address=*) address="${token#address=}" ;;
+      txt_ip4=*) txt_ip4="${token#txt_ip4=}" ;;
+      txt_ip6=*) txt_ip6="${token#txt_ip6=}" ;;
+      txt_host=*) txt_host="${token#txt_host=}" ;;
     esac
   done
+
+  if [ -z "${host}" ] && [ -n "${txt_host}" ]; then
+    host="${txt_host}"
+  fi
 
   if [ -z "${host}" ]; then
     return 1
@@ -2252,28 +2260,95 @@ select_server_candidate() {
     MDNS_SELECTED_MODE="${mode}"
   fi
 
+  local resolve_ip=""
   if [ -n "${address}" ]; then
-    MDNS_SELECTED_IP="${address}"
+    resolve_ip="${address}"
     MDNS_SELECTED_RESOLVE_OK=1
   else
     MDNS_SELECTED_RESOLVE_OK=0
   fi
 
+  local txt_ip=""
+  local txt_ip_source=""
+  if [ -n "${txt_ip4}" ] || [ -n "${txt_ip6}" ]; then
+    txt_ip="$(TXT_IP4_VALUE="${txt_ip4}" TXT_IP6_VALUE="${txt_ip6}" python3 - <<'PY'
+import ipaddress
+import os
+import sys
+
+ip4 = os.environ.get("TXT_IP4_VALUE", "").strip()
+ip6 = os.environ.get("TXT_IP6_VALUE", "").strip()
+
+
+def pick(candidate: str, family: int) -> str:
+    if not candidate:
+        return ""
+    try:
+        ip_obj = ipaddress.ip_address(candidate)
+    except ValueError:
+        return ""
+    if family == 4 and not isinstance(ip_obj, ipaddress.IPv4Address):
+        return ""
+    if family == 6 and not isinstance(ip_obj, ipaddress.IPv6Address):
+        return ""
+    if ip_obj.is_unspecified or ip_obj.is_multicast:
+        return ""
+    if isinstance(ip_obj, ipaddress.IPv4Address):
+        if ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+            return ""
+    if isinstance(ip_obj, ipaddress.IPv6Address):
+        if ip_obj.is_loopback:
+            return ""
+    return str(ip_obj)
+
+
+ip4_valid = pick(ip4, 4)
+if ip4_valid:
+    print(ip4_valid)
+    sys.exit(0)
+
+ip6_valid = pick(ip6, 6)
+if ip6_valid:
+    print(ip6_valid)
+PY
+    )"
+    txt_ip="${txt_ip//$'\n'/}"
+    if [ -n "${txt_ip}" ]; then
+      if [ -n "${txt_ip4}" ] && [ "${txt_ip}" = "${txt_ip4}" ]; then
+        txt_ip_source="ip4"
+      elif [ -n "${txt_ip6}" ] && [ "${txt_ip}" = "${txt_ip6}" ]; then
+        txt_ip_source="ip6"
+      fi
+    fi
+  fi
+
   local nss_ip=""
   if nss_ip="$(mdns_lookup_nss_ip "${host}" 2>/dev/null)"; then
     MDNS_SELECTED_NSS_OK=1
-    if [ -z "${MDNS_SELECTED_IP}" ]; then
-      MDNS_SELECTED_IP="${nss_ip}"
-    fi
   else
     MDNS_SELECTED_NSS_OK=0
   fi
 
   local accept_path=""
-  if [ "${MDNS_SELECTED_RESOLVE_OK}" = "1" ]; then
-    accept_path="resolve"
-  elif [ "${MDNS_SELECTED_NSS_OK}" = "1" ]; then
+  local txt_ip_flag=0
+  local selected_ip=""
+
+  if [ -n "${txt_ip}" ]; then
+    selected_ip="${txt_ip}"
+    accept_path="txt"
+    txt_ip_flag=1
+  elif [ -n "${nss_ip}" ]; then
+    selected_ip="${nss_ip}"
     accept_path="nss"
+  elif [ -n "${resolve_ip}" ]; then
+    selected_ip="${resolve_ip}"
+    accept_path="resolve"
+  fi
+
+  if [ -n "${selected_ip}" ]; then
+    MDNS_SELECTED_IP="${selected_ip}"
+  else
+    MDNS_SELECTED_IP=""
   fi
 
   local -a log_fields=(
@@ -2287,6 +2362,12 @@ select_server_candidate() {
 
   if [ -n "${MDNS_SELECTED_MODE}" ]; then
     log_fields+=("mode=${MDNS_SELECTED_MODE}")
+  fi
+
+  log_fields+=("txt_ip=${txt_ip_flag}")
+
+  if [ -n "${txt_ip_source}" ]; then
+    log_fields+=("txt_ip_source=${txt_ip_source}")
   fi
 
   if [ -n "${MDNS_SELECTED_IP}" ]; then
