@@ -126,10 +126,17 @@ What `just wipe` does:
   advertisement to disappear **twice** before returning. This protects against
   cache reuse described in [RFC 6762](https://datatracker.ietf.org/doc/html/rfc6762)
   and makes the next bootstrap more deterministic.
+- Clears every environment variable documented in this guide (for example
+  `SUGARKUBE_SERVERS`, the per-environment tokens, `SAVE_DEBUG_LOGS`, `K3S_CHANNEL`,
+  and the mDNS diagnostics toggles) and writes a helper snippet to
+  `${XDG_CACHE_HOME:-~/.cache}/sugarkube/wipe-env.sh` that you can `source` in your
+  interactive shell to reset exports there as well.
 
 After wiping, re-export the desired environment variables (and token if used) before retrying:
 
 ```bash
+cleanup_snippet="${XDG_CACHE_HOME:-$HOME/.cache}/sugarkube/wipe-env.sh"
+[ -f "${cleanup_snippet}" ] && source "${cleanup_snippet}"  # clears your shell exports
 export SUGARKUBE_SERVERS=3
 export SUGARKUBE_ENV=dev
 # Optional: set SUGARKUBE_TOKEN_DEV to the leader's
