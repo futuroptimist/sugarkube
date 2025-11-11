@@ -50,7 +50,7 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
     ]
     if resolve:
         command.append("--resolve")
-    if mode in {"server-first", "server-count"}:
+    if mode in {"server-first", "server-count", "server-select"}:
         command.append("--ignore-local")
     command.append(service_type)
     return command
