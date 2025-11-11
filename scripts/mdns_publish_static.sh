@@ -22,6 +22,8 @@ case "${role}" in
     exit 2
     ;;
 esac
+MDNS_PUBLISH_IPV4=""
+MDNS_PUBLISH_IPV6=""
 export PORT="${PORT:-6443}"
 export PHASE="${PHASE:-}"
 leader_value="${LEADER:-}"
@@ -58,57 +60,12 @@ cleanup_service_tmp() {
 }
 trap cleanup_service_tmp EXIT
 
-ensure_mdns_target_resolvable() {
-  if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
-    echo "avahi-resolve-host-name not found; skipping SRV target preflight" >&2
-    return 0
-  fi
+determine_publish_ipv4() {
+  local iface addr_candidates
+  iface="${SUGARKUBE_MDNS_INTERFACE:-}"
+  addr_candidates="$(hostname -I 2>/dev/null || true)"
 
-  local resolve_cmd=("avahi-resolve-host-name" "${SRV_HOST}" -4 "--timeout=1")
-  local hosts_path="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
-  local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-}"
-  local nss_ok=0
-  local resolve_ok=0
-  local browse_ok=0
-  local outcome="fail"
-  local hosts_updated=0
-  local avahi_hostname_ran=0
-
-  gather_resolution_status() {
-    nss_ok=0
-    resolve_ok=0
-
-    if command -v getent >/dev/null 2>&1; then
-      local getent_ipv4=""
-      getent_ipv4="$(getent hosts "${SRV_HOST}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
-      if [ -n "${getent_ipv4}" ]; then
-        if [ -n "${expected_ipv4}" ] && [ "${getent_ipv4}" != "${expected_ipv4}" ]; then
-          nss_ok=0
-        else
-          nss_ok=1
-        fi
-      fi
-    fi
-
-    if "${resolve_cmd[@]}" >/dev/null 2>&1; then
-      resolve_ok=1
-    fi
-
-    if [ "${nss_ok}" = "1" ] || [ "${resolve_ok}" = "1" ]; then
-      return 0
-    fi
-    return 1
-  }
-
-  ensure_expected_ipv4() {
-    if [ -n "${expected_ipv4}" ]; then
-      return 0
-    fi
-
-    local iface addr_candidates
-    iface="${SUGARKUBE_MDNS_INTERFACE:-}"
-    addr_candidates="$(hostname -I 2>/dev/null || true)"
-    expected_ipv4="$(python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+  python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
 import ipaddress
 import json
 import subprocess
@@ -137,7 +94,7 @@ IGNORE_IFACE_KINDS = {
 IGNORE_IFACE_FLAGS = {"LOOPBACK"}
 
 
-def valid_ipv4(candidate):
+def valid_ipv4(candidate: str) -> bool:
     try:
         ip = ipaddress.IPv4Address(candidate)
     except ipaddress.AddressValueError:
@@ -183,7 +140,7 @@ def gather_iface_metadata():
 IFACE_METADATA = gather_iface_metadata()
 
 
-def interface_blacklisted(name):
+def interface_blacklisted(name: str) -> bool:
     if not name:
         return True
     if name in IGNORE_IFACE_NAMES:
@@ -201,7 +158,7 @@ def interface_blacklisted(name):
     return False
 
 
-def interface_allowed(name, default_iface):
+def interface_allowed(name: str, default_iface: str) -> bool:
     if not name:
         return False
     if name == iface_hint:
@@ -316,12 +273,146 @@ selected = choose_ip()
 if selected:
     print(selected)
 PY
-    )"
-    if [ -z "${expected_ipv4}" ]; then
-      echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
-      return 1
-    fi
+}
+
+determine_publish_ipv6() {
+  local iface addr_candidates
+  iface="${SUGARKUBE_MDNS_INTERFACE:-}"
+  addr_candidates="$(hostname -I 2>/dev/null || true)"
+
+  python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+import ipaddress
+import json
+import subprocess
+import sys
+
+iface_hint = sys.argv[1].strip()
+hostname_tokens = [token for token in sys.argv[2].split() if token]
+
+
+def valid_ipv6(candidate: str) -> bool:
+    try:
+        ip = ipaddress.IPv6Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+        return False
+    if ip.is_link_local:
+        return False
+    return True
+
+
+def gather_ipv6_entries():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "-6", "addr", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return []
+
+    entries = []
+    for entry in payload:
+        iface_name = entry.get("ifname", "")
+        for addr_info in entry.get("addr_info", []):
+            if addr_info.get("family") != "inet6":
+                continue
+            if addr_info.get("scope") not in {"global", "site"}:
+                continue
+            local_ip = addr_info.get("local")
+            if not local_ip:
+                continue
+            if not valid_ipv6(local_ip):
+                continue
+            entries.append((iface_name, local_ip))
+    return entries
+
+
+entries = gather_ipv6_entries()
+
+candidate = ""
+if iface_hint:
+    for iface_name, ipv6 in entries:
+        if iface_name == iface_hint:
+            candidate = ipv6
+            break
+
+if not candidate and entries:
+    candidate = entries[0][1]
+
+if not candidate:
+    for token in hostname_tokens:
+        if valid_ipv6(token):
+            candidate = token
+            break
+
+if candidate:
+    print(candidate)
+PY
+}
+
+ensure_mdns_target_resolvable() {
+  if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    echo "avahi-resolve-host-name not found; skipping SRV target preflight" >&2
     return 0
+  fi
+
+  local resolve_cmd=("avahi-resolve-host-name" "${SRV_HOST}" -4 "--timeout=1")
+  local hosts_path="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
+  local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-}"
+  local nss_ok=0
+  local resolve_ok=0
+  local browse_ok=0
+  local outcome="fail"
+  local hosts_updated=0
+  local avahi_hostname_ran=0
+
+  gather_resolution_status() {
+    nss_ok=0
+    resolve_ok=0
+
+    if command -v getent >/dev/null 2>&1; then
+      local getent_ipv4=""
+      getent_ipv4="$(getent hosts "${SRV_HOST}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+      if [ -n "${getent_ipv4}" ]; then
+        if [ -n "${expected_ipv4}" ] && [ "${getent_ipv4}" != "${expected_ipv4}" ]; then
+          nss_ok=0
+        else
+          nss_ok=1
+        fi
+      fi
+    fi
+
+    if "${resolve_cmd[@]}" >/dev/null 2>&1; then
+      resolve_ok=1
+    fi
+
+    if [ "${nss_ok}" = "1" ] || [ "${resolve_ok}" = "1" ]; then
+      return 0
+    fi
+    return 1
+  }
+
+  ensure_expected_ipv4() {
+    if [ -n "${expected_ipv4}" ]; then
+      MDNS_PUBLISH_IPV4="${expected_ipv4}"
+      return 0
+    fi
+
+    expected_ipv4="$(determine_publish_ipv4)"
+    if [ -n "${expected_ipv4}" ]; then
+      MDNS_PUBLISH_IPV4="${expected_ipv4}"
+      return 0
+    fi
+
+    echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
+    return 1
   }
 
   update_hosts_file() {
@@ -580,6 +671,19 @@ if ! ensure_mdns_target_resolvable; then
   exit 1
 fi
 
+if [ -z "${MDNS_PUBLISH_IPV4}" ]; then
+  MDNS_PUBLISH_IPV4="$(determine_publish_ipv4)"
+fi
+if [ -n "${MDNS_PUBLISH_IPV4}" ]; then
+  export MDNS_PUBLISH_IPV4
+fi
+MDNS_PUBLISH_IPV6="$(determine_publish_ipv6)"
+if [ -n "${MDNS_PUBLISH_IPV6}" ]; then
+  export MDNS_PUBLISH_IPV6
+else
+  unset MDNS_PUBLISH_IPV6
+fi
+
 service_tmp_file="$(mktemp "${service_dir}/.k3s-mdns.XXXXXX")"
 python3 - "${service_tmp_file}" <<'PY'
 import html
@@ -594,6 +698,8 @@ role = os.environ["ROLE"]
 port = os.environ.get("PORT", "6443")
 phase = os.environ.get("PHASE", "")
 leader = os.environ.get("LEADER", "")
+ipv4 = os.environ.get("MDNS_PUBLISH_IPV4", "")
+ipv6 = os.environ.get("MDNS_PUBLISH_IPV6", "")
 
 service_name = f"k3s-{cluster}-{environment}@{srv_host} ({role})"
 service_type = f"_k3s-{cluster}-{environment}._tcp"
@@ -609,6 +715,13 @@ records = [
     ("phase", phase),
     ("leader", leader),
 ]
+
+if ipv4:
+    records.append(("ip4", ipv4))
+if ipv6:
+    records.append(("ip6", ipv6))
+if srv_host:
+    records.append(("host", srv_host))
 
 with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write("<?xml version=\"1.0\" standalone='no'?>\n")
