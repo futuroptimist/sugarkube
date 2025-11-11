@@ -17,7 +17,7 @@ function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
             [-half, -half],
             [half, -half],
             [-half, half],
-            [half, half]
+            [half, half],
         ];
 
 function fan_face_extent(size) = size + 24; // Adds a 12 mm rim on each edge for stiffness.

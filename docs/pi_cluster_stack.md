@@ -169,7 +169,7 @@ function fan_hole_spacing(size) =
 function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 screws)
 
 function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
-    let (half = spacing / 2)
+    let(half = spacing / 2)
         [
             [-half, -half],
             [half, -half],
