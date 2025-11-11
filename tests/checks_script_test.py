@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
@@ -1045,3 +1047,93 @@ exit 0
     )
     assert result.returncode == 0, result.stderr
     assert "flake8" in pip_log.read_text()
+
+
+def _prepare_command_stubs(fake_bin: Path, env_log: Path | None = None) -> None:
+    def write_stub(name: str, body: str) -> None:
+        path = fake_bin / name
+        path.write_text(body)
+        path.chmod(0o755)
+
+    for name in ("flake8", "isort", "black", "pyspelling", "linkchecker", "coverage", "npm", "npx"):
+        write_stub(name, "#!/bin/bash\nexit 0\n")
+
+    pytest_body = "#!/bin/bash\n"
+    if env_log is not None:
+        pytest_body += f"env | sort > \"{env_log}\"\n"
+    pytest_body += "exit 5\n"
+    write_stub("pytest", pytest_body)
+    write_stub("bats", "#!/bin/bash\nexit 0\n")
+
+    write_stub(
+        "id",
+        "#!/bin/bash\n"
+        "if [ \"$1\" = \"-u\" ]; then\n"
+        "  echo 1000\n"
+        "else\n"
+        "  exec /usr/bin/id \"$@\"\n"
+        "fi\n",
+    )
+
+
+def test_exports_test_env_defaults(tmp_path: Path, script: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    env_log = tmp_path / "pytest-env.log"
+
+    _prepare_command_stubs(fake_bin, env_log)
+
+    (tmp_path / "tests" / "bats").mkdir(parents=True)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PYTHONPATH"] = str(tmp_path)
+    env.pop("ALLOW_NON_ROOT", None)
+    env.pop("BATS_CWD", None)
+    env.pop("BATS_LIB_PATH", None)
+    env["SKIP_INSTALL"] = "1"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert env_log.exists(), "pytest stub should capture environment variables"
+
+    logged_env = {
+        line.split("=", maxsplit=1)[0]: line.split("=", maxsplit=1)[1]
+        for line in env_log.read_text().splitlines()
+        if "=" in line
+    }
+
+    assert logged_env.get("ALLOW_NON_ROOT") == "1"
+    assert logged_env.get("BATS_CWD") == str(tmp_path)
+    assert logged_env.get("BATS_LIB_PATH") == str(tmp_path / "tests" / "bats")
+
+
+def test_rejects_conflicting_allow_non_root(tmp_path: Path, script: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    _prepare_command_stubs(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PYTHONPATH"] = str(tmp_path)
+    env["ALLOW_NON_ROOT"] = "0"
+    env["SKIP_INSTALL"] = "1"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "ALLOW_NON_ROOT" in result.stderr
