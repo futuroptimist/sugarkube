@@ -9,8 +9,13 @@ teardown() {
   stop_readyz_server
 }
 
+# Retry ephemeral port selection so the API gate tests never flake on socket exhaustion.
+# Coverage: find_free_port retries when python fails (this file).
 find_free_port() {
-  python3 - <<'PY'
+  local port
+
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if port="$(python3 - <<'PY' 2>/dev/null
 import socket
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -18,6 +23,49 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     port = sock.getsockname()[1]
 print(port)
 PY
+)"; then
+      if [ -n "${port}" ]; then
+        echo "${port}"
+        return 0
+      fi
+    fi
+    port=""
+    sleep 0.05
+  done
+
+  return 1
+}
+
+@test "find_free_port retries when python fails" {
+  local real_python
+  local shim_dir
+  real_python="$(command -v python3)"
+  shim_dir="${BATS_TEST_TMPDIR}/shim"
+  mkdir -p "${shim_dir}"
+
+  cat <<'EOF' >"${shim_dir}/python3"
+#!/usr/bin/env bash
+count_file="__COUNT_FILE__"
+count=0
+if [ -f "${count_file}" ]; then
+  count="$(cat "${count_file}")"
+fi
+count=$((count + 1))
+echo "${count}" >"${count_file}"
+if [ "${count}" -eq 1 ]; then
+  exit 1
+fi
+exec __REAL_PYTHON__ "$@"
+EOF
+  sed -i "s#__COUNT_FILE__#${BATS_TEST_TMPDIR}/python3_call_count#g" "${shim_dir}/python3"
+  sed -i "s#__REAL_PYTHON__#${real_python}#" "${shim_dir}/python3"
+  chmod +x "${shim_dir}/python3"
+  PATH="${shim_dir}:${PATH}" run find_free_port
+
+  [ "$status" -eq 0 ]
+  [[ "${output}" =~ ^[0-9]+$ ]]
+  [ -s "${BATS_TEST_TMPDIR}/python3_call_count" ]
+  [ "$(cat "${BATS_TEST_TMPDIR}/python3_call_count")" -ge 2 ]
 }
 
 start_readyz_server() {
@@ -114,12 +162,7 @@ stop_readyz_server() {
 @test "api ready gate waits for readyz ok" {
   local port
   port="$(find_free_port)"
-  if [ -z "${port}" ]; then
-    # TODO: Stabilize find_free_port so the test never bails on socket exhaustion.
-    # Root cause: The helper occasionally returns nothing when the OS refuses to reserve a port.
-    # Estimated fix: 30m to retry allocation or fall back to a deterministic testing range.
-    skip "unable to allocate ephemeral port"
-  fi
+  [ -n "${port}" ]
   start_readyz_server "${port}"
 
   run env \
@@ -141,12 +184,7 @@ stop_readyz_server() {
 @test "401 is treated as alive when ALLOW_HTTP_401=1" {
   local port
   port="$(find_free_port)"
-  if [ -z "${port}" ]; then
-    # TODO: Stabilize find_free_port so the test never bails on socket exhaustion.
-    # Root cause: The helper occasionally returns nothing when the OS refuses to reserve a port.
-    # Estimated fix: 30m to retry allocation or fall back to a deterministic testing range.
-    skip "unable to allocate ephemeral port"
-  fi
+  [ -n "${port}" ]
 
   local responses_file
   responses_file="${BATS_TEST_TMPDIR}/readyz_responses_401.pydata"
@@ -181,12 +219,7 @@ EOF
 
   local port_fail
   port_fail="$(find_free_port)"
-  if [ -z "${port_fail}" ]; then
-    # TODO: Stabilize find_free_port so the test never bails on socket exhaustion.
-    # Root cause: The helper occasionally returns nothing when the OS refuses to reserve a port.
-    # Estimated fix: 30m to retry allocation or fall back to a deterministic testing range.
-    skip "unable to allocate ephemeral port for failure case"
-  fi
+  [ -n "${port_fail}" ]
 
   local responses_fail
   responses_fail="${BATS_TEST_TMPDIR}/readyz_responses_401_only.pydata"
