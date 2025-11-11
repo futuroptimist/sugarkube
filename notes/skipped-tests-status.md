@@ -1,6 +1,6 @@
 # Skipped Tests Status and Roadmap
 
-**Date**: 2025-11-10 (Updated - Test Count Correction)  
+**Date**: 2025-11-10 (Updated - Test Count Correction)
 **Context**: Documentation of all skipped tests in the repository and recommendations for future PRs
 
 ## Summary
@@ -56,7 +56,7 @@ All Python tests pass without skips (850+ tests).
 
 **All Tests Now Passing**:
 - ✅ **Test 5: "discover flow joins existing server when discovery succeeds"** (line 513) - FIXED 2025-11-09 PR #10
-- ✅ **Test 6: "discover flow elects winner after self-check failure"** (line 646) - FIXED 2025-11-09 PR #9  
+- ✅ **Test 6: "discover flow elects winner after self-check failure"** (line 646) - FIXED 2025-11-09 PR #9
 - ✅ **Test 7: "discover flow remains follower after self-check failure"** (line 788) - FIXED 2025-11-09 PR #11
 
 **Original Challenge**: Complex integration tests requiring k3s installation and multi-node orchestration
@@ -108,7 +108,7 @@ All Python tests pass without skips (850+ tests).
   - Updated all 4 k3s installation call sites to use new wrapper
   - Added environment variable overrides (tokens, timeouts)
 - **Result**: Infrastructure reusable across all 3 tests
-- **Documentation**: 
+- **Documentation**:
   - Full investigation: notes/k3s-integration-tests-investigation-20251108.md
   - Outages: outages/2025-11-08-k3s-integration-tests-investigation.json
   - Stub implementation: outages/2025-11-08-k3s-integration-tests-stub-infrastructure.json
@@ -249,7 +249,7 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 
 **Original Skip Reason**: Test timed out waiting for mdns_absence_gate logic to complete
 
-**Root Cause**: 
+**Root Cause**:
 - Test runs `k3s-discover.sh` which calls `ensure_mdns_absence_gate()` function
 - The absence gate has complex retry logic with timeouts and backoffs (default 15 seconds)
 - Default MDNS_ABSENCE_TIMEOUT_MS=15000ms caused test to exceed 30s timeout
@@ -332,7 +332,7 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
   - PR #10 Test 5: 35 minutes
   - PR #11 Test 7: 10 minutes
 - **Total time**: 150 minutes (~2.5 hours vs original 20-30 hour estimate)
-- **Outages**: 
+- **Outages**:
   - `outages/2025-11-09-discover-flow-test6-systemctl-stub.json`
   - `outages/2025-11-09-discover-flow-test6-missing-stubs.json`
   - `outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json`
@@ -380,6 +380,9 @@ When adding a test skip directive:
    skip "<User-facing reason>"
    ```
 
+   Regression coverage: `tests/test_bats_skip_guidelines.py` enforces the comment block
+   around each `skip` invocation.
+
 2. **Update this document**:
    - Add entry to relevant section
    - Document root cause and estimated effort
@@ -412,6 +415,6 @@ When adding a test skip directive:
 
 ---
 
-**Maintained by**: CI/Test team  
-**Last updated**: 2025-11-07 
+**Maintained by**: CI/Test team
+**Last updated**: 2025-11-07
 **Next review**: After each skip is addressed or added

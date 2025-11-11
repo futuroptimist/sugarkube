@@ -624,6 +624,9 @@ EOS
 
 @test "mdns self-check falls back to CLI when dbus unsupported" {
   if ! command -v gdbus >/dev/null 2>&1; then
+    # TODO: Install gdbus or provide a shim so the DBus path stays exercised.
+    # Root cause: Minimal systems omit libglib2.0-bin, leaving the helper unavailable.
+    # Estimated fix: 10m to install libglib2.0-bin or wire the test through stub_command.
     skip "gdbus not available"
   fi
 

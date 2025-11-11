@@ -37,6 +37,9 @@ PY
 
 @test "l4_probe reports open port as open" {
   if [ "${NCAT_AVAILABLE}" -ne 1 ]; then
+    # TODO: Install ncat or provide a stub so port probing exercises real sockets.
+    # Root cause: Minimal hosts skip the test because the nmap-ncat package is absent.
+    # Estimated fix: 10m to install nmap-ncat or extend the test harness with a fake binary.
     skip "ncat not available"
   fi
   open_port="$(allocate_port)"
@@ -52,6 +55,9 @@ PY
 
 @test "l4_probe exits non-zero when a port is closed" {
   if [ "${NCAT_AVAILABLE}" -ne 1 ]; then
+    # TODO: Install ncat or provide a stub so port probing exercises real sockets.
+    # Root cause: Minimal hosts skip the test because the nmap-ncat package is absent.
+    # Estimated fix: 10m to install nmap-ncat or extend the test harness with a fake binary.
     skip "ncat not available"
   fi
   open_port="$(allocate_port)"
