@@ -167,13 +167,23 @@ function fan_hole_spacing(size) =
     size == 80  ? 71.5 : 105; // default to 120 mm pattern
 
 function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 screws)
+
+function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
+    let (half = spacing / 2)
+        [
+            [-half, -half],
+            [half, -half],
+            [-half, half],
+            [half, half],
+        ];
 ```
 
-Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards). Add an
-optional helper for square patterns if future fans require it.
+Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards).
+`fan_square_pattern` returns XY offsets for the square bolt pattern so future fan sizes can reuse the
+same layout without duplicating loop logic in consuming modules.
 
-Regression coverage: `tests/test_fan_patterns_scad.py` ensures the helper stays defined and
-continues returning the documented diameters.
+Regression coverage: `tests/test_fan_patterns_scad.py` ensures the helpers stay defined and continue
+returning the documented diameters and offsets.
 
 ### 4.2 `fan_wall.scad`
 
