@@ -201,7 +201,6 @@ MDNS_SELECTED_HOST=""
 MDNS_SELECTED_PORT=6443
 MDNS_SELECTED_MODE=""
 MDNS_SELECTED_IP=""
-MDNS_SELECTED_ACCEPT_PATH=""
 MDNS_SELECTED_BROWSE_OK=0
 MDNS_SELECTED_RESOLVE_OK=0
 MDNS_SELECTED_NSS_OK=0
@@ -2186,7 +2185,6 @@ mdns_reset_selection() {
   MDNS_SELECTED_PORT=6443
   MDNS_SELECTED_MODE=""
   MDNS_SELECTED_IP=""
-  MDNS_SELECTED_ACCEPT_PATH=""
   MDNS_SELECTED_BROWSE_OK=0
   MDNS_SELECTED_RESOLVE_OK=0
   MDNS_SELECTED_NSS_OK=0
@@ -2296,7 +2294,6 @@ select_server_candidate() {
   fi
 
   if [ -n "${accept_path}" ]; then
-    MDNS_SELECTED_ACCEPT_PATH="${accept_path}"
     log_fields+=("accept_path=${accept_path}")
     log_info discover "${log_fields[@]}" >&2
     return 0
