@@ -5,11 +5,11 @@
 
 ## Summary
 
-As of 2025-11-10, there are **2 conditionally skipped tests** in the BATS test suite (pass when ncat installed)
+As of 2025-11-10, **all BATS tests run locally** thanks to the bundled ncat stub
 
 **CI STATUS**: 42/42 BATS tests passing (100% pass rate in CI) 🎉
 
-**LOCAL STATUS**: 40/42 tests passing (2 conditionally skip without ncat)
+**LOCAL STATUS**: 42/42 tests passing (ncat stub keeps listeners available)
 
 All Python tests pass without skips (850+ tests).
 
@@ -22,15 +22,15 @@ All Python tests pass without skips (850+ tests).
 - After PR #9 (2025-11-09): 39 pass, 2 skip (Test 6 "elects winner" now passing with systemctl stub fix)
 - After PR #10 (2025-11-09): 40 pass, 1 skip (Test 5 "joins existing server" now passing with missing stubs fix)
 - After PR #11 (2025-11-09): 41 pass, 0 skip *(incorrect count - see below)*
-- **After 2025-11-10 Correction: 42 total tests (40 pass locally, 2 conditionally skip; 42 pass in CI)** 🎉
+- **After 2025-11-10 Correction: 42 total tests (42 pass locally with stub; 42 pass in CI)** 🎉
 
 **Test Count Correction (2025-11-10)**:
 - Previous documentation stated "41/41 tests" - this was incorrect
 - Actual test count: **42 total tests** across all .bats files
 - The 2 l4_probe tests (17-18) were miscounted as non-existent
-- These tests use `command -v ncat || skip` (conditional skip pattern)
+- These tests used `command -v ncat || skip` until the suite gained a bundled stub
 - In CI: All 42 tests pass (ncat installed at .github/workflows/ci.yml:38)
-- Locally: 40 pass + 2 conditionally skip (when ncat unavailable)
+- Locally: 42 pass with the stub providing `ncat -lk` behaviour when the binary is absent
 - **Achievement maintained**: 100% pass rate in CI environment!
 
 ## Test Suite Status
@@ -38,17 +38,17 @@ All Python tests pass without skips (850+ tests).
 | Test File | Total | Pass (CI) | Pass (Local) | Conditional Skip | Fail |
 |-----------|-------|-----------|--------------|------------------|------|
 | discover_flow.bats | 9 | 9 | 9 | 0 | 0 |
-| l4_probe.bats | 2 | 2 | 0 | 2 | 0 |
+| l4_probe.bats | 2 | 2 | 2 | 0 | 0 |
 | mdns_selfcheck.bats | 18 | 18 | 18 | 0 | 0 |
 | Other BATS | 13 | 13 | 13 | 0 | 0 |
-| **Total BATS** | **42** | **42** | **40** | **2** | **0** |
+| **Total BATS** | **42** | **42** | **42** | **0** | **0** |
 | **Python tests** | **850+** | **850+** | **850+** | **0** | **0** |
 
 ## ALL TESTS COMPLETE IN CI! 🎉
 
 ### Conditionally Skipped Tests (Pass in CI)
 
-#### l4_probe.bats Tests 17-18 (Conditional Skip - ncat dependency)
+#### l4_probe.bats Tests 17-18 (Now stubbed - ncat dependency removed for local runs)
 
 #### ✅ discover_flow.bats - K3s Integration Tests (COMPLETED 2025-11-09)
 
@@ -166,34 +166,32 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 
 ---
 
-### l4_probe.bats - Network Tool Tests (Conditionally Skip - ncat dependency)
+### l4_probe.bats - Network Tool Tests (Stubbed ncat for local runs)
 
 **Tests**:
 - Test 16: "l4_probe reports open port as open" (line 38)
 - Test 17: "l4_probe exits non-zero when a port is closed" (line 53)
 
-**Status**: ✅ PASSING IN CI (conditionally skip locally without ncat)
+**Status**: ✅ PASSING EVERYWHERE (stub handles hosts without ncat)
 
-**Skip Condition**: Tests use conditional skip: `command -v ncat >/dev/null 2>&1 || skip "ncat not available"`
+**Skip Condition**: No longer needed - the suite now provides `tests/bats/fixtures/ncat_stub.py`
 
 **Root Cause**:
-- Tests require `ncat` (netcat) binary for TCP port connectivity checks
-- `l4_probe.sh` script uses `ncat` to probe ports
-- GitHub Actions CI has `ncat` installed (see .github/workflows/ci.yml:38)
-- Tests skip in local environments without ncat but always pass in CI
+- Tests previously required the `ncat` (netcat) binary for TCP port connectivity checks
+- `l4_probe.sh` script still probes ports, but the test harness now bundles a Python stub for listeners
+- GitHub Actions CI continues to use the real `ncat` installed via .github/workflows/ci.yml:38
+- Local environments fall back to the stub, so coverage remains identical without extra packages
 
-**CI Status**: ✅ PASSING (2025-11-07 verified)
+**CI Status**: ✅ PASSING (2025-11-07 verified and unchanged)
 - ncat installed via apt-get in CI workflow
-- Both tests pass automatically when ncat available
-- No code changes needed - conditional skip is working as intended
+- Tests keep using the real binary when available
 
-**Local Status**: ⏭️ CONDITIONALLY SKIPPED (when ncat unavailable)
-- Tests gracefully skip if dependency missing
-- Can be enabled locally by: `sudo apt-get install ncat`
+**Local Status**: ✅ PASSING (stub activated automatically)
+- No manual installs required - the stub is part of the repo
 
-**Complexity**: N/A (tests working as designed)
+**Complexity**: Low - stub mirrors `ncat -lk` behaviour for test listeners
 
-**Note**: These tests were miscounted in previous documentation. They are part of the 42-test suite, not "missing" tests. The conditional skip pattern is intentional and correct.
+**Note**: These tests were miscounted in previous documentation. They are part of the 42-test suite, not "missing" tests. The new stub removes the need for conditional skips.
 
 **Outage Documentation**: `outages/2025-11-07-l4-probe-ncat-already-available.json`
 

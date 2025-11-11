@@ -3,9 +3,9 @@
 setup() {
   LISTENER_PIDS=()
   if command -v ncat >/dev/null 2>&1; then
-    NCAT_AVAILABLE=1
+    NCAT_HELPER="$(command -v ncat)"
   else
-    NCAT_AVAILABLE=0
+    NCAT_HELPER="${BATS_TEST_DIRNAME}/fixtures/ncat_stub.py"
   fi
 }
 
@@ -20,7 +20,7 @@ teardown() {
 
 start_listener() {
   local port="$1"
-  ncat -lk 127.0.0.1 "${port}" >/dev/null 2>&1 &
+  "${NCAT_HELPER}" -lk 127.0.0.1 "${port}" >/dev/null 2>&1 &
   LISTENER_PIDS+=("$!")
   # Give the listener a moment to start accepting connections.
   sleep 0.1
@@ -36,12 +36,6 @@ PY
 }
 
 @test "l4_probe reports open port as open" {
-  if [ "${NCAT_AVAILABLE}" -ne 1 ]; then
-    # TODO: Install ncat or provide a stub so port probing exercises real sockets.
-    # Root cause: Minimal hosts skip the test because the nmap-ncat package is absent.
-    # Estimated fix: 10m to install nmap-ncat or extend the test harness with a fake binary.
-    skip "ncat not available"
-  fi
   open_port="$(allocate_port)"
   start_listener "${open_port}"
 
@@ -54,12 +48,6 @@ PY
 }
 
 @test "l4_probe exits non-zero when a port is closed" {
-  if [ "${NCAT_AVAILABLE}" -ne 1 ]; then
-    # TODO: Install ncat or provide a stub so port probing exercises real sockets.
-    # Root cause: Minimal hosts skip the test because the nmap-ncat package is absent.
-    # Estimated fix: 10m to install nmap-ncat or extend the test harness with a fake binary.
-    skip "ncat not available"
-  fi
   open_port="$(allocate_port)"
   closed_port="$(allocate_port)"
   start_listener "${open_port}"

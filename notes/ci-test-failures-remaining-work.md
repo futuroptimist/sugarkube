@@ -4,7 +4,7 @@ This document tracks the remaining test failures that need to be addressed after
 
 ## Current Status (2025-11-10 Update - Test Count Correction)
 
-**BATS Suite**: ✅ ALL TESTS PASSING (42 total: 40 pass locally, 2 conditionally skip, 0 fail) 🎉
+**BATS Suite**: ✅ ALL TESTS PASSING (42 total: 42 pass locally with stubbed ncat, 0 fail) 🎉
 
 **Python Suite**: ✅ All tests passing (850+ pass, 11 skip, 0 fail)
 
@@ -14,8 +14,7 @@ This document tracks the remaining test failures that need to be addressed after
 
 **Test Summary**:
 - ✅ **42/42 BATS tests total** - ALL COMPLETE!
-- ✅ **40 tests passing locally** (95.2% when ncat unavailable)
-- ⏭️ **2 tests conditionally skipped locally** (l4_probe tests 16-17: pass when ncat installed)
+- ✅ **42 tests passing locally** (stubbed ncat keeps coverage when the binary is absent)
 - ✅ **42/42 tests passing in CI** (100% - ncat installed)
 - ❌ **0 BATS tests failing**
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
@@ -52,7 +51,7 @@ This document tracks the remaining test failures that need to be addressed after
 **Previous Update (2025-11-10 - Documentation Correction)**:
 - **Issue**: Notes incorrectly stated "41/41 tests" when actual count is 42 tests
 - **Correction**: Updated all test counts to accurately reflect 42 total tests
-- **Clarification**: 2 l4_probe tests (16-17) are "conditionally skipped" (not broken - they pass when ncat installed)
+- **Clarification**: l4_probe tests (16-17) now run everywhere thanks to the bundled ncat stub
 - **CI Status**: 100% pass rate (42/42) achieved - ncat is installed in CI environment
 - **Outage**: `outages/2025-11-10-test-count-documentation-correction.json`
 
@@ -84,11 +83,11 @@ This document tracks the remaining test failures that need to be addressed after
 
 **Previous Improvements (2025-11-07 PR #8)**:
 - **CI Parity**: Added `libglib2.0-bin` to CI workflow for explicit gdbus availability
-- **Verification**: Confirmed tests 16-17 (l4_probe with ncat) and test 31 (mdns gdbus fallback) pass in both local and CI environments  
+- **Verification**: Confirmed tests 16-17 (l4_probe with ncat) and test 31 (mdns gdbus fallback) pass in both local and CI environments
 - **Documentation**: Corrected notes to reflect that conditional skips are passing, not actually skipped
 - **Outage**: `outages/2025-11-07-ci-parity-gdbus-dependency.json`
 
-**Time Estimate Validation**: 
+**Time Estimate Validation**:
 - CI parity improvement: ~15 minutes (adding dependency + validation)
 - K3s integration tests investigation: 20 minutes (validated 4-8 hour estimates as accurate)
 - Test 8 was documented as "2-3 hours" but actual fix took ~1 hour including investigation
@@ -111,10 +110,10 @@ This document tracks the remaining test failures that need to be addressed after
    - Actual time: 15 minutes
 
 9. **l4_probe.bats Tests 16-17** - 2/2 tests confirmed working (NEW 2025-11-07 PR #7)
-   - Tests were skipped locally due to missing ncat, but CI already has ncat installed
-   - No code changes needed - tests use conditional skip logic
+   - Tests previously skipped locally due to missing ncat; the suite now ships a Python-based stub
+   - The stub mirrors `ncat -lk` behaviour so the listeners run even on minimal hosts
    - Root cause documented in `outages/2025-11-07-l4-probe-ncat-already-available.json`
-   - This was a documentation issue, not a test failure
+   - Follow-up coverage: `tests/test_ncat_stub.py` ensures the fallback keeps working
 
 **Previous: Python 3.14 Compatibility (2025-11-07 PR #6)**
 
@@ -212,7 +211,7 @@ All remaining skipped tests are documented in `notes/skipped-tests-status.md`:
   - ⚠️ Original issue was missing systemctl reload/restart stubs (now resolved)
 
 #### Test 7: "discover flow remains follower after self-check failure" (line 788) - ✅ FIXED (2025-11-09 PR #11 - THIS PR)
-- **Status**: ✅ NOW PASSING  
+- **Status**: ✅ NOW PASSING
 - **Root Cause**: Test was marked as skipped but was actually missing critical stubs from Test 6 pattern (timeout, journalctl, sleep, gdbus, busctl, directories, avahi.conf, env vars)
 - **Fix Applied (2025-11-09)**:
   - Added all missing stubs following Test 6 pattern
