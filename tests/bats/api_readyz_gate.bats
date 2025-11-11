@@ -94,6 +94,9 @@ PY
   local port
   port="$(find_free_port)"
   if [ -z "${port}" ]; then
+    # TODO: Stabilize find_free_port so the test never bails on socket exhaustion.
+    # Root cause: The helper occasionally returns nothing when the OS refuses to reserve a port.
+    # Estimated fix: 30m to retry allocation or fall back to a deterministic testing range.
     skip "unable to allocate ephemeral port"
   fi
   start_readyz_server "${port}"

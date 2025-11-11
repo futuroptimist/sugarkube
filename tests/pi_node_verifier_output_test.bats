@@ -152,6 +152,9 @@ EOF
 
 @test "pi_node_verifier reports pi_home_repos pass when repositories exist" {
   if [ -e /home/pi ]; then
+    # TODO: Harden the pi_home_repos fixture so it never mutates a real /home/pi directory.
+    # Root cause: The test seeds repositories under /home/pi, which already exists on some hosts.
+    # Estimated fix: 45m to pivot the helper toward a temporary prefix or allow an override.
     skip "/home/pi already exists"
   fi
 
