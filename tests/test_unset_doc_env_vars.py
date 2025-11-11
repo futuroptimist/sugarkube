@@ -25,7 +25,7 @@ print(os.environ.get('SUGARKUBE_API_REGADDR'))
 PY
     """
     result = subprocess.run(
-        ["bash", "-lc", command],
+        ["bash", "-c", command],
         cwd=REPO_ROOT,
         env=env,
         text=True,

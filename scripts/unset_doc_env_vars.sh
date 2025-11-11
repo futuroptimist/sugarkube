@@ -66,7 +66,6 @@ for var_name in "${DOC_ENV_VARS[@]}"; do
         unset "${var_name}"
         unset_vars+=("${var_name}")
     fi
-    unset "var_name"
 done
 
 if [ -n "${XDG_CACHE_HOME:-}" ]; then
