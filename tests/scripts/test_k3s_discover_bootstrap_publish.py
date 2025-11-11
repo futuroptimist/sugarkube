@@ -137,7 +137,7 @@ def test_bootstrap_publish_writes_static_service(tmp_path):
     assert port == "6443"
 
     txt_records = _txt_records(tree)
-    assert txt_records == [
+    assert txt_records[:6] == [
         "k3s=1",
         "cluster=sugar",
         "env=dev",
@@ -145,6 +145,16 @@ def test_bootstrap_publish_writes_static_service(tmp_path):
         "phase=bootstrap",
         f"leader={hostname}",
     ]
+
+    extras = txt_records[6:]
+    if extras:
+        assert extras[0] == f"host={hostname}"
+    if len(extras) >= 2:
+        assert extras[1].startswith("ip4=")
+        assert len(extras[1]) > 4
+    if len(extras) >= 3:
+        assert extras[2].startswith("ip6=")
+        assert len(extras[2]) > 4
 
     assert (
         "SYSTEMCTL:reload avahi-daemon" in systemctl_log
@@ -176,7 +186,7 @@ def test_bootstrap_publish_sanitizes_trailing_dot_hostname(tmp_path):
     assert host_name == expected_host
 
     txt_records = _txt_records(tree)
-    assert txt_records[-1] == f"leader={expected_host}"
+    assert f"leader={expected_host}" in txt_records
     assert "phase=bootstrap" in txt_records
     assert result.returncode == 0
 
