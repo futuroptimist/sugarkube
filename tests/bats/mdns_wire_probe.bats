@@ -40,6 +40,71 @@ prepare_mdns_publish_static_environment() {
   real_mv="$(command -v mv)"
   real_chmod="$(command -v chmod)"
 
+  stub_command ip <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+
+emit_json_link() {
+  cat <<'JSON'
+[
+  {
+    "ifname": "lo",
+    "flags": ["LOOPBACK"]
+  },
+  {
+    "ifname": "eth0",
+    "flags": ["BROADCAST", "MULTICAST", "UP"],
+    "linkinfo": {"info_kind": ""}
+  }
+]
+JSON
+}
+
+emit_json_ipv4_addr() {
+  cat <<'JSON'
+[
+  {
+    "ifname": "eth0",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "10.0.0.10",
+        "scope": "global"
+      }
+    ]
+  }
+]
+JSON
+}
+
+case "${args[*]}" in
+  "-j link show")
+    emit_json_link
+    exit 0
+    ;;
+  "-j -4 addr show"|"-4 -j addr show")
+    emit_json_ipv4_addr
+    exit 0
+    ;;
+  "-j -6 addr show"|"-6 -j addr show")
+    printf '[]\n'
+    exit 0
+    ;;
+  "-4 route show default")
+    printf 'default via 10.0.0.1 dev eth0\n'
+    exit 0
+    ;;
+  "-6 route show default")
+    exit 1
+    ;;
+  *)
+    printf 'ip stub missing handler for: %s\n' "${args[*]}" >&2
+    exit 1
+    ;;
+esac
+EOS
+
   stub_command systemctl <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail

@@ -12,5 +12,7 @@
     <txt-record>role=bootstrap</txt-record>
     <txt-record>phase=bootstrap</txt-record>
     <txt-record>leader=test-node.local</txt-record>
+    <txt-record>host=test-node.local</txt-record>
+    <txt-record>ip4=10.0.0.10</txt-record>
   </service>
 </service-group>
