@@ -197,7 +197,6 @@ MDNS_SELF_CHECK_FAILURE_CODE=94
 FAST_SLEEP_FLAG="${SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP:-0}"
 API_READY_LAST_STATUS=""
 API_READY_LAST_MODE=""
-API_READY_LAST_OUTCOME=""
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -2708,7 +2707,6 @@ PY
     local display_port="${parsed_port:-${port}}"
     API_READY_LAST_STATUS="${http_status:-}"
     API_READY_LAST_MODE="${mode:-}"
-    API_READY_LAST_OUTCOME="${outcome:-ok}"
     local -a log_fields=(
       "event=api_ready_local"
       "outcome=${outcome:-ok}"
@@ -2736,7 +2734,6 @@ PY
 
   API_READY_LAST_STATUS=""
   API_READY_LAST_MODE=""
-  API_READY_LAST_OUTCOME=""
   local -a warn_fields=(
     "phase=api_ready_local"
     "status=${status}"
