@@ -54,6 +54,29 @@ exit 1
 SH
 chmod +x "${BIN_DIR}/busctl"
 
+cat >"${BIN_DIR}/getent" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 2 ]; then
+  case "$1" in
+    hosts)
+      if [ "$2" = "host" ]; then
+        echo "192.0.2.80 host"
+        exit 0
+      fi
+      ;;
+    ahostsv4)
+      if [ "$2" = "host" ]; then
+        echo "192.0.2.80 STREAM host"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+exit 2
+SH
+chmod +x "${BIN_DIR}/getent"
+
 cat >"${BIN_DIR}/avahi-browse" <<SH
 #!/usr/bin/env bash
 set -euo pipefail

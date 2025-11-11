@@ -50,7 +50,7 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
     ]
     if resolve:
         command.append("--resolve")
-    if mode in {"server-first", "server-count"}:
+    if mode in {"server-first", "server-count", "server-select"}:
         command.append("--ignore-local")
     command.append(service_type)
     return command
@@ -180,6 +180,23 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
         for record in records:
             if record.txt.get("role") == "server":
                 return [record.host]
+        return []
+
+    if mode == "server-select":
+        for record in records:
+            if record.txt.get("role") != "server":
+                continue
+            phase = record.txt.get("phase") or record.txt.get("state") or ""
+            fields = []
+            if phase:
+                fields.append(f"mode={phase}")
+            else:
+                fields.append("mode=")
+            fields.append(f"host={record.host}")
+            fields.append(f"port={record.port}")
+            if record.address:
+                fields.append(f"address={record.address}")
+            return [" ".join(fields)]
         return []
 
     if mode == "server-count":
