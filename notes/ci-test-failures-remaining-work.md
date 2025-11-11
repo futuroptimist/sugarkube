@@ -21,7 +21,21 @@ This document tracks the remaining test failures that need to be addressed after
 - ✅ **850+ Python tests passing** (100% of non-skipped tests)
 - ❌ **0 Python tests failing**
 
-**Latest Update (2025-11-10 - Final Documentation Synchronization)**:
+**Latest Update (2025-11-10 - Outage Reference Correction)**:
+- **Issue**: Broken references to non-existent 'test7-discover-flow-follower-unskip.json' in two documentation files
+- **Fix**: Updated to correct filename 'test7-discover-flow-follower-missing-stubs.json' reflecting actual root cause
+- **Impact**: Fixes broken documentation links, improves clarity of Test 7 fix rationale
+- **Outage**: `outages/2025-11-10-outage-reference-correction.json`
+- **Time**: 10 minutes (documentation-only changes)
+
+**Previous Update (2025-11-10 - Test Index Reference Correction)**:
+- **Issue**: One remaining "1-41" reference found in 2025-11-05-ci-test-status-verified.md line 126 using outdated "global test index" terminology
+- **Fix**: Updated to position-based numbering convention with reference to test-numbering-standardization.md
+- **Impact**: Completes final synchronization of test numbering documentation, removes last outdated reference
+- **Outage**: `outages/2025-11-10-test-index-reference-correction.json`
+- **Time**: 15 minutes (documentation-only changes)
+
+**Previous Update (2025-11-10 - Final Documentation Synchronization)**:
 - **Issue**: One remaining reference to "41 BATS tests" found in test-suite-xy-analysis-20251108.md line 5 (methodology section)
 - **Fix**: Updated from "41 BATS tests" to "42 BATS tests" to complete synchronization
 - **Impact**: Eliminates last test count discrepancy, completes documentation synchronization effort
@@ -47,7 +61,7 @@ This document tracks the remaining test failures that need to be addressed after
 - **Root Cause**: Test marked as "70% complete" but all infrastructure already in place
 - **Fix**: Removed skip directive, added documentation, validated passing
 - **Result**: Test passes immediately - completes 100% BATS pass rate!
-- **Outage**: `outages/2025-11-09-test7-discover-flow-follower-unskip.json`
+- **Outage**: `outages/2025-11-09-test7-discover-flow-follower-missing-stubs.json`
 - **Time**: 10 minutes (exactly as estimated!)
 - **Also Fixed**: Test numbering discrepancy across all documentation
 - **Outage**: `outages/2025-11-09-test-numbering-standardization.json`

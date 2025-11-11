@@ -123,7 +123,7 @@ All actionable CI/test failures have been resolved. The problem statement assume
 
 The 3 remaining skipped tests are documented as requiring dedicated PRs.
 
-**Note**: Test numbers refer to global test index (1-41) when running `bats --recursive tests/bats`.
+**Note**: Test numbers refer to position in discover_flow.bats (see `notes/test-numbering-standardization.md`).
 
 1. **Tests 6-8** (discover_flow.bats) - estimated 4-8 hours each (validated via 2025-11-08 investigation)
    - Requires comprehensive stubbing beyond k3s installation

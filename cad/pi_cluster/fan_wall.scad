@@ -37,6 +37,7 @@ wall_height = stack_height + column_tab_offset * 2;
 fan_opening = fan_size - 10;
 fan_center_z = column_tab_offset + stack_height / 2;
 hole_spacing = fan_hole_spacing(fan_size);
+square_offsets = fan_square_pattern(fan_size, hole_spacing);
 
 module _fan_mount(x, z) {
     if (include_bosses) {
@@ -66,16 +67,14 @@ module fan_wall(
         translate([-fan_opening / 2, -fan_plate_t, fan_center_z - fan_opening / 2])
             cube([fan_opening, fan_plate_t * 2, fan_opening]);
 
-        for (dx = [-hole_spacing / 2, hole_spacing / 2])
-            for (dz = [-hole_spacing / 2, hole_spacing / 2])
-                translate([dx, 0, fan_center_z + dz])
-                    rotate([90, 0, 0])
-                        cylinder(h = fan_plate_t + boss_height + 0.4, r = fan_clearance_radius, $fn = 40);
+        for (offset = square_offsets)
+            translate([offset[0], 0, fan_center_z + offset[1]])
+                rotate([90, 0, 0])
+                    cylinder(h = fan_plate_t + boss_height + 0.4, r = fan_clearance_radius, $fn = 40);
     }
 
-    for (dx = [-hole_spacing / 2, hole_spacing / 2])
-        for (dz = [-hole_spacing / 2, hole_spacing / 2])
-            _fan_mount(dx, fan_center_z + dz);
+    for (offset = square_offsets)
+        _fan_mount(offset[0], fan_center_z + offset[1]);
 
     // Column interface tabs with M2.5 pass-through holes
     if (alignment_guard_enabled) {

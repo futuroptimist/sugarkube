@@ -59,6 +59,38 @@ environment.
 EOF
 }
 
+prepare_test_environment() {
+  if [ "$DOCS_ONLY" -eq 1 ]; then
+    return 0
+  fi
+
+  local repo_root
+  repo_root="$(pwd)"
+
+  if [ -z "${BATS_CWD:-}" ]; then
+    export BATS_CWD="$repo_root"
+  fi
+
+  if [ -z "${BATS_LIB_PATH:-}" ]; then
+    local bats_dir
+    bats_dir="${BATS_CWD}/tests/bats"
+    if [ -d "$bats_dir" ]; then
+      export BATS_LIB_PATH="$bats_dir"
+    fi
+  fi
+
+  if [ "$(id -u)" -ne 0 ]; then
+    if [ -z "${ALLOW_NON_ROOT:-}" ]; then
+      export ALLOW_NON_ROOT=1
+      echo "[sugarkube] Exporting ALLOW_NON_ROOT=1 for non-root test run." >&2
+    elif [ "$ALLOW_NON_ROOT" != "1" ]; then
+      echo "ALLOW_NON_ROOT must be set to 1 when running scripts/checks.sh without sudo." >&2
+      echo "Export ALLOW_NON_ROOT=1 and retry." >&2
+      exit 1
+    fi
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --docs-only)
@@ -83,6 +115,8 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+prepare_test_environment
 
 python_supports_pcbnew() {
   local interpreter="$1"

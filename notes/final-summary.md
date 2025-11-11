@@ -27,7 +27,7 @@ All test failures have been resolved through PRs #1-11 (2025-11-04 to 2025-11-09
    - Fix: Added environment variable to test setup
    - Status: ✅ FIXED
 
-2. **Missing curl stub for socket readiness** (10 tests)  
+2. **Missing curl stub for socket readiness** (10 tests)
    - Outage: `outages/2025-11-04-mdns-test-missing-curl-stub.json`
    - Fix: Added curl stub to simulate successful API
    - Status: ✅ FIXED
@@ -131,11 +131,14 @@ Original notes:
 
 2. **Medium term** (Est: 2-4 hours):
    - Investigate discover_flow.bats timeouts
-   - Investigate join_gate.bats timeouts  
+   - Investigate join_gate.bats timeouts
    - Goal: All BATS tests passing
 
 3. **Long term**:
-   - Add pre-commit checks for test environment variables
+   - ✅ Add pre-commit checks for test environment variables (`scripts/checks.sh`
+     now sets `ALLOW_NON_ROOT=1` and Bats paths automatically; regression
+     coverage: `tests/checks_script_test.py::test_exports_test_env_defaults`,
+     `tests/checks_script_test.py::test_rejects_conflicting_allow_non_root`)
    - Create test helper functions for common stubs
    - Document test writing guidelines
 

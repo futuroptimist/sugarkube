@@ -184,10 +184,16 @@ linters, tests, and documentation checks. If you send patches with `git send-ema
 copy [`hooks/sendemail-validate.sample`](hooks/sendemail-validate.sample) to
 `.git/hooks/sendemail-validate` so the email workflow executes the same checks
 after applying your series and scans each patch for secrets before sending.
+Running the checks as a non-root user now exports `ALLOW_NON_ROOT=1` and sets
+`BATS_CWD`/`BATS_LIB_PATH` to the repository root so Bats fixtures resolve the
+same way they do in CI. Overriding `ALLOW_NON_ROOT` with any value other than
+`1` causes an immediate failure instead of a confusing permission error.
 Regression coverage:
 `tests/test_sendemail_validate_hook.py::test_sendemail_hook_runs_repo_checks`
 and
-`tests/test_sendemail_validate_hook.py::test_sendemail_hook_scans_patches_for_secrets`.
+`tests/test_sendemail_validate_hook.py::test_sendemail_hook_scans_patches_for_secrets`,
+plus `tests/checks_script_test.py::test_exports_test_env_defaults` and
+`tests/checks_script_test.py::test_rejects_conflicting_allow_non_root`.
 
 ### Integration tests
 
