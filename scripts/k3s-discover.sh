@@ -1207,7 +1207,7 @@ ensure_avahi_liveness_signal() {
         AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/wait_for_avahi_dbus.sh" 2>&1
       )" || wait_status=$?
       if [ -n "${dbus_output}" ]; then
-        printf '%s\n' "${dbus_output}"
+        printf '%s\n' "${dbus_output}" >&2
       fi
       if [ "${wait_status}" -eq 0 ]; then
         log_info discover event=avahi_liveness_dbus outcome=ok attempt="${dbus_attempt}" >&2

@@ -151,12 +151,11 @@ with open(log_path, "w", encoding="utf-8") as handle:
     except subprocess.TimeoutExpired:
         proc.terminate()
         try:
-            return_code = proc.wait(timeout=2)
+            proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
-            return_code = proc.wait(timeout=2)
-        if return_code == 0:
-            return_code = 124
+            proc.wait(timeout=2)
+        return_code = 124
     sys.exit(return_code)
 PY
 status=$?
