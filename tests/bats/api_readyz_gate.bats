@@ -12,11 +12,10 @@ teardown() {
 # Retry ephemeral port selection so the API gate tests never flake on socket exhaustion.
 # Coverage: find_free_port retries when python fails (this file).
 find_free_port() {
-  local attempt
   local port
 
-  for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    port="$(python3 - <<'PY' 2>/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if port="$(python3 - <<'PY' 2>/dev/null
 import socket
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -24,11 +23,13 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     port = sock.getsockname()[1]
 print(port)
 PY
-)"
-    if [ -n "${port}" ]; then
-      echo "${port}"
-      return 0
+)"; then
+      if [ -n "${port}" ]; then
+        echo "${port}"
+        return 0
+      fi
     fi
+    port=""
     sleep 0.05
   done
 
@@ -57,7 +58,7 @@ fi
 exec __REAL_PYTHON__ "$@"
 EOF
   sed -i "s#__COUNT_FILE__#${BATS_TEST_TMPDIR}/python3_call_count#g" "${shim_dir}/python3"
-  sed -i "s#__REAL_PYTHON__#${real_python//\//\\/}#" "${shim_dir}/python3"
+  sed -i "s#__REAL_PYTHON__#${real_python}#" "${shim_dir}/python3"
   chmod +x "${shim_dir}/python3"
   PATH="${shim_dir}:${PATH}" run find_free_port
 
