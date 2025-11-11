@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -16,12 +17,16 @@ def test_skip_comments_document_todo_root_cause_and_fix(bats_file: Path) -> None
     lines = bats_file.read_text(encoding="utf-8").splitlines()
     missing: list[str] = []
 
+    skip_directive = re.compile(r"^\s*skip\b(?:\s*\(|\s+|$)")
+
     for index, line in enumerate(lines):
-        if not line.strip().startswith("skip "):
+        if not skip_directive.match(line):
             continue
 
         comment_block: list[str] = []
         lookback = index - 1
+        # Skip blank lines above the skip directive to ensure we only collect contiguous
+        # comment blocks associated with the directive.
         while lookback >= 0 and lines[lookback].strip() == "":
             lookback -= 1
 
