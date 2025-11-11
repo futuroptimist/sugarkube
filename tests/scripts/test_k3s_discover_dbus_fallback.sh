@@ -54,11 +54,17 @@ exit 1
 SH
 chmod +x "${BIN_DIR}/busctl"
 
-cat >"${BIN_DIR}/avahi-browse" <<SH
+cat >"${BIN_DIR}/avahi-browse" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "=;eth0;IPv4;k3s API sugar/dev [server] on host;_k3s-sugar-dev._tcp;local" >> "${AVAHI_LOG}"
-echo "=;eth0;IPv4;k3s API sugar/dev [server] on host;_k3s-sugar-dev._tcp;local"
+if [ "${1:-}" = "--all" ]; then
+  printf '+ wlan0 IPv4 Some Service _http._tcp local\n'
+  printf '= wlan0 IPv4 Some Service _http._tcp local\n'
+  exit 0
+fi
+line='=;eth0;IPv4;k3s API sugar/dev [server] on sugarkube0;_k3s-sugar-dev._tcp;local;sugarkube0.local;;6443;txt=role=server,mode=ready'
+echo "${line}" >> "${AVAHI_LOG}"
+echo "${line}"
 exit 0
 SH
 chmod +x "${BIN_DIR}/avahi-browse"
@@ -117,6 +123,7 @@ export SUGARKUBE_MDNS_SERVER_DELAY=0
 export SUGARKUBE_MDNS_DBUS=1
 export SUGARKUBE_MDNS_SELF_CHECK_BIN="${TMP_DIR}/mdns-selfcheck.sh"
 export SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP=1
+export SUGARKUBE_MDNS_ABSENCE_GATE=0
 export HOSTNAME="cube.local"
 
 start_ts="$(python3 - <<'PY'

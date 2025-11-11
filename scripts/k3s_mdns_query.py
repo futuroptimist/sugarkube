@@ -182,6 +182,39 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
                 return [record.host]
         return []
 
+    if mode == "server-candidates":
+        outputs: List[str] = []
+        for record in records:
+            if record.txt.get("role") != "server":
+                continue
+
+            tokens = ["role=server"]
+            host = record.host
+            if host:
+                tokens.append(f"host={host}")
+
+            port = record.port or 6443
+            tokens.append(f"port={port}")
+
+            if record.address:
+                tokens.append(f"address={record.address}")
+
+            txt_mode = record.txt.get("mode")
+            if txt_mode:
+                tokens.append(f"txt_mode={txt_mode}")
+
+            txt_phase = record.txt.get("phase")
+            if txt_phase:
+                tokens.append(f"phase={txt_phase}")
+
+            txt_leader = record.txt.get("leader")
+            if txt_leader:
+                tokens.append(f"leader={txt_leader}")
+
+            outputs.append(" ".join(tokens))
+
+        return outputs
+
     if mode == "server-count":
         count = sum(1 for record in records if record.txt.get("role") == "server")
         return [str(count)]

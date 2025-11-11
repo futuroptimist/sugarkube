@@ -198,6 +198,17 @@ FAST_SLEEP_FLAG="${SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP:-0}"
 API_READY_LAST_STATUS=""
 API_READY_LAST_MODE=""
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
+
+MDNS_DISCOVER_LAST_HOST=""
+MDNS_DISCOVER_LAST_PORT=""
+MDNS_DISCOVER_LAST_IP_HINT=""
+MDNS_DISCOVER_LAST_ACCEPT_PATH=""
+MDNS_DISCOVER_LAST_MODE=""
+MDNS_DISCOVER_LAST_PHASE=""
+MDNS_DISCOVER_LAST_LEADER=""
+MDNS_DISCOVER_LAST_BROWSE_OK=0
+MDNS_DISCOVER_LAST_RESOLVE_OK=0
+MDNS_DISCOVER_LAST_NSS_OK=0
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
@@ -1163,6 +1174,12 @@ ensure_avahi_liveness_signal() {
   local summary_recorded=0
   local summary_note=""
 
+  if [ "${SUGARKUBE_SKIP_AVAHI_LIVENESS:-0}" = "1" ]; then
+    AVAHI_LIVENESS_READY=1
+    log_info discover event=avahi_liveness outcome=skip reason=skip_flag >&2
+    return 0
+  fi
+
   ensure_avahi_systemd_units || true
 
   if [ "${SUMMARY_API_AVAILABLE}" -eq 1 ] && [ "${SUMMARY_DBUS_RECORDED}" -eq 0 ]; then
@@ -2121,6 +2138,43 @@ same_host() {
   [ -n "${left_base}" ] && [ "${left_base}" = "${right_base}" ]
 }
 
+mdns_reset_discover_state() {
+  MDNS_DISCOVER_LAST_HOST=""
+  MDNS_DISCOVER_LAST_PORT=""
+  MDNS_DISCOVER_LAST_IP_HINT=""
+  MDNS_DISCOVER_LAST_ACCEPT_PATH=""
+  MDNS_DISCOVER_LAST_MODE=""
+  MDNS_DISCOVER_LAST_PHASE=""
+  MDNS_DISCOVER_LAST_LEADER=""
+  MDNS_DISCOVER_LAST_BROWSE_OK=0
+  MDNS_DISCOVER_LAST_RESOLVE_OK=0
+  MDNS_DISCOVER_LAST_NSS_OK=0
+}
+
+mdns_lookup_nss_ip() {
+  local host="$1"
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+  if ! command -v getent >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local ip
+  ip="$(getent ahostsv4 "${host}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+  if [ -z "${ip}" ]; then
+    ip="$(getent ahostsv6 "${host}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+  fi
+  if [ -z "${ip}" ]; then
+    ip="$(getent hosts "${host}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+  fi
+  if [ -z "${ip}" ]; then
+    return 1
+  fi
+  printf '%s' "${ip}"
+  return 0
+}
+
 run_avahi_query() {
   local mode="$1"
   # Export variables needed by the inline Python script
@@ -2132,12 +2186,12 @@ run_avahi_query() {
   # Set PYTHONPATH to ensure scripts directory is importable (Python 3.13+ compatibility)
   # Python 3.13+ no longer adds current dir to sys.path for stdin scripts
   export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
-  
+
   # DEBUG: Log bash environment before calling Python
   echo "BASH_DEBUG: mode=${mode}, CLUSTER=${CLUSTER}, ENVIRONMENT=${ENVIRONMENT}, SCRIPT_DIR=${SCRIPT_DIR}" >&2
   echo "BASH_DEBUG: PYTHONPATH=${PYTHONPATH}" >&2
   echo "BASH_DEBUG: About to call python3 with args: - ${mode} ${CLUSTER} ${ENVIRONMENT} ${SCRIPT_DIR}" >&2
-  
+
   # Pass SCRIPT_DIR as argument to inline script for Python 3.14+ compatibility
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" "${SCRIPT_DIR}" <<'PY'
 import os
@@ -2204,7 +2258,128 @@ PY
 }
 
 discover_server_host() {
-  run_avahi_query server-first | head -n1
+  mdns_reset_discover_state
+
+  local line
+  line="$(run_avahi_query server-candidates | head -n1)"
+  if [ -z "${line}" ]; then
+    return 1
+  fi
+
+  MDNS_DISCOVER_LAST_BROWSE_OK=1
+
+  local token role="" host="" port="" address="" txt_mode="" phase="" leader=""
+  for token in ${line}; do
+    token="$(token__trim "${token}")"
+    token="$(token__strip_quotes "${token}")"
+    case "${token}" in
+      role=*) role="${token#role=}" ;;
+      host=*) host="${token#host=}" ;;
+      port=*) port="${token#port=}" ;;
+      address=*) address="${token#address=}" ;;
+      txt_mode=*) txt_mode="${token#txt_mode=}" ;;
+      phase=*) phase="${token#phase=}" ;;
+      leader=*) leader="${token#leader=}" ;;
+    esac
+  done
+
+  if [ -z "${port}" ]; then
+    port="6443"
+  fi
+
+  local mode="${txt_mode}"
+  if [ -z "${mode}" ] && [ -n "${phase}" ]; then
+    mode="${phase}"
+  fi
+
+  local resolve_ok=0
+  local ip_hint=""
+  if [ -n "${address}" ]; then
+    resolve_ok=1
+    ip_hint="${address}"
+  fi
+
+  local nss_ok=0
+  local nss_ip=""
+  if nss_ip="$(mdns_lookup_nss_ip "${host}" 2>/dev/null)"; then
+    nss_ok=1
+    if [ -z "${ip_hint}" ]; then
+      ip_hint="${nss_ip}"
+    fi
+  fi
+
+  MDNS_DISCOVER_LAST_RESOLVE_OK="${resolve_ok}"
+  MDNS_DISCOVER_LAST_NSS_OK="${nss_ok}"
+
+  local accept_path=""
+  if [ "${resolve_ok}" -eq 1 ]; then
+    accept_path="resolve"
+  elif [ "${nss_ok}" -eq 1 ]; then
+    accept_path="nss"
+  fi
+
+  if [ -z "${host}" ] || [ -z "${accept_path}" ]; then
+    local reason="missing_host"
+    if [ -n "${host}" ] && [ -z "${accept_path}" ]; then
+      reason="unresolved"
+    fi
+    local -a reject_fields=(
+      "event=mdns_select"
+      "outcome=reject"
+      "reason=${reason}"
+      "browse_ok=${MDNS_DISCOVER_LAST_BROWSE_OK}"
+      "resolve_ok=${resolve_ok}"
+      "nss_ok=${nss_ok}"
+    )
+    if [ -n "${mode}" ]; then
+      reject_fields+=("mode=${mode}")
+    fi
+    if [ -n "${host}" ]; then
+      reject_fields+=("host=\"$(escape_log_value "${host}")\"")
+    fi
+    reject_fields+=("port=${port}")
+    log_warn_msg discover "mDNS candidate rejected" "${reject_fields[@]}"
+    return 1
+  fi
+
+  MDNS_DISCOVER_LAST_HOST="${host}"
+  MDNS_DISCOVER_LAST_PORT="${port}"
+  MDNS_DISCOVER_LAST_IP_HINT="${ip_hint}"
+  MDNS_DISCOVER_LAST_ACCEPT_PATH="${accept_path}"
+  MDNS_DISCOVER_LAST_MODE="${mode}"
+  MDNS_DISCOVER_LAST_PHASE="${phase}"
+  MDNS_DISCOVER_LAST_LEADER="${leader}"
+
+  local -a log_fields=(
+    "event=mdns_select"
+    "outcome=accept"
+    "accept_path=${accept_path}"
+    "browse_ok=${MDNS_DISCOVER_LAST_BROWSE_OK}"
+    "resolve_ok=${resolve_ok}"
+    "nss_ok=${nss_ok}"
+    "host=\"$(escape_log_value "${host}")\""
+    "port=${port}"
+  )
+  if [ -n "${mode}" ]; then
+    log_fields+=("mode=${mode}")
+  fi
+  if [ -n "${phase}" ]; then
+    log_fields+=("phase=${phase}")
+  fi
+  if [ -n "${leader}" ]; then
+    log_fields+=("leader=\"$(escape_log_value "${leader}")\"")
+  fi
+  if [ -n "${address}" ]; then
+    log_fields+=("resolved_ip=${address}")
+  fi
+  if [ -n "${nss_ip}" ]; then
+    log_fields+=("nss_ip=${nss_ip}")
+  fi
+  log_fields+=("role=${role:-server}")
+
+  log_info discover "${log_fields[@]}" >&2
+
+  printf '%s\n' "${host}"
 }
 
 discover_server_hosts() {
@@ -3550,7 +3725,7 @@ install_server_join() {
     fi
     exit 1
   fi
-  if ! wait_for_remote_api_ready "${server}"; then
+  if ! wait_for_remote_api_ready "${server}" "${MDNS_DISCOVER_LAST_IP_HINT:-}" "${MDNS_DISCOVER_LAST_PORT:-6443}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -3696,7 +3871,7 @@ install_agent() {
     fi
     exit 1
   fi
-  if ! wait_for_remote_api_ready "${server}"; then
+  if ! wait_for_remote_api_ready "${server}" "${MDNS_DISCOVER_LAST_IP_HINT:-}" "${MDNS_DISCOVER_LAST_PORT:-6443}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
