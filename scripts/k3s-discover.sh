@@ -3483,10 +3483,6 @@ install_server_single() {
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
-    env_assignments+=("SERVER_IP=${ip_hint}")
-  fi
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
@@ -3540,10 +3536,6 @@ install_server_cluster_init() {
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
-    env_assignments+=("SERVER_IP=${ip_hint}")
-  fi
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
