@@ -169,8 +169,8 @@ Option B & C remain valid for future comprehensive E2E testing but are not neede
 ### l4_probe.bats - Network Tool Tests (Stubbed ncat for local runs)
 
 **Tests**:
-- Test 16: "l4_probe reports open port as open" (line 38)
-- Test 17: "l4_probe exits non-zero when a port is closed" (line 53)
+- Test 17: "l4_probe reports open port as open" (line 38)
+- Test 18: "l4_probe exits non-zero when a port is closed" (line 53)
 
 **Status**: ✅ PASSING EVERYWHERE (stub handles hosts without ncat)
 

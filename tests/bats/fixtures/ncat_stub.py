@@ -10,8 +10,8 @@ from contextlib import closing
 
 def _parse_args(argv: list[str]) -> tuple[str, int, bool]:
     host = "0.0.0.0"
-    port: int | None = None
     keep_open = False
+    positionals: list[str] = []
 
     idx = 0
     while idx < len(argv):
@@ -23,18 +23,24 @@ def _parse_args(argv: list[str]) -> tuple[str, int, bool]:
             # `-l` is implied for the stub; nothing else to do.
             idx += 1
             continue
-        host = arg
-        idx += 1
-        if idx >= len(argv):
-            raise ValueError("port argument missing")
-        try:
-            port = int(argv[idx])
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise ValueError(f"invalid port: {argv[idx]}") from exc
+        positionals.append(arg)
         idx += 1
 
-    if port is None:
+    if not positionals:
         raise ValueError("port argument missing")
+
+    if len(positionals) == 1:
+        port_arg = positionals[0]
+    elif len(positionals) == 2:
+        host, port_arg = positionals
+    else:  # pragma: no cover - defensive
+        raise ValueError("too many positional arguments")
+
+    try:
+        port = int(port_arg)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise ValueError(f"invalid port: {port_arg}") from exc
+
     return host, port, keep_open
 
 
