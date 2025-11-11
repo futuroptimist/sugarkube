@@ -208,7 +208,7 @@ wipe:
     set -euo pipefail
 
     sudo -E bash scripts/cleanup_mdns_publishers.sh
-    sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
+    @sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
 
     scripts_dir="{{ justfile_directory() }}/scripts"
     if [ -x "${scripts_dir}/unset_doc_env_vars.sh" ]; then
