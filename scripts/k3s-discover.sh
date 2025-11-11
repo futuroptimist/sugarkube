@@ -203,6 +203,10 @@ FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 SUGARKUBE_STRICT_TIME="${SUGARKUBE_STRICT_TIME:-0}"
+MDNS_SELECTED_SERVER_HOST=""
+MDNS_SELECTED_SERVER_PORT="6443"
+MDNS_SELECTED_SERVER_MODE=""
+MDNS_SELECTED_SERVER_IP_HINT=""
 if [ -n "${SUGARKUBE_API_REGADDR:-}" ]; then
   API_REGADDR="${SUGARKUBE_API_REGADDR}"
   while [[ "${API_REGADDR}" == *. ]]; do
@@ -2204,7 +2208,167 @@ PY
 }
 
 discover_server_host() {
-  run_avahi_query server-first | head -n1
+  local selection
+  selection="$(run_avahi_query server-first | head -n1 || true)"
+
+  MDNS_SELECTED_SERVER_HOST=""
+  MDNS_SELECTED_SERVER_MODE=""
+  MDNS_SELECTED_SERVER_PORT="6443"
+  MDNS_SELECTED_SERVER_IP_HINT=""
+
+  if [ -z "${selection}" ]; then
+    return 1
+  fi
+
+  local host=""
+  local port=""
+  local mode=""
+  local address=""
+  local token
+
+  if [[ "${selection}" == *"="* ]]; then
+    for token in ${selection}; do
+      case "${token}" in
+        mode=*)
+          mode="${token#mode=}"
+          ;;
+        host=*)
+          host="${token#host=}"
+          ;;
+        port=*)
+          port="${token#port=}"
+          ;;
+        address=*)
+          address="${token#address=}"
+          ;;
+      esac
+    done
+  fi
+
+  if [ -z "${host}" ]; then
+    host="${selection}"
+  fi
+
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+
+  local browse_ok=1
+  local resolve_ok=0
+  local nss_ok=0
+  local resolved_ip=""
+  local nss_ip=""
+
+  if [ -n "${port}" ]; then
+    case "${port}" in
+      ''|*[!0-9]*) port="6443" ;;
+    esac
+  else
+    port="6443"
+  fi
+
+  case "${host}" in
+    *:*)
+      resolved_ip="${host}"
+      resolve_ok=1
+      ;;
+    *[!0-9.]* )
+      ;;
+    *)
+      resolved_ip="${host}"
+      resolve_ok=1
+      ;;
+  esac
+
+  if [ -n "${address}" ] && [ "${resolve_ok}" -ne 1 ]; then
+    resolved_ip="${address}"
+    resolve_ok=1
+  fi
+
+  if [ "${resolve_ok}" -ne 1 ] && command -v avahi-resolve >/dev/null 2>&1; then
+    local resolve_output=""
+    if resolve_output="$(avahi-resolve -n "${host}" 2>/dev/null)"; then
+      local resolved_candidate
+      resolved_candidate="$(printf '%s\n' "${resolve_output}" | awk 'NF>=2 {print $NF; exit}' | tr -d '\r' | head -n1)"
+      if [ -n "${resolved_candidate}" ]; then
+        resolved_ip="${resolved_candidate}"
+        resolve_ok=1
+      fi
+    fi
+  fi
+
+  if command -v getent >/dev/null 2>&1; then
+    local db
+    for db in hosts ahostsv4 ahostsv6; do
+      local lookup
+      lookup="$(getent "${db}" "${host}" 2>/dev/null | awk 'NR==1 {print $1}' | tr -d '\r' | head -n1)" || lookup=""
+      if [ -n "${lookup}" ]; then
+        nss_ip="${lookup}"
+        nss_ok=1
+        break
+      fi
+    done
+  fi
+
+  if [ "${resolve_ok}" -eq 1 ] && [ -z "${resolved_ip}" ]; then
+    resolve_ok=0
+  fi
+
+  if [ "${nss_ok}" -eq 1 ] && [ -z "${nss_ip}" ]; then
+    nss_ok=0
+  fi
+
+  local accept_path=""
+  local ip_hint=""
+
+  if [ "${browse_ok}" -eq 1 ] && { [ "${resolve_ok}" -eq 1 ] || [ "${nss_ok}" -eq 1 ]; }; then
+    if [ "${resolve_ok}" -eq 1 ]; then
+      accept_path="resolve"
+      ip_hint="${resolved_ip}"
+    else
+      accept_path="nss"
+      ip_hint="${nss_ip}"
+    fi
+  else
+    local -a reject_fields=(
+      "event=mdns_server_select"
+      "host=\"$(escape_log_value "${host}")\""
+      "port=${port}"
+      "browse_ok=${browse_ok}"
+      "resolve_ok=${resolve_ok}"
+      "nss_ok=${nss_ok}"
+    )
+    if [ -n "${mode}" ]; then
+      reject_fields+=("mode=${mode}")
+    fi
+    log_warn_msg discover "mDNS server candidate rejected" "${reject_fields[@]}"
+    return 1
+  fi
+
+  MDNS_SELECTED_SERVER_HOST="${host}"
+  MDNS_SELECTED_SERVER_MODE="${mode}"
+  MDNS_SELECTED_SERVER_PORT="${port}"
+  MDNS_SELECTED_SERVER_IP_HINT="${ip_hint}"
+
+  local -a log_fields=(
+    "event=mdns_server_select"
+    "outcome=accept"
+    "host=\"$(escape_log_value "${host}")\""
+    "port=${port}"
+    "browse_ok=${browse_ok}"
+    "resolve_ok=${resolve_ok}"
+    "nss_ok=${nss_ok}"
+    "accept_path=${accept_path}"
+  )
+  if [ -n "${mode}" ]; then
+    log_fields+=("mode=${mode}")
+  fi
+  if [ -n "${ip_hint}" ]; then
+    log_fields+=("ip_hint=\"$(escape_log_value "${ip_hint}")\"")
+  fi
+  log_info discover "${log_fields[@]}" >&2
+
+  printf '%s\n' "${host}"
 }
 
 discover_server_hosts() {
@@ -3550,7 +3714,7 @@ install_server_join() {
     fi
     exit 1
   fi
-  if ! wait_for_remote_api_ready "${server}"; then
+  if ! wait_for_remote_api_ready "${server}" "${MDNS_SELECTED_SERVER_IP_HINT:-}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -3621,6 +3785,15 @@ install_server_join() {
   fi
   local env_assignments
   build_install_env env_assignments
+  local join_port="${MDNS_SELECTED_SERVER_PORT:-6443}"
+  case "${join_port}" in
+    ''|*[!0-9]*) join_port="6443" ;;
+  esac
+  local join_url_host="${server}"
+  if [[ "${join_url_host}" == *:* ]] && [[ "${join_url_host}" != \[* ]]; then
+    join_url_host="[${join_url_host}]"
+  fi
+  env_assignments+=("K3S_URL=https://${join_url_host}:${join_port}")
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
@@ -3696,7 +3869,7 @@ install_agent() {
     fi
     exit 1
   fi
-  if ! wait_for_remote_api_ready "${server}"; then
+  if ! wait_for_remote_api_ready "${server}" "${MDNS_SELECTED_SERVER_IP_HINT:-}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -3740,7 +3913,15 @@ install_agent() {
   log_info discover "${agent_log_args[@]}" >&2
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:6443")
+  local agent_port="${MDNS_SELECTED_SERVER_PORT:-6443}"
+  case "${agent_port}" in
+    ''|*[!0-9]*) agent_port="6443" ;;
+  esac
+  local agent_url_host="${server}"
+  if [[ "${agent_url_host}" == *:* ]] && [[ "${agent_url_host}" != \[* ]]; then
+    agent_url_host="[${agent_url_host}]"
+  fi
+  env_assignments+=("K3S_URL=https://${agent_url_host}:${agent_port}")
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment

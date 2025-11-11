@@ -7,6 +7,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from k3s_mdns_query import query_mdns  # noqa: E402
 
 
+def _parse_selection(entry: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for token in entry.split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        fields[key] = value
+    return fields
+
+
 def _sample_server_stdout() -> str:
     return (
         "=;eth0;IPv4;k3s-sugar-dev@host0 (server);_k3s-sugar-dev._tcp;local;host0.local;"
@@ -46,7 +56,9 @@ def test_query_mdns_keeps_output_when_avahi_errors():
         debug=messages.append,
     )
 
-    assert results == ["host0.local"]
+    assert len(results) == 1
+    fields = _parse_selection(results[0])
+    assert fields.get("host") == "host0.local"
     assert any("255" in msg for msg in messages)
     assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
 
@@ -68,7 +80,9 @@ def test_query_mdns_handles_avahi_timeout():
         debug=messages.append,
     )
 
-    assert results == ["host0.local"]
+    assert len(results) == 1
+    fields = _parse_selection(results[0])
+    assert fields.get("host") == "host0.local"
     assert len(calls) == 2  # primary + legacy service browse
     assert all(call and call > 0 for call in calls)
     assert any("timed out" in msg for msg in messages)
@@ -108,7 +122,9 @@ def test_query_mdns_queries_legacy_service_type_when_needed():
         runner=runner,
     )
 
-    assert results == ["host0.local"]
+    assert len(results) == 1
+    fields = _parse_selection(results[0])
+    assert fields.get("host") == "host0.local"
     assert calls == ["_k3s-sugar-dev._tcp", "_https._tcp"]
 
 

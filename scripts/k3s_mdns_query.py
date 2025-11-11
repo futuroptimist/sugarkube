@@ -178,8 +178,23 @@ def _load_lines_from_avahi(
 def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
     if mode == "server-first":
         for record in records:
-            if record.txt.get("role") == "server":
-                return [record.host]
+            if record.txt.get("role") != "server":
+                continue
+
+            pieces: List[str] = []
+            record_mode = record.txt.get("mode")
+            if record_mode:
+                pieces.append(f"mode={record_mode}")
+
+            pieces.append(f"host={record.host}")
+
+            port = record.port or 6443
+            pieces.append(f"port={port}")
+
+            if record.address:
+                pieces.append(f"address={record.address}")
+
+            return [" ".join(pieces)]
         return []
 
     if mode == "server-count":
