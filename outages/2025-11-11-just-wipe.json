@@ -1,0 +1,10 @@
+{
+  "id": "just-wipe-script-prefix",
+  "date": "2025-11-11",
+  "component": "just wipe recipe",
+  "rootCause": "The wipe recipe switched to script mode but retained an @-prefixed sudo invocation, so the generated shell script attempted to run '@sudo' and aborted.",
+  "resolution": "Removed the @ prefix from the sudo line and added a regression test that asserts the wrapper call is not prefixed.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/pull/1738"
+  ]
+}
