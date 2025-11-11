@@ -197,6 +197,14 @@ MDNS_SELF_CHECK_FAILURE_CODE=94
 FAST_SLEEP_FLAG="${SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP:-0}"
 API_READY_LAST_STATUS=""
 API_READY_LAST_MODE=""
+MDNS_SELECTED_HOST=""
+MDNS_SELECTED_PORT=6443
+MDNS_SELECTED_MODE=""
+MDNS_SELECTED_IP=""
+MDNS_SELECTED_ACCEPT_PATH=""
+MDNS_SELECTED_BROWSE_OK=0
+MDNS_SELECTED_RESOLVE_OK=0
+MDNS_SELECTED_NSS_OK=0
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -2129,58 +2137,30 @@ run_avahi_query() {
   if [ -n "${TOKEN:-}" ]; then
     export SUGARKUBE_TOKEN="${TOKEN}"
   fi
-  # Set PYTHONPATH to ensure scripts directory is importable (Python 3.13+ compatibility)
-  # Python 3.13+ no longer adds current dir to sys.path for stdin scripts
-  export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
-  
-  # DEBUG: Log bash environment before calling Python
-  echo "BASH_DEBUG: mode=${mode}, CLUSTER=${CLUSTER}, ENVIRONMENT=${ENVIRONMENT}, SCRIPT_DIR=${SCRIPT_DIR}" >&2
-  echo "BASH_DEBUG: PYTHONPATH=${PYTHONPATH}" >&2
-  echo "BASH_DEBUG: About to call python3 with args: - ${mode} ${CLUSTER} ${ENVIRONMENT} ${SCRIPT_DIR}" >&2
-  
-  # Pass SCRIPT_DIR as argument to inline script for Python 3.14+ compatibility
+  # Ensure scripts directory is importable when running the inline Python helper
+  if [ -n "${PYTHONPATH:-}" ]; then
+    export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
+  else
+    export PYTHONPATH="${SCRIPT_DIR}"
+  fi
+
+  # Pass SCRIPT_DIR as an argument so the Python helper can amend sys.path explicitly
   python3 - "${mode}" "${CLUSTER}" "${ENVIRONMENT}" "${SCRIPT_DIR}" <<'PY'
 import os
 import sys
 
-# Debug output to help diagnose Python 3.14 issues
-print(f"DEBUG: Python version: {sys.version}", file=sys.stderr)
-print(f"DEBUG: sys.argv: {sys.argv}", file=sys.stderr)
-print(f"DEBUG: PYTHONPATH: {os.environ.get('PYTHONPATH', 'NOT SET')}", file=sys.stderr)
+mode = sys.argv[1] if len(sys.argv) > 1 else ""
+cluster = sys.argv[2] if len(sys.argv) > 2 else ""
+environment = sys.argv[3] if len(sys.argv) > 3 else ""
+scripts_dir = sys.argv[4] if len(sys.argv) > 4 else ""
 
-# Python 3.14+ appears to require explicit sys.path manipulation for stdin scripts,
-# even with PYTHONPATH set. Add scripts directory before any imports.
-if len(sys.argv) >= 5:
-    scripts_dir = sys.argv[4]
-    print(f"DEBUG: scripts_dir from argv[4]: {scripts_dir}", file=sys.stderr)
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-        print(f"DEBUG: Inserted {scripts_dir} into sys.path", file=sys.stderr)
-    else:
-        print(f"DEBUG: {scripts_dir} already in sys.path", file=sys.stderr)
-else:
-    print(f"DEBUG: WARNING - len(sys.argv) = {len(sys.argv)}, not >= 5", file=sys.stderr)
+if scripts_dir and scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
 
-print(f"DEBUG: sys.path[:3]: {sys.path[:3]}", file=sys.stderr)
-
-try:
-    from k3s_mdns_query import query_mdns
-    print("DEBUG: Successfully imported k3s_mdns_query", file=sys.stderr)
-except ImportError as e:
-    print(f"ERROR: Failed to import k3s_mdns_query: {e}", file=sys.stderr)
-    print(f"sys.path: {sys.path}", file=sys.stderr)
-    print(f"sys.argv: {sys.argv}", file=sys.stderr)
-    raise
-
-
-mode, cluster, environment = sys.argv[1:4]
-
-print(f"DEBUG: mode={mode}, cluster={cluster}, environment={environment}", file=sys.stderr)
+from k3s_mdns_query import query_mdns
 
 fixture_path = os.environ.get("SUGARKUBE_MDNS_FIXTURE_FILE")
 debug_enabled = bool(os.environ.get("SUGARKUBE_DEBUG"))
-
-print(f"DEBUG: fixture_path={fixture_path}, debug_enabled={debug_enabled}", file=sys.stderr)
 
 
 def debug(message: str) -> None:
@@ -2188,7 +2168,6 @@ def debug(message: str) -> None:
         print(f"[k3s-discover mdns] {message}", file=sys.stderr)
 
 
-print(f"DEBUG: About to call query_mdns", file=sys.stderr)
 results = query_mdns(
     mode,
     cluster,
@@ -2196,11 +2175,137 @@ results = query_mdns(
     fixture_path=fixture_path,
     debug=debug if debug_enabled else None,
 )
-print(f"DEBUG: query_mdns returned {len(results)} results: {results}", file=sys.stderr)
 
 for line in results:
     print(line)
 PY
+}
+
+mdns_reset_selection() {
+  MDNS_SELECTED_HOST=""
+  MDNS_SELECTED_PORT=6443
+  MDNS_SELECTED_MODE=""
+  MDNS_SELECTED_IP=""
+  MDNS_SELECTED_ACCEPT_PATH=""
+  MDNS_SELECTED_BROWSE_OK=0
+  MDNS_SELECTED_RESOLVE_OK=0
+  MDNS_SELECTED_NSS_OK=0
+}
+
+mdns_lookup_nss_ip() {
+  local host="$1"
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+  if ! command -v getent >/dev/null 2>&1; then
+    return 1
+  fi
+  local candidate=""
+  candidate="$(getent hosts "${host}" | awk 'NR==1 {print $1}' | head -n1 | tr -d '\r' || true)"
+  if [ -n "${candidate}" ]; then
+    printf '%s' "${candidate}"
+    return 0
+  fi
+  candidate="$(getent ahostsv4 "${host}" | awk 'NR==1 {print $1}' | head -n1 | tr -d '\r' || true)"
+  if [ -n "${candidate}" ]; then
+    printf '%s' "${candidate}"
+    return 0
+  fi
+  candidate="$(getent ahostsv6 "${host}" | awk 'NR==1 {print $1}' | head -n1 | tr -d '\r' || true)"
+  if [ -n "${candidate}" ]; then
+    printf '%s' "${candidate}"
+    return 0
+  fi
+  return 1
+}
+
+select_server_candidate() {
+  mdns_reset_selection
+  local selection_line
+  selection_line="$(run_avahi_query server-select | head -n1 || true)"
+  if [ -z "${selection_line}" ]; then
+    return 1
+  fi
+
+  MDNS_SELECTED_BROWSE_OK=1
+
+  local token host="" port="" mode="" address=""
+  for token in ${selection_line}; do
+    case "${token}" in
+      mode=*) mode="${token#mode=}" ;;
+      host=*) host="${token#host=}" ;;
+      port=*) port="${token#port=}" ;;
+      address=*) address="${token#address=}" ;;
+    esac
+  done
+
+  if [ -z "${host}" ]; then
+    return 1
+  fi
+
+  MDNS_SELECTED_HOST="${host}"
+  if [ -n "${port}" ] && [[ "${port}" =~ ^[0-9]+$ ]]; then
+    MDNS_SELECTED_PORT="${port}"
+  else
+    MDNS_SELECTED_PORT=6443
+  fi
+
+  if [ -n "${mode}" ]; then
+    MDNS_SELECTED_MODE="${mode}"
+  fi
+
+  if [ -n "${address}" ]; then
+    MDNS_SELECTED_IP="${address}"
+    MDNS_SELECTED_RESOLVE_OK=1
+  else
+    MDNS_SELECTED_RESOLVE_OK=0
+  fi
+
+  local nss_ip=""
+  if nss_ip="$(mdns_lookup_nss_ip "${host}" 2>/dev/null)"; then
+    MDNS_SELECTED_NSS_OK=1
+    if [ -z "${MDNS_SELECTED_IP}" ]; then
+      MDNS_SELECTED_IP="${nss_ip}"
+    fi
+  else
+    MDNS_SELECTED_NSS_OK=0
+  fi
+
+  local accept_path=""
+  if [ "${MDNS_SELECTED_RESOLVE_OK}" = "1" ]; then
+    accept_path="resolve"
+  elif [ "${MDNS_SELECTED_NSS_OK}" = "1" ]; then
+    accept_path="nss"
+  fi
+
+  local -a log_fields=(
+    "event=mdns_select"
+    "host=\"$(escape_log_value "${MDNS_SELECTED_HOST}")\""
+    "port=${MDNS_SELECTED_PORT}"
+    "browse_ok=${MDNS_SELECTED_BROWSE_OK}"
+    "resolve_ok=${MDNS_SELECTED_RESOLVE_OK}"
+    "nss_ok=${MDNS_SELECTED_NSS_OK}"
+  )
+
+  if [ -n "${MDNS_SELECTED_MODE}" ]; then
+    log_fields+=("mode=${MDNS_SELECTED_MODE}")
+  fi
+
+  if [ -n "${MDNS_SELECTED_IP}" ]; then
+    log_fields+=("ip=\"$(escape_log_value "${MDNS_SELECTED_IP}")\"")
+  fi
+
+  if [ -n "${accept_path}" ]; then
+    MDNS_SELECTED_ACCEPT_PATH="${accept_path}"
+    log_fields+=("accept_path=${accept_path}")
+    log_info discover "${log_fields[@]}" >&2
+    return 0
+  fi
+
+  log_fields+=("accept_path=none")
+  log_warn_msg discover "mDNS server candidate rejected" "${log_fields[@]}"
+  mdns_reset_selection
+  return 1
 }
 
 discover_server_host() {
@@ -3378,6 +3483,10 @@ install_server_single() {
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
   local env_assignments
   build_install_env env_assignments
+  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
+  if [ -n "${ip_hint}" ]; then
+    env_assignments+=("SERVER_IP=${ip_hint}")
+  fi
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
@@ -3431,6 +3540,10 @@ install_server_cluster_init() {
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
   local env_assignments
   build_install_env env_assignments
+  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
+  if [ -n "${ip_hint}" ]; then
+    env_assignments+=("SERVER_IP=${ip_hint}")
+  fi
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
@@ -3476,6 +3589,16 @@ install_server_join() {
   local server
   server="$(join_target_host "${discovered_server}")"
   local probe_host="${server}"
+  local selected_port="${MDNS_SELECTED_PORT:-6443}"
+  case "${selected_port}" in
+    ''|*[!0-9]*) selected_port=6443 ;;
+  esac
+  local ip_hint=""
+  if [ -z "${API_REGADDR:-}" ] && [ -n "${MDNS_SELECTED_IP:-}" ] && [ -n "${discovered_server:-}" ]; then
+    if same_host "${MDNS_SELECTED_HOST}" "${discovered_server}"; then
+      ip_hint="${MDNS_SELECTED_IP}"
+    fi
+  fi
   local summary_active=0
   local summary_start=0
   local summary_recorded=0
@@ -3550,7 +3673,7 @@ install_server_join() {
     fi
     exit 1
   fi
-  if ! wait_for_remote_api_ready "${server}"; then
+  if ! wait_for_remote_api_ready "${server}" "${ip_hint}" "${selected_port}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -3604,6 +3727,9 @@ install_server_join() {
     "server=${server}"
     "desired_servers=${SERVERS_DESIRED}"
   )
+  if [ "${selected_port}" != "6443" ]; then
+    log_args+=("port=${selected_port}")
+  fi
   if [ -n "${API_REGADDR:-}" ] && [ -n "${discovered_server:-}" ] && [ "${server}" != "${discovered_server}" ]; then
     log_args+=("discovered_server=${discovered_server}")
   fi
@@ -3621,13 +3747,17 @@ install_server_join() {
   fi
   local env_assignments
   build_install_env env_assignments
+  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
+  if [ -n "${ip_hint}" ]; then
+    env_assignments+=("SERVER_IP=${ip_hint}")
+  fi
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
     run_k3s_install server \
-      --server "https://${server}:6443" \
+      --server "https://${server}:${selected_port}" \
       --tls-san "${server}" \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -3677,6 +3807,16 @@ install_agent() {
   local discovered_server="$1"
   local server
   server="$(join_target_host "${discovered_server}")"
+  local selected_port="${MDNS_SELECTED_PORT:-6443}"
+  case "${selected_port}" in
+    ''|*[!0-9]*) selected_port=6443 ;;
+  esac
+  local ip_hint=""
+  if [ -z "${API_REGADDR:-}" ] && [ -n "${MDNS_SELECTED_IP:-}" ] && [ -n "${discovered_server:-}" ]; then
+    if same_host "${MDNS_SELECTED_HOST}" "${discovered_server}"; then
+      ip_hint="${MDNS_SELECTED_IP}"
+    fi
+  fi
   local summary_active=0
   local summary_start=0
   local summary_recorded=0
@@ -3696,7 +3836,7 @@ install_agent() {
     fi
     exit 1
   fi
-  if ! wait_for_remote_api_ready "${server}"; then
+  if ! wait_for_remote_api_ready "${server}" "${ip_hint}" "${selected_port}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -3740,7 +3880,10 @@ install_agent() {
   log_info discover "${agent_log_args[@]}" >&2
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:6443")
+  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
+  if [ -n "${ip_hint}" ]; then
+    env_assignments+=("SERVER_IP=${ip_hint}")
+  fi
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
@@ -3843,8 +3986,8 @@ bootstrap_selected="false"
 while :; do
   if [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; then
     while [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; do
-      server_host="$(discover_server_host || true)"
-      if [ -n "${server_host}" ]; then
+      if select_server_candidate; then
+        server_host="${MDNS_SELECTED_HOST}"
         FOLLOWER_UNTIL_SERVER=0
         FOLLOWER_UNTIL_SERVER_SET_AT=0
         break
@@ -3867,8 +4010,8 @@ while :; do
 
       if run_leader_election; then
         sleep "${ELECTION_HOLDOFF}"
-        server_host="$(discover_server_host || true)"
-        if [ -n "${server_host}" ]; then
+        if select_server_candidate; then
+          server_host="${MDNS_SELECTED_HOST}"
           log_info discover outcome=post_election_server host="${server_host}" holdoff="${ELECTION_HOLDOFF}" >&2
           FOLLOWER_UNTIL_SERVER=0
           FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -3931,7 +4074,9 @@ while :; do
   servers_now="$(count_servers)"
   if [ "${servers_now}" -lt "${SERVERS_DESIRED}" ]; then
     if [ -z "${server_host:-}" ]; then
-      server_host="$(discover_server_host || true)"
+      if select_server_candidate; then
+        server_host="${MDNS_SELECTED_HOST}"
+      fi
     fi
     if [ -z "${server_host:-}" ]; then
       log_info discover outcome=fallback_bootstrap reason=no_servers attempts="${DISCOVERY_ATTEMPTS}" >&2
@@ -3945,7 +4090,9 @@ while :; do
     fi
   else
     if [ -z "${server_host:-}" ]; then
-      server_host="$(discover_server_host || true)"
+      if select_server_candidate; then
+        server_host="${MDNS_SELECTED_HOST}"
+      fi
     fi
     if [ -z "${server_host:-}" ]; then
       log_error_msg discover "Unable to discover an API server to join as agent" "cluster=${CLUSTER}" "environment=${ENVIRONMENT}"
