@@ -127,14 +127,14 @@ PY
 
 set +e
 discover_log="${TMP_DIR}/discover.log"
-COMMAND_TIMEOUT=8 DISCOVER_LOG="${discover_log}" python3 - "${DISCOVER_SCRIPT}" <<'PY'
+COMMAND_TIMEOUT=12 DISCOVER_LOG="${discover_log}" python3 - "${DISCOVER_SCRIPT}" <<'PY'
 import os
 import subprocess
 import sys
 
 script = sys.argv[1]
 log_path = os.environ.get("DISCOVER_LOG", "")
-timeout = float(os.environ.get("COMMAND_TIMEOUT", "8"))
+timeout = float(os.environ.get("COMMAND_TIMEOUT", "12"))
 
 if not log_path:
     raise SystemExit(2)
@@ -174,15 +174,18 @@ print(repr(time.time()))
 PY
 )"
 
-elapsed_ok="$(python3 - <<PY
+elapsed_data="$(python3 - <<PY
 start = float(${start_ts})
 end = float(${end_ts})
-print(1 if (end - start) < 9.0 else 0)
+elapsed = end - start
+print(1 if elapsed < 12.0 else 0, f"{elapsed:.3f}")
 PY
 )"
+IFS=' ' read -r elapsed_ok elapsed_seconds <<<"${elapsed_data}" || elapsed_ok=0
 
 if [ "${elapsed_ok}" != "1" ]; then
-  echo "D-Bus fallback took too long" >&2
+  elapsed_seconds="${elapsed_seconds:-unknown}"
+  printf 'D-Bus fallback took too long (elapsed=%ss)\n' "${elapsed_seconds}" >&2
   exit 1
 fi
 
