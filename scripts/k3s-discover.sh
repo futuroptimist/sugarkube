@@ -198,6 +198,7 @@ FAST_SLEEP_FLAG="${SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP:-0}"
 API_READY_LAST_STATUS=""
 API_READY_LAST_MODE=""
 MDNS_SELECTED_HOST=""
+MDNS_SELECTED_TXT_IP=0
 MDNS_SELECTED_PORT=6443
 MDNS_SELECTED_MODE=""
 MDNS_SELECTED_IP=""
@@ -2188,6 +2189,55 @@ mdns_reset_selection() {
   MDNS_SELECTED_BROWSE_OK=0
   MDNS_SELECTED_RESOLVE_OK=0
   MDNS_SELECTED_NSS_OK=0
+  MDNS_SELECTED_TXT_IP=0
+}
+
+mdns_is_valid_ipv4() {
+  local candidate="$1"
+  if [ -z "${candidate}" ]; then
+    return 1
+  fi
+  python3 - "$candidate" <<'PY'
+import ipaddress
+import sys
+
+value = sys.argv[1]
+
+try:
+    ip = ipaddress.IPv4Address(value)
+except ipaddress.AddressValueError:
+    sys.exit(1)
+
+if ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+    sys.exit(1)
+
+sys.exit(0)
+PY
+}
+
+mdns_is_valid_ipv6() {
+  local candidate="$1"
+  if [ -z "${candidate}" ]; then
+    return 1
+  fi
+  python3 - "$candidate" <<'PY'
+import ipaddress
+import sys
+
+value = sys.argv[1]
+
+try:
+    ip = ipaddress.IPv6Address(value)
+except ipaddress.AddressValueError:
+    sys.exit(1)
+
+if ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+    sys.exit(1)
+if ip.is_link_local:
+    sys.exit(1)
+
+sys.exit(0)
+PY
 }
 
 mdns_lookup_nss_ip() {
@@ -2227,13 +2277,15 @@ select_server_candidate() {
 
   MDNS_SELECTED_BROWSE_OK=1
 
-  local token host="" port="" mode="" address=""
+  local token host="" port="" mode="" address="" txt_ip4="" txt_ip6=""
   for token in ${selection_line}; do
     case "${token}" in
-      mode=*) mode="${token#mode=}" ;;
-      host=*) host="${token#host=}" ;;
-      port=*) port="${token#port=}" ;;
-      address=*) address="${token#address=}" ;;
+      mode=*) mode="$(token__strip_quotes "$(token__trim "${token#mode=}")")" ;;
+      host=*) host="$(token__strip_quotes "$(token__trim "${token#host=}")")" ;;
+      port=*) port="$(token__strip_quotes "$(token__trim "${token#port=}")")" ;;
+      address=*) address="$(token__strip_quotes "$(token__trim "${token#address=}")")" ;;
+      txt_ip4=*) txt_ip4="$(token__strip_quotes "$(token__trim "${token#txt_ip4=}")")" ;;
+      txt_ip6=*) txt_ip6="$(token__strip_quotes "$(token__trim "${token#txt_ip6=}")")" ;;
     esac
   done
 
@@ -2259,6 +2311,20 @@ select_server_candidate() {
     MDNS_SELECTED_RESOLVE_OK=0
   fi
 
+  local txt_candidate=""
+  if mdns_is_valid_ipv4 "${txt_ip4}"; then
+    txt_candidate="${txt_ip4}"
+  elif mdns_is_valid_ipv6 "${txt_ip6}"; then
+    txt_candidate="${txt_ip6}"
+  fi
+
+  if [ -n "${txt_candidate}" ]; then
+    MDNS_SELECTED_IP="${txt_candidate}"
+    MDNS_SELECTED_TXT_IP=1
+  else
+    MDNS_SELECTED_TXT_IP=0
+  fi
+
   local nss_ip=""
   if nss_ip="$(mdns_lookup_nss_ip "${host}" 2>/dev/null)"; then
     MDNS_SELECTED_NSS_OK=1
@@ -2270,7 +2336,9 @@ select_server_candidate() {
   fi
 
   local accept_path=""
-  if [ "${MDNS_SELECTED_RESOLVE_OK}" = "1" ]; then
+  if [ "${MDNS_SELECTED_TXT_IP}" = "1" ]; then
+    accept_path="txt"
+  elif [ "${MDNS_SELECTED_RESOLVE_OK}" = "1" ]; then
     accept_path="resolve"
   elif [ "${MDNS_SELECTED_NSS_OK}" = "1" ]; then
     accept_path="nss"
@@ -2291,6 +2359,10 @@ select_server_candidate() {
 
   if [ -n "${MDNS_SELECTED_IP}" ]; then
     log_fields+=("ip=\"$(escape_log_value "${MDNS_SELECTED_IP}")\"")
+  fi
+
+  if [ "${MDNS_SELECTED_TXT_IP}" = "1" ]; then
+    log_fields+=("txt_ip=1")
   fi
 
   if [ -n "${accept_path}" ]; then

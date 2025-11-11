@@ -13,6 +13,7 @@ environment="${SUGARKUBE_ENV:?SUGARKUBE_ENV is required}"
 : "${HOSTNAME:?HOSTNAME is required}"
 SRV_HOST="${HOSTNAME%.local}.local"
 export SRV_HOST
+MDNS_LAST_EXPECTED_IPV4=""
 role="${ROLE:?ROLE is required}"
 case "${role}" in
   bootstrap|server)
@@ -321,6 +322,7 @@ PY
       echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
       return 1
     fi
+    MDNS_LAST_EXPECTED_IPV4="${expected_ipv4}"
     return 0
   }
 
@@ -580,6 +582,171 @@ if ! ensure_mdns_target_resolvable; then
   exit 1
 fi
 
+determine_primary_ipv4() {
+  local iface addr_candidates
+  iface="${SUGARKUBE_MDNS_INTERFACE:-}"
+  addr_candidates="$(hostname -I 2>/dev/null || true)"
+  python3 - "${iface}" "${addr_candidates}" <<'PY'
+import ipaddress
+import json
+import subprocess
+import sys
+
+iface_hint = sys.argv[1].strip()
+hostname_tokens = [token for token in sys.argv[2].split() if token]
+
+
+def valid_ipv4(candidate: str) -> bool:
+    try:
+        ip = ipaddress.IPv4Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+        return False
+    return True
+
+
+def gather_ip_entries():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "-4", "addr", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return []
+
+    entries = []
+    for entry in payload:
+        iface_name = entry.get("ifname", "")
+        for addr_info in entry.get("addr_info", []):
+            if addr_info.get("family") != "inet":
+                continue
+            if addr_info.get("scope") not in {"global", "site"}:
+                continue
+            local_ip = addr_info.get("local")
+            if not local_ip:
+                continue
+            entries.append((iface_name, local_ip))
+    return entries
+
+
+def pick_preferred(entries, target_iface):
+    if target_iface:
+        for iface_name, candidate_ip in entries:
+            if iface_name != target_iface:
+                continue
+            if valid_ipv4(candidate_ip):
+                return candidate_ip
+
+    for _, candidate_ip in entries:
+        if valid_ipv4(candidate_ip):
+            return candidate_ip
+
+    for token in hostname_tokens:
+        if valid_ipv4(token):
+            return token
+
+    return ""
+
+
+entries = gather_ip_entries()
+choice = pick_preferred(entries, iface_hint)
+if choice:
+    print(choice)
+PY
+}
+
+determine_primary_ipv6() {
+  local iface
+  iface="${SUGARKUBE_MDNS_INTERFACE:-}"
+  python3 - "${iface}" <<'PY'
+import ipaddress
+import json
+import subprocess
+import sys
+
+iface_hint = sys.argv[1].strip()
+
+
+def valid_ipv6(candidate: str) -> bool:
+    try:
+        ip = ipaddress.IPv6Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+        return False
+    if ip.is_link_local:
+        return False
+    return True
+
+
+def gather_ipv6_entries():
+    try:
+        data = subprocess.check_output(
+            ["ip", "-j", "-6", "addr", "show"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return []
+
+    entries = []
+    for entry in payload:
+        iface_name = entry.get("ifname", "")
+        for addr_info in entry.get("addr_info", []):
+            if addr_info.get("family") != "inet6":
+                continue
+            if addr_info.get("scope") not in {"global", "site"}:
+                continue
+            local_ip = addr_info.get("local")
+            if not local_ip:
+                continue
+            entries.append((iface_name, local_ip))
+    return entries
+
+
+def pick_preferred(entries, target_iface):
+    if target_iface:
+        for iface_name, candidate_ip in entries:
+            if iface_name != target_iface:
+                continue
+            if valid_ipv6(candidate_ip):
+                return candidate_ip
+
+    for _, candidate_ip in entries:
+        if valid_ipv6(candidate_ip):
+            return candidate_ip
+
+    return ""
+
+
+entries = gather_ipv6_entries()
+choice = pick_preferred(entries, iface_hint)
+if choice:
+    print(choice)
+PY
+}
+
+primary_ipv4="${MDNS_LAST_EXPECTED_IPV4:-}"
+if [ -z "${primary_ipv4}" ]; then
+  primary_ipv4="$(determine_primary_ipv4 || true)"
+fi
+
+primary_ipv6="$(determine_primary_ipv6 || true)"
+
+export MDNS_PUBLISH_IPV4="${primary_ipv4}" MDNS_PUBLISH_IPV6="${primary_ipv6}"
+
 service_tmp_file="$(mktemp "${service_dir}/.k3s-mdns.XXXXXX")"
 python3 - "${service_tmp_file}" <<'PY'
 import html
@@ -594,6 +761,9 @@ role = os.environ["ROLE"]
 port = os.environ.get("PORT", "6443")
 phase = os.environ.get("PHASE", "")
 leader = os.environ.get("LEADER", "")
+ip4 = os.environ.get("MDNS_PUBLISH_IPV4", "")
+ip6 = os.environ.get("MDNS_PUBLISH_IPV6", "")
+txt_host = srv_host
 
 service_name = f"k3s-{cluster}-{environment}@{srv_host} ({role})"
 service_type = f"_k3s-{cluster}-{environment}._tcp"
@@ -609,6 +779,13 @@ records = [
     ("phase", phase),
     ("leader", leader),
 ]
+
+if ip4:
+    records.append(("ip4", ip4))
+if ip6:
+    records.append(("ip6", ip6))
+if txt_host:
+    records.append(("host", txt_host))
 
 with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write("<?xml version=\"1.0\" standalone='no'?>\n")
