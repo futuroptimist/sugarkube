@@ -204,8 +204,19 @@ kubeconfig env='dev':
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 wipe:
-    @sudo -E bash scripts/cleanup_mdns_publishers.sh
-    @sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    sudo -E bash scripts/cleanup_mdns_publishers.sh
+    sudo --preserve-env=SUGARKUBE_CLUSTER,SUGARKUBE_ENV,DRY_RUN,ALLOW_NON_ROOT bash scripts/wipe_node.sh
+
+    scripts_dir="{{ justfile_directory() }}/scripts"
+    if [ -x "${scripts_dir}/unset_doc_env_vars.sh" ]; then
+        # shellcheck disable=SC1090
+        source "${scripts_dir}/unset_doc_env_vars.sh"
+    else
+        printf 'WARNING: %s/unset_doc_env_vars.sh missing; environment variables not cleared.\n' "${scripts_dir}" >&2
+    fi
 
 scripts_dir := justfile_directory() + "/scripts"
 image_dir := env_var_or_default("IMAGE_DIR", env_var("HOME") + "/sugarkube/images")
