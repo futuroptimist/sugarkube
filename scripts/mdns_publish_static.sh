@@ -62,7 +62,8 @@ TXT_IP4=""
 TXT_IP6=""
 TXT_HOST="${HOSTNAME}"
 
-txt_ip_payload="$(python3 - <<'PY'
+if command -v python3 >/dev/null 2>&1; then
+  txt_ip_payload="$(python3 - <<'PY'
 import ipaddress
 import json
 import os
@@ -256,6 +257,8 @@ def choose_ip(family):
         return allowed_candidates[0]
 
     if entries:
+        # Entries existed, but filtering rejected them all; return empty string to indicate
+        # that discovery succeeded yet no allowed addresses were found.
         return ""
 
     for token in hostname_tokens:
@@ -283,6 +286,9 @@ if ip6:
     print(f"ip6={ip6}")
 PY
 )"
+else
+  txt_ip_payload=""
+fi
 if [ -n "${txt_ip_payload}" ]; then
   while IFS='=' read -r key value; do
     case "${key}" in

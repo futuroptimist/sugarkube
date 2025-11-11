@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-11-mdns-disconnect",
+  "date": "2025-11-11",
+  "component": "scripts/k3s-discover.sh",
+  "longForm": "docs/outages/2025-11-11-mdns-disconnect.md",
+  "rootCause": "Follower treated avahi-resolve success as a hard gate, so transient Avahi instability blocked joins despite NSS resolving correctly.",
+  "resolution": "Relax the resolve_ok gate, publish IPv4/IPv6 hints in TXT records, and prefer those hints while keeping existing D-Bus fallbacks.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "scripts/mdns_publish_static.sh",
+    "docs/outages/2025-11-11-mdns-disconnect.md"
+  ]
+}
