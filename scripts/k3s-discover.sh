@@ -194,6 +194,10 @@ MDNS_WIRE_PROOF_LAST_RESULT=""
 MDNS_WIRE_PROOF_DISABLED_LOGGED=0
 MDNS_WIRE_PROOF_SKIP_LOGGED=0
 MDNS_SELF_CHECK_FAILURE_CODE=94
+FAST_SLEEP_FLAG="${SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP:-0}"
+API_READY_LAST_STATUS=""
+API_READY_LAST_MODE=""
+API_READY_LAST_OUTCOME=""
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -296,6 +300,7 @@ TEST_RUN_AVAHI=""
 TEST_RENDER_SERVICE=0
 TEST_WAIT_LOOP=0
 TEST_PUBLISH_BOOTSTRAP=0
+TEST_MDNS_FALLBACK=0
 TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
 declare -a TEST_RENDER_ARGS=()
@@ -328,6 +333,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-bootstrap-publish)
       TEST_PUBLISH_BOOTSTRAP=1
+      ;;
+    --test-mdns-fallback)
+      TEST_MDNS_FALLBACK=1
       ;;
     --test-bootstrap-server-flow)
       TEST_BOOTSTRAP_SERVER_FLOW=1
@@ -1089,6 +1097,14 @@ remove_privileged_file() {
   fi
 }
 
+maybe_sleep() {
+  local duration="$1"
+  if [ "${FAST_SLEEP_FLAG}" = "1" ]; then
+    return 0
+  fi
+  sleep "${duration}"
+}
+
 reload_avahi_daemon() {
   if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
     return 0
@@ -1169,20 +1185,75 @@ ensure_avahi_liveness_signal() {
 
   local wait_status=0
   local dbus_note=""
+  local dbus_reason=""
+  local dbus_wait_limit="${SUGARKUBE_AVAHI_DBUS_WAIT_MS:-1000}"
+  case "${dbus_wait_limit}" in
+    ''|*[!0-9]*)
+      dbus_wait_limit=1000
+      ;;
+  esac
+  if [ "${dbus_wait_limit}" -le 0 ]; then
+    dbus_wait_limit=1000
+  elif [ "${dbus_wait_limit}" -gt 2000 ]; then
+    dbus_wait_limit=2000
+  fi
+
   if command -v gdbus >/dev/null 2>&1; then
-    if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
-      log_info discover event=avahi_liveness_dbus outcome=ok >&2
-    else
-      wait_status=$?
+    local dbus_attempt
+    local dbus_output=""
+    for dbus_attempt in 1 2; do
+      wait_status=0
+      dbus_output="$(
+        AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/wait_for_avahi_dbus.sh" 2>&1
+      )" || wait_status=$?
+      if [ -n "${dbus_output}" ]; then
+        printf '%s\n' "${dbus_output}"
+      fi
+      if [ "${wait_status}" -eq 0 ]; then
+        log_info discover event=avahi_liveness_dbus outcome=ok attempt="${dbus_attempt}" >&2
+        dbus_note=""
+        dbus_reason=""
+        break
+      fi
       if [ "${wait_status}" -eq 2 ]; then
         dbus_note="dbus=disabled"
-        log_info discover event=avahi_liveness_dbus outcome=disabled severity=info >&2
-      else
-        log_warn_msg discover "Avahi D-Bus wait failed" "event=avahi_liveness" "status=${wait_status}" >&2
+        dbus_reason="dbus_disabled"
+        log_info discover \
+          event=avahi_liveness_dbus \
+          outcome=disabled \
+          attempt="${dbus_attempt}" \
+          severity=info >&2
+        break
       fi
+      if printf '%s' "${dbus_output}" | grep -Eiq 'bus_status=call_failed|GetVersionString'; then
+        dbus_note="dbus=unavailable"
+        dbus_reason="dbus_unavailable"
+        log_warn_msg discover \
+          "Avahi D-Bus unavailable; falling back to CLI" \
+          "attempt=${dbus_attempt}" \
+          "status=${wait_status}"
+        if [ "${dbus_attempt}" -lt 2 ]; then
+          maybe_sleep 0.25
+          continue
+        fi
+        break
+      fi
+      log_warn_msg discover \
+        "Avahi D-Bus wait failed" \
+        "event=avahi_liveness" \
+        "attempt=${dbus_attempt}" \
+        "status=${wait_status}" >&2
+      if [ "${dbus_attempt}" -lt 2 ]; then
+        maybe_sleep 0.25
+      fi
+    done
+    if [ "${wait_status}" -ne 0 ] && [ "${wait_status}" -ne 2 ] && [ -z "${dbus_note}" ]; then
+      dbus_note="dbus=failed"
+      dbus_reason="dbus_failed"
     fi
   else
     dbus_note="dbus=missing"
+    dbus_reason="dbus_missing"
     log_info discover event=avahi_liveness_dbus outcome=skip reason=gdbus_missing severity=info >&2
   fi
 
@@ -1199,7 +1270,19 @@ ensure_avahi_liveness_signal() {
     fi
     lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
     if [ "${status}" -eq 0 ] && [ -n "${lines}" ] && [ "${lines}" -gt 0 ]; then
-      log_info discover event=avahi_liveness outcome=ok attempt="${attempt}" lines="${lines}" >&2
+      local -a liveness_fields=(
+        event=avahi_liveness
+        outcome=ok
+        "attempt=${attempt}"
+        "lines=${lines}"
+      )
+      if [ -n "${dbus_reason}" ]; then
+        liveness_fields+=("fallback=${dbus_reason}")
+      fi
+      if [ -n "${dbus_note}" ]; then
+        liveness_fields+=("${dbus_note}")
+      fi
+      log_info discover "${liveness_fields[@]}" >&2
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
         summary_note="attempt=${attempt} lines=${lines}"
         if [ -n "${dbus_note}" ]; then
@@ -1217,7 +1300,7 @@ ensure_avahi_liveness_signal() {
     fi
     log_warn_msg discover "Avahi liveness probe retry" "attempt=${attempt}" "status=${status}" "lines=${lines:-0}" >&2
     if [ "${attempt}" -eq 1 ]; then
-      sleep 1
+      maybe_sleep 1
     fi
   done
 
@@ -2623,6 +2706,9 @@ PY
   if [ "${status}" -eq 0 ]; then
     local display_host="${parsed_host:-${host}}"
     local display_port="${parsed_port:-${port}}"
+    API_READY_LAST_STATUS="${http_status:-}"
+    API_READY_LAST_MODE="${mode:-}"
+    API_READY_LAST_OUTCOME="${outcome:-ok}"
     local -a log_fields=(
       "event=api_ready_local"
       "outcome=${outcome:-ok}"
@@ -2648,6 +2734,9 @@ PY
     return 0
   fi
 
+  API_READY_LAST_STATUS=""
+  API_READY_LAST_MODE=""
+  API_READY_LAST_OUTCOME=""
   local -a warn_fields=(
     "phase=api_ready_local"
     "status=${status}"
@@ -2730,6 +2819,8 @@ publish_avahi_service() {
   fi
 
   AVAHI_LIVENESS_READY=0
+  local publish_api_status="${API_READY_LAST_STATUS:-}"
+  local publish_api_mode="${API_READY_LAST_MODE:-}"
   local publish_status=0
   local publish_summary_active=0
   local publish_summary_start=0
@@ -2744,6 +2835,26 @@ publish_avahi_service() {
     publish_summary_active=1
     publish_summary_start="$(summary_now_ms)"
   fi
+
+  local -a publish_attempt_fields=(
+    "outcome=attempt"
+    "role=${role}"
+    "host=${hostname}"
+    "method=static"
+  )
+  if [ -n "${phase}" ]; then
+    publish_attempt_fields+=("phase=${phase}")
+  fi
+  if [ -n "${leader}" ]; then
+    publish_attempt_fields+=("leader=${leader}")
+  fi
+  if [ -n "${publish_api_status}" ]; then
+    publish_attempt_fields+=("api_status=${publish_api_status}")
+  fi
+  if [ -n "${publish_api_mode}" ]; then
+    publish_attempt_fields+=("api_mode=${publish_api_mode}")
+  fi
+  log_info mdns_publish "${publish_attempt_fields[@]}" >&2
 
   if ! run_privileged env "${publish_env[@]}" "${SCRIPT_DIR}/mdns_publish_static.sh"; then
     publish_status=$?
@@ -2761,8 +2872,46 @@ publish_avahi_service() {
   fi
 
   if [ "${publish_status}" -ne 0 ]; then
+    local -a publish_error_fields=(
+      "role=${role}"
+      "host=${hostname}"
+      "status=${publish_status}"
+    )
+    if [ -n "${phase}" ]; then
+      publish_error_fields+=("phase=${phase}")
+    fi
+    if [ -n "${leader}" ]; then
+      publish_error_fields+=("leader=${leader}")
+    fi
+    if [ -n "${publish_api_status}" ]; then
+      publish_error_fields+=("api_status=${publish_api_status}")
+    fi
+    if [ -n "${publish_api_mode}" ]; then
+      publish_error_fields+=("api_mode=${publish_api_mode}")
+    fi
+    log_warn_msg mdns_publish "Static publish failed" "${publish_error_fields[@]}"
     return "${publish_status}"
   fi
+
+  local -a publish_success_fields=(
+    "outcome=ok"
+    "role=${role}"
+    "host=${hostname}"
+    "method=static"
+  )
+  if [ -n "${phase}" ]; then
+    publish_success_fields+=("phase=${phase}")
+  fi
+  if [ -n "${leader}" ]; then
+    publish_success_fields+=("leader=${leader}")
+  fi
+  if [ -n "${publish_api_status}" ]; then
+    publish_success_fields+=("api_status=${publish_api_status}")
+  fi
+  if [ -n "${publish_api_mode}" ]; then
+    publish_success_fields+=("api_mode=${publish_api_mode}")
+  fi
+  log_info mdns_publish "${publish_success_fields[@]}" >&2
 
   ensure_avahi_liveness_signal || return 1
 }
@@ -2778,7 +2927,7 @@ publish_api_service() {
   fi
 
   log_warn_msg mdns_selfcheck "server advertisement not visible; refreshing Avahi service" "host=${MDNS_HOST_RAW}" "role=server"
-  sleep 1
+  maybe_sleep 1
 
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
@@ -2799,7 +2948,7 @@ publish_api_service() {
 publish_bootstrap_service() {
   log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
-  sleep 1
+  maybe_sleep 1
   if ensure_self_mdns_advertisement bootstrap; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
@@ -2808,10 +2957,10 @@ publish_bootstrap_service() {
   fi
 
   log_warn_msg mdns_selfcheck "bootstrap advertisement not visible; refreshing Avahi service" "host=${MDNS_HOST_RAW}" "role=bootstrap"
-  sleep 1
+  maybe_sleep 1
 
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
-  sleep 1
+  maybe_sleep 1
   if ensure_self_mdns_advertisement bootstrap; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
@@ -3649,8 +3798,18 @@ if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
   exit 1
 fi
 
+if [ "${TEST_MDNS_FALLBACK:-0}" -eq 1 ]; then
+  if ! wait_for_api 1; then
+    exit 1
+  fi
+  if publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"; then
+    exit 0
+  fi
+  exit 1
+fi
+
 if [ "${TEST_BOOTSTRAP_SERVER_FLOW:-0}" -eq 1 ]; then
-  if publish_bootstrap_service && publish_api_service; then
+  if wait_for_api 1 && publish_bootstrap_service && publish_api_service; then
     exit 0
   fi
   exit 1
