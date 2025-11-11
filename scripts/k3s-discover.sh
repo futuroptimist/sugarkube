@@ -204,6 +204,7 @@ MDNS_SELECTED_IP=""
 MDNS_SELECTED_BROWSE_OK=0
 MDNS_SELECTED_RESOLVE_OK=0
 MDNS_SELECTED_NSS_OK=0
+MDNS_SELECTED_TXT_IP=0
 ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
@@ -2188,6 +2189,7 @@ mdns_reset_selection() {
   MDNS_SELECTED_BROWSE_OK=0
   MDNS_SELECTED_RESOLVE_OK=0
   MDNS_SELECTED_NSS_OK=0
+  MDNS_SELECTED_TXT_IP=0
 }
 
 mdns_lookup_nss_ip() {
@@ -2228,12 +2230,16 @@ select_server_candidate() {
   MDNS_SELECTED_BROWSE_OK=1
 
   local token host="" port="" mode="" address=""
+  local txt_ip4="" txt_ip6="" txt_host=""
   for token in ${selection_line}; do
     case "${token}" in
       mode=*) mode="${token#mode=}" ;;
       host=*) host="${token#host=}" ;;
       port=*) port="${token#port=}" ;;
       address=*) address="${token#address=}" ;;
+      txt_ip4=*) txt_ip4="${token#txt_ip4=}" ;;
+      txt_ip6=*) txt_ip6="${token#txt_ip6=}" ;;
+      txt_host=*) txt_host="${token#txt_host=}" ;;
     esac
   done
 
@@ -2252,9 +2258,43 @@ select_server_candidate() {
     MDNS_SELECTED_MODE="${mode}"
   fi
 
+  local txt_candidate_ip=""
+  if [ -n "${txt_ip4}" ] || [ -n "${txt_ip6}" ]; then
+    txt_candidate_ip="$(TXT_IP4="${txt_ip4}" TXT_IP6="${txt_ip6}" python3 - <<'PY' 2>/dev/null || true
+import ipaddress
+import os
+
+candidates = []
+ip4 = os.environ.get("TXT_IP4", "").strip()
+ip6 = os.environ.get("TXT_IP6", "").strip()
+if ip4:
+    candidates.append(ip4)
+if ip6:
+    candidates.append(ip6)
+
+for candidate in candidates:
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        continue
+    print(candidate)
+    break
+PY
+    )"
+    txt_candidate_ip="$(printf '%s' "${txt_candidate_ip}" | tr -d '\r')"
+  fi
+  if [ -n "${txt_candidate_ip}" ]; then
+    MDNS_SELECTED_IP="${txt_candidate_ip}"
+    MDNS_SELECTED_TXT_IP=1
+  else
+    MDNS_SELECTED_TXT_IP=0
+  fi
+
   if [ -n "${address}" ]; then
-    MDNS_SELECTED_IP="${address}"
     MDNS_SELECTED_RESOLVE_OK=1
+    if [ -z "${MDNS_SELECTED_IP}" ]; then
+      MDNS_SELECTED_IP="${address}"
+    fi
   else
     MDNS_SELECTED_RESOLVE_OK=0
   fi
@@ -2270,10 +2310,12 @@ select_server_candidate() {
   fi
 
   local accept_path=""
-  if [ "${MDNS_SELECTED_RESOLVE_OK}" = "1" ]; then
-    accept_path="resolve"
+  if [ "${MDNS_SELECTED_TXT_IP}" = "1" ]; then
+    accept_path="txt"
   elif [ "${MDNS_SELECTED_NSS_OK}" = "1" ]; then
     accept_path="nss"
+  elif [ "${MDNS_SELECTED_RESOLVE_OK}" = "1" ]; then
+    accept_path="resolve"
   fi
 
   local -a log_fields=(
@@ -2283,6 +2325,7 @@ select_server_candidate() {
     "browse_ok=${MDNS_SELECTED_BROWSE_OK}"
     "resolve_ok=${MDNS_SELECTED_RESOLVE_OK}"
     "nss_ok=${MDNS_SELECTED_NSS_OK}"
+    "txt_ip=${MDNS_SELECTED_TXT_IP}"
   )
 
   if [ -n "${MDNS_SELECTED_MODE}" ]; then
@@ -2291,6 +2334,10 @@ select_server_candidate() {
 
   if [ -n "${MDNS_SELECTED_IP}" ]; then
     log_fields+=("ip=\"$(escape_log_value "${MDNS_SELECTED_IP}")\"")
+  fi
+
+  if [ -n "${txt_host}" ]; then
+    log_fields+=("txt_host=\"$(escape_log_value "${txt_host}")\"")
   fi
 
   if [ -n "${accept_path}" ]; then

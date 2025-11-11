@@ -48,74 +48,32 @@ fi
 service_dir="$(dirname "${service_file}")"
 SERVICE_TYPE="_k3s-${cluster}-${environment}._tcp"
 
-install -d -m 755 "${service_dir}"
+PUBLISH_IPV4=""
+PUBLISH_IPV6=""
+PUBLISH_HOST="${SRV_HOST}"
 
-service_tmp_file=""
-cleanup_service_tmp() {
-  if [ -n "${service_tmp_file}" ] && [ -e "${service_tmp_file}" ]; then
-    rm -f "${service_tmp_file}"
-  fi
-}
-trap cleanup_service_tmp EXIT
+gather_publish_ips() {
+  local python_output=""
 
-ensure_mdns_target_resolvable() {
-  if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
-    echo "avahi-resolve-host-name not found; skipping SRV target preflight" >&2
-    return 0
-  fi
-
-  local resolve_cmd=("avahi-resolve-host-name" "${SRV_HOST}" -4 "--timeout=1")
-  local hosts_path="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
-  local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-}"
-  local nss_ok=0
-  local resolve_ok=0
-  local browse_ok=0
-  local outcome="fail"
-  local hosts_updated=0
-  local avahi_hostname_ran=0
-
-  gather_resolution_status() {
-    nss_ok=0
-    resolve_ok=0
-
-    if command -v getent >/dev/null 2>&1; then
-      local getent_ipv4=""
-      getent_ipv4="$(getent hosts "${SRV_HOST}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
-      if [ -n "${getent_ipv4}" ]; then
-        if [ -n "${expected_ipv4}" ] && [ "${getent_ipv4}" != "${expected_ipv4}" ]; then
-          nss_ok=0
-        else
-          nss_ok=1
-        fi
-      fi
-    fi
-
-    if "${resolve_cmd[@]}" >/dev/null 2>&1; then
-      resolve_ok=1
-    fi
-
-    if [ "${nss_ok}" = "1" ] || [ "${resolve_ok}" = "1" ]; then
-      return 0
-    fi
-    return 1
-  }
-
-  ensure_expected_ipv4() {
-    if [ -n "${expected_ipv4}" ]; then
-      return 0
-    fi
-
-    local iface addr_candidates
-    iface="${SUGARKUBE_MDNS_INTERFACE:-}"
-    addr_candidates="$(hostname -I 2>/dev/null || true)"
-    expected_ipv4="$(python3 - "${iface}" "${addr_candidates}" 2>/dev/null <<'PY' || true
+  if ! python_output="$(python3 - <<'PY'
 import ipaddress
 import json
+import os
 import subprocess
 import sys
 
-iface_hint = sys.argv[1].strip()
-hostname_tokens = [token for token in sys.argv[2].split() if token]
+
+def gather_hostname_tokens():
+    try:
+        data = subprocess.check_output(
+            ["hostname", "-I"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+    return [token.strip() for token in data.split() if token.strip()]
+
 
 IGNORE_IFACE_NAMES = {"lo"}
 IGNORE_IFACE_PREFIXES = (
@@ -135,16 +93,6 @@ IGNORE_IFACE_KINDS = {
     "bridge",
 }
 IGNORE_IFACE_FLAGS = {"LOOPBACK"}
-
-
-def valid_ipv4(candidate):
-    try:
-        ip = ipaddress.IPv4Address(candidate)
-    except ipaddress.AddressValueError:
-        return False
-    if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast or ip.is_reserved:
-        return False
-    return True
 
 
 def gather_iface_metadata():
@@ -183,7 +131,7 @@ def gather_iface_metadata():
 IFACE_METADATA = gather_iface_metadata()
 
 
-def interface_blacklisted(name):
+def interface_blacklisted(name: str) -> bool:
     if not name:
         return True
     if name in IGNORE_IFACE_NAMES:
@@ -201,9 +149,10 @@ def interface_blacklisted(name):
     return False
 
 
-def interface_allowed(name, default_iface):
+def interface_allowed(name: str, default_iface: str) -> bool:
     if not name:
         return False
+    iface_hint = os.environ.get("SUGARKUBE_MDNS_INTERFACE", "").strip()
     if name == iface_hint:
         return True
     if default_iface and name == default_iface and not interface_blacklisted(name):
@@ -211,10 +160,50 @@ def interface_allowed(name, default_iface):
     return not interface_blacklisted(name)
 
 
-def gather_ip_entries():
+def valid_ipv4(candidate: str) -> bool:
+    try:
+        ip = ipaddress.IPv4Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if (
+        ip.is_loopback
+        or ip.is_unspecified
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+    ):
+        return False
+    return True
+
+
+def valid_ipv6(candidate: str) -> bool:
+    try:
+        ip = ipaddress.IPv6Address(candidate)
+    except ipaddress.AddressValueError:
+        return False
+    if (
+        ip.is_loopback
+        or ip.is_unspecified
+        or ip.is_multicast
+        or ip.is_link_local
+    ):
+        return False
+    return True
+
+
+def gather_ip_entries(family: str):
+    if family == "inet":
+        command = ["ip", "-j", "-4", "addr", "show"]
+        target_family = "inet"
+        allowed_scopes = {"global", "site"}
+    else:
+        command = ["ip", "-j", "-6", "addr", "show"]
+        target_family = "inet6"
+        allowed_scopes = {"global", "site"}
+
     try:
         data = subprocess.check_output(
-            ["ip", "-j", "-4", "addr", "show"],
+            command,
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -230,9 +219,10 @@ def gather_ip_entries():
     for entry in payload:
         iface_name = entry.get("ifname", "")
         for addr_info in entry.get("addr_info", []):
-            if addr_info.get("family") != "inet":
+            if addr_info.get("family") != target_family:
                 continue
-            if addr_info.get("scope") not in {"global", "site"}:
+            scope = addr_info.get("scope")
+            if scope not in allowed_scopes:
                 continue
             local_ip = addr_info.get("local")
             if not local_ip:
@@ -241,28 +231,32 @@ def gather_ip_entries():
     return entries
 
 
-def pick_from_interface(entries, target_iface, allow_blacklisted=False):
+def pick_from_interface(entries, target_iface, *, allow_blacklisted=False, validator=None):
     if not target_iface:
         return None
     for iface_name, candidate_ip in entries:
         if iface_name != target_iface:
             continue
-        if not valid_ipv4(candidate_ip):
+        if validator and not validator(candidate_ip):
             continue
         if allow_blacklisted or not interface_blacklisted(iface_name):
             return candidate_ip
     return None
 
 
-def default_interface():
+def default_interface(family: str) -> str:
+    if family == "inet":
+        command = ["ip", "-4", "route", "show", "default"]
+    else:
+        command = ["ip", "-6", "route", "show", "default"]
     try:
         output = subprocess.check_output(
-            ["ip", "-4", "route", "show", "default"],
+            command,
             text=True,
             stderr=subprocess.DEVNULL,
         )
     except Exception:
-        return None
+        return ""
     for line in output.splitlines():
         parts = line.split()
         if "dev" in parts:
@@ -270,19 +264,29 @@ def default_interface():
                 return parts[parts.index("dev") + 1]
             except (IndexError, ValueError):
                 continue
-    return None
+    return ""
 
 
-def choose_ip():
-    entries = gather_ip_entries()
-    default_iface_name = default_interface()
+def choose_ip(family: str, validator, hostname_tokens):
+    entries = gather_ip_entries(family)
+    iface_hint = os.environ.get("SUGARKUBE_MDNS_INTERFACE", "").strip()
+    default_iface_name = default_interface(family)
 
-    candidate = pick_from_interface(entries, iface_hint, allow_blacklisted=True)
+    candidate = pick_from_interface(
+        entries,
+        iface_hint,
+        allow_blacklisted=True,
+        validator=validator,
+    )
     if candidate:
         return candidate
 
     if default_iface_name:
-        candidate = pick_from_interface(entries, default_iface_name)
+        candidate = pick_from_interface(
+            entries,
+            default_iface_name,
+            validator=validator,
+        )
         if candidate:
             return candidate
 
@@ -290,7 +294,7 @@ def choose_ip():
     allowed_candidates = []
     disallowed_ips = set()
     for iface_name, candidate_ip in entries:
-        if not valid_ipv4(candidate_ip):
+        if validator and not validator(candidate_ip):
             continue
         if interface_allowed(iface_name, default_iface_name):
             allowed_candidates.append(candidate_ip)
@@ -306,17 +310,109 @@ def choose_ip():
     for candidate_ip in hostname_tokens:
         if candidate_ip in disallowed_ips:
             continue
-        if valid_ipv4(candidate_ip):
+        if validator and validator(candidate_ip):
             return candidate_ip
 
     return None
 
 
-selected = choose_ip()
-if selected:
-    print(selected)
+hostname_tokens = gather_hostname_tokens()
+
+ipv4 = choose_ip("inet", valid_ipv4, hostname_tokens)
+ipv6 = choose_ip("inet6", valid_ipv6, hostname_tokens)
+
+if ipv4:
+    print(f"ip4={ipv4}")
+if ipv6:
+    print(f"ip6={ipv6}")
 PY
-    )"
+  )"; then
+    python_output=""
+  fi
+
+  PUBLISH_IPV4=""
+  PUBLISH_IPV6=""
+  while IFS= read -r line; do
+    case "${line}" in
+      ip4=*)
+        PUBLISH_IPV4="${line#ip4=}"
+        ;;
+      ip6=*)
+        PUBLISH_IPV6="${line#ip6=}"
+        ;;
+    esac
+  done <<<"${python_output}"
+
+  if [ -n "${SUGARKUBE_EXPECTED_IPV4:-}" ]; then
+    PUBLISH_IPV4="${SUGARKUBE_EXPECTED_IPV4}"
+  fi
+  if [ -n "${SUGARKUBE_EXPECTED_IPV6:-}" ]; then
+    PUBLISH_IPV6="${SUGARKUBE_EXPECTED_IPV6}"
+  fi
+}
+
+install -d -m 755 "${service_dir}"
+
+service_tmp_file=""
+cleanup_service_tmp() {
+  if [ -n "${service_tmp_file}" ] && [ -e "${service_tmp_file}" ]; then
+    rm -f "${service_tmp_file}"
+  fi
+}
+trap cleanup_service_tmp EXIT
+
+ensure_mdns_target_resolvable() {
+  if [ -z "${SUGARKUBE_EXPECTED_IPV4:-}" ] && [ -z "${PUBLISH_IPV4:-}" ]; then
+    gather_publish_ips
+  fi
+  if ! command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    echo "avahi-resolve-host-name not found; skipping SRV target preflight" >&2
+    return 0
+  fi
+
+  local resolve_cmd=("avahi-resolve-host-name" "${SRV_HOST}" -4 "--timeout=1")
+  local hosts_path="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
+  local expected_ipv4="${SUGARKUBE_EXPECTED_IPV4:-${PUBLISH_IPV4:-}}"
+  local nss_ok=0
+  local resolve_ok=0
+  local browse_ok=0
+  local outcome="fail"
+  local hosts_updated=0
+  local avahi_hostname_ran=0
+
+  gather_resolution_status() {
+    nss_ok=0
+    resolve_ok=0
+
+    if command -v getent >/dev/null 2>&1; then
+      local getent_ipv4=""
+      getent_ipv4="$(getent hosts "${SRV_HOST}" 2>/dev/null | awk 'NR==1 {print $1}' | head -n1)"
+      if [ -n "${getent_ipv4}" ]; then
+        if [ -n "${expected_ipv4}" ] && [ "${getent_ipv4}" != "${expected_ipv4}" ]; then
+          nss_ok=0
+        else
+          nss_ok=1
+        fi
+      fi
+    fi
+
+    if "${resolve_cmd[@]}" >/dev/null 2>&1; then
+      resolve_ok=1
+    fi
+
+    if [ "${nss_ok}" = "1" ] || [ "${resolve_ok}" = "1" ]; then
+      return 0
+    fi
+    return 1
+  }
+
+  ensure_expected_ipv4() {
+    if [ -n "${expected_ipv4}" ]; then
+      return 0
+    fi
+
+    gather_publish_ips
+    expected_ipv4="${PUBLISH_IPV4:-}"
     if [ -z "${expected_ipv4}" ]; then
       echo "Unable to determine IPv4 for ${SRV_HOST}; cannot pre-publish mDNS host" >&2
       return 1
@@ -580,6 +676,11 @@ if ! ensure_mdns_target_resolvable; then
   exit 1
 fi
 
+gather_publish_ips
+export PUBLISH_IP4="${PUBLISH_IPV4:-}"
+export PUBLISH_IP6="${PUBLISH_IPV6:-}"
+export PUBLISH_HOST="${PUBLISH_HOST}"
+
 service_tmp_file="$(mktemp "${service_dir}/.k3s-mdns.XXXXXX")"
 python3 - "${service_tmp_file}" <<'PY'
 import html
@@ -594,6 +695,9 @@ role = os.environ["ROLE"]
 port = os.environ.get("PORT", "6443")
 phase = os.environ.get("PHASE", "")
 leader = os.environ.get("LEADER", "")
+ip4 = os.environ.get("PUBLISH_IP4", "")
+ip6 = os.environ.get("PUBLISH_IP6", "")
+publish_host = os.environ.get("PUBLISH_HOST", "")
 
 service_name = f"k3s-{cluster}-{environment}@{srv_host} ({role})"
 service_type = f"_k3s-{cluster}-{environment}._tcp"
@@ -609,6 +713,13 @@ records = [
     ("phase", phase),
     ("leader", leader),
 ]
+
+if publish_host:
+    records.append(("host", publish_host))
+if ip4:
+    records.append(("ip4", ip4))
+if ip6:
+    records.append(("ip6", ip6))
 
 with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write("<?xml version=\"1.0\" standalone='no'?>\n")

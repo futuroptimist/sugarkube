@@ -196,6 +196,15 @@ def _render_mode(mode: str, records: Iterable[MdnsRecord]) -> List[str]:
             fields.append(f"port={record.port}")
             if record.address:
                 fields.append(f"address={record.address}")
+            txt_host = record.txt.get("host", "")
+            if txt_host:
+                fields.append(f"txt_host={txt_host}")
+            txt_ip4 = record.txt.get("ip4", "")
+            if txt_ip4:
+                fields.append(f"txt_ip4={txt_ip4}")
+            txt_ip6 = record.txt.get("ip6", "")
+            if txt_ip6:
+                fields.append(f"txt_ip6={txt_ip6}")
             return [" ".join(fields)]
         return []
 
