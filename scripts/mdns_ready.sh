@@ -79,17 +79,16 @@ PY
 
   local method=""
   local dbus_status=0
-  local dbus_output=""
 
   # Try D-Bus method first
   if command -v gdbus >/dev/null 2>&1; then
-    dbus_output="$(gdbus call \
+    gdbus call \
       --system \
       --dest org.freedesktop.Avahi \
       --object-path / \
       --method org.freedesktop.Avahi.Server.GetVersionString \
       --timeout "${dbus_timeout_secs}" \
-      2>&1)" || dbus_status=$?
+      >/dev/null 2>&1 || dbus_status=$?
     
     if [ "${dbus_status}" -eq 0 ]; then
       method="dbus"
@@ -114,13 +113,11 @@ PY
     fi
   else
     dbus_status=127
-    dbus_output="gdbus command not found"
   fi
 
   # D-Bus failed or unavailable, fall back to CLI method
   method="cli"
   local cli_status=0
-  local cli_output=""
   local browse_cmd="avahi-browse --all --ignore-local --resolve --terminate"
   
   if ! command -v avahi-browse >/dev/null 2>&1; then
@@ -145,7 +142,7 @@ PY
     return 1
   fi
 
-  cli_output="$(avahi-browse --all --ignore-local --resolve --terminate 2>&1)" || cli_status=$?
+  avahi-browse --all --ignore-local --resolve --terminate >/dev/null 2>&1 || cli_status=$?
   
   local elapsed_ms
   elapsed_ms="$(python3 - <<PY
