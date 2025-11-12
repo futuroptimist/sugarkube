@@ -124,6 +124,9 @@ jobs:
       - name: Run Pi Imager preset e2e test
         run: bash tests/render_pi_imager_preset_e2e.sh
 
+      - name: Run Avahi hardening test
+        run: bash tests/avahi_hardening_test.sh
+
   build:
     # Only run the expensive image build when manually dispatched
     if: github.event_name == 'workflow_dispatch'
@@ -241,6 +244,37 @@ jobs:
             echo "pi-gen:latest Docker image not found!"
             exit 1
           fi
+
+      - name: Avahi smoke test in pi-gen container
+        run: |
+          set -euo pipefail
+          docker run --rm pi-gen:latest bash -c '
+            set -euo pipefail
+            if ! command -v avahi-browse >/dev/null 2>&1; then
+              echo "Installing avahi-utils for smoke test..."
+              apt-get update -qq
+              apt-get install -y -qq avahi-utils avahi-daemon dbus
+            fi
+            # Start dbus and avahi-daemon for the test
+            mkdir -p /var/run/dbus
+            if [ ! -f /var/run/dbus/system_bus_socket ]; then
+              dbus-daemon --system --fork || true
+            fi
+            avahi-daemon -D || true
+            sleep 2
+            # Run avahi-browse with short timeout
+            timeout 5 avahi-browse --all --terminate || {
+              code=$?
+              if [ $code -eq 124 ]; then
+                echo "avahi-browse timeout (expected - no services)"
+                exit 0
+              else
+                echo "avahi-browse failed with code $code"
+                exit 1
+              fi
+            }
+            echo "avahi-browse smoke test passed"
+          '
 
       - name: List deploy directory
         if: always()

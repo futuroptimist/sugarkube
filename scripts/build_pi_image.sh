@@ -337,7 +337,8 @@ cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
 
 ensure_packages "${PI_GEN_DIR}/stage2/01-sys-tweaks/00-packages" \
   policykit-1 rpi-eeprom ethtool jq parted util-linux raspi-utils \
-  network-manager curl
+  network-manager curl \
+  avahi-daemon avahi-utils dbus libnss-mdns nftables
 
 just_path_profile="${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/profile.d/sugarkube-path.sh"
 install -d "$(dirname "${just_path_profile}")"
@@ -525,6 +526,18 @@ install -Dm755 "${REPO_ROOT}/scripts/k3s_preflight.sh" \
 install -Dm755 "${REPO_ROOT}/scripts/k3s-install-iptables.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-install-iptables.sh"
 
+# Bundle Avahi/mDNS configuration scripts
+install -Dm755 "${REPO_ROOT}/scripts/configure_avahi.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/configure_avahi.sh"
+install -Dm755 "${REPO_ROOT}/scripts/wait_for_avahi_dbus.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/wait_for_avahi_dbus.sh"
+install -Dm755 "${REPO_ROOT}/scripts/check_avahi_config_effective.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/check_avahi_config_effective.sh"
+install -Dm755 "${REPO_ROOT}/scripts/configure_nsswitch_mdns.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/configure_nsswitch_mdns.sh"
+install -Dm755 "${REPO_ROOT}/scripts/log.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/log.sh"
+
 install -Dm755 "${REPO_ROOT}/scripts/spot_check.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/sugarkube-spot-check"
 install -Dm755 "${REPO_ROOT}/scripts/clone_to_nvme.sh" \
@@ -546,6 +559,9 @@ install -Dm644 "${REPO_ROOT}/scripts/systemd/first-boot.service" \
 install -Dm644 "${REPO_ROOT}/scripts/systemd/ssd-clone.service" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/ssd-clone.service"
 
+install -Dm644 "${REPO_ROOT}/scripts/systemd/avahi-configure.service" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/avahi-configure.service"
+
 install -d "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
 ln -sf ../first-boot.service \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
@@ -555,6 +571,8 @@ install -Dm644 "${REPO_ROOT}/systemd/first-boot-prepare.service" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/first-boot-prepare.service"
 ln -sf ../first-boot-prepare.service \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot-prepare.service"
+ln -sf ../avahi-configure.service \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/avahi-configure.service"
 
 
 install -Dm644 "${REPO_ROOT}/scripts/udev/99-sugarkube-ssd-clone.rules" \
