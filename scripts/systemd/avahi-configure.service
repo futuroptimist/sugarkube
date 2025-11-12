@@ -1,0 +1,18 @@
+[Unit]
+Description=Configure Avahi and mDNS at first boot
+After=dbus.service avahi-daemon.service network-online.target
+Wants=network-online.target
+Requires=dbus.service avahi-daemon.service
+ConditionPathExists=/opt/sugarkube/configure_avahi.sh
+ConditionPathExists=/opt/sugarkube/configure_nsswitch_mdns.sh
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sugarkube/configure_nsswitch_mdns.sh
+ExecStart=/opt/sugarkube/configure_avahi.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
