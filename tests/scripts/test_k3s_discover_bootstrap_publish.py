@@ -39,9 +39,10 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> BootstrapPublishRe
     expected_ipv4 = "192.0.2.10"
     hosts_path = tmp_path / "avahi-hosts"
     resolve_log = tmp_path / "avahi-resolve.log"
+    browse_log = tmp_path / "avahi-browse.log"
 
-    avahi_resolve = bin_dir / "avahi-resolve-host-name"
-    avahi_resolve.write_text(
+    avahi_resolve_host_name = bin_dir / "avahi-resolve-host-name"
+    avahi_resolve_host_name.write_text(
         textwrap.dedent(
             f"""\
             #!/usr/bin/env bash
@@ -67,6 +68,43 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> BootstrapPublishRe
               exit 0
             fi
             echo "FAIL {expected_host}" >> '{resolve_log}'
+            exit 1
+            """
+        ),
+        encoding="utf-8",
+    )
+    avahi_resolve_host_name.chmod(0o755)
+
+    # Mock avahi-browse for service verification
+    avahi_browse = bin_dir / "avahi-browse"
+    avahi_browse.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            echo "AVAHI-BROWSE:$*" >> '{browse_log}'
+            # Return output that contains the expected host
+            echo "=;eth0;IPv4;k3s-sugar-dev@{expected_host} (bootstrap);_k3s-sugar-dev._tcp;local;{expected_host};{expected_ipv4};6443;"
+            exit 0
+            """
+        ),
+        encoding="utf-8",
+    )
+    avahi_browse.chmod(0o755)
+
+    # Mock avahi-resolve for host record self-check (with -n flag)
+    avahi_resolve = bin_dir / "avahi-resolve"
+    avahi_resolve.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            echo "AVAHI-RESOLVE:$*" >> '{resolve_log}'
+            # Handle -n flag for name resolution
+            if [[ "$*" == *"-n"* ]]; then
+              echo "{expected_host}	{expected_ipv4}"
+              exit 0
+            fi
             exit 1
             """
         ),

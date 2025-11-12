@@ -758,9 +758,14 @@ wait_for_avahi_publication() {
 
   case "${timeout_seconds}" in
     ''|*[!0-9]*)
-      timeout_seconds=20
+      timeout_seconds=30
       ;;
   esac
+  
+  # Ensure minimum timeout of 30 seconds
+  if [ "${timeout_seconds}" -lt 30 ]; then
+    timeout_seconds=30
+  fi
 
   if ! command -v journalctl >/dev/null 2>&1; then
     echo "journalctl not available; skipping Avahi publication confirmation" >&2
@@ -790,6 +795,78 @@ wait_for_avahi_publication() {
   done
 }
 
+verify_service_with_avahi_browse() {
+  local service_type="$1"
+  local expected_host="$2"
+  local max_attempts="${3:-10}"
+  local initial_delay="${4:-2}"
+  local max_delay="${5:-16}"
+  
+  if ! command -v avahi-browse >/dev/null 2>&1; then
+    echo "avahi-browse not available; skipping service verification" >&2
+    return 0
+  fi
+  
+  local attempt=1
+  local delay="${initial_delay}"
+  
+  while [ "${attempt}" -le "${max_attempts}" ]; do
+    echo "Attempt ${attempt}/${max_attempts}: verifying ${service_type} is visible via avahi-browse..." >&2
+    
+    local browse_output
+    if browse_output="$(timeout 5 avahi-browse -rt "${service_type}" 2>/dev/null)"; then
+      if [ -n "${browse_output}" ]; then
+        if printf '%s\n' "${browse_output}" | grep -Fq "${expected_host}"; then
+          echo "Service ${service_type} successfully verified for ${expected_host}" >&2
+          return 0
+        else
+          echo "Service found but does not match expected host ${expected_host}" >&2
+        fi
+      else
+        echo "No services found for ${service_type}" >&2
+      fi
+    else
+      echo "avahi-browse command failed" >&2
+    fi
+    
+    if [ "${attempt}" -lt "${max_attempts}" ]; then
+      echo "Retrying in ${delay}s..." >&2
+      sleep "${delay}"
+      # Exponential backoff
+      delay=$((delay * 2))
+      if [ "${delay}" -gt "${max_delay}" ]; then
+        delay="${max_delay}"
+      fi
+    fi
+    
+    attempt=$((attempt + 1))
+  done
+  
+  echo "ERROR: Service ${service_type} not observable after ${max_attempts} attempts" >&2
+  return 1
+}
+
+verify_host_record() {
+  local hostname="$1"
+  
+  if ! command -v avahi-resolve >/dev/null 2>&1; then
+    echo "avahi-resolve not available; skipping host record verification" >&2
+    return 0
+  fi
+  
+  echo "Verifying host record for ${hostname} with avahi-resolve..." >&2
+  
+  local resolve_output
+  if resolve_output="$(avahi-resolve -n "${hostname}" 2>&1)"; then
+    echo "SUCCESS: Host record ${hostname} is advertised: ${resolve_output}" >&2
+    return 0
+  else
+    local status=$?
+    echo "FAILURE: Host record ${hostname} not advertised (status=${status}): ${resolve_output}" >&2
+    return 1
+  fi
+}
+
 reload_avahi_daemon() {
   local service_display timeout_seconds start_epoch
   service_display="$1"
@@ -797,9 +874,14 @@ reload_avahi_daemon() {
 
   case "${timeout_seconds}" in
     ''|*[!0-9]*)
-      timeout_seconds=20
+      timeout_seconds=30
       ;;
   esac
+  
+  # Ensure minimum timeout of 30 seconds
+  if [ "${timeout_seconds}" -lt 30 ]; then
+    timeout_seconds=30
+  fi
 
   if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ] || ! command -v systemctl >/dev/null 2>&1; then
     return 0
@@ -886,4 +968,14 @@ fs::atomic_install "${service_tmp_file}" "${service_file}" 0644 root root
 service_tmp_file=""
 
 service_display="k3s-${cluster}-${environment}@${SRV_HOST} (${role})"
-reload_avahi_daemon "${service_display}" "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-20}"
+# Increase default timeout to 30s minimum
+reload_avahi_daemon "${service_display}" "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-30}"
+
+# Verify service is visible via avahi-browse with retry and exponential backoff
+if ! verify_service_with_avahi_browse "${SERVICE_TYPE}" "${SRV_HOST}" 10 2 16; then
+  echo "Service ${SERVICE_TYPE} not observable after publication" >&2
+  exit 1
+fi
+
+# Self-check: verify host record is advertised
+verify_host_record "${SRV_HOST}" || true  # Log but don't fail on host record check
