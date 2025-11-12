@@ -5,7 +5,7 @@ set -euo pipefail
 
 # Source shared kube-proxy library
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/kube_proxy.sh
+# shellcheck disable=SC1091  # Library resolves at runtime
 source "${SCRIPT_DIR}/lib/kube_proxy.sh"
 
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
