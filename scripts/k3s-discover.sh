@@ -1221,7 +1221,7 @@ ensure_avahi_liveness_signal() {
   if [ "${ready_status}" -eq 0 ]; then
     # mdns_ready succeeded - check if it was via CLI fallback
     if printf '%s' "${ready_output}" | grep -q 'method=cli'; then
-      dbus_note="dbus=fallback_cli"
+      dbus_note="dbus=unavailable"
       dbus_reason="dbus_unavailable"
     else
       dbus_note=""
@@ -1229,7 +1229,14 @@ ensure_avahi_liveness_signal() {
     fi
     
     # mdns_ready already confirmed Avahi is working, return success
-    log_info discover event=avahi_liveness outcome=ok method=mdns_ready "${dbus_note:+${dbus_note}}" >&2
+    local -a liveness_fields=(event=avahi_liveness outcome=ok method=mdns_ready)
+    if [ -n "${dbus_reason}" ]; then
+      liveness_fields+=("fallback=${dbus_reason}")
+    fi
+    if [ -n "${dbus_note}" ]; then
+      liveness_fields+=("${dbus_note}")
+    fi
+    log_info discover "${liveness_fields[@]}" >&2
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       summary_note="mdns_ready"
       if [ -n "${dbus_note}" ]; then

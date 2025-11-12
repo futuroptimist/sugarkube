@@ -20,7 +20,8 @@ real_ip_bin="$(command -v ip || true)"
 
 cat >"${BIN_DIR}/gdbus" <<'SH'
 #!/usr/bin/env bash
-exit 0
+echo "Error: Method GetVersionString with signature '' on interface 'org.freedesktop.Avahi.Server' doesn't exist" >&2
+exit 1
 SH
 chmod +x "${BIN_DIR}/gdbus"
 
@@ -236,9 +237,15 @@ if [ ! -s "${API_READY_LOG}" ]; then
   exit 1
 fi
 
-if [ ! -s "${BUSCTL_LOG}" ]; then
+if ! grep -q 'method=cli' <<<"${command_output}"; then
   printf '%s\n' "${command_output}" >&2
-  echo "busctl stub was not called" >&2
+  echo "expected CLI method to be used in fallback" >&2
+  exit 1
+fi
+
+if ! grep -q 'dbus_fallback=true' <<<"${command_output}"; then
+  printf '%s\n' "${command_output}" >&2
+  echo "expected dbus_fallback=true indicating D-Bus was attempted first" >&2
   exit 1
 fi
 
