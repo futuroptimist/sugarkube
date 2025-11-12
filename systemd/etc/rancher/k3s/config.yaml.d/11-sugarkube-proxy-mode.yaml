@@ -1,2 +1,2 @@
 kube-proxy-arg:
-  - proxy-mode=nft
+  - proxy-mode=nftables

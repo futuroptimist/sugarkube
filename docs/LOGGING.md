@@ -85,7 +85,7 @@ JSON export, so you can diff results across runs:
 
 | Check | Status |
 | --- | --- |
-| iptables_backend | pass |
+| kube_proxy_dataplane | pass |
 | k3s_node_ready | fail |
 ```
 
@@ -96,5 +96,5 @@ Status semantics match the console output:
 - `fail` — intervention required before continuing the runbook.
 - `skip` — the probe could not run and should be revisited later.
 
-When nftables mode is configured the `iptables_backend` check logs `pass`,
-avoiding the high-priority warning that accompanied the legacy backend.
+When nftables mode is configured the `kube_proxy_dataplane` check logs `pass`,
+confirming that the nft binary is available and the configuration is consistent.

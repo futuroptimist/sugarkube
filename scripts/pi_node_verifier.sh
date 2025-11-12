@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Source shared kube-proxy library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091  # Library resolves at runtime
+source "${SCRIPT_DIR}/lib/kube_proxy.sh"
+
 json_warnings=()
 
 json_escape() {
@@ -407,16 +412,51 @@ else
   print_result "time_sync" "skip"
 fi
 
-# iptables backend
-if command -v iptables >/dev/null 2>&1; then
-  if iptables --version 2>/dev/null | grep -qi nf_tables; then
-    print_result "iptables_backend" "pass"
+# kube-proxy dataplane check
+check_kube_proxy_dataplane() {
+  local config_dir="/etc/rancher/k3s/config.yaml.d"
+  local configured_mode
+  
+  # Determine configured proxy mode using shared library
+  configured_mode=$(kube_proxy::detect_mode "$config_dir")
+
+  # Check for required binaries based on configuration
+  if [[ "$configured_mode" == "nftables" ]]; then
+    if command -v nft >/dev/null 2>&1; then
+      print_result "kube_proxy_dataplane" "pass"
+    else
+      warn "nftables mode configured but nft binary not found"
+      print_result "kube_proxy_dataplane" "fail"
+    fi
+  elif [[ "$configured_mode" == "iptables" ]]; then
+    if command -v iptables >/dev/null 2>&1; then
+      if iptables --version 2>/dev/null | grep -qi legacy; then
+        print_result "kube_proxy_dataplane" "pass"
+      else
+        warn "iptables mode configured but binary appears to use nf_tables backend"
+        print_result "kube_proxy_dataplane" "pass"
+      fi
+    else
+      warn "iptables mode configured but iptables binary not found"
+      print_result "kube_proxy_dataplane" "fail"
+    fi
   else
-    print_result "iptables_backend" "fail"
+    # If mode is not explicitly configured, check for either nft or iptables
+    if command -v nft >/dev/null 2>&1; then
+      print_result "kube_proxy_dataplane" "pass"
+    elif command -v iptables >/dev/null 2>&1; then
+      if iptables --version 2>/dev/null | grep -qi nf_tables; then
+        print_result "kube_proxy_dataplane" "pass"
+      else
+        print_result "kube_proxy_dataplane" "fail"
+      fi
+    else
+      print_result "kube_proxy_dataplane" "skip"
+    fi
   fi
-else
-  print_result "iptables_backend" "skip"
-fi
+}
+
+check_kube_proxy_dataplane
 
 # optional k3s check-config
 if command -v k3s >/dev/null 2>&1; then

@@ -107,6 +107,7 @@ crimpers
 customizations
 cAdvisor
 democratizedspace
+dataplane
 dev
 dir
 dropdown
@@ -159,6 +160,8 @@ multimeter
 namespace
 namespaces
 Netdata
+nft
+nftables
 nonint
 npm
 onboarding

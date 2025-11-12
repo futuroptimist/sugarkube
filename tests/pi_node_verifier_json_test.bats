@@ -71,7 +71,7 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.checks[] | select(.name=="cloud_init") | .status=="fail"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="time_sync") | .status=="fail"' > /dev/null
-  echo "$output" | jq -e '.checks[] | select(.name=="iptables_backend") | .status=="fail"' > /dev/null
+  echo "$output" | jq -e '.checks[] | select(.name=="kube_proxy_dataplane") | .status=="fail"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="k3s_node_ready") | .status=="fail"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="projects_compose_active") | .status=="fail"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="token_place_http") | .status=="fail"' > /dev/null
@@ -87,7 +87,7 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.checks[] | select(.name=="cloud_init") | .status=="skip"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="time_sync") | .status=="skip"' > /dev/null
-  echo "$output" | jq -e '.checks[] | select(.name=="iptables_backend") | .status=="skip"' > /dev/null
+  echo "$output" | jq -e '.checks[] | select(.name=="kube_proxy_dataplane") | .status=="skip"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="k3s_check_config") | .status=="skip"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="k3s_node_ready") | .status=="skip"' > /dev/null
   echo "$output" | jq -e '.checks[] | select(.name=="projects_compose_active") | .status=="skip"' > /dev/null

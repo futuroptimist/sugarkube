@@ -26,8 +26,7 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 > clusters can override the drop-in (or set `K3S_KUBE_PROXY_MODE=iptables`
 > before rerunning the installer) to stick with the legacy iptables proxy if
 > necessary. When the drop-in is present `pi_node_verifier` records
-> `iptables_backend: pass`, which downgrades the legacy-backend warning that
-> appeared in earlier images.
+> `kube_proxy_dataplane: pass`, which confirms the nftables backend is available.
 3. Start k3s on the first control-plane:
 
    ```bash
@@ -231,7 +230,7 @@ inventory details followed by a table of checks:
 | Check | Status |
 | --- | --- |
 | cgroup_memory | pass |
-| iptables_backend | pass |
+| kube_proxy_dataplane | pass |
 | k3s_node_ready | pass |
 
 ### Migration Steps
