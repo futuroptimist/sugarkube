@@ -20,7 +20,7 @@ real_ip_bin="$(command -v ip || true)"
 
 cat >"${BIN_DIR}/gdbus" <<'SH'
 #!/usr/bin/env bash
-echo "Error: Method GetVersionString with signature '' on interface 'org.freedesktop.Avahi.Server' doesn't exist" >&2
+echo "Error: Method GetVersionString with signature '' on interface 'org.freedesktop.Avahi.Server' does not exist" >&2
 exit 1
 SH
 chmod +x "${BIN_DIR}/gdbus"

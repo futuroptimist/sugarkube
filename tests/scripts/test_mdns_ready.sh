@@ -32,7 +32,6 @@ export AVAHI_DBUS_TIMEOUT_MS=1000
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
-status=${status:-0}
 
 if [ "${status}" -ne 0 ]; then
   echo "FAIL: Expected exit code 0, got ${status}"
@@ -72,7 +71,6 @@ chmod +x "${BIN_DIR}/avahi-browse"
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
-status=${status:-0}
 
 if [ "${status}" -ne 0 ]; then
   echo "FAIL: Expected exit code 0, got ${status}"
@@ -124,7 +122,6 @@ chmod +x "${BIN_DIR}/avahi-browse"
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
-status=${status:-0}
 
 if [ "${status}" -ne 1 ]; then
   echo "FAIL: Expected exit code 1, got ${status}"
@@ -158,7 +155,6 @@ export AVAHI_CONF_PATH="${AVAHI_CONF}"
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
-status=${status:-0}
 
 if [ "${status}" -ne 2 ]; then
   echo "FAIL: Expected exit code 2 (disabled), got ${status}"
@@ -187,7 +183,6 @@ unset AVAHI_CONF_PATH  # Clear config from previous test
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
-status=${status:-0}
 
 if [ "${status}" -ne 1 ]; then
   echo "FAIL: Expected exit code 1, got ${status}"
@@ -221,7 +216,6 @@ chmod +x "${BIN_DIR}/gdbus"
 unset AVAHI_CONF_PATH
 status=0  # Reset status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
-status=${status:-0}
 
 if [ "${status}" -ne 0 ]; then
   echo "FAIL: Expected exit code 0, got ${status}"

@@ -1196,6 +1196,8 @@ ensure_avahi_liveness_signal() {
   local ready_output=""
 
   # Use mdns_ready() wrapper function for robust D-Bus + CLI fallback
+  # Note: SUGARKUBE_AVAHI_DBUS_WAIT_MS is the external API, converted to
+  # AVAHI_DBUS_TIMEOUT_MS for mdns_ready.sh internal use
   local dbus_wait_limit="${SUGARKUBE_AVAHI_DBUS_WAIT_MS:-1000}"
   case "${dbus_wait_limit}" in
     ''|*[!0-9]*)

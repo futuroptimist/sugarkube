@@ -21,6 +21,7 @@ SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 #
 # Environment variables:
 #   AVAHI_DBUS_TIMEOUT_MS - D-Bus call timeout in milliseconds (default: 2000, max: 2000)
+#                           Note: Converted to seconds (rounded up) for gdbus, minimum 1s
 #   AVAHI_CONF_PATH - Path to avahi-daemon.conf (default: /etc/avahi/avahi-daemon.conf)
 mdns_ready() {
   local start_ms
@@ -69,8 +70,9 @@ PY
   
   local dbus_timeout_secs
   dbus_timeout_secs="$(python3 - <<PY
+import math
 timeout_ms = ${dbus_timeout_ms}
-timeout_secs = max(1, int(timeout_ms / 1000))
+timeout_secs = max(1, math.ceil(timeout_ms / 1000))
 print(timeout_secs)
 PY
   )"
@@ -78,11 +80,9 @@ PY
   local method=""
   local dbus_status=0
   local dbus_output=""
-  local dbus_cmd=""
 
   # Try D-Bus method first
   if command -v gdbus >/dev/null 2>&1; then
-    dbus_cmd="gdbus call --system --dest org.freedesktop.Avahi --object-path / --method org.freedesktop.Avahi.Server.GetVersionString"
     dbus_output="$(gdbus call \
       --system \
       --dest org.freedesktop.Avahi \
