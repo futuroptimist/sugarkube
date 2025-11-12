@@ -814,7 +814,7 @@ verify_service_with_avahi_browse() {
     echo "Attempt ${attempt}/${max_attempts}: verifying ${service_type} is visible via avahi-browse..." >&2
     
     local browse_output
-    if browse_output="$(avahi-browse -rt "${service_type}" 2>/dev/null)"; then
+    if browse_output="$(timeout 5 avahi-browse -rt "${service_type}" 2>/dev/null)"; then
       if [ -n "${browse_output}" ]; then
         if printf '%s\n' "${browse_output}" | grep -Fq "${expected_host}"; then
           echo "Service ${service_type} successfully verified for ${expected_host}" >&2
@@ -857,12 +857,11 @@ verify_host_record() {
   echo "Verifying host record for ${hostname} with avahi-resolve..." >&2
   
   local resolve_output
-  local status=0
   if resolve_output="$(avahi-resolve -n "${hostname}" 2>&1)"; then
     echo "SUCCESS: Host record ${hostname} is advertised: ${resolve_output}" >&2
     return 0
   else
-    status=$?
+    local status=$?
     echo "FAILURE: Host record ${hostname} not advertised (status=${status}): ${resolve_output}" >&2
     return 1
   fi
@@ -974,7 +973,7 @@ reload_avahi_daemon "${service_display}" "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-30}"
 
 # Verify service is visible via avahi-browse with retry and exponential backoff
 if ! verify_service_with_avahi_browse "${SERVICE_TYPE}" "${SRV_HOST}" 10 2 16; then
-  echo "FATAL: Service ${SERVICE_TYPE} not observable after publication" >&2
+  echo "Service ${SERVICE_TYPE} not observable after publication" >&2
   exit 1
 fi
 
