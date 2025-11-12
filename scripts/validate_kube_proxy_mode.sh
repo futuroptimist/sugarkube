@@ -3,6 +3,11 @@
 # Usage: ./scripts/validate_kube_proxy_mode.sh [--config-dir PATH]
 set -euo pipefail
 
+# Source shared kube-proxy library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/kube_proxy.sh
+source "${SCRIPT_DIR}/lib/kube_proxy.sh"
+
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
 
 while [[ $# -gt 0 ]]; do
@@ -37,21 +42,8 @@ EOF
   esac
 done
 
-# Determine configured proxy mode
-CONFIGURED_MODE="unknown"
-if [[ -d "$CONFIG_DIR" ]]; then
-  for config_file in "$CONFIG_DIR"/*.yaml; do
-    if [[ -f "$config_file" ]]; then
-      if grep -q "proxy-mode=nftables\|proxy-mode=nft" "$config_file" 2>/dev/null; then
-        CONFIGURED_MODE="nftables"
-        break
-      elif grep -q "proxy-mode=iptables" "$config_file" 2>/dev/null; then
-        CONFIGURED_MODE="iptables"
-        break
-      fi
-    fi
-  done
-fi
+# Determine configured proxy mode using shared library
+CONFIGURED_MODE=$(kube_proxy::detect_mode "$CONFIG_DIR")
 
 # Check for nft binary
 NFT_AVAILABLE="no"

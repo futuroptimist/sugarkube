@@ -3,6 +3,11 @@
 # Usage: sudo ./scripts/k3s_preflight.sh [--config-dir PATH]
 set -Eeuo pipefail
 
+# Source shared kube-proxy library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/kube_proxy.sh
+source "${SCRIPT_DIR}/lib/kube_proxy.sh"
+
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
 
 # Parse arguments
@@ -60,21 +65,9 @@ set_sysctl() {
 }
 
 check_kube_proxy_mode() {
-  # Determine configured proxy mode from k3s config files
-  local configured_mode="unknown"
-  if [[ -d "$CONFIG_DIR" ]]; then
-    for config_file in "$CONFIG_DIR"/*.yaml; do
-      if [[ -f "$config_file" ]]; then
-        if grep -q "proxy-mode=nftables\|proxy-mode=nft" "$config_file" 2>/dev/null; then
-          configured_mode="nftables"
-          break
-        elif grep -q "proxy-mode=iptables" "$config_file" 2>/dev/null; then
-          configured_mode="iptables"
-          break
-        fi
-      fi
-    done
-  fi
+  # Determine configured proxy mode using shared library
+  local configured_mode
+  configured_mode=$(kube_proxy::detect_mode "$CONFIG_DIR")
 
   # Check for required binaries based on configured mode
   if [[ "$configured_mode" == "nftables" ]]; then
