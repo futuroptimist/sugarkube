@@ -631,6 +631,9 @@ def _run_build_script(tmp_path, env):
     ssd_clone_unit_src = repo_root / "scripts" / "systemd" / "ssd-clone.service"
     shutil.copy(ssd_clone_unit_src, systemd_dir / "ssd-clone.service")
 
+    avahi_configure_unit_src = repo_root / "scripts" / "systemd" / "avahi-configure.service"
+    shutil.copy(avahi_configure_unit_src, systemd_dir / "avahi-configure.service")
+
     udev_src = repo_root / "scripts" / "udev" / "99-sugarkube-ssd-clone.rules"
     udev_dir = script_dir / "udev"
     udev_dir.mkdir(exist_ok=True)
@@ -644,6 +647,11 @@ def _run_build_script(tmp_path, env):
         ("scripts/post_clone_verify.sh", 0o755),
         ("scripts/k3s_preflight.sh", 0o755),
         ("scripts/k3s-install-iptables.sh", 0o755),
+        ("scripts/configure_avahi.sh", 0o755),
+        ("scripts/wait_for_avahi_dbus.sh", 0o755),
+        ("scripts/check_avahi_config_effective.sh", 0o755),
+        ("scripts/configure_nsswitch_mdns.sh", 0o755),
+        ("scripts/log.sh", 0o755),
         ("systemd/first-boot-prepare.sh", 0o755),
         ("systemd/first-boot-prepare.service", 0o644),
     ]
