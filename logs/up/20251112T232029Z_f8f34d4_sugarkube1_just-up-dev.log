@@ -1,0 +1,63 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-12T23:20:29Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+ensure_unique_hostname hostname is already unique hostname=sugarkube1
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-12T15:20:34-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=missing boot_token_state=missing token_source="/home/pi/sugarkube/scripts/resolve_server_token.sh"
+ts=2025-11-12T15:20:35-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-12T15:20:35-08:00 level=info event=iptables_preflight msg="iptables binary is missing" severity=warn outcome=warn details="variant=missing,version=unavailable,nft=yes,kube-proxy=iptables,kube-proxy-source=default" variant=missing version=unavailable nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="install_iptables_package"
+ts=2025-11-12T15:20:35-08:00 level=info event=discover event=mdns_absence_gate phase=start host=sugarkube1.local service=_k3s-sugar-dev._tcp timeout_ms=15000
+ts=2025-11-12T15:20:35-08:00 level=info event=discover event=mdns_absence_gate action=restart_avahi outcome=ok
+ts=2025-11-12T15:20:55-08:00 level=info event=avahi_dbus_ready outcome=timeout ms_elapsed=20376 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-12T15:20:56-08:00 level=info event=discover msg="mDNS absence gate timed out" severity=warn mdns_absence_confirmed=0 attempts=1 ms_elapsed=21589 reason=timeout last_method=cli consecutive_dbus_absent=0 wire_proof_status=skipped
+ts=2025-11-12T15:20:56-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+ts=2025-11-12T15:20:58-08:00 level=info event=discover event=discovery_failopen_tracking_started timeout_secs=300
+ts=2025-11-12T15:20:58-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-12T15:21:04-08:00 level=info event=discover event=mdns_diag_start failure_count=2 threshold=2
+=== mDNS Diagnostic Output ===
+=== mDNS Diagnostic ===
+Hostname: sugarkube1.local
+Service:  _k3s-sugar-dev._tcp
+
+▶ Checking D-Bus service...
+  ✓ dbus is active
+▶ Checking Avahi daemon...
+  ✓ avahi-daemon is active
+▶ Browsing for _k3s-sugar-dev._tcp services...
+  ✗ avahi-browse failed (exit code: 1)
+▶ Resolving sugarkube1.local...
+  ✓ Resolved to 192.168.86.45
+▶ Checking NSS mDNS resolution...
+  ✓ NSS resolved to 192.168.86.45
+▶ Checking Avahi configuration...
+  ✓ Avahi configuration looks OK
+
+=== Summary ===
+
+Failures (1):
+  ✗ avahi-browse command failed
+
+=== Suggested Remediation ===
+• Check Avahi daemon logs:
+    journalctl -u avahi-daemon -n 50
+• Restart Avahi daemon:
+    sudo systemctl restart avahi-daemon
+
+For more information, see:
+  • Avahi documentation: https://avahi.org/
+  • Sugarkube docs: docs/pi-cluster-bootstrap.md
+=============================
+ts=2025-11-12T15:21:05-08:00 level=info event=discover event=mdns_diag_complete status=1 failure_count=2
+ts=2025-11-12T15:22:00-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-12T15:22:00-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-12T15:23:01-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-12T15:23:01-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-12T15:24:02-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-12T15:24:02-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-12T15:25:03-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-12T15:25:03-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
