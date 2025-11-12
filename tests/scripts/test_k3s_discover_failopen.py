@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import textwrap
-import time
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh"
