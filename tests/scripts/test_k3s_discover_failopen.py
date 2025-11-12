@@ -43,6 +43,7 @@ def test_failopen_disabled_by_default_in_prod(tmp_path: Path) -> None:
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
     
     # Create a stub that makes mDNS discovery fail
     mdns_fixture = tmp_path / "mdns-empty.json"
@@ -57,6 +58,8 @@ def test_failopen_disabled_by_default_in_prod(tmp_path: Path) -> None:
         "SUGARKUBE_TOKEN": "test-token",
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
+        "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
+        "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     }
@@ -84,6 +87,7 @@ def test_failopen_enabled_by_default_in_dev(tmp_path: Path) -> None:
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
     
     # Create a stub that makes mDNS discovery fail
     mdns_fixture = tmp_path / "mdns-empty.json"
@@ -98,6 +102,8 @@ def test_failopen_enabled_by_default_in_dev(tmp_path: Path) -> None:
         "SUGARKUBE_TOKEN": "test-token",
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
+        "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
+        "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     }
@@ -127,6 +133,7 @@ def test_failopen_explicit_disable(tmp_path: Path) -> None:
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
     
     # Create a stub that makes mDNS discovery fail
     mdns_fixture = tmp_path / "mdns-empty.json"
@@ -142,6 +149,8 @@ def test_failopen_explicit_disable(tmp_path: Path) -> None:
         "SUGARKUBE_DISCOVERY_FAILOPEN": "0",
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
+        "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
+        "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
     }
@@ -172,6 +181,7 @@ def test_failopen_triggers_after_timeout(tmp_path: Path) -> None:
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ss", "#!/usr/bin/env bash\necho 'LISTEN'\nexit 0\n")
     
     # Stub check_apiready to succeed for sugarkube0.local
@@ -245,6 +255,7 @@ def test_failopen_triggers_after_timeout(tmp_path: Path) -> None:
         "SUGARKUBE_K3S_INSTALL_SCRIPT": str(bin_dir / "k3s-install-stub.sh"),
         "SUGARKUBE_API_READY_CHECK_BIN": str(bin_dir / "check_apiready.sh"),
         "SUGARKUBE_ELECT_LEADER_BIN": str(bin_dir / "elect_leader.sh"),
+        "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "DISCOVERY_WAIT_SECS": "1",
         "FOLLOWER_REELECT_SECS": "2",
         "ALLOW_NON_ROOT": "1",
@@ -294,6 +305,7 @@ def test_failopen_logs_endpoints(tmp_path: Path) -> None:
     _write_stub(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "iptables", "#!/usr/bin/env bash\nexit 0\n")
     _write_stub(bin_dir / "ip6tables", "#!/usr/bin/env bash\nexit 0\n")
+    _write_stub(bin_dir / "configure_avahi.sh", "#!/usr/bin/env bash\nexit 0\n")
     
     # Stub check_apiready to always fail
     _write_stub(
@@ -329,6 +341,7 @@ def test_failopen_logs_endpoints(tmp_path: Path) -> None:
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_API_READY_CHECK_BIN": str(bin_dir / "check_apiready.sh"),
         "SUGARKUBE_ELECT_LEADER_BIN": str(bin_dir / "elect_leader.sh"),
+        "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "DISCOVERY_WAIT_SECS": "1",
         "FOLLOWER_REELECT_SECS": "1",
         "ALLOW_NON_ROOT": "1",
