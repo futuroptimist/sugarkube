@@ -1234,7 +1234,24 @@ ensure_avahi_liveness_signal() {
         dbus_reason=""
       fi
       
-      # mdns_ready already confirmed Avahi is working, return success
+      # Verify avahi-browse returns actual service listings
+      # This is important even if D-Bus is working, to confirm services are advertised
+      local browse_output=""
+      local browse_status=0
+      browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
+      local lines
+      lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
+      
+      if [ "${browse_status}" -ne 0 ] || [ -z "${lines}" ] || [ "${lines}" -eq 0 ]; then
+        # No service output yet, retry on first attempt
+        if [ "${attempt}" -eq 1 ]; then
+          log_warn_msg discover "Avahi liveness probe retry" "attempt=${attempt}" "lines=${lines:-0}" >&2
+          maybe_sleep 1
+          continue
+        fi
+      fi
+      
+      # mdns_ready confirmed Avahi is working and services are advertised
       local -a liveness_fields=(event=avahi_liveness outcome=ok method=mdns_ready "attempt=${attempt}")
       if [ -n "${dbus_reason}" ]; then
         liveness_fields+=("fallback=${dbus_reason}")
