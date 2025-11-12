@@ -208,6 +208,17 @@ ELECTION_HOLDOFF="${ELECTION_HOLDOFF:-10}"
 FOLLOWER_UNTIL_SERVER=0
 FOLLOWER_UNTIL_SERVER_SET_AT=0
 FOLLOWER_REELECT_SECS="${FOLLOWER_REELECT_SECS:-60}"
+# Discovery fail-open configuration
+if [ "${ENVIRONMENT}" = "dev" ]; then
+  DISCOVERY_FAILOPEN_DEFAULT=1
+else
+  DISCOVERY_FAILOPEN_DEFAULT=0
+fi
+DISCOVERY_FAILOPEN="${SUGARKUBE_DISCOVERY_FAILOPEN:-${DISCOVERY_FAILOPEN_DEFAULT}}"
+DISCOVERY_FAILOPEN_TIMEOUT_SECS="${SUGARKUBE_DISCOVERY_FAILOPEN_TIMEOUT:-300}"
+DISCOVERY_FAILOPEN_STARTED=0
+DISCOVERY_FAILOPEN_START_TIME=0
+DISCOVERY_FAILOPEN_USED=0
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 SUGARKUBE_STRICT_TIME="${SUGARKUBE_STRICT_TIME:-0}"
 if [ -n "${SUGARKUBE_API_REGADDR:-}" ]; then
@@ -3968,6 +3979,152 @@ install_agent() {
   fi
 }
 
+try_discovery_failopen() {
+  if [ "${DISCOVERY_FAILOPEN}" != "1" ]; then
+    return 1
+  fi
+  
+  if [ "${DISCOVERY_FAILOPEN_USED}" -eq 1 ]; then
+    return 1
+  fi
+  
+  # Check if we've been failing for long enough
+  if [ "${DISCOVERY_FAILOPEN_STARTED}" -eq 0 ]; then
+    DISCOVERY_FAILOPEN_STARTED=1
+    DISCOVERY_FAILOPEN_START_TIME="$(date +%s)"
+    log_info discover event=discovery_failopen_tracking_started timeout_secs="${DISCOVERY_FAILOPEN_TIMEOUT_SECS}" >&2
+    return 1
+  fi
+  
+  local now
+  now="$(date +%s)"
+  local elapsed=$((now - DISCOVERY_FAILOPEN_START_TIME))
+  
+  if [ "${elapsed}" -lt "${DISCOVERY_FAILOPEN_TIMEOUT_SECS}" ]; then
+    return 1
+  fi
+  
+  # We've exceeded the timeout, try fail-open
+  DISCOVERY_FAILOPEN_USED=1
+  
+  log_info_msg discover "mDNS discovery failed for ${elapsed}s; switching to fail-open direct join" \
+    "elapsed_secs=${elapsed}" "timeout_secs=${DISCOVERY_FAILOPEN_TIMEOUT_SECS}"
+  
+  # Try to get server token for direct join
+  local failopen_token=""
+  local resolver="${SCRIPT_DIR}/resolve_server_token.sh"
+  
+  if [ ! -x "${resolver}" ]; then
+    log_warn_msg discover "resolve_server_token.sh not found; cannot attempt fail-open join" \
+      "script=${resolver}"
+    return 1
+  fi
+  
+  local -a resolver_env=()
+  if [ -n "${INITIAL_TOKEN:-}" ]; then
+    resolver_env+=("SUGARKUBE_TOKEN=${INITIAL_TOKEN}")
+  fi
+  if [ "${SUGARKUBE_SUDO_BIN+x}" = "x" ]; then
+    resolver_env+=("SUGARKUBE_SUDO_BIN=${SUGARKUBE_SUDO_BIN}")
+  fi
+  if [ "${SUGARKUBE_K3S_BIN+x}" = "x" ]; then
+    resolver_env+=("SUGARKUBE_K3S_BIN=${SUGARKUBE_K3S_BIN}")
+  fi
+  if [ -n "${SERVER_TOKEN_PATH:-}" ]; then
+    resolver_env+=("SUGARKUBE_K3S_SERVER_TOKEN_PATH=${SERVER_TOKEN_PATH}")
+  fi
+  
+  local resolved_output=""
+  if [ "${#resolver_env[@]}" -gt 0 ]; then
+    if ! resolved_output="$(env "${resolver_env[@]}" "${resolver}" 2>&1)"; then
+      log_warn_msg discover "Failed to resolve server token for fail-open join" \
+        "script=${resolver}"
+      return 1
+    fi
+  else
+    if ! resolved_output="$("${resolver}" 2>&1)"; then
+      log_warn_msg discover "Failed to resolve server token for fail-open join" \
+        "script=${resolver}"
+      return 1
+    fi
+  fi
+  
+  failopen_token="${resolved_output}"
+  if [ -z "${failopen_token}" ]; then
+    log_warn_msg discover "No token available for fail-open join"
+    return 1
+  fi
+  
+  # Try deterministic endpoints in order
+  local -a endpoints=(
+    "sugarkube0.local:6443"
+  )
+  
+  # Check if we have a last-seen IP from previous mDNS attempts
+  if [ -n "${MDNS_SELECTED_IP:-}" ]; then
+    endpoints+=("${MDNS_SELECTED_IP}:6443")
+  fi
+  
+  local endpoint
+  for endpoint in "${endpoints[@]}"; do
+    local endpoint_host="${endpoint%:*}"
+    local endpoint_port="${endpoint#*:}"
+    
+    log_info_msg discover "Attempting fail-open direct join" \
+      "endpoint=${endpoint}" "host=${endpoint_host}" "port=${endpoint_port}"
+    
+    # Check if we can resolve the endpoint
+    local resolved_ip=""
+    if resolved_ip="$(resolve_server_ip_hint "${endpoint_host}" "")"; then
+      if [ -n "${resolved_ip}" ]; then
+        log_info discover event=discovery_failopen_endpoint_resolved \
+          "endpoint=${endpoint}" "ip=${resolved_ip}" >&2
+      fi
+    fi
+    
+    # Try to connect to the API
+    if [ -z "${API_READY_CHECK_BIN}" ] || [ ! -x "${API_READY_CHECK_BIN}" ]; then
+      log_warn_msg discover "API readiness helper missing; skipping fail-open endpoint" \
+        "script=${API_READY_CHECK_BIN}" "endpoint=${endpoint}"
+      continue
+    fi
+    
+    local -a check_env=(
+      "SERVER_HOST=${endpoint_host}"
+      "SERVER_PORT=${endpoint_port}"
+      "TIMEOUT=30"
+      "POLL_INTERVAL=2"
+    )
+    if [ -n "${resolved_ip}" ]; then
+      check_env+=("SERVER_IP=${resolved_ip}")
+    fi
+    
+    local api_check_status=0
+    if ! env "${check_env[@]}" "${API_READY_CHECK_BIN}" >/dev/null 2>&1; then
+      api_check_status=$?
+      log_warn_msg discover "Fail-open endpoint not reachable" \
+        "endpoint=${endpoint}" "status=${api_check_status}"
+      continue
+    fi
+    
+    log_info_msg discover "Fail-open endpoint is reachable; attempting join" \
+      "endpoint=${endpoint}" "host=${endpoint_host}" "port=${endpoint_port}"
+    
+    # Set the token and selected host for join
+    TOKEN="${failopen_token}"
+    MDNS_SELECTED_HOST="${endpoint_host}"
+    MDNS_SELECTED_PORT="${endpoint_port}"
+    if [ -n "${resolved_ip}" ]; then
+      MDNS_SELECTED_IP="${resolved_ip}"
+    fi
+    
+    return 0
+  done
+  
+  log_warn_msg discover "All fail-open endpoints failed; returning to normal discovery"
+  return 1
+}
+
 if [ -n "${TEST_RUN_AVAHI:-}" ]; then
   run_avahi_query "${TEST_RUN_AVAHI}"
   exit 0
@@ -4056,6 +4213,18 @@ while :; do
         server_host="${MDNS_SELECTED_HOST}"
         FOLLOWER_UNTIL_SERVER=0
         FOLLOWER_UNTIL_SERVER_SET_AT=0
+        # Reset fail-open tracking on successful discovery
+        DISCOVERY_FAILOPEN_STARTED=0
+        DISCOVERY_FAILOPEN_START_TIME=0
+        break
+      fi
+
+      # Try fail-open path if mDNS has been failing for too long
+      if try_discovery_failopen; then
+        server_host="${MDNS_SELECTED_HOST}"
+        log_info discover event=discovery_failopen_success host="${server_host}" port="${MDNS_SELECTED_PORT}" >&2
+        FOLLOWER_UNTIL_SERVER=0
+        FOLLOWER_UNTIL_SERVER_SET_AT=0
         break
       fi
 
@@ -4081,6 +4250,9 @@ while :; do
           log_info discover outcome=post_election_server host="${server_host}" holdoff="${ELECTION_HOLDOFF}" >&2
           FOLLOWER_UNTIL_SERVER=0
           FOLLOWER_UNTIL_SERVER_SET_AT=0
+          # Reset fail-open tracking on successful discovery
+          DISCOVERY_FAILOPEN_STARTED=0
+          DISCOVERY_FAILOPEN_START_TIME=0
           break
         fi
         bootstrap_selected="true"
