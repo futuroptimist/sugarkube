@@ -1,0 +1,41 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-11T23:46:51Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+ensure_unique_hostname hostname is already unique hostname=sugarkube1
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-11T15:46:56-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=missing boot_token_state=missing token_source="/home/pi/sugarkube/scripts/resolve_server_token.sh"
+ts=2025-11-11T15:46:56-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-11T15:46:56-08:00 level=info event=iptables_preflight msg="iptables binary is missing" severity=warn outcome=warn details="variant=missing,version=unavailable,nft=yes,kube-proxy=iptables,kube-proxy-source=default" variant=missing version=unavailable nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="install_iptables_package"
+ts=2025-11-11T15:46:56-08:00 level=info event=discover event=mdns_absence_gate phase=start host=sugarkube1.local service=_k3s-sugar-dev._tcp timeout_ms=15000
+ts=2025-11-11T15:46:56-08:00 level=info event=discover event=mdns_absence_gate action=restart_avahi outcome=ok
+ts=2025-11-11T15:47:17-08:00 level=info event=avahi_dbus_ready outcome=timeout ms_elapsed=20025 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-11T15:47:18-08:00 level=info event=discover msg="mDNS absence gate timed out" severity=warn mdns_absence_confirmed=0 attempts=1 ms_elapsed=21246 reason=timeout last_method=cli consecutive_dbus_absent=0 wire_proof_status=skipped
+ts=2025-11-11T15:47:18-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+ts=2025-11-11T15:47:20-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:48:21-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:48:21-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:49:22-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:49:22-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:50:23-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:50:23-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:51:25-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:51:25-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:52:26-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:52:26-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:53:27-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:53:27-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:54:28-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:54:28-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:55:29-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:55:29-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:56:31-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:56:31-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:57:32-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:57:32-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
+ts=2025-11-11T15:58:33-08:00 level=info event=discover event=follower_election_retry wait_secs=60
+ts=2025-11-11T15:58:33-08:00 level=info event=discover event=election outcome=follower key=sugarkube1
