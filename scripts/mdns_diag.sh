@@ -116,7 +116,12 @@ echo "▶ Browsing for ${SERVICE_TYPE} services..."
 if command -v avahi-browse >/dev/null 2>&1; then
   browse_output=""
   browse_status=0
-  browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
+  # Use timeout command to prevent hanging, fallback to script's --timeout if timeout unavailable
+  if command -v timeout >/dev/null 2>&1; then
+    browse_output="$(timeout 5 avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
+  else
+    browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
+  fi
   
   if [ "${browse_status}" -eq 0 ]; then
     service_count="$(printf '%s\n' "${browse_output}" | grep -c '^=' || true)"
@@ -142,7 +147,12 @@ echo "▶ Resolving ${HOSTNAME_TO_CHECK}..."
 if command -v avahi-resolve >/dev/null 2>&1; then
   resolve_output=""
   resolve_status=0
-  resolve_output="$(avahi-resolve -n "${HOSTNAME_TO_CHECK}" -4 2>&1)" || resolve_status=$?
+  # Use timeout to prevent hanging
+  if command -v timeout >/dev/null 2>&1; then
+    resolve_output="$(timeout 5 avahi-resolve -n "${HOSTNAME_TO_CHECK}" -4 2>&1)" || resolve_status=$?
+  else
+    resolve_output="$(avahi-resolve -n "${HOSTNAME_TO_CHECK}" -4 2>&1)" || resolve_status=$?
+  fi
   
   if [ "${resolve_status}" -eq 0 ] && [ -n "${resolve_output}" ]; then
     resolved_ip="$(printf '%s\n' "${resolve_output}" | awk '{print $2}' | head -n1)"
@@ -166,7 +176,12 @@ echo "▶ Checking NSS mDNS resolution..."
 if command -v getent >/dev/null 2>&1; then
   getent_output=""
   getent_status=0
-  getent_output="$(getent hosts "${HOSTNAME_TO_CHECK}" 2>&1)" || getent_status=$?
+  # Use timeout to prevent hanging on mDNS lookups
+  if command -v timeout >/dev/null 2>&1; then
+    getent_output="$(timeout 5 getent hosts "${HOSTNAME_TO_CHECK}" 2>&1)" || getent_status=$?
+  else
+    getent_output="$(getent hosts "${HOSTNAME_TO_CHECK}" 2>&1)" || getent_status=$?
+  fi
   
   if [ "${getent_status}" -eq 0 ] && [ -n "${getent_output}" ]; then
     resolved_ip="$(printf '%s\n' "${getent_output}" | awk '{print $1}' | head -n1)"
