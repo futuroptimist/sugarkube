@@ -219,6 +219,11 @@ DISCOVERY_FAILOPEN_TIMEOUT_SECS="${SUGARKUBE_DISCOVERY_FAILOPEN_TIMEOUT:-300}"
 DISCOVERY_FAILOPEN_STARTED=0
 DISCOVERY_FAILOPEN_START_TIME=0
 DISCOVERY_FAILOPEN_USED=0
+# Discovery failure tracking for diagnostics
+DISCOVERY_FAILURE_COUNT=0
+DISCOVERY_DIAG_THRESHOLD="${SUGARKUBE_DISCOVERY_DIAG_THRESHOLD:-2}"
+DISCOVERY_DIAG_RAN=0
+MDNS_DIAG_BIN="${SUGARKUBE_MDNS_DIAG_BIN:-${SCRIPT_DIR}/mdns_diag.sh}"
 SUGARKUBE_STRICT_IPTABLES="${SUGARKUBE_STRICT_IPTABLES:-0}"
 SUGARKUBE_STRICT_TIME="${SUGARKUBE_STRICT_TIME:-0}"
 if [ -n "${SUGARKUBE_API_REGADDR:-}" ]; then
@@ -3979,6 +3984,51 @@ install_agent() {
   fi
 }
 
+run_mdns_diagnostic() {
+  if [ "${DISCOVERY_DIAG_RAN}" -eq 1 ]; then
+    return 0
+  fi
+  
+  if [ ! -x "${MDNS_DIAG_BIN}" ]; then
+    log_warn_msg discover "mDNS diagnostic script not found or not executable" \
+      "script=${MDNS_DIAG_BIN}" "event=mdns_diag_skip"
+    return 0
+  fi
+  
+  log_info discover event=mdns_diag_start \
+    "failure_count=${DISCOVERY_FAILURE_COUNT}" \
+    "threshold=${DISCOVERY_DIAG_THRESHOLD}" >&2
+  
+  local diag_output=""
+  local diag_status=0
+  local expected_host="${MDNS_HOST:-$(hostname -s 2>/dev/null || hostname)}"
+  case "${expected_host}" in
+    *.local) ;;
+    *) expected_host="${expected_host}.local" ;;
+  esac
+  
+  diag_output="$(
+    MDNS_DIAG_HOSTNAME="${expected_host}" \
+    SUGARKUBE_CLUSTER="${CLUSTER}" \
+    SUGARKUBE_ENV="${ENVIRONMENT}" \
+    "${MDNS_DIAG_BIN}" 2>&1
+  )" || diag_status=$?
+  
+  DISCOVERY_DIAG_RAN=1
+  
+  if [ -n "${diag_output}" ]; then
+    echo "=== mDNS Diagnostic Output ===" >&2
+    printf '%s\n' "${diag_output}" >&2
+    echo "=============================" >&2
+  fi
+  
+  log_info discover event=mdns_diag_complete \
+    "status=${diag_status}" \
+    "failure_count=${DISCOVERY_FAILURE_COUNT}" >&2
+  
+  return 0
+}
+
 try_discovery_failopen() {
   if [ "${DISCOVERY_FAILOPEN}" != "1" ]; then
     return 1
@@ -4216,7 +4266,19 @@ while :; do
         # Reset fail-open tracking on successful discovery
         DISCOVERY_FAILOPEN_STARTED=0
         DISCOVERY_FAILOPEN_START_TIME=0
+        # Reset failure count on success
+        DISCOVERY_FAILURE_COUNT=0
         break
+      fi
+
+      # Increment failure count
+      DISCOVERY_FAILURE_COUNT=$((DISCOVERY_FAILURE_COUNT + 1))
+      
+      # Run diagnostic after threshold failures
+      if [ "${DISCOVERY_FAILURE_COUNT}" -ge "${DISCOVERY_DIAG_THRESHOLD}" ]; then
+        if [ "${DISCOVERY_DIAG_RAN}" -eq 0 ]; then
+          run_mdns_diagnostic || true
+        fi
       fi
 
       # Try fail-open path if mDNS has been failing for too long
@@ -4253,6 +4315,8 @@ while :; do
           # Reset fail-open tracking on successful discovery
           DISCOVERY_FAILOPEN_STARTED=0
           DISCOVERY_FAILOPEN_START_TIME=0
+          # Reset failure count on success
+          DISCOVERY_FAILURE_COUNT=0
           break
         fi
         bootstrap_selected="true"
