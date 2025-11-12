@@ -8,7 +8,7 @@
   [ "$status" -eq 0 ]
   echo "$output" | grep "cloud_init: skip"
   echo "$output" | grep "time_sync: skip"
-  echo "$output" | grep "iptables_backend: skip"
+  echo "$output" | grep "kube_proxy_dataplane: skip"
   echo "$output" | grep "k3s_check_config: skip"
   echo "$output" | grep "k3s_node_ready: skip"
   echo "$output" | grep "projects_compose_active: skip"

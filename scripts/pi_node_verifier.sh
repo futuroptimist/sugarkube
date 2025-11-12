@@ -407,16 +407,63 @@ else
   print_result "time_sync" "skip"
 fi
 
-# iptables backend
-if command -v iptables >/dev/null 2>&1; then
-  if iptables --version 2>/dev/null | grep -qi nf_tables; then
-    print_result "iptables_backend" "pass"
-  else
-    print_result "iptables_backend" "fail"
+# kube-proxy dataplane check
+check_kube_proxy_dataplane() {
+  local config_dir="/etc/rancher/k3s/config.yaml.d"
+  local configured_mode="unknown"
+  
+  # Determine configured proxy mode
+  if [[ -d "$config_dir" ]]; then
+    for config_file in "$config_dir"/*.yaml; do
+      if [[ -f "$config_file" ]]; then
+        if grep -q "proxy-mode=nftables\|proxy-mode=nft" "$config_file" 2>/dev/null; then
+          configured_mode="nftables"
+          break
+        elif grep -q "proxy-mode=iptables" "$config_file" 2>/dev/null; then
+          configured_mode="iptables"
+          break
+        fi
+      fi
+    done
   fi
-else
-  print_result "iptables_backend" "skip"
-fi
+
+  # Check for required binaries based on configuration
+  if [[ "$configured_mode" == "nftables" ]]; then
+    if command -v nft >/dev/null 2>&1; then
+      print_result "kube_proxy_dataplane" "pass"
+    else
+      warn "nftables mode configured but nft binary not found"
+      print_result "kube_proxy_dataplane" "fail"
+    fi
+  elif [[ "$configured_mode" == "iptables" ]]; then
+    if command -v iptables >/dev/null 2>&1; then
+      if iptables --version 2>/dev/null | grep -qi legacy; then
+        print_result "kube_proxy_dataplane" "pass"
+      else
+        warn "iptables mode configured but binary appears to use nf_tables backend"
+        print_result "kube_proxy_dataplane" "pass"
+      fi
+    else
+      warn "iptables mode configured but iptables binary not found"
+      print_result "kube_proxy_dataplane" "fail"
+    fi
+  else
+    # If mode is not explicitly configured, check for either nft or iptables
+    if command -v nft >/dev/null 2>&1; then
+      print_result "kube_proxy_dataplane" "pass"
+    elif command -v iptables >/dev/null 2>&1; then
+      if iptables --version 2>/dev/null | grep -qi nf_tables; then
+        print_result "kube_proxy_dataplane" "pass"
+      else
+        print_result "kube_proxy_dataplane" "fail"
+      fi
+    else
+      print_result "kube_proxy_dataplane" "skip"
+    fi
+  fi
+}
+
+check_kube_proxy_dataplane
 
 # optional k3s check-config
 if command -v k3s >/dev/null 2>&1; then

@@ -6,7 +6,7 @@
   echo "$output" | grep "cgroup_memory:"
   echo "$output" | grep "cloud_init:"
   echo "$output" | grep "time_sync:"
-  echo "$output" | grep "iptables_backend:"
+  echo "$output" | grep "kube_proxy_dataplane:"
   echo "$output" | grep "k3s_check_config:"
   echo "$output" | grep "k3s_node_ready:"
   echo "$output" | grep "projects_compose_active:"
@@ -142,7 +142,7 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep "cloud_init: fail"
   echo "$output" | grep "time_sync: fail"
-  echo "$output" | grep "iptables_backend: fail"
+  echo "$output" | grep "kube_proxy_dataplane: fail"
   echo "$output" | grep "k3s_node_ready: fail"
   echo "$output" | grep "projects_compose_active: fail"
   echo "$output" | grep "pi_home_repos: fail"
