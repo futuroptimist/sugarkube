@@ -5,8 +5,6 @@ set -euo pipefail
 # This script checks systemctl services, avahi-browse, and avahi-resolve,
 # then prints suggested remediation based on exit codes.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # Default hostname to check
 HOSTNAME_TO_CHECK="${MDNS_DIAG_HOSTNAME:-sugarkube0.local}"
 
