@@ -1192,6 +1192,10 @@ ensure_avahi_liveness_signal() {
   local wait_status=0
   local dbus_note=""
   local dbus_reason=""
+  local ready_status=0
+  local ready_output=""
+
+  # Use mdns_ready() wrapper function for robust D-Bus + CLI fallback
   local dbus_wait_limit="${SUGARKUBE_AVAHI_DBUS_WAIT_MS:-1000}"
   case "${dbus_wait_limit}" in
     ''|*[!0-9]*)
@@ -1204,129 +1208,82 @@ ensure_avahi_liveness_signal() {
     dbus_wait_limit=2000
   fi
 
-  if command -v gdbus >/dev/null 2>&1; then
-    local dbus_attempt
-    local dbus_output=""
-    for dbus_attempt in 1 2; do
-      wait_status=0
-      dbus_output="$(
-        AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/wait_for_avahi_dbus.sh" 2>&1
-      )" || wait_status=$?
-      if [ -n "${dbus_output}" ]; then
-        printf '%s\n' "${dbus_output}" >&2
+  ready_output="$(
+    AVAHI_DBUS_TIMEOUT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/mdns_ready.sh" 2>&1
+  )" || ready_status=$?
+  
+  if [ -n "${ready_output}" ]; then
+    printf '%s\n' "${ready_output}" >&2
+  fi
+
+  wait_status="${ready_status}"
+
+  if [ "${ready_status}" -eq 0 ]; then
+    # mdns_ready succeeded - check if it was via CLI fallback
+    if printf '%s' "${ready_output}" | grep -q 'method=cli'; then
+      dbus_note="dbus=fallback_cli"
+      dbus_reason="dbus_unavailable"
+    else
+      dbus_note=""
+      dbus_reason=""
+    fi
+    
+    # mdns_ready already confirmed Avahi is working, return success
+    log_info discover event=avahi_liveness outcome=ok method=mdns_ready "${dbus_note:+${dbus_note}}" >&2
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      summary_note="mdns_ready"
+      if [ -n "${dbus_note}" ]; then
+        summary_note+=" ${dbus_note}"
       fi
-      if [ "${wait_status}" -eq 0 ]; then
-        log_info discover event=avahi_liveness_dbus outcome=ok attempt="${dbus_attempt}" >&2
-        dbus_note=""
-        dbus_reason=""
-        break
-      fi
-      if [ "${wait_status}" -eq 2 ]; then
-        dbus_note="dbus=disabled"
-        dbus_reason="dbus_disabled"
-        log_info discover \
-          event=avahi_liveness_dbus \
-          outcome=disabled \
-          attempt="${dbus_attempt}" \
-          severity=info >&2
-        break
-      fi
-      if printf '%s' "${dbus_output}" | grep -Eiq 'bus_status=call_failed|GetVersionString'; then
-        dbus_note="dbus=unavailable"
-        dbus_reason="dbus_unavailable"
-        log_warn_msg discover \
-          "Avahi D-Bus unavailable; falling back to CLI" \
-          "attempt=${dbus_attempt}" \
-          "status=${wait_status}"
-        if [ "${dbus_attempt}" -lt 2 ]; then
-          maybe_sleep 0.25
-          continue
-        fi
-        break
-      fi
-      log_warn_msg discover \
-        "Avahi D-Bus wait failed" \
-        "event=avahi_liveness" \
-        "attempt=${dbus_attempt}" \
-        "status=${wait_status}" >&2
-      if [ "${dbus_attempt}" -lt 2 ]; then
-        maybe_sleep 0.25
-      fi
-    done
-    if [ "${wait_status}" -ne 0 ] && [ "${wait_status}" -ne 2 ] && [ -z "${dbus_note}" ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "Avahi D-Bus"
+      summary::step OK "D-Bus readiness" "${summary_note} elapsed_ms=${elapsed_ms}"
+      SUMMARY_DBUS_RECORDED=1
+      summary_recorded=1
+    fi
+    AVAHI_LIVENESS_READY=1
+    return 0
+  elif [ "${ready_status}" -eq 2 ]; then
+    # D-Bus is disabled in Avahi config
+    dbus_note="dbus=disabled"
+    dbus_reason="dbus_disabled"
+  else
+    # mdns_ready failed - both D-Bus and CLI failed
+    if printf '%s' "${ready_output}" | grep -q 'reason=cli_missing'; then
+      dbus_note="dbus=missing"
+      dbus_reason="cli_missing"
+    else
       dbus_note="dbus=failed"
       dbus_reason="dbus_failed"
     fi
-  else
-    dbus_note="dbus=missing"
-    dbus_reason="dbus_missing"
-    log_info discover event=avahi_liveness_dbus outcome=skip reason=gdbus_missing severity=info >&2
   fi
 
-  local attempt
-  local status
-  local browse_output
-  local lines
-  for attempt in 1 2; do
-    status=0
-    browse_output=""
-    if ! browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)"; then
-      status=$?
-      browse_output=""
-    fi
-    lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
-    if [ "${status}" -eq 0 ] && [ -n "${lines}" ] && [ "${lines}" -gt 0 ]; then
-      local -a liveness_fields=(
-        event=avahi_liveness
-        outcome=ok
-        "attempt=${attempt}"
-        "lines=${lines}"
-      )
-      if [ -n "${dbus_reason}" ]; then
-        liveness_fields+=("fallback=${dbus_reason}")
-      fi
-      if [ -n "${dbus_note}" ]; then
-        liveness_fields+=("${dbus_note}")
-      fi
-      log_info discover "${liveness_fields[@]}" >&2
-      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-        summary_note="attempt=${attempt} lines=${lines}"
-        if [ -n "${dbus_note}" ]; then
-          summary_note+=" ${dbus_note}"
-        fi
-        local elapsed_ms
-        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
-        summary::section "Avahi D-Bus"
-        summary::step OK "D-Bus readiness" "${summary_note} elapsed_ms=${elapsed_ms}"
-        SUMMARY_DBUS_RECORDED=1
-        summary_recorded=1
-      fi
-      AVAHI_LIVENESS_READY=1
-      return 0
-    fi
-    log_warn_msg discover "Avahi liveness probe retry" "attempt=${attempt}" "status=${status}" "lines=${lines:-0}" >&2
-    if [ "${attempt}" -eq 1 ]; then
-      maybe_sleep 1
-    fi
-  done
-
+  # If we get here, mdns_ready failed or D-Bus is disabled
+  # Log the failure appropriately
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
-    summary_note="attempts=2 status=${status}"
+    summary_note="mdns_ready_failed status=${ready_status}"
     if [ -n "${dbus_note}" ]; then
       summary_note+=" ${dbus_note}"
-    fi
-    if [ "${wait_status}" -ne 0 ] && [ -z "${dbus_note}" ]; then
-      summary_note+=" wait_status=${wait_status}"
     fi
     local elapsed_ms
     elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
     summary::section "Avahi D-Bus"
-    summary::step FAIL "D-Bus readiness" "${summary_note} elapsed_ms=${elapsed_ms}"
+    if [ "${ready_status}" -eq 2 ]; then
+      summary::step OK "D-Bus readiness" "${summary_note} elapsed_ms=${elapsed_ms}"
+    else
+      summary::step FAIL "D-Bus readiness" "${summary_note} elapsed_ms=${elapsed_ms}"
+    fi
     SUMMARY_DBUS_RECORDED=1
     summary_recorded=1
   fi
 
-  log_error_msg discover "Avahi liveness probe failed" "event=avahi_liveness" >&2
+  if [ "${ready_status}" -eq 2 ]; then
+    # D-Bus disabled is not an error
+    return 2
+  fi
+
+  log_error_msg discover "Avahi liveness probe failed" "event=avahi_liveness" "method=mdns_ready" >&2
   return 1
 }
 
