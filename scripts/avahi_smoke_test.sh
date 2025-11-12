@@ -21,10 +21,15 @@ echo "Running avahi-browse smoke test (timeout: ${TIMEOUT}s)..."
 # Run avahi-browse with timeout to terminate after discovering services
 # or if timeout is reached. The --terminate flag causes it to exit after
 # collecting all services.
-if timeout "${TIMEOUT}" avahi-browse --all --terminate >/dev/null 2>&1; then
+set +e
+timeout "${TIMEOUT}" avahi-browse --all --terminate >/dev/null 2>&1
+code=$?
+set -e
+
+if [ $code -eq 0 ]; then
     echo "✓ avahi-browse executed successfully"
     exit 0
-elif [ $? -eq 124 ]; then
+elif [ $code -eq 124 ]; then
     # Timeout reached - this is acceptable if no services are found quickly
     echo "✓ avahi-browse timed out (no services found, but command works)"
     exit 0
