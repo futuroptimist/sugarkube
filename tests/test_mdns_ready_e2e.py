@@ -81,7 +81,13 @@ def netns_setup():
     via a virtual ethernet pair.
 
     Returns:
-        dict: Namespace names and cleanup function
+        dict: Namespace configuration with keys:
+            - ns1 (str): Name of first network namespace
+            - ns2 (str): Name of second network namespace
+            - veth1 (str): Name of veth interface in ns1
+            - veth2 (str): Name of veth interface in ns2
+            - ip1 (str): IP address of ns1 (e.g., 192.168.100.1)
+            - ip2 (str): IP address of ns2 (e.g., 192.168.100.2)
     """
     _check_prerequisites()
     _check_root()
@@ -187,8 +193,7 @@ def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
     if mDNS multicast doesn't cross namespace boundaries.
     """
     ns1 = netns_setup["ns1"]
-    # ns2 would be used for cross-namespace discovery if multicast routing was available
-    # ns2 = netns_setup["ns2"]
+    # Cross-namespace discovery is tested within the same namespace due to multicast limitations
 
     service_name = "k3s-test-e2e"
     service_type = "_k3s-sugar-dev._tcp"
@@ -324,7 +329,7 @@ while [ $attempt -lt $max_attempts ]; do
     attempt=$((attempt + 1))
     echo "Attempt $attempt of $max_attempts" >&2
 
-    if {MDNS_READY_SCRIPT} 2>&1; then
+    if "{MDNS_READY_SCRIPT}" 2>&1; then
         echo "Success on attempt $attempt" >&2
         exit 0
     fi

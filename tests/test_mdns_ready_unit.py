@@ -17,7 +17,16 @@ MDNS_READY_SCRIPT = SCRIPTS_DIR / "mdns_ready.sh"
 
 @pytest.fixture
 def mock_env(tmp_path):
-    """Set up a temporary environment with mocked binaries."""
+    """Set up a temporary environment with mocked binaries.
+
+    Args:
+        tmp_path (pathlib.Path): pytest's tmp_path fixture providing a temporary directory.
+
+    Returns:
+        dict: Environment configuration with keys:
+            - bin_dir (pathlib.Path): Path to the mock binary directory.
+            - path (str): Modified PATH with mock binaries prepended.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
 
