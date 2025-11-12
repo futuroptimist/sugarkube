@@ -142,7 +142,8 @@ PY
     return 1
   fi
 
-  avahi-browse --all --ignore-local --resolve --terminate >/dev/null 2>&1 || cli_status=$?
+  local cli_output
+  cli_output="$(avahi-browse --all --ignore-local --resolve --terminate 2>/dev/null)" || cli_status=$?
   
   local elapsed_ms
   elapsed_ms="$(python3 - <<PY
@@ -156,16 +157,36 @@ print(elapsed)
 PY
   )"
 
+  # Check if CLI succeeded and returned actual output
   if [ "${cli_status}" -eq 0 ]; then
-    log_info \
-      mdns_ready \
-      outcome=ok \
-      method="${method}" \
-      elapsed_ms="${elapsed_ms}" \
-      dbus_fallback=true \
-      dbus_status="${dbus_status}" \
-      browse_command="${browse_cmd}"
-    return 0
+    # Verify there's actual output (non-empty lines)
+    local lines
+    lines="$(printf '%s\n' "${cli_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
+    
+    if [ -n "${lines}" ] && [ "${lines}" -gt 0 ]; then
+      log_info \
+        mdns_ready \
+        outcome=ok \
+        method="${method}" \
+        elapsed_ms="${elapsed_ms}" \
+        dbus_fallback=true \
+        dbus_status="${dbus_status}" \
+        browse_command="${browse_cmd}" \
+        lines="${lines}"
+      return 0
+    else
+      # Exit 0 but no output - treat as not ready
+      log_info \
+        mdns_ready \
+        outcome=no_output \
+        method="${method}" \
+        elapsed_ms="${elapsed_ms}" \
+        dbus_fallback=true \
+        dbus_status="${dbus_status}" \
+        browse_command="${browse_cmd}" \
+        lines=0
+      return 1
+    fi
   fi
 
   # Both methods failed

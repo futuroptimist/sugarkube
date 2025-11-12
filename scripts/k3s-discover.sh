@@ -1229,23 +1229,6 @@ ensure_avahi_liveness_signal() {
       if printf '%s' "${ready_output}" | grep -q 'method=cli'; then
         dbus_note="dbus=unavailable"
         dbus_reason="dbus_unavailable"
-        
-        # For CLI method, verify avahi-browse returns actual output
-        # This handles cases where avahi-browse exits 0 but hasn't populated results yet
-        local browse_output=""
-        local browse_status=0
-        browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
-        local lines
-        lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
-        
-        if [ "${browse_status}" -ne 0 ] || [ -z "${lines}" ] || [ "${lines}" -eq 0 ]; then
-          # No output yet, retry on first attempt
-          if [ "${attempt}" -eq 1 ]; then
-            log_warn_msg discover "Avahi liveness probe retry" "attempt=${attempt}" "lines=${lines:-0}" >&2
-            maybe_sleep 1
-            continue
-          fi
-        fi
       else
         dbus_note=""
         dbus_reason=""
