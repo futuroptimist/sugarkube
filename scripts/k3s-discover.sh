@@ -3383,6 +3383,33 @@ resolve_server_ip_hint() {
   return 1
 }
 
+failopen_resolve_candidate() {
+  local candidate="$1"
+  if [ -z "${candidate}" ]; then
+    return 1
+  fi
+
+  local resolved=""
+
+  if command -v getent >/dev/null 2>&1; then
+    resolved="$(getent hosts "${candidate}" | awk 'NR==1 {print $1}' | head -n1 | tr -d '\r')"
+    if [ -n "${resolved}" ]; then
+      printf '%s' "${resolved}"
+      return 0
+    fi
+  fi
+
+  if command -v avahi-resolve >/dev/null 2>&1; then
+    resolved="$(avahi-resolve -n "${candidate}" 2>/dev/null | awk 'NR==1 {print $2}' | head -n1 | tr -d '\r')"
+    if [ -n "${resolved}" ]; then
+      printf '%s' "${resolved}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 wait_for_remote_api_ready() {
   local host="$1"
   local ip_hint="${2:-}"
@@ -4082,94 +4109,88 @@ try_discovery_failopen() {
     resolver_env+=("SUGARKUBE_K3S_SERVER_TOKEN_PATH=${SERVER_TOKEN_PATH}")
   fi
   
+  local resolver_status=0
   local resolved_output=""
   if [ "${#resolver_env[@]}" -gt 0 ]; then
-    if ! resolved_output="$(env "${resolver_env[@]}" "${resolver}" 2>&1)"; then
+    if ! resolved_output="$(env "${resolver_env[@]}" "${resolver}")"; then
+      resolver_status=$?
       log_warn_msg discover "Failed to resolve server token for fail-open join" \
-        "script=${resolver}"
+        "script=${resolver}" "status=${resolver_status}"
       return 1
     fi
   else
-    if ! resolved_output="$("${resolver}" 2>&1)"; then
+    if ! resolved_output="$("${resolver}")"; then
+      resolver_status=$?
       log_warn_msg discover "Failed to resolve server token for fail-open join" \
-        "script=${resolver}"
+        "script=${resolver}" "status=${resolver_status}"
       return 1
     fi
   fi
-  
-  failopen_token="${resolved_output}"
+
+  failopen_token="$(token__strip_quotes "$(token__trim "${resolved_output}")")"
   if [ -z "${failopen_token}" ]; then
     log_warn_msg discover "No token available for fail-open join"
     return 1
   fi
   
-  # Try deterministic endpoints in order
-  local -a endpoints=(
-    "sugarkube0.local:6443"
-  )
-  
-  # Check if we have a last-seen IP from previous mDNS attempts
-  if [ -n "${MDNS_SELECTED_IP:-}" ]; then
-    endpoints+=("${MDNS_SELECTED_IP}:6443")
+  local server_total="${SERVERS_DESIRED}"
+  if ! [[ "${server_total}" =~ ^[0-9]+$ ]] || [ "${server_total}" -lt 1 ]; then
+    server_total=1
   fi
-  
-  local endpoint
-  for endpoint in "${endpoints[@]}"; do
-    local endpoint_host="${endpoint%:*}"
-    local endpoint_port="${endpoint#*:}"
-    
-    log_info_msg discover "Attempting fail-open direct join" \
-      "endpoint=${endpoint}" "host=${endpoint_host}" "port=${endpoint_port}"
-    
-    # Check if we can resolve the endpoint
+
+  local attempt=0
+  local idx
+  for idx in $(seq 0 $((server_total - 1))); do
+    attempt=$((attempt + 1))
+    local candidate_host="sugarkube${idx}.local"
     local resolved_ip=""
-    if resolved_ip="$(resolve_server_ip_hint "${endpoint_host}" "")"; then
-      if [ -n "${resolved_ip}" ]; then
-        log_info discover event=discovery_failopen_endpoint_resolved \
-          "endpoint=${endpoint}" "ip=${resolved_ip}" >&2
+
+    if resolved_ip="$(failopen_resolve_candidate "${candidate_host}")"; then
+      local join_host="${resolved_ip:-${candidate_host}}"
+
+      if ! wait_for_remote_api_ready "${candidate_host}" "${resolved_ip}" 6443; then
+        log_info discover \
+          event=failopen_join \
+          "attempt=${attempt}" \
+          "server=\"$(escape_log_value "${candidate_host}")\"" \
+          outcome=error \
+          reason=api_unreachable >&2
+        continue
       fi
+
+      TOKEN="${failopen_token}"
+      MDNS_SELECTED_HOST="${join_host}"
+      MDNS_SELECTED_PORT=6443
+      if [ -n "${resolved_ip}" ]; then
+        MDNS_SELECTED_IP="${resolved_ip}"
+      else
+        MDNS_SELECTED_IP=""
+      fi
+      export K3S_URL="https://${join_host}:6443"
+
+      local -a success_fields=(
+        "event=failopen_join"
+        "attempt=${attempt}"
+        "server=\"$(escape_log_value "${candidate_host}")\""
+        "outcome=ok"
+      )
+      if [ -n "${resolved_ip}" ]; then
+        success_fields+=("target=\"$(escape_log_value "${join_host}")\"")
+      fi
+      log_info discover "${success_fields[@]}" >&2
+
+      return 0
     fi
-    
-    # Try to connect to the API
-    if [ -z "${API_READY_CHECK_BIN}" ] || [ ! -x "${API_READY_CHECK_BIN}" ]; then
-      log_warn_msg discover "API readiness helper missing; skipping fail-open endpoint" \
-        "script=${API_READY_CHECK_BIN}" "endpoint=${endpoint}"
-      continue
-    fi
-    
-    local -a check_env=(
-      "SERVER_HOST=${endpoint_host}"
-      "SERVER_PORT=${endpoint_port}"
-      "TIMEOUT=30"
-      "POLL_INTERVAL=2"
-    )
-    if [ -n "${resolved_ip}" ]; then
-      check_env+=("SERVER_IP=${resolved_ip}")
-    fi
-    
-    local api_check_status=0
-    if ! env "${check_env[@]}" "${API_READY_CHECK_BIN}" >/dev/null 2>&1; then
-      api_check_status=$?
-      log_warn_msg discover "Fail-open endpoint not reachable" \
-        "endpoint=${endpoint}" "status=${api_check_status}"
-      continue
-    fi
-    
-    log_info_msg discover "Fail-open endpoint is reachable; attempting join" \
-      "endpoint=${endpoint}" "host=${endpoint_host}" "port=${endpoint_port}"
-    
-    # Set the token and selected host for join
-    TOKEN="${failopen_token}"
-    MDNS_SELECTED_HOST="${endpoint_host}"
-    MDNS_SELECTED_PORT="${endpoint_port}"
-    if [ -n "${resolved_ip}" ]; then
-      MDNS_SELECTED_IP="${resolved_ip}"
-    fi
-    
-    return 0
+
+    log_info discover \
+      event=failopen_join \
+      "attempt=${attempt}" \
+      "server=\"$(escape_log_value "${candidate_host}")\"" \
+      outcome=error \
+      reason=resolve >&2
   done
-  
-  log_warn_msg discover "All fail-open endpoints failed; returning to normal discovery"
+
+  log_warn_msg discover "All fail-open candidates failed; returning to normal discovery"
   return 1
 }
 
