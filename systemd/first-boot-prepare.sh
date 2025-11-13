@@ -74,7 +74,8 @@ if [[ -x "${K3S_PREFLIGHT}" ]]; then
   if "${K3S_PREFLIGHT}" --config-dir "${K3S_CONFIG_DIR}"; then
     echo "[first-boot-prepare] k3s preflight completed"
   else
-    echo "[first-boot-prepare] warning: k3s preflight exited with $?"
+    preflight_exit=$?
+    echo "[first-boot-prepare] warning: k3s preflight exited with ${preflight_exit}"
   fi
 else
   echo "[first-boot-prepare] k3s preflight helper missing at ${K3S_PREFLIGHT}"

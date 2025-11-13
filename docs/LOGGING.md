@@ -99,5 +99,5 @@ Status semantics match the console output:
 When nftables mode is configured the `kube_proxy_dataplane` check logs `pass`,
 confirming that the nft binary is available and the configuration is
 consistent. The first-boot preflight also emits a `k3s-preflight` journal entry
-(`kube-proxy mode=nftables nft=yes`) so you can confirm the dataplane without
+(`kube-proxy mode=nftables nft=yes config=/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml`) so you can confirm the dataplane without
 opening the verifier report.

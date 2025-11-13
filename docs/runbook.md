@@ -24,7 +24,7 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 > Sugarkube image enables it by default. On first boot the bundled
 > `k3s_preflight` helper writes
 > `/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml` and logs the detected
-> dataplane (`mode=nftables nft=yes`) once. Older clusters can override the
+> dataplane (`mode=nftables nft=yes config=/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml`) once. Older clusters can override the
 > drop-in (or set `K3S_KUBE_PROXY_MODE=iptables` before rerunning the installer)
 > to stick with the legacy iptables proxy if necessary. When the drop-in is
 > present `pi_node_verifier` records `kube_proxy_dataplane: pass`, which confirms

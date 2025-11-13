@@ -523,6 +523,8 @@ install -Dm755 "${REPO_ROOT}/scripts/post_clone_verify.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/post_clone_verify.sh"
 install -Dm755 "${REPO_ROOT}/scripts/k3s_preflight.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s_preflight.sh"
+install -Dm644 "${REPO_ROOT}/scripts/lib/kube_proxy.sh" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/lib/kube_proxy.sh"
 install -Dm755 "${REPO_ROOT}/scripts/k3s-install-iptables.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-install-iptables.sh"
 install -Dm644 "${REPO_ROOT}/systemd/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml" \
