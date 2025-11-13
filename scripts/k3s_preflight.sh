@@ -9,7 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/kube_proxy.sh"
 
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
-KUBE_PROXY_CONFIG="${CONFIG_DIR}/10-kube-proxy.yaml"
 KUBE_PROXY_LOG_STATE="/var/lib/sugarkube/kube-proxy-mode.log"
 
 APT_UPDATED=0
@@ -65,36 +64,23 @@ ensure_nft_binary() {
 }
 
 ensure_kube_proxy_config() {
-  local desired tmp_file
-  desired=$'kube-proxy-arg:\n  - proxy-mode=nftables\n'
-
-  if [[ ! -d "${CONFIG_DIR}" ]]; then
-    if mkdir -p "${CONFIG_DIR}"; then
-      changes+=("created ${CONFIG_DIR}")
-    else
-      changes+=("ERROR: failed to create ${CONFIG_DIR}")
-      return 1
-    fi
-  fi
-
-  tmp_file="$(mktemp)"
-  printf '%s' "${desired}" >"${tmp_file}"
-
-  if [[ ! -f "${KUBE_PROXY_CONFIG}" ]] || \
-    ! cmp -s "${tmp_file}" "${KUBE_PROXY_CONFIG}"; then
-    if install -m 0644 "${tmp_file}" "${KUBE_PROXY_CONFIG}"; then
-      changes+=("wrote kube-proxy nftables config at ${KUBE_PROXY_CONFIG}")
-    else
-      changes+=("ERROR: failed to write ${KUBE_PROXY_CONFIG}")
-      rm -f "${tmp_file}"
-      return 1
-    fi
-  else
-    changes+=("kube-proxy nftables config already present at ${KUBE_PROXY_CONFIG}")
-  fi
-
-  rm -f "${tmp_file}"
-  return 0
+  local status line
+  status=0
+  while IFS= read -r line; do
+    case "${line}" in
+      INFO:*)
+        changes+=("${line#INFO: }")
+        ;;
+      ERROR:*)
+        changes+=("ERROR: ${line#ERROR: }")
+        ;;
+      *)
+        changes+=("${line}")
+        ;;
+    esac
+  done < <(kube_proxy::ensure_nftables_config "${CONFIG_DIR}")
+  status=${PIPESTATUS[0]}
+  return "${status}"
 }
 
 log_kube_proxy_status_once() {
@@ -109,6 +95,8 @@ log_kube_proxy_status_once() {
 
   mkdir -p "${state_dir}" 2>/dev/null || true
 
+  local should_write_state=0
+
   if [[ ! -f "${KUBE_PROXY_LOG_STATE}" ]]; then
     if command -v logger >/dev/null 2>&1; then
       local logger_msg
@@ -117,14 +105,20 @@ log_kube_proxy_status_once() {
       else
         logger_msg="${message}"
       fi
-      logger -t sugarkube-k3s-preflight "${logger_msg}" || true
+      if logger -t sugarkube-k3s-preflight "${logger_msg}"; then
+        should_write_state=1
+      fi
     fi
+  else
+    should_write_state=1
   fi
 
-  if [[ "${nft_status}" == "present" && -n "${nft_path}" ]]; then
-    printf '%s path=%s\n' "${message}" "${nft_path}" >"${KUBE_PROXY_LOG_STATE}"
-  else
-    printf '%s\n' "${message}" >"${KUBE_PROXY_LOG_STATE}"
+  if [[ ${should_write_state} -eq 1 ]]; then
+    if [[ "${nft_status}" == "present" && -n "${nft_path}" ]]; then
+      printf '%s path=%s\n' "${message}" "${nft_path}" >"${KUBE_PROXY_LOG_STATE}"
+    else
+      printf '%s\n' "${message}" >"${KUBE_PROXY_LOG_STATE}"
+    fi
   fi
 }
 
@@ -222,7 +216,6 @@ check_kube_proxy_mode() {
     changes+=("kube-proxy mode: not configured or unknown")
   fi
 
-  LAST_KUBE_PROXY_MODE="${configured_mode:-unknown}"
   if [[ "$LAST_NFT_STATUS" != "present" ]] && command -v nft >/dev/null 2>&1; then
     LAST_NFT_STATUS="present"
     LAST_NFT_PATH="$(command -v nft)"
