@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/kube_proxy.sh"
 
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
+DETECTED_KUBE_PROXY_MODE="unknown"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -35,6 +36,62 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 
 changes=()
+
+ensure_kube_proxy_config() {
+  local config_dir="$1"
+  local target="${config_dir}/10-kube-proxy.yaml"
+  local desired_content
+  desired_content=$'kube-proxy-arg:\n  - proxy-mode=nftables\n'
+
+  if [[ ! -d "${config_dir}" ]]; then
+    if mkdir -p "${config_dir}"; then
+      changes+=("created k3s config directory ${config_dir}")
+    else
+      changes+=("ERROR: failed to create ${config_dir}")
+      return 1
+    fi
+  fi
+
+  if [[ -f "${target}" ]]; then
+    local current_content
+    current_content="$(<"${target}")$'\n'"
+    if [[ "${current_content}" == "${desired_content}" ]]; then
+      changes+=("kube-proxy nftables config already present (${target})")
+      return 0
+    fi
+  fi
+
+  if printf '%s' "${desired_content}" >"${target}"; then
+    if [[ -f "${target}" ]]; then
+      changes+=("wrote kube-proxy nftables config to ${target}")
+    else
+      changes+=("ERROR: expected to write ${target} but file missing")
+      return 1
+    fi
+  else
+    changes+=("ERROR: failed to write ${target}")
+    return 1
+  fi
+
+  return 0
+}
+
+log_kube_proxy_detection() {
+  local mode="$1"
+  local nft_status="missing"
+
+  if command -v nft >/dev/null 2>&1; then
+    nft_status="present"
+  fi
+
+  local message
+  message="kube-proxy detection: mode=${mode:-unknown} nft=${nft_status}"
+  changes+=("${message}")
+
+  if command -v logger >/dev/null 2>&1; then
+    logger -t sugarkube-k3s-preflight "${message}" || true
+  fi
+}
 
 ensure_module() {
   local module="$1"
@@ -68,6 +125,9 @@ check_kube_proxy_mode() {
   # Determine configured proxy mode using shared library
   local configured_mode
   configured_mode=$(kube_proxy::detect_mode "$CONFIG_DIR")
+  DETECTED_KUBE_PROXY_MODE="${configured_mode}"
+
+  log_kube_proxy_detection "${configured_mode}"
 
   # Check for required binaries based on configured mode
   if [[ "$configured_mode" == "nftables" ]]; then
@@ -105,6 +165,15 @@ for bridge_key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-i
     changes+=("sysctl ${bridge_key} unavailable; skipping")
   fi
 done
+
+# Ensure kube-proxy is explicitly configured for nftables mode
+if ! ensure_kube_proxy_config "$CONFIG_DIR"; then
+  printf 'k3s preflight adjustments:\n'
+  for entry in "${changes[@]}"; do
+    printf '  - %s\n' "${entry}"
+  done
+  exit 1
+fi
 
 # Check kube-proxy mode configuration
 if ! check_kube_proxy_mode; then
