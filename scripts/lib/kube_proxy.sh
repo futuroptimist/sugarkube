@@ -34,15 +34,31 @@ kube_proxy::detect_mode() {
   echo "$mode"
 }
 
-# Ensure the kube-proxy configuration enforces nftables mode.
-# Usage: kube_proxy::ensure_nftables_config [CONFIG_DIR] [CONFIG_FILE_NAME]
+# Ensure the kube-proxy configuration enforces the requested mode.
+# Usage: kube_proxy::ensure_mode_config [CONFIG_DIR] MODE [CONFIG_FILE_NAME]
+# Supported modes: nftables, iptables.
 # Emits INFO/ERROR prefixed messages describing the actions taken.
-kube_proxy::ensure_nftables_config() {
+kube_proxy::ensure_mode_config() {
   local config_dir="${1:-/etc/rancher/k3s/config.yaml.d}"
-  local config_file_name="${2:-10-kube-proxy.yaml}"
+  local mode="${2:-nftables}"
+  local config_file_name="${3:-10-kube-proxy.yaml}"
   local config_path="${config_dir}/${config_file_name}"
-  local desired=$'kube-proxy-arg:\n  - proxy-mode=nftables\n'
+  local desired=""
   local tmp_file
+
+  case "${mode}" in
+    nft|nftables)
+      desired=$'kube-proxy-arg:\n  - proxy-mode=nftables\n'
+      mode="nftables"
+      ;;
+    iptables)
+      desired=$'kube-proxy-arg:\n  - proxy-mode=iptables\n'
+      ;;
+    *)
+      printf 'ERROR: unsupported kube-proxy mode "%s"\n' "${mode}"
+      return 1
+      ;;
+  esac
 
   if [[ ! -d "${config_dir}" ]]; then
     if mkdir -p "${config_dir}"; then
@@ -62,16 +78,21 @@ kube_proxy::ensure_nftables_config() {
 
   if [[ ! -f "${config_path}" ]] || ! cmp -s "${tmp_file}" "${config_path}"; then
     if install -m 0644 "${tmp_file}" "${config_path}"; then
-      printf 'INFO: wrote kube-proxy nftables config at %s\n' "${config_path}"
+      printf 'INFO: wrote kube-proxy %s config at %s\n' "${mode}" "${config_path}"
     else
       printf 'ERROR: failed to write kube-proxy config at %s\n' "${config_path}"
       rm -f "${tmp_file}"
       return 1
     fi
   else
-    printf 'INFO: kube-proxy nftables config already present at %s\n' "${config_path}"
+    printf 'INFO: kube-proxy %s config already present at %s\n' "${mode}" "${config_path}"
   fi
 
   rm -f "${tmp_file}"
   return 0
+}
+
+# Backwards compatibility wrapper that enforces nftables mode.
+kube_proxy::ensure_nftables_config() {
+  kube_proxy::ensure_mode_config "$1" "nftables" "$2"
 }
