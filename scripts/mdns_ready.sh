@@ -8,6 +8,20 @@ SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
 
+# Helper function to calculate elapsed milliseconds since start
+elapsed_ms_since() {
+  local start_ms="$1"
+  python3 - <<PY
+import time
+start = int(${start_ms})
+now = int(time.time() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+}
+
 # mdns_ready() - Check if Avahi/mDNS is ready
 #
 # This function checks Avahi readiness using two methods:
@@ -40,18 +54,10 @@ PY
     if LC_ALL=C grep -Eiq '^[[:space:]]*enable-dbus[[:space:]]*=[[:space:]]*no([[:space:]]|$)' \
       "${avahi_conf_path}"; then
       local elapsed_ms
-      elapsed_ms="$(python3 - <<PY
-import time
-start = int(${start_ms})
-now = int(time.time() * 1000)
-elapsed = now - start
-if elapsed < 0:
-    elapsed = 0
-print(elapsed)
-PY
-      )"
+      elapsed_ms="$(elapsed_ms_since "${start_ms}")"
       log_info \
         mdns_ready \
+        event=mdns_ready \
         outcome=disabled \
         reason=enable_dbus_no \
         method=config \
@@ -105,16 +111,7 @@ PY
       
       # Calculate elapsed time
       local elapsed_ms
-      elapsed_ms="$(python3 - <<PY
-import time
-start = int(${start_ms})
-now = int(time.time() * 1000)
-elapsed = now - start
-if elapsed < 0:
-    elapsed = 0
-print(elapsed)
-PY
-      )"
+      elapsed_ms="$(elapsed_ms_since "${start_ms}")"
       
       # Check if we've exceeded the wait limit
       if [ "${elapsed_ms}" -ge "${dbus_wait_ms}" ]; then
@@ -149,8 +146,10 @@ PY
     
     # If ownership confirmed, try GetVersionString
     if [ "${ownership_confirmed}" -eq 1 ]; then
+      local timeout_secs=$((dbus_timeout_ms / 1000))
+      [ "${timeout_secs}" -eq 0 ] && timeout_secs=1
       if busctl --system \
-        --timeout=2 \
+        --timeout="${timeout_secs}" \
         call \
         org.freedesktop.Avahi \
         / \
@@ -160,16 +159,7 @@ PY
         dbus_status=0
         method="dbus"
         local elapsed_ms
-        elapsed_ms="$(python3 - <<PY
-import time
-start = int(${start_ms})
-now = int(time.time() * 1000)
-elapsed = now - start
-if elapsed < 0:
-    elapsed = 0
-print(elapsed)
-PY
-        )"
+        elapsed_ms="$(elapsed_ms_since "${start_ms}")"
         log_info \
           mdns_ready \
           event=mdns_ready \
@@ -204,16 +194,7 @@ PY
     if [ "${dbus_status}" -eq 0 ]; then
       method="dbus"
       local elapsed_ms
-      elapsed_ms="$(python3 - <<PY
-import time
-start = int(${start_ms})
-now = int(time.time() * 1000)
-elapsed = now - start
-if elapsed < 0:
-    elapsed = 0
-print(elapsed)
-PY
-      )"
+      elapsed_ms="$(elapsed_ms_since "${start_ms}")"
       log_info \
         mdns_ready \
         event=mdns_ready \
@@ -238,16 +219,7 @@ PY
   
   if ! command -v avahi-browse >/dev/null 2>&1; then
     local elapsed_ms
-    elapsed_ms="$(python3 - <<PY
-import time
-start = int(${start_ms})
-now = int(time.time() * 1000)
-elapsed = now - start
-if elapsed < 0:
-    elapsed = 0
-print(elapsed)
-PY
-    )"
+    elapsed_ms="$(elapsed_ms_since "${start_ms}")"
     log_info \
       mdns_ready \
       event=mdns_ready \
@@ -259,20 +231,19 @@ PY
     return 1
   fi
 
+  # Use timeout to prevent avahi-browse from hanging indefinitely
+  # avahi-browse -t (--terminate) waits for at least one service before terminating
+  # Set timeout to 5 seconds to allow enough time for service discovery
   local cli_output
-  cli_output="$(avahi-browse -rt "${service_type}" --parsable 2>/dev/null)" || cli_status=$?
+  local browse_timeout=5
+  if command -v timeout >/dev/null 2>&1; then
+    cli_output="$(timeout "${browse_timeout}" avahi-browse -rt "${service_type}" --parsable 2>/dev/null)" || cli_status=$?
+  else
+    cli_output="$(avahi-browse -rt "${service_type}" --parsable 2>/dev/null)" || cli_status=$?
+  fi
   
   local elapsed_ms
-  elapsed_ms="$(python3 - <<PY
-import time
-start = int(${start_ms})
-now = int(time.time() * 1000)
-elapsed = now - start
-if elapsed < 0:
-    elapsed = 0
-print(elapsed)
-PY
-  )"
+  elapsed_ms="$(elapsed_ms_since "${start_ms}")"
 
   # Check if CLI succeeded and returned actual output
   if [ "${cli_status}" -eq 0 ] && [ -n "${cli_output}" ]; then

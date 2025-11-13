@@ -287,12 +287,12 @@ count=$(cat "$state_file")
 count=$((count + 1))
 echo "$count" > "$state_file"
 
-# Fail first 2 calls (simulating Avahi not ready yet)
+# Fail first 2 NameHasOwner calls (simulating Avahi ownership not registered yet)
 if [ "$count" -le 2 ]; then
     exit 1
 fi
 
-# Succeed on subsequent calls
+# Succeed on subsequent calls (3rd NameHasOwner check, then GetVersionString)
 exit 0
 """
     )
@@ -338,6 +338,10 @@ exit 0
     assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
     assert "elapsed_ms=" in output, f"Expected elapsed_ms in output\n{output}"
     
-    # Verify busctl was called multiple times
+    # Verify busctl was called multiple times (NameHasOwner checks + GetVersionString)
     final_count = int(state_file.read_text())
-    assert final_count >= 3, f"Expected at least 3 busctl calls, got {final_count}"
+    assert final_count >= 3, (
+        f"Expected at least 3 total busctl calls "
+        f"(including both NameHasOwner checks and the final GetVersionString call), "
+        f"got {final_count}"
+    )
