@@ -235,7 +235,6 @@ PY
   local cluster="${SUGARKUBE_CLUSTER:-sugar}"
   local env="${SUGARKUBE_ENV:-dev}"
   local service_type="_k3s-${cluster}-${env}._tcp"
-  local browse_cmd="avahi-browse -rt ${service_type} --parsable"
   
   if ! command -v avahi-browse >/dev/null 2>&1; then
     local elapsed_ms
