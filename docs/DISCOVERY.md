@@ -49,6 +49,13 @@ The discovery process follows this sequence:
 - `SUGARKUBE_DEBUG_MDNS=1`: Enable detailed mDNS diagnostics
 - See [LOGGING.md](LOGGING.md) for details
 
+### mDNS Diagnostics and Resilience
+- **Automatic Retry**: avahi-browse retries once after 1-2s on failure
+- **D-Bus Fallback**: Attempts gdbus/busctl ServiceBrowser if avahi-browse fails
+- **Journal Logging**: On failure, dumps last 200 lines of avahi-daemon journal
+- **Interface Pinning**: Set `ALLOW_IFACE=eth0` to pin queries to specific interface
+- **Detailed Logging**: Exit codes and stderr are logged for all avahi-browse attempts
+
 ## Troubleshooting
 
 ### Common Issues
