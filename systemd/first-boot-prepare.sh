@@ -7,6 +7,7 @@ export DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-noninteractive}
 LOG_FILE="/var/log/first-boot-prepare.log"
 STATE_DIR="/var/lib/sugarkube"
 STATE_FILE="${STATE_DIR}/first-boot-prepare.done"
+K3S_CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 mkdir -p "${STATE_DIR}" "$(dirname "${LOG_FILE}")"
@@ -56,6 +57,7 @@ ensure_package jq
 ensure_package parted
 ensure_package util-linux
 ensure_package curl
+ensure_package nftables
 
 if ! command -v vcgencmd >/dev/null 2>&1; then
   ensure_package libraspberrypi-bin
@@ -64,6 +66,18 @@ fi
 if ! command -v rpi-clone >/dev/null 2>&1; then
   echo "[first-boot-prepare] installing rpi-clone"
   curl -fsSL https://raw.githubusercontent.com/geerlingguy/rpi-clone/master/install | bash
+fi
+
+K3S_PREFLIGHT="/opt/sugarkube/k3s_preflight.sh"
+if [[ -x "${K3S_PREFLIGHT}" ]]; then
+  echo "[first-boot-prepare] running k3s preflight"
+  if "${K3S_PREFLIGHT}" --config-dir "${K3S_CONFIG_DIR}"; then
+    echo "[first-boot-prepare] k3s preflight completed"
+  else
+    echo "[first-boot-prepare] warning: k3s preflight exited with $?"
+  fi
+else
+  echo "[first-boot-prepare] k3s preflight helper missing at ${K3S_PREFLIGHT}"
 fi
 
 SET_NVME_BOOT=${SET_NVME_BOOT:-1}

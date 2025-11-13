@@ -9,6 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/kube_proxy.sh"
 
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
+STATE_DIR="/var/lib/sugarkube"
+PROXY_LOG_STATE_FILE="${STATE_DIR}/k3s-preflight-proxy.log"
+DETECTED_MODE="unknown"
+NFT_PRESENT="no"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -28,6 +32,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+CONFIG_DIR="${CONFIG_DIR%/}"
+KUBE_PROXY_CONFIG_FILE="${CONFIG_DIR}/10-kube-proxy.yaml"
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run this script with sudo to adjust kernel settings." >&2
@@ -64,14 +71,66 @@ set_sysctl() {
   fi
 }
 
+ensure_kube_proxy_config() {
+  local desired_content
+  desired_content=$'kube-proxy-arg:\n  - proxy-mode=nftables\n'
+
+  if [[ ! -d "${CONFIG_DIR}" ]]; then
+    mkdir -p "${CONFIG_DIR}"
+    changes+=("created k3s config directory ${CONFIG_DIR}")
+  fi
+
+  if [[ -f "${KUBE_PROXY_CONFIG_FILE}" ]]; then
+    if printf '%s' "${desired_content}" | cmp -s "${KUBE_PROXY_CONFIG_FILE}" - 2>/dev/null; then
+      changes+=("kube-proxy config already set to nftables (${KUBE_PROXY_CONFIG_FILE})")
+      return
+    fi
+  fi
+
+  printf '%s' "${desired_content}" >"${KUBE_PROXY_CONFIG_FILE}.tmp"
+  chmod 0644 "${KUBE_PROXY_CONFIG_FILE}.tmp"
+  mv "${KUBE_PROXY_CONFIG_FILE}.tmp" "${KUBE_PROXY_CONFIG_FILE}"
+  changes+=("wrote kube-proxy nftables config to ${KUBE_PROXY_CONFIG_FILE}")
+}
+
+log_proxy_detection_once() {
+  local message timestamp
+  message="kube-proxy mode=${DETECTED_MODE} nft=${NFT_PRESENT} config=${KUBE_PROXY_CONFIG_FILE}"
+
+  mkdir -p "${STATE_DIR}"
+  if [[ ! -f "${PROXY_LOG_STATE_FILE}" ]]; then
+    if timestamp=$(date --iso-8601=seconds 2>/dev/null); then
+      :
+    elif timestamp=$(date 2>/dev/null); then
+      :
+    else
+      timestamp="$(hostname 2>/dev/null || echo sugarkube)"
+    fi
+    if command -v logger >/dev/null 2>&1; then
+      logger -t k3s-preflight -- "${message}" || true
+    fi
+    printf '%s %s\n' "${timestamp}" "${message}" >"${PROXY_LOG_STATE_FILE}"
+    changes+=("logged kube-proxy dataplane detection (${message})")
+  else
+    changes+=("kube-proxy dataplane detection already logged (${message})")
+  fi
+}
+
 check_kube_proxy_mode() {
   # Determine configured proxy mode using shared library
   local configured_mode
   configured_mode=$(kube_proxy::detect_mode "$CONFIG_DIR")
+  DETECTED_MODE="$configured_mode"
+
+  if command -v nft >/dev/null 2>&1; then
+    NFT_PRESENT="yes"
+  else
+    NFT_PRESENT="no"
+  fi
 
   # Check for required binaries based on configured mode
   if [[ "$configured_mode" == "nftables" ]]; then
-    if command -v nft >/dev/null 2>&1; then
+    if [[ "$NFT_PRESENT" == "yes" ]]; then
       changes+=("kube-proxy mode: nftables (nft binary found)")
     else
       changes+=("ERROR: kube-proxy mode configured as nftables but nft binary not found")
@@ -106,16 +165,19 @@ for bridge_key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-i
   fi
 done
 
+ensure_kube_proxy_config
+
 # Check kube-proxy mode configuration
+check_result=0
 if ! check_kube_proxy_mode; then
-  printf 'k3s preflight adjustments:\n'
-  for entry in "${changes[@]}"; do
-    printf '  - %s\n' "${entry}"
-  done
-  exit 1
+  check_result=1
 fi
+
+log_proxy_detection_once
 
 printf 'k3s preflight adjustments:\n'
 for entry in "${changes[@]}"; do
   printf '  - %s\n' "${entry}"
 done
+
+exit "${check_result}"
