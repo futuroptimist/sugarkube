@@ -14,12 +14,12 @@ mkdir -p "${BIN_DIR}"
 
 # Test 1: D-Bus success path
 echo "Test 1: D-Bus success path"
-cat >"${BIN_DIR}/gdbus" <<'SH'
+cat >"${BIN_DIR}/busctl" <<'SH'
 #!/usr/bin/env bash
-echo "('0.8')"
+# Mock busctl to succeed for both NameHasOwner and GetVersionString
 exit 0
 SH
-chmod +x "${BIN_DIR}/gdbus"
+chmod +x "${BIN_DIR}/busctl"
 
 cat >"${BIN_DIR}/avahi-browse" <<'SH'
 #!/usr/bin/env bash
@@ -28,7 +28,7 @@ SH
 chmod +x "${BIN_DIR}/avahi-browse"
 
 export PATH="${BIN_DIR}:${PATH}"
-export AVAHI_DBUS_TIMEOUT_MS=1000
+export AVAHI_DBUS_WAIT_MS=1000
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
@@ -55,12 +55,12 @@ echo "PASS: D-Bus success path"
 
 # Test 2: D-Bus failure, CLI fallback success
 echo "Test 2: D-Bus failure, CLI fallback success"
-cat >"${BIN_DIR}/gdbus" <<'SH'
+cat >"${BIN_DIR}/busctl" <<'SH'
 #!/usr/bin/env bash
 echo "Error: Method GetVersionString unavailable" >&2
 exit 1
 SH
-chmod +x "${BIN_DIR}/gdbus"
+chmod +x "${BIN_DIR}/busctl"
 
 cat >"${BIN_DIR}/avahi-browse" <<'SH'
 #!/usr/bin/env bash
@@ -68,6 +68,8 @@ echo "=;eth0;IPv4;test;_test._tcp;local"
 exit 0
 SH
 chmod +x "${BIN_DIR}/avahi-browse"
+
+export AVAHI_DBUS_WAIT_MS=100  # Short wait for tests
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
@@ -96,8 +98,8 @@ if ! grep -q "dbus_fallback=true" <<<"${output}"; then
   exit 1
 fi
 
-if ! grep -q "browse_command=" <<<"${output}"; then
-  echo "FAIL: Expected browse_command in output"
+if ! grep -q "service_type=" <<<"${output}"; then
+  echo "FAIL: Expected service_type in output"
   echo "Output: ${output}"
   exit 1
 fi
@@ -106,12 +108,12 @@ echo "PASS: D-Bus failure, CLI fallback success"
 
 # Test 3: Both methods fail
 echo "Test 3: Both methods fail"
-cat >"${BIN_DIR}/gdbus" <<'SH'
+cat >"${BIN_DIR}/busctl" <<'SH'
 #!/usr/bin/env bash
 echo "Error: Connection failed" >&2
 exit 1
 SH
-chmod +x "${BIN_DIR}/gdbus"
+chmod +x "${BIN_DIR}/busctl"
 
 cat >"${BIN_DIR}/avahi-browse" <<'SH'
 #!/usr/bin/env bash
@@ -119,6 +121,8 @@ echo "Error: Daemon not running" >&2
 exit 2
 SH
 chmod +x "${BIN_DIR}/avahi-browse"
+
+export AVAHI_DBUS_WAIT_MS=100  # Short wait for tests
 
 status=0  # Initialize status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
@@ -176,9 +180,9 @@ fi
 
 echo "PASS: D-Bus disabled in config"
 
-# Test 5: avahi-browse missing, gdbus missing
+# Test 5: avahi-browse missing, busctl missing
 echo "Test 5: Both tools missing"
-rm -f "${BIN_DIR}/gdbus" "${BIN_DIR}/avahi-browse"
+rm -f "${BIN_DIR}/busctl" "${BIN_DIR}/avahi-browse"
 unset AVAHI_CONF_PATH  # Clear config from previous test
 
 status=0  # Initialize status variable
@@ -206,14 +210,14 @@ echo "PASS: Both tools missing"
 
 # Test 6: Verify structured logging fields
 echo "Test 6: Verify structured logging includes required fields"
-cat >"${BIN_DIR}/gdbus" <<'SH'
+cat >"${BIN_DIR}/busctl" <<'SH'
 #!/usr/bin/env bash
-echo "('0.8')"
 exit 0
 SH
-chmod +x "${BIN_DIR}/gdbus"
+chmod +x "${BIN_DIR}/busctl"
 
 unset AVAHI_CONF_PATH
+export AVAHI_DBUS_WAIT_MS=1000
 status=0  # Reset status variable
 output=$("${MDNS_READY_SCRIPT}" 2>&1) || status=$?
 

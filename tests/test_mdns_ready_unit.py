@@ -48,17 +48,19 @@ def mock_env(tmp_path):
 def test_mdns_ready_dbus_failure_cli_success(mock_env):
     """Test that mdns_ready falls back to CLI when D-Bus fails.
 
-    This test forces a D-Bus failure by mocking gdbus to return an error,
+    This test forces a D-Bus failure by mocking busctl to return an error,
     and verifies that the CLI fallback path (avahi-browse) succeeds.
     """
     bin_dir = mock_env["bin_dir"]
 
-    # Mock gdbus to fail (D-Bus unavailable)
-    gdbus_mock = bin_dir / "gdbus"
-    gdbus_mock.write_text(
-        "#!/usr/bin/env bash\n" "echo 'Error: Method GetVersionString unavailable' >&2\n" "exit 1\n"
+    # Mock busctl to fail (D-Bus unavailable)
+    busctl_mock = bin_dir / "busctl"
+    busctl_mock.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo 'Error: D-Bus connection failed' >&2\n"
+        "exit 1\n"
     )
-    gdbus_mock.chmod(0o755)
+    busctl_mock.chmod(0o755)
 
     # Mock avahi-browse to succeed with valid output
     avahi_browse_mock = bin_dir / "avahi-browse"
@@ -72,7 +74,7 @@ def test_mdns_ready_dbus_failure_cli_success(mock_env):
     # Run mdns_ready.sh with mocked environment
     env = os.environ.copy()
     env["PATH"] = mock_env["path"]
-    env["AVAHI_DBUS_TIMEOUT_MS"] = "500"
+    env["AVAHI_DBUS_WAIT_MS"] = "100"  # Short wait for tests
 
     result = subprocess.run(
         [str(MDNS_READY_SCRIPT)],
@@ -101,8 +103,8 @@ def test_mdns_ready_dbus_failure_cli_success(mock_env):
     # Verify D-Bus status shows it failed
     assert "dbus_status=" in output, f"Expected dbus_status in output\n{output}"
 
-    # Verify browse command is logged
-    assert "browse_command=" in output, f"Expected browse_command in output\n{output}"
+    # Verify service type is logged
+    assert "service_type=" in output, f"Expected service_type in output\n{output}"
 
     # Verify structured logging contains required fields
     assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
@@ -116,12 +118,12 @@ def test_mdns_ready_dbus_and_cli_both_fail(mock_env):
     """
     bin_dir = mock_env["bin_dir"]
 
-    # Mock gdbus to fail
-    gdbus_mock = bin_dir / "gdbus"
-    gdbus_mock.write_text(
+    # Mock busctl to fail
+    busctl_mock = bin_dir / "busctl"
+    busctl_mock.write_text(
         "#!/usr/bin/env bash\n" "echo 'Error: D-Bus connection failed' >&2\n" "exit 1\n"
     )
-    gdbus_mock.chmod(0o755)
+    busctl_mock.chmod(0o755)
 
     # Mock avahi-browse to also fail
     avahi_browse_mock = bin_dir / "avahi-browse"
@@ -133,7 +135,7 @@ def test_mdns_ready_dbus_and_cli_both_fail(mock_env):
     # Run mdns_ready.sh with mocked environment
     env = os.environ.copy()
     env["PATH"] = mock_env["path"]
-    env["AVAHI_DBUS_TIMEOUT_MS"] = "500"
+    env["AVAHI_DBUS_WAIT_MS"] = "100"  # Short wait for tests
 
     result = subprocess.run(
         [str(MDNS_READY_SCRIPT)],
@@ -157,6 +159,9 @@ def test_mdns_ready_dbus_and_cli_both_fail(mock_env):
     # Verify both status codes are logged
     assert "dbus_status=" in output, f"Expected dbus_status in output\n{output}"
     assert "cli_status=" in output, f"Expected cli_status in output\n{output}"
+    
+    # Verify structured logging
+    assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
 
 
 def test_mdns_ready_cli_no_output(mock_env):
@@ -166,10 +171,10 @@ def test_mdns_ready_cli_no_output(mock_env):
     """
     bin_dir = mock_env["bin_dir"]
 
-    # Mock gdbus to fail
-    gdbus_mock = bin_dir / "gdbus"
-    gdbus_mock.write_text("#!/usr/bin/env bash\n" "exit 1\n")
-    gdbus_mock.chmod(0o755)
+    # Mock busctl to fail
+    busctl_mock = bin_dir / "busctl"
+    busctl_mock.write_text("#!/usr/bin/env bash\n" "exit 1\n")
+    busctl_mock.chmod(0o755)
 
     # Mock avahi-browse to succeed but return no output
     avahi_browse_mock = bin_dir / "avahi-browse"
@@ -181,7 +186,7 @@ def test_mdns_ready_cli_no_output(mock_env):
     # Run mdns_ready.sh with mocked environment
     env = os.environ.copy()
     env["PATH"] = mock_env["path"]
-    env["AVAHI_DBUS_TIMEOUT_MS"] = "500"
+    env["AVAHI_DBUS_WAIT_MS"] = "100"  # Short wait for tests
 
     result = subprocess.run(
         [str(MDNS_READY_SCRIPT)],
@@ -196,22 +201,26 @@ def test_mdns_ready_cli_no_output(mock_env):
 
     output = result.stdout + result.stderr
 
-    # Verify no_output outcome
-    assert "outcome=no_output" in output, f"Expected outcome=no_output in output\n{output}"
-    assert "lines=0" in output, f"Expected lines=0 in output\n{output}"
+    # Verify timeout outcome (CLI succeeded but no services)
+    assert "outcome=timeout" in output, f"Expected outcome=timeout in output\n{output}"
+    assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
 
 
 def test_mdns_ready_dbus_success(mock_env):
     """Test that mdns_ready succeeds via D-Bus when available.
 
-    This verifies the primary (non-fallback) code path.
+    This verifies the primary (non-fallback) code path with busctl.
     """
     bin_dir = mock_env["bin_dir"]
 
-    # Mock gdbus to succeed
-    gdbus_mock = bin_dir / "gdbus"
-    gdbus_mock.write_text("#!/usr/bin/env bash\n" "echo \"('avahi-daemon 0.8')\"\n" "exit 0\n")
-    gdbus_mock.chmod(0o755)
+    # Mock busctl to succeed for both NameHasOwner and GetVersionString
+    busctl_mock = bin_dir / "busctl"
+    busctl_mock.write_text(
+        "#!/usr/bin/env bash\n"
+        "# Succeed for both NameHasOwner check and GetVersionString call\n"
+        "exit 0\n"
+    )
+    busctl_mock.chmod(0o755)
 
     # Mock avahi-browse (should not be called)
     avahi_browse_mock = bin_dir / "avahi-browse"
@@ -225,7 +234,7 @@ def test_mdns_ready_dbus_success(mock_env):
     # Run mdns_ready.sh with mocked environment
     env = os.environ.copy()
     env["PATH"] = mock_env["path"]
-    env["AVAHI_DBUS_TIMEOUT_MS"] = "500"
+    env["AVAHI_DBUS_WAIT_MS"] = "5000"
 
     result = subprocess.run(
         [str(MDNS_READY_SCRIPT)],
@@ -250,3 +259,89 @@ def test_mdns_ready_dbus_success(mock_env):
     assert (
         "dbus_fallback=true" not in output
     ), f"Should not have dbus_fallback=true when D-Bus succeeds\n{output}"
+    
+    # Verify structured logging
+    assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
+    assert "elapsed_ms=" in output, f"Expected elapsed_ms in output\n{output}"
+
+
+def test_mdns_ready_dbus_late_but_succeeds(mock_env):
+    """Test that mdns_ready retries and succeeds when D-Bus ownership arrives late.
+
+    This simulates a cold start where Avahi takes a few attempts to register
+    its D-Bus name, but eventually succeeds.
+    """
+    bin_dir = mock_env["bin_dir"]
+
+    # Create a state file to track call count
+    state_file = bin_dir / "busctl_call_count"
+    state_file.write_text("0")
+
+    # Mock busctl to fail first 2 times, then succeed
+    busctl_mock = bin_dir / "busctl"
+    busctl_mock.write_text(
+        f"""#!/usr/bin/env bash
+# Track number of calls
+state_file="{state_file}"
+count=$(cat "$state_file")
+count=$((count + 1))
+echo "$count" > "$state_file"
+
+# Fail first 2 NameHasOwner calls (simulating Avahi ownership not registered yet)
+if [ "$count" -le 2 ]; then
+    exit 1
+fi
+
+# Succeed on subsequent calls (3rd NameHasOwner check, then GetVersionString)
+exit 0
+"""
+    )
+    busctl_mock.chmod(0o755)
+
+    # Mock avahi-browse (should not be called if D-Bus eventually succeeds)
+    avahi_browse_mock = bin_dir / "avahi-browse"
+    avahi_browse_mock.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo 'ERROR: Should not be called when D-Bus eventually succeeds' >&2\n"
+        "exit 1\n"
+    )
+    avahi_browse_mock.chmod(0o755)
+
+    # Run mdns_ready.sh with mocked environment
+    env = os.environ.copy()
+    env["PATH"] = mock_env["path"]
+    env["AVAHI_DBUS_WAIT_MS"] = "5000"  # Allow enough time for retries
+
+    result = subprocess.run(
+        [str(MDNS_READY_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+
+    # Assert D-Bus path succeeded after retries
+    assert result.returncode == 0, f"Expected exit code 0, got {result.returncode}\n{result.stderr}"
+
+    output = result.stdout + result.stderr
+
+    # Verify D-Bus method was used (not CLI)
+    assert "method=dbus" in output, f"Expected method=dbus in output\n{output}"
+
+    # Verify successful outcome
+    assert "outcome=ok" in output, f"Expected outcome=ok in output\n{output}"
+
+    # Verify multiple ownership attempts were made
+    assert "ownership_attempts=" in output, f"Expected ownership_attempts in output\n{output}"
+
+    # Verify structured logging
+    assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
+    assert "elapsed_ms=" in output, f"Expected elapsed_ms in output\n{output}"
+    
+    # Verify busctl was called multiple times (NameHasOwner checks + GetVersionString)
+    final_count = int(state_file.read_text())
+    assert final_count >= 3, (
+        f"Expected at least 3 total busctl calls "
+        f"(including both NameHasOwner checks and the final GetVersionString call), "
+        f"got {final_count}"
+    )
