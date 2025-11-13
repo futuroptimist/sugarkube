@@ -1019,6 +1019,22 @@ PY
       ;;
   esac
 
+  if [ "${outcome}" = "ok" ]; then
+    case "${iptables_variant}" in
+      legacy)
+        message="iptables legacy backend selected"
+        ;;
+      nf_tables)
+        message="iptables nf_tables backend selected"
+        ;;
+      missing)
+        ;;
+      *)
+        message="iptables backend could not be determined"
+        ;;
+    esac
+  fi
+
   if [ "${outcome}" = "ok" ] && [ "${iptables_variant}" = "nf_tables" ]; then
     if [ "${nft_mode_configured}" -eq 1 ]; then
       message="nf_tables backend detected; kube-proxy nft mode is enabled (GA in Kubernetes v1.33)"
