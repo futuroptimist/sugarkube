@@ -399,8 +399,14 @@ EOS
 if [ "$1" = "--system" ]; then
   shift
 fi
-if [ "$1" = "--timeout=2" ]; then
+# Handle --timeout with any value
+if [[ "$1" =~ ^--timeout= ]]; then
   shift
+fi
+if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.DBus" ] && [ "$5" = "NameHasOwner" ]; then
+  # Handle NameHasOwner check for Avahi - return true
+  echo 'b true'
+  exit 0
 fi
 if [ "$1" = "call" ] && [ "$2" = "org.freedesktop.Avahi" ]; then
   echo 's "stub"'
@@ -436,6 +442,13 @@ fi
 exit 0
 EOS
 
+  stub_command timeout <<'EOS'
+#!/usr/bin/env bash
+# Pass through to the actual command, ignoring timeout
+shift
+exec "$@"
+EOS
+
   stub_command sleep <<'EOS'
 #!/usr/bin/env bash
 echo "$*" >>"${BATS_TEST_TMPDIR}/sleep.log"
@@ -462,6 +475,16 @@ case "$1" in
     fi
     printf '%s\n' "=;eth0;IPv4;ready;_k3s-demo-test._tcp;local;ready.local;192.0.2.1;1234;"
     printf '%s' 1 >"${ready_flag}"
+    exit 0
+    ;;
+  -rt)
+    # Handle mdns_ready.sh CLI fallback with specific service type
+    # Check if ready_flag exists (set by second --all call from k3s-discover.sh)
+    if [ ! -f "${ready_flag}" ]; then
+      echo "liveness_not_confirmed" >&2
+      exit 1
+    fi
+    printf '%s\n' "=;eth0;IPv4;k3s-demo-test@demo.local (bootstrap);_k3s-demo-test._tcp;local;demo.local;192.0.2.10;6443;"
     exit 0
     ;;
   -rtp)
