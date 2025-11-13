@@ -5,8 +5,9 @@ from __future__ import annotations
 import errno
 import os
 import subprocess
+import time
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional, Tuple
 
 from k3s_mdns_parser import MdnsRecord, parse_mdns_records
 from mdns_helpers import _norm_host
@@ -16,6 +17,7 @@ DebugFn = Optional[Callable[[str], None]]
 _DUMP_PATH = Path("/tmp/sugarkube-mdns.txt")
 _TIMEOUT_ENV = "SUGARKUBE_MDNS_QUERY_TIMEOUT"
 _DEFAULT_TIMEOUT = 10.0
+_RETRY_DELAY = 1.5  # Delay between retry attempts in seconds
 
 
 def _resolve_timeout(value: Optional[str]) -> Optional[float]:
@@ -52,8 +54,131 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
         command.append("--resolve")
     if mode in {"server-first", "server-count", "server-select"}:
         command.append("--ignore-local")
+
+    # Add interface pinning if ALLOW_IFACE is set
+    allow_iface = os.environ.get("ALLOW_IFACE", "").strip()
+    if allow_iface:
+        command.append(f"--interface={allow_iface}")
+
     command.append(service_type)
     return command
+
+
+def _dump_avahi_journal(debug: DebugFn) -> None:
+    """Dump tail of avahi-daemon journal logs for diagnostics."""
+    if debug is None:
+        return
+
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", "avahi-daemon", "-n", "200", "--no-pager"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            # Sanitize log output (remove any potential sensitive data)
+            log_lines = result.stdout.splitlines()
+            sanitized_lines = []
+            for line in log_lines:
+                # Basic sanitization: remove IP addresses in private ranges if needed
+                # For now, we'll include the logs as-is since they're system logs
+                sanitized_lines.append(line)
+
+            debug("=== Avahi daemon journal (last 200 lines) ===")
+            for line in sanitized_lines[-200:]:
+                debug(line)
+            debug("=== End of Avahi daemon journal ===")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        debug(f"Unable to fetch avahi-daemon journal: {e}")
+
+
+def _try_dbus_browser(
+    service_type: str, debug: DebugFn, timeout: Optional[float]
+) -> Tuple[int, str, str]:
+    """
+    Try to browse mDNS services using D-Bus via gdbus or busctl.
+    Returns (returncode, stdout, stderr).
+    """
+    # Try gdbus first
+    if os.path.isfile("/usr/bin/gdbus") or os.path.isfile("/bin/gdbus"):
+        try:
+            # Use gdbus to call Avahi's ServiceBrowser
+            cmd = [
+                "gdbus",
+                "call",
+                "--system",
+                "--dest", "org.freedesktop.Avahi",
+                "--object-path", "/",
+                "--method", "org.freedesktop.Avahi.Server.ServiceBrowserNew",
+                "-1",  # IF_UNSPEC
+                "-1",  # PROTO_UNSPEC
+                service_type,
+                "local",
+                "0",  # flags
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout if timeout else 10,
+                check=False,
+            )
+            if result.returncode == 0:
+                if debug:
+                    debug(f"D-Bus browse via gdbus succeeded (exit {result.returncode})")
+                return (result.returncode, result.stdout, result.stderr)
+            else:
+                if debug:
+                    debug(
+                        f"D-Bus browse via gdbus failed "
+                        f"(exit {result.returncode}): {result.stderr}"
+                    )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            if debug:
+                debug(f"gdbus not available or failed: {e}")
+
+    # Try busctl as fallback
+    if os.path.isfile("/usr/bin/busctl") or os.path.isfile("/bin/busctl"):
+        try:
+            cmd = [
+                "busctl",
+                "call",
+                "--system",
+                "org.freedesktop.Avahi",
+                "/",
+                "org.freedesktop.Avahi.Server",
+                "ServiceBrowserNew",
+                "iissu",
+                "-1",  # interface
+                "-1",  # protocol
+                service_type,
+                "local",
+                "0",  # flags
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout if timeout else 10,
+                check=False,
+            )
+            if result.returncode == 0:
+                if debug:
+                    debug(f"D-Bus browse via busctl succeeded (exit {result.returncode})")
+                return (result.returncode, result.stdout, result.stderr)
+            else:
+                if debug:
+                    debug(
+                        f"D-Bus browse via busctl failed "
+                        f"(exit {result.returncode}): {result.stderr}"
+                    )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            if debug:
+                debug(f"busctl not available or failed: {e}")
+
+    return (1, "", "D-Bus browser not available")
 
 
 def _invoke_avahi(
@@ -80,40 +205,101 @@ def _invoke_avahi(
         run_kwargs["env"] = dict(os.environ)
     if timeout is not None:
         run_kwargs["timeout"] = timeout
-    try:
-        result = runner(command, **run_kwargs)
-    except subprocess.TimeoutExpired as exc:
-        if debug is not None and timeout is not None:
-            debug("avahi-browse timed out after " f"{timeout:g}s; continuing without mDNS results")
-        stdout = exc.stdout or exc.output or ""
-        stderr = exc.stderr or ""
-        return subprocess.CompletedProcess(
-            command,
-            returncode=124,
-            stdout=stdout,
-            stderr=stderr,
-        )
-    except FileNotFoundError:
-        if debug is not None:
-            debug("avahi-browse executable not found; continuing without mDNS results")
-        return subprocess.CompletedProcess(
-            command,
-            returncode=127,
-            stdout="",
-            stderr="",
-        )
-    except OSError as exc:
-        if exc.errno == errno.ENOEXEC:
-            fallback = ["bash", *command]
+
+    # Try avahi-browse with retry logic
+    result: Optional[subprocess.CompletedProcess[str]] = None
+    for attempt in range(1, 3):  # Try twice: initial attempt + 1 retry
+        try:
+            result = runner(command, **run_kwargs)
+
+            # Log exact exit code and stderr
             if debug is not None:
-                debug("avahi-browse returned ENOEXEC; retrying with Bash fallback")
-            result = runner(fallback, **run_kwargs)
-        else:
-            raise
-    if result.returncode != 0 and debug is not None:
-        debug(f"avahi-browse exited with {result.returncode}; continuing with available data")
-        if result.stderr:
-            debug(result.stderr.strip())
+                debug(f"avahi-browse attempt {attempt}: exit_code={result.returncode}")
+                if result.stderr:
+                    debug(f"avahi-browse stderr: {result.stderr.strip()}")
+
+            # If successful or has output, break
+            if result.returncode == 0 or result.stdout:
+                break
+
+            # If first attempt failed with non-zero exit and no output, retry
+            if attempt == 1:
+                if debug is not None:
+                    debug(
+                        f"avahi-browse attempt {attempt} failed with exit "
+                        f"{result.returncode}, retrying after {_RETRY_DELAY}s..."
+                    )
+                time.sleep(_RETRY_DELAY)
+
+        except subprocess.TimeoutExpired as exc:
+            if debug is not None and timeout is not None:
+                debug(f"avahi-browse attempt {attempt} timed out after {timeout:g}s")
+            stdout = exc.stdout or exc.output or ""
+            stderr = exc.stderr or ""
+            result = subprocess.CompletedProcess(
+                command,
+                returncode=124,
+                stdout=stdout,
+                stderr=stderr,
+            )
+            if attempt == 1:
+                if debug is not None:
+                    debug(f"Retrying after timeout (attempt {attempt})...")
+                time.sleep(_RETRY_DELAY)
+            else:
+                break
+
+        except FileNotFoundError:
+            if debug is not None:
+                debug("avahi-browse executable not found; continuing without mDNS results")
+            return subprocess.CompletedProcess(
+                command,
+                returncode=127,
+                stdout="",
+                stderr="",
+            )
+        except OSError as exc:
+            if exc.errno == errno.ENOEXEC:
+                fallback = ["bash", *command]
+                if debug is not None:
+                    debug("avahi-browse returned ENOEXEC; retrying with Bash fallback")
+                result = runner(fallback, **run_kwargs)
+            else:
+                raise
+
+    # If all avahi-browse attempts failed, try D-Bus browser as fallback
+    if result is not None and result.returncode != 0 and not result.stdout:
+        if debug is not None:
+            debug(
+                f"avahi-browse failed after retries (exit {result.returncode}), "
+                "trying D-Bus browser..."
+            )
+
+        dbus_exit, dbus_stdout, dbus_stderr = _try_dbus_browser(service_type, debug, timeout)
+
+        if dbus_exit == 0:
+            # D-Bus browser succeeded, but we can't parse its output directly
+            # Just log that it worked
+            if debug is not None:
+                debug(
+                    "D-Bus ServiceBrowser call succeeded; however, "
+                    "avahi-browse is still needed for record parsing"
+                )
+
+        # Dump avahi-daemon journal for diagnostics on failure
+        if debug is not None:
+            debug("Browse failed; dumping avahi-daemon journal for diagnostics...")
+            _dump_avahi_journal(debug)
+
+    if result is None:
+        # Fallback in case something unexpected happened
+        result = subprocess.CompletedProcess(
+            command,
+            returncode=1,
+            stdout="",
+            stderr="Unexpected error in _invoke_avahi",
+        )
+
     return result
 
 
