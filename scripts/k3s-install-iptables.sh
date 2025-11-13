@@ -29,6 +29,12 @@ set_legacy_alternative() {
   local name="$1"
   local legacy_path="/usr/sbin/${name}-legacy"
 
+  # When running without root privileges (e.g. ALLOW_NON_ROOT=1 test runs),
+  # skip update-alternatives to avoid failing the script under set -e.
+  if [ "${ALLOW_NON_ROOT:-0}" = "1" ] || [ "$(id -u)" -ne 0 ]; then
+    return 0
+  fi
+
   if ! command -v update-alternatives >/dev/null 2>&1; then
     return 0
   fi
