@@ -191,6 +191,9 @@ def test_failopen_resolves_deterministic_hosts(tmp_path: Path) -> None:
             """\
             #!/usr/bin/env bash
             set -euo pipefail
+            if [ "${SERVER_HOST:-}" = "sugarkube1.local" ]; then
+              exit 1
+            fi
             exit 0
             """
         ),
@@ -282,6 +285,7 @@ def test_failopen_resolves_deterministic_hosts(tmp_path: Path) -> None:
     stderr = result.stderr
     assert "event=discovery_failopen_tracking_started" in stderr
     assert "event=failopen_join attempt=1 server=\"sugarkube0.local\" outcome=error" in stderr
-    assert "event=failopen_join attempt=2 server=\"sugarkube1.local\" outcome=ok" in stderr
-    assert "target=\"192.0.2.21\"" in stderr
+    assert "event=failopen_join attempt=2 server=\"sugarkube1.local\" outcome=error reason=api_unreachable" in stderr
+    assert "event=failopen_join attempt=3 server=\"sugarkube2.local\" outcome=ok" in stderr
+    assert "target=\"192.0.2.22\"" in stderr
     assert "event=discovery_failopen_success" in stderr

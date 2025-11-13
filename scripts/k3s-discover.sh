@@ -4147,6 +4147,17 @@ try_discovery_failopen() {
 
     if resolved_ip="$(failopen_resolve_candidate "${candidate_host}")"; then
       local join_host="${resolved_ip:-${candidate_host}}"
+
+      if ! wait_for_remote_api_ready "${candidate_host}" "${resolved_ip}" 6443; then
+        log_info discover \
+          event=failopen_join \
+          "attempt=${attempt}" \
+          "server=\"$(escape_log_value "${candidate_host}")\"" \
+          outcome=error \
+          reason=api_unreachable >&2
+        continue
+      fi
+
       TOKEN="${failopen_token}"
       MDNS_SELECTED_HOST="${join_host}"
       MDNS_SELECTED_PORT=6443
