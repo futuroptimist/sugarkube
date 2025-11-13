@@ -97,4 +97,7 @@ Status semantics match the console output:
 - `skip` — the probe could not run and should be revisited later.
 
 When nftables mode is configured the `kube_proxy_dataplane` check logs `pass`,
-confirming that the nft binary is available and the configuration is consistent.
+confirming that the nft binary is available and the configuration is
+consistent. The first-boot preflight also emits a `k3s-preflight` journal entry
+(`kube-proxy mode=nftables nft=yes`) so you can confirm the dataplane without
+opening the verifier report.

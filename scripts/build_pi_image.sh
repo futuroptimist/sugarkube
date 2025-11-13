@@ -525,6 +525,8 @@ install -Dm755 "${REPO_ROOT}/scripts/k3s_preflight.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s_preflight.sh"
 install -Dm755 "${REPO_ROOT}/scripts/k3s-install-iptables.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/opt/sugarkube/k3s-install-iptables.sh"
+install -Dm644 "${REPO_ROOT}/systemd/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml"
 
 # Bundle Avahi/mDNS configuration scripts
 install -Dm755 "${REPO_ROOT}/scripts/configure_avahi.sh" \
