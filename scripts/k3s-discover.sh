@@ -4166,7 +4166,7 @@ try_discovery_failopen() {
       else
         MDNS_SELECTED_IP=""
       fi
-      K3S_URL="https://${join_host}:6443"
+      export K3S_URL="https://${join_host}:6443"
 
       local -a success_fields=(
         "event=failopen_join"
