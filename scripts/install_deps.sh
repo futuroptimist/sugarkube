@@ -27,6 +27,7 @@ apt_packages=(
   curl
   python3
   tcpdump
+  nftables
 )
 
 check_apt_support() {

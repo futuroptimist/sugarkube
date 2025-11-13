@@ -22,7 +22,7 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 
 > **Note:** Kubernetes 1.33 promoted kube-proxy's nftables backend to GA, so the
 > Sugarkube image enables it by default via
-> `systemd/etc/rancher/k3s/config.yaml.d/11-sugarkube-proxy-mode.yaml`. Older
+> `/etc/rancher/k3s/config.yaml.d/10-kube-proxy.yaml`. Older
 > clusters can override the drop-in (or set `K3S_KUBE_PROXY_MODE=iptables`
 > before rerunning the installer) to stick with the legacy iptables proxy if
 > necessary. When the drop-in is present `pi_node_verifier` records

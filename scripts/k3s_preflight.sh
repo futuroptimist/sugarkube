@@ -9,6 +9,122 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/kube_proxy.sh"
 
 CONFIG_DIR="/etc/rancher/k3s/config.yaml.d"
+KUBE_PROXY_LOG_STATE="/var/lib/sugarkube/kube-proxy-mode.log"
+
+APT_UPDATED=0
+
+apt_update_once() {
+  if [[ ${APT_UPDATED} -eq 0 ]]; then
+    if command -v apt-get >/dev/null 2>&1; then
+      if apt-get -o Acquire::Retries=5 \
+        -o Acquire::http::Timeout=30 \
+        -o Acquire::https::Timeout=30 \
+        update >/dev/null 2>&1; then
+        changes+=("apt-get update (nftables)")
+      else
+        changes+=("ERROR: apt-get update failed while preparing nftables installation")
+        return 1
+      fi
+    else
+      return 1
+    fi
+    APT_UPDATED=1
+  fi
+  return 0
+}
+
+ensure_nft_binary() {
+  if command -v nft >/dev/null 2>&1; then
+    local nft_path
+    nft_path="$(command -v nft)"
+    changes+=("nft binary present at ${nft_path}")
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    changes+=("ERROR: nft binary missing and apt-get unavailable to install nftables")
+    return 1
+  fi
+
+  if ! apt_update_once; then
+    return 1
+  fi
+
+  if DEBIAN_FRONTEND=noninteractive \
+    apt-get -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    install -y --no-install-recommends nftables >/dev/null 2>&1; then
+    changes+=("installed nftables package to provide nft binary")
+    return 0
+  fi
+
+  changes+=("ERROR: failed to install nftables package; nft binary still missing")
+  return 1
+}
+
+ensure_kube_proxy_config() {
+  local status line
+  status=0
+  while IFS= read -r line; do
+    case "${line}" in
+      INFO:*)
+        changes+=("${line#INFO: }")
+        ;;
+      ERROR:*)
+        changes+=("ERROR: ${line#ERROR: }")
+        ;;
+      *)
+        changes+=("${line}")
+        ;;
+    esac
+  done < <(kube_proxy::ensure_nftables_config "${CONFIG_DIR}")
+  status=${PIPESTATUS[0]}
+  return "${status}"
+}
+
+log_kube_proxy_status_once() {
+  local mode="$1"
+  local nft_status="$2"
+  local nft_path="$3"
+  local message
+  local state_dir
+  state_dir="$(dirname "${KUBE_PROXY_LOG_STATE}")"
+
+  message="kube-proxy mode=${mode} nft=${nft_status}"
+
+  mkdir -p "${state_dir}" 2>/dev/null || true
+
+  local should_write_state=0
+
+  if [[ ! -f "${KUBE_PROXY_LOG_STATE}" ]]; then
+    if command -v logger >/dev/null 2>&1; then
+      local logger_msg
+      if [[ "${nft_status}" == "present" && -n "${nft_path}" ]]; then
+        logger_msg="${message} path=${nft_path}"
+      else
+        logger_msg="${message}"
+      fi
+      if logger -t sugarkube-k3s-preflight "${logger_msg}"; then
+        should_write_state=1
+      fi
+    fi
+  else
+    should_write_state=1
+  fi
+
+  if [[ ${should_write_state} -eq 1 ]]; then
+    if [[ "${nft_status}" == "present" && -n "${nft_path}" ]]; then
+      printf '%s path=%s\n' "${message}" "${nft_path}" >"${KUBE_PROXY_LOG_STATE}"
+    else
+      printf '%s\n' "${message}" >"${KUBE_PROXY_LOG_STATE}"
+    fi
+  fi
+}
+
+LAST_KUBE_PROXY_MODE="unknown"
+LAST_NFT_STATUS="missing"
+LAST_NFT_PATH=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -69,10 +185,16 @@ check_kube_proxy_mode() {
   local configured_mode
   configured_mode=$(kube_proxy::detect_mode "$CONFIG_DIR")
 
+  LAST_KUBE_PROXY_MODE="${configured_mode:-unknown}"
+  LAST_NFT_STATUS="missing"
+  LAST_NFT_PATH=""
+
   # Check for required binaries based on configured mode
   if [[ "$configured_mode" == "nftables" ]]; then
     if command -v nft >/dev/null 2>&1; then
       changes+=("kube-proxy mode: nftables (nft binary found)")
+      LAST_NFT_STATUS="present"
+      LAST_NFT_PATH="$(command -v nft)"
     else
       changes+=("ERROR: kube-proxy mode configured as nftables but nft binary not found")
       return 1
@@ -93,6 +215,12 @@ check_kube_proxy_mode() {
   else
     changes+=("kube-proxy mode: not configured or unknown")
   fi
+
+  if [[ "$LAST_NFT_STATUS" != "present" ]] && command -v nft >/dev/null 2>&1; then
+    LAST_NFT_STATUS="present"
+    LAST_NFT_PATH="$(command -v nft)"
+  fi
+
   return 0
 }
 
@@ -106,6 +234,16 @@ for bridge_key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-i
   fi
 done
 
+preflight_failure=0
+
+if ! ensure_kube_proxy_config; then
+  preflight_failure=1
+fi
+
+if ! ensure_nft_binary; then
+  preflight_failure=1
+fi
+
 # Check kube-proxy mode configuration
 if ! check_kube_proxy_mode; then
   printf 'k3s preflight adjustments:\n'
@@ -114,6 +252,16 @@ if ! check_kube_proxy_mode; then
   done
   exit 1
 fi
+
+if [[ ${preflight_failure} -ne 0 ]]; then
+  printf 'k3s preflight adjustments:\n'
+  for entry in "${changes[@]}"; do
+    printf '  - %s\n' "${entry}"
+  done
+  exit 1
+fi
+
+log_kube_proxy_status_once "${LAST_KUBE_PROXY_MODE}" "${LAST_NFT_STATUS}" "${LAST_NFT_PATH}"
 
 printf 'k3s preflight adjustments:\n'
 for entry in "${changes[@]}"; do

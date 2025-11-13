@@ -98,3 +98,9 @@ Status semantics match the console output:
 
 When nftables mode is configured the `kube_proxy_dataplane` check logs `pass`,
 confirming that the nft binary is available and the configuration is consistent.
+
+During provisioning a one-time `sugarkube-first-boot` journal entry records the
+detected kube-proxy mode and whether the `nft` binary is present (including the
+path when available). Running `scripts/k3s_preflight.sh` outside of first boot
+produces a matching `sugarkube-k3s-preflight` log, so post-install audits can
+verify that the nftables backend remains active.
