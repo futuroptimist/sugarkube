@@ -4109,22 +4109,25 @@ try_discovery_failopen() {
     resolver_env+=("SUGARKUBE_K3S_SERVER_TOKEN_PATH=${SERVER_TOKEN_PATH}")
   fi
   
+  local resolver_status=0
   local resolved_output=""
   if [ "${#resolver_env[@]}" -gt 0 ]; then
-    if ! resolved_output="$(env "${resolver_env[@]}" "${resolver}" 2>&1)"; then
+    if ! resolved_output="$(env "${resolver_env[@]}" "${resolver}")"; then
+      resolver_status=$?
       log_warn_msg discover "Failed to resolve server token for fail-open join" \
-        "script=${resolver}"
+        "script=${resolver}" "status=${resolver_status}"
       return 1
     fi
   else
-    if ! resolved_output="$("${resolver}" 2>&1)"; then
+    if ! resolved_output="$("${resolver}")"; then
+      resolver_status=$?
       log_warn_msg discover "Failed to resolve server token for fail-open join" \
-        "script=${resolver}"
+        "script=${resolver}" "status=${resolver_status}"
       return 1
     fi
   fi
-  
-  failopen_token="${resolved_output}"
+
+  failopen_token="$(token__strip_quotes "$(token__trim "${resolved_output}")")"
   if [ -z "${failopen_token}" ]; then
     log_warn_msg discover "No token available for fail-open join"
     return 1
