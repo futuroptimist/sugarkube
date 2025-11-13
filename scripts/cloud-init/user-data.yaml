@@ -85,6 +85,7 @@ packages:
   - docker-buildx-plugin
   - docker-compose-plugin
   - helm
+  - nftables
 write_files:
   - path: /opt/sugarkube/.cloudflared.env
     permissions: '0600'
