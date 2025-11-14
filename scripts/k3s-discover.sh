@@ -193,6 +193,14 @@ fi
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
+# Phase 3: Simple Discovery Control
+# SUGARKUBE_SIMPLE_DISCOVERY=1 uses direct NSS resolution instead of service browsing
+# Default: 1 (simplified discovery enabled; set to 0 for legacy service browsing)
+SIMPLE_DISCOVERY="${SUGARKUBE_SIMPLE_DISCOVERY:-1}"
+# Phase 4: Service Advertisement Control
+# SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1 skips mDNS service publishing
+# Default: 1 (service advertisement skipped; set to 0 for legacy advertisement)
+SKIP_SERVICE_ADVERTISEMENT="${SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT:-1}"
 SERVER_TOKEN_PATH="${SUGARKUBE_K3S_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
@@ -206,6 +214,10 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+# Phase 2: Absence Gate Control
+# SUGARKUBE_SKIP_ABSENCE_GATE=1 bypasses the absence gate entirely
+# Default: 1 (absence gate skipped; set to 0 for legacy restart behavior)
+SKIP_ABSENCE_GATE="${SUGARKUBE_SKIP_ABSENCE_GATE:-1}"
 MDNS_ABSENCE_GATE="${SUGARKUBE_MDNS_ABSENCE_GATE:-1}"
 MDNS_ABSENCE_TIMEOUT_MS="${SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS:-15000}"
 MDNS_ABSENCE_BACKOFF_START_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS:-500}"
@@ -3374,6 +3386,12 @@ publish_avahi_service() {
 }
 
 publish_api_service() {
+  # Phase 4: Skip service advertisement when SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1
+  if [ "${SKIP_SERVICE_ADVERTISEMENT}" = "1" ]; then
+    log_info mdns_publish event=service_advertisement_skipped reason="SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1" role=server >&2
+    return 0
+  fi
+  
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
   if ensure_self_mdns_advertisement server; then
@@ -3403,6 +3421,12 @@ publish_api_service() {
   return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 publish_bootstrap_service() {
+  # Phase 4: Skip service advertisement when SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1
+  if [ "${SKIP_SERVICE_ADVERTISEMENT}" = "1" ]; then
+    log_info mdns_publish event=service_advertisement_skipped reason="SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1" role=bootstrap >&2
+    return 0
+  fi
+  
   log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
   maybe_sleep 1
@@ -4532,16 +4556,137 @@ run_configure_avahi
 
 iptables_preflight
 
-ensure_mdns_absence_gate
-
-# Support test mode: exit after absence gate for testing absence detection without k3s installation
-if [ "${SUGARKUBE_EXIT_AFTER_ABSENCE_GATE:-0}" = "1" ]; then
-  exit 0
+# Phase 2: Skip absence gate when SUGARKUBE_SKIP_ABSENCE_GATE=1
+# Trust systemd to keep Avahi running instead of restarting it
+if [ "${SKIP_ABSENCE_GATE}" != "1" ]; then
+  ensure_mdns_absence_gate
+  
+  # Support test mode: exit after absence gate for testing absence detection without k3s installation
+  if [ "${SUGARKUBE_EXIT_AFTER_ABSENCE_GATE:-0}" = "1" ]; then
+    exit 0
+  fi
+else
+  log_info discover event=absence_gate_skipped reason="SUGARKUBE_SKIP_ABSENCE_GATE=1" >&2
+  
+  # Optional systemd health check as safety net
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet avahi-daemon; then
+      log_info discover event=avahi_health_check status=active >&2
+    else
+      log_warn_msg discover "avahi-daemon not active" "event=avahi_health_check" >&2
+    fi
+  fi
 fi
+
+# Phase 3: Simplified discovery using direct NSS resolution + API check
+# When SUGARKUBE_SIMPLE_DISCOVERY=1, skip service browsing and leader election
+discover_via_nss_and_api() {
+  log_info discover event=simple_discovery_start phase=discover_via_nss servers="${SERVERS_DESIRED}" >&2
+  
+  local server_count="${SERVERS_DESIRED}"
+  case "${server_count}" in
+    ''|*[!0-9]*) server_count=1 ;;
+  esac
+  
+  # Try known server hostnames in order (sugarkube0.local, sugarkube1.local, ...)
+  local idx
+  for idx in $(seq 0 $((server_count - 1))); do
+    local candidate="sugarkube${idx}.local"
+    
+    log_info discover event=simple_discovery_try candidate="${candidate}" idx="${idx}" >&2
+    
+    # Step 1: Resolve via NSS (automatic .local handling)
+    if ! command -v getent >/dev/null 2>&1; then
+      log_warn_msg discover "getent not available; skipping NSS resolution" "candidate=${candidate}" >&2
+      continue
+    fi
+    
+    if ! getent hosts "${candidate}" >/dev/null 2>&1; then
+      log_info discover event=simple_discovery_skip candidate="${candidate}" reason="not_resolvable" >&2
+      continue  # Host not resolvable, try next
+    fi
+    
+    log_info discover event=simple_discovery_resolved candidate="${candidate}" >&2
+    
+    # Step 2: Check if API is alive (accepts 401)
+    if wait_for_remote_api_ready "${candidate}" "" 6443; then
+      # Success! Found a joinable server
+      log_info discover event=simple_discovery_found server="${candidate}" >&2
+      MDNS_SELECTED_HOST="${candidate}"
+      MDNS_SELECTED_PORT=6443
+      MDNS_SELECTED_NSS_OK=1
+      return 0
+    else
+      log_info discover event=simple_discovery_api_fail candidate="${candidate}" >&2
+    fi
+  done
+  
+  # No servers found - check if we should become bootstrap
+  log_info discover event=simple_discovery_no_servers token_present="${TOKEN_PRESENT}" >&2
+  
+  if [ "${TOKEN_PRESENT}" -eq 0 ]; then
+    # No token means we can bootstrap if allowed
+    log_info discover event=simple_discovery_bootstrap reason="no_token" >&2
+    return 1  # Signal to caller that bootstrap is needed
+  fi
+  
+  # Token present but no servers found
+  log_error_msg discover "No joinable servers found" "event=simple_discovery_fail"
+  return 1
+}
 
 log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
 server_host=""
 bootstrap_selected="false"
+
+# Phase 3: Use simplified discovery if enabled
+if [ "${SIMPLE_DISCOVERY}" = "1" ]; then
+  log_info discover event=simple_discovery_enabled >&2
+  
+  if discover_via_nss_and_api; then
+    # Found a server via simple discovery
+    server_host="${MDNS_SELECTED_HOST}"
+    log_info discover event=simple_discovery_success server="${server_host}" >&2
+  else
+    # No server found, check if we should bootstrap
+    if [ "${TOKEN_PRESENT}" -eq 0 ]; then
+      bootstrap_selected="true"
+      log_info discover event=simple_discovery_bootstrap >&2
+    else
+      log_error_msg discover "Simple discovery failed and token is present; cannot bootstrap" >&2
+      exit 1
+    fi
+  fi
+  
+  # Skip the complex discovery loop below
+  if [ "${bootstrap_selected}" = "true" ]; then
+    if publish_bootstrap_service; then
+      if [ "${SERVERS_DESIRED}" = "1" ]; then
+        install_server_single
+      else
+        install_server_cluster_init
+      fi
+    else
+      log_error_msg discover "Failed to publish bootstrap service" "phase=bootstrap"
+      exit 1
+    fi
+    exit 0
+  elif [ -n "${server_host}" ]; then
+    # Join the discovered server
+    if wait_for_remote_api_ready "${server_host}" "${MDNS_SELECTED_IP:-}" "${MDNS_SELECTED_PORT:-6443}"; then
+      install_server_join "${server_host}"
+      exit 0
+    else
+      log_error_msg discover "API readiness check failed after simple discovery" "server=${server_host}"
+      exit 1
+    fi
+  else
+    log_error_msg discover "Simple discovery produced no result" >&2
+    exit 1
+  fi
+fi
+
+# Original complex discovery flow (when SIMPLE_DISCOVERY=0)
 
 while :; do
   if [ -z "${server_host}" ] && [ "${bootstrap_selected}" != "true" ]; then

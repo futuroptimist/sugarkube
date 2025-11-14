@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-14-mdns-simple-discovery",
+  "date": "2025-11-14",
+  "component": "scripts/k3s-discover.sh - mDNS discovery flow",
+  "rootCause": "The current discovery flow is overly complex, involving service browsing, leader election, D-Bus polling, and multiple retry mechanisms totaling ~800 lines. This complexity creates multiple failure modes and makes the system difficult to debug. The core insight is that mDNS service advertisement is not required for .local name resolution - NSS (Name Service Switch) can resolve sugarkube0.local directly using Avahi's host records without any service records being published.",
+  "resolution": "Added SUGARKUBE_SIMPLE_DISCOVERY feature flag (defaults to 1, simplified discovery enabled by default) that replaces the complex service discovery with direct NSS resolution. When enabled, follower nodes iterate through sugarkube{0..N}.local, use getent to resolve each hostname via NSS, check the API with 401 support, and join the first responsive server. This eliminates service browsing, leader election, and D-Bus polling logic. This is Phase 3 of the mDNS discovery simplification roadmap.",
+  "references": [
+    "notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md",
+    "outages/2025-11-14-mdns-complexity-analysis.md",
+    "scripts/k3s-discover.sh lines 196-199 (feature flag definition)",
+    "scripts/k3s-discover.sh discover_via_nss_and_api() function",
+    "tests/scripts/test_simple_discovery.py"
+  ]
+}

@@ -58,6 +58,7 @@ def test_failopen_disabled_by_default_in_prod(tmp_path: Path) -> None:
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
         "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
+        "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for this test
         "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
@@ -102,6 +103,7 @@ def test_failopen_enabled_by_default_in_dev(tmp_path: Path) -> None:
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
         "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
+        "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for this test
         "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
@@ -149,6 +151,7 @@ def test_failopen_explicit_disable(tmp_path: Path) -> None:
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
         "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
         "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
+        "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for this test
         "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
@@ -257,6 +260,8 @@ def test_failopen_resolves_deterministic_hosts(tmp_path: Path) -> None:
         "SUGARKUBE_DISCOVERY_FAILOPEN_TIMEOUT": "0",
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(fixture),
         "SUGARKUBE_MDNS_ABSENCE_GATE": "0",
+        "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for legacy flow
+        "SUGARKUBE_SIMPLE_DISCOVERY": "0",  # Use legacy discovery for failopen test
         "SUGARKUBE_MDNS_PUBLISH_ADDR": "192.0.2.50",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
         "ALLOW_NON_ROOT": "1",

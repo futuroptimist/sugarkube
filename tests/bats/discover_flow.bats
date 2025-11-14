@@ -523,6 +523,7 @@ CONF
     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}" \
     SUGARKUBE_MDNS_BOOT_RETRIES=1 \
     SUGARKUBE_MDNS_BOOT_DELAY=0 \
+    SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0 \
     "${BATS_CWD}/scripts/k3s-discover.sh" --test-bootstrap-publish
 
   [ "$status" -eq 0 ]
@@ -647,6 +648,8 @@ CONF
     ELECTION_HOLDOFF=0 \
     SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
+    SUGARKUBE_SIMPLE_DISCOVERY=0 \
+    SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0 \
     timeout 30 "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 0 ]
@@ -787,6 +790,8 @@ CONF
     ELECTION_HOLDOFF=0 \
     SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
+    SUGARKUBE_SIMPLE_DISCOVERY=0 \
+    SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0 \
     timeout 30 "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 0 ]
@@ -923,6 +928,8 @@ CONF
     ELECTION_HOLDOFF=0 \
     SUGARKUBE_API_READY_TIMEOUT=2 \
     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}" \
+    SUGARKUBE_SIMPLE_DISCOVERY=0 \
+    SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0 \
     timeout 1 "${BATS_CWD}/scripts/k3s-discover.sh"
 
   [ "$status" -eq 124 ]
