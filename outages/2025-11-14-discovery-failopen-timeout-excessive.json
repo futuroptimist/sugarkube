@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-14-discovery-failopen-timeout-excessive",
+  "date": "2025-11-14",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "The discovery fail-open timeout was hardcoded to 300 seconds (5 minutes) for all environments, including dev. When mDNS discovery encounters persistent failures, nodes wait 5 minutes before attempting direct join using fail-open logic. This excessive delay in development environments significantly impacts developer workflow and cluster formation time during mDNS issues.",
+  "resolution": "Introduced environment-specific fail-open timeout defaults: 60 seconds for dev environments and 300 seconds for production/integration environments. The timeout remains configurable via SUGARKUBE_DISCOVERY_FAILOPEN_TIMEOUT environment variable. This reduces the wait time in development from 5 minutes to 1 minute while maintaining conservative timeouts in production.",
+  "references": [
+    "scripts/k3s-discover.sh:254-262",
+    "scripts/k3s-discover.sh:4321-4459"
+  ]
+}
