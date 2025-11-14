@@ -1,0 +1,12 @@
+{
+  "id": "mdns-ready-dbus-path-mismatch",
+  "date": "2025-11-14",
+  "component": "scripts/mdns_ready.sh",
+  "rootCause": "The mdns_ready.sh script called D-Bus methods on the wrong object path. It used '/' instead of '/org/freedesktop/Avahi/Server', causing 'Method GetVersionString...doesn't exist' errors and preventing cross-node mDNS discovery. Both busctl and gdbus calls were affected, leading to D-Bus timeout fallbacks to slower CLI methods.",
+  "resolution": "Updated both busctl and gdbus calls to use the correct object path '/org/freedesktop/Avahi/Server'. Updated test assertions to expect the corrected path in log output.",
+  "references": [
+    "scripts/mdns_ready.sh",
+    "tests/test_mdns_ready_unit.py",
+    "docs/raspi_cluster_setup.md"
+  ]
+}
