@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "is-active" ] && [ "$2" = "avahi-daemon" ]; then
+  echo "active"
+  exit 0
+fi
+if [ "$1" = "restart" ] || [ "$1" = "status" ]; then
+  exit 0
+fi
+echo "systemctl stub unexpected: $*" >&2
+exit 1

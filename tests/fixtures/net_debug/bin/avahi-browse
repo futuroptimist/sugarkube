@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "-rt" ] && [ "$2" = "_k3s-sugar-dev._tcp" ]; then
+  cat <<'OUT'
++;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (server);_k3s-sugar-dev._tcp;local
+=;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;10.0.0.5;6443;txt=cluster=sugar;txt=env=dev;txt=role=server
+=;eth0;IPv4;public-host.example;_k3s-sugar-dev._tcp;local;public-host.example;203.0.113.12;6443;txt=role=server
+OUT
+  exit 0
+fi
+echo "avahi-browse stub unexpected: $*" >&2
+exit 1

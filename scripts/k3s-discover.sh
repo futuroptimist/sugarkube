@@ -18,6 +18,49 @@ elif [ -f "${SUMMARY_LIB}" ]; then
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
 
+NET_DEBUG_CAPTURE_FIRST=0
+NET_DEBUG_CAPTURE_ELECTION=0
+
+maybe_capture_net_debug() {
+  local stage="$1"
+
+  if [ "${SAVE_DEBUG_LOGS:-0}" != "1" ]; then
+    return
+  fi
+  if [ "${SUGARKUBE_ENV:-}" != "dev" ]; then
+    return
+  fi
+  if [ -z "${SUGARKUBE_DEBUG_LOG_FILE:-}" ]; then
+    return
+  fi
+  if [ ! -e "${SUGARKUBE_DEBUG_LOG_FILE}" ]; then
+    return
+  fi
+  if [ ! -x "${SCRIPT_DIR}/net_debug_sanitized.sh" ]; then
+    return
+  fi
+
+  case "${stage}" in
+    mdns-first-browse)
+      if [ "${NET_DEBUG_CAPTURE_FIRST}" -eq 1 ]; then
+        return
+      fi
+      NET_DEBUG_CAPTURE_FIRST=1
+      ;;
+    pre-election-backoff)
+      if [ "${NET_DEBUG_CAPTURE_ELECTION}" -eq 1 ]; then
+        return
+      fi
+      NET_DEBUG_CAPTURE_ELECTION=1
+      ;;
+  esac
+
+  {
+    printf '\n'
+    "${SCRIPT_DIR}/net_debug_sanitized.sh" "${stage}"
+  } >>"${SUGARKUBE_DEBUG_LOG_FILE}" 2>&1 || true
+}
+
 log_message() {
   local level="$1"
   shift
@@ -4487,8 +4530,11 @@ while :; do
         DISCOVERY_FAILOPEN_START_TIME=0
         # Reset failure count on success
         DISCOVERY_FAILURE_COUNT=0
+        maybe_capture_net_debug "mdns-first-browse"
         break
       fi
+
+      maybe_capture_net_debug "mdns-first-browse"
 
       # Increment failure count
       DISCOVERY_FAILURE_COUNT=$((DISCOVERY_FAILURE_COUNT + 1))
@@ -4525,6 +4571,7 @@ while :; do
       fi
 
       if run_leader_election; then
+        maybe_capture_net_debug "pre-election-backoff"
         sleep "${ELECTION_HOLDOFF}"
         if select_server_candidate; then
           server_host="${MDNS_SELECTED_HOST}"
