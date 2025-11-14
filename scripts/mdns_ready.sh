@@ -180,7 +180,7 @@ PY
         --timeout="${timeout_secs}" \
         call \
         org.freedesktop.Avahi \
-        / \
+        /org/freedesktop/Avahi/Server \
         org.freedesktop.Avahi.Server \
         GetVersionString 2>&1)"; then
         dbus_status=0
@@ -209,7 +209,7 @@ PY
           elapsed_ms="${elapsed_ms}" \
           ownership_attempts="${ownership_attempts}" \
           bus_destination=org.freedesktop.Avahi \
-          bus_object=/ \
+          bus_object=/org/freedesktop/Avahi/Server \
           bus_interface=org.freedesktop.Avahi.Server \
           bus_method=GetVersionString \
           bus_owner=owned \
@@ -232,7 +232,7 @@ PY
     if gdbus_output="$(gdbus call \
       --system \
       --dest org.freedesktop.Avahi \
-      --object-path / \
+      --object-path /org/freedesktop/Avahi/Server \
       --method org.freedesktop.Avahi.Server.GetVersionString \
       --timeout "${dbus_timeout_secs}" 2>&1)"; then
       dbus_status=0
@@ -264,7 +264,7 @@ PY
         method=dbus \
         elapsed_ms="${elapsed_ms}" \
         bus_destination=org.freedesktop.Avahi \
-        bus_object=/ \
+        bus_object=/org/freedesktop/Avahi/Server \
         bus_interface=org.freedesktop.Avahi.Server \
         bus_method=GetVersionString \
         bus_owner=unknown \

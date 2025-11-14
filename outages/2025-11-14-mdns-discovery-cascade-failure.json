@@ -1,0 +1,12 @@
+{
+  "id": "mdns-discovery-cascade-failure",
+  "date": "2025-11-14",
+  "component": "mDNS discovery stack",
+  "rootCause": "The D-Bus object path mismatch in multiple Avahi client scripts created a cascade of discovery failures. When mdns_ready.sh couldn't verify D-Bus readiness, the mDNS absence gate couldn't get reliable absence confirmation, timing out after 15+ seconds. When mdns_publish_static.sh couldn't confirm service publication via ResolveService, it relied on slower journalctl-based confirmation, adding 30+ seconds. When nodes couldn't discover each other via D-Bus, avahi-browse CLI fallbacks also failed if D-Bus wasn't working. The cumulative effect prevented cross-node discovery and left follower nodes unable to find the bootstrap leader.",
+  "resolution": "Fixed the root cause by correcting D-Bus object paths in all Avahi client scripts. This eliminates the cascade: (1) mdns_ready.sh can properly check D-Bus readiness, (2) absence gate can get reliable D-Bus confirmation, (3) publication confirmation works via ResolveService, and (4) service discovery works reliably. Total discovery time should drop from 2+ minutes to under 30 seconds.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "outages/2025-11-14-mdns-ready-dbus-path-mismatch.json",
+    "docs/raspi_cluster_setup.md"
+  ]
+}

@@ -174,7 +174,7 @@ def test_mdns_ready_logs_dbus_method_failure_details(mock_env):
     assert "event=mdns_ready_dbus" in output, (
         f"Expected D-Bus failure log to include event=mdns_ready_dbus\n{output}"
     )
-    assert "bus_object=/" in output, f"Expected bus_object=/ in failure log\n{output}"
+    assert "bus_object=/org/freedesktop/Avahi/Server" in output, f"Expected bus_object=/org/freedesktop/Avahi/Server in failure log\n{output}"
     assert "bus_interface=org.freedesktop.Avahi.Server" in output, (
         f"Expected bus_interface in failure log\n{output}"
     )

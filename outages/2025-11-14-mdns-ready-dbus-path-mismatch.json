@@ -1,0 +1,16 @@
+{
+  "id": "mdns-ready-dbus-path-mismatch",
+  "date": "2025-11-14",
+  "component": "scripts/mdns_ready.sh, scripts/mdns_publish_static.sh, scripts/mdns_selfcheck.sh, scripts/k3s_mdns_query.py",
+  "rootCause": "Multiple scripts called Avahi D-Bus methods on the wrong object path. They used '/' instead of '/org/freedesktop/Avahi/Server', causing 'Method...doesn't exist' errors and preventing cross-node mDNS discovery. Affected methods: GetVersionString (mdns_ready.sh), ResolveService (mdns_publish_static.sh), GetHostNameFqdn (mdns_selfcheck.sh), and ServiceBrowserNew (k3s_mdns_query.py). This caused D-Bus timeouts forcing fallback to slower CLI methods and preventing reliable mDNS absence gate confirmation.",
+  "resolution": "Updated all D-Bus calls to use the correct object path '/org/freedesktop/Avahi/Server' for Server interface methods. Fixed in: mdns_ready.sh (busctl and gdbus GetVersionString), mdns_publish_static.sh (gdbus and busctl ResolveService), mdns_selfcheck.sh (gdbus GetHostNameFqdn), and k3s_mdns_query.py (gdbus and busctl ServiceBrowserNew). Updated test assertions to expect the corrected path in log output.",
+  "references": [
+    "scripts/mdns_ready.sh",
+    "scripts/mdns_publish_static.sh",
+    "scripts/mdns_selfcheck.sh",
+    "scripts/k3s_mdns_query.py",
+    "tests/test_mdns_ready_unit.py",
+    "tests/test_mdns_ready_dbus_path_fix.py",
+    "docs/raspi_cluster_setup.md"
+  ]
+}
