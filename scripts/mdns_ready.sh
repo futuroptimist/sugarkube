@@ -8,6 +8,16 @@ SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 # shellcheck source=scripts/log.sh
 . "${SCRIPT_DIR}/log.sh"
 
+sanitize_kv() {
+  # Match the sanitization used in wait_for_avahi_dbus.sh so log fields stay
+  # consistent across scripts regardless of whitespace or locale quirks.
+  LC_ALL=C printf '%s' "$1" \
+    | tr '\n\r\t' '   ' \
+    | tr -s ' ' ' ' \
+    | tr ' ' '_' \
+    | tr -cd '[:alnum:]_.:/-'
+}
+
 # Helper function to calculate elapsed milliseconds since start
 elapsed_ms_since() {
   local start_ms="$1"
@@ -108,7 +118,7 @@ PY
         ownership_confirmed=1
         break
       fi
-      
+
       # Calculate elapsed time
       local elapsed_ms
       elapsed_ms="$(elapsed_ms_since "${start_ms}")"
@@ -144,18 +154,35 @@ PY
       fi
     done
     
+    if [ "${ownership_confirmed}" -ne 1 ]; then
+      local elapsed_ms
+      elapsed_ms="$(elapsed_ms_since "${start_ms}")"
+      log_info \
+        mdns_ready \
+        event=mdns_ready_dbus \
+        outcome=ownership_timeout \
+        method=dbus \
+        elapsed_ms="${elapsed_ms}" \
+        ownership_attempts="${ownership_attempts}" \
+        bus_destination=org.freedesktop.DBus \
+        bus_object=/org/freedesktop/DBus \
+        bus_interface=org.freedesktop.DBus \
+        bus_method=NameHasOwner \
+        bus_owner=absent
+    fi
+
     # If ownership confirmed, try GetVersionString
     if [ "${ownership_confirmed}" -eq 1 ]; then
       local timeout_secs=$((dbus_timeout_ms / 1000))
       [ "${timeout_secs}" -eq 0 ] && timeout_secs=1
-      if busctl --system \
+      local bus_output=""
+      if bus_output="$(busctl --system \
         --timeout="${timeout_secs}" \
         call \
         org.freedesktop.Avahi \
         / \
         org.freedesktop.Avahi.Server \
-        GetVersionString \
-        >/dev/null 2>&1; then
+        GetVersionString 2>&1)"; then
         dbus_status=0
         method="dbus"
         local elapsed_ms
@@ -170,6 +197,24 @@ PY
         return 0
       else
         dbus_status=$?
+        local elapsed_ms
+        elapsed_ms="$(elapsed_ms_since "${start_ms}")"
+        local bus_error
+        bus_error="$(sanitize_kv "${bus_output}")"
+        log_info \
+          mdns_ready \
+          event=mdns_ready_dbus \
+          outcome=call_failed \
+          method=dbus \
+          elapsed_ms="${elapsed_ms}" \
+          ownership_attempts="${ownership_attempts}" \
+          bus_destination=org.freedesktop.Avahi \
+          bus_object=/ \
+          bus_interface=org.freedesktop.Avahi.Server \
+          bus_method=GetVersionString \
+          bus_owner=owned \
+          bus_code="${dbus_status}" \
+          bus_error="${bus_error}"
       fi
     fi
   elif command -v gdbus >/dev/null 2>&1; then
@@ -183,14 +228,18 @@ print(timeout_secs)
 PY
     )"
     
-    gdbus call \
+    local gdbus_output=""
+    if gdbus_output="$(gdbus call \
       --system \
       --dest org.freedesktop.Avahi \
       --object-path / \
       --method org.freedesktop.Avahi.Server.GetVersionString \
-      --timeout "${dbus_timeout_secs}" \
-      >/dev/null 2>&1 || dbus_status=$?
-    
+      --timeout "${dbus_timeout_secs}" 2>&1)"; then
+      dbus_status=0
+    else
+      dbus_status=$?
+    fi
+
     if [ "${dbus_status}" -eq 0 ]; then
       method="dbus"
       local elapsed_ms
@@ -203,6 +252,25 @@ PY
         elapsed_ms="${elapsed_ms}" \
         fallback=gdbus
       return 0
+    else
+      local elapsed_ms
+      elapsed_ms="$(elapsed_ms_since "${start_ms}")"
+      local bus_error
+      bus_error="$(sanitize_kv "${gdbus_output}")"
+      log_info \
+        mdns_ready \
+        event=mdns_ready_dbus \
+        outcome=call_failed \
+        method=dbus \
+        elapsed_ms="${elapsed_ms}" \
+        bus_destination=org.freedesktop.Avahi \
+        bus_object=/ \
+        bus_interface=org.freedesktop.Avahi.Server \
+        bus_method=GetVersionString \
+        bus_owner=unknown \
+        bus_code="${dbus_status}" \
+        bus_error="${bus_error}" \
+        fallback=gdbus
     fi
   else
     dbus_status=127

@@ -171,6 +171,11 @@ last_systemctl_detail=""
 last_bus_status="pending"
 last_bus_error=""
 last_bus_code=1
+last_bus_destination="org.freedesktop.Avahi"
+last_bus_object="/org/freedesktop/Avahi/Server"
+last_bus_interface="org.freedesktop.Avahi.Server"
+last_bus_method=GetVersionString
+last_bus_owner="unknown"
 systemd_absent_hint=0
 
 while :; do
@@ -215,6 +220,13 @@ while :; do
   if [ "${systemd_ready}" -eq 1 ]; then
     busctl_output=""
     busctl_status=0
+    prev_bus_status="${last_bus_status}"
+    prev_bus_owner="${last_bus_owner}"
+    last_bus_destination="org.freedesktop.Avahi"
+    last_bus_object="/org/freedesktop/Avahi/Server"
+    last_bus_interface="org.freedesktop.Avahi.Server"
+    last_bus_method=GetVersionString
+    last_bus_owner="unknown"
     if busctl_output="$(busctl \
       --system \
       --timeout=2 \
@@ -226,6 +238,7 @@ while :; do
       last_bus_status="ok"
       last_bus_error=""
       last_bus_code=0
+      last_bus_owner="owned"
       elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
       systemd_state_log="$(sanitize_kv "${last_systemctl_state}")"
       [ -n "${systemd_state_log}" ] || systemd_state_log=unknown
@@ -234,7 +247,12 @@ while :; do
         outcome=ok \
         ms_elapsed="${elapsed_ms}" \
         systemd_state="${systemd_state_log}" \
-        bus_status=ok
+        bus_status=ok \
+        bus_owner=owned \
+        bus_destination="${last_bus_destination}" \
+        bus_object="${last_bus_object}" \
+        bus_interface="${last_bus_interface}" \
+        bus_method="${last_bus_method}"
       log_info "$@"
       exit 0
     fi
@@ -253,6 +271,7 @@ while :; do
         last_bus_status="ok"
         last_bus_error=""
         last_bus_code=0
+        last_bus_owner="owned"
         elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
         systemd_state_log="$(sanitize_kv "${last_systemctl_state}")"
         [ -n "${systemd_state_log}" ] || systemd_state_log=unknown
@@ -262,6 +281,11 @@ while :; do
           ms_elapsed="${elapsed_ms}" \
           systemd_state="${systemd_state_log}" \
           bus_status=ok \
+          bus_owner=owned \
+          bus_destination="${last_bus_destination}" \
+          bus_object="${last_bus_object}" \
+          bus_interface="${last_bus_interface}" \
+          bus_method=VersionString \
           bus_fallback=get_property
         log_info "$@"
         exit 0
@@ -336,10 +360,40 @@ while :; do
       last_bus_status="call_failed"
       last_bus_error="${busctl_output}"
     fi
+
+    if [ "${last_bus_status}" = "name_not_owned" ]; then
+      last_bus_owner="not_owned"
+    elif [ "${last_bus_status}" = "method_error" ]; then
+      last_bus_owner="owned"
+    elif [ "${last_bus_status}" = "call_failed" ]; then
+      last_bus_owner="unknown"
+    fi
+
+    if [ "${last_bus_status}" != "${prev_bus_status}" ] \
+      || [ "${last_bus_owner}" != "${prev_bus_owner}" ]; then
+      elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
+      bus_error_log="$(sanitize_kv "${busctl_output}")"
+      set -- \
+        avahi_dbus_call \
+        outcome=retry \
+        ms_elapsed="${elapsed_ms}" \
+        bus_status="${last_bus_status}" \
+        bus_owner="${last_bus_owner}" \
+        bus_code="${last_bus_code}" \
+        bus_destination="${last_bus_destination}" \
+        bus_object="${last_bus_object}" \
+        bus_interface="${last_bus_interface}" \
+        bus_method="${last_bus_method}"
+      if [ -n "${bus_error_log}" ]; then
+        set -- "$@" bus_error="${bus_error_log}"
+      fi
+      log_info "$@"
+    fi
   else
     last_bus_status="systemd_wait"
     last_bus_error=""
     last_bus_code=0
+    last_bus_owner="unknown"
   fi
 
   elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
@@ -376,6 +430,16 @@ bus_status_log="$(sanitize_kv "${last_bus_status}")"
 [ -n "${bus_status_log}" ] || bus_status_log=unknown
 bus_error_log="$(sanitize_kv "${last_bus_error}")"
 systemd_detail_log="$(sanitize_kv "${last_systemctl_detail}")"
+bus_destination_log="$(sanitize_kv "${last_bus_destination}")"
+[ -n "${bus_destination_log}" ] || bus_destination_log=unknown
+bus_object_log="$(sanitize_kv "${last_bus_object}")"
+[ -n "${bus_object_log}" ] || bus_object_log=unknown
+bus_interface_log="$(sanitize_kv "${last_bus_interface}")"
+[ -n "${bus_interface_log}" ] || bus_interface_log=unknown
+bus_method_log="$(sanitize_kv "${last_bus_method}")"
+[ -n "${bus_method_log}" ] || bus_method_log=unknown
+bus_owner_log="$(sanitize_kv "${last_bus_owner}")"
+[ -n "${bus_owner_log}" ] || bus_owner_log=unknown
 
 if [ "${systemd_absent_hint}" -ne 0 ]; then
   set -- \
@@ -393,6 +457,11 @@ if [ "${systemd_absent_hint}" -ne 0 ]; then
   if [ -n "${bus_error_log}" ]; then
     set -- "$@" bus_error="${bus_error_log}"
   fi
+  set -- "$@" bus_destination="${bus_destination_log}"
+  set -- "$@" bus_object="${bus_object_log}"
+  set -- "$@" bus_interface="${bus_interface_log}"
+  set -- "$@" bus_method="${bus_method_log}"
+  set -- "$@" bus_owner="${bus_owner_log}"
   log_info "$@"
   exit 2
 fi
@@ -411,5 +480,10 @@ fi
 if [ -n "${bus_error_log}" ]; then
   set -- "$@" bus_error="${bus_error_log}"
 fi
+set -- "$@" bus_destination="${bus_destination_log}"
+set -- "$@" bus_object="${bus_object_log}"
+set -- "$@" bus_interface="${bus_interface_log}"
+set -- "$@" bus_method="${bus_method_log}"
+set -- "$@" bus_owner="${bus_owner_log}"
 log_info "$@"
 exit 1

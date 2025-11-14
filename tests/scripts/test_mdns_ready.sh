@@ -104,6 +104,18 @@ if ! grep -q "service_type=" <<<"${output}"; then
   exit 1
 fi
 
+if ! grep -q "bus_method=NameHasOwner" <<<"${output}"; then
+  echo "FAIL: Expected bus_method=NameHasOwner in output"
+  echo "Output: ${output}"
+  exit 1
+fi
+
+if ! grep -q "bus_owner=absent" <<<"${output}"; then
+  echo "FAIL: Expected bus_owner=absent in output"
+  echo "Output: ${output}"
+  exit 1
+fi
+
 echo "PASS: D-Bus failure, CLI fallback success"
 
 # Test 3: Both methods fail

@@ -110,6 +110,79 @@ def test_mdns_ready_dbus_failure_cli_success(mock_env):
     assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
     assert "elapsed_ms=" in output, f"Expected elapsed_ms in output\n{output}"
 
+    # Verify D-Bus failure log captured object/method/owner details
+    assert "bus_method=NameHasOwner" in output, (
+        f"Expected bus_method=NameHasOwner in D-Bus failure log\n{output}"
+    )
+    assert "bus_owner=absent" in output, (
+        f"Expected bus_owner=absent when ownership timed out\n{output}"
+    )
+
+
+def test_mdns_ready_logs_dbus_method_failure_details(mock_env):
+    """Ensure GetVersionString failures log object, interface, method, and owner."""
+
+    bin_dir = mock_env["bin_dir"]
+
+    busctl_mock = bin_dir / "busctl"
+    busctl_mock.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        "  *\"NameHasOwner\"*)\n"
+        "    echo 'b true'\n"
+        "    exit 0\n"
+        "    ;;\n"
+        "  *\"get-property\"*)\n"
+        "    exit 1\n"
+        "    ;;\n"
+        "  *\"GetVersionString\"*)\n"
+        "    echo 'Call failed: Method GetVersionString unavailable' >&2\n"
+        "    exit 1\n"
+        "    ;;\n"
+        "esac\n"
+        "echo \"unexpected busctl call: $*\" >&2\n"
+        "exit 2\n"
+    )
+    busctl_mock.chmod(0o755)
+
+    avahi_browse_mock = bin_dir / "avahi-browse"
+    avahi_browse_mock.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo '=;eth0;IPv4;test-service;_k3s-sugar-dev._tcp;local'\n"
+        "exit 0\n"
+    )
+    avahi_browse_mock.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = mock_env["path"]
+    env["AVAHI_DBUS_WAIT_MS"] = "200"
+
+    result = subprocess.run(
+        [str(MDNS_READY_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, (
+        f"Expected exit code 0, got {result.returncode}\n{result.stderr}"
+    )
+
+    output = result.stdout + result.stderr
+
+    assert "event=mdns_ready_dbus" in output, (
+        f"Expected D-Bus failure log to include event=mdns_ready_dbus\n{output}"
+    )
+    assert "bus_object=/" in output, f"Expected bus_object=/ in failure log\n{output}"
+    assert "bus_interface=org.freedesktop.Avahi.Server" in output, (
+        f"Expected bus_interface in failure log\n{output}"
+    )
+    assert "bus_method=GetVersionString" in output, (
+        f"Expected bus_method=GetVersionString in failure log\n{output}"
+    )
+    assert "bus_owner=owned" in output, f"Expected bus_owner=owned in failure log\n{output}"
+
 
 def test_mdns_ready_dbus_and_cli_both_fail(mock_env):
     """Test that mdns_ready fails when both D-Bus and CLI fail.
