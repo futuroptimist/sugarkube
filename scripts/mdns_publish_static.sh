@@ -750,8 +750,11 @@ PY
 }
 
 
+AVAHI_WAIT_ERROR_REASON=""
+AVAHI_WAIT_ERROR_MESSAGE=""
+
 wait_for_avahi_publication() {
-  local service_display timeout_seconds start_epoch pattern deadline now journal_output
+  local service_display timeout_seconds start_epoch pattern deadline now journal_output failure_line
   service_display="$1"
   timeout_seconds="$2"
   start_epoch="$3"
@@ -772,6 +775,9 @@ wait_for_avahi_publication() {
     return 0
   fi
 
+  AVAHI_WAIT_ERROR_REASON=""
+  AVAHI_WAIT_ERROR_MESSAGE=""
+
   pattern="Service \"${service_display}\" successfully established."
   deadline=$(( $(date +%s) + timeout_seconds ))
 
@@ -783,6 +789,16 @@ wait_for_avahi_publication() {
     fi
 
     if journal_output="$(journalctl -u avahi-daemon --since "@${start_epoch}" --no-pager 2>/dev/null)"; then
+      if [ -z "${AVAHI_WAIT_ERROR_REASON}" ]; then
+        failure_line="$(printf '%s\n' "${journal_output}" | grep -m1 -F "Service \"${service_display}\" failed:" || true)"
+        if [ -n "${failure_line}" ]; then
+          AVAHI_WAIT_ERROR_MESSAGE="${failure_line}"
+          AVAHI_WAIT_ERROR_REASON="${failure_line}"
+          if [[ "${failure_line}" == *" failed: "* ]]; then
+            AVAHI_WAIT_ERROR_REASON="${failure_line##* failed: }"
+          fi
+        fi
+      fi
       if grep -Fq "${pattern}" <<<"${journal_output}"; then
         return 0
       fi
@@ -1249,10 +1265,19 @@ printf 'publish_metrics confirm_outcome=%s confirm_latency_ms=%s confirm_attempt
   "${CONFIRM_CLI_STATUS}" \
   "${reload_status}"
 
-if [ "${CONFIRM_SUCCESS}" -ne 1 ]; then
-  echo "Service ${SERVICE_TYPE} not observable after publication" >&2
-  exit 95
-fi
+  if [ -n "${AVAHI_WAIT_ERROR_REASON}" ]; then
+    avahi_reason_lc="$(printf '%s' "${AVAHI_WAIT_ERROR_REASON}" | tr '[:upper:]' '[:lower:]')"
+    if printf '%s' "${avahi_reason_lc}" | grep -Fq "permission denied"; then
+      avahi_error_message="${AVAHI_WAIT_ERROR_MESSAGE:-Service ${SERVICE_TYPE} failed: ${AVAHI_WAIT_ERROR_REASON}}"
+      echo "${avahi_error_message}" >&2
+      exit 1
+    fi
+  fi
+
+  if [ "${CONFIRM_SUCCESS}" -ne 1 ]; then
+    echo "Service ${SERVICE_TYPE} not observable after publication" >&2
+    exit 95
+  fi
 
 # Self-check: verify host record is advertised
 verify_host_record "${SRV_HOST}" || true  # Log but don't fail on host record check

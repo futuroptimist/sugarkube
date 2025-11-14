@@ -373,6 +373,7 @@ STUB
 
   [ "$script_status" -ne 0 ]
   [[ "$script_stderr" =~ Timed\ out\ waiting\ for\ Avahi\ to\ publish ]]
+  [[ "$script_stderr" =~ Permission\ denied ]]
   run grep -F "Permission denied" "${TEST_JOURNAL_LOG}"
   [ "$status" -eq 0 ]
 }
