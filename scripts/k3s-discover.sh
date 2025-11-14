@@ -198,6 +198,47 @@ FAST_SLEEP_FLAG="${SUGARKUBE_TEST_SKIP_PUBLISH_SLEEP:-0}"
 API_READY_LAST_STATUS=""
 API_READY_LAST_MODE=""
 MDNS_SELECTED_HOST=""
+
+NET_DEBUG_CAPTURE_SCRIPT="${SCRIPT_DIR}/net_debug_sanitized.sh"
+NET_DEBUG_CAPTURE_INITIAL=0
+NET_DEBUG_CAPTURE_BACKOFF=0
+
+run_net_debug_capture() {
+  local stage="$1"
+
+  if [ "${SAVE_DEBUG_LOGS:-0}" != "1" ]; then
+    return 0
+  fi
+  if [ "${SUGARKUBE_ENV:-}" != "dev" ]; then
+    return 0
+  fi
+  if [ -z "${SUGARKUBE_DEBUG_LOG_FILE:-}" ] || [ ! -f "${SUGARKUBE_DEBUG_LOG_FILE}" ]; then
+    return 0
+  fi
+  if [ ! -x "${NET_DEBUG_CAPTURE_SCRIPT}" ]; then
+    return 0
+  fi
+
+  case "${stage}" in
+    initial)
+      if [ "${NET_DEBUG_CAPTURE_INITIAL}" = "1" ]; then
+        return 0
+      fi
+      NET_DEBUG_CAPTURE_INITIAL=1
+      ;;
+    backoff)
+      if [ "${NET_DEBUG_CAPTURE_BACKOFF}" = "1" ]; then
+        return 0
+      fi
+      NET_DEBUG_CAPTURE_BACKOFF=1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  "${NET_DEBUG_CAPTURE_SCRIPT}" >>"${SUGARKUBE_DEBUG_LOG_FILE}" 2>&1 || true
+}
 MDNS_SELECTED_PORT=6443
 MDNS_SELECTED_MODE=""
 MDNS_SELECTED_IP=""
@@ -1253,6 +1294,7 @@ ensure_avahi_liveness_signal() {
       local browse_output=""
       local browse_status=0
       browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
+      run_net_debug_capture initial
       local lines
       lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
       
@@ -4519,6 +4561,7 @@ while :; do
           FOLLOWER_UNTIL_SERVER=0
           FOLLOWER_UNTIL_SERVER_SET_AT=0
         else
+          run_net_debug_capture backoff
           sleep "${DISCOVERY_WAIT_SECS}"
           continue
         fi
@@ -4546,6 +4589,7 @@ while :; do
 
       FOLLOWER_UNTIL_SERVER=1
       FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
+      run_net_debug_capture backoff
       sleep "${DISCOVERY_WAIT_SECS}"
     done
   fi
