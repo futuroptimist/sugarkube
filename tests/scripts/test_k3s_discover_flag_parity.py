@@ -140,6 +140,8 @@ def test_join_aborts_when_flag_parity_fails(tmp_path: Path) -> None:
             "SUGARKUBE_SERVER_SERVICE_PATH": str(server_service),
             "SUGARKUBE_INTENDED_K3S_CONFIG_PATH": str(intended_config),
             "SUGARKUBE_SERVER_FLAG_PARITY_BIN": str(PARITY_SCRIPT),
+            "SUGARKUBE_SIMPLE_DISCOVERY": "0",  # Use legacy discovery for this test
+            "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for legacy flow
         }
     )
 

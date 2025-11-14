@@ -277,6 +277,8 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
             "SUGARKUBE_JOIN_GATE_BIN": str(bin_dir / "join_gate_stub.sh"),
             "SUGARKUBE_DISABLE_JOIN_GATE": "1",
             "SUGARKUBE_MDNS_ABSENCE_GATE": "0",
+            "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for legacy flow
+            "SUGARKUBE_SIMPLE_DISCOVERY": "0",  # Use legacy discovery for this test
             "SUGARKUBE_TEST_FAST_JOIN": "1",
         }
     )
