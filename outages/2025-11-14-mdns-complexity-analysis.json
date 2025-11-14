@@ -1,0 +1,15 @@
+{
+  "id": "2025-11-14-mdns-complexity-analysis",
+  "date": "2025-11-14",
+  "component": "mDNS discovery stack",
+  "longForm": "outages/2025-11-14-mdns-complexity-analysis.md",
+  "rootCause": "The mDNS discovery system has accumulated excessive complexity with multiple layers of fallbacks, retries, and verification mechanisms. The core insight: mDNS service advertisement is NOT required for .local name resolution. NSS (Name Service Switch) can resolve sugarkube0.local directly using Avahi's host records without any service records being published. The current system unnecessarily restarts Avahi, polls D-Bus for 20s, publishes services via XML files, and self-checks advertisement—all adding complexity that became the problem itself.",
+  "resolution": "Phase 1 (immediate fixes) completed: Accept 401 as alive for API readiness, reduce fail-open timeout to 60s for dev, increase Avahi stabilization to 5s. Comprehensive 4-phase simplification roadmap created documenting how to remove ~2000 lines of unnecessary code: Phase 2 eliminates absence gate, Phase 3 simplifies to NSS→API→Join flow, Phase 4 removes service advertisement entirely. See notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md for detailed implementation plan.",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md",
+    "outages/2025-11-14-api-readiness-401-rejection.json",
+    "outages/2025-11-14-discovery-failopen-timeout-excessive.json",
+    "outages/2025-11-14-avahi-restart-insufficient-stabilization.json"
+  ]
+}

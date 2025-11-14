@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-14-api-readiness-401-rejection",
+  "date": "2025-11-14",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "The wait_for_remote_api_ready() function does not set ALLOW_HTTP_401=1 when checking remote k3s API servers, causing follower nodes to treat HTTP 401 (Unauthorized) responses as failures instead of recognizing them as 'alive' servers. This prevents follower nodes from joining the cluster even when the bootstrap server's API is running and returning 401 responses, which is expected behavior before authentication is configured.",
+  "resolution": "Modified wait_for_remote_api_ready() to include ALLOW_HTTP_401=1 in the check_env array when calling check_apiready.sh. This allows follower nodes to recognize HTTP 401 responses as an indication that the API server is alive and operational, matching the behavior of the local API readiness check (wait_for_api).",
+  "references": [
+    "scripts/k3s-discover.sh:3677-3717",
+    "scripts/check_apiready.sh:175-190",
+    "scripts/k3s-discover.sh:2871-2920"
+  ]
+}
