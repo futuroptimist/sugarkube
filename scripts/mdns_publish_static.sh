@@ -750,8 +750,11 @@ PY
 }
 
 
+AVAHI_WAIT_ERROR_REASON=""
+AVAHI_WAIT_ERROR_MESSAGE=""
+
 wait_for_avahi_publication() {
-  local service_display timeout_seconds start_epoch pattern deadline now journal_output
+  local service_display timeout_seconds start_epoch pattern deadline now journal_output failure_line
   service_display="$1"
   timeout_seconds="$2"
   start_epoch="$3"
@@ -772,6 +775,9 @@ wait_for_avahi_publication() {
     return 0
   fi
 
+  AVAHI_WAIT_ERROR_REASON=""
+  AVAHI_WAIT_ERROR_MESSAGE=""
+
   pattern="Service \"${service_display}\" successfully established."
   deadline=$(( $(date +%s) + timeout_seconds ))
 
@@ -783,6 +789,16 @@ wait_for_avahi_publication() {
     fi
 
     if journal_output="$(journalctl -u avahi-daemon --since "@${start_epoch}" --no-pager 2>/dev/null)"; then
+      if [ -z "${AVAHI_WAIT_ERROR_REASON}" ]; then
+        failure_line="$(printf '%s\n' "${journal_output}" | grep -m1 -F "Service \"${service_display}\" failed:" || true)"
+        if [ -n "${failure_line}" ]; then
+          AVAHI_WAIT_ERROR_MESSAGE="${failure_line}"
+          AVAHI_WAIT_ERROR_REASON="${failure_line}"
+          if [[ "${failure_line}" == *" failed: "* ]]; then
+            AVAHI_WAIT_ERROR_REASON="${failure_line##* failed: }"
+          fi
+        fi
+      fi
       if grep -Fq "${pattern}" <<<"${journal_output}"; then
         return 0
       fi
@@ -795,55 +811,313 @@ wait_for_avahi_publication() {
   done
 }
 
-verify_service_with_avahi_browse() {
+# monotonic_now_ms prints the current monotonic clock in milliseconds so that
+# timeout calculations are not affected by wall-clock adjustments.
+monotonic_now_ms() {
+  python3 - <<'PY'
+import time
+print(int(time.monotonic() * 1000))
+PY
+}
+
+# elapsed_since_ms prints the number of monotonic milliseconds that have passed
+# since the provided start timestamp. Invalid or missing input is treated as 0.
+elapsed_since_ms() {
+  python3 - "$1" <<'PY'
+import sys
+import time
+
+try:
+    start = int(sys.argv[1])
+except (IndexError, ValueError):
+    start = 0
+now = int(time.monotonic() * 1000)
+elapsed = now - start
+if elapsed < 0:
+    elapsed = 0
+print(elapsed)
+PY
+}
+
+# check_service_via_dbus queries Avahi over D-Bus using gdbus or busctl to
+# verify that the expected host/port tuple is published. It returns 0 on match,
+# 1 on mismatch, and 2 when no compatible tool is available.
+check_service_via_dbus() {
+  local instance="$1"
+  local service_type="$2"
+  local domain="$3"
+  local expected_host="$4"
+  local expected_port="$5"
+  python3 - "$instance" "$service_type" "$domain" "$expected_host" "$expected_port" <<'PY'
+import ast
+import re
+import shutil
+import subprocess
+import sys
+
+instance, service_type, domain, expected_host, expected_port = sys.argv[1:6]
+expected_host = (expected_host or "").strip().lower().rstrip('.')
+if expected_host and not expected_host.endswith(".local"):
+    expected_host = f"{expected_host}.local"
+expected_port = (expected_port or "").strip()
+
+tools = []
+if shutil.which("gdbus"):
+    tools.append(
+        (
+            "gdbus",
+            [
+                "gdbus",
+                "call",
+                "--system",
+                "--dest",
+                "org.freedesktop.Avahi",
+                "--object-path",
+                "/",
+                "--method",
+                "org.freedesktop.Avahi.Server.ResolveService",
+                "int32:-1",
+                "int32:-1",
+                instance,
+                service_type,
+                domain,
+                "int32:-1",
+                "uint32:0",
+            ],
+        )
+    )
+if shutil.which("busctl"):
+    tools.append(
+        (
+            "busctl",
+            [
+                "busctl",
+                "call",
+                "--system",
+                "org.freedesktop.Avahi",
+                "/",
+                "org.freedesktop.Avahi.Server",
+                "ResolveService",
+                "iisssiu",
+                "-1",
+                "-1",
+                instance,
+                service_type,
+                domain,
+                "-1",
+                0,
+            ],
+        )
+    )
+
+if not tools:
+    sys.exit(2)
+
+for name, cmd in tools:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception:
+        continue
+    if proc.returncode != 0:
+        continue
+    output = proc.stdout.strip()
+    if not output:
+        continue
+    clean = re.sub(
+        r'\b(?:int16|int32|int64|uint16|uint32|uint64|byte|double|boolean|objectpath)\s*:?',
+        '',
+        output,
+    )
+    clean = re.sub(r'\barray\s*(?=\[)', '', clean)
+    try:
+        value = ast.literal_eval(clean)
+    except Exception:
+        continue
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    # Avahi D-Bus ResolveService is expected to return a tuple with at least 9
+    # elements: [interface, protocol, name, type, domain, host, aprotocol,
+    # address, port, txt, flags]. Skip unexpected payloads to avoid IndexError.
+    if not (isinstance(value, (list, tuple)) and len(value) >= 9):
+        continue
+    try:
+        host = str(value[5]).strip().lower().rstrip('.')
+        port = str(value[8]).strip()
+    except Exception:
+        continue
+    if host and not host.endswith('.local'):
+        host = f"{host}.local"
+    if expected_host and host != expected_host:
+        continue
+    if expected_port and port != expected_port:
+        continue
+    sys.exit(0)
+
+sys.exit(1)
+PY
+}
+
+# check_service_via_cli validates publication using avahi-browse. It returns 0
+# when the expected host is observed, 1 on mismatch, and 2 if avahi-browse is
+# unavailable.
+check_service_via_cli() {
   local service_type="$1"
   local expected_host="$2"
-  local max_attempts="${3:-10}"
-  local initial_delay="${4:-2}"
-  local max_delay="${5:-16}"
-  
+
   if ! command -v avahi-browse >/dev/null 2>&1; then
-    echo "avahi-browse not available; skipping service verification" >&2
+    return 2
+  fi
+
+  local browse_output=""
+  if ! browse_output="$(timeout 5 avahi-browse -rt "${service_type}" 2>/dev/null)"; then
+    return 1
+  fi
+  if [ -z "${browse_output}" ]; then
+    return 1
+  fi
+  local browse_output_lc expected_host_lc
+  browse_output_lc="$(printf '%s\n' "${browse_output}" | tr '[:upper:]' '[:lower:]')"
+  expected_host_lc="$(printf '%s' "${expected_host}" | tr '[:upper:]' '[:lower:]')"
+  if printf '%s\n' "${browse_output_lc}" | grep -Fq "${expected_host_lc}"; then
     return 0
   fi
-  
+  return 1
+}
+
+# confirm_avahi_publication orchestrates the verification loop, combining the
+# D-Bus and CLI checks with exponential backoff. It populates CONFIRM_* metrics
+# and returns 0 while signaling success/failure through CONFIRM_SUCCESS.
+confirm_avahi_publication() {
+  local service_type="$1"
+  local instance="$2"
+  local expected_host="$3"
+  local expected_port="$4"
+  local timeout_seconds="${5:-30}"
+  local domain="$6"
+
+  case "${timeout_seconds}" in
+    ''|*[!0-9]*) timeout_seconds=30 ;;
+  esac
+  if [ "${timeout_seconds}" -lt 1 ]; then
+    timeout_seconds=30
+  fi
+  if [ -z "${domain}" ]; then
+    domain="local"
+  fi
+
+  local start_ms
+  start_ms="$(monotonic_now_ms)"
+  local deadline_ms=$((start_ms + (timeout_seconds * 1000)))
+  local sleep_ms=500
+  local sleep_cap_ms=4000
   local attempt=1
-  local delay="${initial_delay}"
-  
-  while [ "${attempt}" -le "${max_attempts}" ]; do
-    echo "Attempt ${attempt}/${max_attempts}: verifying ${service_type} is visible via avahi-browse..." >&2
-    
-    local browse_output
-    if browse_output="$(timeout 5 avahi-browse -rt "${service_type}" 2>/dev/null)"; then
-      if [ -n "${browse_output}" ]; then
-        if printf '%s\n' "${browse_output}" | grep -Fq "${expected_host}"; then
-          echo "Service ${service_type} successfully verified for ${expected_host}" >&2
-          return 0
-        else
-          echo "Service found but does not match expected host ${expected_host}" >&2
-        fi
+
+  CONFIRM_SUCCESS=0
+  CONFIRM_LATENCY_MS=0
+  CONFIRM_ATTEMPTS=0
+  CONFIRM_DBUS_STATUS=2
+  CONFIRM_CLI_STATUS=2
+  CONFIRM_OUTCOME=timeout
+
+  while :; do
+    local dbus_status=2
+    local cli_status=2
+
+    if command -v gdbus >/dev/null 2>&1 || command -v busctl >/dev/null 2>&1; then
+      if check_service_via_dbus "${instance}" "${service_type}" "${domain}" "${expected_host}" "${expected_port}"; then
+        dbus_status=0
       else
-        echo "No services found for ${service_type}" >&2
-      fi
-    else
-      echo "avahi-browse command failed" >&2
-    fi
-    
-    if [ "${attempt}" -lt "${max_attempts}" ]; then
-      echo "Retrying in ${delay}s..." >&2
-      sleep "${delay}"
-      # Exponential backoff
-      delay=$((delay * 2))
-      if [ "${delay}" -gt "${max_delay}" ]; then
-        delay="${max_delay}"
+        dbus_status=$?
+        if [ "${dbus_status}" -ne 0 ] && [ "${dbus_status}" -ne 2 ]; then
+          dbus_status=1
+        fi
       fi
     fi
-    
+
+    if command -v avahi-browse >/dev/null 2>&1; then
+      if check_service_via_cli "${service_type}" "${expected_host}"; then
+        cli_status=0
+      else
+        cli_status=$?
+        if [ "${cli_status}" -ne 0 ] && [ "${cli_status}" -ne 2 ]; then
+          cli_status=1
+        fi
+      fi
+    fi
+
+    CONFIRM_DBUS_STATUS="${dbus_status}"
+    CONFIRM_CLI_STATUS="${cli_status}"
+
+    if [ "${dbus_status}" -eq 0 ] || [ "${cli_status}" -eq 0 ]; then
+      CONFIRM_SUCCESS=1
+      CONFIRM_OUTCOME=ok
+      break
+    fi
+
+    if [ "${dbus_status}" -eq 2 ] && [ "${cli_status}" -eq 2 ]; then
+      echo "ERROR: Neither gdbus/busctl nor avahi-browse are available; cannot verify service publication." >&2
+      CONFIRM_SUCCESS=0
+      CONFIRM_OUTCOME=unavailable
+      break
+    fi
+
+    local now_ms
+    now_ms="$(monotonic_now_ms)"
+    if [ "${now_ms}" -ge "${deadline_ms}" ]; then
+      break
+    fi
+
+    local remaining_ms
+    remaining_ms=$((deadline_ms - now_ms))
+    if [ "${remaining_ms}" -le 0 ]; then
+      break
+    fi
+
+    local sleep_seconds
+    local sleep_target_ms="${sleep_ms}"
+    if [ "${sleep_target_ms}" -gt "${remaining_ms}" ]; then
+      sleep_target_ms="${remaining_ms}"
+    fi
+    if [ "${sleep_target_ms}" -le 0 ]; then
+      break
+    fi
+    sleep_seconds="$(python3 - "${sleep_target_ms}" <<'PY'
+import sys
+try:
+    value = int(sys.argv[1])
+except (IndexError, ValueError):
+    value = 500
+if value < 1:
+    value = 1
+print(value / 1000.0)
+PY
+)"
+    sleep "${sleep_seconds}"
+    if [ "${sleep_ms}" -lt "${sleep_cap_ms}" ]; then
+      sleep_ms=$((sleep_ms * 2))
+      if [ "${sleep_ms}" -gt "${sleep_cap_ms}" ]; then
+        sleep_ms="${sleep_cap_ms}"
+      fi
+    fi
     attempt=$((attempt + 1))
   done
-  
-  echo "ERROR: Service ${service_type} not observable after ${max_attempts} attempts" >&2
-  return 1
+
+  CONFIRM_LATENCY_MS="$(elapsed_since_ms "${start_ms}")"
+  case "${CONFIRM_LATENCY_MS}" in
+    ''|*[!0-9]*) CONFIRM_LATENCY_MS=0 ;;
+  esac
+  CONFIRM_ATTEMPTS="${attempt}"
+  if [ "${CONFIRM_SUCCESS}" -ne 1 ]; then
+    if [ "${CONFIRM_DBUS_STATUS}" -ne 0 ] && [ "${CONFIRM_DBUS_STATUS}" -ne 2 ]; then
+      CONFIRM_OUTCOME=dbus_miss
+    elif [ "${CONFIRM_CLI_STATUS}" -ne 0 ] && [ "${CONFIRM_CLI_STATUS}" -ne 2 ]; then
+      CONFIRM_OUTCOME=cli_miss
+    else
+      CONFIRM_OUTCOME=timeout
+    fi
+  fi
+
+  return 0
 }
 
 verify_host_record() {
@@ -968,14 +1242,44 @@ fs::atomic_install "${service_tmp_file}" "${service_file}" 0644 root root
 service_tmp_file=""
 
 service_display="k3s-${cluster}-${environment}@${SRV_HOST} (${role})"
-# Increase default timeout to 30s minimum
-reload_avahi_daemon "${service_display}" "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-30}"
-
-# Verify service is visible via avahi-browse with retry and exponential backoff
-if ! verify_service_with_avahi_browse "${SERVICE_TYPE}" "${SRV_HOST}" 10 2 16; then
-  echo "Service ${SERVICE_TYPE} not observable after publication" >&2
-  exit 1
+service_domain="${SUGARKUBE_MDNS_DOMAIN:-local}"
+reload_status=0
+if ! reload_avahi_daemon "${service_display}" "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-30}"; then
+  reload_status=$?
+  echo "Avahi reload wait failed; continuing with direct confirmation" >&2
 fi
 
-# Self-check: verify host record is advertised
-verify_host_record "${SRV_HOST}" || true  # Log but don't fail on host record check
+confirm_avahi_publication \
+  "${SERVICE_TYPE}" \
+  "${service_display}" \
+  "${SRV_HOST}" \
+  "${PORT}" \
+  "${SUGARKUBE_AVAHI_CONFIRM_TIMEOUT:-30}" \
+  "${service_domain}"
+
+printf 'publish_metrics confirm_outcome=%s confirm_latency_ms=%s confirm_attempts=%s confirm_dbus_status=%s confirm_cli_status=%s reload_status=%s\n' \
+  "${CONFIRM_OUTCOME}" \
+  "${CONFIRM_LATENCY_MS}" \
+  "${CONFIRM_ATTEMPTS}" \
+  "${CONFIRM_DBUS_STATUS}" \
+  "${CONFIRM_CLI_STATUS}" \
+  "${reload_status}"
+
+  if [ -n "${AVAHI_WAIT_ERROR_REASON}" ]; then
+    avahi_reason_lc="$(printf '%s' "${AVAHI_WAIT_ERROR_REASON}" | tr '[:upper:]' '[:lower:]')"
+    if printf '%s' "${avahi_reason_lc}" | grep -Fq "permission denied"; then
+      avahi_error_message="${AVAHI_WAIT_ERROR_MESSAGE:-Service ${SERVICE_TYPE} failed: ${AVAHI_WAIT_ERROR_REASON}}"
+      echo "${avahi_error_message}" >&2
+      exit 1
+    fi
+  fi
+
+  if [ "${CONFIRM_SUCCESS}" -ne 1 ]; then
+    echo "Service ${SERVICE_TYPE} not observable after publication" >&2
+    exit 95
+  fi
+
+# Self-check: verify host record is advertised unless explicitly skipped
+if [ "${SUGARKUBE_SKIP_MDNS_SELF_CHECK:-0}" != "1" ]; then
+  verify_host_record "${SRV_HOST}" || true  # Log but don't fail on host record check
+fi

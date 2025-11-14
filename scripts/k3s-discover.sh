@@ -2962,6 +2962,64 @@ PY
   return "${status}"
 }
 
+# publish__parse_metrics extracts CONFIRM_* fields from the structured output of
+# mdns_publish_static.sh, defaulting unset metrics to empty strings so callers
+# can rely on variable presence.
+publish__parse_metrics() {
+  PUBLISH_CONFIRM_OUTCOME=""
+  PUBLISH_CONFIRM_LATENCY=""
+  PUBLISH_CONFIRM_ATTEMPTS=""
+  PUBLISH_CONFIRM_DBUS_STATUS=""
+  PUBLISH_CONFIRM_CLI_STATUS=""
+  PUBLISH_CONFIRM_RELOAD_STATUS=""
+  local raw="$1"
+  local line token
+  if [ -z "${raw}" ]; then
+    return 0
+  fi
+  while IFS= read -r line; do
+    for token in ${line}; do
+      case "${token}" in
+        confirm_outcome=*) PUBLISH_CONFIRM_OUTCOME="${token#confirm_outcome=}" ;;
+        confirm_latency_ms=*) PUBLISH_CONFIRM_LATENCY="${token#confirm_latency_ms=}" ;;
+        confirm_attempts=*) PUBLISH_CONFIRM_ATTEMPTS="${token#confirm_attempts=}" ;;
+        confirm_dbus_status=*) PUBLISH_CONFIRM_DBUS_STATUS="${token#confirm_dbus_status=}" ;;
+        confirm_cli_status=*) PUBLISH_CONFIRM_CLI_STATUS="${token#confirm_cli_status=}" ;;
+        reload_status=*) PUBLISH_CONFIRM_RELOAD_STATUS="${token#reload_status=}" ;;
+      esac
+    done
+  done <<<"${raw}"
+}
+
+# publish_latency_bucket maps a numeric latency (ms) into human-readable ranges
+# used for histogram metrics. Non-numeric input is classified as "unknown".
+publish_latency_bucket() {
+  local value="$1"
+  case "${value}" in
+    *[!0-9]*)
+      printf 'unknown\n'
+      return 0
+      ;;
+  esac
+  if [ "${value}" -lt 250 ]; then
+    printf 'ms_0_249\n'
+  elif [ "${value}" -lt 500 ]; then
+    printf 'ms_250_499\n'
+  elif [ "${value}" -lt 1000 ]; then
+    printf 'ms_500_999\n'
+  elif [ "${value}" -lt 2000 ]; then
+    printf 'ms_1000_1999\n'
+  elif [ "${value}" -lt 5000 ]; then
+    printf 'ms_2000_4999\n'
+  elif [ "${value}" -lt 10000 ]; then
+    printf 'ms_5000_9999\n'
+  elif [ "${value}" -lt 20000 ]; then
+    printf 'ms_10000_19999\n'
+  else
+    printf 'ms_20000_plus\n'
+  fi
+}
+
 publish_avahi_service() {
   local role="$1"; shift
   local port="6443"
@@ -3026,28 +3084,120 @@ publish_avahi_service() {
     publish_summary_start="$(summary_now_ms)"
   fi
 
-  local -a publish_attempt_fields=(
+  local -a publish_attempt_fields_base=(
     "outcome=attempt"
     "role=${role}"
     "host=${hostname}"
     "method=static"
   )
   if [ -n "${phase}" ]; then
-    publish_attempt_fields+=("phase=${phase}")
+    publish_attempt_fields_base+=("phase=${phase}")
   fi
   if [ -n "${leader}" ]; then
-    publish_attempt_fields+=("leader=${leader}")
+    publish_attempt_fields_base+=("leader=${leader}")
   fi
   if [ -n "${publish_api_status}" ]; then
-    publish_attempt_fields+=("api_status=${publish_api_status}")
+    publish_attempt_fields_base+=("api_status=${publish_api_status}")
   fi
   if [ -n "${publish_api_mode}" ]; then
-    publish_attempt_fields+=("api_mode=${publish_api_mode}")
+    publish_attempt_fields_base+=("api_mode=${publish_api_mode}")
   fi
-  log_info mdns_publish "${publish_attempt_fields[@]}" >&2
+  local -a first_attempt_fields=("${publish_attempt_fields_base[@]}" "attempt=1")
+  log_info mdns_publish "${first_attempt_fields[@]}" >&2
 
-  if ! run_privileged env "${publish_env[@]}" "${SCRIPT_DIR}/mdns_publish_static.sh"; then
-    publish_status=$?
+  local publish_attempt=1
+  local max_publish_attempts=2
+  local publish_attempts_used=1
+  local handled_retry=0
+  local confirm_latency_ms=""
+  local confirm_attempts=""
+  local confirm_outcome=""
+  local confirm_bucket=""
+  local confirm_dbus_status=""
+  local confirm_cli_status=""
+  local confirm_reload_status=""
+
+  while [ "${publish_attempt}" -le "${max_publish_attempts}" ]; do
+    local attempt_output=""
+    local attempt_status=0
+    if ! attempt_output="$(run_privileged env "${publish_env[@]}" "${SCRIPT_DIR}/mdns_publish_static.sh")"; then
+      attempt_status=$?
+    fi
+
+    publish__parse_metrics "${attempt_output}"
+    confirm_outcome="${PUBLISH_CONFIRM_OUTCOME}"
+    confirm_latency_ms="${PUBLISH_CONFIRM_LATENCY}"
+    confirm_attempts="${PUBLISH_CONFIRM_ATTEMPTS}"
+    confirm_dbus_status="${PUBLISH_CONFIRM_DBUS_STATUS}"
+    confirm_cli_status="${PUBLISH_CONFIRM_CLI_STATUS}"
+    confirm_reload_status="${PUBLISH_CONFIRM_RELOAD_STATUS}"
+    confirm_bucket=""
+    if [ -n "${confirm_latency_ms}" ]; then
+      case "${confirm_latency_ms}" in
+        ''|*[!0-9]*) ;; 
+        *) confirm_bucket="$(publish_latency_bucket "${confirm_latency_ms}")" ;;
+      esac
+    fi
+    publish_attempts_used="${publish_attempt}"
+
+    if [ "${attempt_status}" -eq 0 ]; then
+      publish_status=0
+      break
+    fi
+
+    if [ "${publish_attempt}" -eq 1 ] && [ "${attempt_status}" -eq 95 ]; then
+      case "${confirm_outcome}" in
+        timeout|cli_miss|dbus_miss)
+          handled_retry=1
+          local -a retry_warn_fields=(
+            "role=${role}"
+            "host=${hostname}"
+            "method=static"
+            "attempt=${publish_attempt}"
+          )
+          if [ -n "${phase}" ]; then
+            retry_warn_fields+=("phase=${phase}")
+          fi
+          if [ -n "${leader}" ]; then
+            retry_warn_fields+=("leader=${leader}")
+          fi
+          if [ -n "${confirm_latency_ms}" ]; then
+            retry_warn_fields+=("confirm_latency_ms=${confirm_latency_ms}")
+          fi
+          if [ -n "${confirm_bucket}" ]; then
+            retry_warn_fields+=("confirm_bucket=${confirm_bucket}")
+          fi
+          if [ -n "${confirm_attempts}" ]; then
+            retry_warn_fields+=("confirm_attempts=${confirm_attempts}")
+          fi
+          if [ -n "${confirm_reload_status}" ]; then
+            retry_warn_fields+=("reload_status=${confirm_reload_status}")
+          fi
+          log_warn_msg mdns_publish "Static publish confirmation timed out; retrying" "${retry_warn_fields[@]}"
+
+          publish_attempt=$((publish_attempt + 1))
+          if [ "${publish_attempt}" -le "${max_publish_attempts}" ]; then
+            local -a retry_attempt_fields=("${publish_attempt_fields_base[@]}" "attempt=${publish_attempt}" "handled_retry=1")
+            log_info mdns_publish "${retry_attempt_fields[@]}" >&2
+          fi
+          maybe_sleep 1
+          continue
+          ;;
+      esac
+    fi
+
+    publish_status="${attempt_status}"
+    break
+  done
+
+  if [ -n "${publish_attempts_used}" ]; then
+    publish_note+=" attempts=${publish_attempts_used}"
+  fi
+  if [ -n "${confirm_latency_ms}" ]; then
+    publish_note+=" confirm_ms=${confirm_latency_ms}"
+  fi
+  if [ "${handled_retry}" -eq 1 ]; then
+    publish_note+=" handled_retry=1"
   fi
 
   if [ "${publish_summary_active}" -eq 1 ]; then
@@ -3079,6 +3229,31 @@ publish_avahi_service() {
     if [ -n "${publish_api_mode}" ]; then
       publish_error_fields+=("api_mode=${publish_api_mode}")
     fi
+    if [ -n "${confirm_outcome}" ]; then
+      publish_error_fields+=("confirm_outcome=${confirm_outcome}")
+    fi
+    if [ -n "${confirm_latency_ms}" ]; then
+      publish_error_fields+=("confirm_latency_ms=${confirm_latency_ms}")
+    fi
+    if [ -n "${confirm_bucket}" ]; then
+      publish_error_fields+=("confirm_bucket=${confirm_bucket}")
+    fi
+    if [ -n "${confirm_attempts}" ]; then
+      publish_error_fields+=("confirm_attempts=${confirm_attempts}")
+    fi
+    if [ -n "${confirm_dbus_status}" ]; then
+      publish_error_fields+=("confirm_dbus_status=${confirm_dbus_status}")
+    fi
+    if [ -n "${confirm_cli_status}" ]; then
+      publish_error_fields+=("confirm_cli_status=${confirm_cli_status}")
+    fi
+    if [ -n "${confirm_reload_status}" ]; then
+      publish_error_fields+=("reload_status=${confirm_reload_status}")
+    fi
+    publish_error_fields+=("attempts=${publish_attempts_used}")
+    if [ "${handled_retry}" -eq 1 ]; then
+      publish_error_fields+=("handled_retry=1")
+    fi
     log_warn_msg mdns_publish "Static publish failed" "${publish_error_fields[@]}"
     return "${publish_status}"
   fi
@@ -3100,6 +3275,31 @@ publish_avahi_service() {
   fi
   if [ -n "${publish_api_mode}" ]; then
     publish_success_fields+=("api_mode=${publish_api_mode}")
+  fi
+  if [ -n "${confirm_outcome}" ]; then
+    publish_success_fields+=("confirm_outcome=${confirm_outcome}")
+  fi
+  if [ -n "${confirm_latency_ms}" ]; then
+    publish_success_fields+=("confirm_latency_ms=${confirm_latency_ms}")
+  fi
+  if [ -n "${confirm_bucket}" ]; then
+    publish_success_fields+=("confirm_bucket=${confirm_bucket}")
+  fi
+  if [ -n "${confirm_attempts}" ]; then
+    publish_success_fields+=("confirm_attempts=${confirm_attempts}")
+  fi
+  if [ -n "${confirm_dbus_status}" ]; then
+    publish_success_fields+=("confirm_dbus_status=${confirm_dbus_status}")
+  fi
+  if [ -n "${confirm_cli_status}" ]; then
+    publish_success_fields+=("confirm_cli_status=${confirm_cli_status}")
+  fi
+  if [ -n "${confirm_reload_status}" ]; then
+    publish_success_fields+=("reload_status=${confirm_reload_status}")
+  fi
+  publish_success_fields+=("attempts=${publish_attempts_used}")
+  if [ "${handled_retry}" -eq 1 ]; then
+    publish_success_fields+=("handled_retry=1")
   fi
   log_info mdns_publish "${publish_success_fields[@]}" >&2
 
