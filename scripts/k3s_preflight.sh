@@ -38,38 +38,18 @@ apt_update_once() {
   return 0
 }
 
-normalize_kube_proxy_mode() {
-  local value="${1:-}"
-  value="${value,,}"
-  case "${value}" in
-    nft|nftables)
-      echo "nftables"
-      ;;
-    iptables)
-      echo "iptables"
-      ;;
-    auto)
-      echo "auto"
-      ;;
-    "")
-      echo "unknown"
-      ;;
-    *)
-      echo "unknown"
-      ;;
-  esac
-}
-
 select_kube_proxy_mode() {
-  local desired="${DESIRED_KUBE_PROXY_MODE}"
+  local desired
   local env_mode
   local configured_mode
+
+  desired="$(kube_proxy::normalize_mode "${DESIRED_KUBE_PROXY_MODE}")"
 
   if [[ "${desired}" != "auto" && "${desired}" != "unknown" ]]; then
     SELECTED_KUBE_PROXY_MODE="${desired}"
     KUBE_PROXY_MODE_SOURCE="cli"
   else
-    env_mode="$(normalize_kube_proxy_mode "${K3S_KUBE_PROXY_MODE:-}")"
+    env_mode="$(kube_proxy::normalize_mode "${K3S_KUBE_PROXY_MODE:-}")"
     if [[ "${env_mode}" == "nftables" || "${env_mode}" == "iptables" ]]; then
       SELECTED_KUBE_PROXY_MODE="${env_mode}"
       KUBE_PROXY_MODE_SOURCE="env"
@@ -118,136 +98,58 @@ ensure_nft_binary() {
   return 1
 }
 
-set_update_alternative() {
-  local name="$1"
-  local path="$2"
-
-  if ! command -v update-alternatives >/dev/null 2>&1; then
-    changes+=("ERROR: update-alternatives unavailable while configuring ${name}")
+ensure_iptables_package() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    printf 'ERROR: iptables binaries missing and apt-get unavailable\n'
     return 1
   fi
-
-  if ! update-alternatives --query "${name}" >/dev/null 2>&1; then
-    changes+=("update-alternatives entry ${name} not managed; skipped (${path})")
+  if ! apt_update_once "iptables"; then
+    return 1
+  fi
+  if DEBIAN_FRONTEND=noninteractive \
+    apt-get -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    install -y --no-install-recommends iptables >/dev/null 2>&1; then
+    printf 'INFO: installed iptables package to provide legacy backend\n'
     return 0
   fi
 
-  if update-alternatives --set "${name}" "${path}" >/dev/null 2>&1; then
-    changes+=("update-alternatives ${name} -> ${path}")
-    return 0
-  fi
-
-  changes+=("ERROR: failed to set update-alternatives ${name} -> ${path}")
+  printf 'ERROR: failed to install iptables package\n'
   return 1
 }
 
-configure_iptables_legacy_alternatives() {
-  local alt
-  local legacy_path
-  local failures=0
-  local names=(
-    iptables
-    ip6tables
-    iptables-save
-    iptables-restore
-    ip6tables-save
-    ip6tables-restore
-  )
-
-  for alt in "${names[@]}"; do
-    legacy_path="/usr/sbin/${alt}-legacy"
-    if [[ ! -x "${legacy_path}" ]]; then
-      changes+=("legacy binary ${legacy_path} missing; skipping ${alt}")
-      continue
-    fi
-    if ! set_update_alternative "${alt}" "${legacy_path}"; then
-      failures=$((failures + 1))
-    fi
-  done
-
-  if [[ ${failures} -gt 0 ]]; then
-    return 1
-  fi
-  return 0
-}
-
-read_iptables_details() {
-  local variant="missing"
-  local version="unavailable"
-  local path=""
-  local version_line
-
-  if command -v iptables >/dev/null 2>&1; then
-    path="$(command -v iptables)"
-    variant="unknown"
-    version="unknown"
-    version_line="$(iptables -V 2>/dev/null | head -n1 || echo "")"
-    if [[ -n "${version_line}" ]]; then
-      version="$(printf '%s' "${version_line}" | awk '{print $2}')"
-      if printf '%s' "${version_line}" | grep -qi 'legacy'; then
-        variant="legacy"
-      elif printf '%s' "${version_line}" | grep -qi 'nf_tables'; then
-        variant="nf_tables"
-      fi
-    fi
-  fi
-
-  printf '%s;%s;%s\n' "${variant}" "${version}" "${path}"
-}
-
 ensure_iptables_legacy() {
-  local variant version path
+  local status=0
+  local line
+  local details=""
 
-  if ! command -v iptables >/dev/null 2>&1 || ! command -v ip6tables >/dev/null 2>&1; then
-    if ! command -v apt-get >/dev/null 2>&1; then
-      changes+=("ERROR: iptables binaries missing and apt-get unavailable")
-      return 1
-    fi
-    if ! apt_update_once "iptables"; then
-      return 1
-    fi
-    if DEBIAN_FRONTEND=noninteractive \
-      apt-get -o Acquire::Retries=5 \
-      -o Acquire::http::Timeout=30 \
-      -o Acquire::https::Timeout=30 \
-      install -y --no-install-recommends iptables >/dev/null 2>&1; then
-      changes+=("installed iptables package to provide legacy backend")
-    else
-      changes+=("ERROR: failed to install iptables package")
-      return 1
-    fi
+  while IFS= read -r line; do
+    case "${line}" in
+      INFO:*)
+        changes+=("${line#INFO: }")
+        ;;
+      WARN:*)
+        changes+=("WARNING: ${line#WARN: }")
+        ;;
+      ERROR:*)
+        changes+=("ERROR: ${line#ERROR: }")
+        ;;
+      DETAILS:*)
+        details="${line#DETAILS:}"
+        ;;
+      *)
+        changes+=("${line}")
+        ;;
+    esac
+  done < <(kube_proxy::ensure_iptables_legacy ensure_iptables_package)
+  status=${PIPESTATUS[0]}
+
+  if [[ ${status} -eq 0 && -n "${details}" ]]; then
+    IFS=';' read -r LAST_IPTABLES_VARIANT LAST_IPTABLES_VERSION LAST_IPTABLES_PATH <<<"${details}"
   fi
 
-  if ! command -v iptables >/dev/null 2>&1 || ! command -v ip6tables >/dev/null 2>&1; then
-    changes+=("ERROR: iptables or ip6tables missing after installation attempt")
-    return 1
-  fi
-
-  IFS=';' read -r variant version path < <(read_iptables_details)
-
-  if [[ "${variant}" != "legacy" ]]; then
-    if ! configure_iptables_legacy_alternatives; then
-      return 1
-    fi
-    IFS=';' read -r variant version path < <(read_iptables_details)
-  fi
-
-  LAST_IPTABLES_VARIANT="${variant}"
-  LAST_IPTABLES_PATH="${path}"
-  LAST_IPTABLES_VERSION="${version}"
-
-  if [[ "${variant}" != "legacy" ]]; then
-    changes+=("ERROR: expected iptables legacy backend but detected ${variant}")
-    return 1
-  fi
-
-  if [[ -n "${path}" ]]; then
-    changes+=("iptables binary present at ${path} (variant=${variant} version=${version})")
-  else
-    changes+=("iptables binary present (variant=${variant} version=${version})")
-  fi
-
-  return 0
+  return "${status}"
 }
 
 apply_kube_proxy_config() {
@@ -366,21 +268,11 @@ while [[ $# -gt 0 ]]; do
         echo "--kube-proxy-mode requires an argument" >&2
         exit 1
       fi
-      case "${2,,}" in
-        nft|nftables)
-          DESIRED_KUBE_PROXY_MODE="nftables"
-          ;;
-        iptables)
-          DESIRED_KUBE_PROXY_MODE="iptables"
-          ;;
-        auto)
-          DESIRED_KUBE_PROXY_MODE="auto"
-          ;;
-        *)
-          echo "Unsupported kube-proxy mode: $2" >&2
-          exit 1
-          ;;
-      esac
+      DESIRED_KUBE_PROXY_MODE="$(kube_proxy::normalize_mode "$2")"
+      if [[ "${DESIRED_KUBE_PROXY_MODE}" == "unknown" ]]; then
+        echo "Unsupported kube-proxy mode: $2" >&2
+        exit 1
+      fi
       shift 2
       ;;
     *)
@@ -452,7 +344,7 @@ check_kube_proxy_mode() {
       return 1
     fi
   elif [[ "${configured_mode}" == "iptables" ]]; then
-    IFS=';' read -r variant version path < <(read_iptables_details)
+    IFS=';' read -r variant version path < <(kube_proxy::read_iptables_details)
     LAST_IPTABLES_VARIANT="${variant}"
     LAST_IPTABLES_PATH="${path}"
     LAST_IPTABLES_VERSION="${version}"

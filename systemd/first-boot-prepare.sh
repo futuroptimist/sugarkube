@@ -63,42 +63,22 @@ apt_update_once() {
   fi
 }
 
-normalize_kube_proxy_mode() {
-  local value="${1:-}"
-  value="${value,,}"
-  case "${value}" in
-    nft|nftables)
-      echo "nftables"
-      ;;
-    iptables)
-      echo "iptables"
-      ;;
-    auto)
-      echo "auto"
-      ;;
-    "")
-      echo "unknown"
-      ;;
-    *)
-      echo "unknown"
-      ;;
-  esac
-}
-
 select_kube_proxy_mode() {
-  local desired="${DESIRED_KUBE_PROXY_MODE}"
+  local desired
   local env_mode
   local configured_mode
   local override
 
+  desired="$(kube_proxy::normalize_mode "${DESIRED_KUBE_PROXY_MODE}")"
+
   if [[ -n "${FIRST_BOOT_KUBE_PROXY_MODE:-}" ]]; then
-    override="$(normalize_kube_proxy_mode "${FIRST_BOOT_KUBE_PROXY_MODE}")"
+    override="$(kube_proxy::normalize_mode "${FIRST_BOOT_KUBE_PROXY_MODE}")"
     if [[ "${override}" != "unknown" ]]; then
       desired="${override}"
     fi
   fi
 
-  env_mode="$(normalize_kube_proxy_mode "${K3S_KUBE_PROXY_MODE:-}")"
+  env_mode="$(kube_proxy::normalize_mode "${K3S_KUBE_PROXY_MODE:-}")"
 
   if [[ "${desired}" != "auto" && "${desired}" != "unknown" ]]; then
     SELECTED_KUBE_PROXY_MODE="${desired}"
@@ -134,127 +114,54 @@ ensure_package() {
     install -y --no-install-recommends "${pkg}"
 }
 
-set_update_alternative() {
-  local name="$1"
-  local path="$2"
-
-  if ! command -v update-alternatives >/dev/null 2>&1; then
-    echo "[first-boot-prepare] ERROR: update-alternatives unavailable for ${name}"
-    return 1
-  fi
-
-  if ! update-alternatives --query "${name}" >/dev/null 2>&1; then
-    echo "[first-boot-prepare] update-alternatives entry ${name} not managed; skipped (${path})"
+ensure_iptables_package() {
+  apt_update_once
+  echo "[first-boot-prepare] installing iptables"
+  if apt-get -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    install -y --no-install-recommends iptables; then
+    echo "[first-boot-prepare] installed iptables package"
     return 0
   fi
 
-  if update-alternatives --set "${name}" "${path}" >/dev/null 2>&1; then
-    echo "[first-boot-prepare] update-alternatives ${name} -> ${path}"
-    return 0
-  fi
-
-  echo "[first-boot-prepare] ERROR: failed to set update-alternatives ${name} -> ${path}"
+  echo "[first-boot-prepare] ERROR: failed to install iptables package"
   return 1
 }
 
-configure_iptables_legacy_alternatives() {
-  local alt
-  local legacy_path
-  local failures=0
-  local names=(
-    iptables
-    ip6tables
-    iptables-save
-    iptables-restore
-    ip6tables-save
-    ip6tables-restore
-  )
-
-  for alt in "${names[@]}"; do
-    legacy_path="/usr/sbin/${alt}-legacy"
-    if [[ ! -x "${legacy_path}" ]]; then
-      echo "[first-boot-prepare] legacy binary ${legacy_path} missing; skipping ${alt}"
-      continue
-    fi
-    if ! set_update_alternative "${alt}" "${legacy_path}"; then
-      failures=$((failures + 1))
-    fi
-  done
-
-  if [[ ${failures} -gt 0 ]]; then
-    return 1
-  fi
-  return 0
-}
-
-read_iptables_details() {
-  local variant="missing"
-  local version="unavailable"
-  local path=""
-  local version_line
-
-  if command -v iptables >/dev/null 2>&1; then
-    path="$(command -v iptables)"
-    variant="unknown"
-    version="unknown"
-    version_line="$(iptables -V 2>/dev/null | head -n1 || echo "")"
-    if [[ -n "${version_line}" ]]; then
-      version="$(printf '%s' "${version_line}" | awk '{print $2}')"
-      if printf '%s' "${version_line}" | grep -qi 'legacy'; then
-        variant="legacy"
-      elif printf '%s' "${version_line}" | grep -qi 'nf_tables'; then
-        variant="nf_tables"
-      fi
-    fi
-  fi
-
-  printf '%s;%s;%s\n' "${variant}" "${version}" "${path}"
-}
-
 ensure_iptables_legacy() {
-  local variant version path
+  local status=0
+  local line
+  local details=""
 
-  if ! command -v iptables >/dev/null 2>&1 || ! command -v ip6tables >/dev/null 2>&1; then
-    apt_update_once
-    echo "[first-boot-prepare] installing iptables"
-    apt-get -o Acquire::Retries=5 \
-      -o Acquire::http::Timeout=30 \
-      -o Acquire::https::Timeout=30 \
-      install -y --no-install-recommends iptables
+  while IFS= read -r line; do
+    case "${line}" in
+      INFO:*)
+        echo "[first-boot-prepare] ${line#INFO: }"
+        ;;
+      WARN:*)
+        echo "[first-boot-prepare] WARNING: ${line#WARN: }"
+        ;;
+      ERROR:*)
+        echo "[first-boot-prepare] ERROR: ${line#ERROR: }"
+        ;;
+      DETAILS:*)
+        details="${line#DETAILS:}"
+        ;;
+      *)
+        echo "[first-boot-prepare] ${line}"
+        ;;
+    esac
+  done < <(kube_proxy::ensure_iptables_legacy ensure_iptables_package)
+  status=${PIPESTATUS[0]}
+
+  if [[ ${status} -eq 0 && -n "${details}" ]]; then
+    IFS=';' read -r LAST_IPTABLES_VARIANT LAST_IPTABLES_VERSION LAST_IPTABLES_PATH <<<"${details}"
   fi
 
-  if ! command -v iptables >/dev/null 2>&1 || ! command -v ip6tables >/dev/null 2>&1; then
-    echo "[first-boot-prepare] ERROR: iptables or ip6tables missing after installation"
-    return 1
-  fi
-
-  IFS=';' read -r variant version path < <(read_iptables_details)
-
-  if [[ "${variant}" != "legacy" ]]; then
-    if ! configure_iptables_legacy_alternatives; then
-      echo "[first-boot-prepare] ERROR: failed to switch iptables alternatives to legacy"
-      return 1
-    fi
-    IFS=';' read -r variant version path < <(read_iptables_details)
-  fi
-
-  LAST_IPTABLES_VARIANT="${variant}"
-  LAST_IPTABLES_PATH="${path}"
-  LAST_IPTABLES_VERSION="${version}"
-
-  if [[ "${variant}" != "legacy" ]]; then
-    echo "[first-boot-prepare] ERROR: expected iptables legacy backend but detected ${variant}"
-    return 1
-  fi
-
-  if [[ -n "${path}" ]]; then
-    echo "[first-boot-prepare] iptables binary ${path} variant=${variant} version=${version}"
-  else
-    echo "[first-boot-prepare] iptables binary variant=${variant} version=${version}"
-  fi
-
-  return 0
+  return "${status}"
 }
+
 
 select_kube_proxy_mode
 
@@ -325,7 +232,7 @@ log_kube_proxy_mode_once() {
   fi
 
   if [[ "${config_mode}" == "iptables" ]]; then
-    IFS=';' read -r iptables_variant iptables_version iptables_path < <(read_iptables_details)
+    IFS=';' read -r iptables_variant iptables_version iptables_path < <(kube_proxy::read_iptables_details)
   fi
 
   if [[ "${config_mode}" == "iptables" ]]; then
