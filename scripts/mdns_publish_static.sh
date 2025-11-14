@@ -1279,5 +1279,7 @@ printf 'publish_metrics confirm_outcome=%s confirm_latency_ms=%s confirm_attempt
     exit 95
   fi
 
-# Self-check: verify host record is advertised
-verify_host_record "${SRV_HOST}" || true  # Log but don't fail on host record check
+# Self-check: verify host record is advertised unless explicitly skipped
+if [ "${SUGARKUBE_SKIP_MDNS_SELF_CHECK:-0}" != "1" ]; then
+  verify_host_record "${SRV_HOST}" || true  # Log but don't fail on host record check
+fi
