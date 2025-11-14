@@ -914,21 +914,21 @@ for name, cmd in tools:
     )
     clean = re.sub(r'\barray\s*(?=\[)', '', clean)
     try:
-    value = ast.literal_eval(clean)
-  except Exception:
-    continue
-  if isinstance(value, (list, tuple)) and len(value) == 1:
-    value = value[0]
-  # Avahi D-Bus ResolveService is expected to return a tuple with at least 9
-  # elements: [interface, protocol, name, type, domain, host, aprotocol,
-  # address, port, txt, flags]. Skip unexpected payloads to avoid IndexError.
-  if not (isinstance(value, (list, tuple)) and len(value) >= 9):
-    continue
-  try:
-    host = str(value[5]).strip().lower().rstrip('.')
-    port = str(value[8]).strip()
-  except Exception:
-    continue
+        value = ast.literal_eval(clean)
+    except Exception:
+        continue
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    # Avahi D-Bus ResolveService is expected to return a tuple with at least 9
+    # elements: [interface, protocol, name, type, domain, host, aprotocol,
+    # address, port, txt, flags]. Skip unexpected payloads to avoid IndexError.
+    if not (isinstance(value, (list, tuple)) and len(value) >= 9):
+        continue
+    try:
+        host = str(value[5]).strip().lower().rstrip('.')
+        port = str(value[8]).strip()
+    except Exception:
+        continue
     if host and not host.endswith('.local'):
         host = f"{host}.local"
     if expected_host and host != expected_host:
