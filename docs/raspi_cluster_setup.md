@@ -268,6 +268,7 @@ You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or ex
 | `K3S_CHANNEL` | `stable` | Channel for the official k3s install script |
 | `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Environment-specific join tokens (see above) |
 | `SUGARKUBE_TOKEN` | _none_ | Fallback token if no per-env variant is set |
+| `SUGARKUBE_SKIP_ABSENCE_GATE` | `0` | Skip Avahi restart at discovery time (Phase 2 simplification) |
 
 ### Generating Tokens Manually
 If you ever need to regenerate a token, run this on a control-plane node:
@@ -275,6 +276,19 @@ If you ever need to regenerate a token, run this on a control-plane node:
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 or, if that file is missing, reinstall the server (`just up dev` on a fresh node) and grab the new token.
+
+### mDNS Discovery Simplification (Phase 2)
+
+The discovery system has been simplified to reduce complexity and improve reliability. By default, the system still restarts Avahi before discovery for backward compatibility, but this can be skipped:
+
+```bash
+export SUGARKUBE_SKIP_ABSENCE_GATE=1
+just up dev
+```
+
+When `SUGARKUBE_SKIP_ABSENCE_GATE=1`, the script trusts systemd to keep Avahi running and performs an optional health check instead of restarting the daemon. This eliminates restart-related race conditions and saves 5-25 seconds per node. This is recommended for most environments as Avahi is managed by systemd with automatic restart on failure.
+
+For more details on the phased simplification roadmap, see `notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md`.
 
 ---
 

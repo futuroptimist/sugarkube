@@ -206,6 +206,10 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+# Phase 2: Absence Gate Control
+# SUGARKUBE_SKIP_ABSENCE_GATE=1 bypasses the absence gate entirely
+# Default: 0 (absence gate runs for backward compatibility)
+SKIP_ABSENCE_GATE="${SUGARKUBE_SKIP_ABSENCE_GATE:-0}"
 MDNS_ABSENCE_GATE="${SUGARKUBE_MDNS_ABSENCE_GATE:-1}"
 MDNS_ABSENCE_TIMEOUT_MS="${SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS:-15000}"
 MDNS_ABSENCE_BACKOFF_START_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS:-500}"
@@ -4532,11 +4536,26 @@ run_configure_avahi
 
 iptables_preflight
 
-ensure_mdns_absence_gate
-
-# Support test mode: exit after absence gate for testing absence detection without k3s installation
-if [ "${SUGARKUBE_EXIT_AFTER_ABSENCE_GATE:-0}" = "1" ]; then
-  exit 0
+# Phase 2: Skip absence gate when SUGARKUBE_SKIP_ABSENCE_GATE=1
+# Trust systemd to keep Avahi running instead of restarting it
+if [ "${SKIP_ABSENCE_GATE}" != "1" ]; then
+  ensure_mdns_absence_gate
+  
+  # Support test mode: exit after absence gate for testing absence detection without k3s installation
+  if [ "${SUGARKUBE_EXIT_AFTER_ABSENCE_GATE:-0}" = "1" ]; then
+    exit 0
+  fi
+else
+  log_info discover event=absence_gate_skipped reason="SUGARKUBE_SKIP_ABSENCE_GATE=1" >&2
+  
+  # Optional systemd health check as safety net
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet avahi-daemon; then
+      log_info discover event=avahi_health_check status=active >&2
+    else
+      log_warn_msg discover "avahi-daemon not active" "event=avahi_health_check" >&2
+    fi
+  fi
 fi
 
 log_info discover phase=discover_existing cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2

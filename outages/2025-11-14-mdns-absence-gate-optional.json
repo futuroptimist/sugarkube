@@ -1,0 +1,15 @@
+{
+  "id": "2025-11-14-mdns-absence-gate-optional",
+  "date": "2025-11-14",
+  "component": "scripts/k3s-discover.sh - mDNS discovery absence gate",
+  "rootCause": "The mdns_absence_gate unnecessarily restarts Avahi at discovery time, creating a window of instability and race conditions. Avahi is already managed by systemd with automatic restart on failure, making the restart logic redundant and counterproductive.",
+  "resolution": "Added SUGARKUBE_SKIP_ABSENCE_GATE feature flag (defaults to 0 for backward compatibility) that allows bypassing the absence gate entirely. When enabled, the script trusts systemd to keep Avahi running and performs an optional systemd health check instead of restarting the daemon. This is Phase 2 of the mDNS discovery simplification roadmap.",
+  "references": [
+    "notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md",
+    "outages/2025-11-14-avahi-restart-race-mdns-absence-gate.json",
+    "outages/2025-11-14-avahi-restart-insufficient-stabilization.json",
+    "scripts/k3s-discover.sh lines 209-214 (feature flag definition)",
+    "scripts/k3s-discover.sh lines 4535-4553 (conditional logic)",
+    "tests/scripts/test_skip_absence_gate.py"
+  ]
+}
