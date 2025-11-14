@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+-P INPUT ACCEPT
+-A KUBE-SERVICES -d 10.0.0.5/32 -p tcp -m tcp --dport 6443 -j ACCEPT
+OUT

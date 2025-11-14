@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+{"name":"KUBE-SERVICES","counter":{"packets":10,"bytes":2000},"right":"10.0.0.5"}
+OUT

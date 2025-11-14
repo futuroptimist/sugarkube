@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "-lntu" ]; then
+  cat <<'OUT'
+Netid State      Recv-Q Send-Q Local Address:Port   Peer Address:Port
+udp   UNCONN     0      0      0.0.0.0:8472        0.0.0.0:*
+tcp   LISTEN     0      128    10.0.0.5:6443       0.0.0.0:*
+tcp   LISTEN     0      128    127.0.0.1:2379      0.0.0.0:*
+tcp   LISTEN     0      128    192.168.3.10:2380   0.0.0.0:*
+tcp   LISTEN     0      128    203.0.113.20:10250 0.0.0.0:*
+OUT
+  exit 0
+fi
+echo "ss stub unexpected: $*" >&2
+exit 1

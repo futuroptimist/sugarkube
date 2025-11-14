@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "dns" ]; then
+  echo "Global: 10.0.0.53 2001:db8::53"
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  cat <<'OUT'
+Link 2 (eth0)
+      Current DNS Server: 10.0.0.53
+      DNS Servers: 10.0.0.53 1.1.1.1
+OUT
+  exit 0
+fi
+echo "resolvectl stub unexpected: $*" >&2
+exit 1

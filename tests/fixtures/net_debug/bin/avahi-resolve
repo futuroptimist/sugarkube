@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "-n" ] && [ "$2" = "sugarkube0.local" ]; then
+  sleep 0.01
+  printf 'sugarkube0.local\t10.0.0.5\n'
+  exit 0
+fi
+echo "avahi-resolve stub unexpected: $*" >&2
+exit 1

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+-P INPUT ACCEPT
+-A KUBE-SERVICES -d 2001:db8::1/128 -j ACCEPT
+OUT

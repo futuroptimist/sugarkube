@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "list" ] && [ "$2" = "tables" ]; then
+  echo "table inet kube-proxy"
+  exit 0
+fi
+if [ "$1" = "-j" ] && [ "$2" = "list" ] && [ "$3" = "ruleset" ]; then
+  cat <<'OUT'
+{
+  "nftables": [
+    {
+      "chain": {
+        "name": "KUBE-SERVICES",
+        "handle": 12,
+        "counter": {"packets": 10, "bytes": 2000},
+        "expr": [
+          {"match": {"left": {"payload": {"protocol": "ip"}}, "right": "10.0.0.5"}}
+        ]
+      }
+    }
+  ]
+}
+OUT
+  exit 0
+fi
+echo "nft stub unexpected: $*" >&2
+exit 1

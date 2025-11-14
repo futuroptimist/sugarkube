@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+case "${args}" in
+  "-o link show up")
+    cat <<'OUT'
+1: lo    mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0    mtu 1500 qdisc mq state UP mode DEFAULT group default qlen 1000    link/ether 52:54:00:aa:bb:cc brd ff:ff:ff:ff:ff:ff
+3: wlan0    mtu 1500 qdisc mq state DOWN mode DEFAULT group default qlen 1000    link/ether 02:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff
+OUT
+    ;;
+  "-4 -o addr show scope global")
+    cat <<'OUT'
+2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0
+3: wlan0    inet 198.51.100.7/24 brd 198.51.100.255 scope global wlan0
+OUT
+    ;;
+  "route show default")
+    printf 'default via 192.168.3.1 dev eth0 proto dhcp metric 100\n'
+    ;;
+  *)
+    echo "ip stub missing case: ${args}" >&2
+    exit 1
+    ;;
+ esac

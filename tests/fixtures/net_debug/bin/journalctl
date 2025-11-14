@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "-u" ] && [ "$2" = "avahi-daemon" ]; then
+  cat <<'OUT'
+Mar 13 12:00:00 pi avahi-daemon[123]: Registering new address 10.0.0.5 for host sugarkube0.local
+Mar 13 12:00:01 pi avahi-daemon[123]: Authorization: Bearer abcdef12345
+OUT
+  exit 0
+fi
+echo "journalctl stub unexpected: $*" >&2
+exit 1
