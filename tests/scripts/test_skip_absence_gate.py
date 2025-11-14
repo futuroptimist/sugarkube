@@ -16,18 +16,18 @@ def test_skip_absence_gate_variable_defined() -> None:
     assert 'SKIP_ABSENCE_GATE="${SUGARKUBE_SKIP_ABSENCE_GATE' in script_content, \
         "SKIP_ABSENCE_GATE should be defined from SUGARKUBE_SKIP_ABSENCE_GATE"
     
-    # Verify default is 0 for backward compatibility
+    # Verify default is 1 (new behavior enabled by default)
     lines = script_content.splitlines()
     found_default = False
     
     for line in lines:
         if 'SKIP_ABSENCE_GATE=' in line and 'SUGARKUBE_SKIP_ABSENCE_GATE' in line:
-            # Should default to 0
-            if ':-0}' in line:
+            # Should default to 1
+            if ':-1}' in line:
                 found_default = True
                 break
     
-    assert found_default, "SKIP_ABSENCE_GATE should default to 0 for backward compatibility"
+    assert found_default, "SKIP_ABSENCE_GATE should default to 1 (absence gate skipped by default)"
 
 
 def test_skip_absence_gate_conditional_logic() -> None:

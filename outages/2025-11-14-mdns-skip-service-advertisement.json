@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-14-mdns-skip-service-advertisement",
+  "date": "2025-11-14",
+  "component": "scripts/k3s-discover.sh - mDNS service advertisement",
+  "rootCause": "The mDNS service advertisement system publishes XML service files to /etc/avahi/services/, triggering reload storms and self-check confirmation delays. Service advertisement adds ~1000 lines of complexity (XML rendering, publishing, reload management, self-checks) but is unnecessary - Avahi automatically advertises A/AAAA host records for .local resolution without any service files. NSS can resolve sugarkube0.local directly using these host records.",
+  "resolution": "Added SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT feature flag (defaults to 1 - service advertisement skipped by default) that bypasses publish_api_service() and publish_bootstrap_service() functions. When enabled, the script skips XML file generation, Avahi reload triggers, and mDNS self-check confirmation. .local hostname resolution continues to work via Avahi's automatic host records. This is Phase 4 of the mDNS discovery simplification roadmap, completing the transition from complex service-based discovery to simple NSS-based resolution.",
+  "references": [
+    "notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md",
+    "outages/2025-11-14-mdns-simple-discovery.json",
+    "scripts/k3s-discover.sh lines 195-202 (feature flag definition)",
+    "scripts/k3s-discover.sh publish_api_service() and publish_bootstrap_service() functions",
+    "tests/scripts/test_skip_service_advertisement.py"
+  ]
+}

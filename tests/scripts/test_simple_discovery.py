@@ -16,18 +16,18 @@ def test_simple_discovery_variable_defined() -> None:
     assert 'SIMPLE_DISCOVERY="${SUGARKUBE_SIMPLE_DISCOVERY' in script_content, \
         "SIMPLE_DISCOVERY should be defined from SUGARKUBE_SIMPLE_DISCOVERY"
     
-    # Verify default is 0 for backward compatibility
+    # Verify default is 1 (new behavior enabled by default)
     lines = script_content.splitlines()
     found_default = False
     
     for line in lines:
         if 'SIMPLE_DISCOVERY=' in line and 'SUGARKUBE_SIMPLE_DISCOVERY' in line:
-            # Should default to 0
-            if ':-0}' in line:
+            # Should default to 1
+            if ':-1}' in line:
                 found_default = True
                 break
     
-    assert found_default, "SIMPLE_DISCOVERY should default to 0 for backward compatibility"
+    assert found_default, "SIMPLE_DISCOVERY should default to 1 (simplified discovery enabled by default)"
 
 
 def test_discover_via_nss_and_api_function_exists() -> None:

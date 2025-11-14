@@ -268,8 +268,9 @@ You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or ex
 | `K3S_CHANNEL` | `stable` | Channel for the official k3s install script |
 | `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Environment-specific join tokens (see above) |
 | `SUGARKUBE_TOKEN` | _none_ | Fallback token if no per-env variant is set |
-| `SUGARKUBE_SKIP_ABSENCE_GATE` | `0` | Skip Avahi restart at discovery time (Phase 2 simplification) |
-| `SUGARKUBE_SIMPLE_DISCOVERY` | `0` | Use direct NSS resolution instead of service browsing (Phase 3 simplification) |
+| `SUGARKUBE_SKIP_ABSENCE_GATE` | `1` | Skip Avahi restart at discovery time (Phase 2: enabled by default) |
+| `SUGARKUBE_SIMPLE_DISCOVERY` | `1` | Use direct NSS resolution instead of service browsing (Phase 3: enabled by default) |
+| `SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT` | `1` | Skip mDNS service publishing (Phase 4: enabled by default) |
 
 ### Generating Tokens Manually
 If you ever need to regenerate a token, run this on a control-plane node:
@@ -278,38 +279,47 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 or, if that file is missing, reinstall the server (`just up dev` on a fresh node) and grab the new token.
 
-### mDNS Discovery Simplification (Phases 2-3)
+### mDNS Discovery Simplification (Phases 2-4) - Enabled by Default
 
-The discovery system has been simplified to reduce complexity and improve reliability.
+The discovery system has been significantly simplified to improve reliability and performance. All simplifications are **enabled by default** in new deployments.
 
-#### Phase 2: Skip Absence Gate
+#### Phase 2: Skip Absence Gate (Default: Enabled)
 
-By default, the system still restarts Avahi before discovery for backward compatibility, but this can be skipped:
+The system now trusts systemd to keep Avahi running instead of restarting it before discovery. This eliminates restart-related race conditions and saves 5-25 seconds per node.
 
+To revert to the legacy behavior (restart Avahi before discovery):
 ```bash
-export SUGARKUBE_SKIP_ABSENCE_GATE=1
+export SUGARKUBE_SKIP_ABSENCE_GATE=0
 just up dev
 ```
 
-When `SUGARKUBE_SKIP_ABSENCE_GATE=1`, the script trusts systemd to keep Avahi running and performs an optional health check instead of restarting the daemon. This eliminates restart-related race conditions and saves 5-25 seconds per node. This is recommended for most environments as Avahi is managed by systemd with automatic restart on failure.
+#### Phase 3: Simplified Discovery (Default: Enabled)
 
-#### Phase 3: Simplified Discovery
-
-The traditional discovery flow uses service browsing and leader election, which is complex and can fail in multiple ways. A simpler approach is available:
-
-```bash
-export SUGARKUBE_SIMPLE_DISCOVERY=1
-export SUGARKUBE_SERVERS=3
-just up dev
-```
-
-When `SUGARKUBE_SIMPLE_DISCOVERY=1`, follower nodes use a straightforward approach:
+Discovery now uses a straightforward NSS-based approach instead of complex service browsing:
 1. Try `sugarkube0.local`, `sugarkube1.local`, etc. up to `SUGARKUBE_SERVERS-1`
 2. For each hostname, resolve it via NSS (Name Service Switch)
 3. Check if the API is alive (accepts 401 for unauthorized but running servers)
 4. Join the first responsive server
 
-This eliminates service browsing, leader election, and D-Bus polling, reducing discovery time to 10-20 seconds and removing ~800 lines of complex code. The simplified approach is more reliable and easier to debug.
+This reduces discovery time to 10-20 seconds and eliminates service browsing, leader election, and D-Bus polling.
+
+To revert to the legacy behavior (service-based discovery with leader election):
+```bash
+export SUGARKUBE_SIMPLE_DISCOVERY=0
+just up dev
+```
+
+#### Phase 4: Skip Service Advertisement (Default: Enabled)
+
+The system no longer publishes mDNS service records to `/etc/avahi/services/`. Avahi automatically advertises A/AAAA host records for `.local` resolution without any service files, which is sufficient for discovery. This eliminates XML file generation, Avahi reload storms, and self-check delays.
+
+To revert to the legacy behavior (publish service records):
+```bash
+export SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0
+just up dev
+```
+
+**Note**: `.local` hostname resolution continues to work in all modes. The simplifications only change *how* nodes discover each other, not *whether* discovery works.
 
 For more details on the phased simplification roadmap, see `notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md`.
 

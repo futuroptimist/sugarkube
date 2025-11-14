@@ -195,8 +195,12 @@ ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 # Phase 3: Simple Discovery Control
 # SUGARKUBE_SIMPLE_DISCOVERY=1 uses direct NSS resolution instead of service browsing
-# Default: 0 (complex service discovery for backward compatibility)
-SIMPLE_DISCOVERY="${SUGARKUBE_SIMPLE_DISCOVERY:-0}"
+# Default: 1 (simplified discovery enabled; set to 0 for legacy service browsing)
+SIMPLE_DISCOVERY="${SUGARKUBE_SIMPLE_DISCOVERY:-1}"
+# Phase 4: Service Advertisement Control
+# SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1 skips mDNS service publishing
+# Default: 1 (service advertisement skipped; set to 0 for legacy advertisement)
+SKIP_SERVICE_ADVERTISEMENT="${SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT:-1}"
 SERVER_TOKEN_PATH="${SUGARKUBE_K3S_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
@@ -212,8 +216,8 @@ SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
 # Phase 2: Absence Gate Control
 # SUGARKUBE_SKIP_ABSENCE_GATE=1 bypasses the absence gate entirely
-# Default: 0 (absence gate runs for backward compatibility)
-SKIP_ABSENCE_GATE="${SUGARKUBE_SKIP_ABSENCE_GATE:-0}"
+# Default: 1 (absence gate skipped; set to 0 for legacy restart behavior)
+SKIP_ABSENCE_GATE="${SUGARKUBE_SKIP_ABSENCE_GATE:-1}"
 MDNS_ABSENCE_GATE="${SUGARKUBE_MDNS_ABSENCE_GATE:-1}"
 MDNS_ABSENCE_TIMEOUT_MS="${SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS:-15000}"
 MDNS_ABSENCE_BACKOFF_START_MS="${SUGARKUBE_MDNS_ABSENCE_BACKOFF_START_MS:-500}"
@@ -3382,6 +3386,12 @@ publish_avahi_service() {
 }
 
 publish_api_service() {
+  # Phase 4: Skip service advertisement when SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1
+  if [ "${SKIP_SERVICE_ADVERTISEMENT}" = "1" ]; then
+    log_info mdns_publish event=service_advertisement_skipped reason="SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1" role=server >&2
+    return 0
+  fi
+  
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
   if ensure_self_mdns_advertisement server; then
@@ -3411,6 +3421,12 @@ publish_api_service() {
   return "${MDNS_SELF_CHECK_FAILURE_CODE}"
 }
 publish_bootstrap_service() {
+  # Phase 4: Skip service advertisement when SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1
+  if [ "${SKIP_SERVICE_ADVERTISEMENT}" = "1" ]; then
+    log_info mdns_publish event=service_advertisement_skipped reason="SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1" role=bootstrap >&2
+    return 0
+  fi
+  
   log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
   maybe_sleep 1
