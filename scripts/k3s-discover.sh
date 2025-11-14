@@ -1955,6 +1955,27 @@ ensure_mdns_absence_gate() {
 
   if restart_avahi_daemon_service; then
     log_info discover event=mdns_absence_gate action=restart_avahi outcome=ok >&2
+    
+    # Add stabilization delay to allow avahi-daemon to fully initialize
+    # after restart before querying it with avahi-browse or D-Bus calls
+    local restart_delay_ms="${MDNS_ABSENCE_RESTART_DELAY_MS:-2000}"
+    case "${restart_delay_ms}" in
+      ''|*[!0-9]*) restart_delay_ms=2000 ;;
+    esac
+    if [ "${restart_delay_ms}" -gt 0 ]; then
+      local restart_delay_s
+      restart_delay_s="$(python3 - "${restart_delay_ms}" <<'PY'
+import sys
+try:
+    value = int(sys.argv[1])
+except (IndexError, ValueError):
+    value = 2000
+print(value / 1000.0)
+PY
+)"
+      log_info discover event=mdns_absence_gate action=restart_stabilization delay_ms="${restart_delay_ms}" >&2
+      sleep "${restart_delay_s}"
+    fi
   else
     log_warn_msg discover "failed to restart avahi-daemon" "action=restart_avahi" >&2
   fi

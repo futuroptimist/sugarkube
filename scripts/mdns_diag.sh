@@ -116,12 +116,34 @@ echo "▶ Browsing for ${SERVICE_TYPE} services..."
 if command -v avahi-browse >/dev/null 2>&1; then
   browse_output=""
   browse_status=0
-  # Use timeout command to prevent hanging, fallback to script's --timeout if timeout unavailable
-  if command -v timeout >/dev/null 2>&1; then
-    browse_output="$(timeout 5 avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
-  else
-    browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
+  browse_retries="${MDNS_DIAG_BROWSE_RETRIES:-2}"
+  case "${browse_retries}" in
+    ''|*[!0-9]*) browse_retries=2 ;;
+  esac
+  if [ "${browse_retries}" -lt 1 ]; then
+    browse_retries=1
   fi
+  
+  # Retry avahi-browse in case daemon is still initializing
+  for attempt in $(seq 1 "${browse_retries}"); do
+    browse_output=""
+    browse_status=0
+    # Use timeout command to prevent hanging, fallback to script's --timeout if timeout unavailable
+    if command -v timeout >/dev/null 2>&1; then
+      browse_output="$(timeout 5 avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
+    else
+      browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
+    fi
+    
+    if [ "${browse_status}" -eq 0 ]; then
+      break
+    fi
+    
+    # If not the last attempt, wait before retrying
+    if [ "${attempt}" -lt "${browse_retries}" ]; then
+      sleep 1
+    fi
+  done
   
   if [ "${browse_status}" -eq 0 ]; then
     service_count="$(printf '%s\n' "${browse_output}" | grep -c '^=' || true)"
@@ -134,8 +156,13 @@ if command -v avahi-browse >/dev/null 2>&1; then
       WARNINGS+=("No ${SERVICE_TYPE} services discovered on the network")
     fi
   else
-    echo "  ✗ avahi-browse failed (exit code: ${browse_status})"
-    FAILURES+=("avahi-browse command failed")
+    if [ "${browse_retries}" -gt 1 ]; then
+      echo "  ✗ avahi-browse failed (exit code: ${browse_status}) after ${browse_retries} attempts"
+      FAILURES+=("avahi-browse command failed after ${browse_retries} retries (daemon may be restarting)")
+    else
+      echo "  ✗ avahi-browse failed (exit code: ${browse_status})"
+      FAILURES+=("avahi-browse command failed")
+    fi
   fi
 else
   echo "  ✗ avahi-browse command not found"
