@@ -3108,7 +3108,6 @@ publish_avahi_service() {
   local publish_attempt=1
   local max_publish_attempts=2
   local publish_attempts_used=1
-  local publish_success=0
   local handled_retry=0
   local confirm_latency_ms=""
   local confirm_attempts=""
@@ -3143,7 +3142,6 @@ publish_avahi_service() {
 
     if [ "${attempt_status}" -eq 0 ]; then
       publish_status=0
-      publish_success=1
       break
     fi
 
