@@ -8,6 +8,18 @@ personas:
 
 `sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
 
+## How Discovery Works
+
+Nodes discover each other **automatically** via mDNS (multicast DNS) service browsing:
+
+1. **First node bootstraps**: When you run `just up dev` on the first Pi, it starts k3s and publishes an mDNS service advertisement on the local network saying "k3s API available here at port 6443"
+
+2. **Subsequent nodes discover**: When you run `just up dev` on additional Pis, they use `avahi-browse` to scan the local network for any node advertising the k3s service
+
+3. **Automatic joining**: Once a node finds an advertised k3s server, it validates the API is responding, then joins using the token you provided
+
+**Key point:** There is no pre-configuration, hostname registry, or "previously discovered" node list. Discovery happens dynamically at runtime through mDNS service advertisements. Nodes can have any hostname - they're discovered by their advertised services, not by assumed naming patterns.
+
 ---
 
 ## Happy Path: 3-server `dev` cluster in two runs
@@ -295,13 +307,22 @@ just up dev
 
 #### Phase 3: Simplified Discovery (Default: Enabled)
 
-Discovery now uses a straightforward NSS-based approach instead of complex service browsing:
-1. Try `sugarkube0.local`, `sugarkube1.local`, etc. up to `SUGARKUBE_SERVERS-1`
-2. For each hostname, resolve it via NSS (Name Service Switch)
-3. Check if the API is alive (accepts 401 for unauthorized but running servers)
-4. Join the first responsive server
+Discovery uses mDNS service browsing to find any k3s nodes advertising themselves on the network:
 
-This reduces discovery time to 10-20 seconds and eliminates service browsing, leader election, and D-Bus polling.
+**How it works:**
+1. When a node starts k3s, it publishes an mDNS service record (via Avahi) advertising the k3s API on port 6443
+2. Joining nodes use `avahi-browse` to scan the local network for advertised k3s services
+3. The first responsive server found is used for joining
+4. **No hostname assumptions:** Any node with any hostname can be discovered, as long as it advertises the k3s service
+
+**Key benefits:**
+- Zero-configuration: No need to know hostnames in advance
+- Flexible naming: Use any hostname pattern (`pi-node-1.local`, `cluster-server.local`, etc.)
+- Dynamic discovery: Nodes find each other automatically via service advertisements
+- Simplified flow: Eliminates leader election complexity while maintaining proper service discovery
+
+**What was simplified:**
+The discovery process now skips the leader election phase but **still uses proper mDNS service browsing**. This reduces discovery time to 10-20 seconds while maintaining zero-configuration networking.
 
 To revert to the legacy behavior (service-based discovery with leader election):
 ```bash
@@ -311,9 +332,17 @@ just up dev
 
 #### Phase 4: Skip Service Advertisement (Default: Enabled)
 
-The system no longer publishes mDNS service records to `/etc/avahi/services/`. Avahi automatically advertises A/AAAA host records for `.local` resolution without any service files, which is sufficient for discovery. This eliminates XML file generation, Avahi reload storms, and self-check delays.
+**Important distinction:** This phase controls whether nodes **publish** service records, but discovery still **browses** for services.
 
-To revert to the legacy behavior (publish service records):
+When enabled (default), nodes rely on Avahi's automatic A/AAAA host record advertisements (`.local` DNS resolution) rather than explicitly publishing service records to `/etc/avahi/services/`. This works because:
+
+1. **Joining nodes still use service browsing** to find servers via `avahi-browse`
+2. **Bootstrap nodes can advertise** minimally through host records
+3. This eliminates XML file generation, Avahi reload delays, and self-check complexity
+
+The discovery mechanism (Phase 3) continues to use proper mDNS service browsing regardless of this setting - it's only the advertisement method that's simplified.
+
+To revert to the legacy behavior (explicitly publish service records to `/etc/avahi/services/`):
 ```bash
 export SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0
 just up dev
