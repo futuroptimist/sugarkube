@@ -1970,8 +1970,6 @@ try:
     value = int(sys.argv[1])
 except (IndexError, ValueError):
     value = 2000
-if value < 0:
-    value = 0
 print(value / 1000.0)
 PY
 )"

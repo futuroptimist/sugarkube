@@ -5,8 +5,7 @@
   "rootCause": "ensure_mdns_absence_gate() restarts avahi-daemon without a stabilization delay, causing immediate avahi-browse queries to fail with exit code 1 while the daemon is still initializing. This prevents follower nodes from discovering bootstrap nodes during cluster formation.",
   "resolution": "Added a 2-second stabilization delay after avahi-daemon restart in ensure_mdns_absence_gate() to allow the daemon to fully initialize before querying. The delay is configurable via MDNS_ABSENCE_RESTART_DELAY_MS environment variable (default: 2000ms).",
   "references": [
-    "scripts/k3s-discover.sh:1956-1960",
-    "scripts/k3s-discover.sh:1986",
-    "scripts/mdns_diag.sh:115-139"
+    "scripts/k3s-discover.sh:1956-1980",
+    "scripts/mdns_diag.sh:119-146"
   ]
 }

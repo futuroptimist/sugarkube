@@ -2,7 +2,7 @@
   "id": "2025-11-14-avahi-dbus-getversionstring-missing",
   "date": "2025-11-14",
   "component": "scripts/wait_for_avahi_dbus.sh",
-  "rootCause": "During avahi-daemon restart or initialization, D-Bus interface methods (GetVersionString, VersionString property, State property, GetState) are temporarily unavailable, causing wait_for_avahi_dbus.sh to timeout after 20 seconds with 'Call_failed: Method GetVersionString with signature on interface org.freedesktop.Avahi.Server doesnt exist'. Existing fallback logic exists but all methods fail during the initialization window.",
+  "rootCause": "During avahi-daemon restart or initialization, D-Bus interface methods (GetVersionString, VersionString property, State property, GetState) are temporarily unavailable, causing wait_for_avahi_dbus.sh to timeout after 20 seconds with error \"Call_failed: Method GetVersionString with signature on interface org.freedesktop.Avahi.Server doesn't exist\". Existing fallback logic exists but all methods fail during the initialization window.",
   "resolution": "Enhanced error logging to clearly indicate when D-Bus methods are unavailable during initialization. Added recommendation to use CLI-based fallback (avahi-browse) when D-Bus is unreliable. The mdns_ready.sh wrapper already implements this fallback pattern and should be preferred over direct wait_for_avahi_dbus.sh calls.",
   "references": [
     "scripts/wait_for_avahi_dbus.sh:230-258",
