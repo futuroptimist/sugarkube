@@ -10,7 +10,9 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List, Tuple
+
+from tests.conftest import ensure_root_privileges, require_tools
 
 import pytest
 
@@ -18,30 +20,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 K3S_DISCOVER = SCRIPTS_DIR / "k3s-discover.sh"
 
+DBUS_STARTUP_TIMEOUT_SECS = 5
+DBUS_POLL_INTERVAL_SECS = 0.1
+AVAHI_STARTUP_DELAY_SECS = 1
+SERVICE_PUBLICATION_DELAY_SECS = 2
+PROCESS_TERMINATION_TIMEOUT_SECS = 5
+
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("AVAHI_AVAILABLE") != "1",
     reason="AVAHI_AVAILABLE=1 not set (requires Avahi daemon and root permissions)",
 )
-
-
-def _require_tools(tools: Iterable[str]) -> None:
-    missing: List[str] = []
-    for tool in tools:
-        if shutil.which(tool) is None:
-            missing.append(tool)
-    if missing:
-        pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
-
-
-def _ensure_root() -> None:
-    result = subprocess.run(["id", "-u"], capture_output=True, text=True, check=True)
-    if result.stdout.strip() != "0":
-        probe = subprocess.run(
-            ["unshare", "-n", "true"], capture_output=True, text=True, check=False
-        )
-        if probe.returncode != 0:
-            pytest.skip("Insufficient privileges for network namespace operations")
 
 
 def _unique_name(prefix: str) -> str:
@@ -194,13 +183,13 @@ def _start_dbus(namespace: str, bus_path: Path) -> subprocess.Popen[str]:
         "--nopidfile",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.time() + 5
+    deadline = time.time() + DBUS_STARTUP_TIMEOUT_SECS
     while time.time() < deadline:
         if bus_path.exists():
             return proc
-        time.sleep(0.1)
+        time.sleep(DBUS_POLL_INTERVAL_SECS)
     proc.terminate()
-    proc.wait(timeout=2)
+    proc.wait(timeout=PROCESS_TERMINATION_TIMEOUT_SECS)
     raise RuntimeError(f"dbus-daemon did not create bus socket at {bus_path}")
 
 
@@ -230,7 +219,8 @@ def _start_avahi(namespace: str, bus_path: Path, runtime_dir: Path) -> subproces
         "--no-rlimits",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1)
+    # Allow Avahi time to register with D-Bus and expose services before proceeding.
+    time.sleep(AVAHI_STARTUP_DELAY_SECS)
     return proc
 
 
@@ -286,39 +276,55 @@ def _create_stub_bin(
     fallback_host: str,
     leader_ip: str,
 ) -> Dict[str, Path]:
+    """Create stub executables that emulate system tooling used by k3s-discover tests.
+
+    The stubs wrap or replace binaries such as ``systemctl``, ``k3s-install`` and
+    ``avahi-browse`` so the harness can observe interactions without mutating the
+    host system. Some simply exit successfully, while others log arguments or
+    proxy to the real binary with deterministic responses for the test scenario.
+
+    Args:
+        bin_dir: Directory in which to place the stub executables.
+        canonical_host: Canonical host name advertised via mDNS.
+        fallback_host: Host name used when fail-open mode is triggered.
+        leader_ip: IP address returned for both canonical and fallback host lookups.
+
+    Returns:
+        Mapping of stub names to their file paths for convenient lookup.
+    """
     bin_dir.mkdir(parents=True, exist_ok=True)
 
     stubs: Dict[str, Path] = {}
 
     for name in ("systemctl", "iptables", "ip6tables", "curl", "openssl", "journalctl"):
         stub = bin_dir / name
-        _write_executable(stub, "#!/usr/bin/env bash\nexit 0\n")
+        _write_executable(stub, "#!/bin/bash\nexit 0\n")
         stubs[name] = stub
 
     sleep_stub = bin_dir / "sleep"
-    _write_executable(sleep_stub, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(sleep_stub, "#!/bin/bash\nexit 0\n")
     stubs["sleep"] = sleep_stub
 
     configure_avahi_stub = bin_dir / "configure_avahi.sh"
-    _write_executable(configure_avahi_stub, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(configure_avahi_stub, "#!/bin/bash\nexit 0\n")
     stubs["configure_avahi"] = configure_avahi_stub
 
     wait_avahi_stub = bin_dir / "wait_for_avahi_dbus.sh"
-    _write_executable(wait_avahi_stub, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(wait_avahi_stub, "#!/bin/bash\nexit 0\n")
     stubs["wait_for_avahi_dbus"] = wait_avahi_stub
 
     mdns_diag_stub = bin_dir / "mdns_diag.sh"
-    _write_executable(mdns_diag_stub, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(mdns_diag_stub, "#!/bin/bash\nexit 0\n")
     stubs["mdns_diag"] = mdns_diag_stub
 
     net_diag_stub = bin_dir / "net_diag.sh"
-    _write_executable(net_diag_stub, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(net_diag_stub, "#!/bin/bash\nexit 0\n")
     stubs["net_diag"] = net_diag_stub
 
     install_stub = bin_dir / "k3s-install.sh"
     _write_executable(
         install_stub,
-        """#!/usr/bin/env bash
+        """#!/bin/bash
 set -euo pipefail
 log_path="${K3S_INSTALL_LOG:?}"
 {
@@ -336,7 +342,7 @@ exit 0
     check_api_stub = bin_dir / "check_apiready.sh"
     _write_executable(
         check_api_stub,
-        """#!/usr/bin/env bash
+        """#!/bin/bash
 set -euo pipefail
 log_path="${CHECK_API_LOG:?}"
 echo "host=${SERVER_HOST:-} ip=${SERVER_IP:-} port=${SERVER_PORT:-}" >>"${log_path}"
@@ -351,7 +357,7 @@ exit 0
     getent_stub = bin_dir / "getent"
     _write_executable(
         getent_stub,
-        f"""#!/usr/bin/env bash
+        f"""#!/bin/bash
 set -e
 if [ "$#" -ge 2 ]; then
   case "$1 $2" in
@@ -384,7 +390,7 @@ exec "{real_getent}" "$@"
     avahi_browse_stub = bin_dir / "avahi-browse"
     _write_executable(
         avahi_browse_stub,
-        f"""#!/usr/bin/env bash
+        f"""#!/bin/bash
 mode="${{AVAHI_STUB_MODE:-real}}"
 if [ "${{mode}}" = "fail" ]; then
   echo "avahi-browse stub forcing failure" >&2
@@ -400,17 +406,48 @@ exec "{real_avahi_browse}" "$@"
         avahi_resolve_stub = bin_dir / "avahi-resolve"
         _write_executable(
             avahi_resolve_stub,
-            f"#!/usr/bin/env bash\nexec \"{real_avahi_resolve}\" \"$@\"\n",
+            f"#!/bin/bash\nexec \"{real_avahi_resolve}\" \"$@\"\n",
         )
         stubs["avahi_resolve"] = avahi_resolve_stub
 
     return stubs
+def _safe_terminate_wait(proc: subprocess.Popen[str], timeout: float = PROCESS_TERMINATION_TIMEOUT_SECS) -> None:
+    """Best-effort termination helper that never raises during cleanup."""
+
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=timeout)
+    except Exception:
+        pass
 
 
 @pytest.fixture
 def discover_harness(tmp_path: Path):
-    _require_tools(["avahi-daemon", "avahi-publish", "avahi-browse", "dbus-daemon", "ip", "unshare"])
-    _ensure_root()
+    """Provision isolated namespaces, Avahi services and binary stubs for tests.
+
+    Two network namespaces (``leader`` and ``follower``) are created and linked via
+    a veth pair. Each namespace runs its own ``dbus-daemon`` and ``avahi-daemon``
+    instance so discovery traffic is fully isolated. A publisher in the leader
+    namespace announces canonical metadata while a directory of stub executables
+    replaces system tooling (``systemctl``, ``k3s-install``, diagnostics, etc.) so
+    interactions can be observed safely.  The fixture yields a dictionary with
+    namespace metadata, running process handles, stub locations and log directories
+    used by the tests. All processes, namespaces and temporary files are torn down
+    after the test, even when failures occur.
+    """
+
+    require_tools([
+        "avahi-daemon",
+        "avahi-publish",
+        "avahi-browse",
+        "dbus-daemon",
+        "ip",
+        "unshare",
+    ])
+    ensure_root_privileges()
 
     ns_info, cleanup_commands = _setup_namespace_pair()
     leader_state = tmp_path / "leader"
@@ -445,7 +482,8 @@ def discover_harness(tmp_path: Path):
         ns_info["leader_ip"],
     )
 
-    time.sleep(2)
+    # Give the Avahi publisher time to broadcast the service before discovery attempts.
+    time.sleep(SERVICE_PUBLICATION_DELAY_SECS)
 
     bin_dir = tmp_path / "bin"
     stubs = _create_stub_bin(
@@ -517,23 +555,32 @@ def discover_harness(tmp_path: Path):
     try:
         yield harness
     finally:
-        publisher.terminate()
-        publisher.wait(timeout=5)
-        harness["leader"].avahi.terminate()
-        harness["leader"].avahi.wait(timeout=5)
-        harness["leader"].dbus.terminate()
-        harness["leader"].dbus.wait(timeout=5)
-        harness["follower"].avahi.terminate()
-        harness["follower"].avahi.wait(timeout=5)
-        harness["follower"].dbus.terminate()
-        harness["follower"].dbus.wait(timeout=5)
+        _safe_terminate_wait(publisher)
+        _safe_terminate_wait(harness["leader"].avahi)
+        _safe_terminate_wait(harness["leader"].dbus)
+        _safe_terminate_wait(harness["follower"].avahi)
+        _safe_terminate_wait(harness["follower"].dbus)
         for command in reversed(cleanup_commands):
-            subprocess.run(command, capture_output=True)
+            try:
+                subprocess.run(command, capture_output=True)
+            except Exception:
+                pass
 
 
 def _run_discover(
     harness: Dict[str, object], *, stub_mode: str, log_prefix: str, timeout: int = 120
 ) -> Tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """Execute ``k3s-discover.sh`` within the follower namespace and capture logs.
+
+    Args:
+        harness: Harness dictionary produced by :func:`discover_harness`.
+        stub_mode: Behaviour for the Avahi stub (``"fail"`` or ``"real"``).
+        log_prefix: Prefix applied to generated log filenames.
+        timeout: Maximum seconds to wait for the subprocess to exit.
+
+    Returns:
+        Tuple containing the subprocess result, install log path and API-ready log path.
+    """
     env = dict(harness["base_env"])
     env["AVAHI_STUB_MODE"] = stub_mode
 
@@ -566,6 +613,13 @@ def _read_log_lines(path: Path) -> List[str]:
 
 
 def test_failopen_then_recovers_with_canonical_metadata(discover_harness):
+    """Exercise fail-open join and subsequent recovery once mDNS metadata is available.
+
+    First run configures the Avahi stub to fail, forcing ``k3s-discover`` to rely on
+    the fallback ``K3S_URL`` metadata. A second run restores normal Avahi behaviour
+    and asserts the script rejoins using the canonical host advertised over mDNS.
+    """
+
     result_fail, install_fail, api_fail = _run_discover(
         discover_harness, stub_mode="fail", log_prefix="failopen"
     )

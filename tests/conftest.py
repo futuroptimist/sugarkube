@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
+from typing import Iterable, List
 
 import pytest
 
@@ -36,3 +38,31 @@ def enable_subprocess_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("COVERAGE_PROCESS_START", str(ROOT / ".coveragerc"))
     _export_pythonpath(monkeypatch)
+
+
+def require_tools(tools: Iterable[str]) -> None:
+    """Skip the current test when required system tools are missing."""
+
+    missing: List[str] = []
+    for tool in tools:
+        result = subprocess.run([
+            "which",
+            tool,
+        ], capture_output=True, text=True)
+        if result.returncode != 0:
+            missing.append(tool)
+
+    if missing:
+        pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
+
+
+def ensure_root_privileges() -> None:
+    """Skip when we cannot create network namespaces due to insufficient privileges."""
+
+    result = subprocess.run(["id", "-u"], capture_output=True, text=True)
+    if result.stdout.strip() == "0":
+        return
+
+    probe = subprocess.run(["unshare", "-n", "true"], capture_output=True, text=True)
+    if probe.returncode != 0:
+        pytest.skip("Insufficient privileges for network namespace operations")

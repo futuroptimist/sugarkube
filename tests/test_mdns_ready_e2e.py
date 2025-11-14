@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import ensure_root_privileges, require_tools
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 MDNS_READY_SCRIPT = SCRIPTS_DIR / "mdns_ready.sh"
@@ -29,50 +31,6 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("AVAHI_AVAILABLE") != "1",
     reason="AVAHI_AVAILABLE=1 not set (requires Avahi daemon and root permissions)",
 )
-
-
-def _check_prerequisites():
-    """Check if all required tools are available."""
-    required_tools = [
-        "avahi-daemon",
-        "avahi-publish",
-        "avahi-browse",
-        "ip",
-        "unshare",
-    ]
-
-    missing = []
-    for tool in required_tools:
-        result = subprocess.run(
-            ["which", tool],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            missing.append(tool)
-
-    if missing:
-        pytest.skip(f"Required tools not available: {', '.join(missing)}")
-
-
-def _check_root():
-    """Check if running with sufficient privileges."""
-    result = subprocess.run(
-        ["id", "-u"],
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip() != "0":
-        # Not root, check if we can create network namespaces
-        result = subprocess.run(
-            ["unshare", "-n", "true"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip("Insufficient privileges for network namespace operations")
-
-
 @pytest.fixture
 def netns_setup():
     """Set up a network namespace environment for testing.
@@ -89,8 +47,14 @@ def netns_setup():
             - ip1 (str): IP address of ns1 (e.g., 192.168.100.1)
             - ip2 (str): IP address of ns2 (e.g., 192.168.100.2)
     """
-    _check_prerequisites()
-    _check_root()
+    require_tools([
+        "avahi-daemon",
+        "avahi-publish",
+        "avahi-browse",
+        "ip",
+        "unshare",
+    ])
+    ensure_root_privileges()
 
     ns1 = "mdns-test-ns1"
     ns2 = "mdns-test-ns2"
