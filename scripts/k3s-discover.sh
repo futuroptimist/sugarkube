@@ -2962,6 +2962,9 @@ PY
   return "${status}"
 }
 
+# publish__parse_metrics extracts CONFIRM_* fields from the structured output of
+# mdns_publish_static.sh, defaulting unset metrics to empty strings so callers
+# can rely on variable presence.
 publish__parse_metrics() {
   PUBLISH_CONFIRM_OUTCOME=""
   PUBLISH_CONFIRM_LATENCY=""
@@ -2988,29 +2991,29 @@ publish__parse_metrics() {
   done <<<"${raw}"
 }
 
+# publish_latency_bucket maps a numeric latency (ms) into human-readable ranges
+# used for histogram metrics. Non-numeric input is classified as "unknown".
 publish_latency_bucket() {
   local value="$1"
   case "${value}" in
-    ''|*[!0-9]*)
+    *[!0-9]*)
       printf 'unknown\n'
       return 0
       ;;
   esac
-  local numeric
-  numeric="${value}"
-  if [ "${numeric}" -lt 250 ]; then
+  if [ "${value}" -lt 250 ]; then
     printf 'ms_0_249\n'
-  elif [ "${numeric}" -lt 500 ]; then
+  elif [ "${value}" -lt 500 ]; then
     printf 'ms_250_499\n'
-  elif [ "${numeric}" -lt 1000 ]; then
+  elif [ "${value}" -lt 1000 ]; then
     printf 'ms_500_999\n'
-  elif [ "${numeric}" -lt 2000 ]; then
+  elif [ "${value}" -lt 2000 ]; then
     printf 'ms_1000_1999\n'
-  elif [ "${numeric}" -lt 5000 ]; then
+  elif [ "${value}" -lt 5000 ]; then
     printf 'ms_2000_4999\n'
-  elif [ "${numeric}" -lt 10000 ]; then
+  elif [ "${value}" -lt 10000 ]; then
     printf 'ms_5000_9999\n'
-  elif [ "${numeric}" -lt 20000 ]; then
+  elif [ "${value}" -lt 20000 ]; then
     printf 'ms_10000_19999\n'
   else
     printf 'ms_20000_plus\n'

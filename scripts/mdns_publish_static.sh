@@ -795,6 +795,8 @@ wait_for_avahi_publication() {
   done
 }
 
+# monotonic_now_ms prints the current monotonic clock in milliseconds so that
+# timeout calculations are not affected by wall-clock adjustments.
 monotonic_now_ms() {
   python3 - <<'PY'
 import time
@@ -802,6 +804,8 @@ print(int(time.monotonic() * 1000))
 PY
 }
 
+# elapsed_since_ms prints the number of monotonic milliseconds that have passed
+# since the provided start timestamp. Invalid or missing input is treated as 0.
 elapsed_since_ms() {
   python3 - "$1" <<'PY'
 import sys
@@ -819,6 +823,9 @@ print(elapsed)
 PY
 }
 
+# check_service_via_dbus queries Avahi over D-Bus using gdbus or busctl to
+# verify that the expected host/port tuple is published. It returns 0 on match,
+# 1 on mismatch, and 2 when no compatible tool is available.
 check_service_via_dbus() {
   local instance="$1"
   local service_type="$2"
@@ -907,16 +914,21 @@ for name, cmd in tools:
     )
     clean = re.sub(r'\barray\s*(?=\[)', '', clean)
     try:
-        value = ast.literal_eval(clean)
-    except Exception:
-        continue
-    if isinstance(value, (list, tuple)) and len(value) == 1:
-        value = value[0]
-    try:
-        host = str(value[5]).strip().lower().rstrip('.')
-        port = str(value[8]).strip()
-    except Exception:
-        continue
+    value = ast.literal_eval(clean)
+  except Exception:
+    continue
+  if isinstance(value, (list, tuple)) and len(value) == 1:
+    value = value[0]
+  # Avahi D-Bus ResolveService is expected to return a tuple with at least 9
+  # elements: [interface, protocol, name, type, domain, host, aprotocol,
+  # address, port, txt, flags]. Skip unexpected payloads to avoid IndexError.
+  if not (isinstance(value, (list, tuple)) and len(value) >= 9):
+    continue
+  try:
+    host = str(value[5]).strip().lower().rstrip('.')
+    port = str(value[8]).strip()
+  except Exception:
+    continue
     if host and not host.endswith('.local'):
         host = f"{host}.local"
     if expected_host and host != expected_host:
@@ -929,6 +941,9 @@ sys.exit(1)
 PY
 }
 
+# check_service_via_cli validates publication using avahi-browse. It returns 0
+# when the expected host is observed, 1 on mismatch, and 2 if avahi-browse is
+# unavailable.
 check_service_via_cli() {
   local service_type="$1"
   local expected_host="$2"
@@ -944,12 +959,18 @@ check_service_via_cli() {
   if [ -z "${browse_output}" ]; then
     return 1
   fi
-  if printf '%s\n' "${browse_output}" | grep -Fqi "${expected_host}"; then
+  local browse_output_lc expected_host_lc
+  browse_output_lc="$(printf '%s\n' "${browse_output}" | tr '[:upper:]' '[:lower:]')"
+  expected_host_lc="$(printf '%s' "${expected_host}" | tr '[:upper:]' '[:lower:]')"
+  if printf '%s\n' "${browse_output_lc}" | grep -Fq "${expected_host_lc}"; then
     return 0
   fi
   return 1
 }
 
+# confirm_avahi_publication orchestrates the verification loop, combining the
+# D-Bus and CLI checks with exponential backoff. It populates CONFIRM_* metrics
+# and returns 0 while signaling success/failure through CONFIRM_SUCCESS.
 confirm_avahi_publication() {
   local service_type="$1"
   local instance="$2"
@@ -1011,10 +1032,16 @@ confirm_avahi_publication() {
     CONFIRM_DBUS_STATUS="${dbus_status}"
     CONFIRM_CLI_STATUS="${cli_status}"
 
-    if { [ "${dbus_status}" -eq 0 ] || [ "${dbus_status}" -eq 2 ]; } \
-      && { [ "${cli_status}" -eq 0 ] || [ "${cli_status}" -eq 2 ]; }; then
+    if [ "${dbus_status}" -eq 0 ] || [ "${cli_status}" -eq 0 ]; then
       CONFIRM_SUCCESS=1
       CONFIRM_OUTCOME=ok
+      break
+    fi
+
+    if [ "${dbus_status}" -eq 2 ] && [ "${cli_status}" -eq 2 ]; then
+      echo "ERROR: Neither gdbus/busctl nor avahi-browse are available; cannot verify service publication." >&2
+      CONFIRM_SUCCESS=0
+      CONFIRM_OUTCOME=unavailable
       break
     fi
 
@@ -1024,8 +1051,21 @@ confirm_avahi_publication() {
       break
     fi
 
+    local remaining_ms
+    remaining_ms=$((deadline_ms - now_ms))
+    if [ "${remaining_ms}" -le 0 ]; then
+      break
+    fi
+
     local sleep_seconds
-    sleep_seconds="$(python3 - "${sleep_ms}" <<'PY'
+    local sleep_target_ms="${sleep_ms}"
+    if [ "${sleep_target_ms}" -gt "${remaining_ms}" ]; then
+      sleep_target_ms="${remaining_ms}"
+    fi
+    if [ "${sleep_target_ms}" -le 0 ]; then
+      break
+    fi
+    sleep_seconds="$(python3 - "${sleep_target_ms}" <<'PY'
 import sys
 try:
     value = int(sys.argv[1])
