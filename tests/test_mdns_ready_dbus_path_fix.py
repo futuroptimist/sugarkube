@@ -38,7 +38,7 @@ def mock_env(tmp_path):
 
 def test_mdns_ready_uses_correct_dbus_path(mock_env):
     """Test that mdns_ready.sh uses the correct D-Bus object path.
-    
+
     This test verifies the fix for the issue where mdns_ready.sh was using
     '/' instead of '/org/freedesktop/Avahi/Server' as the object path,
     causing GetVersionString calls to fail with "Method...doesn't exist" errors.
@@ -47,7 +47,7 @@ def test_mdns_ready_uses_correct_dbus_path(mock_env):
 
     # Track what busctl was called with
     busctl_log = bin_dir / "busctl.log"
-    
+
     # Mock busctl to log its arguments and handle both ownership and GetVersionString
     busctl_mock = bin_dir / "busctl"
     busctl_mock.write_text(
@@ -106,7 +106,7 @@ exit 1
         f"Expected busctl to be called with '/org/freedesktop/Avahi/Server' object path, "
         f"but log shows:\n{log_content}"
     )
-    
+
     # Verify it's NOT using the wrong path
     # The log should contain the full busctl call including /org/freedesktop/Avahi/Server
     assert "OBJECT_PATH: /org/freedesktop/Avahi/Server" in log_content, (
@@ -117,6 +117,6 @@ exit 1
     # Verify output logs show correct path in error reporting
     output = result.stdout + result.stderr
     if "bus_object=" in output:
-        assert "bus_object=/org/freedesktop/Avahi/Server" in output, (
-            f"Expected log output to show bus_object=/org/freedesktop/Avahi/Server\n{output}"
-        )
+        assert (
+            "bus_object=/org/freedesktop/Avahi/Server" in output
+        ), f"Expected log output to show bus_object=/org/freedesktop/Avahi/Server\n{output}"
