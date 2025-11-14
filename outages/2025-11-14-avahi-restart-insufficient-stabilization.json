@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-14-avahi-restart-insufficient-stabilization",
+  "date": "2025-11-14",
+  "component": "scripts/k3s-discover.sh",
+  "rootCause": "The mdns_absence_gate restarts avahi-daemon and waits only 2 seconds before querying it with D-Bus calls and avahi-browse. This is insufficient for the daemon to fully initialize: D-Bus methods (GetVersionString) are unavailable, avahi-browse returns exit code 1, and service advertisement hasn't stabilized. Additionally, if service files are written immediately after restart, the daemon receives rapid reload signals (observed: 6 reloads in 1 second) which can cause it to be terminated with SIGTERM before it fully stabilizes.",
+  "resolution": "Increased the MDNS_ABSENCE_RESTART_DELAY_MS default from 2000ms (2 seconds) to 5000ms (5 seconds). This longer stabilization window allows: (1) D-Bus interface to become available, (2) avahi-browse to successfully query services, (3) service registration to complete, and (4) the daemon to process any pending reload signals before new queries arrive. The value remains configurable via environment variable for environments that need different timing.",
+  "references": [
+    "scripts/k3s-discover.sh:1931-1990",
+    "outages/2025-11-14-avahi-dbus-getversionstring-missing.json",
+    "outages/2025-11-14-avahi-browse-restart-failure.json"
+  ]
+}

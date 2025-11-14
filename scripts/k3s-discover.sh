@@ -1960,9 +1960,10 @@ ensure_mdns_absence_gate() {
     
     # Add stabilization delay to allow avahi-daemon to fully initialize
     # after restart before querying it with avahi-browse or D-Bus calls
-    local restart_delay_ms="${MDNS_ABSENCE_RESTART_DELAY_MS:-2000}"
+    # Increased from 2s to 5s to prevent querying daemon before it's ready
+    local restart_delay_ms="${MDNS_ABSENCE_RESTART_DELAY_MS:-5000}"
     case "${restart_delay_ms}" in
-      ''|*[!0-9]*) restart_delay_ms=2000 ;;
+      ''|*[!0-9]*) restart_delay_ms=5000 ;;
     esac
     if [ "${restart_delay_ms}" -gt 0 ]; then
       local restart_delay_s
