@@ -269,6 +269,7 @@ You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or ex
 | `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Environment-specific join tokens (see above) |
 | `SUGARKUBE_TOKEN` | _none_ | Fallback token if no per-env variant is set |
 | `SUGARKUBE_SKIP_ABSENCE_GATE` | `0` | Skip Avahi restart at discovery time (Phase 2 simplification) |
+| `SUGARKUBE_SIMPLE_DISCOVERY` | `0` | Use direct NSS resolution instead of service browsing (Phase 3 simplification) |
 
 ### Generating Tokens Manually
 If you ever need to regenerate a token, run this on a control-plane node:
@@ -277,9 +278,13 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 or, if that file is missing, reinstall the server (`just up dev` on a fresh node) and grab the new token.
 
-### mDNS Discovery Simplification (Phase 2)
+### mDNS Discovery Simplification (Phases 2-3)
 
-The discovery system has been simplified to reduce complexity and improve reliability. By default, the system still restarts Avahi before discovery for backward compatibility, but this can be skipped:
+The discovery system has been simplified to reduce complexity and improve reliability.
+
+#### Phase 2: Skip Absence Gate
+
+By default, the system still restarts Avahi before discovery for backward compatibility, but this can be skipped:
 
 ```bash
 export SUGARKUBE_SKIP_ABSENCE_GATE=1
@@ -287,6 +292,24 @@ just up dev
 ```
 
 When `SUGARKUBE_SKIP_ABSENCE_GATE=1`, the script trusts systemd to keep Avahi running and performs an optional health check instead of restarting the daemon. This eliminates restart-related race conditions and saves 5-25 seconds per node. This is recommended for most environments as Avahi is managed by systemd with automatic restart on failure.
+
+#### Phase 3: Simplified Discovery
+
+The traditional discovery flow uses service browsing and leader election, which is complex and can fail in multiple ways. A simpler approach is available:
+
+```bash
+export SUGARKUBE_SIMPLE_DISCOVERY=1
+export SUGARKUBE_SERVERS=3
+just up dev
+```
+
+When `SUGARKUBE_SIMPLE_DISCOVERY=1`, follower nodes use a straightforward approach:
+1. Try `sugarkube0.local`, `sugarkube1.local`, etc. up to `SUGARKUBE_SERVERS-1`
+2. For each hostname, resolve it via NSS (Name Service Switch)
+3. Check if the API is alive (accepts 401 for unauthorized but running servers)
+4. Join the first responsive server
+
+This eliminates service browsing, leader election, and D-Bus polling, reducing discovery time to 10-20 seconds and removing ~800 lines of complex code. The simplified approach is more reliable and easier to debug.
 
 For more details on the phased simplification roadmap, see `notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md`.
 
