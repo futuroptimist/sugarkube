@@ -408,3 +408,18 @@ STUB
   run diff -u "${expected_hosts}" "${HOSTS_PATH}"
   [ "$status" -eq 0 ]
 }
+
+@test "mdns_publish_static emits confirmation metrics" {
+  prepare_mdns_publish_static_environment
+  rm -f "${SERVICE_FILE}" "${HOSTS_PATH}" || true
+  : >"${TEST_RENAME_MARKER}"
+  : >"${TEST_JOURNAL_LOG}"
+
+  run --separate-stderr bash "${BATS_CWD}/scripts/mdns_publish_static.sh"
+
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -ge 1 ]
+  [[ "${lines[0]}" =~ publish_metrics ]]
+  [[ "${lines[0]}" =~ confirm_outcome=ok ]]
+  [[ "${lines[0]}" =~ confirm_attempts=1 ]]
+}
