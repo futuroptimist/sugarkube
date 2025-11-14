@@ -110,7 +110,7 @@ def _try_dbus_browser(
                 "call",
                 "--system",
                 "--dest", "org.freedesktop.Avahi",
-                "--object-path", "/",
+                "--object-path", "/org/freedesktop/Avahi/Server",
                 "--method", "org.freedesktop.Avahi.Server.ServiceBrowserNew",
                 "-1",  # IF_UNSPEC
                 "-1",  # PROTO_UNSPEC
@@ -147,7 +147,7 @@ def _try_dbus_browser(
                 "call",
                 "--system",
                 "org.freedesktop.Avahi",
-                "/",
+                "/org/freedesktop/Avahi/Server",
                 "org.freedesktop.Avahi.Server",
                 "ServiceBrowserNew",
                 "iissu",

@@ -277,7 +277,7 @@ mdns_liveness_probe() {
   if [ "${dbus_allowed}" -eq 1 ]; then
     if command -v gdbus >/dev/null 2>&1; then
     local dbus_output
-    if dbus_output="$(run_command_capture avahi_dbus_hostname gdbus call --system --dest org.freedesktop.Avahi --object-path / --method org.freedesktop.Avahi.Server.GetHostNameFqdn)"; then
+    if dbus_output="$(run_command_capture avahi_dbus_hostname gdbus call --system --dest org.freedesktop.Avahi --object-path /org/freedesktop/Avahi/Server --method org.freedesktop.Avahi.Server.GetHostNameFqdn)"; then
       local dbus_command_kv
       dbus_command_kv="command=\"$(kv_escape "${MDNS_LAST_CMD_DISPLAY:-}")\""
       local dbus_duration_kv
