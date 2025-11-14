@@ -220,8 +220,6 @@ while :; do
   if [ "${systemd_ready}" -eq 1 ]; then
     busctl_output=""
     busctl_status=0
-    local prev_bus_status
-    local prev_bus_owner
     prev_bus_status="${last_bus_status}"
     prev_bus_owner="${last_bus_owner}"
     last_bus_destination="org.freedesktop.Avahi"
@@ -373,9 +371,7 @@ while :; do
 
     if [ "${last_bus_status}" != "${prev_bus_status}" ] \
       || [ "${last_bus_owner}" != "${prev_bus_owner}" ]; then
-      local elapsed_ms
       elapsed_ms="$(elapsed_since_start_ms "${script_start_ms}")"
-      local bus_error_log
       bus_error_log="$(sanitize_kv "${busctl_output}")"
       set -- \
         avahi_dbus_call \

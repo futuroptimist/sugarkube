@@ -9,9 +9,13 @@ SCRIPT_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/log.sh"
 
 sanitize_kv() {
+  # Match the sanitization used in wait_for_avahi_dbus.sh so log fields stay
+  # consistent across scripts regardless of whitespace or locale quirks.
   LC_ALL=C printf '%s' "$1" \
     | tr '\n\r\t' '   ' \
-    | tr -s ' ' ' '
+    | tr -s ' ' ' ' \
+    | tr ' ' '_' \
+    | tr -cd '[:alnum:]_.:/-'
 }
 
 # Helper function to calculate elapsed milliseconds since start
