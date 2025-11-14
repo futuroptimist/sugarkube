@@ -1,0 +1,11 @@
+{
+  "id": "2025-11-14-avahi-browse-restart-failure",
+  "date": "2025-11-14",
+  "component": "scripts/mdns_diag.sh",
+  "rootCause": "avahi-browse commands fail with exit code 1 when executed immediately after avahi-daemon restart, before the daemon has fully initialized its multicast group memberships and service database. The mdns_diag.sh diagnostic script reports this as 'avahi-browse command failed' without retry logic, preventing accurate diagnosis of mDNS issues during the critical post-restart window.",
+  "resolution": "Added retry logic to avahi-browse invocation in mdns_diag.sh with exponential backoff (2 attempts, 1-second delay). Enhanced error messages to distinguish between temporary initialization failures and persistent avahi-browse issues. Added MDNS_DIAG_BROWSE_RETRIES environment variable (default: 2) to control retry behavior.",
+  "references": [
+    "scripts/mdns_diag.sh:115-139",
+    "scripts/k3s-discover.sh:1956-1960"
+  ]
+}
