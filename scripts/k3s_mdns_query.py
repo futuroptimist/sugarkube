@@ -1,4 +1,38 @@
-"""Helpers for querying k3s mDNS advertisements via Avahi."""
+"""
+Helpers for querying k3s mDNS advertisements via Avahi.
+
+This module provides functions to discover k3s nodes on the local network using
+multicast DNS (mDNS) service browsing. It wraps avahi-browse and handles various
+edge cases and error conditions.
+
+Key Behaviors (as of 2025-11-15 fixes):
+
+1. **Network Discovery by Default**: By default, avahi-browse waits for actual
+   mDNS multicast responses on the network. This is essential for initial cluster
+   formation when nodes have never seen each other before.
+   
+   - Set SUGARKUBE_MDNS_NO_TERMINATE=0 to use --terminate flag (cache-only, fast)
+   - Default is SUGARKUBE_MDNS_NO_TERMINATE=1 (network discovery, reliable)
+
+2. **No --ignore-local Flag**: Nodes can discover any k3s service on the network,
+   including their own (for self-verification). This allows bootstrap nodes to
+   confirm their service publications.
+
+3. **Robust Error Handling**: Handles TimeoutExpired exceptions gracefully,
+   converting bytes to str as needed to prevent TypeErrors during diagnostics.
+
+Environment Variables:
+    SUGARKUBE_MDNS_NO_TERMINATE: Controls --terminate flag (default: "1", no terminate)
+    SUGARKUBE_MDNS_QUERY_TIMEOUT: Query timeout in seconds (default: 10.0)
+    ALLOW_IFACE: Pin avahi-browse to specific interface (e.g., "eth0")
+    SUGARKUBE_DEBUG: Enable detailed debug logging
+    SUGARKUBE_MDNS_FIXTURE_FILE: Use fixture file instead of live avahi-browse
+
+See Also:
+    - outages/2025-11-15-mdns-terminate-flag-prevented-discovery.json
+    - outages/2025-11-15-mdns-ignore-local-blocked-verification.json
+    - outages/2025-11-15-mdns-timeout-bytes-str-mismatch.json
+"""
 
 from __future__ import annotations
 
@@ -54,15 +88,18 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
     # --terminate causes avahi-browse to dump only cached entries and exit immediately.
     # This is fast but won't discover services that haven't been cached yet.
     # For initial cluster formation, we want to wait for network responses,
-    # so we skip --terminate when SUGARKUBE_MDNS_NO_TERMINATE=1.
-    use_terminate = os.environ.get(_NO_TERMINATE_ENV, "0").strip() != "1"
+    # so we skip --terminate by default. Set SUGARKUBE_MDNS_NO_TERMINATE=0 to re-enable it.
+    use_terminate = os.environ.get(_NO_TERMINATE_ENV, "1").strip() == "0"
     if use_terminate:
         command.append("--terminate")
     
     if resolve:
         command.append("--resolve")
-    if mode in {"server-first", "server-count", "server-select"}:
-        command.append("--ignore-local")
+    # Note: --ignore-local prevents discovering services published by THIS host's Avahi daemon.
+    # For cross-node discovery, we don't need this flag - we want to see all k3s services on the network.
+    # Removing this flag allows nodes to discover any k3s server, including for self-checks.
+    # if mode in {"server-first", "server-count", "server-select"}:
+    #     command.append("--ignore-local")
 
     # Add interface pinning if ALLOW_IFACE is set
     allow_iface = os.environ.get("ALLOW_IFACE", "").strip()
@@ -254,8 +291,14 @@ def _invoke_avahi(
         except subprocess.TimeoutExpired as exc:
             if debug is not None and timeout is not None:
                 debug(f"avahi-browse attempt {attempt} timed out after {timeout:g}s")
+            # TimeoutExpired may contain bytes even when text=True is used
             stdout = exc.stdout or exc.output or ""
             stderr = exc.stderr or ""
+            # Convert bytes to str if necessary
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
             result = subprocess.CompletedProcess(
                 command,
                 returncode=124,
@@ -525,10 +568,17 @@ def query_mdns(
 
     if debug is not None and not records and lines and not fixture_path:
         try:
-            _DUMP_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # Ensure all lines are strings (handle potential bytes from error paths)
+            str_lines = []
+            for line in lines:
+                if isinstance(line, bytes):
+                    str_lines.append(line.decode("utf-8", errors="replace"))
+                else:
+                    str_lines.append(str(line))
+            _DUMP_PATH.write_text("\n".join(str_lines) + "\n", encoding="utf-8")
             debug(f"Wrote browse dump to {_DUMP_PATH}")
-        except OSError:
-            debug("Unable to write browse dump to /tmp")
+        except (OSError, TypeError) as e:
+            debug(f"Unable to write browse dump to /tmp: {e}")
     
     result = _render_mode(mode, records)
     if debug is not None:

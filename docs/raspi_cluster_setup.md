@@ -20,6 +20,31 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 **Key point:** There is no pre-configuration, hostname registry, or "previously discovered" node list. Discovery happens dynamically at runtime through mDNS service advertisements. Nodes can have any hostname - they're discovered by their advertised services, not by assumed naming patterns.
 
+### Technical Details: mDNS Service Browsing
+
+**Service Advertisement:**
+- Bootstrap nodes publish an Avahi service file to `/etc/avahi/services/`
+- Service type: `_k3s-<cluster>-<environment>._tcp` (e.g., `_k3s-sugar-dev._tcp`)
+- Includes TXT records: cluster name, environment, role (server/agent), and phase info
+- Avahi daemon multicasts this on UDP port 5353 to `224.0.0.251` (IPv4) or `ff02::fb` (IPv6)
+
+**Service Discovery:**
+- Joining nodes run `avahi-browse --parsable --resolve _k3s-sugar-dev._tcp`
+- By default, avahi-browse waits for actual multicast responses (not just cached entries)
+- This is essential: on first boot, the cache is empty, so waiting for network responses is required
+- Discovery timeout: 10 seconds by default (configurable via `SUGARKUBE_MDNS_QUERY_TIMEOUT`)
+
+**Why this works without configuration:**
+- mDNS is link-local: automatically works on any L2 network segment
+- No DNS server needed: nodes directly respond to multicast queries
+- No hostname assumptions: services are found by type, not by assumed naming patterns
+- Zero-config: as long as nodes share the same LAN and multicast is allowed, discovery happens
+
+**Troubleshooting tip:** If discovery fails, it's usually one of these issues:
+1. Multicast blocked by network/firewall (UDP 5353)
+2. Nodes on different L2 subnets (multicast doesn't route)
+3. Avahi daemon not running on one or both nodes
+
 ---
 
 ## Happy Path: 3-server `dev` cluster in two runs
@@ -283,6 +308,8 @@ You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or ex
 | `SUGARKUBE_SKIP_ABSENCE_GATE` | `1` | Skip Avahi restart at discovery time (Phase 2: enabled by default) |
 | `SUGARKUBE_SIMPLE_DISCOVERY` | `1` | Use mDNS service browsing for discovery (Phase 3: enabled by default) |
 | `SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT` | `0` | When set to `1`, skip mDNS service publishing (Phase 4: disabled by default - nodes advertise) |
+| `SUGARKUBE_MDNS_NO_TERMINATE` | `1` | Skip `--terminate` flag in avahi-browse to wait for network responses (recommended for initial cluster formation) |
+| `SUGARKUBE_MDNS_QUERY_TIMEOUT` | `10.0` | Timeout in seconds for mDNS queries (increase if discovery is slow) |
 
 ### Generating Tokens Manually
 If you ever need to regenerate a token, run this on a control-plane node:
@@ -399,11 +426,52 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
   should only see this error when orchestrating multi-server or agent joins. Export the
   appropriate environment variable with the control-plane token before retrying.
 
-- **Cluster discovery fails**
+- **Cluster discovery fails: "No joinable servers found via mDNS service browsing"**
 
-  - Confirm multicast (UDP 5353) is allowed.
-  - Verify `avahi-daemon` is running (`sudo systemctl status avahi-daemon`).
-  - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`.
+  This means the joining node couldn't find any k3s servers advertising on the network.
+  
+  **Check the basics:**
+  - Confirm multicast (UDP 5353) is allowed on your network/firewall
+  - Verify both nodes are on the same L2 subnet
+  - Verify `avahi-daemon` is running on both nodes: `sudo systemctl status avahi-daemon`
+  - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`
+  
+  **Verify the bootstrap node is advertising:**
+  Run this on the bootstrap node (sugarkube0):
+  ```bash
+  # Should show the k3s service with port 6443
+  avahi-browse --all --resolve --terminate | grep -A5 'k3s-sugar-dev'
+  ```
+  
+  **Verify the joining node can see the advertisement:**
+  Run this on the joining node (sugarkube1):
+  ```bash
+  # Should show services from sugarkube0
+  avahi-browse --all --resolve | grep -A5 'k3s-sugar-dev'
+  # Press Ctrl+C after a few seconds
+  ```
+  
+  **If avahi-browse sees nothing:**
+  This usually indicates a network issue (multicast blocked) or Avahi daemon not running.
+  
+  **Enable detailed mDNS debugging:**
+  ```bash
+  export SUGARKUBE_DEBUG=1
+  export SUGARKUBE_MDNS_WIRE_PROOF=1
+  just up dev 2>&1 | tee debug.log
+  ```
+  
+  Check `debug.log` for lines starting with `[k3s-discover mdns]` to see what avahi-browse
+  is finding (or not finding).
+
+- **Discovery takes too long or times out**
+
+  By default, avahi-browse waits for actual mDNS multicast responses (not just cached entries).
+  This is necessary for initial cluster formation but can be slow on congested networks.
+  
+  - Increase the timeout: `export SUGARKUBE_MDNS_QUERY_TIMEOUT=30`
+  - Check network quality: high packet loss or multicast flooding can delay responses
+  - Verify no mDNS reflector or proxy is interfering with multicast
 
 - **Verify mDNS discoverability**
 
@@ -413,6 +481,10 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
 
   Expect the API advert (`port 6443`) with TXT records `k3s=1`,
   `cluster=<name>`, `env=<env>`, `role=server`.
+  
+  **Note:** Using `--terminate` flag is fast but only shows cached entries. If you just
+  published a service, you might need to wait a few seconds or omit `--terminate` to see
+  fresh results.
 
 - **Reset everything**
 
