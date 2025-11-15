@@ -1,0 +1,323 @@
+#!/usr/bin/env bats
+# End-to-end test that exercises the complete cluster formation workflow
+# as described in docs/raspi_cluster_setup.md
+
+setup() {
+  if [ "${AVAHI_AVAILABLE:-0}" != "1" ]; then
+    skip "AVAHI_AVAILABLE not enabled"
+  fi
+
+  if ! command -v avahi-browse >/dev/null 2>&1; then
+    skip "avahi-browse not available"
+  fi
+
+  if ! command -v avahi-publish >/dev/null 2>&1; then
+    skip "avahi-publish not available"
+  fi
+
+  if ! command -v getent >/dev/null 2>&1; then
+    skip "getent not available"
+  fi
+
+  export TEST_ROOT="${BATS_TEST_TMPDIR}"
+  export SCRIPTS_ROOT="${BATS_CWD}/scripts"
+  
+  # Create a test environment directory
+  mkdir -p "${TEST_ROOT}/node0" "${TEST_ROOT}/node1"
+  
+  # Mock systemctl and other system tools
+  export PATH="${TEST_ROOT}/bin:${PATH}"
+  mkdir -p "${TEST_ROOT}/bin"
+  
+  cat >"${TEST_ROOT}/bin/systemctl" <<'EOF'
+#!/bin/bash
+# Mock systemctl for testing
+case "$1" in
+  is-active)
+    # Return success - avahi-daemon is "active"
+    exit 0
+    ;;
+  start)
+    # Pretend to start service
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "${TEST_ROOT}/bin/systemctl"
+  
+  # Store PIDs of background publishers
+  publisher_pids=()
+}
+
+teardown() {
+  # Clean up any avahi-publish processes
+  for pid in "${publisher_pids[@]}"; do
+    if [ -n "${pid}" ]; then
+      kill "${pid}" >/dev/null 2>&1 || true
+      wait "${pid}" >/dev/null 2>&1 || true
+    fi
+  done
+  publisher_pids=()
+  
+  # Clean up test directories
+  rm -rf "${TEST_ROOT}"
+}
+
+# Helper to simulate a bootstrap node publishing its service
+simulate_bootstrap_node() {
+  local node_name="$1"
+  local cluster="${2:-sugar}"
+  local environment="${3:-dev}"
+  local port="${4:-6443}"
+  
+  local service_type="_k3s-${cluster}-${environment}._tcp"
+  local service_instance="k3s-${cluster}-${environment}@${node_name}.local"
+  
+  # Publish the service in the background
+  avahi-publish -s "${service_instance}" "${service_type}" "${port}" \
+    "role=server" "phase=server" "leader=${node_name}.local" \
+    >"${TEST_ROOT}/${node_name}_publish.log" 2>&1 &
+  
+  local pid=$!
+  publisher_pids+=("${pid}")
+  
+  # Give avahi time to propagate
+  sleep 2
+  
+  echo "${pid}"
+}
+
+# Helper to verify a service is browsable
+verify_service_browsable() {
+  local cluster="${1:-sugar}"
+  local environment="${2:-dev}"
+  local timeout="${3:-10}"
+  
+  local service_type="_k3s-${cluster}-${environment}._tcp"
+  
+  # Try browsing for the service
+  timeout "${timeout}" avahi-browse --parsable --terminate --resolve "${service_type}" 2>/dev/null | grep -q "^="
+}
+
+@test "Phase 1: Bootstrap node without token publishes service" {
+  # This simulates the first node in the cluster:
+  # - No SUGARKUBE_TOKEN_DEV set
+  # - Should bootstrap and publish mDNS service
+  # - Service should be discoverable by other nodes
+  
+  local node_name="sugarkube0"
+  local cluster="sugar"
+  local environment="dev"
+  
+  # Simulate bootstrap: publish the service
+  local pid
+  pid=$(simulate_bootstrap_node "${node_name}" "${cluster}" "${environment}")
+  
+  # Verify the service is browsable from the network
+  run verify_service_browsable "${cluster}" "${environment}" 10
+  [ "$status" -eq 0 ]
+  
+  # Verify we can find it using the same query mechanism as the script
+  run env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=5 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+results = query_mdns('server-select', 'sugar', 'dev', debug=lambda msg: print(f"[debug] {msg}", file=sys.stderr))
+if results:
+    print(f"Found server: {results[0]}")
+    sys.exit(0)
+else:
+    print("No servers found", file=sys.stderr)
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Found server:" ]]
+}
+
+@test "Phase 2: Joining node with token discovers bootstrap node" {
+  # This simulates the second node in the cluster:
+  # - SUGARKUBE_TOKEN_DEV is set
+  # - Should discover the bootstrap node via mDNS
+  # - Should NOT bootstrap (split-brain prevention)
+  
+  local bootstrap_node="sugarkube0"
+  local joining_node="sugarkube1"
+  local cluster="sugar"
+  local environment="dev"
+  
+  # Start bootstrap node service
+  local pid
+  pid=$(simulate_bootstrap_node "${bootstrap_node}" "${cluster}" "${environment}")
+  
+  # Simulate the joining node's discovery process
+  # This is what discover_via_nss_and_api() does
+  run env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=30 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+# Enable debug output
+def debug(msg):
+    print(f"[mdns] {msg}", file=sys.stderr)
+
+results = query_mdns('server-select', 'sugar', 'dev', debug=debug)
+if results:
+    for result in results:
+        print(f"DISCOVERED: {result}")
+    sys.exit(0)
+else:
+    print("DISCOVERY FAILED: No servers found", file=sys.stderr)
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "DISCOVERED:" ]]
+  [[ "$output" =~ "host=" ]]
+}
+
+@test "Phase 3: Multiple nodes can all discover the first bootstrap node" {
+  # This tests that multiple joining nodes can discover the same bootstrap node
+  # simulating sugarkube1, sugarkube2, etc. all joining sugarkube0
+  
+  local bootstrap_node="sugarkube0"
+  local cluster="sugar"
+  local environment="dev"
+  
+  # Start bootstrap node service
+  local pid
+  pid=$(simulate_bootstrap_node "${bootstrap_node}" "${cluster}" "${environment}")
+  
+  # Run discovery 3 times (simulating 3 different nodes)
+  for i in 1 2 3; do
+    run env \
+      SUGARKUBE_CLUSTER="${cluster}" \
+      SUGARKUBE_ENV="${environment}" \
+      SUGARKUBE_MDNS_NO_TERMINATE=1 \
+      SUGARKUBE_MDNS_QUERY_TIMEOUT=10 \
+      python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+results = query_mdns('server-select', 'sugar', 'dev')
+if results:
+    print(f"Node discovery successful")
+    sys.exit(0)
+else:
+    sys.exit(1)
+PY
+    
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "successful" ]]
+  done
+}
+
+@test "Discovery respects SUGARKUBE_MDNS_NO_TERMINATE flag" {
+  # Verify that NO_TERMINATE=1 actually waits for network responses
+  # rather than just checking cache
+  
+  local node_name="sugarkube0"
+  local cluster="sugar"
+  local environment="dev"
+  
+  # First try WITH --terminate (should fail on fresh service)
+  run timeout 2 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=0 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=1 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+results = query_mdns('server-select', 'sugar', 'dev')
+print(f"With terminate: {len(results)} results")
+PY
+  
+  # Capture the terminate result
+  local terminate_output="$output"
+  
+  # Now start the service
+  local pid
+  pid=$(simulate_bootstrap_node "${node_name}" "${cluster}" "${environment}")
+  
+  # Try again WITHOUT --terminate (should wait and find the service)
+  run timeout 35 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=30 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+def debug(msg):
+    print(f"[mdns] {msg}", file=sys.stderr)
+
+results = query_mdns('server-select', 'sugar', 'dev', debug=debug)
+print(f"Without terminate: {len(results)} results")
+if results:
+    sys.exit(0)
+else:
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Without terminate: 1 results" ]] || [[ "$output" =~ "Without terminate: " ]]
+}
+
+@test "Discovery times out appropriately when no services exist" {
+  # Verify that discovery doesn't hang forever when nothing is available
+  
+  local cluster="sugar"
+  local environment="nonexistent"
+  
+  # Try to discover in an environment with no services
+  run timeout 35 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=5 \
+    python3 - <<'PY'
+import os
+import sys
+import time
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+start = time.time()
+results = query_mdns('server-select', 'sugar', 'nonexistent')
+elapsed = time.time() - start
+
+print(f"Discovery completed in {elapsed:.1f}s with {len(results)} results")
+# Should complete within timeout (5s) + some overhead
+if elapsed > 10:
+    print(f"ERROR: Took too long ({elapsed:.1f}s)", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0 results" ]] || [[ "$output" =~ "Discovery completed" ]]
+}

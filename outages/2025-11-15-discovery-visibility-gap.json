@@ -1,0 +1,16 @@
+{
+  "id": "2025-11-15-discovery-visibility-gap",
+  "date": "2025-11-15",
+  "component": "scripts/k3s-discover.sh mDNS discovery",
+  "longForm": "outages/2025-11-15-discovery-visibility-gap.md",
+  "rootCause": "sugarkube1 unable to discover sugarkube0 despite successful mDNS service advertisement. Logs show 4-minute discovery timeout with no servers found, suggesting either: (1) avahi-browse not waiting for network responses, (2) service not propagating across network, (3) network segmentation/firewall blocking mDNS multicast, or (4) timing issue where service published but not yet visible when browsing starts.",
+  "resolution": "Added comprehensive debug logging to k3s-discover.sh and k3s_mdns_query.py to capture: avahi-browse command execution, raw output, parsed records, timeout behavior, and post-publish verification. Created e2e test suite that simulates real cluster formation workflow. Logging will help identify exact failure mode in next reproduction.",
+  "references": [
+    "logs/up/20251115T023707Z_ecd5c60_sugarkube0_just-up-dev.log",
+    "logs/up/20251115T024530Z_6c1c7a4_sugarkube1_just-up-dev.log",
+    "scripts/k3s-discover.sh discover_via_nss_and_api function",
+    "scripts/k3s_mdns_query.py query_mdns function",
+    "tests/integration/cluster_formation_e2e.bats",
+    "outages/2025-11-15-phase3-phase4-incompatibility.md"
+  ]
+}
