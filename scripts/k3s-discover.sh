@@ -4583,6 +4583,17 @@ fi
 discover_via_nss_and_api() {
   log_info discover event=simple_discovery_start phase=discover_via_service_browse >&2
   
+  # For simple discovery, we want avahi-browse to wait for network responses
+  # instead of just checking the cache. This is critical for initial cluster
+  # formation when services may not be cached yet.
+  export SUGARKUBE_MDNS_NO_TERMINATE=1
+  
+  # Increase timeout for initial discovery to allow time for service propagation
+  # across the network (default is 10s, we use 30s for simple discovery)
+  if [ -z "${SUGARKUBE_MDNS_QUERY_TIMEOUT:-}" ]; then
+    export SUGARKUBE_MDNS_QUERY_TIMEOUT=30
+  fi
+  
   # Use existing service browsing infrastructure to discover any advertised k3s nodes
   # This properly scans the network for mDNS services instead of assuming hostnames
   if select_server_candidate; then

@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-15-avahi-browse-terminate-cache-only",
+  "date": "2025-11-15",
+  "component": "scripts/k3s_mdns_query.py - avahi-browse command builder",
+  "longForm": "outages/2025-11-15-avahi-browse-terminate-cache-only.md",
+  "rootCause": "The --terminate flag in avahi-browse causes it to dump only cached entries and exit immediately, without waiting for multicast responses from the network. During initial cluster formation, when sugarkube1 tries to discover sugarkube0's advertised services, the services aren't in the local Avahi cache yet, so avahi-browse returns empty results in ~2 seconds. This prevented joining nodes from discovering bootstrap nodes, causing cluster formation to fail.",
+  "resolution": "Added SUGARKUBE_MDNS_NO_TERMINATE environment variable (defaults to 0 for backward compatibility). When set to 1, the --terminate flag is skipped, allowing avahi-browse to actively listen for multicast mDNS announcements from the network. The discover_via_nss_and_api() function in k3s-discover.sh now sets SUGARKUBE_MDNS_NO_TERMINATE=1 and SUGARKUBE_MDNS_QUERY_TIMEOUT=30 to enable network-based discovery with adequate timeout for service propagation.",
+  "references": [
+    "scripts/k3s_mdns_query.py lines 18, 47-59",
+    "scripts/k3s-discover.sh discover_via_nss_and_api function",
+    "outages/2025-11-15-phase3-phase4-incompatibility.md",
+    "notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md Phase 3 section"
+  ]
+}
