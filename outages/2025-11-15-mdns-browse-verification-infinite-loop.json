@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-15-mdns-browse-verification-infinite-loop",
+  "date": "2025-11-15",
+  "component": "scripts/k3s-discover.sh - publish_api_service and publish_bootstrap_service browse verification",
+  "rootCause": "The discover_via_nss_and_api() function exports SUGARKUBE_MDNS_NO_TERMINATE=1 to enable network waiting during initial cluster discovery. This environment variable persists throughout script execution. When publish_api_service() or publish_bootstrap_service() perform browse verification with SAVE_DEBUG_LOGS=1, they call run_avahi_query server-select which inherits NO_TERMINATE=1, causing avahi-browse to wait indefinitely for network responses instead of returning cached results immediately. This resulted in an infinite loop that prevented k3s from starting.",
+  "resolution": "Modified both browse_verification calls in publish_api_service() and publish_bootstrap_service() to explicitly set SUGARKUBE_MDNS_NO_TERMINATE=0 in the command substitution. This ensures avahi-browse uses the --terminate flag for quick cache-only lookups during verification, while still allowing the initial discovery phase to wait for network responses as intended. Added test coverage to prevent regression.",
+  "references": [
+    "scripts/k3s-discover.sh lines 3408, 3456 (browse verification calls)",
+    "scripts/k3s-discover.sh line 4616 (discover_via_nss_and_api NO_TERMINATE export)",
+    "tests/scripts/test_browse_verification_no_terminate_fix.py",
+    "logs/up/20251115T070652Z_d3ad6d5_sugarkube0_just-up-dev.log"
+  ]
+}
