@@ -1,4 +1,38 @@
-"""Helpers for querying k3s mDNS advertisements via Avahi."""
+"""
+Helpers for querying k3s mDNS advertisements via Avahi.
+
+This module provides functions to discover k3s nodes on the local network using
+multicast DNS (mDNS) service browsing. It wraps avahi-browse and handles various
+edge cases and error conditions.
+
+Key Behaviors (as of 2025-11-15 fixes):
+
+1. **Network Discovery by Default**: By default, avahi-browse waits for actual
+   mDNS multicast responses on the network. This is essential for initial cluster
+   formation when nodes have never seen each other before.
+   
+   - Set SUGARKUBE_MDNS_NO_TERMINATE=0 to use --terminate flag (cache-only, fast)
+   - Default is SUGARKUBE_MDNS_NO_TERMINATE=1 (network discovery, reliable)
+
+2. **No --ignore-local Flag**: Nodes can discover any k3s service on the network,
+   including their own (for self-verification). This allows bootstrap nodes to
+   confirm their service publications.
+
+3. **Robust Error Handling**: Handles TimeoutExpired exceptions gracefully,
+   converting bytes to str as needed to prevent TypeErrors during diagnostics.
+
+Environment Variables:
+    SUGARKUBE_MDNS_NO_TERMINATE: Controls --terminate flag (default: "1", no terminate)
+    SUGARKUBE_MDNS_QUERY_TIMEOUT: Query timeout in seconds (default: 10.0)
+    ALLOW_IFACE: Pin avahi-browse to specific interface (e.g., "eth0")
+    SUGARKUBE_DEBUG: Enable detailed debug logging
+    SUGARKUBE_MDNS_FIXTURE_FILE: Use fixture file instead of live avahi-browse
+
+See Also:
+    - outages/2025-11-15-mdns-terminate-flag-prevented-discovery.json
+    - outages/2025-11-15-mdns-ignore-local-blocked-verification.json
+    - outages/2025-11-15-mdns-timeout-bytes-str-mismatch.json
+"""
 
 from __future__ import annotations
 

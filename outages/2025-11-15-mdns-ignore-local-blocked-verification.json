@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-15-mdns-ignore-local-blocked-verification",
+  "date": "2025-11-15",
+  "component": "scripts/k3s_mdns_query.py",
+  "rootCause": "The --ignore-local flag was being added to avahi-browse commands for all server discovery modes (server-first, server-count, server-select). This flag tells avahi-browse to ignore services published by the local machine's Avahi daemon. While this might seem useful to prevent a node from discovering itself, it had two problems: (1) it prevented bootstrap nodes from verifying their own service publications via avahi-browse self-checks, causing 'service not found via avahi-browse after publish' warnings, and (2) it was unnecessary since nodes should be able to discover any k3s server on the network, including themselves for verification purposes.",
+  "resolution": "Removed the --ignore-local flag entirely from avahi-browse commands. Nodes can now discover any k3s service on the network, including their own for self-verification. If self-discovery becomes problematic in the future, filtering can be done at the application layer based on hostname or IP address rather than at the avahi-browse level.",
+  "references": [
+    "scripts/k3s_mdns_query.py:62-68",
+    "logs/up/20251115T075654Z_a248613_sugarkube0_just-up-dev.log:ts=2025-11-15T00:01:55",
+    "scripts/mdns_selfcheck.sh:511"
+  ]
+}
