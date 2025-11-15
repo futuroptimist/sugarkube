@@ -1,0 +1,31 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-15T02:45:30Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+ensure_unique_hostname hostname is already unique hostname=sugarkube1
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-14T18:45:35-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=missing boot_token_state=missing token_source="/home/pi/sugarkube/scripts/resolve_server_token.sh"
+ts=2025-11-14T18:45:35-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-14T18:45:35-08:00 level=info event=iptables_preflight msg="iptables binary is missing" severity=warn outcome=warn details="variant=missing,version=unavailable,nft=yes,kube-proxy=iptables,kube-proxy-source=default" variant=missing version=unavailable nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="install_iptables_package"
+ts=2025-11-14T18:45:35-08:00 level=info event=discover event=absence_gate_skipped reason=SUGARKUBE_SKIP_ABSENCE_GATE=1
+ts=2025-11-14T18:45:35-08:00 level=info event=discover event=avahi_health_check status=active
+ts=2025-11-14T18:45:35-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+ts=2025-11-14T18:45:35-08:00 level=info event=discover event=simple_discovery_enabled
+ts=2025-11-14T18:45:35-08:00 level=info event=discover event=simple_discovery_start phase=discover_via_service_browse
+ts=2025-11-14T18:49:42-08:00 level=info event=discover event=simple_discovery_no_servers token_present=1
+ts=2025-11-14T18:49:42-08:00 level=info event=discover msg="No joinable servers found via mDNS service browsing" severity=error event=simple_discovery_fail
+ts=2025-11-14T18:49:42-08:00 level=info event=discover msg="Simple discovery failed and token is present; cannot bootstrap" severity=error
+Summary:
+  Dependencies elapsed_ms=656
+  Ensure unique hostname elapsed_ms=4159
+  Memory cgroup elapsed_ms=30
+  Avahi configure elapsed_ms=123
+  WLAN disable elapsed_ms=563
+  Node IP configure elapsed_ms=85
+  k3s discover/install elapsed_ms=246583
+
+[debug] Log saved to logs/up/20251115T024530Z_6c1c7a4_sugarkube1_just-up-dev.log
