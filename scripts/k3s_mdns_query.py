@@ -18,6 +18,7 @@ _DUMP_PATH = Path("/tmp/sugarkube-mdns.txt")
 _TIMEOUT_ENV = "SUGARKUBE_MDNS_QUERY_TIMEOUT"
 _DEFAULT_TIMEOUT = 10.0
 _RETRY_DELAY = 1.5  # Delay between retry attempts in seconds
+_NO_TERMINATE_ENV = "SUGARKUBE_MDNS_NO_TERMINATE"  # Skip --terminate to wait for network responses
 
 
 def _resolve_timeout(value: Optional[str]) -> Optional[float]:
@@ -48,8 +49,16 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
     command = [
         "avahi-browse",
         "--parsable",
-        "--terminate",
     ]
+    
+    # --terminate causes avahi-browse to dump only cached entries and exit immediately.
+    # This is fast but won't discover services that haven't been cached yet.
+    # For initial cluster formation, we want to wait for network responses,
+    # so we skip --terminate when SUGARKUBE_MDNS_NO_TERMINATE=1.
+    use_terminate = os.environ.get(_NO_TERMINATE_ENV, "0").strip() != "1"
+    if use_terminate:
+        command.append("--terminate")
+    
     if resolve:
         command.append("--resolve")
     if mode in {"server-first", "server-count", "server-select"}:
