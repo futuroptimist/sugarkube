@@ -281,8 +281,8 @@ You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or ex
 | `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Environment-specific join tokens (see above) |
 | `SUGARKUBE_TOKEN` | _none_ | Fallback token if no per-env variant is set |
 | `SUGARKUBE_SKIP_ABSENCE_GATE` | `1` | Skip Avahi restart at discovery time (Phase 2: enabled by default) |
-| `SUGARKUBE_SIMPLE_DISCOVERY` | `1` | Use direct NSS resolution instead of service browsing (Phase 3: enabled by default) |
-| `SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT` | `1` | Skip mDNS service publishing (Phase 4: enabled by default) |
+| `SUGARKUBE_SIMPLE_DISCOVERY` | `1` | Use mDNS service browsing for discovery (Phase 3: enabled by default) |
+| `SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT` | `0` | When set to `1`, skip mDNS service publishing (Phase 4: disabled by default - nodes advertise) |
 
 ### Generating Tokens Manually
 If you ever need to regenerate a token, run this on a control-plane node:
@@ -330,25 +330,24 @@ export SUGARKUBE_SIMPLE_DISCOVERY=0
 just up dev
 ```
 
-#### Phase 4: Skip Service Advertisement (Default: Enabled)
+#### Phase 4: Service Advertisement (Default: Enabled)
 
-**Important distinction:** This phase controls whether nodes **publish** service records, but discovery still **browses** for services.
+**By default, nodes advertise their k3s API via mDNS service records.** This allows Phase 3 simplified discovery to find servers using `avahi-browse`.
 
-When enabled (default), nodes rely on Avahi's automatic A/AAAA host record advertisements (`.local` DNS resolution) rather than explicitly publishing service records to `/etc/avahi/services/`. This works because:
+When service advertisement is enabled (default), bootstrap nodes publish service records to `/etc/avahi/services/` that include:
+- Service type: `_k3s-{cluster}-{environment}._tcp` (e.g., `_k3s-sugar-dev._tcp`)
+- Port: 6443 (k3s API)
+- TXT records: cluster name, environment, role, and phase information
 
-1. **Joining nodes still use service browsing** to find servers via `avahi-browse`
-2. **Bootstrap nodes can advertise** minimally through host records
-3. This eliminates XML file generation, Avahi reload delays, and self-check complexity
+This enables joining nodes to discover available k3s servers without needing to know hostnames in advance.
 
-The discovery mechanism (Phase 3) continues to use proper mDNS service browsing regardless of this setting - it's only the advertisement method that's simplified.
-
-To revert to the legacy behavior (explicitly publish service records to `/etc/avahi/services/`):
+To disable service advertisement and rely only on `.local` hostname resolution:
 ```bash
-export SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0
+export SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1
 just up dev
 ```
 
-**Note**: `.local` hostname resolution continues to work in all modes. The simplifications only change *how* nodes discover each other, not *whether* discovery works.
+**Note**: Disabling service advertisement (Phase 4) is incompatible with simplified discovery (Phase 3). If you disable advertisement, you must also disable simplified discovery by setting `SUGARKUBE_SIMPLE_DISCOVERY=0`.
 
 For more details on the phased simplification roadmap, see `notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md`.
 

@@ -130,7 +130,7 @@ def _run_bootstrap_publish(tmp_path: Path, mdns_host: str) -> BootstrapPublishRe
             "SUGARKUBE_AVAHI_HOSTS_PATH": str(hosts_path),
             "SUGARKUBE_EXPECTED_IPV4": expected_ipv4,
             "LEADER": expected_host,
-            "SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT": "0",  # Enable service advertisement for this test
+            "SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT": "0",  # Service advertisement enabled (default behavior)
         }
     )
 

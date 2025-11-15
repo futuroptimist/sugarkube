@@ -1,0 +1,14 @@
+{
+  "id": "2025-11-15-phase3-phase4-incompatibility",
+  "date": "2025-11-15",
+  "component": "scripts/k3s-discover.sh mDNS discovery",
+  "longForm": "outages/2025-11-15-phase3-phase4-incompatibility.md",
+  "rootCause": "Phase 3 (simplified discovery) defaults to using mDNS service browsing via avahi-browse, but Phase 4 (skip service advertisement) defaults to skipping mDNS service publishing. This created an incompatibility where joining nodes could not discover bootstrap nodes because no services were being advertised.",
+  "resolution": "Changed SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT default from 1 (skip advertisement) to 0 (advertise by default). Updated documentation and tests to reflect that service advertisement is now enabled by default, making it compatible with Phase 3 simplified discovery.",
+  "references": [
+    "scripts/k3s-discover.sh line 203",
+    "docs/raspi_cluster_setup.md Phase 4 section",
+    "tests/scripts/test_skip_service_advertisement.py",
+    "notes/2025-11-14-mdns-discovery-fixes-and-simplification-roadmap.md"
+  ]
+}

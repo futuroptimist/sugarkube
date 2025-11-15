@@ -16,18 +16,18 @@ def test_skip_service_advertisement_variable_defined() -> None:
     assert 'SKIP_SERVICE_ADVERTISEMENT="${SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT' in script_content, \
         "SKIP_SERVICE_ADVERTISEMENT should be defined from SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT"
     
-    # Verify default is 1 (new behavior enabled by default)
+    # Verify default is 0 (service advertisement enabled by default)
     lines = script_content.splitlines()
     found_default = False
     
     for line in lines:
         if 'SKIP_SERVICE_ADVERTISEMENT=' in line and 'SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT' in line:
-            # Should default to 1
-            if ':-1}' in line:
+            # Should default to 0 (advertisement enabled)
+            if ':-0}' in line:
                 found_default = True
                 break
     
-    assert found_default, "SKIP_SERVICE_ADVERTISEMENT should default to 1 (service advertisement skipped by default)"
+    assert found_default, "SKIP_SERVICE_ADVERTISEMENT should default to 0 (service advertisement enabled by default)"
 
 
 def test_publish_api_service_checks_flag() -> None:

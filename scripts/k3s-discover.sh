@@ -199,8 +199,8 @@ SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 SIMPLE_DISCOVERY="${SUGARKUBE_SIMPLE_DISCOVERY:-1}"
 # Phase 4: Service Advertisement Control
 # SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1 skips mDNS service publishing
-# Default: 1 (service advertisement skipped; set to 0 for legacy advertisement)
-SKIP_SERVICE_ADVERTISEMENT="${SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT:-1}"
+# Default: 0 (service advertisement enabled; set to 1 to skip advertisement)
+SKIP_SERVICE_ADVERTISEMENT="${SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT:-0}"
 SERVER_TOKEN_PATH="${SUGARKUBE_K3S_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
 NODE_TOKEN_PATH="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
 BOOT_TOKEN_PATH="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
