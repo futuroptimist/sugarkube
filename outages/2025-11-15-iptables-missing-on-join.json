@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-15-iptables-missing-on-join",
+  "date": "2025-11-15",
+  "component": "scripts/k3s-discover.sh iptables preflight check",
+  "rootCause": "The iptables binary was not installed on sugarkube1 during setup, causing the preflight check to report a warning. While k3s can install iptables during its own installation, the preflight check detects this early to provide visibility into the configuration.",
+  "resolution": "Documented as expected behavior. The iptables preflight check is informational and reports 'outcome=warn' rather than failing. K3s will install iptables-nftables during installation if missing. Users can pre-install iptables with 'apt install iptables' if they want to avoid the warning.",
+  "references": [
+    "scripts/k3s-discover.sh iptables_preflight function",
+    "scripts/k3s-install-iptables.sh",
+    "docs/raspi_cluster_setup.md prerequisites section"
+  ]
+}
