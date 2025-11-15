@@ -200,6 +200,11 @@ def _invoke_avahi(
     resolve: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     command = _build_command(mode, service_type, resolve=resolve)
+    
+    if debug is not None:
+        debug(f"_invoke_avahi: command={' '.join(command)}")
+        debug(f"_invoke_avahi: timeout={timeout}s")
+    
     run_kwargs = {
         "capture_output": True,
         "text": True,
@@ -226,6 +231,12 @@ def _invoke_avahi(
                 debug(f"avahi-browse attempt {attempt}: exit_code={result.returncode}")
                 if result.stderr:
                     debug(f"avahi-browse stderr: {result.stderr.strip()}")
+                if result.stdout:
+                    lines_count = len(result.stdout.splitlines())
+                    debug(f"avahi-browse stdout: {lines_count} lines")
+                    # Log first few lines of output for debugging
+                    for i, line in enumerate(result.stdout.splitlines()[:10]):
+                        debug(f"avahi-browse stdout[{i}]: {line}")
 
             # If successful or has output, break
             if result.returncode == 0 or result.stdout:
@@ -351,6 +362,8 @@ def _load_lines_from_avahi(
 ) -> Iterable[str]:
     lines: List[str] = []
     for service_type in _service_types(cluster, environment):
+        if debug is not None:
+            debug(f"_load_lines_from_avahi: browsing service_type={service_type}, resolve={resolve}")
         result = _invoke_avahi(
             mode,
             service_type,
@@ -360,6 +373,8 @@ def _load_lines_from_avahi(
             resolve=resolve,
         )
         new_lines = _normalize_record_lines(result.stdout.splitlines())
+        if debug is not None:
+            debug(f"_load_lines_from_avahi: got {len(new_lines)} normalized lines from {service_type}")
         if debug is not None and not new_lines and result.stdout:
             try:
                 _DUMP_PATH.write_text(result.stdout, encoding="utf-8")
@@ -465,6 +480,13 @@ def query_mdns(
         runner = subprocess.run  # type: ignore[assignment]
 
     timeout = _resolve_timeout(os.environ.get(_TIMEOUT_ENV))
+    
+    if debug is not None:
+        service_types = _service_types(cluster, environment)
+        debug(f"query_mdns: mode={mode}, cluster={cluster}, env={environment}")
+        debug(f"query_mdns: service_types={service_types}")
+        debug(f"query_mdns: timeout={timeout}s")
+        debug(f"query_mdns: no_terminate={os.environ.get(_NO_TERMINATE_ENV, '0')}")
 
     if fixture_path:
         lines = _load_lines_from_fixture(fixture_path)
@@ -479,7 +501,13 @@ def query_mdns(
             timeout,
         )
         records = parse_mdns_records(lines, cluster, environment)
+        
+        if debug is not None:
+            debug(f"query_mdns: initial browse returned {len(lines)} lines, {len(records)} records")
+        
         if not records:
+            if debug is not None:
+                debug("query_mdns: no records found, trying without --resolve")
             fallback_lines = _load_lines_from_avahi(
                 mode,
                 cluster,
@@ -492,6 +520,8 @@ def query_mdns(
             if fallback_lines:
                 lines = fallback_lines
                 records = parse_mdns_records(lines, cluster, environment)
+                if debug is not None:
+                    debug(f"query_mdns: fallback browse returned {len(lines)} lines, {len(records)} records")
 
     if debug is not None and not records and lines and not fixture_path:
         try:
@@ -499,6 +529,14 @@ def query_mdns(
             debug(f"Wrote browse dump to {_DUMP_PATH}")
         except OSError:
             debug("Unable to write browse dump to /tmp")
+    
+    if debug is not None:
+        result = _render_mode(mode, records)
+        debug(f"query_mdns: returning {len(result)} results for mode={mode}")
+        if result:
+            for r in result[:5]:  # Log first 5 results
+                debug(f"query_mdns: result: {r}")
+        return result
 
     return _render_mode(mode, records)
 
