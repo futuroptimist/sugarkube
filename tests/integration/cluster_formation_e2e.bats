@@ -4,18 +4,30 @@
 
 setup() {
   if [ "${AVAHI_AVAILABLE:-0}" != "1" ]; then
+    # TODO: Provide a hermetic Avahi fixture so this suite runs without AVAHI_AVAILABLE=1.
+    # Root cause: The integration exercise requires a host Avahi daemon for mDNS service advertisement.
+    # Estimated fix: 60m to bundle a containerised Avahi helper or dedicated stub binaries.
     skip "AVAHI_AVAILABLE not enabled"
   fi
 
   if ! command -v avahi-browse >/dev/null 2>&1; then
+    # TODO: Package avahi-browse for the integration harness to browse advertised services.
+    # Root cause: The suite shells out to avahi-browse for service discovery validation.
+    # Estimated fix: 20m to include avahi-utils in docs or provide a bats stub.
     skip "avahi-browse not available"
   fi
 
   if ! command -v avahi-publish >/dev/null 2>&1; then
+    # TODO: Ship avahi-publish alongside the cluster formation test fixtures.
+    # Root cause: Tests require avahi-publish to simulate bootstrap node service advertisement.
+    # Estimated fix: 20m to install avahi-utils or extend the stub harness in tests/fixtures.
     skip "avahi-publish not available"
   fi
 
   if ! command -v getent >/dev/null 2>&1; then
+    # TODO: Provide getent stub or document NSS requirements for cluster formation tests.
+    # Root cause: Tests use getent for hostname resolution verification in discovery workflow.
+    # Estimated fix: 15m to create a getent stub or document the dependency in test README.
     skip "getent not available"
   fi
 
