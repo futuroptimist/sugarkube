@@ -1,0 +1,84 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-15T02:37:08Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+ensure_unique_hostname hostname is already unique hostname=sugarkube0
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-14T18:37:17-08:00 level=info event=discover event=token_resolution token_present=0 allow_bootstrap=1 node_token_state=missing boot_token_state=missing
+ts=2025-11-14T18:37:17-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-14T18:37:17-08:00 level=info event=iptables_preflight msg="iptables is using the nf_tables backend; enable kube-proxy nft mode (GA in Kubernetes v1.33) or select iptables-legacy" severity=warn outcome=warn details="variant=nf_tables,version=v1.8.9,nft=yes,kube-proxy=iptables,kube-proxy-source=default,path=/usr/sbin/iptables" variant=nf_tables version=v1.8.9 nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="enable_kube-proxy_nft_mode_or_select_iptables-legacy"
+ts=2025-11-14T18:37:17-08:00 level=info event=discover event=absence_gate_skipped reason=SUGARKUBE_SKIP_ABSENCE_GATE=1
+ts=2025-11-14T18:37:17-08:00 level=info event=discover event=avahi_health_check status=active
+ts=2025-11-14T18:37:17-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+ts=2025-11-14T18:37:17-08:00 level=info event=discover event=simple_discovery_enabled
+ts=2025-11-14T18:37:17-08:00 level=info event=discover event=simple_discovery_start phase=discover_via_service_browse
+ts=2025-11-14T18:41:24-08:00 level=info event=discover event=simple_discovery_no_servers token_present=0
+ts=2025-11-14T18:41:24-08:00 level=info event=discover event=simple_discovery_bootstrap reason=no_token
+ts=2025-11-14T18:41:24-08:00 level=info event=discover event=simple_discovery_bootstrap
+ts=2025-11-14T18:41:24-08:00 level=info event=mdns_publish phase=bootstrap_attempt cluster=sugar environment=dev host=sugarkube0.local
+ts=2025-11-14T18:41:24-08:00 level=info event=mdns_publish outcome=attempt role=bootstrap host=sugarkube0.local method=static phase=bootstrap leader=sugarkube0.local attempt=1
+mdns resolution status action=ok nss_ok=1 resolve_ok=0 browse_ok=0 hosts_updated=0
+Timed out waiting for Avahi to publish k3s-sugar-dev@sugarkube0.local (bootstrap)
+Avahi reload wait failed; continuing with direct confirmation
+Verifying host record for sugarkube0.local with avahi-resolve...
+SUCCESS: Host record sugarkube0.local is advertised: sugarkube0.local	192.168.86.41
+ts=2025-11-14T18:41:57-08:00 level=info event=mdns_publish outcome=ok role=bootstrap host=sugarkube0.local method=static phase=bootstrap leader=sugarkube0.local confirm_outcome=ok confirm_latency_ms=1099 confirm_bucket=ms_1000_1999 confirm_attempts=1 confirm_dbus_status=1 confirm_cli_status=0 reload_status=0 attempts=1
+ts=2025-11-14T18:41:57-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=27 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-14T18:41:58-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1063 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-dev._tcp
+ts=2025-11-14T18:41:58-08:00 level=info event=discover msg="Avahi liveness probe retry" severity=warn attempt=1 lines=0
+ts=2025-11-14T18:41:59-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=26 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-14T18:42:00-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1060 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-dev._tcp
+ts=2025-11-14T18:42:00-08:00 level=info event=discover event=avahi_liveness outcome=ok method=mdns_ready attempt=2 fallback=dbus_unavailable dbus=unavailable
+ts=2025-11-14T18:42:01-08:00 level=info event=mdns_selfcheck phase=start role=bootstrap host=sugarkube0.local attempts=20
+ts=2025-11-14T18:42:04-08:00 level=info event=mdns_selfcheck outcome=ok role=bootstrap host=sugarkube0.local observed=sugarkube0.local attempts=1 ms_elapsed=2430
+ts=2025-11-14T18:42:04-08:00 level=info event=mdns_selfcheck outcome=confirmed role=bootstrap host=sugarkube0.local observed=sugarkube0.local phase=bootstrap check=initial
+event=iptables_check installed=no mode=nft version="v1.8.9 (nf_tables)"
+ts=2025-11-14T18:42:04-08:00 level=info event=discover phase=install_cluster_init cluster=sugar environment=dev host=sugarkube0.local datastore=etcd
+[INFO]  Finding release for channel stable
+[INFO]  Using v1.33.5+k3s1 as release
+[INFO]  Downloading hash https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/sha256sum-arm64.txt
+[INFO]  Downloading binary https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/k3s-arm64
+[INFO]  Verifying binary download
+[INFO]  Installing k3s to /usr/local/bin/k3s
+[INFO]  Skipping installation of SELinux RPM
+[INFO]  Creating /usr/local/bin/kubectl symlink to k3s
+[INFO]  Creating /usr/local/bin/crictl symlink to k3s
+[INFO]  Creating /usr/local/bin/ctr symlink to k3s
+[INFO]  Creating killall script /usr/local/bin/k3s-killall.sh
+[INFO]  Creating uninstall script /usr/local/bin/k3s-uninstall.sh
+[INFO]  env: Creating environment file /etc/systemd/system/k3s.service.env
+[INFO]  systemd: Creating service file /etc/systemd/system/k3s.service
+[INFO]  systemd: Enabling k3s unit
+Created symlink /etc/systemd/system/multi-user.target.wants/k3s.service → /etc/systemd/system/k3s.service.
+[INFO]  systemd: Starting k3s
+ts=2025-11-14T18:42:30-08:00 level=info event=discover event=api_ready_local outcome=alive host="sugarkube0.local" port="6443" ip="127.0.0.1" attempts=1 elapsed=0 status=401 mode=alive
+ts=2025-11-14T18:42:30-08:00 level=info event=mdns_publish outcome=attempt role=server host=sugarkube0.local method=static phase=server leader=sugarkube0.local api_status=401 api_mode=alive attempt=1
+mdns resolution status action=ok nss_ok=1 resolve_ok=0 browse_ok=1 hosts_updated=0
+Timed out waiting for Avahi to publish k3s-sugar-dev@sugarkube0.local (server)
+Avahi reload wait failed; continuing with direct confirmation
+Verifying host record for sugarkube0.local with avahi-resolve...
+SUCCESS: Host record sugarkube0.local is advertised: sugarkube0.local	192.168.86.41
+ts=2025-11-14T18:43:04-08:00 level=info event=mdns_publish outcome=ok role=server host=sugarkube0.local method=static phase=server leader=sugarkube0.local api_status=401 api_mode=alive confirm_outcome=ok confirm_latency_ms=1106 confirm_bucket=ms_1000_1999 confirm_attempts=1 confirm_dbus_status=1 confirm_cli_status=0 reload_status=0 attempts=1
+ts=2025-11-14T18:43:04-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=37 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-14T18:43:05-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1081 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-dev._tcp
+ts=2025-11-14T18:43:05-08:00 level=info event=discover msg="Avahi liveness probe retry" severity=warn attempt=1 lines=0
+ts=2025-11-14T18:43:06-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=48 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-14T18:43:07-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1115 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-dev._tcp
+ts=2025-11-14T18:43:07-08:00 level=info event=discover event=avahi_liveness outcome=ok method=mdns_ready attempt=2 fallback=dbus_unavailable dbus=unavailable
+ts=2025-11-14T18:43:07-08:00 level=info event=mdns_selfcheck phase=start role=server host=sugarkube0.local attempts=20
+ts=2025-11-14T18:43:09-08:00 level=info event=mdns_selfcheck outcome=ok role=server host=sugarkube0.local observed=sugarkube0.local attempts=1 ms_elapsed=2423
+ts=2025-11-14T18:43:09-08:00 level=info event=mdns_selfcheck outcome=confirmed role=server host=sugarkube0.local observed=sugarkube0.local phase=server check=initial
+Summary:
+  Dependencies elapsed_ms=655
+  Ensure unique hostname elapsed_ms=8239
+  Memory cgroup elapsed_ms=40
+  Avahi configure elapsed_ms=126
+  WLAN disable elapsed_ms=557
+  Node IP configure elapsed_ms=64
+  k3s discover/install elapsed_ms=352208
+
+[debug] Log saved to logs/up/20251115T023707Z_ecd5c60_sugarkube0_just-up-dev.log
