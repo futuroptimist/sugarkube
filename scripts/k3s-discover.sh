@@ -3405,7 +3405,7 @@ publish_api_service() {
     # Verify the service is browsable via avahi-browse (not just resolvable)
     if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
       local browse_verification
-      browse_verification="$(SUGARKUBE_DEBUG=1 run_avahi_query server-select 2>&1 | head -n1 || true)"
+      browse_verification="$(SUGARKUBE_DEBUG=1 run_avahi_query server-select | head -n1 || true)"
       if [ -n "${browse_verification}" ]; then
         log_info mdns_publish event=browse_verification outcome=ok role=server host="${MDNS_HOST_RAW}" result="${browse_verification}" >&2
       else
@@ -3453,7 +3453,7 @@ publish_bootstrap_service() {
     # Verify the service is browsable via avahi-browse (not just resolvable)
     if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
       local browse_verification
-      browse_verification="$(SUGARKUBE_DEBUG=1 run_avahi_query server-select 2>&1 | head -n1 || true)"
+      browse_verification="$(SUGARKUBE_DEBUG=1 run_avahi_query server-select | head -n1 || true)"
       if [ -n "${browse_verification}" ]; then
         log_info mdns_publish event=browse_verification outcome=ok role=bootstrap host="${MDNS_HOST_RAW}" result="${browse_verification}" >&2
       else

@@ -151,7 +151,6 @@ PY
   # - Should NOT bootstrap (split-brain prevention)
   
   local bootstrap_node="sugarkube0"
-  local joining_node="sugarkube1"
   local cluster="sugar"
   local environment="dev"
   
@@ -284,7 +283,7 @@ else:
 PY
   
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "Without terminate: 1 results" ]] || [[ "$output" =~ "Without terminate: " ]]
+  [[ "$output" =~ "Without terminate: 1 results" ]]
 }
 
 @test "Discovery times out appropriately when no services exist" {
@@ -319,5 +318,5 @@ sys.exit(0)
 PY
   
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "0 results" ]] || [[ "$output" =~ "Discovery completed" ]]
+  [[ "$output" =~ Discovery\ completed.*0\ results ]]
 }

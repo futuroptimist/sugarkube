@@ -530,15 +530,14 @@ def query_mdns(
         except OSError:
             debug("Unable to write browse dump to /tmp")
     
+    result = _render_mode(mode, records)
     if debug is not None:
-        result = _render_mode(mode, records)
         debug(f"query_mdns: returning {len(result)} results for mode={mode}")
         if result:
             for r in result[:5]:  # Log first 5 results
                 debug(f"query_mdns: result: {r}")
-        return result
 
-    return _render_mode(mode, records)
+    return result
 
 
 __all__ = ["query_mdns"]
