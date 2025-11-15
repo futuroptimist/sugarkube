@@ -40,16 +40,19 @@ The simplification effort aimed to reduce complexity in the discovery process by
 
 ### Technical Details
 
-Two functions were affected:
+Two functions were affected, but only one was an antipattern:
 
-1. **`discover_via_nss_and_api()` (lines 4583-4636)**:
+1. **`discover_via_nss_and_api()` (lines 4583-4636)** - **ANTIPATTERN**:
    - Iterated through `sugarkube{0..N}.local` hostnames based on `SUGARKUBE_SERVERS` count
    - Used `getent hosts` to resolve each hardcoded hostname
    - Never used `avahi-browse` to discover advertised services
+   - **This was wrong** - normal discovery should use service browsing
 
-2. **`try_discovery_failopen()` (lines 4428-4487)**:
-   - Same antipattern in the fail-open path
-   - Tried hardcoded `sugarkube{0..N}.local` hostnames sequentially
+2. **`try_discovery_failopen()` (lines 4428-4487)** - **ACCEPTABLE LAST-RESORT FALLBACK**:
+   - Tries hardcoded `sugarkube{0..N}.local` hostnames sequentially
+   - Only triggered after mDNS has been failing for 60+ seconds
+   - Intended as a desperate fallback when mDNS is completely broken
+   - **This is intentional** - failopen should try well-known hostnames as last resort
 
 ### Why This Was Wrong
 
@@ -72,10 +75,11 @@ The existing infrastructure already provided this via:
    - Discovers nodes regardless of their hostname
    - Still maintains the simplified flow (no leader election)
 
-2. **Fixed fail-open discovery in `try_discovery_failopen()`**:
-   - Now uses `select_server_candidate()` with retry logic
-   - Properly discovers services instead of assuming hostnames
-   - Added retry mechanism since mDNS can be flaky
+2. **Preserved failopen as last-resort fallback**:
+   - `try_discovery_failopen()` intentionally keeps hardcoded hostname iteration
+   - Only triggered after mDNS fails continuously for 60+ seconds
+   - Acts as a desperate fallback when mDNS is completely broken
+   - This is acceptable because it's a last resort, not the primary discovery mechanism
 
 3. **Updated documentation**:
    - Corrected comment at line 196-198 to accurately describe behavior

@@ -4425,69 +4425,64 @@ try_discovery_failopen() {
     return 1
   fi
   
-  # Use existing service browsing infrastructure instead of hardcoded hostnames
-  # This properly discovers any advertised k3s nodes on the network
+  local server_total="${SERVERS_DESIRED}"
+  if ! [[ "${server_total}" =~ ^[0-9]+$ ]] || [ "${server_total}" -lt 1 ]; then
+    server_total=1
+  fi
+
   local attempt=0
-  local max_attempts=3  # Try service browsing a few times since mDNS can be flaky
-  
-  while [ "${attempt}" -lt "${max_attempts}" ]; do
+  local idx
+  for idx in $(seq 0 $((server_total - 1))); do
     attempt=$((attempt + 1))
-    
-    if select_server_candidate; then
-      local server="${MDNS_SELECTED_HOST}"
-      local resolved_ip="${MDNS_SELECTED_IP:-}"
-      local port="${MDNS_SELECTED_PORT:-6443}"
-      
-      if ! wait_for_remote_api_ready "${server}" "${resolved_ip}" "${port}"; then
+    local candidate_host="sugarkube${idx}.local"
+    local resolved_ip=""
+
+    if resolved_ip="$(failopen_resolve_candidate "${candidate_host}")"; then
+      local join_host="${resolved_ip:-${candidate_host}}"
+
+      if ! wait_for_remote_api_ready "${candidate_host}" "${resolved_ip}" 6443; then
         log_info discover \
           event=failopen_join \
           "attempt=${attempt}" \
-          "server=\"$(escape_log_value "${server}")\"" \
+          "server=\"$(escape_log_value "${candidate_host}")\"" \
           outcome=error \
           reason=api_unreachable >&2
-        # Try again after a short delay
-        sleep 2
         continue
       fi
-      
-      # Success - configure join parameters
+
       TOKEN="${failopen_token}"
-      MDNS_SELECTED_HOST="${server}"
-      MDNS_SELECTED_PORT="${port}"
+      MDNS_SELECTED_HOST="${join_host}"
+      MDNS_SELECTED_PORT=6443
       if [ -n "${resolved_ip}" ]; then
         MDNS_SELECTED_IP="${resolved_ip}"
-        export K3S_URL="https://${resolved_ip}:${port}"
       else
-        export K3S_URL="https://${server}:${port}"
+        MDNS_SELECTED_IP=""
       fi
-      
+      export K3S_URL="https://${join_host}:6443"
+
       local -a success_fields=(
         "event=failopen_join"
         "attempt=${attempt}"
-        "server=\"$(escape_log_value "${server}")\""
+        "server=\"$(escape_log_value "${candidate_host}")\""
         "outcome=ok"
       )
       if [ -n "${resolved_ip}" ]; then
-        success_fields+=("ip=\"$(escape_log_value "${resolved_ip}")\"")
+        success_fields+=("target=\"$(escape_log_value "${join_host}")\"")
       fi
       log_info discover "${success_fields[@]}" >&2
-      
+
       return 0
     fi
-    
+
     log_info discover \
       event=failopen_join \
       "attempt=${attempt}" \
+      "server=\"$(escape_log_value "${candidate_host}")\"" \
       outcome=error \
-      reason=no_services_found >&2
-    
-    # Wait before retrying
-    if [ "${attempt}" -lt "${max_attempts}" ]; then
-      sleep 2
-    fi
+      reason=resolve >&2
   done
 
-  log_warn_msg discover "All fail-open service browsing attempts failed; returning to normal discovery"
+  log_warn_msg discover "All fail-open candidates failed; returning to normal discovery"
   return 1
 }
 
