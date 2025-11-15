@@ -194,8 +194,8 @@ CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 # Phase 3: Simple Discovery Control
-# SUGARKUBE_SIMPLE_DISCOVERY=1 uses direct NSS resolution instead of service browsing
-# Default: 1 (simplified discovery enabled; set to 0 for legacy service browsing)
+# SUGARKUBE_SIMPLE_DISCOVERY=1 uses mDNS service browsing without leader election
+# Default: 1 (simplified discovery enabled; set to 0 for legacy discovery with leader election)
 SIMPLE_DISCOVERY="${SUGARKUBE_SIMPLE_DISCOVERY:-1}"
 # Phase 4: Service Advertisement Control
 # SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1 skips mDNS service publishing
@@ -4578,50 +4578,28 @@ else
   fi
 fi
 
-# Phase 3: Simplified discovery using direct NSS resolution + API check
-# When SUGARKUBE_SIMPLE_DISCOVERY=1, skip service browsing and leader election
+# Phase 3: Simplified discovery using service browsing + API check
+# When SUGARKUBE_SIMPLE_DISCOVERY=1, skip leader election but still use proper mDNS service browsing
 discover_via_nss_and_api() {
-  log_info discover event=simple_discovery_start phase=discover_via_nss servers="${SERVERS_DESIRED}" >&2
+  log_info discover event=simple_discovery_start phase=discover_via_service_browse >&2
   
-  local server_count="${SERVERS_DESIRED}"
-  case "${server_count}" in
-    ''|*[!0-9]*) server_count=1 ;;
-  esac
-  
-  # Try known server hostnames in order (sugarkube0.local, sugarkube1.local, ...)
-  local idx
-  for idx in $(seq 0 $((server_count - 1))); do
-    local candidate="sugarkube${idx}.local"
+  # Use existing service browsing infrastructure to discover any advertised k3s nodes
+  # This properly scans the network for mDNS services instead of assuming hostnames
+  if select_server_candidate; then
+    local server="${MDNS_SELECTED_HOST}"
+    log_info discover event=simple_discovery_found server="${server}" >&2
     
-    log_info discover event=simple_discovery_try candidate="${candidate}" idx="${idx}" >&2
-    
-    # Step 1: Resolve via NSS (automatic .local handling)
-    if ! command -v getent >/dev/null 2>&1; then
-      log_warn_msg discover "getent not available; skipping NSS resolution" "candidate=${candidate}" >&2
-      continue
-    fi
-    
-    if ! getent hosts "${candidate}" >/dev/null 2>&1; then
-      log_info discover event=simple_discovery_skip candidate="${candidate}" reason="not_resolvable" >&2
-      continue  # Host not resolvable, try next
-    fi
-    
-    log_info discover event=simple_discovery_resolved candidate="${candidate}" >&2
-    
-    # Step 2: Check if API is alive (accepts 401)
-    if wait_for_remote_api_ready "${candidate}" "" 6443; then
-      # Success! Found a joinable server
-      log_info discover event=simple_discovery_found server="${candidate}" >&2
-      MDNS_SELECTED_HOST="${candidate}"
-      MDNS_SELECTED_PORT=6443
-      MDNS_SELECTED_NSS_OK=1
+    # Verify API is alive (accepts 401)
+    if wait_for_remote_api_ready "${server}" "${MDNS_SELECTED_IP:-}" "${MDNS_SELECTED_PORT:-6443}"; then
+      log_info discover event=simple_discovery_api_ok server="${server}" >&2
       return 0
     else
-      log_info discover event=simple_discovery_api_fail candidate="${candidate}" >&2
+      log_info discover event=simple_discovery_api_fail server="${server}" >&2
+      return 1
     fi
-  done
+  fi
   
-  # No servers found - check if we should become bootstrap
+  # No servers found via service browsing - check if we should become bootstrap
   log_info discover event=simple_discovery_no_servers token_present="${TOKEN_PRESENT}" >&2
   
   if [ "${TOKEN_PRESENT}" -eq 0 ]; then
@@ -4631,7 +4609,7 @@ discover_via_nss_and_api() {
   fi
   
   # Token present but no servers found
-  log_error_msg discover "No joinable servers found" "event=simple_discovery_fail"
+  log_error_msg discover "No joinable servers found via mDNS service browsing" "event=simple_discovery_fail"
   return 1
 }
 

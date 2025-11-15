@@ -31,7 +31,7 @@ def test_simple_discovery_variable_defined() -> None:
 
 
 def test_discover_via_nss_and_api_function_exists() -> None:
-    """Test that discover_via_nss_and_api function is defined."""
+    """Test that discover_via_nss_and_api function is defined and uses service browsing."""
     
     script_content = SCRIPT.read_text(encoding="utf-8")
     
@@ -39,65 +39,62 @@ def test_discover_via_nss_and_api_function_exists() -> None:
     assert 'discover_via_nss_and_api()' in script_content, \
         "discover_via_nss_and_api function should be defined"
     
-    # Verify it uses getent for NSS resolution
-    assert 'getent hosts' in script_content, \
-        "Function should use getent for NSS resolution"
-    
-    # Verify it uses wait_for_remote_api_ready
+    # Verify it uses select_server_candidate for proper service browsing
     lines = script_content.splitlines()
     in_function = False
+    found_service_browse = False
     found_api_check = False
     
     for i, line in enumerate(lines):
         if 'discover_via_nss_and_api()' in line:
             in_function = True
         
+        if in_function and 'select_server_candidate' in line:
+            found_service_browse = True
+        
         if in_function and 'wait_for_remote_api_ready' in line:
             found_api_check = True
-            break
         
         # Exit function scope at next function definition
         if in_function and i > 0 and line.strip() and not line.startswith(' ') and \
            not line.startswith('\t') and '()' in line and 'discover_via_nss_and_api' not in line:
             break
     
+    assert found_service_browse, "Function should use select_server_candidate for mDNS service browsing"
     assert found_api_check, "Function should use wait_for_remote_api_ready to check API"
 
 
-def test_simple_discovery_iterates_servers() -> None:
-    """Test that simple discovery iterates through sugarkube{0..N}.local."""
+def test_simple_discovery_uses_service_browsing() -> None:
+    """Test that simple discovery uses mDNS service browsing instead of hardcoded hostnames."""
     
     script_content = SCRIPT.read_text(encoding="utf-8")
     lines = script_content.splitlines()
     
-    # Find the function and verify it iterates through servers
+    # Find the function and verify it uses service browsing
     in_function = False
-    found_iteration = False
-    found_candidate_pattern = False
+    found_service_browse = False
+    found_hardcoded_pattern = False
     
     for i, line in enumerate(lines):
         if 'discover_via_nss_and_api()' in line:
             in_function = True
         
         if in_function:
-            # Check for loop through server indices
-            if 'for idx in' in line or 'seq 0' in line:
-                found_iteration = True
+            # Check for proper service browsing
+            if 'select_server_candidate' in line:
+                found_service_browse = True
             
-            # Check for sugarkube${idx}.local pattern
+            # Check that it doesn't use hardcoded hostname iteration
             if 'sugarkube' in line and '${idx}' in line and '.local' in line:
-                found_candidate_pattern = True
-            
-            if found_iteration and found_candidate_pattern:
-                break
+                found_hardcoded_pattern = True
         
         # Exit function scope
         if in_function and i > 0 and line.strip() and not line.startswith(' ') and \
            not line.startswith('\t') and '()' in line and 'discover_via_nss_and_api' not in line:
             break
     
-    assert found_iteration, "Function should iterate through server indices"
-    assert found_candidate_pattern, "Function should try sugarkube{0..N}.local pattern"
+    assert found_service_browse, "Function should use select_server_candidate for mDNS service browsing"
+    assert not found_hardcoded_pattern, "Function should NOT iterate through hardcoded sugarkube{0..N}.local hostnames"
 
 
 def test_simple_discovery_conditional_in_main_flow() -> None:
@@ -165,30 +162,37 @@ def test_simple_discovery_handles_bootstrap() -> None:
     assert found_bootstrap_path, "Function should handle bootstrap case when no token"
 
 
-def test_simple_discovery_uses_servers_desired() -> None:
-    """Test that simple discovery respects SERVERS_DESIRED variable."""
+def test_simple_discovery_no_hardcoded_hostnames() -> None:
+    """Test that simple discovery does not hardcode hostname patterns."""
     
     script_content = SCRIPT.read_text(encoding="utf-8")
     lines = script_content.splitlines()
     
-    # Find the function and verify it uses SERVERS_DESIRED
+    # Find the function and verify it doesn't hardcode hostnames
     in_function = False
-    found_servers_desired = False
+    uses_service_discovery = False
+    has_hostname_loop = False
     
     for i, line in enumerate(lines):
         if 'discover_via_nss_and_api()' in line:
             in_function = True
         
-        if in_function and 'SERVERS_DESIRED' in line:
-            found_servers_desired = True
-            break
+        if in_function:
+            # Should use service discovery
+            if 'select_server_candidate' in line:
+                uses_service_discovery = True
+            
+            # Should not have hostname iteration based on SERVERS_DESIRED
+            if 'seq 0' in line and 'server_count' in line:
+                has_hostname_loop = True
         
         # Exit function scope
         if in_function and i > 0 and line.strip() and not line.startswith(' ') and \
            not line.startswith('\t') and '()' in line and 'discover_via_nss_and_api' not in line:
             break
     
-    assert found_servers_desired, "Function should use SERVERS_DESIRED to determine how many servers to try"
+    assert uses_service_discovery, "Function should use mDNS service discovery"
+    assert not has_hostname_loop, "Function should not iterate through hardcoded hostname counts"
 
 
 def test_phase_3_comment_present() -> None:
@@ -200,13 +204,13 @@ def test_phase_3_comment_present() -> None:
     assert 'Phase 3:' in script_content or 'phase 3' in script_content.lower(), \
         "Should have Phase 3 documentation comments"
     
-    # Verify it mentions simplified discovery or NSS
+    # Verify it mentions service browsing (not NSS/direct resolution)
     lines = script_content.splitlines()
     phase3_mentioned = False
     
     for line in lines:
-        if 'Phase 3' in line and ('simple' in line.lower() or 'nss' in line.lower()):
+        if 'Phase 3' in line and ('service browsing' in line.lower() or 'mdns' in line.lower()):
             phase3_mentioned = True
             break
     
-    assert phase3_mentioned, "Phase 3 comments should mention simplified discovery or NSS"
+    assert phase3_mentioned, "Phase 3 comments should mention mDNS service browsing"

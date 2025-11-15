@@ -1,0 +1,12 @@
+{
+  "id": "mdns-discovery-hardcoded-hostnames",
+  "date": "2025-11-14",
+  "component": "k3s-discover.sh simple discovery",
+  "longForm": "outages/2025-11-14-mdns-discovery-hardcoded-hostnames.md",
+  "rootCause": "Recent simplification PRs replaced proper mDNS service browsing with hardcoded hostname lookups (sugarkube0.local, sugarkube1.local, etc), enforcing a specific naming convention that prevented discovery of nodes with different hostnames",
+  "resolution": "Restored mDNS service browsing using avahi-browse in both discover_via_nss_and_api() and try_discovery_failopen() functions; nodes are now discovered by their advertised k3s services rather than assumed hostnames",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "docs/raspi_cluster_setup.md"
+  ]
+}
