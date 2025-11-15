@@ -2310,10 +2310,13 @@ mdns_lookup_nss_ip() {
 select_server_candidate() {
   mdns_reset_selection
   local selection_line
+  log_debug discover event=select_server_candidate_start cluster="${CLUSTER}" environment="${ENVIRONMENT}" >&2
   selection_line="$(run_avahi_query server-select | head -n1 || true)"
   if [ -z "${selection_line}" ]; then
+    log_debug discover event=select_server_candidate_empty >&2
     return 1
   fi
+  log_debug discover event=select_server_candidate_result selection="${selection_line}" >&2
 
   MDNS_SELECTED_BROWSE_OK=1
 
@@ -3398,6 +3401,18 @@ publish_api_service() {
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
+    
+    # Verify the service is browsable via avahi-browse (not just resolvable)
+    if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
+      local browse_verification
+      browse_verification="$(SUGARKUBE_DEBUG=1 run_avahi_query server-select | head -n1 || true)"
+      if [ -n "${browse_verification}" ]; then
+        log_info mdns_publish event=browse_verification outcome=ok role=server host="${MDNS_HOST_RAW}" result="${browse_verification}" >&2
+      else
+        log_warn_msg mdns_publish "service not found via avahi-browse after publish" "host=${MDNS_HOST_RAW}" "role=server"
+      fi
+    fi
+    
     return 0
   fi
 
@@ -3434,6 +3449,18 @@ publish_bootstrap_service() {
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log_info mdns_selfcheck outcome=confirmed role=bootstrap host="${MDNS_HOST_RAW}" observed="${observed}" phase=bootstrap check=initial >&2
+    
+    # Verify the service is browsable via avahi-browse (not just resolvable)
+    if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
+      local browse_verification
+      browse_verification="$(SUGARKUBE_DEBUG=1 run_avahi_query server-select | head -n1 || true)"
+      if [ -n "${browse_verification}" ]; then
+        log_info mdns_publish event=browse_verification outcome=ok role=bootstrap host="${MDNS_HOST_RAW}" result="${browse_verification}" >&2
+      else
+        log_warn_msg mdns_publish "service not found via avahi-browse after publish" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+      fi
+    fi
+    
     return 0
   fi
 
@@ -4593,6 +4620,20 @@ discover_via_nss_and_api() {
   if [ -z "${SUGARKUBE_MDNS_QUERY_TIMEOUT:-}" ]; then
     export SUGARKUBE_MDNS_QUERY_TIMEOUT=30
   fi
+  
+  # Enable debug logging for mDNS queries during simple discovery
+  if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
+    export SUGARKUBE_DEBUG=1
+  fi
+  
+  # Log discovery configuration for debugging
+  log_info discover event=simple_discovery_config \
+    no_terminate="${SUGARKUBE_MDNS_NO_TERMINATE}" \
+    timeout="${SUGARKUBE_MDNS_QUERY_TIMEOUT}" \
+    service_type="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp" \
+    cluster="${CLUSTER}" \
+    environment="${ENVIRONMENT}" \
+    debug_enabled="${SUGARKUBE_DEBUG:-0}" >&2
   
   # Use existing service browsing infrastructure to discover any advertised k3s nodes
   # This properly scans the network for mDNS services instead of assuming hostnames
