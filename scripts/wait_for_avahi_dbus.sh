@@ -469,7 +469,6 @@ fi
 # Final fallback: If D-Bus methods failed but Avahi CLI tools work, treat as soft failure
 # This handles cases where D-Bus interface is unavailable but Avahi itself is functional
 if command -v avahi-browse >/dev/null 2>&1; then
-  cli_test_status=0
   if avahi-browse --all --terminate --timeout=2 >/dev/null 2>&1; then
     cli_test_status=0
   else

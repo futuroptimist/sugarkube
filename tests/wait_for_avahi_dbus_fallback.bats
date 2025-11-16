@@ -14,7 +14,6 @@ setup() {
   # Script under test
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
   WAIT_DBUS_SCRIPT="${REPO_ROOT}/scripts/wait_for_avahi_dbus.sh"
-  LOG_SCRIPT="${REPO_ROOT}/scripts/log.sh"
 }
 
 teardown() {
@@ -43,7 +42,7 @@ EOF
 create_busctl_stub_failing() {
   cat >"${BIN_DIR}/busctl" <<'EOF'
 #!/usr/bin/env bash
-echo "Call failed: Method GetVersionString with signature on interface org.freedesktop.Avahi.Server doesnt exist" >&2
+echo "Call failed: Method GetVersionString with signature on interface org.freedesktop.Avahi.Server doesn't exist" >&2
 exit 1
 EOF
   chmod +x "${BIN_DIR}/busctl"
