@@ -1,0 +1,21 @@
+#!/bin/bash
+if [[ "$1" == "addr" && "$2" == "show" ]]; then
+  cat <<'OUT'
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether aa:bb:cc:dd:ee:ff brd ff:ff:ff:ff:ff:ff
+    inet 192.168.1.42/24 brd 192.168.1.255 scope global dynamic eth0
+       valid_lft 86359sec preferred_lft 86359sec
+    inet6 fe80::1234:5678:9abc:def0/64 scope link
+       valid_lft forever preferred_lft forever
+OUT
+elif [[ "$1" == "route" && "$2" == "show" ]]; then
+  echo "224.0.0.0/4 dev eth0 proto kernel scope link src 192.168.1.42"
+elif [[ "$1" == "maddress" && "$2" == "show" ]]; then
+  cat <<'OUT'
+2: eth0
+    inet  224.0.0.251
+    link  01:00:5e:00:00:fb
+OUT
+else
+  /sbin/ip "$@"
+fi

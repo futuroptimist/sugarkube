@@ -1,0 +1,10 @@
+#!/bin/bash
+if [[ "$1" == "-n" ]]; then
+  host="$2"
+else
+  host="$1"
+fi
+if [[ "$host" == "missing.local" ]]; then
+  exit 1
+fi
+echo "$host 10.0.0.15"

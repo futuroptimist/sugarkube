@@ -1,0 +1,4 @@
+#!/bin/bash
+cat <<'OUT'
+ACCEPT     udp  --  0.0.0.0/0            0.0.0.0/0            udp dpt:5353
+OUT

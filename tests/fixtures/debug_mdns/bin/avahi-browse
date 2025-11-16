@@ -1,0 +1,20 @@
+#!/bin/bash
+if [[ "$1" == "-t" && "$2" == "-r" && "$3" == "_k3s-sugar-dev._tcp" ]]; then
+  cat <<'OUT'
++;eth0;IPv4;sugarkube0;_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.1.10;1234
++;eth0;IPv4;other;_ssh._tcp;local;unallowed.local;10.0.0.2;22
+OUT
+  exit 0
+fi
+
+if [[ "$1" == "-a" && "$2" == "-t" && "$3" == "-r" ]]; then
+  cat <<'OUT'
++;eth0;IPv4;sugarkube1;_workstation._tcp;local;sugarkube1.local;192.168.1.11;9
++;eth0;IPv4;printer;_ipp._tcp;local;printer.local;10.0.0.5;631
+OUT
+  exit 0
+fi
+
+cat <<'OUT'
++;eth0;IPv4;sugarkube0;_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.1.10;1234
+OUT
