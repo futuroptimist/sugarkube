@@ -1,0 +1,64 @@
+{
+  "id": "2025-11-16-txt-record-parsing-failure",
+  "date": "2025-11-16",
+  "component": "scripts/k3s_mdns_parser.py TXT record parsing",
+  "severity": "Critical",
+  "status": "Resolved",
+  "rootCause": "The _parse_txt_fields() function expected TXT records to have a 'txt=' prefix, but avahi-browse --parsable --resolve outputs TXT records as separate semicolon-delimited fields without this prefix. This caused ALL TXT records to be skipped during parsing, resulting in role=None for discovered services. Since server-select mode filters for role='server', discovery returned 0 servers even when services were found.",
+  "impact": "Cross-node mDNS discovery failed completely. Joining nodes could not discover bootstrap nodes, preventing cluster formation. Logs showed 'query_mdns: initial browse returned 2 lines, 1 records' but 'query_mdns: returning 0 results for mode=server-select'.",
+  "resolution": "Modified _parse_txt_fields() to handle both formats: (1) legacy txt= prefix format for backward compatibility, (2) raw key=value format as actually output by avahi-browse. The function now processes TXT records whether or not they have the txt= prefix.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-16T04:30:30Z",
+      "event": "sugarkube0 successfully bootstraps and publishes mDNS service with role=server"
+    },
+    {
+      "timestamp": "2025-11-16T04:46:35Z",
+      "event": "sugarkube1 discovers sugarkube0 via avahi-browse, gets 2 lines, 1 record"
+    },
+    {
+      "timestamp": "2025-11-16T04:50:07Z",
+      "event": "sugarkube1 discovery fails with 0 results for server-select mode"
+    },
+    {
+      "timestamp": "2025-11-16T04:59:40Z",
+      "event": "Root cause identified: TXT records not being parsed due to missing txt= prefix"
+    },
+    {
+      "timestamp": "2025-11-16T05:15:00Z",
+      "event": "Fix implemented and tested, all tests pass"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251116T043030Z_8f3ec70_sugarkube0_just-up-dev.log",
+      "logs/up/20251116T044635Z_7b2a7da_sugarkube1_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "[k3s-discover mdns] _load_lines_from_avahi: got 2 normalized lines from _k3s-sugar-dev._tcp",
+      "[k3s-discover mdns] query_mdns: initial browse returned 2 lines, 1 records",
+      "[k3s-discover mdns] query_mdns: returning 0 results for mode=server-select",
+      "ts=2025-11-15T20:50:07-08:00 level=info event=discover event=simple_discovery_no_servers token_present=1"
+    ],
+    "avahi_browse_format": "=;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (server);_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.86.41;6443;\"role=server\";\"phase=server\";\"cluster=sugar\""
+  },
+  "testing": {
+    "new_tests": [
+      "test_parse_txt_fields_without_prefix: Verifies TXT records without txt= prefix are parsed",
+      "test_parse_txt_fields_with_and_without_prefix: Ensures backward compatibility"
+    ],
+    "existing_tests": "All 11 existing tests in test_k3s_mdns_parser.py and test_k3s_mdns_query.py continue to pass"
+  },
+  "prevention": [
+    "Added regression tests for both TXT record formats",
+    "Enhanced test coverage to use actual avahi-browse output format",
+    "Documented the expected format in test docstrings"
+  ],
+  "references": [
+    "scripts/k3s_mdns_parser.py _parse_txt_fields function",
+    "tests/scripts/test_k3s_mdns_parser.py",
+    "docs/raspi_cluster_setup.md mDNS discovery section",
+    "outages/2025-11-15-discovery-visibility-gap.json"
+  ],
+  "longForm": "outages/2025-11-16-txt-record-parsing-failure.md"
+}

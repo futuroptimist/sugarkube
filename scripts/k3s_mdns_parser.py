@@ -107,17 +107,24 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
         if not field:
             continue
         field = _strip_quotes(field)
-        if not field.startswith("txt="):
-            continue
-        payload = field[4:]
-        if not payload:
-            continue
-        payload = _strip_quotes(payload.strip())
-        if not payload:
-            continue
+        
+        # Handle two formats:
+        # 1. avahi-browse --parsable format: fields are TXT records directly (e.g., "role=server")
+        # 2. Legacy format with txt= prefix: txt="role=server,phase=active"
+        payload = field
+        if field.startswith("txt="):
+            payload = field[4:]
+            if not payload:
+                continue
+            payload = _strip_quotes(payload.strip())
+            if not payload:
+                continue
+        
+        # Parse payload - could be single key=value or comma-separated list
         entries = [payload]
         if "," in payload and "=" in payload:
             entries = [item.strip() for item in payload.split(",") if item.strip()]
+        
         for entry in entries:
             entry = _strip_quotes(entry.strip())
             if not entry:
