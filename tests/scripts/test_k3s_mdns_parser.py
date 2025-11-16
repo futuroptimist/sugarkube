@@ -160,3 +160,80 @@ def test_parse_accepts_uppercase_cluster_and_env_values():
     assert record.txt.get("cluster") == "sugar"
     assert record.txt.get("env") == "dev"
     assert record.txt.get("role") == "server"
+
+
+def test_parse_txt_fields_without_prefix():
+    """Test parsing TXT records in avahi-browse --parsable format (no txt= prefix).
+    
+    This is the actual format used by avahi-browse --parsable --resolve where
+    TXT records appear as separate semicolon-delimited fields after field 9,
+    each quoted but without a txt= prefix.
+    
+    Regression test for: mDNS discovery returning 0 servers despite finding records
+    because TXT fields were not being parsed (they were skipped due to missing txt= prefix).
+    """
+    lines = [
+        (
+            '=;eth0;IPv4;k3s-sugar-dev@sugarkube0.local (server);_k3s-sugar-dev._tcp;local;'
+            'sugarkube0.local;192.168.86.41;6443;'
+            '"ip6=fdd1:f818:d4e2:f916:5078:dc19:33de:141a";'
+            '"ip4=192.168.86.41";'
+            '"host=sugarkube0.local";'
+            '"leader=sugarkube0.local";'
+            '"phase=server";'
+            '"role=server";'
+            '"env=dev";'
+            '"cluster=sugar";'
+            '"k3s=1"'
+        ),
+    ]
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 1
+    record = recs[0]
+    # Verify all TXT fields were parsed
+    assert record.txt.get("role") == "server"
+    assert record.txt.get("phase") == "server"
+    assert record.txt.get("cluster") == "sugar"
+    assert record.txt.get("env") == "dev"
+    assert record.txt.get("k3s") == "1"
+    assert record.txt.get("host") == "sugarkube0.local"
+    assert record.txt.get("leader") == "sugarkube0.local"
+    assert record.txt.get("ip4") == "192.168.86.41"
+    assert record.txt.get("ip6") == "fdd1:f818:d4e2:f916:5078:dc19:33de:141a"
+    assert record.host == "sugarkube0.local"
+    assert record.address == "192.168.86.41"
+    assert record.port == 6443
+
+
+def test_parse_txt_fields_with_and_without_prefix():
+    """Test that both txt= prefix format and raw format work together.
+    
+    This ensures backward compatibility with any existing test fixtures or
+    historical logs that might use the txt= prefix format.
+    """
+    lines = [
+        # Old format with txt= prefix
+        (
+            '=;eth0;IPv4;k3s-sugar-dev@host1 (bootstrap);_k3s-sugar-dev._tcp;local;'
+            'host1.local;192.168.1.10;6443;'
+            'txt=k3s=1;txt=cluster=sugar;txt=env=dev;txt=role=bootstrap;txt=phase=bootstrap'
+        ),
+        # New format without txt= prefix (actual avahi-browse output)
+        (
+            '=;eth0;IPv4;k3s-sugar-dev@host2 (server);_k3s-sugar-dev._tcp;local;'
+            'host2.local;192.168.1.11;6443;'
+            '"k3s=1";"cluster=sugar";"env=dev";"role=server";"phase=server"'
+        ),
+    ]
+    recs = parse_mdns_records(lines, "sugar", "dev")
+    assert len(recs) == 2
+    
+    # Check bootstrap record (old format)
+    bootstrap = [r for r in recs if r.txt.get("role") == "bootstrap"][0]
+    assert bootstrap.txt.get("phase") == "bootstrap"
+    assert bootstrap.txt.get("cluster") == "sugar"
+    
+    # Check server record (new format)
+    server = [r for r in recs if r.txt.get("role") == "server"][0]
+    assert server.txt.get("phase") == "server"
+    assert server.txt.get("cluster") == "sugar"
