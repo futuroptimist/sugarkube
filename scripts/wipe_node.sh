@@ -105,6 +105,42 @@ cleanup_dynamic_publishers() {
 
 cleanup_dynamic_publishers
 
+cleanup_runtime_state() {
+  local runtime_dir="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
+  
+  if [ "${DRY_RUN}" = "1" ]; then
+    if [ -d "${runtime_dir}" ]; then
+      printf 'DRY_RUN=1: would remove runtime directory %s\n' "${runtime_dir}"
+      append_summary "runtime-dir:${runtime_dir}"
+    else
+      printf 'DRY_RUN=1: runtime directory not found\n'
+      append_summary "runtime-dir:not-found"
+    fi
+    return 0
+  fi
+  
+  if [ -d "${runtime_dir}" ]; then
+    # Remove cluster/environment-specific state files
+    local state_pattern="${runtime_dir}/join-gate-${CLUSTER}-${ENVIRONMENT}.state"
+    if [ -f "${state_pattern}" ]; then
+      rm -f "${state_pattern}" || true
+      append_summary "removed-join-gate-state:${state_pattern}"
+    fi
+    
+    # Check if runtime dir is empty after cleanup, remove if so
+    if [ -z "$(ls -A "${runtime_dir}" 2>/dev/null)" ]; then
+      rmdir "${runtime_dir}" 2>/dev/null || true
+      append_summary "removed-runtime-dir:${runtime_dir}"
+    else
+      append_summary "runtime-dir-not-empty:${runtime_dir}"
+    fi
+  else
+    append_summary "runtime-dir:not-found"
+  fi
+}
+
+cleanup_runtime_state
+
 reload_avahi() {
   if [ "${DRY_RUN}" = "1" ]; then
     echo "DRY_RUN=1: would reload avahi-daemon"

@@ -337,8 +337,8 @@ cp "${CLOUD_INIT_PATH}" "${USER_DATA}"
 
 ensure_packages "${PI_GEN_DIR}/stage2/01-sys-tweaks/00-packages" \
   policykit-1 rpi-eeprom ethtool jq parted util-linux raspi-utils \
-  network-manager curl \
-  avahi-daemon avahi-utils dbus libnss-mdns nftables
+  network-manager curl python3 tcpdump \
+  avahi-daemon avahi-utils dbus libnss-mdns libglib2.0-bin nftables
 
 just_path_profile="${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/profile.d/sugarkube-path.sh"
 install -d "$(dirname "${just_path_profile}")"
