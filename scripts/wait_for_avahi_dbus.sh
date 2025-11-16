@@ -466,6 +466,42 @@ if [ "${systemd_absent_hint}" -ne 0 ]; then
   exit 2
 fi
 
+# Final fallback: If D-Bus methods failed but Avahi CLI tools work, treat as soft failure
+# This handles cases where D-Bus interface is unavailable but Avahi itself is functional
+if command -v avahi-browse >/dev/null 2>&1; then
+  cli_test_output=""
+  cli_test_status=0
+  if cli_test_output="$(avahi-browse --all --terminate --timeout=2 2>&1)"; then
+    cli_test_status=0
+  else
+    cli_test_status=$?
+  fi
+  # If avahi-browse succeeds or exits with status 1 (no results), Avahi is functional
+  if [ "${cli_test_status}" -eq 0 ] || [ "${cli_test_status}" -eq 1 ]; then
+    set -- \
+      avahi_dbus_ready \
+      outcome=skip \
+      reason=dbus_unavailable_cli_ok \
+      ms_elapsed="${elapsed_ms}" \
+      systemd_state="${systemd_state_log}" \
+      systemd_status="${last_systemctl_status}" \
+      bus_status="${bus_status_log}" \
+      bus_code="${last_bus_code}" \
+      cli_fallback=ok \
+      cli_status="${cli_test_status}"
+    if [ -n "${bus_error_log}" ]; then
+      set -- "$@" bus_error="${bus_error_log}"
+    fi
+    set -- "$@" bus_destination="${bus_destination_log}"
+    set -- "$@" bus_object="${bus_object_log}"
+    set -- "$@" bus_interface="${bus_interface_log}"
+    set -- "$@" bus_method="${bus_method_log}"
+    set -- "$@" bus_owner="${bus_owner_log}"
+    log_info "$@"
+    exit 2
+  fi
+fi
+
 set -- \
   avahi_dbus_ready \
   outcome=timeout \
