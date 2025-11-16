@@ -1,0 +1,16 @@
+#!/bin/bash
+host="$2"
+if [[ "$host" == "sugarkube0.local" ]]; then
+  printf "sugarkube0.local\t10.0.0.10\n"
+  exit 0
+elif [[ "$host" == "sugarkube1.local" ]]; then
+  printf "sugarkube1.local\t10.0.0.11\n"
+  exit 0
+elif [[ "$host" == "sugarkube2.local" ]]; then
+  printf "sugarkube2.local\t10.0.0.12\n"
+  exit 0
+elif [[ "$host" == "custom.local" ]]; then
+  printf "custom.local\t10.0.0.13\n"
+  exit 0
+fi
+exit 1

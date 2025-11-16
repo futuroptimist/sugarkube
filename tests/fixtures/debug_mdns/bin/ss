@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "UNCONN 0      0      0.0.0.0:5353      0.0.0.0:*     users:(\"mdns\",pid=999,fd=3)"

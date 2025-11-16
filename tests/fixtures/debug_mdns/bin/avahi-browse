@@ -1,0 +1,7 @@
+#!/bin/bash
+cat <<'OUT'
++   eth0 IPv4 sugarkube0.local _k3s-sugar-dev._tcp local
++   eth0 IPv4 sugarkube1.local _workstation._tcp local
++   eth0 IPv4 unlisted.local _workstation._tcp local
++   eth0 IPv4 custom.local _workstation._tcp local
+OUT

@@ -1,0 +1,16 @@
+#!/bin/bash
+if [[ "$1" == "addr" ]]; then
+  cat <<'OUT'
+2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0
+    valid_lft forever preferred_lft forever
+    link/ether aa:bb:cc:dd:ee:ff brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::1234:5678:9abc:def0/64 scope link
+OUT
+elif [[ "$1" == "route" ]]; then
+  echo "224.0.0.0/4 dev eth0 proto kernel scope link src 10.0.0.5"
+elif [[ "$1" == "maddress" ]]; then
+  echo "1:  eth0"
+  echo "    inet 224.0.0.251"
+else
+  echo "ip stub"
+fi

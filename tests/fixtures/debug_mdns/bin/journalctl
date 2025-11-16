@@ -1,0 +1,5 @@
+#!/bin/bash
+cat <<'OUT'
+Jan 01 00:00:00 host avahi-daemon[100]: Registering new address record 10.0.0.5
+Jan 01 00:00:01 host avahi-daemon[100]: Joining mDNS multicast group on interface eth0.IPv4 with address 10.0.0.5.
+OUT

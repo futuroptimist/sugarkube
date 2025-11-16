@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "avahi-daemon.service - Avahi mDNS/DNS-SD Stack"
+echo "   Loaded: loaded (/lib/systemd/system/avahi-daemon.service; enabled; vendor preset: enabled)"
+echo "   Active: active (running)"
