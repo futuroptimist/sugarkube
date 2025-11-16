@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "Jan 01 00:00:00 avahi-daemon[1]: Registering new address record"
+echo "Jan 01 00:00:01 avahi-daemon[1]: Server startup complete"

@@ -1,0 +1,13 @@
+#!/bin/bash
+if [[ "$*" == *"_k3s-sugar-dev._tcp"* ]]; then
+  cat <<'OUT'
++   eth0 IPv4 sugarkube0.local _k3s-sugar-dev._tcp local
++   eth0 IPv4 rogue.local _k3s-sugar-dev._tcp local
+OUT
+else
+  cat <<'OUT'
++   eth0 IPv4 sugarkube1.local _workstation._tcp local
++   eth0 IPv4 printer.local _ipp._tcp local
++   eth0 IPv4 rogue.local _http._tcp local
+OUT
+fi

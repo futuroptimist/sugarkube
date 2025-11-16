@@ -1,0 +1,5 @@
+#!/bin/bash
+# Expect: avahi-resolve -n <hostname>
+hostname="$@"
+# Always succeed with placeholder IP
+echo "$hostname\t10.1.2.3"
