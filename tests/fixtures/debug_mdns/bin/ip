@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "addr" && "$2" == "show" ]]; then
+  cat <<'OUT'
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP qlen 1000
+    link/ether aa:bb:cc:dd:ee:ff brd ff:ff:ff:ff:ff:ff
+    inet 192.168.50.24/24 brd 192.168.50.255 scope global dynamic eth0
+    inet6 fe80::abcd:ef12:3456:7890/64 scope link
+       valid_lft forever preferred_lft forever
+OUT
+  exit 0
+fi
+
+if [[ "$1" == "route" && "$2" == "show" ]]; then
+  echo "224.0.0.0/4 dev eth0 proto kernel scope link src 192.168.50.24"
+  exit 0
+fi
+
+if [[ "$1" == "maddress" && "$2" == "show" ]]; then
+  cat <<'OUT'
+2: eth0
+    link  ff:ff:ff:ff:ff:ff
+    inet  224.0.0.251
+    inet6 ff02::fb
+OUT
+  exit 0
+fi
+
+echo "ip stub unexpected: $*" >&2
+exit 1

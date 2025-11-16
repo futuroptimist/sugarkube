@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+cat <<'OUT'
+Jan 01 00:00:00 avahi-daemon[123]: Service browser successfully started
+OUT

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+echo "udp        0      0 0.0.0.0:5353            0.0.0.0:*               123/avahi-daemon"

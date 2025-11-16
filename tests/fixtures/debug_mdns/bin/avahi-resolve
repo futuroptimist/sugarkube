@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+if [[ "$1" == "-n" ]]; then
+  host="$2"
+  if [[ "$host" == "fail.local" ]]; then
+    exit 1
+  fi
+  echo "$host\t192.0.2.1"
+  exit 0
+fi
+echo "avahi-resolve stub unexpected: $*" >&2
+exit 1
