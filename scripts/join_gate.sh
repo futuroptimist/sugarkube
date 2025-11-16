@@ -99,6 +99,12 @@ wait_for_avahi_bus() {
   fi
   local status
   status=$?
+  # Exit status 2 means D-Bus unavailable but CLI tools work (soft failure/skip)
+  # This is a valid success condition - the join can proceed
+  if [ "${status}" -eq 2 ]; then
+    log_join_gate action=dbus_wait outcome=skip status="${status}"
+    return 0
+  fi
   log_join_gate_error action=dbus_wait outcome=error status="${status}"
   return 1
 }
