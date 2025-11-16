@@ -73,7 +73,7 @@
   "references": [
     "scripts/join_gate.sh wait_for_avahi_bus function (lines 92-110)",
     "scripts/wait_for_avahi_dbus.sh CLI fallback (exits with status 2)",
-    "scripts/join_gate.sh ensure_avahi_liveness_signal function (lines 106-152, already handled status 2)",
+    "scripts/join_gate.sh ensure_avahi_liveness_signal function (lines 112-158, already handled status 2)",
     "outages/2025-11-16-dbus-method-fallback-missing.json",
     "tests/bats/join_gate.bats",
     "tests/wait_for_avahi_dbus_fallback.bats"
