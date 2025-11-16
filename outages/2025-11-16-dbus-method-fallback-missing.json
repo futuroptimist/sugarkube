@@ -1,0 +1,75 @@
+{
+  "id": "2025-11-16-dbus-method-fallback-missing",
+  "date": "2025-11-16",
+  "component": "scripts/wait_for_avahi_dbus.sh D-Bus readiness check",
+  "severity": "High",
+  "status": "Resolved",
+  "rootCause": "The wait_for_avahi_dbus.sh script attempts to verify Avahi D-Bus readiness by calling GetVersionString method via busctl. On Raspberry Pi 5 systems, this D-Bus method call consistently fails with 'Method GetVersionString with signature on interface org.freedesktop.Avahi.Server doesn't exist'. The script has fallback logic to try alternative methods (get-property VersionString, GetState, etc.) but these also fail. When all D-Bus methods timeout after 20 seconds, the script exits with status 1 (error), causing join_gate.sh to fail and blocking k3s cluster joins even though Avahi itself is fully functional and mDNS discovery works perfectly.",
+  "impact": "Cross-node k3s cluster joins blocked despite successful mDNS discovery. The joining node (sugarkube1) successfully discovers the bootstrap node (sugarkube0) via avahi-browse, validates the API is responding, but then fails during the join gate acquisition phase due to the D-Bus check timeout. This prevents formation of multi-node HA clusters even though all the underlying mDNS infrastructure is working correctly.",
+  "resolution": "Added CLI-based fallback to wait_for_avahi_dbus.sh. Before exiting with error status on D-Bus timeout, the script now tests if avahi-browse works. If avahi-browse succeeds (exit codes 0 or 1), the script exits with status 2 (skip/disabled) instead of 1 (error). Status 2 is treated as a soft failure by join_gate.sh, allowing the join to proceed. This preserves the D-Bus optimization path for systems where it works while gracefully degrading to CLI-only validation for systems where D-Bus methods are unavailable.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-16T07:15:46Z",
+      "event": "sugarkube0 successfully bootstraps k3s cluster and publishes mDNS service"
+    },
+    {
+      "timestamp": "2025-11-16T07:32:13Z",
+      "event": "sugarkube1 starts join attempt with SUGARKUBE_TOKEN_DEV set"
+    },
+    {
+      "timestamp": "2025-11-16T07:35:44Z",
+      "event": "sugarkube1 successfully discovers sugarkube0 via mDNS (event=simple_discovery_success)"
+    },
+    {
+      "timestamp": "2025-11-16T07:35:45Z",
+      "event": "sugarkube1 validates API is alive on sugarkube0:6443 (status=401)"
+    },
+    {
+      "timestamp": "2025-11-16T07:35:45Z",
+      "event": "sugarkube1 begins join_gate acquisition, calls wait_for_avahi_dbus.sh"
+    },
+    {
+      "timestamp": "2025-11-16T07:36:05Z",
+      "event": "wait_for_avahi_dbus.sh times out after 20 seconds with D-Bus method failures"
+    },
+    {
+      "timestamp": "2025-11-16T07:36:05Z",
+      "event": "join_gate.sh fails with event=join_gate action=dbus_wait outcome=error"
+    },
+    {
+      "timestamp": "2025-11-16T07:36:05Z",
+      "event": "k3s join aborted, cluster formation blocked"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251116T071546Z_42b3907_sugarkube0_just-up-dev.log",
+      "logs/up/20251116T073213Z_aa4fdcb_sugarkube1_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "ts=2025-11-15T23:35:44-08:00 level=info event=discover event=simple_discovery_success server=sugarkube0.local",
+      "ts=2025-11-15T23:35:44-08:00 level=info event=apiready outcome=alive host=\"sugarkube0.local\" port=\"6443\" status=401",
+      "ts=2025-11-15T23:36:05-08:00 level=info event=avahi_dbus_ready outcome=timeout ms_elapsed=20233 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesn't_exist",
+      "ts=2025-11-15T23:36:05-08:00 level=info event=join_gate action=dbus_wait outcome=error status=0"
+    ],
+    "mdns_debug_output": "=== Browse specific k3s service (5 second timeout, filtered) ===\n+   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local\n=   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local\n   hostname = [sugarkube0.local]\n   txt = [\"ip6=<REDACTED>\" \"ip4=<REDACTED>\" \"host=sugarkube0.local\" \"leader=sugarkube0.local\" \"phase=server\" \"role=server\" \"env=dev\" \"cluster=sugar\" \"k3s=1\"]"
+  },
+  "testing": {
+    "manual_verification": "The fix was tested by simulating the D-Bus failure scenario. With the CLI fallback in place, avahi-browse succeeds and wait_for_avahi_dbus.sh exits with status 2, allowing join_gate.sh to continue.",
+    "regression_risk": "Low. The change only affects the error path (D-Bus timeout). Systems where D-Bus works continue to use the fast D-Bus path. Systems where D-Bus fails now have a working fallback instead of hard failure."
+  },
+  "prevention": [
+    "Added CLI-based fallback to handle D-Bus unavailability",
+    "Documented the D-Bus method incompatibility in this outage report",
+    "Exit status semantics clarified: 0=success, 1=error (blocks join), 2=skip (allows join)"
+  ],
+  "workaround": "Users can set SUGARKUBE_DISABLE_JOIN_GATE=1 to completely bypass the join gate mechanism, but this removes the serialization protection for concurrent joins.",
+  "references": [
+    "scripts/wait_for_avahi_dbus.sh",
+    "scripts/join_gate.sh",
+    "docs/raspi_cluster_setup.md",
+    "outages/2025-11-16-txt-record-parsing-failure.json",
+    "outages/2025-11-15-discovery-visibility-gap.json"
+  ],
+  "longForm": "outages/2025-11-16-dbus-method-fallback-missing.md"
+}

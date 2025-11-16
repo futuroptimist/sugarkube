@@ -372,6 +372,13 @@ echo "unexpected busctl call: $*" >&2
 exit 1
 EOS
 
+  stub_command avahi-browse <<'EOS'
+#!/usr/bin/env bash
+# Simulate avahi-browse failing when Avahi daemon is absent
+echo "Failed to create client object: Daemon not running" >&2
+exit 2
+EOS
+
   run env \
     AVAHI_DBUS_WAIT_MS=200 \
     "${BATS_CWD}/scripts/wait_for_avahi_dbus.sh"
