@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Sanitized mDNS / k3s debug script for sugarkube nodes.
 # Produces output that is safe to commit to the repo by:
 # - Redacting IP and MAC addresses
@@ -20,6 +21,8 @@ else
   ALLOWED_HOSTS=("${ALLOWED_HOSTS_DEFAULT[@]}")
 fi
 
+PRIMARY_HOST="${ALLOWED_HOSTS[0]:-sugarkube0.local}"
+
 ###############################################################################
 # Helper functions
 ###############################################################################
@@ -27,19 +30,13 @@ fi
 sanitize_ip_mac() {
   # Redact IPv4, IPv6, and MAC addresses from stdin
   sed -E \
-    -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<REDACTED_IPV4>/g' \
+    -e 's/(^|[^0-9])([0-9]{1,3}(\.[0-9]{1,3}){3})([^0-9]|$)/\1<REDACTED_IPV4>\4/g' \
     -e 's/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/<REDACTED_MAC>/g' \
-    -e 's/[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}/<REDACTED_IPV6>/g'
-}
-
-is_allowed_host() {
-  local host="$1"
-  for ah in "${ALLOWED_HOSTS[@]}"; do
-    if [[ "$host" == "$ah" ]]; then
-      return 0
-    fi
-  done
-  return 1
+    -e 's/\b([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}\b/<REDACTED_IPV6>/g' \
+    -e 's/\b([0-9A-Fa-f]{1,4}:){1,7}:\b/<REDACTED_IPV6>/g' \
+    -e 's/\b:((:[0-9A-Fa-f]{1,4}){1,7})\b/<REDACTED_IPV6>/g' \
+    -e 's/\b([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}\b/<REDACTED_IPV6>/g' \
+    -e 's/::1/<REDACTED_IPV6>/g'
 }
 
 filter_avahi_output() {
@@ -60,6 +57,18 @@ filter_avahi_output() {
       fi
     done
   done
+}
+
+browse_and_filter() {
+  local failure_message="$1"
+  shift
+
+  if command -v avahi-browse >/dev/null 2>&1; then
+    timeout 5 avahi-browse "$@" 2>/dev/null | filter_avahi_output | sanitize_ip_mac || \
+      echo "$failure_message"
+  else
+    echo "avahi-browse not installed"
+  fi
 }
 
 resolve_and_redact() {
@@ -89,7 +98,8 @@ date -u
 ip addr show eth0 | sanitize_ip_mac
 
 print_section "Avahi Daemon Status"
-sudo systemctl status avahi-daemon --no-pager 2>&1
+sudo systemctl status avahi-daemon --no-pager 2>&1 || \
+  echo "avahi-daemon status unavailable"
 
 print_section "Check if mDNS port is listening"
 # This only shows 0.0.0.0:5353, which is not sensitive
@@ -108,20 +118,10 @@ for h in "${ALLOWED_HOSTS[@]}"; do
 done
 
 print_section "Browse all mDNS services (5 second timeout, filtered)"
-if command -v avahi-browse >/dev/null 2>&1; then
-  timeout 5 avahi-browse -a -t -r 2>/dev/null | filter_avahi_output || \
-    echo "Browse timed out or no *allowed* services found"
-else
-  echo "avahi-browse not installed"
-fi
+browse_and_filter "Browse timed out or no *allowed* services found" -a -t -r
 
 print_section "Browse specific k3s service (5 second timeout, filtered)"
-if command -v avahi-browse >/dev/null 2>&1; then
-  timeout 5 avahi-browse -t -r _k3s-sugar-dev._tcp 2>/dev/null | filter_avahi_output || \
-    echo "Browse timed out or no k3s service found"
-else
-  echo "avahi-browse not installed"
-fi
+browse_and_filter "Browse timed out or no k3s service found" -t -r _k3s-sugar-dev._tcp
 
 print_section "Check for multicast route"
 ip route show 2>/dev/null | grep 224.0.0.0 | sanitize_ip_mac || \
@@ -136,38 +136,30 @@ else
 fi
 sudo ufw status 2>/dev/null || echo "UFW not installed/active"
 
-print_section "Check if we can ping sugarkube0.local (summary only)"
-if ping -c 3 -W 1 sugarkube0.local >/dev/null 2>&1; then
-  echo "Ping to sugarkube0.local: SUCCESS (3/3 replies)"
+print_section "Check if we can ping ${PRIMARY_HOST} (summary only)"
+if ping -c 3 -W 1 "${PRIMARY_HOST}" >/dev/null 2>&1; then
+  echo "Ping to ${PRIMARY_HOST}: SUCCESS (3/3 replies)"
 else
-  echo "Ping to sugarkube0.local: FAILED"
-fi
-
-print_section "Try to discover k3s service on sugarkube0 specifically (filtered)"
-if command -v avahi-browse >/dev/null 2>&1; then
-  timeout 5 avahi-browse -t -r _k3s-sugar-dev._tcp 2>/dev/null | filter_avahi_output || \
-    echo "No k3s-sugar-dev service for sugarkube0 found"
-else
-  echo "avahi-browse not installed"
+  echo "Ping to ${PRIMARY_HOST}: FAILED"
 fi
 
 print_section "Check nsswitch.conf for mDNS"
 grep -E 'mdns' /etc/nsswitch.conf || echo "No mdns entry in /etc/nsswitch.conf"
 
-print_section "Test if we can reach sugarkube0's k3s API (summary only)"
-if curl -k --connect-timeout 5 -sS https://sugarkube0.local:6443/ping >/dev/null 2>&1; then
+print_section "Test if we can reach ${PRIMARY_HOST}'s k3s API (summary only)"
+if curl -k --connect-timeout 5 -sS "https://${PRIMARY_HOST}:6443/ping" >/dev/null 2>&1; then
   echo "k3s API via mDNS hostname: OK"
 else
   echo "k3s API via mDNS hostname: FAILED"
 fi
 
-# If an IPv4 for sugarkube0.local is configured in /etc/hosts or resolvable, we
+# If an IPv4 for the primary host is configured in /etc/hosts or resolvable, we
 # can also test via its IPv4, but we never print the IP itself.
-if avahi-resolve -n sugarkube0.local >/dev/null 2>/dev/null; then
-  if curl -k --connect-timeout 5 -sS https://sugarkube0.local:6443/ping >/dev/null 2>&1; then
-    echo "k3s API via sugarkube0.local (as IP): OK"
+if avahi-resolve -n "${PRIMARY_HOST}" >/dev/null 2>/dev/null; then
+  if curl -k --connect-timeout 5 -sS "https://${PRIMARY_HOST}:6443/ping" >/dev/null 2>&1; then
+    echo "k3s API via ${PRIMARY_HOST} (as IP): OK"
   else
-    echo "k3s API via sugarkube0.local (as IP): FAILED"
+    echo "k3s API via ${PRIMARY_HOST} (as IP): FAILED"
   fi
 fi
 
@@ -187,7 +179,7 @@ else
 fi
 
 print_section "Check Avahi daemon logs (last 50 lines)"
-sudo journalctl -u avahi-daemon -n 50 --no-pager 2>&1
+sudo journalctl -u avahi-daemon -n 50 --no-pager 2>&1 | sanitize_ip_mac
 
 print_section "Allowed hostnames in this sanitized log"
 for h in "${ALLOWED_HOSTS[@]}"; do

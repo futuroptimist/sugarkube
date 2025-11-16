@@ -95,6 +95,12 @@ in the hundreds of milliseconds indicate congestion or multicast drops—enable
 `SUGARKUBE_DEBUG_MDNS=1` to capture Avahi traces and
 `SUGARKUBE_MDNS_DBUS=0` to fall back to the CLI path if D-Bus is blocked.
 
+The Raspberry Pi setup runbook documents the sanitized mDNS debugging workflow
+(`logs/debug-mdns.sh`) so operators can capture redacted traces during
+bootstrap without leaking IPs or MACs. See the "Capture sanitized debug logs"
+section of the quick start:
+https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.
+
 ### mDNS Troubleshooting (Avahi)
 
 - **Atomic publish:** Write Avahi service definitions to a temporary file and

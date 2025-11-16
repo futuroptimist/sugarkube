@@ -36,8 +36,8 @@ def test_redacts_addresses_and_mac():
     assert "aa:bb:cc:dd:ee:ff" not in output
 
     ipv4_pattern = re.compile(
-        r"((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}"
-        r"(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)"
+        r"((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+        r"(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
     )
     for match in ipv4_pattern.finditer(output):
         assert match.group(0) in {"0.0.0.0"}
