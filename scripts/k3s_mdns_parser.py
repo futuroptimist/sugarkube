@@ -100,44 +100,98 @@ def _is_candidate_line(line: str) -> bool:
     return bool(line) and line[0] in {"=", "+", "@"}
 
 
+def _split_quoted_fields(field: str) -> List[str]:
+    """Split a field containing multiple quoted strings into individual fields.
+    
+    Example:
+        '"ip6=..." "ip4=..." "role=server"' -> ['"ip6=..."', '"ip4=..."', '"role=server"']
+    """
+    result = []
+    current = []
+    in_quotes = False
+    quote_char = None
+    
+    for char in field:
+        if char in ('"', "'") and not in_quotes:
+            in_quotes = True
+            quote_char = char
+            current.append(char)
+        elif char == quote_char and in_quotes:
+            in_quotes = False
+            quote_char = None
+            current.append(char)
+            # End of quoted string - save it
+            result.append(''.join(current).strip())
+            current = []
+        elif in_quotes:
+            current.append(char)
+        elif char.isspace():
+            # Space outside quotes - ignore
+            pass
+        else:
+            # Non-whitespace outside quotes - start collecting
+            current.append(char)
+    
+    # Save any remaining content
+    if current:
+        result.append(''.join(current).strip())
+    
+    return result
+
+
 def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     txt: Dict[str, str] = {}
     for field in fields:
         field = field.strip()
         if not field:
             continue
-        field = _strip_quotes(field)
         
-        # Handle two formats:
-        # 1. avahi-browse --parsable format: fields are TXT records directly (e.g., "role=server")
-        # 2. Legacy format with txt= prefix: txt="role=server,phase=active"
-        payload = field
-        if field.startswith("txt="):
-            payload = field[4:]
-            if not payload:
-                continue
-            payload = _strip_quotes(payload.strip())
-            if not payload:
-                continue
+        # If field contains multiple quoted strings (space-separated), split them first
+        # This handles avahi-browse output like: "ip6=..." "ip4=..." "role=server"
+        subfields = []
+        if field.count('"') > 2 or field.count("'") > 2:
+            # Multiple quoted strings in this field
+            subfields = _split_quoted_fields(field)
+        else:
+            # Single field (may or may not be quoted)
+            subfields = [field]
         
-        # Parse payload - could be single key=value or comma-separated list
-        entries = [payload]
-        if "," in payload and "=" in payload:
-            entries = [item.strip() for item in payload.split(",") if item.strip()]
-        
-        for entry in entries:
-            entry = _strip_quotes(entry.strip())
-            if not entry:
+        for subfield in subfields:
+            subfield = subfield.strip()
+            if not subfield:
                 continue
-            if "=" in entry:
-                key, value = entry.split("=", 1)
-                key = key.strip().lower()
-                value = _strip_quotes(value.strip())
-            else:
-                key = entry.strip().lower()
-                value = ""
-            if key:
-                txt[key] = value
+            subfield = _strip_quotes(subfield)
+            
+            # Handle two formats:
+            # 1. avahi-browse --parsable format: fields are TXT records directly (e.g., "role=server")
+            # 2. Legacy format with txt= prefix: txt="role=server,phase=active"
+            payload = subfield
+            if subfield.startswith("txt="):
+                payload = subfield[4:]
+                if not payload:
+                    continue
+                payload = _strip_quotes(payload.strip())
+                if not payload:
+                    continue
+            
+            # Parse payload - could be single key=value or comma-separated list
+            entries = [payload]
+            if "," in payload and "=" in payload:
+                entries = [item.strip() for item in payload.split(",") if item.strip()]
+            
+            for entry in entries:
+                entry = _strip_quotes(entry.strip())
+                if not entry:
+                    continue
+                if "=" in entry:
+                    key, value = entry.split("=", 1)
+                    key = key.strip().lower()
+                    value = _strip_quotes(value.strip())
+                else:
+                    key = entry.strip().lower()
+                    value = ""
+                if key:
+                    txt[key] = value
     return txt
 
 
