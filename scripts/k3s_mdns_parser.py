@@ -207,7 +207,14 @@ def parse_avahi_resolved_line(line: str) -> Optional[Dict[str, Any]]:
     if len(parts) < 9:
         parts = parts + [""] * (9 - len(parts))
 
-    cleaned = [_strip_quotes(part.strip()) for part in parts]
+    # Strip quotes from non-TXT fields (0-8), but preserve quotes in TXT fields (9+)
+    # because _parse_txt_fields needs to see the full quoted strings to split them properly
+    cleaned = []
+    for i, part in enumerate(parts):
+        if i < 9:
+            cleaned.append(_strip_quotes(part.strip()))
+        else:
+            cleaned.append(part.strip())  # Don't strip quotes from TXT fields
 
     txt = _parse_txt_fields(cleaned[9:]) if len(cleaned) > 9 else {}
 
