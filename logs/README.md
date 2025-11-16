@@ -13,23 +13,15 @@ leaking WAN IPs or local network details.
 ### Allowlisting hostnames
 
 By default the script keeps only `_k3s-sugar-dev._tcp` records plus hostnames in the allowlist:
-`sugarkube0.local`, `sugarkube1.local`, and `sugarkube2.local`.
-
-Override the allowlist at runtime:
+`sugarkube0.local`, `sugarkube1.local`, and `sugarkube2.local`. Override the allowlist and collect
+sanitized output in one command:
 
 ```bash
-MDNS_ALLOWED_HOSTS="sugarkube0.local my-printer.local" ./logs/debug-mdns.sh
+MDNS_ALLOWED_HOSTS="sugarkube0.local my-printer.local" ./logs/debug-mdns.sh | tee \
+  logs/debug-mdns_$(date -u +"%Y-%m-%dT%H:%M:%SZ").log.sanitized
 ```
 
 The resolved IP addresses are redacted in the output regardless of the allowlist.
-
-### Running locally
-
-Collect a sanitized log file that is safe to check in:
-
-```bash
-./logs/debug-mdns.sh | tee logs/debug-mdns_$(date -u +"%Y-%m-%dT%H:%M:%SZ").log.sanitized
-```
 
 The script summarizes tcpdump, ping, and curl checks instead of printing packet contents.
 
