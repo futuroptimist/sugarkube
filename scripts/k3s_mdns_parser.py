@@ -100,44 +100,118 @@ def _is_candidate_line(line: str) -> bool:
     return bool(line) and line[0] in {"=", "+", "@"}
 
 
+def _split_quoted_fields(field: str) -> List[str]:
+    """Split a field containing multiple quoted strings into individual fields.
+    
+    Handles space-separated quoted strings like: '"ip6=..." "ip4=..." "role=server"'
+    
+    Note: This function does not handle escaped quotes within strings (e.g., "value=\"escaped\"").
+    If avahi-browse returns escaped quotes, they will be treated as regular characters.
+    This is acceptable because avahi-browse TXT record values typically don't contain quotes.
+    
+    Example:
+        '"ip6=..." "ip4=..." "role=server"' -> ['"ip6=..."', '"ip4=..."', '"role=server"']
+    """
+    result = []
+    current = []
+    in_quotes = False
+    quote_char = None
+    
+    for char in field:
+        if char in ('"', "'") and not in_quotes:
+            in_quotes = True
+            quote_char = char
+            current.append(char)
+        elif char == quote_char and in_quotes:
+            in_quotes = False
+            quote_char = None
+            current.append(char)
+            # End of quoted string - save it
+            result.append(''.join(current).strip())
+            current = []
+        elif in_quotes:
+            current.append(char)
+        elif char.isspace():
+            # Space outside quotes - ignore
+            pass
+        else:
+            # Non-whitespace outside quotes - start collecting
+            current.append(char)
+    
+    # Save any remaining content
+    if current:
+        result.append(''.join(current).strip())
+    
+    return result
+
+
 def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
     txt: Dict[str, str] = {}
     for field in fields:
         field = field.strip()
         if not field:
             continue
-        field = _strip_quotes(field)
         
-        # Handle two formats:
-        # 1. avahi-browse --parsable format: fields are TXT records directly (e.g., "role=server")
-        # 2. Legacy format with txt= prefix: txt="role=server,phase=active"
-        payload = field
-        if field.startswith("txt="):
-            payload = field[4:]
-            if not payload:
-                continue
-            payload = _strip_quotes(payload.strip())
-            if not payload:
-                continue
+        # Detect if field contains multiple quoted strings separated by whitespace
+        # Look for patterns like: "..." "..." or '...' '...'
+        # A field with multiple quoted substrings will have at least 4 quotes (2 complete pairs)
+        # and spaces between quoted sections
+        subfields = []
+        quote_count = field.count('"') + field.count("'")
         
-        # Parse payload - could be single key=value or comma-separated list
-        entries = [payload]
-        if "," in payload and "=" in payload:
-            entries = [item.strip() for item in payload.split(",") if item.strip()]
+        # Check if this looks like space-separated quoted fields
+        # We need: multiple quote pairs AND spaces between quotes
+        has_space_between_quotes = False
+        if quote_count >= 4:
+            # Look for pattern: quote...quote space quote...quote
+            import re
+            # Match quoted strings separated by whitespace
+            pattern = r'(["\'])[^\1]*?\1\s+(["\'])[^\2]*?\2'
+            has_space_between_quotes = bool(re.search(pattern, field))
         
-        for entry in entries:
-            entry = _strip_quotes(entry.strip())
-            if not entry:
+        if has_space_between_quotes:
+            # Multiple quoted strings in this field - split them
+            subfields = _split_quoted_fields(field)
+        else:
+            # Single field (may or may not be quoted)
+            subfields = [field]
+        
+        for subfield in subfields:
+            subfield = subfield.strip()
+            if not subfield:
                 continue
-            if "=" in entry:
-                key, value = entry.split("=", 1)
-                key = key.strip().lower()
-                value = _strip_quotes(value.strip())
-            else:
-                key = entry.strip().lower()
-                value = ""
-            if key:
-                txt[key] = value
+            subfield = _strip_quotes(subfield)
+            
+            # Handle two formats:
+            # 1. avahi-browse --parsable format: fields are TXT records directly (e.g., "role=server")
+            # 2. Legacy format with txt= prefix: txt="role=server,phase=active"
+            payload = subfield
+            if subfield.startswith("txt="):
+                payload = subfield[4:]
+                if not payload:
+                    continue
+                payload = _strip_quotes(payload.strip())
+                if not payload:
+                    continue
+            
+            # Parse payload - could be single key=value or comma-separated list
+            entries = [payload]
+            if "," in payload and "=" in payload:
+                entries = [item.strip() for item in payload.split(",") if item.strip()]
+            
+            for entry in entries:
+                entry = _strip_quotes(entry.strip())
+                if not entry:
+                    continue
+                if "=" in entry:
+                    key, value = entry.split("=", 1)
+                    key = key.strip().lower()
+                    value = _strip_quotes(value.strip())
+                else:
+                    key = entry.strip().lower()
+                    value = ""
+                if key:
+                    txt[key] = value
     return txt
 
 
@@ -153,7 +227,14 @@ def parse_avahi_resolved_line(line: str) -> Optional[Dict[str, Any]]:
     if len(parts) < 9:
         parts = parts + [""] * (9 - len(parts))
 
-    cleaned = [_strip_quotes(part.strip()) for part in parts]
+    # Strip quotes from non-TXT fields (0-8), but preserve quotes in TXT fields (9+)
+    # because _parse_txt_fields needs to see the full quoted strings to split them properly
+    cleaned = []
+    for i, part in enumerate(parts):
+        if i < 9:
+            cleaned.append(_strip_quotes(part.strip()))
+        else:
+            cleaned.append(part.strip())  # Don't strip quotes from TXT fields
 
     txt = _parse_txt_fields(cleaned[9:]) if len(cleaned) > 9 else {}
 

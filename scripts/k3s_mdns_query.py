@@ -305,6 +305,18 @@ def _invoke_avahi(
                 stdout=stdout,
                 stderr=stderr,
             )
+            
+            # Log captured output from timeout for debugging
+            if debug is not None:
+                if stderr:
+                    debug(f"avahi-browse stderr (from timeout): {stderr.strip()}")
+                if stdout:
+                    lines_count = len(stdout.splitlines())
+                    debug(f"avahi-browse stdout (from timeout): {lines_count} lines")
+                    # Log first few lines of output for debugging
+                    for i, line in enumerate(stdout.splitlines()[:10]):
+                        debug(f"avahi-browse stdout[{i}]: {line}")
+            
             if attempt == 1:
                 if debug is not None:
                     debug(f"Retrying after timeout (attempt {attempt})...")
