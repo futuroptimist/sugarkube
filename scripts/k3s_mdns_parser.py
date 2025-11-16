@@ -103,6 +103,12 @@ def _is_candidate_line(line: str) -> bool:
 def _split_quoted_fields(field: str) -> List[str]:
     """Split a field containing multiple quoted strings into individual fields.
     
+    Handles space-separated quoted strings like: '"ip6=..." "ip4=..." "role=server"'
+    
+    Note: This function does not handle escaped quotes within strings (e.g., "value=\"escaped\"").
+    If avahi-browse returns escaped quotes, they will be treated as regular characters.
+    This is acceptable because avahi-browse TXT record values typically don't contain quotes.
+    
     Example:
         '"ip6=..." "ip4=..." "role=server"' -> ['"ip6=..."', '"ip4=..."', '"role=server"']
     """
@@ -146,11 +152,25 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
         if not field:
             continue
         
-        # If field contains multiple quoted strings (space-separated), split them first
-        # This handles avahi-browse output like: "ip6=..." "ip4=..." "role=server"
+        # Detect if field contains multiple quoted strings separated by whitespace
+        # Look for patterns like: "..." "..." or '...' '...'
+        # A field with multiple quoted substrings will have at least 4 quotes (2 complete pairs)
+        # and spaces between quoted sections
         subfields = []
-        if field.count('"') > 2 or field.count("'") > 2:
-            # Multiple quoted strings in this field
+        quote_count = field.count('"') + field.count("'")
+        
+        # Check if this looks like space-separated quoted fields
+        # We need: multiple quote pairs AND spaces between quotes
+        has_space_between_quotes = False
+        if quote_count >= 4:
+            # Look for pattern: quote...quote space quote...quote
+            import re
+            # Match quoted strings separated by whitespace
+            pattern = r'(["\'])[^\1]*?\1\s+(["\'])[^\2]*?\2'
+            has_space_between_quotes = bool(re.search(pattern, field))
+        
+        if has_space_between_quotes:
+            # Multiple quoted strings in this field - split them
             subfields = _split_quoted_fields(field)
         else:
             # Single field (may or may not be quoted)

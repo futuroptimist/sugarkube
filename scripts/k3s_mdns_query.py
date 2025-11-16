@@ -317,13 +317,6 @@ def _invoke_avahi(
                     for i, line in enumerate(stdout.splitlines()[:10]):
                         debug(f"avahi-browse stdout[{i}]: {line}")
             
-            # If we got output despite the timeout, that's actually success
-            # (avahi-browse without --terminate waits indefinitely, timeout is expected)
-            if stdout:
-                if debug is not None:
-                    debug(f"Timeout with output is success; using captured data")
-                break
-            
             if attempt == 1:
                 if debug is not None:
                     debug(f"Retrying after timeout (attempt {attempt})...")
