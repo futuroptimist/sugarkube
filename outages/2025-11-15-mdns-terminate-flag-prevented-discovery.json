@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-15-mdns-terminate-flag-prevented-discovery",
+  "date": "2025-11-15",
+  "component": "scripts/k3s_mdns_query.py",
+  "rootCause": "The --terminate flag was being used by default in avahi-browse commands, causing the tool to only dump cached mDNS entries and exit immediately without waiting for network responses. During initial cluster formation when nodes have never seen each other's services before, the cache is empty, resulting in 0 discoveries and preventing cross-node cluster formation. The logic was inverted: SUGARKUBE_MDNS_NO_TERMINATE defaulted to '0', which meant use_terminate=True, despite comments indicating the flag should be skipped for initial cluster formation.",
+  "resolution": "Changed the default behavior to NOT use --terminate by inverting the logic: SUGARKUBE_MDNS_NO_TERMINATE now defaults to '1', meaning use_terminate is False by default. This allows avahi-browse to wait for actual mDNS multicast responses on the network. The behavior can still be overridden by explicitly setting SUGARKUBE_MDNS_NO_TERMINATE=0 to re-enable --terminate for scenarios where only cached entries are needed.",
+  "references": [
+    "scripts/k3s_mdns_query.py:54-60",
+    "logs/up/20251115T075654Z_a248613_sugarkube0_just-up-dev.log",
+    "logs/up/20251115T080439Z_db1f46a_sugarkube1_just-up-dev.log",
+    "docs/raspi_cluster_setup.md"
+  ]
+}

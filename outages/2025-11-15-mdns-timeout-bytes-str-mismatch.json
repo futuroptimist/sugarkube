@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-15-mdns-timeout-bytes-str-mismatch",
+  "date": "2025-11-15",
+  "component": "scripts/k3s_mdns_query.py",
+  "rootCause": "When subprocess.TimeoutExpired exceptions occurred during avahi-browse invocations, the exception's stdout and stderr attributes could contain bytes even though the subprocess.run call used text=True. This happened because the TimeoutExpired exception captures output before the text decoding happens. When the code tried to write these lines to a debug dump file using '\\n'.join(lines), it crashed with 'TypeError: sequence item 0: expected str instance, bytes found'. This prevented diagnostic information from being captured when mDNS discovery failed.",
+  "resolution": "Added defensive bytes-to-str conversion in two places: (1) in the TimeoutExpired exception handler (lines 257-266), checking if stdout/stderr are bytes and decoding them with errors='replace', and (2) in the debug dump code (lines 535-547), iterating through lines and converting any bytes to str before joining. This ensures all diagnostic output can be captured regardless of exception handling paths.",
+  "references": [
+    "scripts/k3s_mdns_query.py:254-270",
+    "scripts/k3s_mdns_query.py:535-547",
+    "logs/up/20251115T080439Z_db1f46a_sugarkube1_just-up-dev.log:Traceback"
+  ]
+}
