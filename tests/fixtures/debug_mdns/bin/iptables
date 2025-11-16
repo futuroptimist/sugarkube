@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "ACCEPT     udp  --  0.0.0.0/0            0.0.0.0/0            udp dpt:5353"

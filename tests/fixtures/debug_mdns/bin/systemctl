@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "avahi-daemon.service - Avahi daemon"
+echo "   Loaded: loaded (/lib/systemd/system/avahi-daemon.service; enabled)"
+echo "   Active: active (running)"
