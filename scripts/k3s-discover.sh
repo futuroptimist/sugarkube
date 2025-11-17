@@ -509,52 +509,70 @@ NODE_TOKEN_STATE="missing"
 BOOT_TOKEN_STATE="missing"
 
 # Only read token files if user explicitly provided a token via environment variables
-# This prevents automatic join attempts when no token was intentionally provided
+# OR if user explicitly provided custom token file paths (not defaults)
+# This prevents automatic join attempts from stale default token files
 USER_PROVIDED_TOKEN=0
+USER_PROVIDED_NODE_PATH=0
+USER_PROVIDED_BOOT_PATH=0
+
 if [ -n "${INITIAL_TOKEN:-}" ]; then
   USER_PROVIDED_TOKEN=1
 fi
 
-if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] && [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH:-}" ] && [ -f "${NODE_TOKEN_PATH}" ]; then
-  NODE_TOKEN_STATE="empty"
-  token__node_raw=""
-  if IFS= read -r token__node_raw <"${NODE_TOKEN_PATH}"; then
-    :
-  else
+# Check if user provided custom token file paths (not the defaults)
+if [ -n "${SUGARKUBE_NODE_TOKEN_PATH:-}" ]; then
+  USER_PROVIDED_NODE_PATH=1
+fi
+if [ -n "${SUGARKUBE_BOOT_TOKEN_PATH:-}" ]; then
+  USER_PROVIDED_BOOT_PATH=1
+fi
+
+# Read NODE_TOKEN_PATH if user provided token OR custom node token path
+if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] || [ "${USER_PROVIDED_NODE_PATH}" -eq 1 ]; then
+  if [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH:-}" ] && [ -f "${NODE_TOKEN_PATH}" ]; then
+    NODE_TOKEN_STATE="empty"
     token__node_raw=""
-  fi
-  token__node_raw="$(token__trim "${token__node_raw}")"
-  if [ -n "${token__node_raw}" ] && [ "${token__node_raw#\#}" = "${token__node_raw}" ]; then
-    TOKEN="${token__node_raw}"
-    RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
-    NODE_TOKEN_STATE="value"
+    if IFS= read -r token__node_raw <"${NODE_TOKEN_PATH}"; then
+      :
+    else
+      token__node_raw=""
+    fi
+    token__node_raw="$(token__trim "${token__node_raw}")"
+    if [ -n "${token__node_raw}" ] && [ "${token__node_raw#\#}" = "${token__node_raw}" ]; then
+      TOKEN="${token__node_raw}"
+      RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+      NODE_TOKEN_STATE="value"
+    fi
   fi
 fi
 
-if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] && [ -z "${TOKEN:-}" ] && [ -n "${BOOT_TOKEN_PATH:-}" ] && [ -f "${BOOT_TOKEN_PATH}" ]; then
-  BOOT_TOKEN_STATE="placeholder"
-  token__boot_line=""
-  while IFS= read -r token__boot_line || [ -n "${token__boot_line}" ]; do
-    token__trimmed_line="$(token__trim "${token__boot_line}")"
-    if [ -z "${token__trimmed_line}" ] || [ "${token__trimmed_line#\#}" != "${token__trimmed_line}" ]; then
-      continue
-    fi
-    case "${token__trimmed_line}" in
-      NODE_TOKEN=*)
-        token__boot_value="${token__trimmed_line#NODE_TOKEN=}"
-        token__boot_value="$(token__trim "${token__boot_value}")"
-        token__boot_value="$(token__strip_quotes "${token__boot_value}")"
-        if [ -n "${token__boot_value}" ]; then
-          TOKEN="${token__boot_value}"
-          RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
-          BOOT_TOKEN_STATE="value"
-        else
-          BOOT_TOKEN_STATE="empty"
-        fi
-        break
-        ;;
-    esac
-  done <"${BOOT_TOKEN_PATH}"
+# Read BOOT_TOKEN_PATH if user provided token OR custom boot token path
+if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] || [ "${USER_PROVIDED_BOOT_PATH}" -eq 1 ]; then
+  if [ -z "${TOKEN:-}" ] && [ -n "${BOOT_TOKEN_PATH:-}" ] && [ -f "${BOOT_TOKEN_PATH}" ]; then
+    BOOT_TOKEN_STATE="placeholder"
+    token__boot_line=""
+    while IFS= read -r token__boot_line || [ -n "${token__boot_line}" ]; do
+      token__trimmed_line="$(token__trim "${token__boot_line}")"
+      if [ -z "${token__trimmed_line}" ] || [ "${token__trimmed_line#\#}" != "${token__trimmed_line}" ]; then
+        continue
+      fi
+      case "${token__trimmed_line}" in
+        NODE_TOKEN=*)
+          token__boot_value="${token__trimmed_line#NODE_TOKEN=}"
+          token__boot_value="$(token__trim "${token__boot_value}")"
+          token__boot_value="$(token__strip_quotes "${token__boot_value}")"
+          if [ -n "${token__boot_value}" ]; then
+            TOKEN="${token__boot_value}"
+            RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+            BOOT_TOKEN_STATE="value"
+          else
+            BOOT_TOKEN_STATE="empty"
+          fi
+          break
+          ;;
+      esac
+    done <"${BOOT_TOKEN_PATH}"
+  fi
 fi
 
 ALLOW_BOOTSTRAP_WITHOUT_TOKEN=0
