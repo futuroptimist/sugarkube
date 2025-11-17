@@ -49,6 +49,23 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 ## Happy Path: 3-server `dev` cluster in two runs
 
+### Bootstrap vs Join: Token Behavior
+
+**Explicit user intent controls whether a node bootstraps or joins:**
+
+- **No token set** (`SUGARKUBE_TOKEN_DEV` not exported): Node **bootstraps** a new cluster
+  ```bash
+  just up dev  # Bootstraps new cluster, mints token for others to use
+  ```
+
+- **Token set** (`SUGARKUBE_TOKEN_DEV` exported): Node **joins** existing cluster
+  ```bash
+  export SUGARKUBE_TOKEN_DEV="K10abc123..."  # Token from first node
+  just up dev  # Joins existing cluster using provided token
+  ```
+
+> **Key principle:** The presence or absence of `SUGARKUBE_TOKEN_DEV` (or `SUGARKUBE_TOKEN_INT`, `SUGARKUBE_TOKEN_PROD`) is how you signal your intent. Without a token, `just up dev` creates a new cluster. With a token, it joins an existing one.
+
 Every Raspberry Pi follows the same rhythm:
 
 > **Time sync prerequisite**
@@ -79,10 +96,12 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 
 Copy the long `K10…` string to a safe place—you will export it on every joining node.
 
-> **Note**
-> The first HA server does **not** need a token pre-exported. Sugarkube now allows
-> the initial control-plane bootstrap to run without one so it can mint the token
-> above for the rest of the cluster.
+> **Important: Bootstrap vs Join**
+> The first node does **not** need `SUGARKUBE_TOKEN_DEV` set. Running `just up dev` 
+> without the token environment variable tells Sugarkube to **bootstrap** a new cluster 
+> and mint the token above. Subsequent nodes **must** export `SUGARKUBE_TOKEN_DEV` 
+> before running `just up dev` to signal they should **join** the existing cluster, not 
+> create a new one.
 
 > **TLS SAN for mDNS**
 > The bootstrap step also writes `/etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml`
