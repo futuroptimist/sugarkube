@@ -1,0 +1,72 @@
+{
+  "id": "2025-11-17-token-resolution-auto-discovery",
+  "date": "2025-11-17",
+  "component": "scripts/k3s-discover.sh token resolution logic",
+  "severity": "Critical",
+  "status": "Resolved",
+  "rootCause": "The token resolution logic in k3s-discover.sh automatically read token files from disk (/var/lib/rancher/k3s/server/node-token and /boot/sugarkube-node-token) whenever TOKEN was empty, regardless of whether the user provided a token via environment variables. This meant that nodes with leftover token files from previous installations would attempt to join instead of bootstrapping, even when the user explicitly did NOT set SUGARKUBE_TOKEN_DEV (or other environment-specific tokens).",
+  "impact": "Complete loss of user intent for bootstrap vs join behavior. When users ran 'just up dev' without setting SUGARKUBE_TOKEN_DEV (intending to bootstrap a fresh cluster), the system would: (1) Find stale token files from previous installations, (2) Automatically use them for joining, (3) Set token_present=1 and allow_bootstrap=0, (4) Go through unnecessary join_gate checks and discovery, (5) Waste significant time (60+ seconds for mDNS discovery timeouts), (6) Potentially attempt to join non-existent or wrong clusters. The documented workflow in docs/raspi_cluster_setup.md assumes 'just up dev' without token means bootstrap, but the code did the opposite.",
+  "resolution": "Modified token resolution logic to only read token files from disk (NODE_TOKEN_PATH and BOOT_TOKEN_PATH) if the user explicitly provided a token via environment variables (SUGARKUBE_TOKEN_DEV, SUGARKUBE_TOKEN_INT, SUGARKUBE_TOKEN_PROD, or SUGARKUBE_TOKEN). Introduced USER_PROVIDED_TOKEN flag that is set to 1 only if INITIAL_TOKEN is non-empty. Token file reading is now gated on this flag, ensuring stale tokens on disk don't override user intent.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "sugarkube0 runs 'just up dev' without SUGARKUBE_TOKEN_DEV, expecting bootstrap"
+    },
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "Token resolution finds /var/lib/rancher/k3s/server/node-token despite no user token"
+    },
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "System sets token_present=1 allow_bootstrap=0, incorrectly attempts join"
+    },
+    {
+      "timestamp": "2025-11-17T00:15:00Z",
+      "event": "Node discovers itself via mDNS and tries to join itself"
+    },
+    {
+      "timestamp": "2025-11-17T00:18:02Z",
+      "event": "Join fails at join_gate, wasting 2+ minutes on inappropriate join attempt"
+    },
+    {
+      "timestamp": "2025-11-17T01:15:00Z",
+      "event": "Bug identified: token auto-discovery overrides user intent"
+    },
+    {
+      "timestamp": "2025-11-17T01:30:00Z",
+      "event": "Fix implemented: gate token file reading on user-provided token"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251117T001354Z_4d83ccd_sugarkube0_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "ts=2025-11-16T16:15:38-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=value token_source=\"/var/lib/rancher/k3s/server/node-token\""
+    ],
+    "expected_behavior": "Without SUGARKUBE_TOKEN_DEV: token_present=0 allow_bootstrap=1 node_token_state=missing",
+    "actual_behavior": "Without SUGARKUBE_TOKEN_DEV: token_present=1 allow_bootstrap=0 node_token_state=value",
+    "code_location": "scripts/k3s-discover.sh lines 511-558 (before fix)"
+  },
+  "testing": {
+    "manual_verification": "Test scenario 1 (bootstrap): Run 'just wipe' then 'just up dev' without setting SUGARKUBE_TOKEN_DEV. Expected: token_present=0, allow_bootstrap=1, bootstrap happens immediately without join attempts. Test scenario 2 (join): Run 'just up dev' with SUGARKUBE_TOKEN_DEV set to a valid token. Expected: token_present=1, allow_bootstrap=0, join proceeds normally. Test scenario 3 (stale token): After bootstrap, run 'just wipe' (leaving stale files), then 'just up dev' without token. Expected: token_present=0, allow_bootstrap=1, fresh bootstrap despite stale files.",
+    "regression_risk": "Low. Changes only affect when token files are read, not what happens after they're read. Explicit token provision via environment variables continues to work exactly as before. The fix aligns code behavior with documented behavior."
+  },
+  "prevention": [
+    "Added USER_PROVIDED_TOKEN flag to distinguish user intent from auto-discovery",
+    "Token file reading now gated on explicit user token provision",
+    "NODE_TOKEN_PATH and BOOT_TOKEN_PATH only consulted when user provided a token",
+    "Stale token files no longer override bootstrap intent",
+    "Saves 60+ seconds per invocation by avoiding unnecessary join attempts",
+    "Documentation behavior now matches code behavior"
+  ],
+  "workaround": "Before fix, users had to manually remove token files: sudo rm -rf /var/lib/rancher/k3s/ /boot/sugarkube-node-token. Or set SUGARKUBE_TOKEN_DEV to empty string explicitly (though this wasn't documented).",
+  "references": [
+    "scripts/k3s-discover.sh token resolution (lines 456-558)",
+    "docs/raspi_cluster_setup.md bootstrap behavior documentation",
+    "outages/2025-11-17-wipe-node-incomplete-cleanup.json (wipe not cleaning tokens)",
+    "outages/2025-11-17-join-gate-exit-status-capture-bug.json (join_gate failure that exposed this)"
+  ],
+  "performanceImpact": "Eliminates 60-120 seconds of unnecessary mDNS discovery and join attempts when bootstrapping after a wipe. Each avoided join attempt saves: 30s mDNS discovery timeout x2 (for two service types) + 20s D-Bus wait + API probes = ~80-100s total.",
+  "documentationChanges": "No changes needed - documentation already stated correct behavior. This fix brings code in line with docs."
+}

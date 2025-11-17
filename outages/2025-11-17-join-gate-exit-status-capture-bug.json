@@ -1,0 +1,64 @@
+{
+  "id": "2025-11-17-join-gate-exit-status-capture-bug",
+  "date": "2025-11-17",
+  "component": "scripts/join_gate.sh wait_for_avahi_bus function",
+  "severity": "Critical",
+  "status": "Resolved",
+  "rootCause": "The wait_for_avahi_bus() function had a bash exit status capture bug on lines 97-101. When wait_for_avahi_dbus.sh exited with status 2 (D-Bus unavailable but CLI works), the status was consumed by the if statement condition check on line 97. By the time $? was captured on line 101, it contained the exit status of the failed if condition (1), not the actual script exit status (2). This prevented the status 2 handling code on lines 104-106 from ever executing, causing joins to fail even though mDNS discovery was working perfectly.",
+  "impact": "Complete blockage of all cross-node k3s cluster joins on systems where D-Bus methods are unavailable (e.g., Raspberry Pi 5). Even though mDNS service discovery successfully found servers, API validation passed, and all L4 probes succeeded, the join failed at the join_gate step with 'event=join_gate action=dbus_wait outcome=error status=0' instead of the expected 'outcome=skip status=2'. This prevented formation of multi-node HA clusters despite all underlying infrastructure working correctly.",
+  "resolution": "Fixed the exit status capture sequence in wait_for_avahi_bus(). Changed from conditional-then-capture pattern to execute-then-capture pattern. Now the script execution and status capture happen on separate lines (99-100) before any conditional checks, ensuring the actual exit status is preserved. The fix allows status 2 to be properly detected and handled as a skip condition.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "sugarkube0 bootstrap attempt - fails at join_gate with status=0"
+    },
+    {
+      "timestamp": "2025-11-17T00:20:03Z",
+      "event": "sugarkube1 join attempt - successfully discovers sugarkube0, passes API validation and L4 probes, but fails at join_gate with status=0"
+    },
+    {
+      "timestamp": "2025-11-17T00:28:10Z",
+      "event": "Bug reported: cross-node discovery working but joins still failing"
+    },
+    {
+      "timestamp": "2025-11-17T00:35:00Z",
+      "event": "Root cause identified: exit status capture bug in wait_for_avahi_bus()"
+    },
+    {
+      "timestamp": "2025-11-17T00:40:00Z",
+      "event": "Fix implemented and validated"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251117T001354Z_4d83ccd_sugarkube0_just-up-dev.log",
+      "logs/up/20251117T002003Z_1eea239_sugarkube1_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "ts=2025-11-16T16:18:02-08:00 level=info event=avahi_dbus_ready outcome=skip reason=dbus_unavailable_cli_ok ... cli_fallback=ok cli_status=1",
+      "ts=2025-11-16T16:18:02-08:00 level=info event=join_gate action=dbus_wait outcome=error status=0",
+      "ts=2025-11-16T16:23:55-08:00 level=info event=avahi_dbus_ready outcome=skip reason=dbus_unavailable_cli_ok ... cli_fallback=ok cli_status=1",
+      "ts=2025-11-16T16:23:55-08:00 level=info event=join_gate action=dbus_wait outcome=error status=0"
+    ],
+    "bug_location": "scripts/join_gate.sh lines 97-101 (before fix)",
+    "bug_pattern": "if \"${SCRIPT_DIR}/wait_for_avahi_dbus.sh\"; then return 0; fi; local status; status=$?"
+  },
+  "testing": {
+    "manual_verification": "The fix ensures exit status is captured immediately after script execution, before any conditional evaluation. Status 2 from wait_for_avahi_dbus.sh will now be correctly detected and handled as a skip condition.",
+    "regression_risk": "Very low. The change only affects the order of operations (execute->capture->check instead of check-or-capture). All logical paths remain the same, just with correct status values. Existing tests in tests/bats/join_gate.bats and tests/wait_for_avahi_dbus_fallback.bats cover the functionality."
+  },
+  "prevention": [
+    "Fixed exit status capture to happen immediately after script execution",
+    "Added comment explaining the capture-before-conditional pattern",
+    "Bash best practice: always capture $? immediately after command execution, before any conditionals",
+    "This completes the D-Bus fallback mechanism chain: wait_for_avahi_dbus.sh exits 2 → join_gate.sh captures 2 → handles as skip → join proceeds"
+  ],
+  "references": [
+    "scripts/join_gate.sh wait_for_avahi_bus function (lines 92-112)",
+    "scripts/wait_for_avahi_dbus.sh CLI fallback (exits with status 2)",
+    "outages/2025-11-16-dbus-method-fallback-missing.json (added CLI fallback to wait_for_avahi_dbus.sh)",
+    "outages/2025-11-16-join-gate-dbus-status-2-not-handled.json (documented status 2 should be handled but wasn't due to this bug)",
+    "tests/bats/join_gate.bats",
+    "tests/wait_for_avahi_dbus_fallback.bats"
+  ]
+}

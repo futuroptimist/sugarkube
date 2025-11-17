@@ -58,6 +58,13 @@ run_uninstaller "k3s-killall.sh"
 run_uninstaller "k3s-uninstall.sh"
 run_uninstaller "k3s-agent-uninstall.sh"
 
+# Explicitly clean up k3s token files that may persist after uninstallers
+# These files can interfere with fresh bootstrap attempts if left behind
+K3S_SERVER_TOKEN="${SUGARKUBE_K3S_SERVER_TOKEN_PATH:-/var/lib/rancher/k3s/server/token}"
+K3S_NODE_TOKEN="${SUGARKUBE_NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
+K3S_BOOT_TOKEN="${SUGARKUBE_BOOT_TOKEN_PATH:-/boot/sugarkube-node-token}"
+K3S_DATA_DIR="${SUGARKUBE_K3S_DATA_DIR:-/var/lib/rancher/k3s}"
+
 AVAHI_PRIMARY="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
 AVAHI_GLOB="/etc/avahi/services/k3s-*.service"
 
@@ -79,6 +86,25 @@ remove_file() {
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+# Remove k3s token files explicitly
+remove_file "${K3S_SERVER_TOKEN}"
+remove_file "${K3S_NODE_TOKEN}"
+remove_file "${K3S_BOOT_TOKEN}"
+
+# Remove entire k3s data directory if it still exists after uninstallers
+# This ensures a completely clean slate for fresh bootstrap
+if [ "${DRY_RUN}" = "1" ]; then
+  if [ -d "${K3S_DATA_DIR}" ]; then
+    printf 'DRY_RUN=1: would remove directory %s\n' "${K3S_DATA_DIR}"
+    append_summary "rm-dir:${K3S_DATA_DIR}"
+  fi
+else
+  if [ -d "${K3S_DATA_DIR}" ]; then
+    rm -rf "${K3S_DATA_DIR}" || true
+    append_summary "removed-dir:${K3S_DATA_DIR}"
+  fi
+fi
 
 cleanup_dynamic_publishers() {
   local svc

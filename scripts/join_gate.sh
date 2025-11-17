@@ -94,11 +94,16 @@ wait_for_avahi_bus() {
   if ! command -v gdbus >/dev/null 2>&1; then
     return 0
   fi
-  if "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"; then
+  # Capture exit status before using it in conditionals
+  # Temporarily disable set -e to capture non-zero exit status
+  local status
+  set +e
+  "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"
+  status=$?
+  set -e
+  if [ "${status}" -eq 0 ]; then
     return 0
   fi
-  local status
-  status=$?
   # Exit status 2 means D-Bus unavailable but CLI tools work (soft failure/skip)
   # This is a valid success condition - the join can proceed
   if [ "${status}" -eq 2 ]; then
