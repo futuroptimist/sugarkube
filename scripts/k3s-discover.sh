@@ -4922,20 +4922,6 @@ while :; do
     fi
     break
   fi
-      else
-        install_server_cluster_init
-      fi
-      break
-    fi
-
-    log_info discover event=bootstrap_selfcheck_election outcome=follower key="${ELECTION_KEY}" >&2
-    FOLLOWER_UNTIL_SERVER=1
-    FOLLOWER_UNTIL_SERVER_SET_AT="$(date +%s)"
-    bootstrap_selected="false"
-    server_host=""
-    sleep "${DISCOVERY_WAIT_SECS}"
-    continue
-  fi
 
   servers_now="$(count_servers)"
   if [ "${servers_now}" -lt "${SERVERS_DESIRED}" ]; then
