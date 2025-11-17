@@ -95,11 +95,12 @@ wait_for_avahi_bus() {
     return 0
   fi
   # Capture exit status before using it in conditionals
-  # Use || true to prevent set -e from exiting script on non-zero status
+  # Temporarily disable set -e to capture non-zero exit status
   local status
-  "${SCRIPT_DIR}/wait_for_avahi_dbus.sh" || status=$?
-  # If the above succeeded, status won't be set, so set it to 0
-  status=${status:-0}
+  set +e
+  "${SCRIPT_DIR}/wait_for_avahi_dbus.sh"
+  status=$?
+  set -e
   if [ "${status}" -eq 0 ]; then
     return 0
   fi
