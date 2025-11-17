@@ -153,6 +153,20 @@ unset SAVE_DEBUG_LOGS
 
 With `SAVE_DEBUG_LOGS=1`, Sugarkube streams console output through a sanitizer that removes secrets and public IP addresses before writing to `logs/up/`. Each run creates a timestamped file combining the UTC timestamp, commit hash, hostname, and environment (for example, `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`). Logs are emitted live to the terminal, and a summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 
+#### Customize mDNS debug log hostnames
+
+When using `logs/debug-mdns.sh` to diagnose network issues, you can configure which hostnames appear in the sanitized output:
+
+```bash
+export MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2"
+just up dev
+
+# Or run the debug script directly
+MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 myprinter" ./logs/debug-mdns.sh
+```
+
+The default allowlist is `sugarkube0 sugarkube1 sugarkube2`. Hostnames should be specified **without** the `.local` suffix—the script automatically handles mDNS resolution. This prevents accidental exposure of other devices on your network in committed logs.
+
 ### Switch environments as needed
 
 `just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.

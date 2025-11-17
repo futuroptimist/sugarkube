@@ -11,8 +11,10 @@ set -euo pipefail
 ###############################################################################
 
 # Default allowlist for sugarkube project. Override at runtime with:
-#   MDNS_ALLOWED_HOSTS="sugarkube0.local sugarkube1.local other.local" ./debug-mdns.sh
-ALLOWED_HOSTS_DEFAULT=("sugarkube0.local" "sugarkube1.local" "sugarkube2.local")
+#   MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2" ./debug-mdns.sh
+# or before running `just up dev`:
+#   export MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2"
+ALLOWED_HOSTS_DEFAULT=("sugarkube0" "sugarkube1" "sugarkube2")
 
 if [[ -n "${MDNS_ALLOWED_HOSTS:-}" ]]; then
   # Split MDNS_ALLOWED_HOSTS on whitespace into an array
@@ -21,7 +23,7 @@ else
   ALLOWED_HOSTS=("${ALLOWED_HOSTS_DEFAULT[@]}")
 fi
 
-PRIMARY_HOST="${ALLOWED_HOSTS[0]:-sugarkube0.local}"
+PRIMARY_HOST="${ALLOWED_HOSTS[0]:-sugarkube0}"
 
 ###############################################################################
 # Helper functions

@@ -5,12 +5,11 @@ This test verifies that when `just up dev` is run without SUGARKUBE_TOKEN_DEV
 (bootstrap mode), the node-token file is created and available for users to
 retrieve and use on subsequent nodes.
 
-Issue: https://github.com/futuroptimist/sugarkube/issues/XXX
+Related to hostname collision and mDNS issues preventing node-token creation.
 """
 
 import os
 import subprocess
-import tempfile
 import textwrap
 from pathlib import Path
 
@@ -243,7 +242,10 @@ def test_bootstrap_timeout_if_node_token_not_created(tmp_path):
     k3s_install.chmod(0o755)
     
     check_apiready = create_mock_check_apiready(bin_dir)
-    create_minimal_mocks(bin_dir)
+    
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    create_minimal_mocks(bin_dir, script_dir)
     
     avahi_service_dir = tmp_path / "avahi" / "services"
     avahi_service_dir.mkdir(parents=True)
