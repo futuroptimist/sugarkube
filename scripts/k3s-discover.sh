@@ -3800,6 +3800,43 @@ wait_for_remote_api_ready() {
   return 0
 }
 
+wait_for_node_token() {
+  local phase="$1"
+  local timeout="${SUGARKUBE_NODE_TOKEN_TIMEOUT:-30}"
+  local poll_interval="${SUGARKUBE_NODE_TOKEN_POLL_INTERVAL:-1}"
+  local node_token_path="${NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
+  
+  local elapsed=0
+  local start_time
+  start_time="$(date +%s)"
+  
+  log_info discover event=node_token_wait phase="${phase}" path="${node_token_path}" timeout="${timeout}" >&2
+  
+  while [ "${elapsed}" -lt "${timeout}" ]; do
+    if [ -f "${node_token_path}" ] && [ -r "${node_token_path}" ]; then
+      # Verify file has content (not empty)
+      if [ -s "${node_token_path}" ]; then
+        local token_content=""
+        if token_content="$(run_privileged cat "${node_token_path}" 2>/dev/null)"; then
+          if [ -n "${token_content}" ]; then
+            log_info discover event=node_token_ready phase="${phase}" path="${node_token_path}" elapsed_secs="${elapsed}" >&2
+            return 0
+          fi
+        fi
+      fi
+    fi
+    
+    sleep "${poll_interval}"
+    local now
+    now="$(date +%s)"
+    elapsed=$((now - start_time))
+  done
+  
+  log_error_msg discover "Node token file not created within timeout" \
+    "phase=${phase}" "path=${node_token_path}" "timeout=${timeout}"
+  return 1
+}
+
 check_remote_server_tls_sans() {
   local server_host="$1"
   if [ -z "${server_host}" ]; then
@@ -3960,6 +3997,18 @@ install_server_single() {
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   )
   if wait_for_api 1; then
+    # Wait for node-token file to be created so users can retrieve it
+    if ! wait_for_node_token "install_single"; then
+      log_error_msg discover "Node token file not created; subsequent nodes cannot join" "host=${MDNS_HOST_RAW}" "phase=install_single"
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=node-token elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
+    fi
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_single"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -4014,6 +4063,18 @@ install_server_cluster_init() {
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
   )
   if wait_for_api 1; then
+    # Wait for node-token file to be created so users can retrieve it
+    if ! wait_for_node_token "install_cluster_init"; then
+      log_error_msg discover "Node token file not created; subsequent nodes cannot join" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=node-token elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
+    fi
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_cluster_init"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -4727,6 +4788,8 @@ if [ "${SIMPLE_DISCOVERY}" = "1" ]; then
       fi
     else
       log_error_msg discover "Failed to publish bootstrap service" "phase=bootstrap"
+      log_error_msg discover "Other nodes will not be able to discover this bootstrap node via mDNS" "phase=bootstrap"
+      log_error_msg discover "Cannot proceed with cluster formation - mDNS advertisement is required" "phase=bootstrap"
       exit 1
     fi
     exit 0

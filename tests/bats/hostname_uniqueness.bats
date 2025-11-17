@@ -51,7 +51,7 @@ exit 0
 EOS
 }
 
-@test "appends suffix when mDNS collision detected" {
+@test "logs warning but does not rename when mDNS collision detected" {
   create_hostname_stub
   create_systemctl_stub
   create_kubectl_stub
@@ -66,16 +66,17 @@ EOS
     "${BATS_CWD}/scripts/ensure_unique_hostname.sh"
 
   [ "$status" -eq 0 ]
+  # Hostname should NOT be changed - we never rename anymore
   local updated
   updated="$(<"${host_file}")"
-  [[ "${updated}" =~ ^sugarkube0-[a-z0-9]{4}$ ]]
-  [[ -f "${BATS_TEST_TMPDIR}/hostname_set" ]]
-  local invocation
-  invocation="$(<"${BATS_TEST_TMPDIR}/hostname_set")"
-  [[ "${invocation}" =~ ^sugarkube0-[a-z0-9]{4}$ ]]
+  [ "${updated}" = "sugarkube0" ]
+  # hostname command should not have been invoked to set a new name
+  [ ! -f "${BATS_TEST_TMPDIR}/hostname_set" ]
+  # Should have logged a warning to stderr about the collision
+  [[ "${output}" =~ "WARNING" ]] || [[ "${stderr}" =~ "WARNING" ]]
 }
 
-@test "enables with-node-id drop-ins when hostname update fails" {
+@test "does not create node-id drop-ins since we never rename hostnames" {
   create_hostname_stub
   create_systemctl_stub
   create_kubectl_stub
@@ -92,10 +93,9 @@ EOS
 
   [ "$status" -eq 0 ]
 
+  # Since we no longer rename hostnames, we should not create with-node-id drop-ins
   local server_dropin="${systemd_dir}/k3s.service.d/20-node-id.conf"
   local agent_dropin="${systemd_dir}/k3s-agent.service.d/20-node-id.conf"
-  [ -f "${server_dropin}" ]
-  [ -f "${agent_dropin}" ]
-  grep -q 'Environment=K3S_WITH_NODE_ID=true' "${server_dropin}"
-  grep -q 'Environment=K3S_WITH_NODE_ID=true' "${agent_dropin}"
+  [ ! -f "${server_dropin}" ]
+  [ ! -f "${agent_dropin}" ]
 }
