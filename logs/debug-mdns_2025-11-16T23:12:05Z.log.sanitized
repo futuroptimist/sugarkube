@@ -1,0 +1,150 @@
+
+=== System Info ===
+sugarkube1
+Sun 16 Nov 23:12:05 UTC 2025
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether <REDACTED_MAC> brd <REDACTED_MAC>
+    inet <REDACTED_IPV4>/24 brd <REDACTED_IPV4> scope global dynamic noprefixroute eth0
+       valid_lft 51511sec preferred_lft 51511sec
+    inet6 <REDACTED_IPV6>/64 scope global dynamic noprefixroute 
+       valid_lft 1799sec preferred_lft 1799sec
+    inet6 <REDACTED_IPV6>b5fc:30be:eda0:a796/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+
+=== Avahi Daemon Status ===
+● avahi-daemon.service - Avahi mDNS/DNS-SD Stack
+     Loaded: loaded (/lib/systemd/system/avahi-daemon.service; enabled; preset: enabled)
+     Active: active (running) since Fri 2025-11-14 00:30:15 PST; 2 days ago
+TriggeredBy: ● avahi-daemon.socket
+    Process: 17027 ExecReload=/usr/sbin/avahi-daemon -r (code=exited, status=0/SUCCESS)
+   Main PID: 3637 (avahi-daemon)
+     Status: "avahi-daemon 0.8 starting up."
+      Tasks: 2 (limit: 4915)
+     Memory: 808.0K
+        CPU: 24.811s
+     CGroup: /system.slice/avahi-daemon.service
+             ├─3637 "avahi-daemon: running [sugarkube1.local]"
+             └─3638 "avahi-daemon: chroot helper"
+
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:53 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:53 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+
+=== Check if mDNS port is listening ===
+udp        0      0 0.0.0.0:5353            0.0.0.0:*                           3637/avahi-daemon:  
+
+=== Test local mDNS resolution (redacted) ===
+sugarkube0.local    <REDACTED_IP>
+my-printer.local    <REDACTED_IP>
+
+=== Browse all mDNS services (5 second timeout, filtered) ===
++   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local
+=   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local
+   hostname = [sugarkube0.local]
+   txt = ["ip6=<REDACTED_IPV6>" "ip4=<REDACTED_IPV4>" "host=sugarkube0.local" "leader=sugarkube0.local" "phase=server" "role=server" "env=dev" "cluster=sugar" "k3s=1"]
+   hostname = [sugarkube0.local]
+
+=== Browse specific k3s service (5 second timeout, filtered) ===
++   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local
+=   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local
+   hostname = [sugarkube0.local]
+   txt = ["ip6=<REDACTED_IPV6>" "ip4=<REDACTED_IPV4>" "host=sugarkube0.local" "leader=sugarkube0.local" "phase=server" "role=server" "env=dev" "cluster=sugar" "k3s=1"]
+
+=== Check for multicast route ===
+No explicit multicast route line for 224.0.0.0 found
+
+=== Check firewall rules ===
+iptables not installed
+UFW not installed/active
+
+=== Check if we can ping sugarkube0.local (summary only) ===
+Ping to sugarkube0.local: SUCCESS (3/3 replies)
+
+=== Check nsswitch.conf for mDNS ===
+hosts:          files mdns4_minimal [NOTFOUND=return] dns
+
+=== Test if we can reach sugarkube0.local's k3s API (summary only) ===
+k3s API via mDNS hostname: OK
+k3s API via sugarkube0.local (as IP): OK
+
+=== Check for multicast group membership (safe addresses only) ===
+2:	eth0
+	link  01:00:5e:00:00:01
+	link  33:33:00:00:00:01
+	link  33:33:ff:a0:a7:96
+	link  33:33:ff:6a:b6:82
+	link  01:00:5e:00:00:fb
+	inet  224.0.0.251
+	inet  224.0.0.1
+	inet6 ff02::1:ff6a:b682
+	inet6 ff02::1:ffa0:a796
+	inet6 ff02::1
+	inet6 ff01::1
+
+=== Capture mDNS traffic (5 second sample, summarized) ===
+No mDNS packets observed on udp/5353 during 5s window (or tcpdump error)
+
+=== Check Avahi daemon logs (last 50 lines) ===
+Nov 15 20:48:04 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 20:48:04 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:45:15 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+Nov 15 21:45:15 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+Nov 15 21:45:15 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:45:15 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:31:35 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+Nov 15 23:31:35 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+Nov 15 23:31:35 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:31:35 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:04:49 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+Nov 16 15:04:49 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+Nov 16 15:04:49 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:04:49 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+Nov 16 15:06:53 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+Nov 16 15:06:53 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+
+=== Allowed hostnames in this sanitized log ===
+ - sugarkube0.local
+ - my-printer.local
+
+=== DONE ===
