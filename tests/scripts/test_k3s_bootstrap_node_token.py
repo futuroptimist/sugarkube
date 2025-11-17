@@ -33,15 +33,15 @@ def test_wait_for_node_token_success():
                     local token_path="${{1}}"
                     local timeout="${{SUGARKUBE_NODE_TOKEN_TIMEOUT:-30}}"
                     local poll_interval="${{SUGARKUBE_NODE_TOKEN_POLL_INTERVAL:-1}}"
-                    local elapsed=0
+                    local start_time=$SECONDS
                     
                     while [ ! -f "${{token_path}}" ]; do
+                        local elapsed=$((SECONDS - start_time))
                         if [ "${{elapsed}}" -ge "${{timeout}}" ]; then
                             echo "ERROR: Node token file not created after ${{timeout}}s" >&2
                             return 1
                         fi
                         sleep "${{poll_interval}}"
-                        elapsed=$((elapsed + poll_interval))
                     done
                     
                     echo "Node token file created at ${{token_path}}"
@@ -66,7 +66,7 @@ def test_wait_for_node_token_success():
             timeout=10,
             env={
                 "SUGARKUBE_NODE_TOKEN_TIMEOUT": "5",
-                "SUGARKUBE_NODE_TOKEN_POLL_INTERVAL": "0.5",
+                "SUGARKUBE_NODE_TOKEN_POLL_INTERVAL": "1",
             },
         )
         
@@ -91,15 +91,15 @@ def test_wait_for_node_token_timeout():
                     local token_path="${{1}}"
                     local timeout="${{SUGARKUBE_NODE_TOKEN_TIMEOUT:-30}}"
                     local poll_interval="${{SUGARKUBE_NODE_TOKEN_POLL_INTERVAL:-1}}"
-                    local elapsed=0
+                    local start_time=$SECONDS
                     
                     while [ ! -f "${{token_path}}" ]; do
+                        local elapsed=$((SECONDS - start_time))
                         if [ "${{elapsed}}" -ge "${{timeout}}" ]; then
                             echo "ERROR: Node token file not created after ${{timeout}}s" >&2
                             return 1
                         fi
                         sleep "${{poll_interval}}"
-                        elapsed=$((elapsed + poll_interval))
                     done
                     
                     echo "Node token file created at ${{token_path}}"
@@ -121,7 +121,7 @@ def test_wait_for_node_token_timeout():
             timeout=10,
             env={
                 "SUGARKUBE_NODE_TOKEN_TIMEOUT": "2",
-                "SUGARKUBE_NODE_TOKEN_POLL_INTERVAL": "0.5",
+                "SUGARKUBE_NODE_TOKEN_POLL_INTERVAL": "1",
             },
         )
         
@@ -147,15 +147,15 @@ def test_wait_for_node_token_immediate():
                     local token_path="${{1}}"
                     local timeout="${{SUGARKUBE_NODE_TOKEN_TIMEOUT:-30}}"
                     local poll_interval="${{SUGARKUBE_NODE_TOKEN_POLL_INTERVAL:-1}}"
-                    local elapsed=0
+                    local start_time=$SECONDS
                     
                     while [ ! -f "${{token_path}}" ]; do
+                        local elapsed=$((SECONDS - start_time))
                         if [ "${{elapsed}}" -ge "${{timeout}}" ]; then
                             echo "ERROR: Node token file not created after ${{timeout}}s" >&2
                             return 1
                         fi
                         sleep "${{poll_interval}}"
-                        elapsed=$((elapsed + poll_interval))
                     done
                     
                     echo "Node token file created at ${{token_path}}"
