@@ -1,0 +1,64 @@
+{
+  "id": "2025-11-17-wipe-node-incomplete-cleanup",
+  "date": "2025-11-17",
+  "component": "scripts/wipe_node.sh k3s state cleanup",
+  "severity": "High",
+  "status": "Resolved",
+  "rootCause": "The wipe_node.sh script relied solely on k3s-uninstall.sh and k3s-agent-uninstall.sh to clean up k3s state. However, these scripts do not always completely remove the /var/lib/rancher/k3s/ directory and token files. When token files persist after wipe (especially /var/lib/rancher/k3s/server/node-token), subsequent 'just up dev' invocations without SUGARKUBE_TOKEN_DEV set would auto-discover and use the stale token, causing the node to attempt joining instead of bootstrapping fresh.",
+  "impact": "After running 'just wipe', users expected a clean slate for fresh bootstrap. However, stale token files caused nodes to incorrectly attempt joining themselves or other nodes instead of bootstrapping. This led to: (1) Unnecessary join_gate checks and delays, (2) Confusing behavior where token_present=1 even though user didn't set SUGARKUBE_TOKEN_DEV, (3) Bootstrap attempts failing because the system thought it should join instead.",
+  "resolution": "Enhanced wipe_node.sh to explicitly remove k3s token files and data directory after running the official uninstallers. Added explicit cleanup for: (1) /var/lib/rancher/k3s/server/token (SERVER_TOKEN_PATH), (2) /var/lib/rancher/k3s/server/node-token (NODE_TOKEN_PATH), (3) /boot/sugarkube-node-token (BOOT_TOKEN_PATH), (4) /var/lib/rancher/k3s/ entire directory. These paths are configurable via environment variables.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "sugarkube0 runs 'just up dev' without SUGARKUBE_TOKEN_DEV set, expecting bootstrap"
+    },
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "Token resolution finds stale /var/lib/rancher/k3s/server/node-token from previous installation"
+    },
+    {
+      "timestamp": "2025-11-17T00:13:54Z",
+      "event": "System sets token_present=1 allow_bootstrap=0, attempts join instead of bootstrap"
+    },
+    {
+      "timestamp": "2025-11-17T00:40:00Z",
+      "event": "Bug identified: just wipe not fully cleaning k3s state"
+    },
+    {
+      "timestamp": "2025-11-17T01:00:00Z",
+      "event": "Fix implemented: explicit token file and directory cleanup"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251117T001354Z_4d83ccd_sugarkube0_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "ts=2025-11-16T16:15:38-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=value boot_token_state=missing token_source=\"/var/lib/rancher/k3s/server/node-token\""
+    ],
+    "expected_behavior": "After 'just wipe', token_present should be 0 and allow_bootstrap should be 1 when SUGARKUBE_TOKEN_DEV is not set"
+  },
+  "testing": {
+    "manual_verification": "After fix, 'just wipe' followed by 'just up dev' (without token) should: (1) Not find any stale tokens, (2) Set token_present=0 allow_bootstrap=1, (3) Bootstrap fresh without attempting join, (4) Skip all join_gate checks",
+    "regression_risk": "Low. Changes only add explicit cleanup steps. DRY_RUN mode properly handles the new cleanup. Existing cleanup steps remain unchanged."
+  },
+  "prevention": [
+    "Added explicit removal of all k3s token files",
+    "Added removal of entire /var/lib/rancher/k3s/ directory as fallback",
+    "Token paths are configurable via environment variables",
+    "DRY_RUN mode logs what would be removed without making changes",
+    "Summary output includes all removed files and directories"
+  ],
+  "workaround": "Users could manually remove token files: sudo rm -rf /var/lib/rancher/k3s/ /boot/sugarkube-node-token",
+  "references": [
+    "scripts/wipe_node.sh token cleanup (lines 61-106)",
+    "scripts/k3s-discover.sh token resolution (lines 511-524)",
+    "docs/raspi_cluster_setup.md wipe documentation",
+    "outages/2025-11-17-join-gate-exit-status-capture-bug.json (related join issue)",
+    "outages/2025-11-17-token-resolution-auto-discovery.json (to be created - token auto-discovery bug)"
+  ],
+  "relatedIssues": [
+    "Token auto-discovery from node-token file when no user token provided",
+    "Nodes attempting to join themselves after wipe+bootstrap"
+  ]
+}

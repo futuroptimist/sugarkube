@@ -508,7 +508,14 @@ resolve_server_join_token || true
 NODE_TOKEN_STATE="missing"
 BOOT_TOKEN_STATE="missing"
 
-if [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH:-}" ] && [ -f "${NODE_TOKEN_PATH}" ]; then
+# Only read token files if user explicitly provided a token via environment variables
+# This prevents automatic join attempts when no token was intentionally provided
+USER_PROVIDED_TOKEN=0
+if [ -n "${INITIAL_TOKEN:-}" ]; then
+  USER_PROVIDED_TOKEN=1
+fi
+
+if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] && [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH:-}" ] && [ -f "${NODE_TOKEN_PATH}" ]; then
   NODE_TOKEN_STATE="empty"
   token__node_raw=""
   if IFS= read -r token__node_raw <"${NODE_TOKEN_PATH}"; then
@@ -524,7 +531,7 @@ if [ -z "${TOKEN:-}" ] && [ -n "${NODE_TOKEN_PATH:-}" ] && [ -f "${NODE_TOKEN_PA
   fi
 fi
 
-if [ -z "${TOKEN:-}" ] && [ -n "${BOOT_TOKEN_PATH:-}" ] && [ -f "${BOOT_TOKEN_PATH}" ]; then
+if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] && [ -z "${TOKEN:-}" ] && [ -n "${BOOT_TOKEN_PATH:-}" ] && [ -f "${BOOT_TOKEN_PATH}" ]; then
   BOOT_TOKEN_STATE="placeholder"
   token__boot_line=""
   while IFS= read -r token__boot_line || [ -n "${token__boot_line}" ]; do
