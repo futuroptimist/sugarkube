@@ -221,15 +221,12 @@ main() {
   fi
 
   local decision
-  local status
   if decision="$(collect_collision_decision "${current_host}" 2>&1)"; then
-    status=0
-  else
-    status=$?
+    :  # Success case - decision may contain warnings
   fi
 
   # We never rename hostnames anymore - collision detection is for diagnostics only
-  # Status is always 0 now since the Python script always exits 0
+  # The Python script always exits 0, so we just log any warnings it produces
   if [ -n "${decision}" ]; then
     # Log any warnings from the collision detection
     printf '%s\n' "${decision}" >&2
