@@ -67,6 +67,7 @@ K3S_DATA_DIR="${SUGARKUBE_K3S_DATA_DIR:-/var/lib/rancher/k3s}"
 
 AVAHI_PRIMARY="/etc/avahi/services/k3s-${CLUSTER}-${ENVIRONMENT}.service"
 AVAHI_GLOB="/etc/avahi/services/k3s-*.service"
+AVAHI_HOSTS_FILE="${SUGARKUBE_AVAHI_HOSTS_PATH:-/etc/avahi/hosts}"
 
 remove_file() {
   local target="$1"
@@ -86,6 +87,11 @@ remove_file() {
 
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
+
+# Remove Avahi static hosts file to prevent hostname collision on next boot
+# The configure_avahi.sh script adds entries here which can cause false collisions
+# in ensure_unique_hostname if not cleaned up during wipe
+remove_file "${AVAHI_HOSTS_FILE}"
 
 # Remove k3s token files explicitly
 remove_file "${K3S_SERVER_TOKEN}"

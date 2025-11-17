@@ -120,29 +120,21 @@ load_kubectl()
 if not current:
     sys.exit(0)
 
+# Never rename hostnames - they are intentionally set by the user
+# If there's a stale mDNS registration, `just wipe` should have cleaned it up
+# If there's an actual collision with another live node, that's a configuration error
+# the user must fix, not something we should work around with random suffixes
 current_norm = normalize_hostname(current)
-if current_norm in hosts:
-    for attempt in range(32):
-        suffix = ''.join(secrets.choice(alphabet) for _ in range(4))
-        candidate = f"{current}-{suffix}"
-        candidate_norm = normalize_hostname(candidate)
-        if candidate_norm not in hosts and candidate_norm.split('.')[0] not in hosts:
-            print(candidate)
-            sys.exit(20)
-    print("unable to generate unique hostname", file=sys.stderr)
-    sys.exit(21)
+current_short = current_norm.split('.')[0]
 
-if current_norm.split('.')[0] in hosts:
-    for attempt in range(32):
-        suffix = ''.join(secrets.choice(alphabet) for _ in range(4))
-        candidate = f"{current}-{suffix}"
-        candidate_norm = normalize_hostname(candidate)
-        if candidate_norm not in hosts and candidate_norm.split('.')[0] not in hosts:
-            print(candidate)
-            sys.exit(20)
-    print("unable to generate unique hostname", file=sys.stderr)
-    sys.exit(21)
+# Log any detected collisions for diagnostic purposes, but don't rename
+if current_norm in hosts or current_short in hosts:
+    colliding = [h for h in hosts if h == current_norm or h == current_short or h.startswith(current_short + '.')]
+    if colliding:
+        print(f"WARNING: hostname {current} may conflict with existing: {colliding}", file=sys.stderr)
+        print(f"If this is incorrect, run 'just wipe' first to clean up stale registrations", file=sys.stderr)
 
+# Always exit 0 - never rename
 sys.exit(0)
 PY
 }
@@ -230,37 +222,20 @@ main() {
 
   local decision
   local status
-  if decision="$(collect_collision_decision "${current_host}")"; then
+  if decision="$(collect_collision_decision "${current_host}" 2>&1)"; then
     status=0
   else
     status=$?
   fi
 
-  if [ "${status}" -eq 0 ]; then
-    log_info "hostname is already unique" "hostname=${current_host}"
-    return 0
+  # We never rename hostnames anymore - collision detection is for diagnostics only
+  # Status is always 0 now since the Python script always exits 0
+  if [ -n "${decision}" ]; then
+    # Log any warnings from the collision detection
+    printf '%s\n' "${decision}" >&2
   fi
-
-  if [ "${status}" -eq 20 ]; then
-    local new_host
-    new_host="${decision%%$'\n'*}"
-    if [ -z "${new_host}" ]; then
-      log_warn "collision detected but no candidate generated"
-      enable_with_node_id
-      return 0
-    fi
-    log_info "detected hostname collision" "current=${current_host}" "candidate=${new_host}"
-    if set_hostname "${new_host}"; then
-      log_info "hostname updated" "new=${new_host}"
-      return 0
-    fi
-    log_warn "failed to update hostname" "new=${new_host}" "fallback=with-node-id"
-    enable_with_node_id
-    return 0
-  fi
-
-  log_warn "unable to evaluate hostname uniqueness" "status=${status}" "fallback=with-node-id"
-  enable_with_node_id
+  
+  log_info "hostname check complete" "hostname=${current_host}"
   return 0
 }
 
