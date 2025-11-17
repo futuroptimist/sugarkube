@@ -4780,15 +4780,19 @@ if [ "${SIMPLE_DISCOVERY}" = "1" ]; then
   
   # Skip the complex discovery loop below
   if [ "${bootstrap_selected}" = "true" ]; then
+    local mdns_publish_ok=0
     if publish_bootstrap_service; then
-      if [ "${SERVERS_DESIRED}" = "1" ]; then
-        install_server_single
-      else
-        install_server_cluster_init
-      fi
+      mdns_publish_ok=1
     else
-      log_error_msg discover "Failed to publish bootstrap service" "phase=bootstrap"
-      exit 1
+      log_warn_msg discover "Failed to publish bootstrap mDNS service; proceeding with k3s install anyway" "phase=bootstrap" "host=${MDNS_HOST_RAW}"
+      log_warn_msg discover "Other nodes may not be able to discover this node via mDNS" "phase=bootstrap"
+      log_warn_msg discover "You can manually provide the node-token to joining nodes" "phase=bootstrap"
+    fi
+    
+    if [ "${SERVERS_DESIRED}" = "1" ]; then
+      install_server_single
+    else
+      install_server_cluster_init
     fi
     exit 0
   elif [ -n "${server_host}" ]; then
@@ -4888,7 +4892,9 @@ while :; do
   fi
 
   if [ "${bootstrap_selected}" = "true" ]; then
+    local mdns_publish_ok=0
     if publish_bootstrap_service; then
+      mdns_publish_ok=1
       if [ "${SERVERS_DESIRED}" = "1" ]; then
         install_server_single
       else
@@ -4897,7 +4903,8 @@ while :; do
       break
     fi
 
-    log_warn_msg discover "mDNS self-check failed after bootstrap advertisement" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+    log_warn_msg discover "mDNS self-check failed after bootstrap advertisement; proceeding with k3s install" "host=${MDNS_HOST_RAW}" "role=bootstrap"
+    log_warn_msg discover "Other nodes may not be able to discover this node via mDNS" "phase=bootstrap"
     cleanup_avahi_publishers || true
     run_net_diag "bootstrap_selfcheck_failure" \
       --iface "${MDNS_IFACE}" \
@@ -4907,13 +4914,14 @@ while :; do
       --tag "role=bootstrap" \
       --tag "status=failure"
 
-    if run_leader_election; then
-      log_info discover event=bootstrap_selfcheck_election outcome=winner key="${ELECTION_KEY}" >&2
-      FOLLOWER_UNTIL_SERVER=0
-      FOLLOWER_UNTIL_SERVER_SET_AT=0
-      sleep "${ELECTION_HOLDOFF}"
-      if [ "${SERVERS_DESIRED}" = "1" ]; then
-        install_server_single
+    # Proceed with installation even if mDNS publish failed
+    if [ "${SERVERS_DESIRED}" = "1" ]; then
+      install_server_single
+    else
+      install_server_cluster_init
+    fi
+    break
+  fi
       else
         install_server_cluster_init
       fi
