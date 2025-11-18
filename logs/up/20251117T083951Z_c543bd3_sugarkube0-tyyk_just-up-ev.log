@@ -1,0 +1,8 @@
+# Sugarkube debug log (sanitized)
+# Source: just up ev
+# Generated: 2025-11-17T08:39:51Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
