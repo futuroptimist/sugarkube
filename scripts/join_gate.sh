@@ -135,6 +135,10 @@ ensure_avahi_liveness_signal() {
     log_join_gate action=avahi_dbus outcome=skip reason=gdbus_missing
   fi
 
+  # Build specific service type to check for k3s cluster services
+  # This is more reliable than --all which may return no results on fresh networks
+  local service_type="_k3s-${CLUSTER}-${ENVIRONMENT}._tcp"
+  
   local attempt
   local status
   local browse_output
@@ -142,23 +146,34 @@ ensure_avahi_liveness_signal() {
   for attempt in 1 2; do
     status=0
     browse_output=""
-    if ! browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)"; then
-      status=$?
-      browse_output=""
+    # Use specific service type with 5-second timeout (matches mdns_ready.sh behavior)
+    # The -r (--resolve) flag is needed to get actual service records, not just announcements
+    # timeout command ensures we don't hang if avahi-browse doesn't terminate
+    if command -v timeout >/dev/null 2>&1; then
+      if ! browse_output="$(timeout 5 avahi-browse -rt "${service_type}" --parsable 2>/dev/null)"; then
+        status=$?
+        browse_output=""
+      fi
+    else
+      # Fallback without timeout command (less reliable but still functional)
+      if ! browse_output="$(avahi-browse -rt "${service_type}" --parsable --timeout=5 2>/dev/null)"; then
+        status=$?
+        browse_output=""
+      fi
     fi
     lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
     if [ "${status}" -eq 0 ] && [ -n "${lines}" ] && [ "${lines}" -gt 0 ]; then
-      log_join_gate action=avahi_liveness outcome=ok attempt="${attempt}" lines="${lines}"
+      log_join_gate action=avahi_liveness outcome=ok attempt="${attempt}" lines="${lines}" service_type="${service_type}"
       AVAHI_LIVENESS_CONFIRMED=1
       return 0
     fi
-    log_join_gate action=avahi_liveness outcome=retry attempt="${attempt}" status="${status}" lines="${lines:-0}"
+    log_join_gate action=avahi_liveness outcome=retry attempt="${attempt}" status="${status}" lines="${lines:-0}" service_type="${service_type}"
     if [ "${attempt}" -eq 1 ]; then
       sleep 1
     fi
   done
 
-  log_join_gate_error action=avahi_liveness outcome=error reason=no_results
+  log_join_gate_error action=avahi_liveness outcome=error reason=no_results service_type="${service_type}"
   return 1
 }
 

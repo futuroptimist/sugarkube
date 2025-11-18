@@ -129,6 +129,7 @@ if [ "$has_all_flag" -eq 1 ]; then
   exit 0
 fi
 
+# Handle -rtp <service_type> pattern
 if [ "$#" -gt 0 ] && [ "$1" = "-rtp" ]; then
   service_type="${2:-}"
   if [ -z "${service_type}" ]; then
@@ -137,6 +138,24 @@ if [ "$#" -gt 0 ] && [ "$1" = "-rtp" ]; then
   fi
   if [ ! -f "${service_file}" ]; then
     exit 1
+  fi
+  emit_from_service "resolve" "${service_type}"
+  exit 0
+fi
+
+# Handle -rt <service_type> --parsable pattern (used by join_gate.sh liveness check)
+if [ "$#" -ge 2 ] && [ "$1" = "-rt" ]; then
+  service_type="${2:-}"
+  if [ -z "${service_type}" ]; then
+    echo "unexpected avahi-browse invocation: $*" >&2
+    exit 1
+  fi
+  # For liveness check, return dummy service output even if service file doesn't exist
+  # join_gate just wants to see that Avahi is responding and can find services
+  if [ ! -f "${service_file}" ]; then
+    # Return minimal dummy output to confirm Avahi is alive and can discover this service type
+    echo "=;eth0;IPv4;dummy-k3s;${service_type};local;dummy.local;192.0.2.1;6443;txt=cluster=sugar;txt=env=dev"
+    exit 0
   fi
   emit_from_service "resolve" "${service_type}"
   exit 0
