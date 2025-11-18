@@ -484,6 +484,10 @@ main() {
     stage="$1"
   fi
 
+  # When called from k3s-discover.sh with SAVE_DEBUG_LOGS=1, ensure we only
+  # emit to stdout and don't create any sidecar log files
+  local stdout_only="${NET_DEBUG_STDOUT_ONLY:-0}"
+
   salt="${LOG_SALT:-$(head -c 16 /dev/urandom | xxd -p)}"
 
   START_TIME="$(date +%s)"
