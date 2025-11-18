@@ -39,6 +39,4 @@ setup() {
   # Verify this policy is documented in comments
   grep -q "never rename" "${BATS_CWD}/README.md" || \
   grep -q "hostname" "${BATS_CWD}/docs/raspi_cluster_setup.md"
-  
-  [ "$?" -eq 0 ]
 }
