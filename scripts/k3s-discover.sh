@@ -57,7 +57,7 @@ maybe_capture_net_debug() {
 
   {
     printf '\n'
-    "${SCRIPT_DIR}/net_debug_sanitized.sh" "${stage}"
+    NET_DEBUG_STDOUT_ONLY=1 "${SCRIPT_DIR}/net_debug_sanitized.sh" "${stage}"
   } >>"${SUGARKUBE_DEBUG_LOG_FILE}" 2>&1 || true
 }
 
