@@ -39,7 +39,9 @@ EOS
   stub_command avahi-browse <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "--all" ]; then
+# Match the new behavior: avahi-browse -rt _k3s-${cluster}-${env}._tcp --parsable
+# or: timeout 5 avahi-browse -rt _k3s-${cluster}-${env}._tcp --parsable
+if [[ "$*" =~ _k3s-.*\._tcp ]]; then
   echo "=;eth0;IPv4;dummy;_dummy._tcp;local;dummy.local;192.0.2.1;1234;"
   exit 0
 fi

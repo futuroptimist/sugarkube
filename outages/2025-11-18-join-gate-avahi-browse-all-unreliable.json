@@ -1,0 +1,91 @@
+{
+  "id": "2025-11-18-join-gate-avahi-browse-all-unreliable",
+  "date": "2025-11-18",
+  "component": "scripts/join_gate.sh ensure_avahi_liveness_signal function",
+  "severity": "Critical",
+  "status": "Resolved",
+  "rootCause": "The ensure_avahi_liveness_signal() function in join_gate.sh used 'avahi-browse --all --terminate --timeout=2' to verify mDNS functionality. The --all flag browses ALL service types (not just k3s), and combined with --terminate, avahi-browse exits immediately after printing cached results. On fresh networks or when avahi-daemon hasn't cached services yet, this returns zero results even when k3s services are being actively advertised. The 2-second timeout was also too short for service discovery to complete. This caused join_gate to fail with 'avahi_liveness outcome=error reason=no_results' even though mDNS discovery was fully functional.",
+  "impact": "Complete blockage of k3s cluster joins despite successful mDNS service discovery. The joining node (sugarkube1) successfully discovered the bootstrap node (sugarkube0) via avahi-browse with specific service type, validated the API was responding, and passed all L4 probes. However, join_gate's liveness check incorrectly concluded that mDNS was not working, preventing cluster formation. This affected all cross-node joins on real Raspberry Pi hardware where the --all flag behavior is unreliable.",
+  "resolution": "Modified ensure_avahi_liveness_signal() to use a specific service type check instead of --all: 'avahi-browse -rt _k3s-${cluster}-${env}._tcp --parsable' with a 5-second timeout. This matches the proven approach used in mdns_ready.sh and k3s-discover.sh. The specific service type ensures avahi-browse actually looks for the k3s cluster service rather than waiting indefinitely for all possible services. The longer timeout allows sufficient time for network service discovery to complete. Updated test stubs to match the new service-type-based check.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-18T07:08:34Z",
+      "event": "sugarkube0 successfully bootstraps k3s cluster and publishes mDNS service _k3s-sugar-dev._tcp"
+    },
+    {
+      "timestamp": "2025-11-18T07:15:59Z",
+      "event": "sugarkube1 starts join attempt with SUGARKUBE_TOKEN_DEV set"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:04Z",
+      "event": "sugarkube1 successfully discovers sugarkube0 via mDNS (simple_discovery_success)"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:04Z",
+      "event": "sugarkube1 validates API is alive on sugarkube0:6443 (status=401, expected)"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:04Z",
+      "event": "sugarkube1 completes L4 probes on ports 6443, 2379, 2380 - all open"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:45Z",
+      "event": "join_gate.sh calls ensure_avahi_liveness_signal()"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:45Z",
+      "event": "avahi-browse --all --terminate --timeout=2 returns 0 lines (status=0)"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:46Z",
+      "event": "Second attempt also returns 0 lines"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:46Z",
+      "event": "join_gate fails with 'avahi_liveness outcome=error reason=no_results'"
+    },
+    {
+      "timestamp": "2025-11-18T07:18:46Z",
+      "event": "k3s join aborted, cluster formation blocked"
+    },
+    {
+      "timestamp": "2025-11-18T07:21:00Z",
+      "event": "Bug reported with network diagnostics showing avahi-browse CAN find services with specific service type"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251118T070834Z_8eb5391_sugarkube0_just-up-dev.log",
+      "logs/up/20251118T071559Z_e4868b7_sugarkube1_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "ts=2025-11-17T23:18:04-08:00 level=info event=discover event=simple_discovery_success server=sugarkube0.local",
+      "ts=2025-11-17T23:18:04-08:00 level=info event=apiready outcome=alive host=\"sugarkube0.local\" port=\"6443\" status=401",
+      "ts=2025-11-17T23:18:45-08:00 level=info event=join_gate action=avahi_liveness outcome=retry attempt=1 status=0 lines=0",
+      "ts=2025-11-17T23:18:46-08:00 level=info event=join_gate action=avahi_liveness outcome=retry attempt=2 status=0 lines=0",
+      "ts=2025-11-17T23:18:46-08:00 level=info event=join_gate action=avahi_liveness outcome=error reason=no_results"
+    ],
+    "mdns_debug_output": "=== Browse specific k3s service (5 second timeout, filtered) ===\n+   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local\n=   eth0 IPv4 k3s-sugar-dev@sugarkube0.local (server)       _k3s-sugar-dev._tcp  local\n   hostname = [sugarkube0.local]\n   txt = [\"ip6=<REDACTED>\" \"ip4=<REDACTED>\" \"host=sugarkube0.local\" \"leader=sugarkube0.local\" \"phase=server\" \"role=server\" \"env=dev\" \"cluster=sugar\" \"k3s=1\"]",
+    "network_diagnostics_confirmation": "Network diagnostics from logs/debug-mdns.sh confirmed that avahi-browse with specific service type (_k3s-sugar-dev._tcp) and 5-second timeout successfully finds services. The --all flag with --terminate does not work reliably."
+  },
+  "testing": {
+    "manual_verification": "The fix ensures avahi-browse targets the specific k3s cluster service type, matching the proven pattern from mdns_ready.sh. The 5-second timeout allows sufficient time for service discovery. Test stub updated to match new service-type-based behavior.",
+    "regression_risk": "Very low. The change makes the liveness check more specific and reliable. It uses the same pattern that already works in mdns_ready.sh and k3s-discover.sh. The longer timeout and specific service type eliminate false negatives. Existing tests updated and passing."
+  },
+  "prevention": [
+    "Replaced 'avahi-browse --all --terminate --timeout=2' with 'avahi-browse -rt _k3s-${cluster}-${env}._tcp --parsable' plus 5-second timeout",
+    "Added timeout command wrapper for robustness (with fallback when timeout unavailable)",
+    "Added service_type to log output for better debugging",
+    "Updated test stub in tests/bats/join_gate.bats to match new service-type-based check",
+    "Pattern now matches proven approach from mdns_ready.sh and k3s-discover.sh"
+  ],
+  "references": [
+    "scripts/join_gate.sh ensure_avahi_liveness_signal function (lines 117-176)",
+    "scripts/mdns_ready.sh CLI fallback (uses specific service type, proven working)",
+    "scripts/k3s-discover.sh ensure_avahi_liveness_signal (also uses mdns_ready.sh)",
+    "tests/bats/join_gate.bats (updated test stub)",
+    "logs/debug-mdns.sh network diagnostics",
+    "outages/2025-11-17-join-gate-exit-status-capture-bug.json",
+    "outages/2025-11-16-join-gate-dbus-status-2-not-handled.json"
+  ]
+}
