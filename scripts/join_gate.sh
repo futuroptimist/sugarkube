@@ -156,7 +156,7 @@ ensure_avahi_liveness_signal() {
       fi
     else
       # Fallback without timeout command (less reliable but still functional)
-      if ! browse_output="$(avahi-browse -t "${service_type}" --parsable --timeout=5 2>/dev/null)"; then
+      if ! browse_output="$(avahi-browse -rt "${service_type}" --parsable --timeout=5 2>/dev/null)"; then
         status=$?
         browse_output=""
       fi
