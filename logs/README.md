@@ -17,7 +17,7 @@ By default the script keeps only `_k3s-sugar-dev._tcp` records plus hostnames in
 sanitized output in one command:
 
 ```bash
-MDNS_ALLOWED_HOSTS="sugarkube0.local my-printer.local" ./logs/debug-mdns.sh | tee \
+MDNS_ALLOWED_HOSTS="sugarkube0.local sugarkube1.local sugarkube2.local" ./logs/debug-mdns.sh | tee \
   logs/debug-mdns_$(date -u +"%Y-%m-%dT%H:%M:%SZ").log.sanitized
 ```
 
