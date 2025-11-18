@@ -18,7 +18,7 @@ sanitized output in one command:
 
 ```bash
 MDNS_ALLOWED_HOSTS="sugarkube0.local sugarkube1.local sugarkube2.local" ./logs/debug-mdns.sh | tee \
-  logs/debug-mdns_$(date -u +"%Y-%m-%dT%H:%M:%SZ").log.sanitized
+  logs/up/debug-mdns_$(date -u +"%Y-%m-%dT%H:%M:%SZ").log.sanitized
 ```
 
 The resolved IP addresses are redacted in the output regardless of the allowlist.

@@ -34,3 +34,6 @@ artifacts/
 
 # kcov build directory (cloned during CI)
 kcov/
+
+# Debug logs generated manually or during development
+logs/debug-mdns_*.log.sanitized
