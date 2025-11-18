@@ -100,27 +100,27 @@ def test_outage_records_conform_to_schema() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     outages_dir = repo_root / "outages"
     schema_file = outages_dir / "schema.json"
-    
+
     assert schema_file.is_file(), "outages/schema.json must exist"
-    
+
     schema = json.loads(schema_file.read_text(encoding="utf-8"))
     required_fields = schema.get("required", [])
-    
+
     assert required_fields, "Schema must define required fields"
-    
+
     for outage_file in sorted(outages_dir.glob("*.json")):
         if outage_file.name == "schema.json":
             continue
-        
+
         content = json.loads(outage_file.read_text(encoding="utf-8"))
-        
+
         # Check all required fields are present
         missing_fields = [field for field in required_fields if field not in content]
         assert not missing_fields, (
             f"{outage_file.name} is missing required schema fields: {missing_fields}. "
             f"Required fields are: {required_fields}"
         )
-        
+
         # Validate field types match schema
         properties = schema.get("properties", {})
         for field_name, field_value in content.items():

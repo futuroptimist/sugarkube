@@ -26,7 +26,7 @@ def test_mdns_diag_help_flag(mdns_diag_script):
         text=True,
         timeout=5,
     )
-    
+
     assert result.returncode == 0, f"Expected exit code 0, got {result.returncode}"
     assert "Usage:" in result.stdout, "Help output should contain 'Usage:'"
     assert "--hostname" in result.stdout, "Help should mention --hostname option"
@@ -41,7 +41,7 @@ def test_mdns_diag_invalid_option(mdns_diag_script):
         text=True,
         timeout=5,
     )
-    
+
     assert result.returncode == 2, f"Expected exit code 2 for invalid option, got {result.returncode}"
     assert "ERROR:" in result.stderr, "Error message should be printed to stderr"
 
@@ -55,7 +55,7 @@ def test_mdns_diag_hostname_option(mdns_diag_script):
             text=True,
             timeout=10,
         )
-        
+
         # Script should run but may fail if services aren't available
         # We're just checking it accepts the option
         assert "Hostname: testhost.local" in result.stdout or "Hostname: testhost.local" in result.stderr
@@ -72,7 +72,7 @@ def test_mdns_diag_service_type_option(mdns_diag_script):
             text=True,
             timeout=10,
         )
-        
+
         # Script should run but may fail if services aren't available
         # We're just checking it accepts the option
         assert "Service:  _test._tcp" in result.stdout or "Service:  _test._tcp" in result.stderr
@@ -89,13 +89,13 @@ def test_mdns_diag_output_format(mdns_diag_script):
             text=True,
             timeout=10,
         )
-        
+
         # Check for expected output structure (regardless of success/failure)
         output = result.stdout + result.stderr
         assert "=== mDNS Diagnostic ===" in output, "Should have diagnostic header"
         assert "Hostname:" in output, "Should display hostname"
         assert "Service:" in output, "Should display service type"
-        
+
         # Should have at least one check
         checks = ["Checking D-Bus", "Checking Avahi daemon", "Browsing for", "Resolving"]
         assert any(check in output for check in checks), "Should perform at least one check"
@@ -110,7 +110,7 @@ def test_mdns_diag_environment_variables(mdns_diag_script):
         "SUGARKUBE_CLUSTER": "testcluster",
         "SUGARKUBE_ENV": "testenv",
     }
-    
+
     try:
         result = subprocess.run(
             [str(mdns_diag_script)],
@@ -119,7 +119,7 @@ def test_mdns_diag_environment_variables(mdns_diag_script):
             timeout=10,
             env={**os.environ, **env},
         )
-        
+
         output = result.stdout + result.stderr
         assert "envhost.local" in output, "Should use MDNS_DIAG_HOSTNAME from environment"
         assert "_k3s-testcluster-testenv._tcp" in output, "Should use cluster and env from environment"
@@ -137,7 +137,7 @@ def test_mdns_diag_exit_codes(mdns_diag_script):
         timeout=5,
     )
     assert result.returncode == 0, "Help should exit with code 0"
-    
+
     # With invalid option, should exit 2
     result = subprocess.run(
         [str(mdns_diag_script), "--invalid"],
@@ -146,7 +146,7 @@ def test_mdns_diag_exit_codes(mdns_diag_script):
         timeout=5,
     )
     assert result.returncode == 2, "Invalid option should exit with code 2"
-    
+
     # Normal run may exit 0 or 1 depending on system state
     try:
         result = subprocess.run(

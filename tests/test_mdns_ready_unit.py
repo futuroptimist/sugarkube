@@ -232,7 +232,7 @@ def test_mdns_ready_dbus_and_cli_both_fail(mock_env):
     # Verify both status codes are logged
     assert "dbus_status=" in output, f"Expected dbus_status in output\n{output}"
     assert "cli_status=" in output, f"Expected cli_status in output\n{output}"
-    
+
     # Verify structured logging
     assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
 
@@ -332,7 +332,7 @@ def test_mdns_ready_dbus_success(mock_env):
     assert (
         "dbus_fallback=true" not in output
     ), f"Should not have dbus_fallback=true when D-Bus succeeds\n{output}"
-    
+
     # Verify structured logging
     assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
     assert "elapsed_ms=" in output, f"Expected elapsed_ms in output\n{output}"
@@ -410,7 +410,7 @@ exit 0
     # Verify structured logging
     assert "event=mdns_ready" in output, f"Expected event=mdns_ready in output\n{output}"
     assert "elapsed_ms=" in output, f"Expected elapsed_ms in output\n{output}"
-    
+
     # Verify busctl was called multiple times (NameHasOwner checks + GetVersionString)
     final_count = int(state_file.read_text())
     assert final_count >= 3, (

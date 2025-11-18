@@ -164,11 +164,11 @@ def test_parse_accepts_uppercase_cluster_and_env_values():
 
 def test_parse_txt_fields_without_prefix():
     """Test parsing TXT records in avahi-browse --parsable format (no txt= prefix).
-    
+
     This is the actual format used by avahi-browse --parsable --resolve where
     TXT records appear as separate semicolon-delimited fields after field 9,
     each quoted but without a txt= prefix.
-    
+
     Regression test for: mDNS discovery returning 0 servers despite finding records
     because TXT fields were not being parsed (they were skipped due to missing txt= prefix).
     """
@@ -207,7 +207,7 @@ def test_parse_txt_fields_without_prefix():
 
 def test_parse_txt_fields_with_and_without_prefix():
     """Test that both txt= prefix format and raw format work together.
-    
+
     This ensures backward compatibility with any existing test fixtures or
     historical logs that might use the txt= prefix format.
     """
@@ -227,12 +227,12 @@ def test_parse_txt_fields_with_and_without_prefix():
     ]
     recs = parse_mdns_records(lines, "sugar", "dev")
     assert len(recs) == 2
-    
+
     # Check bootstrap record (old format)
     bootstrap = [r for r in recs if r.txt.get("role") == "bootstrap"][0]
     assert bootstrap.txt.get("phase") == "bootstrap"
     assert bootstrap.txt.get("cluster") == "sugar"
-    
+
     # Check server record (new format)
     server = [r for r in recs if r.txt.get("role") == "server"][0]
     assert server.txt.get("phase") == "server"
@@ -241,17 +241,17 @@ def test_parse_txt_fields_with_and_without_prefix():
 
 def test_parse_space_separated_quoted_txt_fields():
     """Test parsing space-separated quoted TXT fields within a single field.
-    
+
     This is the actual format from avahi-browse --parsable --resolve on real hardware
     where all TXT records appear as space-separated quoted strings in field 9.
-    
+
     Critical regression test for: The bug where parse_avahi_resolved_line() was stripping
     quotes from ALL fields including TXT fields, corrupting the space-separated format
     and causing role=server to be lost during parsing.
-    
+
     Example from real hardware:
     =;...;6443;"ip6=..." "ip4=..." "role=server"
-    
+
     After split(";"), field 9 is: '"ip6=..." "ip4=..." "role=server"'
     This must be preserved with quotes intact so _split_quoted_fields() can parse it.
     """
@@ -268,7 +268,7 @@ def test_parse_space_separated_quoted_txt_fields():
     recs = parse_mdns_records(lines, "sugar", "dev")
     assert len(recs) == 1
     record = recs[0]
-    
+
     # Verify all TXT fields were correctly parsed from space-separated format
     assert record.txt.get("role") == "server"
     assert record.txt.get("phase") == "server"
@@ -279,7 +279,7 @@ def test_parse_space_separated_quoted_txt_fields():
     assert record.txt.get("leader") == "sugarkube0.local"
     assert record.txt.get("ip4") == "192.168.86.41"
     assert record.txt.get("ip6") == "fdd1:f818:d4e2:f916:5078:dc19:33de:141a"
-    
+
     # Verify metadata fields were also parsed correctly
     assert record.host == "sugarkube0.local"
     assert record.address == "192.168.86.41"

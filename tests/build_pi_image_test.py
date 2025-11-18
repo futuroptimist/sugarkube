@@ -1037,7 +1037,7 @@ def test_user_data_installs_k3s():
 def test_preinstalls_required_packages():
     """Test that build_pi_image.sh pre-installs critical packages for D-Bus and mDNS"""
     script_text = Path("scripts/build_pi_image.sh").read_text()
-    
+
     # These packages must be in the ensure_packages call
     required_packages = [
         "avahi-daemon",
@@ -1049,7 +1049,7 @@ def test_preinstalls_required_packages():
         "tcpdump",
         "nftables",
     ]
-    
+
     # Find the ensure_packages line that installs these
     # Looking for the line around line 338-341
     packages_section = None
@@ -1060,9 +1060,9 @@ def test_preinstalls_required_packages():
             lines = script_text.split('\n')[start:start+10]
             packages_section = '\n'.join(lines)
             break
-    
+
     assert packages_section is not None, "Could not find ensure_packages call for sys-tweaks"
-    
+
     # Verify each required package is listed
     for package in required_packages:
         assert package in packages_section, \
@@ -1075,7 +1075,7 @@ def test_libglib2_provides_gdbus():
     # gdbus is used by join_gate.sh and wait_for_avahi_dbus.sh
     script_text = Path("scripts/build_pi_image.sh").read_text()
     assert "libglib2.0-bin" in script_text, "libglib2.0-bin must be in package list"
-    
+
     # Verify join_gate.sh checks for gdbus
     join_gate_text = Path("scripts/join_gate.sh").read_text()
     assert "gdbus" in join_gate_text, "join_gate.sh should check for gdbus availability"
@@ -1084,11 +1084,11 @@ def test_libglib2_provides_gdbus():
 def test_python3_and_tcpdump_preinstalled():
     """Test that python3 and tcpdump are pre-installed, not installed at runtime"""
     script_text = Path("scripts/build_pi_image.sh").read_text()
-    
+
     # Both should be in the packages list
     assert "python3" in script_text, "python3 should be pre-installed in image"
     assert "tcpdump" in script_text, "tcpdump should be pre-installed in image"
-    
+
     # Verify they're in the ensure_packages call, not just mentioned
     packages_section = None
     for line in script_text.split('\n'):
@@ -1096,7 +1096,7 @@ def test_python3_and_tcpdump_preinstalled():
             idx = script_text.find(line)
             packages_section = script_text[idx:idx+500]
             break
-    
+
     assert packages_section is not None
     assert "python3" in packages_section
     assert "tcpdump" in packages_section

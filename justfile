@@ -135,8 +135,6 @@ up env='dev':
 
     summary_run "Dependencies" sudo -E scripts/install_deps.sh
 
-    summary_run "Ensure unique hostname" sudo -E bash "{{ scripts_dir }}/ensure_unique_hostname.sh"
-
     summary_run "Memory cgroup" "{{ scripts_dir }}/check_memory_cgroup.sh"
 
     # Preflight network/mDNS configuration
