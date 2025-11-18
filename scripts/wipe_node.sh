@@ -88,9 +88,8 @@ remove_file() {
 remove_file "${AVAHI_PRIMARY}"
 remove_file "${AVAHI_GLOB}"
 
-# Remove Avahi static hosts file to prevent hostname collision on next boot
-# The configure_avahi.sh script adds entries here which can cause false collisions
-# in ensure_unique_hostname if not cleaned up during wipe
+# Remove Avahi static hosts file to clean up any stale hostname mappings
+# The configure_avahi.sh script adds entries here which should be cleaned during wipe
 remove_file "${AVAHI_HOSTS_FILE}"
 
 # Remove k3s token files explicitly

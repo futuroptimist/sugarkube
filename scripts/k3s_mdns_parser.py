@@ -102,13 +102,13 @@ def _is_candidate_line(line: str) -> bool:
 
 def _split_quoted_fields(field: str) -> List[str]:
     """Split a field containing multiple quoted strings into individual fields.
-    
+
     Handles space-separated quoted strings like: '"ip6=..." "ip4=..." "role=server"'
-    
+
     Note: This function does not handle escaped quotes within strings (e.g., "value=\"escaped\"").
     If avahi-browse returns escaped quotes, they will be treated as regular characters.
     This is acceptable because avahi-browse TXT record values typically don't contain quotes.
-    
+
     Example:
         '"ip6=..." "ip4=..." "role=server"' -> ['"ip6=..."', '"ip4=..."', '"role=server"']
     """
@@ -116,7 +116,7 @@ def _split_quoted_fields(field: str) -> List[str]:
     current = []
     in_quotes = False
     quote_char = None
-    
+
     for char in field:
         if char in ('"', "'") and not in_quotes:
             in_quotes = True
@@ -137,11 +137,11 @@ def _split_quoted_fields(field: str) -> List[str]:
         else:
             # Non-whitespace outside quotes - start collecting
             current.append(char)
-    
+
     # Save any remaining content
     if current:
         result.append(''.join(current).strip())
-    
+
     return result
 
 
@@ -151,14 +151,14 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
         field = field.strip()
         if not field:
             continue
-        
+
         # Detect if field contains multiple quoted strings separated by whitespace
         # Look for patterns like: "..." "..." or '...' '...'
         # A field with multiple quoted substrings will have at least 4 quotes (2 complete pairs)
         # and spaces between quoted sections
         subfields = []
         quote_count = field.count('"') + field.count("'")
-        
+
         # Check if this looks like space-separated quoted fields
         # We need: multiple quote pairs AND spaces between quotes
         has_space_between_quotes = False
@@ -168,20 +168,20 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
             # Match quoted strings separated by whitespace
             pattern = r'(["\'])[^\1]*?\1\s+(["\'])[^\2]*?\2'
             has_space_between_quotes = bool(re.search(pattern, field))
-        
+
         if has_space_between_quotes:
             # Multiple quoted strings in this field - split them
             subfields = _split_quoted_fields(field)
         else:
             # Single field (may or may not be quoted)
             subfields = [field]
-        
+
         for subfield in subfields:
             subfield = subfield.strip()
             if not subfield:
                 continue
             subfield = _strip_quotes(subfield)
-            
+
             # Handle two formats:
             # 1. avahi-browse --parsable format: fields are TXT records directly (e.g., "role=server")
             # 2. Legacy format with txt= prefix: txt="role=server,phase=active"
@@ -193,12 +193,12 @@ def _parse_txt_fields(fields: Sequence[str]) -> Dict[str, str]:
                 payload = _strip_quotes(payload.strip())
                 if not payload:
                     continue
-            
+
             # Parse payload - could be single key=value or comma-separated list
             entries = [payload]
             if "," in payload and "=" in payload:
                 entries = [item.strip() for item in payload.split(",") if item.strip()]
-            
+
             for entry in entries:
                 entry = _strip_quotes(entry.strip())
                 if not entry:

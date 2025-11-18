@@ -10,7 +10,7 @@ Key Behaviors (as of 2025-11-15 fixes):
 1. **Network Discovery by Default**: By default, avahi-browse waits for actual
    mDNS multicast responses on the network. This is essential for initial cluster
    formation when nodes have never seen each other before.
-   
+
    - Set SUGARKUBE_MDNS_NO_TERMINATE=0 to use --terminate flag (cache-only, fast)
    - Default is SUGARKUBE_MDNS_NO_TERMINATE=1 (network discovery, reliable)
 
@@ -84,7 +84,7 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
         "avahi-browse",
         "--parsable",
     ]
-    
+
     # --terminate causes avahi-browse to dump only cached entries and exit immediately.
     # This is fast but won't discover services that haven't been cached yet.
     # For initial cluster formation, we want to wait for network responses,
@@ -92,7 +92,7 @@ def _build_command(mode: str, service_type: str, *, resolve: bool = True) -> Lis
     use_terminate = os.environ.get(_NO_TERMINATE_ENV, "1").strip() == "0"
     if use_terminate:
         command.append("--terminate")
-    
+
     if resolve:
         command.append("--resolve")
     # Note: --ignore-local prevents discovering services published by THIS host's Avahi daemon.
@@ -237,11 +237,11 @@ def _invoke_avahi(
     resolve: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     command = _build_command(mode, service_type, resolve=resolve)
-    
+
     if debug is not None:
         debug(f"_invoke_avahi: command={' '.join(command)}")
         debug(f"_invoke_avahi: timeout={timeout}s")
-    
+
     run_kwargs = {
         "capture_output": True,
         "text": True,
@@ -305,7 +305,7 @@ def _invoke_avahi(
                 stdout=stdout,
                 stderr=stderr,
             )
-            
+
             # Log captured output from timeout for debugging
             if debug is not None:
                 if stderr:
@@ -316,7 +316,7 @@ def _invoke_avahi(
                     # Log first few lines of output for debugging
                     for i, line in enumerate(stdout.splitlines()[:10]):
                         debug(f"avahi-browse stdout[{i}]: {line}")
-            
+
             if attempt == 1:
                 if debug is not None:
                     debug(f"Retrying after timeout (attempt {attempt})...")
@@ -535,7 +535,7 @@ def query_mdns(
         runner = subprocess.run  # type: ignore[assignment]
 
     timeout = _resolve_timeout(os.environ.get(_TIMEOUT_ENV))
-    
+
     if debug is not None:
         service_types = _service_types(cluster, environment)
         debug(f"query_mdns: mode={mode}, cluster={cluster}, env={environment}")
@@ -556,10 +556,10 @@ def query_mdns(
             timeout,
         )
         records = parse_mdns_records(lines, cluster, environment)
-        
+
         if debug is not None:
             debug(f"query_mdns: initial browse returned {len(lines)} lines, {len(records)} records")
-        
+
         if not records:
             if debug is not None:
                 debug("query_mdns: no records found, trying without --resolve")
@@ -591,7 +591,7 @@ def query_mdns(
             debug(f"Wrote browse dump to {_DUMP_PATH}")
         except (OSError, TypeError) as e:
             debug(f"Unable to write browse dump to /tmp: {e}")
-    
+
     result = _render_mode(mode, records)
     if debug is not None:
         debug(f"query_mdns: returning {len(result)} results for mode={mode}")
