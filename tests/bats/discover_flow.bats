@@ -150,8 +150,12 @@ if [ "$#" -ge 2 ] && [ "$1" = "-rt" ]; then
     echo "unexpected avahi-browse invocation: $*" >&2
     exit 1
   fi
+  # For liveness check, return dummy service output even if service file doesn't exist
+  # join_gate just wants to see that Avahi is responding and can find services
   if [ ! -f "${service_file}" ]; then
-    exit 1
+    # Return minimal dummy output to confirm Avahi is alive and can discover this service type
+    echo "=;eth0;IPv4;dummy-k3s;${service_type};local;dummy.local;192.0.2.1;6443;txt=cluster=sugar;txt=env=dev"
+    exit 0
   fi
   emit_from_service "resolve" "${service_type}"
   exit 0
