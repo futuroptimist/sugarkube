@@ -129,7 +129,22 @@ if [ "$has_all_flag" -eq 1 ]; then
   exit 0
 fi
 
+# Handle -rtp <service_type> pattern
 if [ "$#" -gt 0 ] && [ "$1" = "-rtp" ]; then
+  service_type="${2:-}"
+  if [ -z "${service_type}" ]; then
+    echo "unexpected avahi-browse invocation: $*" >&2
+    exit 1
+  fi
+  if [ ! -f "${service_file}" ]; then
+    exit 1
+  fi
+  emit_from_service "resolve" "${service_type}"
+  exit 0
+fi
+
+# Handle -rt <service_type> --parsable pattern (used by join_gate.sh liveness check)
+if [ "$#" -ge 2 ] && [ "$1" = "-rt" ]; then
   service_type="${2:-}"
   if [ -z "${service_type}" ]; then
     echo "unexpected avahi-browse invocation: $*" >&2
