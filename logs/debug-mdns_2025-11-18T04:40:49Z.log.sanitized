@@ -1,0 +1,119 @@
+
+=== System Info ===
+sugarkube0
+Tue 18 Nov 04:40:49 UTC 2025
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether <REDACTED_MAC> brd <REDACTED_MAC>
+    inet <REDACTED_IPV4>/24 brd <REDACTED_IPV4> scope global dynamic noprefixroute eth0
+       valid_lft 86373sec preferred_lft 86373sec
+    inet6 <REDACTED_IPV6>/64 scope global dynamic noprefixroute 
+       valid_lft 1790sec preferred_lft 1790sec
+    inet6 <REDACTED_IPV6>dc61:6509:6b41:b6cc/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+
+=== Avahi Daemon Status ===
+● avahi-daemon.service - Avahi mDNS/DNS-SD Stack
+     Loaded: loaded (/lib/systemd/system/avahi-daemon.service; enabled; preset: enabled)
+     Active: active (running) since Mon 2025-11-17 20:40:20 PST; 29s ago
+TriggeredBy: ● avahi-daemon.socket
+   Main PID: 547 (avahi-daemon)
+     Status: "avahi-daemon 0.8 starting up."
+      Tasks: 2 (limit: 4915)
+     Memory: 1.6M
+        CPU: 13ms
+     CGroup: /system.slice/avahi-daemon.service
+             ├─547 "avahi-daemon: running [sugarkube0.local]"
+             └─559 "avahi-daemon: chroot helper"
+
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Server startup complete. Host name is sugarkube0.local. Local service cookie is 7699069.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Static host name "sugarkube0-tyyk.local" successfully established.
+Nov 17 20:40:20 sugarkube0 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: Registering new address record for fe80::dc61:6509:6b41:b6cc on eth0.*.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.41.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: New relevant interface eth0.IPv4 for mDNS.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: Registering new address record for 192.168.86.41 on eth0.IPv4.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: iface.c: avahi_server_add_address() failed: Local name collision
+Nov 17 20:40:24 sugarkube0 avahi-daemon[547]: Registering new address record for fdd1:f818:d4e2:f916:5078:dc19:33de:141a on eth0.*.
+Nov 17 20:40:24 sugarkube0 avahi-daemon[547]: Withdrawing address record for fe80::dc61:6509:6b41:b6cc on eth0.
+
+=== Check if mDNS port is listening ===
+udp        0      0 0.0.0.0:5353            0.0.0.0:*                           547/avahi-daemon: r 
+
+=== Test local mDNS resolution (redacted) ===
+sugarkube0.local    <REDACTED_IP>
+sugarkube1.local    <REDACTED_IP>
+sugarkube2.local    <REDACTED_IP>
+
+=== Browse all mDNS services (5 second timeout, filtered) ===
+   hostname = [sugarkube0.local]
+   hostname = [sugarkube2.local]
+   hostname = [sugarkube1.local]
+   hostname = [sugarkube2.local]
+
+=== Browse specific k3s service (5 second timeout, filtered) ===
+
+=== Check for multicast route ===
+No explicit multicast route line for 224.0.0.0 found
+
+=== Check firewall rules ===
+No explicit firewall rules for mDNS
+UFW not installed/active
+
+=== Check if we can ping sugarkube0.local (summary only) ===
+Ping to sugarkube0.local: FAILED
+
+=== Check nsswitch.conf for mDNS ===
+hosts:          files mdns4_minimal [NOTFOUND=return] dns
+
+=== Test if we can reach sugarkube0.local's k3s API (summary only) ===
+k3s API via mDNS hostname: FAILED
+k3s API via sugarkube0.local (as IP): FAILED
+
+=== Check for multicast group membership (safe addresses only) ===
+2:	eth0
+	link  01:00:5e:00:00:01
+	link  33:33:00:00:00:01
+	link  33:33:ff:41:b6:cc
+	link  01:00:5e:00:00:fb
+	link  33:33:ff:de:14:1a
+	inet  224.0.0.251
+	inet  224.0.0.1
+	inet6 ff02::1:ffde:141a
+	inet6 ff02::1:ff41:b6cc
+	inet6 ff02::1
+	inet6 ff01::1
+
+=== Capture mDNS traffic (5 second sample, summarized) ===
+Observed at least one mDNS packet on udp/5353 during 5s window
+
+=== Check Avahi daemon logs (last 50 lines) ===
+Nov 17 20:40:20 sugarkube0 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Found user 'avahi' (UID 104) and group 'avahi' (GID 110).
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Successfully dropped root privileges.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: avahi-daemon 0.8 starting up.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Successfully called chroot().
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Successfully dropped remaining capabilities.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: No service file found in /etc/avahi/services.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Loading new static hostname sugarkube0-tyyk.local.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Network interface enumeration completed.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Server startup complete. Host name is sugarkube0.local. Local service cookie is 7699069.
+Nov 17 20:40:20 sugarkube0 avahi-daemon[547]: Static host name "sugarkube0-tyyk.local" successfully established.
+Nov 17 20:40:20 sugarkube0 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: Registering new address record for <REDACTED_IPV6>dc61:6509:6b41:b6cc on eth0.*.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: Joining mDNS multicast group on interface eth0.IPv4 with address <REDACTED_IPV4>.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: New relevant interface eth0.IPv4 for mDNS.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: Registering new address record for <REDACTED_IPV4> on eth0.IPv4.
+Nov 17 20:40:22 sugarkube0 avahi-daemon[547]: iface.c: avahi_server_add_address() failed: Local name collision
+Nov 17 20:40:24 sugarkube0 avahi-daemon[547]: Registering new address record for <REDACTED_IPV6> on eth0.*.
+Nov 17 20:40:24 sugarkube0 avahi-daemon[547]: Withdrawing address record for <REDACTED_IPV6>dc61:6509:6b41:b6cc on eth0.
+Nov 17 20:41:07 sugarkube0 avahi-daemon[547]: Registering new address record for <REDACTED_IPV4> on eth0.IPv4.
+Nov 17 20:41:07 sugarkube0 avahi-daemon[547]: iface.c: avahi_server_add_address() failed: Local name collision
+Nov 17 20:41:10 sugarkube0 avahi-daemon[547]: Registering new address record for <REDACTED_IPV4> on eth0.IPv4.
+Nov 17 20:41:10 sugarkube0 avahi-daemon[547]: iface.c: avahi_server_add_address() failed: Local name collision
+
+=== Allowed hostnames in this sanitized log ===
+ - sugarkube0.local
+ - sugarkube1.local
+ - sugarkube2.local
+
+=== DONE ===
