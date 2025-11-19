@@ -298,8 +298,9 @@ sync without modifying the host.
     `scripts/cloud-init/docker-compose.yml` to exercise the checks locally. The
     Bats suite (`tests/pi_node_verifier_output_test.bats`) now also spins up a
     temporary HTTP server so the verifier's health probes must report `pass`
-    before changes merge, and verifies that `--full` emits both text output and
-    a JSON payload for downstream automation.
+    before changes merge, verifies that `--full` emits both text output and a
+    JSON payload for downstream automation, and respects `PI_HOME_DIR` so
+    pi_home_repos fixtures never touch a real `/home/pi` on developer workstations.
 - systemd now ships a `k3s-ready.target` that depends on the compose service and waits for
   `kubectl get nodes` to report `Ready`. Inspect the target to confirm the cluster finished
   bootstrapping:

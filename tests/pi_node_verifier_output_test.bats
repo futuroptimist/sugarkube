@@ -151,15 +151,9 @@ EOF
 }
 
 @test "pi_node_verifier reports pi_home_repos pass when repositories exist" {
-  if [ -e /home/pi ]; then
-    # TODO: Harden the pi_home_repos fixture so it never mutates a real /home/pi directory.
-    # Root cause: The test seeds repositories under /home/pi, which already exists on some hosts.
-    # Estimated fix: 45m to pivot the helper toward a temporary prefix or allow an override.
-    skip "/home/pi already exists"
-  fi
-
   tmp="$(mktemp -d)"
   PATH="$tmp:$PATH"
+  PI_HOME_DIR="$tmp/pi-home"
 
   cat <<'EOF' > "$tmp/cloud-init"
 #!/usr/bin/env bash
@@ -191,19 +185,27 @@ exit 0
 EOF
   chmod +x "$tmp/iptables"
 
-  mkdir -p /home/pi/sugarkube/.git
-  mkdir -p /home/pi/token.place/.git
-  mkdir -p /home/pi/dspace/.git
+  mkdir -p "$PI_HOME_DIR/sugarkube/.git"
+  mkdir -p "$PI_HOME_DIR/token.place/.git"
+  mkdir -p "$PI_HOME_DIR/dspace/.git"
 
-  trap 'rm -rf /home/pi' RETURN
+  had_pi_home=false
+  if [[ -d /home/pi ]]; then
+    had_pi_home=true
+  fi
 
   TOKEN_PLACE_HEALTH_URL=skip \
     DSPACE_HEALTH_URL=skip \
     SKIP_COMPOSE=true \
+    PI_HOME_DIR="$PI_HOME_DIR" \
     run "$BATS_TEST_DIRNAME/../scripts/pi_node_verifier.sh" --no-log
 
   [ "$status" -eq 0 ]
   echo "$output" | grep "pi_home_repos: pass"
+
+  if ! $had_pi_home; then
+    [ ! -d /home/pi ]
+  fi
 }
 
 @test "pi_node_verifier --help shows usage" {
