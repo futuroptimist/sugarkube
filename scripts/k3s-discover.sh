@@ -338,6 +338,19 @@ if command -v summary::init >/dev/null 2>&1 && summary_enabled; then
   if [ -n "${API_REGADDR}" ]; then
     summary::kv "API regaddr" "${API_REGADDR}"
   fi
+  
+  # Display cluster join banner if token is set
+  if [ -n "${TOKEN:-}" ]; then
+    printf '\n'
+    printf '═══════════════════════════════════════════════════════════════\n'
+    printf '  JOINING EXISTING CLUSTER\n'
+    printf '═══════════════════════════════════════════════════════════════\n'
+    printf 'Token: present (%s characters)\n' "${#TOKEN}"
+    printf 'Mode: %s\n' "$([ "${SERVERS_DESIRED}" -gt 1 ] && echo "HA server join (${SERVERS_DESIRED} servers desired)" || echo "agent join")"
+    printf 'Cluster: %s\n' "${CLUSTER}"
+    printf 'Environment: %s\n' "${ENVIRONMENT}"
+    printf '\n'
+  fi
 fi
 
 run_net_diag() {
@@ -4862,6 +4875,24 @@ if [ "${SIMPLE_DISCOVERY}" = "1" ]; then
     # Found a server via simple discovery
     server_host="${MDNS_SELECTED_HOST}"
     log_info discover event=simple_discovery_success server="${server_host}" >&2
+    
+    # Display discovery success banner
+    if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
+      printf '\n'
+      printf '═══════════════════════════════════════════════════════════════\n'
+      printf '  ✅ CLUSTER SERVER DISCOVERED\n'
+      printf '═══════════════════════════════════════════════════════════════\n'
+      printf 'Server hostname: %s\n' "${server_host}"
+      if [ -n "${MDNS_SELECTED_IP:-}" ]; then
+        printf 'Server IP: %s\n' "${MDNS_SELECTED_IP}"
+      fi
+      printf 'Port: %s\n' "${MDNS_SELECTED_PORT:-6443}"
+      printf 'Cluster: %s\n' "${CLUSTER}"
+      printf 'Environment: %s\n' "${ENVIRONMENT}"
+      printf '\nProceeding with cluster join...\n'
+      printf '═══════════════════════════════════════════════════════════════\n'
+      printf '\n'
+    fi
   else
     # No server found, check if we should bootstrap
     if [ "${TOKEN_PRESENT}" -eq 0 ]; then
@@ -5061,4 +5092,97 @@ done
 if [ -f /etc/rancher/k3s/k3s.yaml ]; then
   run_privileged mkdir -p /root/.kube
   run_privileged cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+fi
+
+# Display cluster formation summary with next steps
+if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
+  # Cache server count to avoid multiple expensive mDNS queries
+  servers_count="$(count_servers)"
+  
+  printf '\n'
+  printf '═══════════════════════════════════════════════════════════════\n'
+  printf '  CLUSTER FORMATION COMPLETE\n'
+  printf '═══════════════════════════════════════════════════════════════\n'
+  printf '\n'
+  
+  # Try to get cluster status if kubectl is available
+  if command -v kubectl >/dev/null 2>&1; then
+    printf '🎉 Current cluster nodes:\n\n'
+    if kubectl get nodes -o wide 2>/dev/null; then
+      printf '\n'
+    else
+      printf '   (kubectl get nodes failed - k3s may still be starting)\n\n'
+    fi
+  fi
+  
+  printf 'Node hostname: %s\n' "${MDNS_HOST_RAW}"
+  printf 'Cluster: %s\n' "${CLUSTER}"
+  printf 'Environment: %s\n' "${ENVIRONMENT}"
+  printf 'Servers desired: %s\n' "${SERVERS_DESIRED}"
+  
+  if [ -n "${TOKEN:-}" ]; then
+    printf 'Join mode: %s\n' "$([ "${SERVERS_DESIRED}" -gt 1 ] && [ "${servers_count}" -lt "${SERVERS_DESIRED}" ] && echo "HA server" || echo "agent/complete")"
+  else
+    printf 'Bootstrap mode: %s\n' "$([ "${SERVERS_DESIRED}" -eq 1 ] && echo "single server" || echo "HA cluster initialized")"
+  fi
+  printf '\n'
+  
+  printf '📋 Next steps:\n\n'
+  
+  # Show different instructions based on whether this is bootstrap or join
+  if [ -z "${TOKEN:-}" ] && [ "${SERVERS_DESIRED}" -gt 1 ] && [ "${servers_count}" -lt "${SERVERS_DESIRED}" ]; then
+    # Bootstrap node in HA mode - need to add more servers
+    printf '1. This is the first server in an HA cluster (%s/%s servers ready)\n' "${servers_count}" "${SERVERS_DESIRED}"
+    printf '\n'
+    printf '2. Copy the join token from this node:\n'
+    printf '   sudo cat /var/lib/rancher/k3s/server/node-token\n'
+    printf '\n'
+    printf '3. On additional nodes, set the token and run:\n'
+    printf '   export SUGARKUBE_SERVERS=%s\n' "${SERVERS_DESIRED}"
+    printf '   export SUGARKUBE_TOKEN_%s="<token>"\n' "$(printf '%s' "${ENVIRONMENT}" | tr '[:lower:]' '[:upper:]')"
+    printf '   just up %s\n' "${ENVIRONMENT}"
+    printf '\n'
+    printf '4. Verify cluster status:\n'
+    printf '   just status\n'
+    printf '   # or: sudo kubectl get nodes\n'
+  elif [ -n "${TOKEN:-}" ]; then
+    # This was a join operation
+    printf '1. This node joined an existing cluster\n'
+    printf '\n'
+    printf '2. Check cluster status from any node:\n'
+    printf '   just status\n'
+    printf '   # or: sudo kubectl get nodes\n'
+    printf '\n'
+    if [ "${servers_count}" -lt "${SERVERS_DESIRED}" ]; then
+      printf '3. Add more servers to complete HA setup (%s/%s ready):\n' "${servers_count}" "${SERVERS_DESIRED}"
+      printf '   • On new nodes, use the same token\n'
+      printf '   • Run: just up %s\n' "${ENVIRONMENT}"
+    else
+      printf '3. Your HA cluster is complete! (%s/%s servers ready)\n' "${servers_count}" "${SERVERS_DESIRED}"
+    fi
+  else
+    # Single server or complete bootstrap
+    printf '1. Check cluster status:\n'
+    printf '   just status\n'
+    printf '   # or: sudo kubectl get nodes\n'
+    printf '\n'
+    printf '2. Export kubeconfig for local access:\n'
+    printf '   just kubeconfig env=%s\n' "${ENVIRONMENT}"
+    printf '\n'
+    printf '3. To add agent nodes, copy the token:\n'
+    printf '   sudo cat /var/lib/rancher/k3s/server/node-token\n'
+    printf '\n'
+    printf '   Then on agent nodes:\n'
+    printf '   export SUGARKUBE_TOKEN_%s="<token>"\n' "$(printf '%s' "${ENVIRONMENT}" | tr '[:lower:]' '[:upper:]')"
+    printf '   just up %s\n' "${ENVIRONMENT}"
+  fi
+  printf '\n'
+  
+  printf '📚 Documentation:\n'
+  printf '   • Cluster setup: docs/raspi_cluster_setup.md\n'
+  printf '   • Operations: docs/runbook.md\n'
+  printf '   • GitOps setup: scripts/flux-bootstrap.sh\n'
+  printf '\n'
+  printf '═══════════════════════════════════════════════════════════════\n'
+  printf '\n'
 fi
