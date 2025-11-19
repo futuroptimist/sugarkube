@@ -74,8 +74,8 @@
     ],
     "workaround": "Before fix, users could manually edit /etc/systemd/system/k3s.service.env to replace hostname with IP address, or configure systemd-resolved to properly handle mDNS. Neither workaround was documented or user-friendly.",
     "references": [
-        "scripts/k3s-discover.sh install_server_join() lines 4103-4320",
-        "scripts/k3s-discover.sh install_agent() lines 4328-4425",
+        "scripts/k3s-discover.sh install_server_join() lines 4103-4329",
+        "scripts/k3s-discover.sh install_agent() lines 4331-4436",
         "docs/raspi_cluster_setup.md cluster formation documentation",
         "logs/up/20251118T085352Z_5abacd8_sugarkube1_just-up-dev.log",
         "logs/debug-mdns_2025-11-19T00:30:02Z.log.sanitized (user-provided diagnostics)"
