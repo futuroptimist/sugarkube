@@ -5097,7 +5097,6 @@ fi
 # Display cluster formation summary with next steps
 if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
   # Cache server count to avoid multiple expensive mDNS queries
-  local servers_count
   servers_count="$(count_servers)"
   
   printf '\n'
