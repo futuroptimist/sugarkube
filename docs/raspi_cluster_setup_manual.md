@@ -15,6 +15,18 @@ so you can run [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace). It assumes basic familiarity with the
 Linux command line.
 
+## How the quick start trims this checklist
+
+| Workflow | Manual checklist effort | `raspi_cluster_setup.md` equivalent | Savings |
+| --- | --- | --- | --- |
+| Forming an HA control plane | §5 outlines seven numbered steps per Pi (plus `curl` invocations and manual token handling) | Two runs of `just up dev` per Pi, or a single `just 3ha env=dev` wrapper plus `just cat-node-token` | ~6 fewer commands per node and no manual edits to `/etc/rancher/k3s/config.yaml.d` |
+| Capturing bring-up logs | Export/unset `SAVE_DEBUG_LOGS` around every invocation and remember the sanitized log path | `just save-logs env=<env>` bakes in the export and prints the sanitized path automatically | Replaces three commands with one repeatable recipe |
+| Token distribution | SSH into the first node and `sudo cat /var/lib/rancher/k3s/server/node-token` manually | `just cat-node-token` prints the same file and errors out cleanly if run on an agent | Removes guesswork about sudo access or file paths |
+
+The manual doc remains the authoritative reference for hardware prep, SD-to-SSD cloning, and
+cloud-init tweaks. Use the quick start whenever you only need the high-level flow that the new
+Just recipes now encapsulate.
+
 ## Bill of Materials
 - 3 × Raspberry Pi 5 (8 GB recommended)
 - 3 × official Raspberry Pi M.2 HAT with NVMe SSDs

@@ -21,7 +21,7 @@ SCAN_SCRIPT_PATH = "scripts/scan-secrets.py"
 PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"aws(.{0,20})?(?:secret|access)_key", re.IGNORECASE),
     re.compile(r"api[_-]?key", re.IGNORECASE),
-    re.compile(r"token\s*[:=]", re.IGNORECASE),
+    re.compile(r"token\s*[:=]\s*[\w\"']", re.IGNORECASE),
     re.compile(r"password", re.IGNORECASE),
 )
 

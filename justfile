@@ -171,6 +171,23 @@ status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
 
+save-logs env='dev':
+    SAVE_DEBUG_LOGS=1 just up env={{ env }}
+
+3ha env='dev':
+    SUGARKUBE_SERVERS=3 just up env={{ env }}
+
+cat-node-token:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    token_path="/var/lib/rancher/k3s/server/node-token"
+    if [ ! -e "${token_path}" ]; then
+        printf 'No node token found at %s. Is this Pi a control-plane server?\n' "${token_path}" >&2
+        exit 1
+    fi
+    sudo cat "${token_path}"
+
 mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 

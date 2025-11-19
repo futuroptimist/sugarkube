@@ -6,7 +6,7 @@ personas:
 
 # Raspberry Pi Cluster Setup (Quick Start)
 
-`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
+`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node. When the control plane is healthy, jump to [raspi_cluster_operations.md](./raspi_cluster_operations.md) for day-two workflows such as health checks, Helm installs, and log capture.
 
 ## How Discovery Works
 
@@ -139,39 +139,23 @@ just up dev
 
 When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
 
-### Capture sanitized debug logs from each run (optional)
+### Shortcut recipes for HA clusters and logs
 
-Long bootstrap logs can be committed for later analysis. Enable temporary log capture in the shell session before invoking `just up`:
+Typing the same exports on every Pi adds up quickly. These helper recipes compress the routine shell gymnastics into memorable one-liners:
 
-```bash
-export SAVE_DEBUG_LOGS=1
-just up dev
+- `just 3ha env=dev` runs the full `just up` flow with `SUGARKUBE_SERVERS=3` already set so each run forms or joins the embedded-etcd quorum without extra exports.
+- `just save-logs env=dev` keeps the happy-path experience but flips `SAVE_DEBUG_LOGS=1` for you so sanitized transcripts automatically land in `logs/up/`.
+- `just cat-node-token` wraps the `sudo cat /var/lib/rancher/k3s/server/node-token` command used later in the guide; it fails fast on agents that do not host the server-side token.
 
-# When you need to stop saving logs in this shell
-unset SAVE_DEBUG_LOGS
-```
+Prefer the long-form environment variables? They still work, but the shortcuts line up with the defaults described in this quick start.
 
-With `SAVE_DEBUG_LOGS=1`, Sugarkube streams console output through a sanitizer that removes secrets and public IP addresses before writing to `logs/up/`. Each run creates a timestamped file combining the UTC timestamp, commit hash, hostname, and environment (for example, `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`). Logs are emitted live to the terminal, and a summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
-
-#### Customize mDNS debug log hostnames
-
-When using `logs/debug-mdns.sh` to diagnose network issues, you can configure which hostnames appear in the sanitized output:
-
-```bash
-export MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2"
-just up dev
-
-# Or run the debug script directly
-MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 myprinter" ./logs/debug-mdns.sh
-```
-
-The default allowlist is `sugarkube0 sugarkube1 sugarkube2`. Hostnames should be specified **without** the `.local` suffix—the script automatically handles mDNS resolution. This prevents accidental exposure of other devices on your network in committed logs.
+Need to persist debug logs or filter mDNS hostnames? Follow the operational appendix in [raspi_cluster_operations.md](./raspi_cluster_operations.md#1-check-cluster-health-and-capture-logs) for the exact steps, including `MDNS_ALLOWED_HOSTS` customization and log retention tips.
 
 ### Switch environments as needed
 
 `just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.
 
-Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
+Need deeper operational playbooks? Continue with [raspi_cluster_operations.md](./raspi_cluster_operations.md) for health checks, Helm installs, and log capture tips, then graduate to [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
 
 ---
 
