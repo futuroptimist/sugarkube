@@ -171,6 +171,15 @@ status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
 
+3ha env='dev':
+    SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
+
+save-logs env='dev':
+    SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
+
+cat-node-token:
+    sudo cat /var/lib/rancher/k3s/server/node-token
+
 mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 

@@ -10,6 +10,24 @@ personas:
 > [raspi_cluster_setup.md](raspi_cluster_setup.md) for the one-command `just up <env>` flow
 > and hop back here when you need the full manual checklist.
 
+## What the quick start automates
+
+`raspi_cluster_setup.md` collapses the longer manual procedure into two `just up <env>`
+runs per node. The new helper recipes introduced alongside this cleanup further
+reduce typing:
+
+| Manual checklist task | Steps in this document | Quick-start equivalent | Savings |
+|-----------------------|------------------------|------------------------|---------|
+| §5.1–§5.4: install k3s, capture the token, rehearse joins, and run `make cluster-up` | 7 distinct commands plus environment exports | Two invocations of `just up dev` (or `just 3ha env=dev`) plus `just cat-node-token` | ~70% fewer commands and zero manual curl scripts |
+| Passing tokens between shells | Copy `/var/lib/rancher/k3s/server/node-token`, export `SUGARKUBE_TOKEN_<ENV>` | `just cat-node-token` prints the value via `sudo`; export once before rerunning `just up` | Removes two manual steps per node |
+| Capturing debug logs | Run `SAVE_DEBUG_LOGS=1 just up dev`, find the sanitized file manually | `just save-logs env=dev` wraps the export and prints the output path automatically | Eliminates three environment edits |
+| Enabling HA | `export SUGARKUBE_SERVERS=3` before each command | `just 3ha env=dev` sets the env var and executes `just up` in one go | Removes repeated exports across both runs |
+
+Use this manual as the full reference when you need to reason about every moving
+part (pi-image builds, SSD migration, or bespoke rehearsals). Otherwise, stick to
+the quick start plus the new day-two guide so operators only type the minimum
+necessary commands.
+
 This expanded guide walks through building a three-node Raspberry Pi 5 cluster and installing k3s
 so you can run [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace). It assumes basic familiarity with the

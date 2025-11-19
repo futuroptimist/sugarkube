@@ -8,6 +8,10 @@ personas:
 
 `sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
 
+> **Next step:** When the control plane is stable, continue with
+> [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
+> Helm, and other day-two workflows.
+
 ## How Discovery Works
 
 Nodes discover each other **automatically** via mDNS (multicast DNS) service browsing:
@@ -83,6 +87,9 @@ export SUGARKUBE_SERVERS=3
 just up dev              # 2nd run bootstraps or joins k3s
 ```
 
+> Prefer a one-liner? `just 3ha env=dev` wraps `SUGARKUBE_SERVERS=3 just up dev`
+> so you can rerun the HA flow without re-exporting variables.
+
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
 - **HA by default.** Exporting `SUGARKUBE_SERVERS=3` before each run tells `just up` to form an embedded-etcd quorum. Keep it at an odd number (3, 5, …) for resilient control planes.
 
@@ -93,6 +100,9 @@ After the second `just up dev` finishes, capture the join token that future node
 ```bash
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
+
+`just cat-node-token` wraps the same command via `sudo` so you can copy the token
+without retyping the file path.
 
 Copy the long `K10…` string to a safe place—you will export it on every joining node.
 
@@ -139,33 +149,9 @@ just up dev
 
 When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
 
-### Capture sanitized debug logs from each run (optional)
-
-Long bootstrap logs can be committed for later analysis. Enable temporary log capture in the shell session before invoking `just up`:
-
-```bash
-export SAVE_DEBUG_LOGS=1
-just up dev
-
-# When you need to stop saving logs in this shell
-unset SAVE_DEBUG_LOGS
-```
-
-With `SAVE_DEBUG_LOGS=1`, Sugarkube streams console output through a sanitizer that removes secrets and public IP addresses before writing to `logs/up/`. Each run creates a timestamped file combining the UTC timestamp, commit hash, hostname, and environment (for example, `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`). Logs are emitted live to the terminal, and a summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
-
-#### Customize mDNS debug log hostnames
-
-When using `logs/debug-mdns.sh` to diagnose network issues, you can configure which hostnames appear in the sanitized output:
-
-```bash
-export MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2"
-just up dev
-
-# Or run the debug script directly
-MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 myprinter" ./logs/debug-mdns.sh
-```
-
-The default allowlist is `sugarkube0 sugarkube1 sugarkube2`. Hostnames should be specified **without** the `.local` suffix—the script automatically handles mDNS resolution. This prevents accidental exposure of other devices on your network in committed logs.
+> Need sanitized log capture or mDNS hostname filtering? See
+> [raspi_cluster_operations.md](./raspi_cluster_operations.md#capturing-sanitized-bootstrap-logs)
+> for the dedicated flow and the new `just save-logs env=<env>` wrapper.
 
 ### Switch environments as needed
 
@@ -304,26 +290,11 @@ The pattern is:
 
 ### After bootstrap
 
-- Check node readiness from any cluster member:
-  ```bash
-  just status
-  ```
-
-- Export an environment-scoped kubeconfig locally:
-  ```bash
-  just kubeconfig env=dev
-  ```
-  The file lands in `~/.kube/config` with the context renamed to `sugar-dev` and the `.local` hostname preserved for TLS.
-
-- To manage the cluster from your workstation, copy that kubeconfig and adjust credentials as outlined in [Manage from a workstation](./network_setup.md#manage-from-a-workstation).
-
-- Need a clean slate? Use: [`just wipe`](#recover-from-a-failed-bootstrapjoin) for the full
-  recovery flow.
-  ```bash
-  just wipe
-  ```
-
-Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
+Operational commands—`just status`, `just kubeconfig env=<env>`, log capture, and
+the `just wipe` recovery loop—now live in
+[raspi_cluster_operations.md](./raspi_cluster_operations.md). Follow that guide
+for Helm installs, Flux bootstraps, and workstation access. For deeper SRE
+playbooks continue with [docs/runbook.md](./runbook.md).
 
 ---
 
