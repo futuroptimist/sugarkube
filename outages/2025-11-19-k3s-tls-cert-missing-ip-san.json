@@ -75,10 +75,10 @@
   ],
   "workaround": "Before fix, users could manually add IP address to k3s certificate by editing /etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml before first k3s install, or by setting K3S_URL to use hostname instead of IP (but that would hit the systemd mDNS resolution issue). Neither workaround was documented.",
   "references": [
-    "scripts/k3s-discover.sh detect_node_primary_ipv4() lines 3733-3760",
+    "scripts/k3s-discover.sh detect_node_primary_ipv4() lines 3733-3758",
     "scripts/k3s-discover.sh install_server_single() lines 3999-4079",
-    "scripts/k3s-discover.sh install_server_cluster_init() lines 4081-4161",
-    "scripts/k3s-discover.sh install_server_join() lines 4163-4414",
+    "scripts/k3s-discover.sh install_server_cluster_init() lines 4081-4162",
+    "scripts/k3s-discover.sh install_server_join() lines 4164-4407",
     "outages/2025-11-19-k3s-join-mdns-hostname-resolution.json",
     "docs/raspi_cluster_setup.md cluster formation documentation",
     "logs/up/20251119T033902Z_939e97f_sugarkube1_just-up-dev.log"
