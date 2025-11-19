@@ -57,6 +57,12 @@ Review the safety notes before working with power components.
 
 Start with the basics and progress toward a fully autonomous solar cube.
 
+## Raspberry Pi cluster series
+
+1. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — full manual path to understand what the quick start automates.
+2. [raspi_cluster_setup.md](raspi_cluster_setup.md) — happy-path 3-server dev cluster in two runs per node.
+3. [raspi_cluster_operations.md](raspi_cluster_operations.md) — day-two operations, Helm workflows, workloads, and Flux.
+
 ## LLM Prompts
 - [prompts/codex/automation.md](prompts/codex/automation.md) — baseline Codex instructions for maintaining the repo
 - [prompts/codex/cad.md](prompts/codex/cad.md) — keep OpenSCAD models rendering cleanly

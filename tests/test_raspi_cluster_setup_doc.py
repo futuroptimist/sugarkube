@@ -6,11 +6,17 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC = REPO_ROOT / "docs" / "raspi_cluster_setup.md"
+OPERATIONS_DOC = REPO_ROOT / "docs" / "raspi_cluster_operations.md"
 
 
 @pytest.fixture(scope="module")
 def doc_text() -> str:
     return DOC.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def operations_doc_text() -> str:
+    return OPERATIONS_DOC.read_text(encoding="utf-8")
 
 
 def test_happy_path_section_exists(doc_text: str) -> None:
@@ -50,7 +56,13 @@ def test_recovery_mdns_command_present(doc_text: str) -> None:
     assert "avahi-browse --all --resolve --terminate" in doc_text
 
 
-def test_save_debug_logs_documented(doc_text: str) -> None:
-    assert "SAVE_DEBUG_LOGS" in doc_text
-    assert "unset SAVE_DEBUG_LOGS" in doc_text
-    assert "logs/up/" in doc_text
+def test_save_debug_logs_documented(doc_text: str, operations_doc_text: str) -> None:
+    phrases = [
+        "SAVE_DEBUG_LOGS",
+        "unset SAVE_DEBUG_LOGS",
+        "logs/up/",
+    ]
+
+    assert any(
+        all(phrase in text for phrase in phrases) for text in (doc_text, operations_doc_text)
+    ), "SAVE_DEBUG_LOGS guidance should live in either the setup or operations guide."
