@@ -37,6 +37,7 @@ Review the safety notes before working with power components.
 - [archived/pi_image_improvement_checklist.md](archived/pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
+- [raspi_cluster_operations.md](raspi_cluster_operations.md) — verify the cluster, capture logs, and install Helm workloads
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and

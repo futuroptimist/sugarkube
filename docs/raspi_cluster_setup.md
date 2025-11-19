@@ -6,7 +6,7 @@ personas:
 
 # Raspberry Pi Cluster Setup (Quick Start)
 
-`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
+`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node. After the control plane comes online, continue with [raspi_cluster_operations.md](./raspi_cluster_operations.md) to keep the cluster healthy, capture logs, and deploy real workloads such as **token.place** and **democratized.space** (dspace).
 
 ## How Discovery Works
 
@@ -49,6 +49,8 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 ## Happy Path: 3-server `dev` cluster in two runs
 
+> **Quick macros:** `just 3ha env=dev` wraps `export SUGARKUBE_SERVERS=3 && just up dev`. `just save-logs env=dev` enables sanitized log capture while it runs. Pair these shortcuts with the [operations guide](./raspi_cluster_operations.md) once the nodes settle in.
+
 ### Bootstrap vs Join: Token Behavior
 
 **Explicit user intent controls whether a node bootstraps or joins:**
@@ -81,6 +83,9 @@ just up dev              # 1st run patches memory cgroups and reboots
 # after the Pi comes back and you SSH in again
 export SUGARKUBE_SERVERS=3
 just up dev              # 2nd run bootstraps or joins k3s
+
+# Equivalent convenience commands
+just 3ha env=dev         # run twice: once before and once after the reboot
 ```
 
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
@@ -92,6 +97,8 @@ After the second `just up dev` finishes, capture the join token that future node
 
 ```bash
 sudo cat /var/lib/rancher/k3s/server/node-token
+# or use the helper
+just cat-node-token
 ```
 
 Copy the long `K10…` string to a safe place—you will export it on every joining node.
@@ -139,39 +146,11 @@ just up dev
 
 When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
 
-### Capture sanitized debug logs from each run (optional)
-
-Long bootstrap logs can be committed for later analysis. Enable temporary log capture in the shell session before invoking `just up`:
-
-```bash
-export SAVE_DEBUG_LOGS=1
-just up dev
-
-# When you need to stop saving logs in this shell
-unset SAVE_DEBUG_LOGS
-```
-
-With `SAVE_DEBUG_LOGS=1`, Sugarkube streams console output through a sanitizer that removes secrets and public IP addresses before writing to `logs/up/`. Each run creates a timestamped file combining the UTC timestamp, commit hash, hostname, and environment (for example, `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`). Logs are emitted live to the terminal, and a summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
-
-#### Customize mDNS debug log hostnames
-
-When using `logs/debug-mdns.sh` to diagnose network issues, you can configure which hostnames appear in the sanitized output:
-
-```bash
-export MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2"
-just up dev
-
-# Or run the debug script directly
-MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 myprinter" ./logs/debug-mdns.sh
-```
-
-The default allowlist is `sugarkube0 sugarkube1 sugarkube2`. Hostnames should be specified **without** the `.local` suffix—the script automatically handles mDNS resolution. This prevents accidental exposure of other devices on your network in committed logs.
-
 ### Switch environments as needed
 
 `just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.
 
-Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
+Need deeper operational playbooks (status checks, Helm installs for token.place/dspace, log capture, etc.)? Continue with [raspi_cluster_operations.md](./raspi_cluster_operations.md) or [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
 
 ---
 

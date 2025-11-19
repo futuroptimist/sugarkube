@@ -198,6 +198,37 @@ mdns-reset:
 kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+
+3ha env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    SUGARKUBE_SERVERS=3 \
+        just --justfile "{{ justfile() }}" \
+        --working-directory "{{ invocation_directory() }}" \
+        up env="{{ env }}"
+
+save-logs env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    SAVE_DEBUG_LOGS=1 \
+        just --justfile "{{ justfile() }}" \
+        --working-directory "{{ invocation_directory() }}" \
+        up env="{{ env }}"
+
+cat-node-token env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    token_path="/var/lib/rancher/k3s/server/node-token"
+    if [ -f "${token_path}" ]; then
+        printf '# Export this before running just up %s on joining nodes\n' "{{ env }}"
+        env_upper="$(printf '%s' "{{ env }}" | tr '[:lower:]' '[:upper:]')"
+        printf 'export SUGARKUBE_TOKEN_%s="' "${env_upper}"
+        sudo cat "${token_path}"
+        printf '"\n'
+    else
+        printf 'Node token not found at %s. Did this host finish the bootstrap pass yet?\n' "${token_path}" >&2
+        exit 1
+    fi
     sudo chown "$USER":"$USER" ~/.kube/config
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 

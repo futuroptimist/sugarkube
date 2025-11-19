@@ -15,6 +15,16 @@ so you can run [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace). It assumes basic familiarity with the
 Linux command line.
 
+## What the `just up` quick start automates
+
+| Task | Manual steps in this guide | `raspi_cluster_setup.md` shortcut | Savings |
+| --- | --- | --- | --- |
+| Patch memory cgroups and reboot | Edit `/boot/cmdline.txt`, run `sudo reboot`, then rerun the installer (§5.1–§5.5) | `just up dev` (or `just 3ha env=dev`) patches and reboots automatically | -3 manual commands and zero file edits |
+| Bootstrap & join HA control plane | `curl -sfL https://get.k3s.io | sh -`, rehearse joins, run `make cluster-up …`, share tokens (§5.1–§5.5) | `just up dev` twice per node, or the `just 3ha` wrapper, with the join token printed via `just cat-node-token` | Replaces 5+ discrete commands with two consistent runs |
+| Share the join token | `sudo cat /var/lib/rancher/k3s/server/node-token` each time a node finishes bootstrap (§5.2) | `just cat-node-token env=<env>` prints the same file plus the export snippet | Saves one sudo command per node and prevents paste mistakes |
+
+Use this manual when you need the granular touch points (for example, cloning SD cards to SSDs or provisioning custom images). When the goal is simply to recreate the known-good dev cluster, start with [`raspi_cluster_setup.md`](./raspi_cluster_setup.md) and fall back to these sections if something deviates.
+
 ## Bill of Materials
 - 3 × Raspberry Pi 5 (8 GB recommended)
 - 3 × official Raspberry Pi M.2 HAT with NVMe SSDs
