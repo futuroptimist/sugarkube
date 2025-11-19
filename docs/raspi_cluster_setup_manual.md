@@ -15,6 +15,18 @@ so you can run [token.place](https://github.com/futuroptimist/token.place) and
 [dspace](https://github.com/democratizedspace/dspace). It assumes basic familiarity with the
 Linux command line.
 
+## What the quick start automates
+
+| Area | Manual flow (this doc) | Quick start (`raspi_cluster_setup.md`) | Savings |
+|------|------------------------|----------------------------------------|---------|
+| Control-plane bootstrap | §5.1 runs `curl -sfL https://get.k3s.io \| sh -` once per server and expects you to reboot manually. | `just ha3 env=dev` runs twice per node, patches memory cgroups, installs dependencies, and reboots automatically. | Manual = 1 command + manual edits; quick start = 2 commands with zero file editing or `raspi-config` steps. |
+| Token capture | §5.2 requires `sudo cat /var/lib/rancher/k3s/server/node-token` and tracking `/boot/sugarkube-node-token`. | `just cat-node-token` prints the token with one command and guards against missing installs. | Removes 1 command and an error-prone path lookup on every node. |
+| Worker joins | §5.3–5.5 rely on `make rehearse-join`, `make cluster-up`, and the raw join command (`curl -sfL ... K3S_URL=...` plus the control-plane token). | `just ha3 env=dev` + `SUGARKUBE_TOKEN_DEV` wrap discovery, mDNS, and retries—no remote rehearsal is necessary. | Manual = 3 commands per worker; quick start = 1 command (run twice for cgroups/join). |
+| Status + kubeconfig | §5.6–5.7 use `sudo kubectl get nodes` and manually copying `/boot/sugarkube-kubeconfig-full`. | `just status` and `just kubeconfig env=<env>` copy the kubeconfig into `~/.kube/config` with the right context name. | Eliminates 2 manual commands and avoids editing kubeconfig by hand. |
+
+The manual workflow remains useful for understanding each subsystem and for bespoke recoveries, but
+the quick start recipes dramatically reduce the number of shell commands you must memorize.
+
 ## Bill of Materials
 - 3 × Raspberry Pi 5 (8 GB recommended)
 - 3 × official Raspberry Pi M.2 HAT with NVMe SSDs

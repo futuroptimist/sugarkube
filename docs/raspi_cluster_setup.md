@@ -6,7 +6,7 @@ personas:
 
 # Raspberry Pi Cluster Setup (Quick Start)
 
-`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
+`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node. When all three nodes report `Ready`, jump to [raspi_cluster_operations.md](./raspi_cluster_operations.md) for maintenance, Helm releases, and log capture tips.
 
 ## How Discovery Works
 
@@ -66,7 +66,9 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 > **Key principle:** The presence or absence of `SUGARKUBE_TOKEN_DEV` (or `SUGARKUBE_TOKEN_INT`, `SUGARKUBE_TOKEN_PROD`) is how you signal your intent. Without a token, `just up dev` creates a new cluster. With a token, it joins an existing one.
 
-Every Raspberry Pi follows the same rhythm:
+Every Raspberry Pi follows the same rhythm. Prefer `just ha3 env=dev`, which sets
+`SUGARKUBE_SERVERS=3` for you, but exporting manually still works if you want to override the HA
+count.
 
 > **Time sync prerequisite**
 > Sugarkube runs `scripts/check_time_sync.sh` before allowing a node to join. Make sure
@@ -75,12 +77,10 @@ Every Raspberry Pi follows the same rhythm:
 > `SUGARKUBE_STRICT_TIME=1` to make `just up` abort instead of warning when clocks drift.
 
 ```bash
-export SUGARKUBE_SERVERS=3
-just up dev              # 1st run patches memory cgroups and reboots
+just ha3 env=dev         # 1st run patches memory cgroups and reboots
 
 # after the Pi comes back and you SSH in again
-export SUGARKUBE_SERVERS=3
-just up dev              # 2nd run bootstraps or joins k3s
+just ha3 env=dev         # 2nd run bootstraps or joins k3s
 ```
 
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
@@ -88,19 +88,20 @@ just up dev              # 2nd run bootstraps or joins k3s
 
 ### First control-plane node (e.g., `sugarkube0`)
 
-After the second `just up dev` finishes, capture the join token that future nodes will need:
+After the second `just up dev` (or `just ha3 env=dev`) finishes, capture the join token that future
+nodes will need:
 
 ```bash
-sudo cat /var/lib/rancher/k3s/server/node-token
+just cat-node-token
 ```
 
 Copy the long `K10…` string to a safe place—you will export it on every joining node.
 
 > **Important: Bootstrap vs Join**
-> The first node does **not** need `SUGARKUBE_TOKEN_DEV` set. Running `just up dev` 
-> without the token environment variable tells Sugarkube to **bootstrap** a new cluster 
-> and mint the token above. Subsequent nodes **must** export `SUGARKUBE_TOKEN_DEV` 
-> before running `just up dev` to signal they should **join** the existing cluster, not 
+> The first node does **not** need `SUGARKUBE_TOKEN_DEV` set. Running `just up dev`
+> without the token environment variable tells Sugarkube to **bootstrap** a new cluster
+> and mint the token above. Subsequent nodes **must** export `SUGARKUBE_TOKEN_DEV`
+> before running `just up dev` to signal they should **join** the existing cluster, not
 > create a new one.
 
 > **TLS SAN for mDNS**
@@ -129,43 +130,22 @@ Nodes still discover each other via mDNS, but the registration address is used f
 
 ### Remaining control-plane peers or agents
 
-Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the saved token before the second run so it can join the cluster:
+Each additional Pi repeats the same two `just ha3 env=dev` runs. After the reboot, export the saved
+token before the second run so it can join the cluster:
 
 ```bash
-export SUGARKUBE_SERVERS=3
+just ha3 env=dev
+
+# after the reboot
 export SUGARKUBE_TOKEN_DEV="K10abc123..."  # token from the first server
-just up dev
+just ha3 env=dev
 ```
 
 When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
 
-### Capture sanitized debug logs from each run (optional)
-
-Long bootstrap logs can be committed for later analysis. Enable temporary log capture in the shell session before invoking `just up`:
-
-```bash
-export SAVE_DEBUG_LOGS=1
-just up dev
-
-# When you need to stop saving logs in this shell
-unset SAVE_DEBUG_LOGS
-```
-
-With `SAVE_DEBUG_LOGS=1`, Sugarkube streams console output through a sanitizer that removes secrets and public IP addresses before writing to `logs/up/`. Each run creates a timestamped file combining the UTC timestamp, commit hash, hostname, and environment (for example, `20250221T183000Z_ab12cd3_sugarkube0_just-up-dev.log`). Logs are emitted live to the terminal, and a summary line prints the sanitized file path even if you cancel with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
-
-#### Customize mDNS debug log hostnames
-
-When using `logs/debug-mdns.sh` to diagnose network issues, you can configure which hostnames appear in the sanitized output:
-
-```bash
-export MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 sugarkube2"
-just up dev
-
-# Or run the debug script directly
-MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 myprinter" ./logs/debug-mdns.sh
-```
-
-The default allowlist is `sugarkube0 sugarkube1 sugarkube2`. Hostnames should be specified **without** the `.local` suffix—the script automatically handles mDNS resolution. This prevents accidental exposure of other devices on your network in committed logs.
+Need sanitized logs or deeper diagnostics? Use `just save-logs env=dev` (documented in
+[`raspi_cluster_operations.md`](./raspi_cluster_operations.md)) so every bootstrap or join attempt
+writes a scrubbed log under `logs/up/`.
 
 ### Switch environments as needed
 
@@ -273,7 +253,7 @@ The pattern is:
    - All Pis must be on the same L2 subnet with multicast (UDP 5353) allowed.
    - Each Pi should be able to reach the internet.
 
-2. **Run `just up dev` twice on the first control-plane node**
+2. **Run `just ha3 env=dev` twice on the first control-plane node**
 
    The first run modifies memory cgroup settings if needed and reboots automatically. The second run installs `avahi-daemon`, `avahi-utils`, `libnss-mdns`, `libglib2.0-bin`, `tcpdump`, `curl`, and `jq`—with `libglib2.0-bin` enabling the `gdbus` D-Bus code path used for mDNS absence detection—bootstraps k3s as an HA server, publishes the API as `_https._tcp:6443` via Bonjour/mDNS with `cluster=sugar` and `env=dev` TXT records, and taints itself (`node-role.kubernetes.io/control-plane=true:NoSchedule`) so workloads prefer agents.
 
@@ -284,7 +264,7 @@ The pattern is:
 
 3. **Join worker or additional server nodes**
 
-   Give the remaining Pis distinct hostnames such as `sugarkube1` and `sugarkube2` so their `.local` records resolve over the same L2 subnet. Each node runs `just up dev` twice, exporting both `SUGARKUBE_SERVERS` and the appropriate token before the second invocation.
+   Give the remaining Pis distinct hostnames such as `sugarkube1` and `sugarkube2` so their `.local` records resolve over the same L2 subnet. Each node runs `just ha3 env=dev` twice (or exports `SUGARKUBE_SERVERS=3` and runs `just up dev`), exporting the appropriate token before the second invocation.
 
 4. **Switch environments easily**
 
@@ -462,20 +442,20 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
 - **Cluster discovery fails: "No joinable servers found via mDNS service browsing"**
 
   This means the joining node couldn't find any k3s servers advertising on the network.
-  
+
   **Check the basics:**
   - Confirm multicast (UDP 5353) is allowed on your network/firewall
   - Verify both nodes are on the same L2 subnet
   - Verify `avahi-daemon` is running on both nodes: `sudo systemctl status avahi-daemon`
   - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`
-  
+
   **Verify the bootstrap node is advertising:**
   Run this on the bootstrap node (sugarkube0):
   ```bash
   # Should show the k3s service with port 6443
   avahi-browse --all --resolve --terminate | grep -A5 'k3s-sugar-dev'
   ```
-  
+
   **Verify the joining node can see the advertisement:**
   Run this on the joining node (sugarkube1):
   ```bash
@@ -483,17 +463,17 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
   avahi-browse --all --resolve | grep -A5 'k3s-sugar-dev'
   # Press Ctrl+C after a few seconds
   ```
-  
+
   **If avahi-browse sees nothing:**
   This usually indicates a network issue (multicast blocked) or Avahi daemon not running.
-  
+
   **Enable detailed mDNS debugging:**
   ```bash
   export SUGARKUBE_DEBUG=1
   export SUGARKUBE_MDNS_WIRE_PROOF=1
   just up dev 2>&1 | tee debug.log
   ```
-  
+
   Check `debug.log` for lines starting with `[k3s-discover mdns]` to see what avahi-browse
   is finding (or not finding).
 
@@ -501,7 +481,7 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
 
   By default, avahi-browse waits for actual mDNS multicast responses (not just cached entries).
   This is necessary for initial cluster formation but can be slow on congested networks.
-  
+
   - Increase the timeout: `export SUGARKUBE_MDNS_QUERY_TIMEOUT=30`
   - Check network quality: high packet loss or multicast flooding can delay responses
   - Verify no mDNS reflector or proxy is interfering with multicast
@@ -514,7 +494,7 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
 
   Expect the API advert (`port 6443`) with TXT records `k3s=1`,
   `cluster=<name>`, `env=<env>`, `role=server`.
-  
+
   **Note:** Using `--terminate` flag is fast but only shows cached entries. If you just
   published a service, you might need to wait a few seconds or omit `--terminate` to see
   fresh results.
@@ -537,24 +517,24 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
   ```bash
   # Check k3s service status
   sudo systemctl status k3s
-  
+
   # View recent k3s logs
   sudo journalctl -u k3s -n 100 --no-pager
-  
+
   # Check for certificate errors
   sudo journalctl -u k3s | grep -i "certificate\|tls\|x509" | tail -20
-  
+
   # Check for connection errors
   sudo journalctl -u k3s | grep -i "connection\|refused\|timeout" | tail -20
-  
+
   # Verify k3s can reach the remote server
   curl -k https://sugarkube0.local:6443/livez
   # Should return HTTP 401 or 200 (both mean API is alive)
-  
+
   # Check if k3s is trying to connect to the right server
   grep K3S_URL /etc/systemd/system/k3s.service.env
   grep ExecStart /etc/systemd/system/k3s.service | grep -o 'server [^ ]*'
-  
+
   # Verify k3s token is set correctly
   grep K3S_TOKEN /etc/systemd/system/k3s.service.env | wc -c
   # Should show >50 characters if token is present
@@ -564,15 +544,15 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
   ```bash
   # Check if k3s server is running and responsive
   sudo kubectl get nodes
-  
+
   # Verify the API certificate includes IP addresses
   openssl s_client -connect localhost:6443 </dev/null 2>/dev/null | \
     openssl x509 -text | grep -A1 "Subject Alternative Name"
   # Should include both hostnames AND IP addresses
-  
+
   # Check k3s logs for connection attempts from joining nodes
   sudo journalctl -u k3s | grep -E "join|etcd|member" | tail -30
-  
+
   # Verify etcd cluster health (for HA clusters)
   sudo k3s etcd-snapshot save --name diagnostic
   sudo k3s etcd-snapshot ls
@@ -584,11 +564,11 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
   nc -zv sugarkube0.local 6443  # k3s API
   nc -zv sugarkube0.local 2379  # etcd client
   nc -zv sugarkube0.local 2380  # etcd peer
-  
+
   # Check if ports are actually listening on sugarkube0
   # Run on sugarkube0:
   sudo ss -tlnp | grep -E ":(6443|2379|2380)"
-  
+
   # Verify no firewall is blocking
   # Run on both nodes:
   sudo iptables -L -n | grep -E "6443|2379|2380"

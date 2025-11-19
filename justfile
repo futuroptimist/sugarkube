@@ -160,6 +160,20 @@ up env='dev':
     # Proceed with discovery/join for subsequent nodes
     summary_run "k3s discover/install" sudo -E bash scripts/k3s-discover.sh
 
+ha3 env='dev':
+    SUGARKUBE_SERVERS=3 just up env={{ env }}
+
+save-logs env='dev':
+    SAVE_DEBUG_LOGS=1 just up env={{ env }}
+
+cat-node-token:
+    if sudo test -f /var/lib/rancher/k3s/server/node-token; then
+        sudo cat /var/lib/rancher/k3s/server/node-token
+    else
+        printf 'k3s server token not found. Run "just up dev" (or ha3) first.\n' >&2
+        exit 1
+    fi
+
 deps:
     sudo -E scripts/install_deps.sh
 
