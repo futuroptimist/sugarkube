@@ -87,7 +87,7 @@ export SUGARKUBE_SERVERS=3
 just up dev              # 2nd run bootstraps or joins k3s
 ```
 
-> Prefer a one-liner? `just 3ha env=dev` wraps `SUGARKUBE_SERVERS=3 just up dev`
+> Prefer a one-liner? `just ha3 env=dev` wraps `SUGARKUBE_SERVERS=3 just up dev`
 > so you can rerun the HA flow without re-exporting variables.
 
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.

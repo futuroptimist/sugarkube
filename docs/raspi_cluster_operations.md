@@ -36,15 +36,15 @@ throughout the quick-start:
 
 | Recipe | What it does |
 |--------|--------------|
-| `just 3ha env=dev` | Sets `SUGARKUBE_SERVERS=3` and executes `just up dev`, enabling the HA control-plane flow without retyping the export. |
+| `just ha3 env=dev` | Sets `SUGARKUBE_SERVERS=3` and executes `just up dev`, enabling the HA control-plane flow without retyping the export. |
 | `just save-logs env=dev` | Runs `just up <env>` with `SAVE_DEBUG_LOGS=1`, capturing sanitized logs under `logs/up/`. |
 | `just cat-node-token` | Prints `/var/lib/rancher/k3s/server/node-token` via `sudo` so you can copy it into `SUGARKUBE_TOKEN_<ENV>` quickly. |
 
 You can mix-and-match these helpers. Example timeline for an HA node:
 
 ```bash
-just 3ha env=dev              # 1st run patches memory cgroups and reboots
-just 3ha env=dev              # 2nd run bootstraps or joins k3s automatically
+just ha3 env=dev              # 1st run patches memory cgroups and reboots
+just ha3 env=dev              # 2nd run bootstraps or joins k3s automatically
 just cat-node-token           # Copy token for future nodes or clusters
 ```
 
@@ -122,7 +122,7 @@ cluster is steady, wire the charts into Flux by committing manifests under
 - `just flux-bootstrap env=dev` to install Flux with the manifests in `flux/`.
 - `just token-place-samples` to replay the bundled health checks before exposing
   the workloads.
-- `just wipe` whenever a node joins the wrong cluster—then rerun `just 3ha env=dev`.
+- `just wipe` whenever a node joins the wrong cluster—then rerun `just ha3 env=dev`.
 
 For outages or retro write-ups, use the templates under `outages/` and cross-link
 your sanitized logs.
