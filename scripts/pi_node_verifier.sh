@@ -38,6 +38,7 @@ TOKEN_PLACE_HEALTH_INSECURE=${TOKEN_PLACE_HEALTH_INSECURE:-false}
 DSPACE_HEALTH_URL=${DSPACE_HEALTH_URL:-http://127.0.0.1:3000/}
 DSPACE_HEALTH_INSECURE=${DSPACE_HEALTH_INSECURE:-false}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-5}
+PI_HOME_DIR=${PI_HOME_DIR:-/home/pi}
 
 set_skip_compose() {
   local value
@@ -103,6 +104,9 @@ Options:
   --skip-compose[=BOOL]
                Skip the projects-compose.service health check. Defaults to false.
   --help       Show this message.
+
+Environment variables:
+  PI_HOME_DIR  Override the base directory for pi_home_repos checks. Defaults to /home/pi.
 EOF
       exit 0
       ;;
@@ -262,7 +266,7 @@ run_kubectl() {
 }
 
 check_pi_home_repos() {
-  local base="/home/pi"
+  local base="$PI_HOME_DIR"
   if [[ ! -d "$base" ]]; then
     warn "$base missing"
     print_result "pi_home_repos" "fail"
@@ -416,7 +420,7 @@ fi
 check_kube_proxy_dataplane() {
   local config_dir="/etc/rancher/k3s/config.yaml.d"
   local configured_mode
-  
+
   # Determine configured proxy mode using shared library
   configured_mode=$(kube_proxy::detect_mode "$config_dir")
 
