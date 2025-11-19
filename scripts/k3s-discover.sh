@@ -4261,9 +4261,18 @@ install_server_join() {
     log_info discover event=join outcome=fast_path host="${MDNS_HOST_RAW}" server="${server}" mode=fast >&2
     return 0
   fi
+  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
+  # Keep hostname in TLS SANs for certificate verification
+  local server_url_target="${server}"
+  if [ -n "${ip_hint}" ]; then
+    server_url_target="${ip_hint}"
+    log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
+  else
+    log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
+  fi
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
+  env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
   if [ -n "${ip_hint}" ]; then
     env_assignments+=("SERVER_IP=${ip_hint}")
   fi
@@ -4273,7 +4282,7 @@ install_server_join() {
       export "$_assignment"
     done
     run_k3s_install server \
-      --server "https://${server}:${selected_port}" \
+      --server "https://${server_url_target}:${selected_port}" \
       --tls-san "${server}" \
       --tls-san "${MDNS_HOST}" \
       --tls-san "${HN}" \
@@ -4394,9 +4403,17 @@ install_agent() {
     agent_log_args+=("discovered_server=${discovered_server}")
   fi
   log_info discover "${agent_log_args[@]}" >&2
+  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
+  local server_url_target="${server}"
+  if [ -n "${ip_hint}" ]; then
+    server_url_target="${ip_hint}"
+    log_info discover event=install_agent server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
+  else
+    log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
+  fi
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server}:${selected_port}")
+  env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
   if [ -n "${ip_hint}" ]; then
     env_assignments+=("SERVER_IP=${ip_hint}")
   fi

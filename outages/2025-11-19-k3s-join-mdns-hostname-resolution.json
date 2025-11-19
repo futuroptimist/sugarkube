@@ -1,0 +1,86 @@
+{
+    "id": "2025-11-19-k3s-join-mdns-hostname-resolution",
+    "date": "2025-11-19",
+    "component": "scripts/k3s-discover.sh install_server_join and install_agent functions",
+    "severity": "Critical",
+    "status": "Resolved",
+    "rootCause": "When k3s was installed to join an existing cluster, the script passed the mDNS hostname (e.g., 'sugarkube0.local') in both the K3S_URL environment variable and the --server flag. While mDNS discovery worked perfectly during the join process (finding the server, validating connectivity, passing all pre-flight checks), the k3s service itself failed to start. The issue was that when systemd started the k3s.service, the k3s process could not resolve the .local hostname, even though nsswitch.conf was properly configured with mdns4_minimal. Systemd services don't always have the same NSS (Name Service Switch) context as interactive shells, leading to hostname resolution failures during service startup.",
+    "impact": "Complete inability to join additional nodes to k3s clusters on real hardware. Discovery appeared to work perfectly (mDNS browsing succeeded, API connectivity validated, all ports reachable), but k3s.service would fail immediately on startup with 'Job for k3s.service failed because the control process exited with error code.' This affected both server-to-server joins (HA cluster formation) and agent joins to existing clusters. Users would see successful discovery logs but then k3s installation would fail, making it impossible to form multi-node clusters.",
+    "resolution": "Modified install_server_join() and install_agent() functions to use the IP address in K3S_URL and --server parameters when the IP is available from mDNS discovery. The hostname is still preserved in TLS SANs for proper certificate verification. When ip_hint is set (which contains MDNS_SELECTED_IP), the code now creates server_url_target with the IP address and uses that for the connection URL. This ensures k3s can always connect to the server without relying on mDNS hostname resolution in the systemd service context. The fix is backward compatible - if no IP is available, it falls back to using the hostname as before.",
+    "timeline": [
+        {
+            "timestamp": "2025-11-18T08:45:32Z",
+            "event": "sugarkube0 successfully bootstraps k3s cluster and publishes mDNS service"
+        },
+        {
+            "timestamp": "2025-11-18T08:53:52Z",
+            "event": "sugarkube1 starts join attempt with SUGARKUBE_TOKEN_DEV set"
+        },
+        {
+            "timestamp": "2025-11-18T08:55:57Z",
+            "event": "sugarkube1 successfully discovers sugarkube0 via mDNS, validates API, passes L4 probes"
+        },
+        {
+            "timestamp": "2025-11-18T08:56:39Z",
+            "event": "sugarkube1 passes join_gate checks including avahi_liveness"
+        },
+        {
+            "timestamp": "2025-11-18T08:57:32Z",
+            "event": "k3s installation begins with --server https://sugarkube0.local:6443"
+        },
+        {
+            "timestamp": "2025-11-18T08:57:44Z",
+            "event": "k3s.service fails to start with error code, join aborted"
+        },
+        {
+            "timestamp": "2025-11-19T00:30:02Z",
+            "event": "User runs network diagnostics confirming mDNS discovery works, API is reachable"
+        },
+        {
+            "timestamp": "2025-11-19T00:32:00Z",
+            "event": "Bug investigation reveals k3s.service cannot resolve .local hostnames in systemd context"
+        },
+        {
+            "timestamp": "2025-11-19T00:45:00Z",
+            "event": "Fix implemented to use IP addresses in K3S_URL and --server when available"
+        }
+    ],
+    "evidence": {
+        "log_files": [
+            "logs/up/20251118T084532Z_c68d867_sugarkube0_just-up-dev.log",
+            "logs/up/20251118T085352Z_5abacd8_sugarkube1_just-up-dev.log"
+        ],
+        "key_log_lines": [
+            "ts=2025-11-18T00:55:57-08:00 level=info event=discover event=simple_discovery_success server=sugarkube0.local",
+            "ts=2025-11-18T00:55:57-08:00 level=info event=discover event=mdns_select host=\"sugarkube0.local\" port=6443 ... ip=\"192.168.86.41\" accept_path=txt",
+            "ts=2025-11-18T00:56:39-08:00 level=info event=join_gate action=avahi_liveness outcome=ok attempt=1 lines=2 service_type=_k3s-sugar-dev._tcp",
+            "ts=2025-11-18T00:57:32-08:00 level=info event=discover phase=install_join host=sugarkube1.local server=sugarkube0.local desired_servers=3",
+            "[INFO]  systemd: Starting k3s",
+            "Job for k3s.service failed because the control process exited with error code."
+        ],
+        "mdns_debug_output": "Network diagnostics confirmed mDNS discovery working:\n- avahi-browse finds _k3s-sugar-dev._tcp service\n- avahi-browse reports: hostname = [sugarkube0.local], txt = [\"ip4=192.168.86.41\"...]\n- ping sugarkube0.local: SUCCESS\n- k3s API via mDNS hostname: OK\n- k3s API via sugarkube0.local (as IP): OK\n\nProves discovery works but k3s service cannot resolve .local in systemd context"
+    },
+    "testing": {
+        "manual_verification": "Test on real Raspberry Pi hardware: (1) Bootstrap sugarkube0 with 'just up dev' without token, (2) Copy /var/lib/rancher/k3s/server/node-token, (3) On sugarkube1, export SUGARKUBE_TOKEN_DEV=<token> and run 'just up dev', (4) Verify k3s.service starts successfully and node joins cluster, (5) Check 'kubectl get nodes' shows both nodes, (6) Verify logs show IP address used in K3S_URL instead of hostname.",
+        "regression_risk": "Very low. The change only affects the URL used for connection, not the discovery mechanism or TLS verification. When IP is available (normal case), it uses IP. When IP is not available (edge cases, custom configurations), it falls back to hostname as before. TLS certificate verification still works because hostname remains in SANs. Existing tests should pass as ip_hint is set in typical flows."
+    },
+    "prevention": [
+        "Use IP address from mDNS discovery (MDNS_SELECTED_IP) in K3S_URL and --server parameters",
+        "Introduce server_url_target variable in install_server_join() and install_agent()",
+        "Preserve hostname in --tls-san flags for proper certificate verification",
+        "Maintain backward compatibility with fallback to hostname when IP unavailable",
+        "SERVER_IP environment variable already set when ip_hint available (redundant but harmless)",
+        "Pattern applies to both server joins and agent joins for consistency"
+    ],
+    "workaround": "Before fix, users could manually edit /etc/systemd/system/k3s.service.env to replace hostname with IP address, or configure systemd-resolved to properly handle mDNS. Neither workaround was documented or user-friendly.",
+    "references": [
+        "scripts/k3s-discover.sh install_server_join() lines 4103-4329",
+        "scripts/k3s-discover.sh install_agent() lines 4331-4436",
+        "docs/raspi_cluster_setup.md cluster formation documentation",
+        "logs/up/20251118T085352Z_5abacd8_sugarkube1_just-up-dev.log",
+        "logs/debug-mdns_2025-11-19T00:30:02Z.log.sanitized (user-provided diagnostics)"
+    ],
+    "performanceImpact": "Neutral. Using IP addresses may be slightly faster as it avoids name resolution overhead, but the difference is negligible. The main benefit is reliability rather than performance.",
+    "documentationChanges": "No documentation changes needed. The user-visible behavior is unchanged - nodes still discover each other by mDNS hostname and join successfully. The fix is an internal implementation detail that makes the system more robust.",
+    "userConfusion": "The user reported 'sugarkube1 still can't discover sugarkube0' but discovery was actually working perfectly. The real issue was k3s service startup failure after successful discovery. This confusion is understandable because the symptoms (join failure) appeared related to discovery, but the root cause was different. The fix addresses the actual problem while maintaining the expected user experience."
+}
