@@ -529,6 +529,80 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
   `just wipe` now wraps `scripts/wipe_node.sh`, making the cleanup idempotent and safe
   to rerun.
 
+- **k3s service starts but API never becomes ready (times out after 120s)**
+
+  If discovery succeeds and k3s installs but the API never becomes ready, check the k3s service logs:
+
+  **On the node with the problem (e.g., sugarkube1):**
+  ```bash
+  # Check k3s service status
+  sudo systemctl status k3s
+  
+  # View recent k3s logs
+  sudo journalctl -u k3s -n 100 --no-pager
+  
+  # Check for certificate errors
+  sudo journalctl -u k3s | grep -i "certificate\|tls\|x509" | tail -20
+  
+  # Check for connection errors
+  sudo journalctl -u k3s | grep -i "connection\|refused\|timeout" | tail -20
+  
+  # Verify k3s can reach the remote server
+  curl -k https://sugarkube0.local:6443/livez
+  # Should return HTTP 401 or 200 (both mean API is alive)
+  
+  # Check if k3s is trying to connect to the right server
+  grep K3S_URL /etc/systemd/system/k3s.service.env
+  grep ExecStart /etc/systemd/system/k3s.service | grep -o 'server [^ ]*'
+  
+  # Verify k3s token is set correctly
+  grep K3S_TOKEN /etc/systemd/system/k3s.service.env | wc -c
+  # Should show >50 characters if token is present
+  ```
+
+  **On the bootstrap node (e.g., sugarkube0):**
+  ```bash
+  # Check if k3s server is running and responsive
+  sudo kubectl get nodes
+  
+  # Verify the API certificate includes IP addresses
+  openssl s_client -connect localhost:6443 </dev/null 2>/dev/null | \
+    openssl x509 -text | grep -A1 "Subject Alternative Name"
+  # Should include both hostnames AND IP addresses
+  
+  # Check k3s logs for connection attempts from joining nodes
+  sudo journalctl -u k3s | grep -E "join|etcd|member" | tail -30
+  
+  # Verify etcd cluster health (for HA clusters)
+  sudo k3s etcd-snapshot save --name diagnostic
+  sudo k3s etcd-snapshot ls
+  ```
+
+  **Network connectivity between nodes:**
+  ```bash
+  # From joining node (sugarkube1), test connectivity to bootstrap node
+  nc -zv sugarkube0.local 6443  # k3s API
+  nc -zv sugarkube0.local 2379  # etcd client
+  nc -zv sugarkube0.local 2380  # etcd peer
+  
+  # Check if ports are actually listening on sugarkube0
+  # Run on sugarkube0:
+  sudo ss -tlnp | grep -E ":(6443|2379|2380)"
+  
+  # Verify no firewall is blocking
+  # Run on both nodes:
+  sudo iptables -L -n | grep -E "6443|2379|2380"
+  sudo ip6tables -L -n | grep -E "6443|2379|2380"
+  ```
+
+  **Common causes:**
+  - **Missing IP in TLS certificate**: Bootstrap node's certificate doesn't include its IP address as a SAN
+  - **Wrong server URL**: k3s is trying to connect using hostname instead of IP address
+  - **Token mismatch**: Token in SUGARKUBE_TOKEN_DEV doesn't match the actual node-token
+  - **Firewall rules**: Ports 6443, 2379, 2380 blocked between nodes
+  - **Time synchronization**: Clock drift >500ms prevents etcd cluster formation
+  - **Network partition**: Nodes can ping each other but can't establish TCP connections
+
 ---
 
 Once all three default nodes for an environment report `Ready`, proceed to the deployment playbooks (`token.place`, `dspace`, etc.) as usual.

@@ -4369,7 +4369,7 @@ install_server_join() {
     )
     run_k3s_install "${install_args[@]}"
   )
-  if wait_for_api; then
+  if wait_for_api 1; then
     if ! publish_api_service; then
       log_error_msg discover "Failed to confirm Avahi server advertisement" "host=${MDNS_HOST_RAW}" "phase=install_join"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
