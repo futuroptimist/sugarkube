@@ -16,6 +16,13 @@ logs, preparing Helm, and rolling out real workloads like
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
 
+In this guide you will:
+
+- verify the health of your three-node HA control plane,
+- capture and sanitize bring-up logs safely for source control,
+- install Helm and deploy token.place plus democratized.space (dspace), and
+- hook the cluster into Flux for GitOps-managed releases.
+
 ## Quick status checks
 
 | Command | Purpose |

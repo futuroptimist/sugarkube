@@ -12,6 +12,12 @@ personas:
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, and other day-two workflows.
 
+## Helper commands cheat sheet
+
+- `just ha3 env=dev` — main path for a 3-server dev control plane (run twice per node)
+- `just save-logs env=dev` — temporary sanitized logging during the second run
+- `just cat-node-token` — print the token for future nodes
+
 ## How Discovery Works
 
 Nodes discover each other **automatically** via mDNS (multicast DNS) service browsing:

@@ -16,12 +16,12 @@ personas:
 runs per node. The new helper recipes introduced alongside this cleanup further
 reduce typing:
 
-| Manual checklist task | Steps in this document | Quick-start equivalent | Savings |
-|-----------------------|------------------------|------------------------|---------|
-| §5.1–§5.4: install k3s, capture the token, rehearse joins, and run `make cluster-up` | 7 distinct commands plus environment exports | Two invocations of `just up dev` (or `just ha3 env=dev`) plus `just cat-node-token` | ~70% fewer commands and zero manual curl scripts |
-| Passing tokens between shells | Copy `/var/lib/rancher/k3s/server/node-token`, export `SUGARKUBE_TOKEN_<ENV>` | `just cat-node-token` prints the value via `sudo`; export once before rerunning `just up` | Removes two manual steps per node |
-| Capturing debug logs | Run `SAVE_DEBUG_LOGS=1 just up dev`, find the sanitized file manually | `just save-logs env=dev` wraps the export and prints the output path automatically | Eliminates three environment edits |
-| Enabling HA | `export SUGARKUBE_SERVERS=3` before each command | `just ha3 env=dev` sets the env var and executes `just up` in one go | Removes repeated exports across both runs |
+| Manual checklist task | Steps in this document | Quick-start equivalent | Savings | Approx. commands / time saved |
+|-----------------------|------------------------|------------------------|---------|------------------------------|
+| §5.1–§5.4: install k3s, capture the token, rehearse joins, and run `make cluster-up` | 7 distinct commands plus environment exports | Two invocations of `just up dev` (or `just ha3 env=dev`) plus `just cat-node-token` | ~70% fewer commands and zero manual curl scripts | ~7 commands trimmed to 3 (≈55–70% faster) |
+| Passing tokens between shells | Copy `/var/lib/rancher/k3s/server/node-token`, export `SUGARKUBE_TOKEN_<ENV>` | `just cat-node-token` prints the value via `sudo`; export once before rerunning `just up` | Removes two manual steps per node | 2 exports collapsed into a single copy/paste |
+| Capturing debug logs | Run `SAVE_DEBUG_LOGS=1 just up dev`, find the sanitized file manually | `just save-logs env=dev` wraps the export and prints the output path automatically | Eliminates three environment edits | Cuts three edits plus the file lookup |
+| Enabling HA | `export SUGARKUBE_SERVERS=3` before each command | `just ha3 env=dev` sets the env var and executes `just up` in one go | Removes repeated exports across both runs | 2 exports replaced by one reusable recipe |
 
 Use this manual as the full reference when you need to reason about every moving
 part (pi-image builds, SSD migration, or bespoke rehearsals). Otherwise, stick to
