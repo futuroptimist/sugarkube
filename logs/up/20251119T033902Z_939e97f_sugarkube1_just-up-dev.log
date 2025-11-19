@@ -1,0 +1,330 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-19T03:39:02Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=token_resolution token_present=1 allow_bootstrap=0 node_token_state=missing boot_token_state=missing token_source="/home/pi/sugarkube/scripts/resolve_server_token.sh"
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-18T19:39:04-08:00 level=info event=iptables_preflight msg="iptables is using the nf_tables backend; enable kube-proxy nft mode (GA in Kubernetes v1.33) or select iptables-legacy" severity=warn outcome=warn details="variant=nf_tables,version=v1.8.9,nft=yes,kube-proxy=iptables,kube-proxy-source=default,path=/usr/sbin/iptables" variant=nf_tables version=v1.8.9 nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="enable_kube-proxy_nft_mode_or_select_iptables-legacy"
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=absence_gate_skipped reason=SUGARKUBE_SKIP_ABSENCE_GATE=1
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=avahi_health_check status=active
+ts=2025-11-18T19:39:04-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=dev
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=simple_discovery_enabled
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=simple_discovery_start phase=discover_via_service_browse
+ts=2025-11-18T19:39:04-08:00 level=info event=discover event=simple_discovery_config no_terminate=1 timeout=30 service_type=_k3s-sugar-dev._tcp cluster=sugar environment=dev debug_enabled=1
+[k3s-discover mdns] query_mdns: mode=server-select, cluster=sugar, env=dev
+[k3s-discover mdns] query_mdns: service_types=['_k3s-sugar-dev._tcp', '_https._tcp']
+[k3s-discover mdns] query_mdns: timeout=30.0s
+[k3s-discover mdns] query_mdns: no_terminate=1
+[k3s-discover mdns] _load_lines_from_avahi: browsing service_type=_k3s-sugar-dev._tcp, resolve=True
+[k3s-discover mdns] _invoke_avahi: command=avahi-browse --parsable --resolve _k3s-sugar-dev._tcp
+[k3s-discover mdns] _invoke_avahi: timeout=30.0s
+[k3s-discover mdns] avahi-browse attempt 1 timed out after 30s
+[k3s-discover mdns] avahi-browse stdout (from timeout): 2 lines
+[k3s-discover mdns] avahi-browse stdout[0]: +;eth0;IPv4;k3s-sugar-dev\064sugarkube0\.local\032\040server\041;_k3s-sugar-dev._tcp;local
+[k3s-discover mdns] avahi-browse stdout[1]: =;eth0;IPv4;k3s-sugar-dev\064sugarkube0\.local\032\040server\041;_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.86.41;6443;"ip6=fdd1:f818:d4e2:f916:5078:dc19:33de:141a" "ip4=192.168.86.41" "host=sugarkube0.local" "leader=sugarkube0.local" "phase=server" "role=server" "env=dev" "cluster=sugar" "k3s=1"
+[k3s-discover mdns] Retrying after timeout (attempt 1)...
+[k3s-discover mdns] avahi-browse attempt 2 timed out after 30s
+[k3s-discover mdns] avahi-browse stdout (from timeout): 2 lines
+[k3s-discover mdns] avahi-browse stdout[0]: +;eth0;IPv4;k3s-sugar-dev\064sugarkube0\.local\032\040server\041;_k3s-sugar-dev._tcp;local
+[k3s-discover mdns] avahi-browse stdout[1]: =;eth0;IPv4;k3s-sugar-dev\064sugarkube0\.local\032\040server\041;_k3s-sugar-dev._tcp;local;sugarkube0.local;192.168.86.41;6443;"ip6=fdd1:f818:d4e2:f916:5078:dc19:33de:141a" "ip4=192.168.86.41" "host=sugarkube0.local" "leader=sugarkube0.local" "phase=server" "role=server" "env=dev" "cluster=sugar" "k3s=1"
+[k3s-discover mdns] _load_lines_from_avahi: got 2 normalized lines from _k3s-sugar-dev._tcp
+[k3s-discover mdns] _load_lines_from_avahi: browsing service_type=_https._tcp, resolve=True
+[k3s-discover mdns] _invoke_avahi: command=avahi-browse --parsable --resolve _https._tcp
+[k3s-discover mdns] _invoke_avahi: timeout=30.0s
+[k3s-discover mdns] avahi-browse attempt 1 timed out after 30s
+[k3s-discover mdns] Retrying after timeout (attempt 1)...
+[k3s-discover mdns] avahi-browse attempt 2 timed out after 30s
+[k3s-discover mdns] avahi-browse failed after retries (exit 124), trying D-Bus browser...
+[k3s-discover mdns] D-Bus browse via gdbus failed (exit 1): Usage:
+  gdbus call [OPTION…]
+
+Invoke a method on a remote object.
+
+Connection Endpoint Options:
+  -y, --system          Connect to the system bus
+  -e, --session         Connect to the session bus
+  -a, --address         Connect to given D-Bus address
+
+Application Options:
+  -d, --dest            Destination name to invoke method on
+  -o, --object-path     Object path to invoke method on
+  -m, --method          Method and interface name
+  -t, --timeout         Timeout in seconds
+  -i, --interactive     Allow interactive authorisation
+
+
+[k3s-discover mdns] D-Bus browse via busctl failed (exit 1): busctl: invalid option -- '1'
+
+[k3s-discover mdns] Browse failed; dumping avahi-daemon journal for diagnostics...
+[k3s-discover mdns] === Avahi daemon journal (last 200 lines) ===
+[k3s-discover mdns] Nov 14 16:38:43 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 16:38:43 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:49:50 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 14 17:49:50 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 14 17:49:50 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:49:50 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 14 17:50:43 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 17:50:43 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:50:43 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 17:50:43 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:50:43 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 17:50:43 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:50:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 17:50:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:50:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 17:50:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 17:50:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 17:50:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:05 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 14 18:45:05 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 14 18:45:05 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:05 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 14 18:45:34 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 18:45:34 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:34 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 18:45:34 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 14 18:45:35 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:03:41 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 15 00:03:41 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 15 00:03:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:03:41 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 00:04:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 00:04:45 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 00:04:45 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:45:55 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 15 20:45:55 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 15 20:45:55 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:45:55 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 20:48:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 20:48:04 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 20:48:04 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:45:15 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 15 21:45:15 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 15 21:45:15 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:45:15 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 21:47:26 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 21:47:27 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:31:35 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 15 23:31:35 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 15 23:31:35 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:31:35 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 23:33:40 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 15 23:33:41 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:04:49 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 16 15:04:49 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 16 15:04:49 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:04:49 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 15:06:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 15:06:53 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 15:06:53 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:18:58 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 16 16:18:58 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 16 16:18:58 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:18:58 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 16 16:21:30 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 21:56:10 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 16 21:56:10 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 16 21:56:10 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 16 21:56:10 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 17 21:51:45 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:51:45 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:51:46 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 17 21:51:46 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 17 21:51:46 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:51:46 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 17 21:52:05 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:52:05 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:52:05 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:52:05 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:52:05 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:52:05 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:52:06 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:52:06 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:52:06 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:52:06 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 21:52:06 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 21:52:06 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:15:44 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 17 23:15:44 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 17 23:15:44 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:15:44 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 17 23:16:00 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 23:16:00 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:16:00 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 23:16:00 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:16:00 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 23:16:00 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:16:01 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 23:16:01 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:16:01 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 23:16:01 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 17 23:16:01 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 17 23:16:01 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:52:54 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 18 00:52:54 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 18 00:52:54 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:52:54 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 18 00:53:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 00:53:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:53:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 00:53:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:53:52 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 00:53:52 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:53:53 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 00:53:53 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:53:53 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 00:53:53 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 00:53:53 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 00:53:53 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:38:22 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 18 19:38:22 sugarkube1 avahi-daemon[3637]: Got SIGHUP, reloading.
+[k3s-discover mdns] Nov 18 19:38:22 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:38:22 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 18 19:39:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 19:39:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:39:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 19:39:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:39:03 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 19:39:03 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:39:04 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 19:39:04 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:39:04 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 19:39:04 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 18 19:39:04 sugarkube1 avahi-daemon[3637]: Files changed, reloading.
+[k3s-discover mdns] Nov 18 19:39:04 sugarkube1 avahi-daemon[3637]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] === End of Avahi daemon journal ===
+[k3s-discover mdns] _load_lines_from_avahi: got 0 normalized lines from _https._tcp
+[k3s-discover mdns] query_mdns: initial browse returned 2 lines, 1 records
+[k3s-discover mdns] query_mdns: returning 1 results for mode=server-select
+[k3s-discover mdns] query_mdns: result: mode=server host=sugarkube0.local port=6443 address=192.168.86.41 txt_ip4=192.168.86.41 txt_ip6=fdd1:f818:d4e2:f916:5078:dc19:33de:141a txt_host=sugarkube0.local
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=mdns_select host="sugarkube0.local" port=6443 browse_ok=1 resolve_ok=1 nss_ok=1 mode=server txt_ip=1 txt_ip_source=ip4 ip="192.168.86.41" accept_path=txt
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=simple_discovery_found server=sugarkube0.local
+ts=2025-11-18T19:41:08-08:00 level=info event=apiready outcome=alive host="sugarkube0.local" port="6443" attempts=1 elapsed=0 status=401 mode=alive ip="192.168.86.41"
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=simple_discovery_api_ok server=sugarkube0.local
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=simple_discovery_success server=sugarkube0.local
+ts=2025-11-18T19:41:08-08:00 level=info event=apiready outcome=alive host="sugarkube0.local" port="6443" attempts=1 elapsed=0 status=401 mode=alive ip="192.168.86.41"
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=l4_probe phase=install_join server="sugarkube0.local" result="{\"host\":\"sugarkube0.local\",\"port\":6443,\"status\":\"open\",\"latency_ms\":11}"
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=l4_probe phase=install_join server="sugarkube0.local" result="{\"host\":\"sugarkube0.local\",\"port\":2379,\"status\":\"open\",\"latency_ms\":8}"
+ts=2025-11-18T19:41:08-08:00 level=info event=discover event=l4_probe phase=install_join server="sugarkube0.local" result="{\"host\":\"sugarkube0.local\",\"port\":2380,\"status\":\"open\",\"latency_ms\":9}"
+ts=2025-11-18T19:41:08-08:00 level=info event=apiready outcome=alive host="sugarkube0.local" port="6443" attempts=1 elapsed=0 status=401 mode=alive ip="192.168.86.41"
+ts=2025-11-18T19:41:08-08:00 level=info event=discover msg="Server flag parity inputs unavailable; skipping validation" severity=warn phase=install_join server=sugarkube0.local
+ts=2025-11-18T19:41:08-08:00 level=info event=discover msg="time sync: info: systemd-timesyncd active and synchronized" phase=install_join
+ts=2025-11-18T19:41:08-08:00 level=info event=avahi_dbus_call outcome=retry ms_elapsed=49 bus_status=call_failed bus_owner=unknown bus_code=0 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-18T19:41:28-08:00 level=info event=avahi_dbus_ready outcome=skip reason=dbus_unavailable_cli_ok ms_elapsed=20316 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 cli_fallback=ok cli_status=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=unknown
+ts=2025-11-18T19:41:28-08:00 level=info event=join_gate action=dbus_wait outcome=skip status=2
+ts=2025-11-18T19:41:29-08:00 level=info event=avahi_dbus_call outcome=retry ms_elapsed=58 bus_status=call_failed bus_owner=unknown bus_code=0 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-18T19:41:49-08:00 level=info event=avahi_dbus_ready outcome=skip reason=dbus_unavailable_cli_ok ms_elapsed=20129 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 cli_fallback=ok cli_status=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=unknown
+ts=2025-11-18T19:41:49-08:00 level=info event=join_gate action=avahi_dbus outcome=disabled
+ts=2025-11-18T19:41:50-08:00 level=info event=join_gate action=avahi_liveness outcome=ok attempt=1 lines=2 service_type=_k3s-sugar-dev._tcp
+ts=2025-11-18T19:41:51-08:00 level=info event=join_gate action=wait outcome=clear attempts=0
+ts=2025-11-18T19:41:51-08:00 level=info event=avahi_dbus_call outcome=retry ms_elapsed=66 bus_status=call_failed bus_owner=unknown bus_code=0 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-18T19:42:11-08:00 level=info event=avahi_dbus_ready outcome=skip reason=dbus_unavailable_cli_ok ms_elapsed=20390 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 cli_fallback=ok cli_status=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=unknown
+ts=2025-11-18T19:42:11-08:00 level=info event=join_gate action=dbus_wait outcome=skip status=2
+ts=2025-11-18T19:42:11-08:00 level=info event=avahi_dbus_call outcome=retry ms_elapsed=59 bus_status=call_failed bus_owner=unknown bus_code=0 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-18T19:42:31-08:00 level=info event=avahi_dbus_ready outcome=skip reason=dbus_unavailable_cli_ok ms_elapsed=20031 systemd_state=active systemd_status=0 bus_status=call_failed bus_code=0 cli_fallback=ok cli_status=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=unknown
+ts=2025-11-18T19:42:31-08:00 level=info event=join_gate action=avahi_dbus outcome=disabled
+ts=2025-11-18T19:42:32-08:00 level=info event=join_gate action=avahi_liveness outcome=ok attempt=1 lines=2 service_type=_k3s-sugar-dev._tcp
+ts=2025-11-18T19:42:33-08:00 level=info event=join_gate action=wait outcome=clear attempts=0
+ts=2025-11-18T19:42:34-08:00 level=info event=join_gate action=acquire outcome=ok pid=15455 port=50270 owner=19dec742-a29e-4a83-b1d2-305e54b2d75b
+event=iptables_check installed=no mode=nft version="v1.8.9 (nf_tables)"
+ts=2025-11-18T19:42:34-08:00 level=info event=discover phase=install_join host=sugarkube1.local server=sugarkube0.local desired_servers=3
+ts=2025-11-18T19:42:34-08:00 level=info event=discover event=install_join server_url_type=ip server_url=192.168.86.41 hostname=sugarkube0.local
+[INFO]  Finding release for channel stable
+[INFO]  Using v1.33.5+k3s1 as release
+[INFO]  Downloading hash https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/sha256sum-arm64.txt
+[INFO]  Downloading binary https://github.com/k3s-io/k3s/releases/download/v1.33.5+k3s1/k3s-arm64
+[INFO]  Verifying binary download
+[INFO]  Installing k3s to /usr/local/bin/k3s
+[INFO]  Skipping installation of SELinux RPM
+[INFO]  Creating /usr/local/bin/kubectl symlink to k3s
+[INFO]  Creating /usr/local/bin/crictl symlink to k3s
+[INFO]  Creating /usr/local/bin/ctr symlink to k3s
+[INFO]  Creating killall script /usr/local/bin/k3s-killall.sh
+[INFO]  Creating uninstall script /usr/local/bin/k3s-uninstall.sh
+[INFO]  env: Creating environment file /etc/systemd/system/k3s.service.env
+[INFO]  systemd: Creating service file /etc/systemd/system/k3s.service
+[INFO]  systemd: Enabling k3s unit
+Created symlink /etc/systemd/system/multi-user.target.wants/k3s.service → /etc/systemd/system/k3s.service.
+[INFO]  systemd: Starting k3s
+ts=2025-11-18T19:45:20-08:00 level=info event=discover msg="Local API readiness helper failed" severity=warn phase=api_ready_local status=1 outcome=timeout reason=http_error last_status=401:0 attempts=60 elapsed=120 host="sugarkube1.local" port="6443" ip="127.0.0.1"
+ts=2025-11-18T19:45:20-08:00 level=info event=discover msg="k3s API did not become ready within 120s; skipping Avahi publish" severity=warn phase=install_join host=sugarkube1.local
+ts=2025-11-18T19:45:20-08:00 level=info event=join_gate action=release outcome=ok pid=15455 owner=19dec742-a29e-4a83-b1d2-305e54b2d75b port=50270
+Summary:
+  Dependencies elapsed_ms=655
+  Memory cgroup elapsed_ms=30
+  Avahi configure elapsed_ms=124
+  WLAN disable elapsed_ms=567
+  Node IP configure elapsed_ms=63
+  k3s discover/install elapsed_ms=376458
+
+[debug] Log saved to logs/up/20251119T033902Z_939e97f_sugarkube1_just-up-dev.log
