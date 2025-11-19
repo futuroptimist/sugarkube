@@ -4266,6 +4266,9 @@ install_server_join() {
   local server_url_target="${server}"
   if [ -n "${ip_hint}" ]; then
     server_url_target="${ip_hint}"
+    log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
+  else
+    log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
   local env_assignments
   build_install_env env_assignments
@@ -4404,6 +4407,9 @@ install_agent() {
   local server_url_target="${server}"
   if [ -n "${ip_hint}" ]; then
     server_url_target="${ip_hint}"
+    log_info discover event=install_agent server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
+  else
+    log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
   fi
   local env_assignments
   build_install_env env_assignments
