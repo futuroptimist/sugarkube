@@ -156,7 +156,7 @@ just up dev
 When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
 
 > Need sanitized log capture or mDNS hostname filtering? See
-> [raspi_cluster_operations.md](./raspi_cluster_operations.md#capturing-sanitized-bootstrap-logs)
+> [raspi_cluster_operations.md](./raspi_cluster_operations.md#step-2-capture-and-commit-sanitized-bring-up-logs)
 > for the dedicated flow and the new `just save-logs env=<env>` wrapper.
 
 Short on time? You can still capture sanitized bootstrap logs directly from this

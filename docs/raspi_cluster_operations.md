@@ -16,120 +16,359 @@ logs, preparing Helm, and rolling out real workloads like
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
 
-In this guide you will:
+## In this guide you will:
 
-- verify the health of your three-node HA control plane,
-- capture and sanitize bring-up logs safely for source control,
-- install Helm and deploy token.place plus democratized.space (dspace), and
-- hook the cluster into Flux for GitOps-managed releases.
+- Verify the health of your three-node HA control plane
+- Capture and commit sanitized bring-up logs for debugging and documentation
+- Install Helm and deploy the token.place workload
+- Deploy the democratized.space (dspace) application
+- Hook your cluster into Flux for GitOps-managed releases
+- Learn operational recipes for day-to-day cluster management
 
-## Quick status checks
+## Step 1: Verify your 3-node control plane is healthy
 
-| Command | Purpose |
-|---------|---------|
-| `just status` | Shows `kubectl get nodes -o wide` using the embedded kubeconfig. |
-| `just kubeconfig env=dev` | Copies `/etc/rancher/k3s/k3s.yaml` to `~/.kube/config` and renames the context to `sugar-dev`. |
-| `kubectl get pods -A` | Confirm workloads finished scheduling. |
-| `kubectl describe node <name>` | Inspect taints, kubelet config, and resource pressure. |
+After completing the cluster setup from `raspi_cluster_setup.md`, you should have
+three nodes ready to run workloads. This step confirms that your control plane is
+stable and all nodes are communicating properly.
 
-The `just status` recipe guards against running before k3s exists and prints a
-helpful reminder if the control plane is missing. Follow it with
-`watch -n5 kubectl get nodes` when waiting for the third HA node to report `Ready`.
+### Why verify cluster health?
 
-## Shortcut recipes for the bring-up journey
+Before deploying applications, you need to ensure that all three nodes in your HA
+control plane are ready, etcd is healthy, and the Kubernetes API server is
+responding correctly. This baseline check catches configuration issues early.
 
-Sugarkube now exposes smaller recipes that wrap the long environment exports used
-throughout the quick-start:
+Run the following commands to check cluster status:
+
+```bash
+just status
+```
+
+**What you should see:** Output similar to `kubectl get nodes -o wide` showing all
+three nodes in the `Ready` state with their IP addresses, OS versions, and kubelet
+versions. The `just status` recipe guards against running before k3s exists and
+prints a helpful reminder if the control plane is missing.
+
+For continuous monitoring while waiting for the third HA node to report `Ready`:
+
+```bash
+watch -n5 kubectl get nodes
+```
+
+You can also set up kubectl access from your workstation by copying the kubeconfig:
+
+```bash
+just kubeconfig env=dev
+```
+
+**What you should see:** This creates `~/.kube/config` with the context renamed to
+`sugar-dev`, allowing you to run kubectl commands from your local machine.
+
+Verify workloads across all namespaces:
+
+```bash
+kubectl get pods -A
+```
+
+**What you should see:** System pods (like `coredns`, `traefik`, and `metrics-server`)
+in the `kube-system` namespace, all showing `Running` status. If any pods are in
+`Pending` or `CrashLoopBackOff` states, investigate using:
+
+```bash
+kubectl describe node <name>
+```
+
+This command inspects taints, kubelet configuration, and resource pressure that
+might prevent pods from scheduling.
+
+### Handy shortcut recipes
+
+Sugarkube provides convenient recipes that wrap common operations:
 
 | Recipe | What it does |
 |--------|--------------|
 | `just ha3 env=dev` | Sets `SUGARKUBE_SERVERS=3` and executes `just up dev`, enabling the HA control-plane flow without retyping the export. |
-| `just save-logs env=dev` | Runs `just up <env>` with `SAVE_DEBUG_LOGS=1`, capturing sanitized logs under `logs/up/`. |
 | `just cat-node-token` | Prints `/var/lib/rancher/k3s/server/node-token` via `sudo` so you can copy it into `SUGARKUBE_TOKEN_<ENV>` quickly. |
+| `just wipe` | Cleans up a node that joined the wrong cluster, then rerun `just ha3 env=dev`. |
 
-You can mix-and-match these helpers. Example timeline for an HA node:
+## Step 2: Capture and commit sanitized bring-up logs
 
-```bash
-just ha3 env=dev              # 1st run patches memory cgroups and reboots
-just ha3 env=dev              # 2nd run bootstraps or joins k3s automatically
-just cat-node-token           # Copy token for future nodes or clusters
-```
+Capturing logs from your cluster bring-up process creates a valuable record for
+troubleshooting, documentation, and sharing with the community. Sugarkube includes
+a log sanitizer that removes sensitive information automatically.
 
-Need logs from a flaky run? Swap the second command with `just save-logs env=dev`
-so the sanitizer records everything.
+### Why capture logs?
 
-## Capturing sanitized bootstrap logs
+Sanitized logs help you debug issues, document your setup process, and contribute
+examples back to the project. The log filter removes IP addresses, MAC addresses,
+and other potentially sensitive data while preserving the operational narrative.
 
-The log helper moved out of the quick-start so this guide can cover it in more
-detail. Enable capture temporarily before the second `just up` run:
+To capture logs during cluster setup, use the `just save-logs` recipe:
 
 ```bash
 just save-logs env=dev
-# or, if you need more control:
+```
+
+This is equivalent to running:
+
+```bash
 SAVE_DEBUG_LOGS=1 just up dev
 unset SAVE_DEBUG_LOGS  # stop logging in this shell
 ```
 
-`SAVE_DEBUG_LOGS=1` streams console output through `scripts/filter_debug_log.py`
-and writes a sanitized copy to `logs/up/` with a timestamp, commit hash, hostname,
-and environment baked into the filename. The helper prints the saved path at the
-end—even if you abort with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+**What you should see:** Console output streams normally, but a sanitized copy is
+written to `logs/up/` with a timestamp, commit hash, hostname, and environment in
+the filename (e.g., `20231119T123456Z_abc1234_sugarkube0_just-up-dev.log`). The
+helper prints the saved path at the end—even if you abort with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 
-Tune the hostname allowlist for mDNS debug captures (useful when committing logs):
+For clusters with multiple nodes on the same network, you can tune the hostname
+allowlist to focus on specific machines:
 
 ```bash
 MDNS_ALLOWED_HOSTS="sugarkube0 sugarkube1 token-place" just save-logs env=dev
 ```
 
-That keeps unrelated LAN devices out of the committed artifacts.
+**What you should see:** Only mDNS traffic from the specified hostnames appears in
+the sanitized logs, keeping unrelated LAN devices out of the committed artifacts.
 
-## Install Helm and prep app releases
+After capturing logs, review them for completeness and commit them to your
+repository for future reference:
 
-Helm is already available on the Pi image, but if you built a minimal OS run the
-upstream installer:
+```bash
+git add logs/up/
+git commit -m "docs: add sanitized bring-up logs for dev cluster"
+```
+
+## Step 3: Install Helm and deploy token.place
+
+Now that your cluster is healthy and documented, you're ready to deploy real
+applications. [token.place](https://github.com/futuroptimist/token.place) is a
+sample workload designed for Kubernetes clusters like yours.
+
+### Why use Helm?
+
+Helm simplifies Kubernetes application deployment by packaging manifests, providing
+templating, and managing releases. Rather than applying dozens of YAML files
+manually, Helm charts let you install and upgrade applications with a single command.
+
+First, ensure Helm is installed. The Sugarkube Pi image includes Helm by default,
+but if you're working with a minimal OS, install it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 helm version
 ```
 
-1. **Clone your projects** (when cloud-init didn't already do it):
-   ```bash
-   cd /opt/projects
-   git clone https://github.com/futuroptimist/token.place.git
-   git clone https://github.com/democratizedspace/dspace.git
-   ```
-2. **Explore each chart**. Both repositories include Helm charts under their
-   respective `charts/` directories. Update dependencies before you install:
-   ```bash
-   cd /opt/projects/token.place/charts
-   helm dependency update token-place
-   ```
-3. **Install or upgrade** the workloads:
-   ```bash
-   helm upgrade --install token-place ./token-place \
-     --namespace token-place --create-namespace \
-     --set image.tag=$(git -C /opt/projects/token.place rev-parse --short HEAD)
+**What you should see:** Output showing Helm version 3.x (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`).
 
-   helm upgrade --install dspace ./dspace \
-     --namespace dspace --create-namespace
-   ```
-4. **Verify** the deployments:
-   ```bash
-   kubectl get pods -n token-place
-   kubectl get ing -n dspace
-   ```
+### Clone the token.place repository
 
-Adjust the values files to add TLS hosts, Ingress classes, or secrets. Once the
-cluster is steady, wire the charts into Flux by committing manifests under
-`clusters/<env>/` so future releases land via GitOps.
+The token.place application is distributed as a Git repository with Helm charts.
+If cloud-init didn't already clone it during Pi setup, do so now:
 
-## Keep iterating on the cluster
+```bash
+cd /opt/projects
+git clone https://github.com/futuroptimist/token.place.git
+```
 
-- `just flux-bootstrap env=dev` to install Flux with the manifests in `flux/`.
-- `just token-place-samples` to replay the bundled health checks before exposing
-  the workloads.
-- `just wipe` whenever a node joins the wrong cluster—then rerun `just ha3 env=dev`.
+**What you should see:** Git clones the repository and creates `/opt/projects/token.place/`
+containing the application code and Helm charts.
 
-For outages or retro write-ups, use the templates under `outages/` and cross-link
-your sanitized logs.
+### Prepare the Helm chart
+
+Navigate to the charts directory and update dependencies:
+
+```bash
+cd /opt/projects/token.place/charts
+helm dependency update token-place
+```
+
+**What you should see:** Helm downloads any chart dependencies defined in
+`Chart.yaml` and stores them in the `charts/` subdirectory. If there are no
+dependencies, you'll see `Saving 0 charts` which is normal.
+
+### Deploy token.place to your cluster
+
+Install the chart using Helm, creating a dedicated namespace and tagging the image
+with the current Git commit:
+
+```bash
+helm upgrade --install token-place ./token-place \
+  --namespace token-place --create-namespace \
+  --set image.tag=$(git -C /opt/projects/token.place rev-parse --short HEAD)
+```
+
+**What you should see:** Helm creates the `token-place` namespace if it doesn't
+exist, then installs or upgrades the release. Output shows the release name,
+namespace, status (`deployed`), and revision number. The `image.tag` override
+ensures you're running a specific version tied to the Git commit.
+
+### Verify the token.place deployment
+
+Check that all pods are running:
+
+```bash
+kubectl get pods -n token-place
+```
+
+**What you should see:** All token.place pods in `Running` state with `READY`
+showing `1/1` or `2/2` depending on the number of containers per pod. If pods are
+`Pending`, check events with `kubectl describe pod <pod-name> -n token-place`.
+
+## Step 4: Deploy dspace
+
+With token.place running, you can deploy additional workloads like
+[democratized.space (dspace)](https://github.com/democratizedspace/dspace), a
+companion application for your cluster.
+
+### Why deploy dspace?
+
+dspace provides complementary functionality to token.place and demonstrates how to
+run multiple applications on the same cluster. The deployment process is similar,
+reinforcing the patterns you learned in Step 3.
+
+### Clone the dspace repository
+
+If it's not already present, clone the dspace repository:
+
+```bash
+cd /opt/projects
+git clone https://github.com/democratizedspace/dspace.git
+```
+
+**What you should see:** Git clones the repository and creates `/opt/projects/dspace/`
+with the application code and Helm charts.
+
+### Deploy dspace to your cluster
+
+Navigate to the dspace charts directory and install:
+
+```bash
+cd /opt/projects/dspace/charts
+helm upgrade --install dspace ./dspace \
+  --namespace dspace --create-namespace
+```
+
+**What you should see:** Helm creates the `dspace` namespace and deploys the
+application. Output confirms the release status as `deployed`.
+
+### Verify the dspace deployment
+
+Check pod status:
+
+```bash
+kubectl get pods -n dspace
+```
+
+**What you should see:** All dspace pods in `Running` state with healthy readiness
+checks.
+
+If dspace includes an Ingress resource for external access, check it:
+
+```bash
+kubectl get ing -n dspace
+```
+
+**What you should see:** Ingress resources with assigned hosts and backend services.
+If you configured a load balancer or Ingress controller, you'll see the external
+address where dspace is accessible.
+
+## Step 5: Hook the cluster into Flux for GitOps
+
+With your applications deployed manually, the final step is to automate future
+deployments using GitOps. Flux watches your Git repository and automatically applies
+changes to your cluster.
+
+### Why use GitOps?
+
+GitOps treats Git as the single source of truth for your infrastructure. When you
+commit a change to your repository, Flux detects it and applies the update
+automatically. This eliminates manual `kubectl apply` commands and provides an
+audit trail of all changes.
+
+### Bootstrap Flux on your cluster
+
+Sugarkube includes a helper script to bootstrap Flux with the manifests in the
+`flux/` directory:
+
+```bash
+just flux-bootstrap env=dev
+```
+
+**What you should see:** The script installs Flux controllers into the `flux-system`
+namespace and configures them to watch your repository. Output shows the Flux
+components being created (like `source-controller`, `kustomize-controller`,
+`helm-controller`, and `notification-controller`).
+
+Verify Flux is running:
+
+```bash
+kubectl get pods -n flux-system
+```
+
+**What you should see:** All Flux controller pods in `Running` state.
+
+### Wire your applications into Flux
+
+To have Flux manage your token.place and dspace deployments, commit Helm release
+manifests under `clusters/<env>/`. For example, create
+`clusters/dev/token-place-release.yaml`:
+
+```yaml
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: token-place
+  namespace: token-place
+spec:
+  chart:
+    spec:
+      chart: ./token-place
+      sourceRef:
+        kind: GitRepository
+        name: token-place
+  interval: 10m
+```
+
+Commit and push this file. Flux will detect the change and deploy the release
+automatically.
+
+**What you should see:** After committing, Flux reconciles the change within a few
+minutes. Check the HelmRelease status:
+
+```bash
+kubectl get helmrelease -A
+```
+
+You should see `token-place` with a `Ready` condition indicating successful deployment.
+
+## Additional operational recipes
+
+As you continue operating your cluster, these recipes will be helpful:
+
+- **Test token.place samples:** Run `just token-place-samples` to replay bundled
+  health checks before exposing the workloads to external traffic.
+
+- **Reconcile platform changes:** Use `just platform-apply env=dev` to trigger an
+  immediate Flux reconciliation of the platform Kustomization.
+
+- **Seal secrets:** Run `just seal-secrets env=dev` to reseal SOPS secrets for your
+  environment using the cluster's public key.
+
+- **Recover from misconfiguration:** If a node accidentally joins the wrong cluster,
+  use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
+
+### Document outages and incidents
+
+For outages or retrospectives, use the structured templates under `outages/` and
+cross-link your sanitized logs. This maintains a historical record and helps identify
+patterns over time.
+
+## Next steps
+
+Your cluster is now fully operational with applications running and GitOps
+configured. Explore additional guides:
+
+- Adjust Helm values files to add TLS hosts, Ingress classes, or secrets
+- Set up monitoring and alerting for your workloads
+- Configure backups using k3s's built-in etcd snapshot feature
+- Review [docs/runbook.md](./runbook.md) for deeper SRE playbooks
