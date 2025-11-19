@@ -5096,6 +5096,10 @@ fi
 
 # Display cluster formation summary with next steps
 if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
+  # Cache server count to avoid multiple expensive mDNS queries
+  local servers_count
+  servers_count="$(count_servers)"
+  
   printf '\n'
   printf '═══════════════════════════════════════════════════════════════\n'
   printf '  CLUSTER FORMATION COMPLETE\n'
@@ -5118,7 +5122,7 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
   printf 'Servers desired: %s\n' "${SERVERS_DESIRED}"
   
   if [ -n "${TOKEN:-}" ]; then
-    printf 'Join mode: %s\n' "$([ "${SERVERS_DESIRED}" -gt 1 ] && [ "$(count_servers)" -lt "${SERVERS_DESIRED}" ] && echo "HA server" || echo "agent/complete")"
+    printf 'Join mode: %s\n' "$([ "${SERVERS_DESIRED}" -gt 1 ] && [ "${servers_count}" -lt "${SERVERS_DESIRED}" ] && echo "HA server" || echo "agent/complete")"
   else
     printf 'Bootstrap mode: %s\n' "$([ "${SERVERS_DESIRED}" -eq 1 ] && echo "single server" || echo "HA cluster initialized")"
   fi
@@ -5127,9 +5131,9 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
   printf '📋 Next steps:\n\n'
   
   # Show different instructions based on whether this is bootstrap or join
-  if [ -z "${TOKEN:-}" ] && [ "${SERVERS_DESIRED}" -gt 1 ] && [ "$(count_servers)" -lt "${SERVERS_DESIRED}" ]; then
+  if [ -z "${TOKEN:-}" ] && [ "${SERVERS_DESIRED}" -gt 1 ] && [ "${servers_count}" -lt "${SERVERS_DESIRED}" ]; then
     # Bootstrap node in HA mode - need to add more servers
-    printf '1. This is the first server in an HA cluster (%s/%s servers ready)\n' "$(count_servers)" "${SERVERS_DESIRED}"
+    printf '1. This is the first server in an HA cluster (%s/%s servers ready)\n' "${servers_count}" "${SERVERS_DESIRED}"
     printf '\n'
     printf '2. Copy the join token from this node:\n'
     printf '   sudo cat /var/lib/rancher/k3s/server/node-token\n'
@@ -5150,12 +5154,12 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
     printf '   just status\n'
     printf '   # or: sudo kubectl get nodes\n'
     printf '\n'
-    if [ "$(count_servers)" -lt "${SERVERS_DESIRED}" ]; then
-      printf '3. Add more servers to complete HA setup (%s/%s ready):\n' "$(count_servers)" "${SERVERS_DESIRED}"
+    if [ "${servers_count}" -lt "${SERVERS_DESIRED}" ]; then
+      printf '3. Add more servers to complete HA setup (%s/%s ready):\n' "${servers_count}" "${SERVERS_DESIRED}"
       printf '   • On new nodes, use the same token\n'
       printf '   • Run: just up %s\n' "${ENVIRONMENT}"
     else
-      printf '3. Your HA cluster is complete! (%s/%s servers ready)\n' "$(count_servers)" "${SERVERS_DESIRED}"
+      printf '3. Your HA cluster is complete! (%s/%s servers ready)\n' "${servers_count}" "${SERVERS_DESIRED}"
     fi
   else
     # Single server or complete bootstrap
