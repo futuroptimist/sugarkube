@@ -153,6 +153,18 @@ When fewer than three servers are present, the node elects itself into the HA co
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md#capturing-sanitized-bootstrap-logs)
 > for the dedicated flow and the new `just save-logs env=<env>` wrapper.
 
+Short on time? You can still capture sanitized bootstrap logs directly from this
+guide. Set `SAVE_DEBUG_LOGS=1` for the **second** `just up` run, then unset it so
+future commands stay quiet:
+
+```bash
+SAVE_DEBUG_LOGS=1 just up dev
+unset SAVE_DEBUG_LOGS  # stop logging in this shell
+```
+
+This streams console output through `scripts/filter_debug_log.py` and writes a
+timestamped copy under `logs/up/` so you can attach the file to bug reports.
+
 ### Switch environments as needed
 
 `just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.

@@ -44,7 +44,7 @@ You can mix-and-match these helpers. Example timeline for an HA node:
 
 ```bash
 just 3ha env=dev              # 1st run patches memory cgroups and reboots
-just 3ha env=dev              # 2nd run bootstraps/join k3s automatically
+just 3ha env=dev              # 2nd run bootstraps or joins k3s automatically
 just cat-node-token           # Copy token for future nodes or clusters
 ```
 
