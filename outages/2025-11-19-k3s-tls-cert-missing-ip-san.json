@@ -1,0 +1,92 @@
+{
+  "id": "2025-11-19-k3s-tls-cert-missing-ip-san",
+  "date": "2025-11-19",
+  "component": "scripts/k3s-discover.sh TLS certificate generation",
+  "severity": "Critical",
+  "status": "Resolved",
+  "rootCause": "When k3s was installed on the bootstrap node (sugarkube0), the TLS certificate only included hostnames (e.g., 'sugarkube0.local') in the Subject Alternative Names (SANs), not the node's IP address. The fix in outages/2025-11-19-k3s-join-mdns-hostname-resolution.json correctly changed K3S_URL to use IP addresses instead of hostnames to avoid mDNS resolution issues in systemd context. However, when joining nodes connected using the IP address (https://192.168.86.41:6443), TLS certificate validation failed because the server's certificate didn't include the IP address in its SANs. This caused k3s service to start but never become ready, timing out after 120 seconds.",
+  "impact": "Complete inability to form multi-node k3s clusters on real hardware. The first node (sugarkube0) would bootstrap successfully, but joining nodes (sugarkube1, sugarkube2) would fail silently. Discovery worked perfectly (mDNS found the server, API probes succeeded), but k3s installation would hang indefinitely at 'Starting k3s' and eventually time out with 'k3s API did not become ready within 120s'. This affected all cluster join scenarios: server-to-server joins (HA cluster formation) and agent joins. Users would see successful discovery logs but k3s would never start properly on joining nodes.",
+  "resolution": "Added detect_node_primary_ipv4() function to k3s-discover.sh that detects the node's primary IPv4 address on the primary interface (eth0 by default, configurable via SUGARKUBE_MDNS_INTERFACE). Modified three k3s installation functions (install_server_single, install_server_cluster_init, install_server_join) to call this function and add the detected IP address as a TLS SAN using --tls-san flag. Each function now logs the detected IP with event=node_ip_detected and gracefully falls back if IP detection fails (logs warning, continues without IP SAN). This ensures k3s certificates include both hostnames AND IP addresses, allowing TLS validation to succeed whether connections use hostnames or IP addresses.",
+  "timeline": [
+    {
+      "timestamp": "2025-11-18T19:16:00-08:00",
+      "event": "sugarkube0 bootstraps with 'just up dev', publishes mDNS service"
+    },
+    {
+      "timestamp": "2025-11-18T19:39:04-08:00",
+      "event": "sugarkube1 starts join with SUGARKUBE_TOKEN_DEV set"
+    },
+    {
+      "timestamp": "2025-11-18T19:41:08-08:00",
+      "event": "sugarkube1 successfully discovers sugarkube0 at 192.168.86.41 via mDNS"
+    },
+    {
+      "timestamp": "2025-11-18T19:42:34-08:00",
+      "event": "sugarkube1 starts k3s installation with server_url=192.168.86.41"
+    },
+    {
+      "timestamp": "2025-11-18T19:42:34-08:00",
+      "event": "k3s.service starts but TLS validation fails (certificate doesn't include IP)"
+    },
+    {
+      "timestamp": "2025-11-18T19:45:20-08:00",
+      "event": "After 120s timeout, k3s still not ready: last_status=401:0"
+    },
+    {
+      "timestamp": "2025-11-19T03:49:00Z",
+      "event": "User reports issue: 'sugarkube1 still can't discover sugarkube0'"
+    },
+    {
+      "timestamp": "2025-11-19T04:30:00Z",
+      "event": "Investigation reveals root cause: TLS cert missing IP address"
+    },
+    {
+      "timestamp": "2025-11-19T05:15:00Z",
+      "event": "Fix implemented: add IP address to TLS SANs during k3s install"
+    }
+  ],
+  "evidence": {
+    "log_files": [
+      "logs/up/20251119T031559Z_f6a4df2_sugarkube0_just-up-dev.log",
+      "logs/up/20251119T033902Z_939e97f_sugarkube1_just-up-dev.log"
+    ],
+    "key_log_lines": [
+      "ts=2025-11-18T19:41:08-08:00 level=info event=discover event=mdns_select host=\"sugarkube0.local\" port=6443 ... ip=\"192.168.86.41\" accept_path=txt",
+      "ts=2025-11-18T19:42:34-08:00 level=info event=discover event=install_join server_url_type=ip server_url=192.168.86.41 hostname=sugarkube0.local",
+      "[INFO]  systemd: Starting k3s",
+      "ts=2025-11-18T19:45:20-08:00 level=info event=discover msg=\"Local API readiness helper failed\" ... last_status=401:0 attempts=60 elapsed=120",
+      "ts=2025-11-18T19:45:20-08:00 level=info event=discover msg=\"k3s API did not become ready within 120s; skipping Avahi publish\""
+    ],
+    "mdns_debug_output": "Network diagnostics confirmed discovery working:\n- avahi-browse finds _k3s-sugar-dev._tcp service\n- txt = [\"ip4=192.168.86.41\" ...]\n- ping sugarkube0.local: SUCCESS\n- k3s API via mDNS hostname: OK\n- k3s API via sugarkube0.local (as IP): OK\n\nProves discovery works but k3s join fails due to TLS validation"
+  },
+  "testing": {
+    "manual_verification": "Test on real Raspberry Pi hardware: (1) Bootstrap sugarkube0 with 'just up dev' without token - verify logs show 'event=node_ip_detected ip=<address>', (2) Check k3s certificate includes IP: openssl s_client -connect localhost:6443 2>/dev/null | openssl x509 -text | grep -A1 'Subject Alternative Name', (3) Copy node-token from sugarkube0, (4) On sugarkube1, export SUGARKUBE_TOKEN_DEV and run 'just up dev', (5) Verify k3s.service starts successfully and becomes ready within 30s, (6) Check 'kubectl get nodes' shows both nodes Ready",
+    "regression_risk": "Very low. Changes only affect TLS certificate generation during k3s installation - adding the node's IP address as an additional SAN. Existing hostname SANs are unchanged. If IP detection fails, the function logs a warning and continues without adding the IP SAN (same as before). The fix doesn't change any discovery logic, API probing, or join gate behavior. Existing tests pass."
+  },
+  "prevention": [
+    "Added detect_node_primary_ipv4() function using same parsing logic as configure_k3s_node_ip.sh",
+    "Modified install_server_single() to detect and add IP to TLS SANs",
+    "Modified install_server_cluster_init() to detect and add IP to TLS SANs",
+    "Modified install_server_join() to detect and add IP to TLS SANs",
+    "Each function logs detected IP with event=node_ip_detected",
+    "Graceful fallback: if IP detection fails, logs warning and continues",
+    "Works with existing SUGARKUBE_MDNS_INTERFACE environment variable (defaults to eth0)",
+    "Complements existing fix from outages/2025-11-19-k3s-join-mdns-hostname-resolution.json"
+  ],
+  "workaround": "Before fix, users could manually add IP address to k3s certificate by editing /etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml before first k3s install, or by setting K3S_URL to use hostname instead of IP (but that would hit the systemd mDNS resolution issue). Neither workaround was documented.",
+  "references": [
+    "scripts/k3s-discover.sh detect_node_primary_ipv4() lines 3733-3758",
+    "scripts/k3s-discover.sh install_server_single() lines 3999-4079",
+    "scripts/k3s-discover.sh install_server_cluster_init() lines 4081-4162",
+    "scripts/k3s-discover.sh install_server_join() lines 4164-4407",
+    "outages/2025-11-19-k3s-join-mdns-hostname-resolution.json",
+    "docs/raspi_cluster_setup.md cluster formation documentation",
+    "logs/up/20251119T033902Z_939e97f_sugarkube1_just-up-dev.log"
+  ],
+  "relatedIssues": [
+    "2025-11-19-k3s-join-mdns-hostname-resolution"
+  ],
+  "performanceImpact": "Neutral. Adding IP address to TLS certificate has no performance impact. The IP detection runs once during k3s installation and adds milliseconds to the install time.",
+  "documentationChanges": "No documentation changes needed. The user-visible behavior remains the same - nodes discover each other and join successfully. The fix is an internal implementation detail.",
+  "userConfusion": "User reported 'sugarkube1 still can't discover sugarkube0' but discovery was actually working perfectly. The real issue was post-discovery: k3s service startup failure due to TLS validation. This confusion is expected because the symptom (join failure) appeared related to discovery, but the root cause was certificate configuration."
+}
