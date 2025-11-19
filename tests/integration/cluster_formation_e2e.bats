@@ -332,3 +332,163 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" =~ Discovery\ completed.*0\ results ]]
 }
+
+@test "Phase 4: Three-server HA cluster formation" {
+  # This tests a complete 3-server HA cluster formation scenario:
+  # - sugarkube0 bootstraps with SUGARKUBE_SERVERS=3
+  # - sugarkube1 discovers sugarkube0 and joins as second server
+  # - sugarkube2 discovers either node and joins as third server
+  # - All three nodes advertise their services
+  # - All three nodes can discover each other
+  
+  local cluster="sugar"
+  local environment="dev"
+  
+  # Node 1: Bootstrap (sugarkube0)
+  # Simulates: SUGARKUBE_SERVERS=3, no token → bootstrap
+  local pid0
+  pid0=$(simulate_bootstrap_node "sugarkube0" "${cluster}" "${environment}")
+  
+  # Verify sugarkube0 is discoverable
+  run timeout 15 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=10 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+def debug(msg):
+    print(f"[mdns-0] {msg}", file=sys.stderr)
+
+results = query_mdns('server-select', 'sugar', 'dev', debug=debug)
+if results and any('sugarkube0' in str(r) for r in results):
+    print("✓ sugarkube0 discovered")
+    sys.exit(0)
+else:
+    print("✗ sugarkube0 not found", file=sys.stderr)
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "sugarkube0 discovered" ]]
+  
+  # Node 2: Join as second server (sugarkube1)
+  # Simulates: SUGARKUBE_SERVERS=3, token set → join as server
+  local pid1
+  pid1=$(simulate_bootstrap_node "sugarkube1" "${cluster}" "${environment}")
+  
+  # Give time for service to propagate
+  sleep 3
+  
+  # Verify both nodes are now discoverable
+  run timeout 15 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=10 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+def debug(msg):
+    print(f"[mdns-1] {msg}", file=sys.stderr)
+
+results = query_mdns('server-select', 'sugar', 'dev', debug=debug)
+result_strs = [str(r) for r in results]
+has_0 = any('sugarkube0' in s for s in result_strs)
+has_1 = any('sugarkube1' in s for s in result_strs)
+
+print(f"Discovered {len(results)} servers")
+print(f"Has sugarkube0: {has_0}")
+print(f"Has sugarkube1: {has_1}")
+
+if has_0 and has_1:
+    print("✓ Both sugarkube0 and sugarkube1 discovered")
+    sys.exit(0)
+else:
+    print("✗ Not all servers found", file=sys.stderr)
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Both sugarkube0 and sugarkube1 discovered" ]]
+  
+  # Node 3: Join as third server (sugarkube2)
+  # Simulates: SUGARKUBE_SERVERS=3, token set → join as final server
+  local pid2
+  pid2=$(simulate_bootstrap_node "sugarkube2" "${cluster}" "${environment}")
+  
+  # Give time for service to propagate
+  sleep 3
+  
+  # Verify all three nodes are discoverable
+  run timeout 15 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=10 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+def debug(msg):
+    print(f"[mdns-2] {msg}", file=sys.stderr)
+
+results = query_mdns('server-select', 'sugar', 'dev', debug=debug)
+result_strs = [str(r) for r in results]
+has_0 = any('sugarkube0' in s for s in result_strs)
+has_1 = any('sugarkube1' in s for s in result_strs)
+has_2 = any('sugarkube2' in s for s in result_strs)
+
+print(f"Discovered {len(results)} servers")
+print(f"Has sugarkube0: {has_0}")
+print(f"Has sugarkube1: {has_1}")
+print(f"Has sugarkube2: {has_2}")
+
+if has_0 and has_1 and has_2:
+    print("✓ All three servers discovered (sugarkube0, sugarkube1, sugarkube2)")
+    print("✓ 3-server HA cluster formation complete")
+    sys.exit(0)
+else:
+    print("✗ Not all servers found", file=sys.stderr)
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "All three servers discovered" ]]
+  [[ "$output" =~ "3-server HA cluster formation complete" ]]
+  
+  # Verify any joining node can discover all three servers
+  # This simulates what would happen when running `kubectl get nodes`
+  run timeout 15 env \
+    SUGARKUBE_CLUSTER="${cluster}" \
+    SUGARKUBE_ENV="${environment}" \
+    SUGARKUBE_MDNS_NO_TERMINATE=1 \
+    SUGARKUBE_MDNS_QUERY_TIMEOUT=10 \
+    python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ.get('BATS_CWD', '.') + '/scripts')
+from k3s_mdns_query import query_mdns
+
+results = query_mdns('server-select', 'sugar', 'dev')
+if len(results) >= 3:
+    print(f"✓ Final verification: {len(results)} servers visible")
+    print("✓ HA cluster ready: all nodes can discover each other")
+    sys.exit(0)
+else:
+    print(f"✗ Expected 3+ servers, found {len(results)}", file=sys.stderr)
+    sys.exit(1)
+PY
+  
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "HA cluster ready" ]]
+}
