@@ -3730,6 +3730,33 @@ resolve_server_ip_hint() {
   return 1
 }
 
+detect_node_primary_ipv4() {
+  # Detect the primary IPv4 address of this node on the primary interface
+  # Used for adding IP address to TLS SANs during k3s installation
+  local iface="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
+  local ip_cmd="${IP_CMD:-ip}"
+  
+  if ! command -v "${ip_cmd}" >/dev/null 2>&1; then
+    return 1
+  fi
+  
+  local output
+  output="$(${ip_cmd} -4 -o addr show "${iface}" 2>/dev/null || true)"
+  if [ -z "${output}" ]; then
+    return 1
+  fi
+  
+  # Parse the IPv4 address from the output
+  local ip
+  ip="$(printf '%s\n' "${output}" | awk '$3 == "inet" { split($4, addr, "/"); if (addr[1] != "") { print addr[1]; exit 0 } }')"
+  if [ -z "${ip}" ]; then
+    return 1
+  fi
+  
+  printf '%s' "${ip}"
+  return 0
+}
+
 failopen_resolve_candidate() {
   local candidate="$1"
   if [ -z "${candidate}" ]; then
@@ -3981,6 +4008,15 @@ install_server_single() {
   fi
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
+  
+  # Detect node IP for TLS SAN
+  local node_ip=""
+  if node_ip="$(detect_node_primary_ipv4)"; then
+    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
+  else
+    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_single
+  fi
+  
   local env_assignments
   build_install_env env_assignments
   (
@@ -3988,13 +4024,21 @@ install_server_single() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    run_k3s_install server \
-      --tls-san "${MDNS_HOST}" \
-      --tls-san "${HN}" \
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}" \
-      --node-label "sugarkube.cluster=${CLUSTER}" \
-      --node-label "sugarkube.env=${ENVIRONMENT}" \
+    local -a install_args=(
+      server
+      --tls-san "${MDNS_HOST}"
+      --tls-san "${HN}"
+    )
+    if [ -n "${node_ip}" ]; then
+      install_args+=(--tls-san "${node_ip}")
+    fi
+    install_args+=(
+      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+      --node-label "sugarkube.cluster=${CLUSTER}"
+      --node-label "sugarkube.env=${ENVIRONMENT}"
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+    )
+    run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
     # Wait for node-token file to be created so users can retrieve it
@@ -4046,6 +4090,15 @@ install_server_cluster_init() {
   fi
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
+  
+  # Detect node IP for TLS SAN
+  local node_ip=""
+  if node_ip="$(detect_node_primary_ipv4)"; then
+    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
+  else
+    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_cluster_init
+  fi
+  
   local env_assignments
   build_install_env env_assignments
   (
@@ -4053,14 +4106,22 @@ install_server_cluster_init() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    run_k3s_install server \
-      --cluster-init \
-      --tls-san "${MDNS_HOST}" \
-      --tls-san "${HN}" \
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}" \
-      --node-label "sugarkube.cluster=${CLUSTER}" \
-      --node-label "sugarkube.env=${ENVIRONMENT}" \
+    local -a install_args=(
+      server
+      --cluster-init
+      --tls-san "${MDNS_HOST}"
+      --tls-san "${HN}"
+    )
+    if [ -n "${node_ip}" ]; then
+      install_args+=(--tls-san "${node_ip}")
+    fi
+    install_args+=(
+      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+      --node-label "sugarkube.cluster=${CLUSTER}"
+      --node-label "sugarkube.env=${ENVIRONMENT}"
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+    )
+    run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
     # Wait for node-token file to be created so users can retrieve it
@@ -4270,6 +4331,15 @@ install_server_join() {
   else
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
+  
+  # Detect node IP for TLS SAN
+  local node_ip=""
+  if node_ip="$(detect_node_primary_ipv4)"; then
+    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
+  else
+    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_join
+  fi
+  
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
@@ -4281,15 +4351,23 @@ install_server_join() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    run_k3s_install server \
-      --server "https://${server_url_target}:${selected_port}" \
-      --tls-san "${server}" \
-      --tls-san "${MDNS_HOST}" \
-      --tls-san "${HN}" \
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}" \
-      --node-label "sugarkube.cluster=${CLUSTER}" \
-      --node-label "sugarkube.env=${ENVIRONMENT}" \
+    local -a install_args=(
+      server
+      --server "https://${server_url_target}:${selected_port}"
+      --tls-san "${server}"
+      --tls-san "${MDNS_HOST}"
+      --tls-san "${HN}"
+    )
+    if [ -n "${node_ip}" ]; then
+      install_args+=(--tls-san "${node_ip}")
+    fi
+    install_args+=(
+      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+      --node-label "sugarkube.cluster=${CLUSTER}"
+      --node-label "sugarkube.env=${ENVIRONMENT}"
       --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+    )
+    run_k3s_install "${install_args[@]}"
   )
   if wait_for_api; then
     if ! publish_api_service; then
