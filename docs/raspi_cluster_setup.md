@@ -29,6 +29,8 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 - **`just cat-node-token`** — display the k3s node token for joining nodes  
   _When to use:_ After bootstrapping the first node, use this to retrieve the token that other nodes need to join the cluster. Copy the output and set it as `SUGARKUBE_TOKEN_DEV` on subsequent nodes.
 
+> **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
+
 ## How Discovery Works
 
 Nodes discover each other **automatically** via mDNS (multicast DNS) service browsing:
@@ -255,6 +257,8 @@ just up dev
 `SUGARKUBE_MDNS_WIRE_PROOF` makes the helper refuse success until a TCP socket
 to port 6443 opens, ensuring the join path is viable—not just advertised.
 
+> **💡 Troubleshooting:** For detailed guidance on diagnosing bootstrap and join failures, including how to interpret discovery logs and resolve mDNS issues, see the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md).
+
 ---
 
 ## Conceptual Overview
@@ -451,6 +455,10 @@ For more details on the phased simplification roadmap, see `notes/2025-11-14-mdn
 ---
 
 ## Troubleshooting
+
+> **📖 Complete Troubleshooting Guide:** For comprehensive troubleshooting guidance including log interpretation, common failure scenarios, and step-by-step diagnostics, see the dedicated [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md).
+
+The following quick tips address the most common issues:
 
 - **Error: `SUGARKUBE_TOKEN (or per-env variant) required`**
 
