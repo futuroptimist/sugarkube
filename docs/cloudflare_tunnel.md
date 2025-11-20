@@ -20,7 +20,7 @@ the cluster's Traefik ingress.
    ```
 2. Install/update the chart and Secret (creates the namespace if needed):
    ```bash
-   just cf:tunnel:install env=dev token="$CF_TUNNEL_TOKEN"
+   just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
    ```
 3. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
@@ -35,7 +35,7 @@ the cluster's Traefik ingress.
    ```
 2. Determine the Service FQDN that Cloudflare should target (HTTP on port 80):
    ```bash
-   just cf:tunnel:route host=dspace-v3.example.com
+   just cf-tunnel-route host=dspace-v3.example.com
    # Service URL: http://traefik.kube-system.svc.cluster.local:80
    ```
 3. In the Cloudflare dashboard, add an **Application** (or **Public hostname**) entry under your

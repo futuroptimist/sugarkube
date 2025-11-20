@@ -215,7 +215,7 @@ kubeconfig env='dev':
     sudo chown "$USER":"$USER" ~/.kube/config
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
-cf:tunnel:install env='dev' token='':
+cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -234,27 +234,28 @@ cf:tunnel:install env='dev' token='':
     helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
     helm repo update cloudflare
 
+    values_yaml=$(printf '%s\n' \
+        'fullnameOverride: cloudflare-tunnel' \
+        'cloudflare:' \
+        "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"" \
+        "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
+        '  secretName: tunnel-token' \
+        '  ingress: []'
+    )
+
     helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
         --wait \
-        --values - <<EOF
-fullnameOverride: cloudflare-tunnel
-cloudflare:
-  tunnelName: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
-  tunnelId: "${CF_TUNNEL_ID:-}"
-  secretName: tunnel-token
-  ingress: []
-EOF
+        --values - <<<"${values_yaml}"
 
-    cat <<'EOF'
-Cloudflare Tunnel chart deployed.
-- Secret: cloudflare/tunnel-token (key: token)
-- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
-- Readiness endpoint: /ready must return 200
-EOF
+    printf '%s\n' \
+        'Cloudflare Tunnel chart deployed.' \
+        '- Secret: cloudflare/tunnel-token (key: token)' \
+        '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
+        '- Readiness endpoint: /ready must return 200'
 
-cf:tunnel:route host='':
+cf-tunnel-route host='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -265,16 +266,15 @@ cf:tunnel:route host='':
 
     svc_fqdn="traefik.kube-system.svc.cluster.local:80"
 
-    cat <<EOF
-Use the Cloudflare dashboard to create a route for:
-  Hostname: {{ host }}
-  Service URL: http://${svc_fqdn}
-
-Discover Traefik services:
-  kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
-
-Dashboard steps are documented in docs/cloudflare_tunnel.md.
-EOF
+    printf '%s\n' \
+        'Use the Cloudflare dashboard to create a route for:' \
+        "  Hostname: {{ host }}" \
+        "  Service URL: http://${svc_fqdn}" \
+        '' \
+        'Discover Traefik services:' \
+        '  kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik' \
+        '' \
+        'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
 wipe:
     #!/usr/bin/env bash
