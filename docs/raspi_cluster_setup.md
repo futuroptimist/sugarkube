@@ -610,4 +610,18 @@ Once all three default nodes for an environment report `Ready`, proceed to the d
 > For a step-by-step deep dive, see
 > [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
 
+## Exercises
+
+Reinforce your k3s cluster knowledge with these practical tasks:
+
+1. **Modified environment:** To upgrade k3s on an existing cluster, first stop the k3s service with `sudo systemctl stop k3s` (or set `INSTALL_K3S_SKIP_START=false`), then re-run `just ha3 env=dev` with `K3S_CHANNEL=latest` exported to use a newer k3s version. After the upgrade, check `kubectl version` to verify the control plane now reports the updated version.
+
+2. **Node label inspection:** After bringing up your cluster, use `kubectl get nodes --show-labels` to observe the labels automatically applied by k3s (e.g., `node-role.kubernetes.io/control-plane`). Note which nodes have the `NoSchedule` taint preventing workload scheduling.
+
+3. **Discovery validation:** Before joining a second node, run `avahi-browse --all --resolve --terminate | grep -A5 'k3s-sugar-dev'` on the joining node to confirm it can discover the control plane's mDNS advertisement. Record the hostname and port displayed.
+
+4. **Recovery practice:** On a test node, deliberately join it to the wrong cluster by exporting an incorrect token, then use `just wipe` to reset it. After wiping, verify `/var/lib/rancher/k3s/` no longer exists and re-run `just ha3 env=dev` with the correct token.
+
+5. **Log capture and review:** Run `just save-logs env=dev` during a node bring-up and locate the sanitized log file in `logs/up/`. Examine the file to find the mDNS discovery timing (look for `ms_elapsed` fields) and identify any network delays over 200ms.
+
 ---

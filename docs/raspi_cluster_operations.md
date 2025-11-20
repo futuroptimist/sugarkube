@@ -388,6 +388,20 @@ For outages or retrospectives, use the structured templates under `outages/` and
 cross-link your sanitized logs. This maintains a historical record and helps identify
 patterns over time.
 
+## Exercises
+
+Apply your operational knowledge with these hands-on tasks:
+
+1. **Scale a deployment:** Use `kubectl scale deployment <name> --replicas=3 -n token-place` to scale the token.place deployment to three replicas. Verify the new pods are running with `kubectl get pods -n token-place` and observe load distribution across nodes.
+
+2. **Pod log inspection:** Pick any running pod from `kubectl get pods -A` and examine its logs with `kubectl logs <pod-name> -n <namespace>`. If the pod has multiple containers, use `-c <container-name>` to view a specific container's output.
+
+3. **Add an annotation:** Choose a deployment in the `token-place` or `dspace` namespace and add a custom annotation with `kubectl annotate deployment <name> -n <namespace> example.com/owner=yourname`. Verify the annotation appears in `kubectl describe deployment <name> -n <namespace>`.
+
+4. **Helm value override:** Temporarily change a Helm value for token.place by running `helm upgrade token-place ./token-place --namespace token-place --set replicaCount=2` from the `/opt/projects/token.place/charts` directory (or the charts directory at the root of your token.place project). Check the effect with `kubectl get deployment -n token-place` to see the updated replica count.
+
+5. **Cluster health check:** Use `kubectl get componentstatuses` (deprecated but educational; may not work on k3s v1.26+ and newer) or `kubectl get --raw /healthz` to query the cluster's overall health status. Then run `kubectl top nodes` to see CPU and memory usage across the control plane.
+
 ## Next steps
 
 Your cluster is now fully operational with applications running and GitOps

@@ -204,6 +204,20 @@ CI can promote images between namespaces after validation.
 Tag a release in the integration namespace as golden and deploy that tag to `prod`.
 Roll back by redeploying the previous known-good tag if needed.
 
+## Exercises
+
+Practice what you've learned with these hands-on tasks:
+
+1. **Compare automation coverage:** Review the table in §"What the quick start automates" and identify which manual steps from §5 (Form the k3s cluster) are eliminated by `just up dev`. Count how many shell commands you avoid by using the quick-start flow.
+
+2. **Manual token capture:** On your control-plane node, manually retrieve the join token using `sudo cat /var/lib/rancher/k3s/server/node-token` and compare it to the output of `just cat-node-token`. Verify they match character-for-character.
+
+3. **Rehearse before joining:** Before adding a new worker node, run the rehearsal command from §5 step 3 to check network reachability and ensure the control plane is advertising its mDNS service. Record any warnings or errors for troubleshooting.
+
+4. **Clone validation:** After completing an SSD clone in §2, run `sudo ./scripts/ssd_clone.py --target /dev/sda --dry-run` again (replace `/dev/sda` with your target) and observe that the script reports the clone is already complete.
+
+5. **Environment separation:** Create a second environment by exporting `SUGARKUBE_TOKEN_INT` with a new token and running `just up int` on a separate Pi. Verify that `dev` and `int` clusters can coexist on the same LAN with `kubectl get nodes` showing different members.
+
 ## Next steps
 Explore [network_setup.md](network_setup.md) for networking tips and
 [pi_image_cloudflare.md](pi_image_cloudflare.md) for details on exposing services securely.
