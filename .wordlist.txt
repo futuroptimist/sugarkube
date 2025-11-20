@@ -238,3 +238,5 @@ justfile
 justfiles
 systemd
 Taskfile
+componentstatuses
+replicaCount
