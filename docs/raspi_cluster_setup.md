@@ -614,7 +614,7 @@ Once all three default nodes for an environment report `Ready`, proceed to the d
 
 Reinforce your k3s cluster knowledge with these practical tasks:
 
-1. **Modified environment:** Re-run `just ha3 env=dev` on an existing cluster with `K3S_CHANNEL=latest` exported to use a newer k3s version. After the upgrade, check `kubectl version` to verify the control plane now reports the updated version.
+1. **Modified environment:** To upgrade k3s on an existing cluster, first stop the k3s service with `sudo systemctl stop k3s` (or set `INSTALL_K3S_SKIP_START=false`), then re-run `just ha3 env=dev` with `K3S_CHANNEL=latest` exported to use a newer k3s version. After the upgrade, check `kubectl version` to verify the control plane now reports the updated version.
 
 2. **Node label inspection:** After bringing up your cluster, use `kubectl get nodes --show-labels` to observe the labels automatically applied by k3s (e.g., `node-role.kubernetes.io/control-plane`). Note which nodes have the `NoSchedule` taint preventing workload scheduling.
 

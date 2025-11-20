@@ -212,7 +212,7 @@ Practice what you've learned with these hands-on tasks:
 
 2. **Manual token capture:** On your control-plane node, manually retrieve the join token using `sudo cat /var/lib/rancher/k3s/server/node-token` and compare it to the output of `just cat-node-token`. Verify they match character-for-character.
 
-3. **Rehearse before joining:** Before adding a new worker node, run the rehearsal command from §5.3 to check network reachability and ensure the control plane is advertising its mDNS service. Record any warnings or errors for troubleshooting.
+3. **Rehearse before joining:** Before adding a new worker node, run the rehearsal command from §5 step 3 to check network reachability and ensure the control plane is advertising its mDNS service. Record any warnings or errors for troubleshooting.
 
 4. **Clone validation:** After completing an SSD clone in §2, run `sudo ./scripts/ssd_clone.py --target /dev/sda --dry-run` again (replace `/dev/sda` with your target) and observe that the script reports the clone is already complete.
 
