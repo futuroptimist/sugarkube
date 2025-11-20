@@ -4,7 +4,11 @@ personas:
   - software
 ---
 
-# Raspberry Pi Cluster Setup
+# Raspberry Pi Cluster Setup (Manual)
+
+**📚 Part 1 of 3** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
+- **Next:** [Part 2 - Quick-Start Setup](raspi_cluster_setup.md)
+- **Then:** [Part 3 - Operations & Helm](raspi_cluster_operations.md)
 
 > Looking for the condensed bring-up path? Start with
 > [raspi_cluster_setup.md](raspi_cluster_setup.md) for the one-command `just up <env>` flow
