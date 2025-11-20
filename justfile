@@ -167,19 +167,20 @@ prereqs:
     @echo "[deprecated] Use 'just deps' instead of 'just prereqs'." >&2
     sudo -E scripts/install_deps.sh
 
+# Check cluster health by displaying all nodes (guards against running before k3s is installed).
 status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
 
-# Run twice per server after flashing the sugarkube image to build a 3-node HA control plane.
+# Run twice per server during initial bring-up to build a 3-node HA control plane.
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
-# Temporary, sanitized logging for the second run; unset SAVE_DEBUG_LOGS after collecting the artifact.
+# Capture sanitized logs to logs/up/ during cluster bring-up (useful for troubleshooting and documentation).
 save-logs env='dev':
     SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
-# Use when copying tokens into new shells or clusters.
+# Display the k3s node token needed for additional nodes to join the cluster.
 cat-node-token:
     sudo cat /var/lib/rancher/k3s/server/node-token
 
@@ -207,6 +208,7 @@ wlan-up:
 mdns-reset:
     sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
+# Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
 kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
