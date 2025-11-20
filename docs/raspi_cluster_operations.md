@@ -144,6 +144,8 @@ git add logs/up/
 git commit -m "docs: add sanitized bring-up logs for dev cluster"
 ```
 
+> **💡 Troubleshooting:** Need help interpreting your logs? The [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) explains how to read up logs and sanitized mDNS output, with examples of common failure scenarios and their solutions.
+
 ## Step 3: Install Helm and deploy token.place
 
 Now that your cluster is healthy and documented, you're ready to deploy real
