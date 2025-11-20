@@ -6,6 +6,10 @@ personas:
 
 # Raspberry Pi Cluster Setup (Quick Start)
 
+**📚 Part 2 of 3** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
+- **Previous:** [Part 1 - Manual Setup](raspi_cluster_setup_manual.md)
+- **Next:** [Part 3 - Operations & Helm](raspi_cluster_operations.md)
+
 `sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
 
 > **Next step:** When the control plane is stable, continue with
