@@ -18,9 +18,16 @@ personas:
 
 ## Helper commands cheat sheet
 
-- `just ha3 env=dev` — main path for a 3-server dev control plane (run twice per node)
-- `just save-logs env=dev` — temporary sanitized logging during the second run
-- `just cat-node-token` — print the token for future nodes
+Quick reference for the most common recipes when bringing up a 3-node HA dev cluster:
+
+- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev cluster  
+  _When to use:_ Run this twice per server during initial bring-up (first run patches memory cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an existing cluster.
+
+- **`just save-logs env=dev`** — run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/`  
+  _When to use:_ Capture sanitized logs during the second run for troubleshooting or documentation. The logs are automatically filtered to remove sensitive data.
+
+- **`just cat-node-token`** — display the k3s node token for joining nodes  
+  _When to use:_ After bootstrapping the first node, use this to retrieve the token that other nodes need to join the cluster. Copy the output and set it as `SUGARKUBE_TOKEN_DEV` on subsequent nodes.
 
 ## How Discovery Works
 

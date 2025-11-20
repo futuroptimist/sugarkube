@@ -84,15 +84,17 @@ kubectl describe node <name>
 This command inspects taints, kubelet configuration, and resource pressure that
 might prevent pods from scheduling.
 
-### Handy shortcut recipes
+### Operational commands cheat sheet
 
-Sugarkube provides convenient recipes that wrap common operations:
+Quick reference for the most common recipes when operating your cluster:
 
-| Recipe | What it does |
-|--------|--------------|
-| `just ha3 env=dev` | Sets `SUGARKUBE_SERVERS=3` and executes `just up dev`, enabling the HA control-plane flow without retyping the export. |
-| `just cat-node-token` | Prints `/var/lib/rancher/k3s/server/node-token` via `sudo` so you can copy it into `SUGARKUBE_TOKEN_<ENV>` quickly. |
-| `just wipe` | Cleans up a node that joined the wrong cluster; rerun `just ha3 env=dev` afterward. |
+| Recipe | What it does | When to use |
+|--------|--------------|-------------|
+| `just status` | Display cluster nodes with `kubectl get nodes -o wide` | Check overall cluster health and node readiness. Guards against running before k3s is installed. |
+| `just kubeconfig env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
+| `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
+| `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
+| `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
 
 ## Step 2: Capture and commit sanitized bring-up logs
 
