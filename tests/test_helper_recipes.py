@@ -47,7 +47,7 @@ def test_ha3_recipe_has_correct_purpose(justfile_text: str) -> None:
         ha3_start = justfile_text.find("ha3:")
     assert ha3_start != -1, "ha3 recipe not found"
 
-    # Get the next ~10 lines after the recipe declaration
+    # Get the recipe body (next ~300 characters after the recipe declaration)
     ha3_section = justfile_text[ha3_start : ha3_start + 300]
 
     assert "SUGARKUBE_SERVERS=3" in ha3_section
@@ -66,7 +66,7 @@ def test_save_logs_recipe_has_correct_purpose(justfile_text: str) -> None:
         save_logs_start = justfile_text.find("save-logs:")
     assert save_logs_start != -1, "save-logs recipe not found"
 
-    # Get the next ~10 lines after the recipe declaration
+    # Get the recipe body (next ~300 characters after the recipe declaration)
     save_logs_section = justfile_text[save_logs_start : save_logs_start + 300]
 
     assert "SAVE_DEBUG_LOGS=1" in save_logs_section
@@ -83,7 +83,7 @@ def test_cat_node_token_recipe_has_correct_purpose(justfile_text: str) -> None:
     cat_token_start = justfile_text.find("cat-node-token:")
     assert cat_token_start != -1, "cat-node-token recipe not found"
 
-    # Get the next ~10 lines after the recipe declaration
+    # Get the recipe body (next ~300 characters after the recipe declaration)
     cat_token_section = justfile_text[cat_token_start : cat_token_start + 300]
 
     assert "/var/lib/rancher/k3s/server/node-token" in cat_token_section

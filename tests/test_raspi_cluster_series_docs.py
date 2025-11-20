@@ -33,40 +33,33 @@ def operations_text() -> str:
     return OPERATIONS_DOC.read_text(encoding="utf-8")
 
 
+@pytest.fixture(scope="module")
+def series_section(index_text: str) -> str:
+    """Extract the 'Raspberry Pi cluster series' section from index.md."""
+    series_start = index_text.find("## Raspberry Pi cluster series")
+    next_section = index_text.find("\n## ", series_start + 1)
+    if next_section == -1:
+        return index_text[series_start:]
+    else:
+        return index_text[series_start:next_section]
+
+
 # Test series linkage from index.md
 def test_index_lists_series_section(index_text: str) -> None:
     """The index should have a dedicated section for the Raspberry Pi cluster series."""
     assert "## Raspberry Pi cluster series" in index_text
 
 
-def test_index_lists_all_three_docs(index_text: str) -> None:
+def test_index_lists_all_three_docs(series_section: str) -> None:
     """The index should list all three docs in the series."""
-    # Find the series section
-    series_start = index_text.find("## Raspberry Pi cluster series")
-    assert series_start != -1, "Series section not found"
-
-    # Get text from series section to next section or end
-    next_section = index_text.find("\n## ", series_start + 1)
-    if next_section == -1:
-        series_section = index_text[series_start:]
-    else:
-        series_section = index_text[series_start:next_section]
-
     # Check all three docs are mentioned
     assert "raspi_cluster_setup_manual.md" in series_section
     assert "raspi_cluster_setup.md" in series_section
     assert "raspi_cluster_operations.md" in series_section
 
 
-def test_index_describes_series_as_three_parts(index_text: str) -> None:
+def test_index_describes_series_as_three_parts(series_section: str) -> None:
     """The index should describe the series as having three parts."""
-    series_start = index_text.find("## Raspberry Pi cluster series")
-    next_section = index_text.find("\n## ", series_start + 1)
-    if next_section == -1:
-        series_section = index_text[series_start:]
-    else:
-        series_section = index_text[series_start:next_section]
-
     # Check that the series is described with numbered parts
     assert any(
         phrase in series_section for phrase in ["three-part", "3-part", "1.", "2.", "3."]
@@ -123,14 +116,14 @@ def test_operations_mentions_manual(operations_text: str) -> None:
 # Test that each doc mentions the series
 def test_manual_setup_mentions_series(manual_setup_text: str) -> None:
     """Part 1 should mention it's part of the Raspberry Pi cluster series."""
-    assert "Raspberry Pi cluster series" in manual_setup_text or "series" in manual_setup_text
+    assert "Raspberry Pi cluster series" in manual_setup_text
 
 
 def test_quick_start_mentions_series(quick_start_text: str) -> None:
     """Part 2 should mention it's part of the Raspberry Pi cluster series."""
-    assert "Raspberry Pi cluster series" in quick_start_text or "series" in quick_start_text
+    assert "Raspberry Pi cluster series" in quick_start_text
 
 
 def test_operations_mentions_series(operations_text: str) -> None:
     """Part 3 should mention it's part of the Raspberry Pi cluster series."""
-    assert "Raspberry Pi cluster series" in operations_text or "series" in operations_text
+    assert "Raspberry Pi cluster series" in operations_text
