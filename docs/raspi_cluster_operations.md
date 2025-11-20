@@ -88,7 +88,7 @@ Sugarkube provides convenient recipes that wrap common operations:
 |--------|--------------|
 | `just ha3 env=dev` | Sets `SUGARKUBE_SERVERS=3` and executes `just up dev`, enabling the HA control-plane flow without retyping the export. |
 | `just cat-node-token` | Prints `/var/lib/rancher/k3s/server/node-token` via `sudo` so you can copy it into `SUGARKUBE_TOKEN_<ENV>` quickly. |
-| `just wipe` | Cleans up a node that joined the wrong cluster, then rerun `just ha3 env=dev`. |
+| `just wipe` | Cleans up a node that joined the wrong cluster; rerun `just ha3 env=dev` afterward. |
 
 ## Step 2: Capture and commit sanitized bring-up logs
 
@@ -238,12 +238,25 @@ git clone https://github.com/democratizedspace/dspace.git
 **What you should see:** Git clones the repository and creates `/opt/projects/dspace/`
 with the application code and Helm charts.
 
-### Deploy dspace to your cluster
+### Prepare the Helm chart
 
-Navigate to the dspace charts directory and install:
+Navigate to the dspace charts directory and update dependencies:
 
 ```bash
 cd /opt/projects/dspace/charts
+helm dependency update ./dspace
+```
+
+**What you should see:** Helm checks for chart dependencies. If no external
+dependencies are defined, you'll see output indicating `Saving 0 charts`, which
+is normal. This step ensures consistency with the pattern from Step 3 and
+future-proofs the deployment if dependencies are added later.
+
+### Deploy dspace to your cluster
+
+Install the chart:
+
+```bash
 helm upgrade --install dspace ./dspace \
   --namespace dspace --create-namespace
 ```
@@ -328,6 +341,12 @@ spec:
         name: token-place
   interval: 10m
 ```
+
+> **Note:** This is a simplified example showing the HelmRelease structure. In
+> practice, you'll also need to create a GitRepository resource that points to
+> your token.place repository, or use a HelmRepository if the chart is published
+> to a Helm repository. See the [Flux documentation](https://fluxcd.io/flux/components/source/)
+> for complete GitRepository and HelmRepository configuration examples.
 
 Commit and push this file. Flux will detect the change and deploy the release
 automatically.
