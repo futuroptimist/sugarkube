@@ -29,10 +29,11 @@ logs, preparing Helm, and rolling out real workloads like
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
 
-## Deploy your first app (dspace@v3)
+## Deploy your first app (generic ingress path)
 
-If you want a fast path to your first live app, follow this numbered tutorial. It
-assumes your `env=dev` cluster is online and reachable with kubectl.
+If you want a fast path to your first live app, follow this numbered tutorial.
+It assumes your `env=dev` cluster is online and reachable with kubectl and that
+Traefik is your ingress controller.
 
 1. Confirm Traefik is present:
 
@@ -40,36 +41,31 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
    kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
    ```
 
-2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
+2. Install Cloudflare Tunnel on a node that can reach the cluster API (see
+   [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
    just cf:tunnel:install env=dev token=$CF_TUNNEL_TOKEN
    ```
 
-3. Create a Tunnel route in the Cloudflare dashboard from your FQDN to
+3. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
    `http://traefik.kube-system.svc.cluster.local:80`. Cluster DNS makes the
    `traefik.kube-system.svc.cluster.local` hostname resolvable from every node,
    so the tunnel can reach Traefik reliably.
 
-4. Install the app from the [dspace v3 docs][dspace-v3-docs]:
+4. Install your app using its Helm or `just` recipe. For example, the
+   [dspace app guide](apps/dspace.md) shows how to deploy dspace v3 with a
+   Traefik ingress host and tested values.
+
+5. Verify everything is healthy, then browse to the FQDN on your phone or
+   laptop:
 
    ```bash
-   just dspace:install env=dev host=dspace-v3.<your-domain>
+   kubectl -n <app-namespace> get ingress,pods,svc
    ```
 
-5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
-
-   ```bash
-   kubectl -n dspace get ingress,pods,svc
-   ```
-
-6. Iterate new builds from v3:
-
-   ```bash
-   just dspace:upgrade tag=v3-<shortsha>
-   ```
-
-[dspace-v3-docs]: https://github.com/democratizedspace/dspace/tree/v3/docs
+6. Iterate new builds using your app's upgrade instructions (e.g., the dspace
+   guide covers rolling new `v3-<shortsha>` images).
 
 ## Step 1: Verify your 3-node control plane is healthy
 
