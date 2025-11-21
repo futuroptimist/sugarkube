@@ -31,6 +31,11 @@ shim_missing_command() {
   local name="$1"
   shift || true
 
+  if [ -z "${name}" ]; then
+    echo "shim_missing_command: command name required" >&2
+    return 1
+  fi
+
   if [ "${force}" -ne 1 ] && command -v "${name}" >/dev/null 2>&1; then
     return 0
   fi

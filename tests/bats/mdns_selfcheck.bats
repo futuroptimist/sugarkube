@@ -633,7 +633,6 @@ EOS
 
   run -127 gdbus --version
 
-  [ "$status" -eq 127 ]
   [ -f "${BATS_TEST_TMPDIR}/gdbus-shim.log" ]
 }
 
