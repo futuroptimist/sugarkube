@@ -41,8 +41,9 @@ if [ -d "${services_dir}" ]; then
         type) type="$value" ;;
         port) port="$value" ;;
         host) service_host="$value" ;;
+        ipv4) ipv4="$value" ;;
       esac
-    done < <(grep -E '^(instance|type|port|host)=' "${file}")
+    done < <(grep -E '^(instance|type|port|host|ipv4)=' "${file}")
     if [ "${service_host}" = "${requested_host}" ] || [ "${requested_host}" = "${service_host%.local}" ]; then
       if [ -n "${ipv4}" ]; then
         printf '%s %s\n' "${requested_host}" "${ipv4}"

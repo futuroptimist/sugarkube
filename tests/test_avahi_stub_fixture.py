@@ -52,7 +52,7 @@ def test_stub_roundtrip_publishes_and_browses(tmp_path: Path) -> None:
             if time.time() - start > timeout:
                 raise RuntimeError(f"Stub service file {service_file} not created after {timeout}s")
             time.sleep(interval)
-        
+
         browse = subprocess.run(
             ["avahi-browse", "--parsable", "--terminate", "_k3s-test._tcp"],
             env=env,
