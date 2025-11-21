@@ -11,14 +11,23 @@ setup() {
   fi
 
   if ! command -v avahi-publish >/dev/null 2>&1; then
+    # TODO: Remove hermetic stub fallback once Avahi is in CI image
+    # Root cause: CI environment lacks Avahi tools by default
+    # Estimated fix: Add avahi-utils to CI image or use stub-only tests
     skip "avahi-publish not available even after enabling stub"
   fi
 
   if ! command -v avahi-browse >/dev/null 2>&1; then
+    # TODO: Remove hermetic stub fallback once Avahi is in CI image
+    # Root cause: CI environment lacks Avahi tools by default
+    # Estimated fix: Add avahi-utils to CI image or use stub-only tests
     skip "avahi-browse not available even after enabling stub"
   fi
 
   if ! command -v avahi-resolve >/dev/null 2>&1; then
+    # TODO: Remove hermetic stub fallback once Avahi is in CI image
+    # Root cause: CI environment lacks Avahi tools by default
+    # Estimated fix: Add avahi-utils to CI image or use stub-only tests
     skip "avahi-resolve not available even after enabling stub"
   fi
 

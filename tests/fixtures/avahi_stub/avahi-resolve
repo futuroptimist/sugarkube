@@ -8,7 +8,7 @@ requested_host=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -n|--name)
-      shift
+      shift || true
       requested_host="${1:-}"
       ;;
     -4|-6|--address)
@@ -33,11 +33,17 @@ if [ -d "${services_dir}" ]; then
     type=""
     port=""
     service_host=""
-    # shellcheck disable=SC1090
-    source "${file}"
-    if [ -z "${service_host}" ] && [ -n "${host:-}" ]; then
-      service_host="${host}"
-    fi
+    # Safely parse key=value pairs from the .service file
+    # shellcheck disable=SC2034  # instance, type, port parsed for completeness but not currently used
+    while IFS='=' read -r key value; do
+      case "$key" in
+        instance) instance="$value" ;;
+        type) type="$value" ;;
+        port) port="$value" ;;
+        host) service_host="$value" ;;
+        ipv4) ipv4="$value" ;;
+      esac
+    done < <(grep -E '^(instance|type|port|host|ipv4)=' "${file}")
     if [ "${service_host}" = "${requested_host}" ] || [ "${requested_host}" = "${service_host%.local}" ]; then
       if [ -n "${ipv4}" ]; then
         printf '%s %s\n' "${requested_host}" "${ipv4}"
