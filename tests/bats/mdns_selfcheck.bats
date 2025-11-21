@@ -2,6 +2,8 @@
 
 load helpers/path_stub
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   setup_path_stub_dir
 }
@@ -622,14 +624,20 @@ EOS
   [[ "$output" =~ reason=instance_not_found ]]
 }
 
-@test "mdns self-check falls back to CLI when dbus unsupported" {
-  if ! command -v gdbus >/dev/null 2>&1; then
-    # TODO: Install gdbus or provide a shim so the DBus path stays exercised.
-    # Root cause: Minimal systems omit libglib2.0-bin, leaving the helper unavailable.
-    # Estimated fix: 10m to install libglib2.0-bin or wire the test through stub_command.
-    skip "gdbus not available"
-  fi
+@test "mdns test harness shims gdbus when unavailable" {
+  shim_missing_command --force gdbus <<'EOS'
+#!/usr/bin/env bash
+echo "shimmed" >>"${BATS_TEST_TMPDIR}/gdbus-shim.log"
+exit 127
+EOS
 
+  run -127 gdbus --version
+
+  [ "$status" -eq 127 ]
+  [ -f "${BATS_TEST_TMPDIR}/gdbus-shim.log" ]
+}
+
+@test "mdns self-check falls back to CLI when dbus unsupported" {
   stub_command gdbus <<'EOS'
 #!/usr/bin/env bash
 echo "dbus" >>"${BATS_TEST_TMPDIR}/gdbus.log"
