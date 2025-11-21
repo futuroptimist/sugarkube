@@ -276,6 +276,154 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
+helm:oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
+        echo "Set release, namespace, and chart to install." >&2
+        exit 1
+    fi
+
+    chart_version="{{ version }}"
+    if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
+        chart_version="$(
+            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 || true
+        )"
+    fi
+
+    version_args=()
+    if [ -n "${chart_version}" ]; then
+        version_args+=(--version "${chart_version}")
+    fi
+
+    value_args=()
+    if [ -n "{{ values }}" ]; then
+        value_args+=(-f "{{ values }}")
+    fi
+
+    image_tag="{{ tag }}"
+    if [ -z "${image_tag}" ] && [ -n "{{ default_tag }}" ]; then
+        image_tag="{{ default_tag }}"
+    fi
+
+    set_args=()
+    if [ -n "{{ host }}" ]; then
+        set_args+=(--set ingress.host="{{ host }}")
+    fi
+    if [ -n "${image_tag}" ]; then
+        set_args+=(--set image.tag="${image_tag}")
+    fi
+
+    helm upgrade --install "{{ release }}" "{{ chart }}" \
+        --namespace "{{ namespace }}" \
+        --create-namespace \
+        "${value_args[@]}" \
+        "${set_args[@]}" \
+        "${version_args[@]}"
+
+helm:oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
+        echo "Set release, namespace, and chart to upgrade." >&2
+        exit 1
+    fi
+
+    chart_version="{{ version }}"
+    if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
+        chart_version="$(
+            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 || true
+        )"
+    fi
+
+    version_args=()
+    if [ -n "${chart_version}" ]; then
+        version_args+=(--version "${chart_version}")
+    fi
+
+    value_args=()
+    if [ -n "{{ values }}" ]; then
+        value_args+=(-f "{{ values }}")
+    fi
+
+    image_tag="{{ tag }}"
+    if [ -z "${image_tag}" ] && [ -n "{{ default_tag }}" ]; then
+        image_tag="{{ default_tag }}"
+    fi
+
+    set_args=()
+    if [ -n "{{ host }}" ]; then
+        set_args+=(--set ingress.host="{{ host }}")
+    fi
+    if [ -n "${image_tag}" ]; then
+        set_args+=(--set image.tag="${image_tag}")
+    fi
+
+    helm upgrade "{{ release }}" "{{ chart }}" \
+        --namespace "{{ namespace }}" \
+        --reuse-values \
+        "${value_args[@]}" \
+        "${set_args[@]}" \
+        "${version_args[@]}"
+
+app:status namespace='' release='' host_key='ingress.host':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ namespace }}" ]; then
+        echo "Set namespace to inspect." >&2
+        exit 1
+    fi
+
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "kubectl is required to check the deployment." >&2
+        exit 1
+    fi
+
+    kubectl -n "{{ namespace }}" get pods
+    kubectl -n "{{ namespace }}" get ingress
+
+    if [ -n "{{ release }}" ] && command -v helm >/dev/null 2>&1; then
+        host="$(
+            helm get values "{{ release }}" \
+                --namespace "{{ namespace }}" \
+                --all --output json 2>/dev/null |
+                python3 - "{{ host_key }}" <<'PY'
+import json
+import sys
+
+try:
+    host_key = sys.argv[1]
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+
+def get_with_dots(payload, dotted_key):
+    node = payload
+    for part in dotted_key.split('.'):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
+
+if isinstance(data, dict):
+    host_value = get_with_dots(data, host_key)
+    if host_value:
+        print(host_value)
+PY
+        )"
+    else
+        host=""
+    fi
+
+    if [ -n "${host}" ]; then
+        printf 'Public URL: https://%s\n' "${host}"
+    else
+        echo "Public URL host not recorded; check the Helm release values."
+    fi
+
 wipe:
     #!/usr/bin/env bash
     set -euo pipefail
