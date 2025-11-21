@@ -43,7 +43,16 @@ def test_stub_roundtrip_publishes_and_browses(tmp_path: Path) -> None:
     )
 
     try:
-        time.sleep(0.2)
+        # Wait for the stub publisher to create the service file (max 2s).
+        service_file = Path(env["AVAHI_STUB_DIR"]) / "services" / "k3s-test@node0.local.service"
+        timeout = 2.0
+        interval = 0.05
+        start = time.time()
+        while not service_file.exists():
+            if time.time() - start > timeout:
+                raise RuntimeError(f"Stub service file {service_file} not created after {timeout}s")
+            time.sleep(interval)
+        
         browse = subprocess.run(
             ["avahi-browse", "--parsable", "--terminate", "_k3s-test._tcp"],
             env=env,

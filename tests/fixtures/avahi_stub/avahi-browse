@@ -8,7 +8,7 @@ service_type=""
 # Accept common avahi-browse flags and treat last non-flag arg as service type
 for arg in "$@"; do
   case "${arg}" in
-    -*|-*)
+    -*)
       continue
       ;;
     *)
@@ -34,8 +34,23 @@ for file in "${services_dir}"/*.service; do
   host=""
   ipv4=""
   txt=""
-  # shellcheck disable=SC1090
-  source "${file}"
+  # Safely parse key=value pairs from the .service file
+  while IFS='=' read -r key value; do
+    case "$key" in
+      instance) instance="$value" ;;
+      type) type="$value" ;;
+      port) port="$value" ;;
+      host) host="$value" ;;
+      ipv4) ipv4="$value" ;;
+      txt) txt="$value" ;;
+    esac
+  done < <(grep -E '^(instance|type|port|host|ipv4|txt)=' "${file}")
+  # Basic validation: ensure required variables are not empty and do not contain newlines
+  for var in instance type port host ipv4; do
+    if [[ -z "${!var}" ]] || [[ "${!var}" =~ [^[:print:]] ]]; then
+      continue 2
+    fi
+  done
   if [ "${type}" != "${service_type}" ]; then
     continue
   fi

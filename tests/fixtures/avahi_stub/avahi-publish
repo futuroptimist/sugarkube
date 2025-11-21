@@ -16,8 +16,7 @@ shift 3
 # Remaining args are TXT records, join with spaces
 extra_txt="$*"
 
-host="${AVAHI_STUB_HOST:-$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost.local")}" \
-|| host="localhost.local"
+host="${AVAHI_STUB_HOST:-$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost.local")}"
 ipv4="${AVAHI_STUB_IPV4:-127.0.0.1}"
 
 service_file="${state_dir}/services/${instance//\//_}.service"
