@@ -1,32 +1,34 @@
 #!/usr/bin/env bats
 
 setup() {
-  if [ "${AVAHI_AVAILABLE:-0}" != "1" ]; then
-    # TODO: Provide a hermetic Avahi fixture so this suite runs without AVAHI_AVAILABLE=1.
-    # Root cause: The integration exercise still depends on a host Avahi daemon toggle.
-    # Estimated fix: 60m to bundle a containerised Avahi helper or dedicated stub binaries.
-    skip "AVAHI_AVAILABLE not enabled"
+  local helper_path
+  helper_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../fixtures/avahi_stub" && pwd)"/avahi_stub_helpers.bash
+
+  if [ "${AVAHI_AVAILABLE:-0}" != "1" ] || ! command -v avahi-publish >/dev/null 2>&1; then
+    # shellcheck source=tests/fixtures/avahi_stub/avahi_stub_helpers.bash
+    . "${helper_path}"
+    enable_avahi_stub
   fi
 
   if ! command -v avahi-publish >/dev/null 2>&1; then
-    # TODO: Ship avahi-publish alongside the mdns_roundtrip fixtures for local runs.
-    # Root cause: Developers without avahi-utils cannot advertise services during the test.
-    # Estimated fix: 20m to install avahi-utils or extend the stub harness in tests/fixtures.
-    skip "avahi-publish not available"
+    # TODO: Remove hermetic stub fallback once Avahi is in CI image
+    # Root cause: CI environment lacks Avahi tools by default
+    # Estimated fix: Add avahi-utils to CI image or use stub-only tests
+    skip "avahi-publish not available even after enabling stub"
   fi
 
   if ! command -v avahi-browse >/dev/null 2>&1; then
-    # TODO: Package avahi-browse for the integration harness to browse advertised services.
-    # Root cause: The suite shells out to avahi-browse, which is missing on minimal installs.
-    # Estimated fix: 20m to include avahi-utils in docs or provide a bats stub.
-    skip "avahi-browse not available"
+    # TODO: Remove hermetic stub fallback once Avahi is in CI image
+    # Root cause: CI environment lacks Avahi tools by default
+    # Estimated fix: Add avahi-utils to CI image or use stub-only tests
+    skip "avahi-browse not available even after enabling stub"
   fi
 
   if ! command -v avahi-resolve >/dev/null 2>&1; then
-    # TODO: Ensure avahi-resolve is present so the resolver path exercises real binaries.
-    # Root cause: The integration test still shells to avahi-resolve to confirm hostnames.
-    # Estimated fix: 20m to install avahi-utils or extend mdns fixtures with a resolver stub.
-    skip "avahi-resolve not available"
+    # TODO: Remove hermetic stub fallback once Avahi is in CI image
+    # Root cause: CI environment lacks Avahi tools by default
+    # Estimated fix: Add avahi-utils to CI image or use stub-only tests
+    skip "avahi-resolve not available even after enabling stub"
   fi
 
   publisher_pid=""

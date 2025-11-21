@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${AVAHI_STUB_DIR:-/tmp/avahi_stub}"
+services_dir="${state_dir}/services"
+requested_host=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -n|--name)
+      shift || true
+      requested_host="${1:-}"
+      ;;
+    -4|-6|--address)
+      ;;
+    *)
+      # ignore other flags
+      ;;
+  esac
+  shift || true
+done
+
+if [ -z "${requested_host}" ]; then
+  echo "avahi-resolve stub requires a hostname" >&2
+  exit 64
+fi
+
+ipv4="${AVAHI_STUB_IPV4:-127.0.0.1}"
+if [ -d "${services_dir}" ]; then
+  shopt -s nullglob
+  for file in "${services_dir}"/*.service; do
+    instance=""
+    type=""
+    port=""
+    service_host=""
+    # Safely parse key=value pairs from the .service file
+    # shellcheck disable=SC2034  # instance, type, port parsed for completeness but not currently used
+    while IFS='=' read -r key value; do
+      case "$key" in
+        instance) instance="$value" ;;
+        type) type="$value" ;;
+        port) port="$value" ;;
+        host) service_host="$value" ;;
+        ipv4) ipv4="$value" ;;
+      esac
+    done < <(grep -E '^(instance|type|port|host|ipv4)=' "${file}")
+    if [ "${service_host}" = "${requested_host}" ] || [ "${requested_host}" = "${service_host%.local}" ]; then
+      if [ -n "${ipv4}" ]; then
+        printf '%s %s\n' "${requested_host}" "${ipv4}"
+        exit 0
+      fi
+    fi
+  done
+fi
+
+printf '%s %s\n' "${requested_host}" "${ipv4}"
+exit 0
