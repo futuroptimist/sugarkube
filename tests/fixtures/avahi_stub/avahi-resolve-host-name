@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -4|-6|--timeout=*)
+      ;;
+    *)
+      host="${1}"
+      ;;
+  esac
+  shift || true
+done
+
+if [ -z "${host}" ]; then
+  echo "avahi-resolve-host-name stub requires a hostname" >&2
+  exit 64
+fi
+
+ipv4="${AVAHI_STUB_IPV4:-127.0.0.1}"
+printf '%s %s\n' "${host}" "${ipv4}"

@@ -19,8 +19,9 @@ Sugarkube uses a comprehensive testing strategy combining unit tests, integratio
 ### Integration Tests
 
 **mDNS Roundtrip**: Located in `tests/integration/mdns_roundtrip.bats`
-- Requires `AVAHI_AVAILABLE=1` environment variable
-- Tests actual Avahi service publishing and discovery
+- Enables a hermetic Avahi stub when `avahi-*` binaries are missing, so no
+  host services are required.
+- Tests service publishing and discovery
 - Validates the complete mDNS discovery flow
 
 **Pi Smoke Tests**: Located in `tests/pi_smoke_test_unit_test.py`

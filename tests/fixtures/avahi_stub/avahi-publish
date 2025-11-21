@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${AVAHI_STUB_DIR:-/tmp/avahi_stub}"
+mkdir -p "${state_dir}/services"
+
+if [ "$#" -lt 4 ] || [ "$1" != "-s" ]; then
+  echo "avahi-publish stub expects: -s <instance> <type> <port> [txt...]" >&2
+  exit 64
+fi
+shift
+instance="$1"
+type="$2"
+port="$3"
+shift 3
+# Remaining args are TXT records, join with spaces
+extra_txt="$*"
+
+host="${AVAHI_STUB_HOST:-$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost.local")}" \
+|| host="localhost.local"
+ipv4="${AVAHI_STUB_IPV4:-127.0.0.1}"
+
+service_file="${state_dir}/services/${instance//\//_}.service"
+{
+  printf 'instance=%s\n' "${instance}"
+  printf 'type=%s\n' "${type}"
+  printf 'port=%s\n' "${port}"
+  printf 'host=%s\n' "${host}"
+  printf 'ipv4=%s\n' "${ipv4}"
+  printf 'txt=%s\n' "${extra_txt}"
+} >"${service_file}"
+
+# Keep the stub running to mimic avahi-publish's long-lived process
+trap 'rm -f "${service_file}.pid"' EXIT
+printf '%s' "$$" >"${service_file}.pid"
+
+while true; do
+  sleep 1
+done

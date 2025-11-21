@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${AVAHI_STUB_DIR:-/tmp/avahi_stub}"
+services_dir="${state_dir}/services"
+service_type=""
+
+# Accept common avahi-browse flags and treat last non-flag arg as service type
+for arg in "$@"; do
+  case "${arg}" in
+    -*|-*)
+      continue
+      ;;
+    *)
+      service_type="${arg}"
+      ;;
+  esac
+done
+
+if [ -z "${service_type}" ]; then
+  echo "avahi-browse stub requires a service type" >&2
+  exit 64
+fi
+
+if [ ! -d "${services_dir}" ]; then
+  exit 1
+fi
+
+shopt -s nullglob
+for file in "${services_dir}"/*.service; do
+  instance=""
+  type=""
+  port=""
+  host=""
+  ipv4=""
+  txt=""
+  # shellcheck disable=SC1090
+  source "${file}"
+  if [ "${type}" != "${service_type}" ]; then
+    continue
+  fi
+  txt_fields=""
+  if [ -n "${txt}" ]; then
+    IFS=' ' read -r -a txt_tokens <<<"${txt}"
+    for token in "${txt_tokens[@]}"; do
+      sanitized="${token//;/}"
+      txt_fields="${txt_fields};${sanitized}"
+    done
+  fi
+  printf '=;stub;IPv4;%s;%s;local;%s;%s;%s%s\n' \
+    "${instance}" "${type}" "${host}" "${ipv4}" "${port}" "${txt_fields}"
+done
