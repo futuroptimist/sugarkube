@@ -276,20 +276,23 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-helm:oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+_helm:oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
-        echo "Set release, namespace, and chart to install." >&2
+        echo "Set release, namespace, and chart to deploy." >&2
         exit 1
     fi
 
     chart_version="{{ version }}"
     if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
         chart_version="$(
-            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 || true
+            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 | tr -d '[:space:]' || true
         )"
+        if [ -z "${chart_version}" ]; then
+            echo "Warning: version_file '{{ version_file }}' did not contain a valid version" >&2
+        fi
     fi
 
     version_args=()
@@ -315,59 +318,35 @@ helm:oci-install release='' namespace='' chart='' values='' host='' version='' v
         set_args+=(--set image.tag="${image_tag}")
     fi
 
-    helm upgrade --install "{{ release }}" "{{ chart }}" \
-        --namespace "{{ namespace }}" \
-        --create-namespace \
-        "${value_args[@]}" \
-        "${set_args[@]}" \
-        "${version_args[@]}"
+    helm_args=(upgrade "{{ release }}" "{{ chart }}" --namespace "{{ namespace }}")
+
+    if [ "{{ allow_install }}" = "true" ]; then
+        helm_args+=(--install --create-namespace)
+    fi
+
+    if [ "{{ reuse_values }}" = "true" ]; then
+        helm_args+=(--reuse-values)
+    fi
+
+    if [ ${#value_args[@]} -gt 0 ]; then
+        helm_args+=("${value_args[@]}")
+    fi
+
+    if [ ${#set_args[@]} -gt 0 ]; then
+        helm_args+=("${set_args[@]}")
+    fi
+
+    if [ ${#version_args[@]} -gt 0 ]; then
+        helm_args+=("${version_args[@]}")
+    fi
+
+    helm "${helm_args[@]}"
+
+helm:oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    @just _helm:oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
 
 helm:oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
-        echo "Set release, namespace, and chart to upgrade." >&2
-        exit 1
-    fi
-
-    chart_version="{{ version }}"
-    if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
-        chart_version="$(
-            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 || true
-        )"
-    fi
-
-    version_args=()
-    if [ -n "${chart_version}" ]; then
-        version_args+=(--version "${chart_version}")
-    fi
-
-    value_args=()
-    if [ -n "{{ values }}" ]; then
-        value_args+=(-f "{{ values }}")
-    fi
-
-    image_tag="{{ tag }}"
-    if [ -z "${image_tag}" ] && [ -n "{{ default_tag }}" ]; then
-        image_tag="{{ default_tag }}"
-    fi
-
-    set_args=()
-    if [ -n "{{ host }}" ]; then
-        set_args+=(--set ingress.host="{{ host }}")
-    fi
-    if [ -n "${image_tag}" ]; then
-        set_args+=(--set image.tag="${image_tag}")
-    fi
-
-    helm upgrade "{{ release }}" "{{ chart }}" \
-        --namespace "{{ namespace }}" \
-        --reuse-values \
-        "${value_args[@]}" \
-        "${set_args[@]}" \
-        "${version_args[@]}"
-
+    @just _helm:oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
 app:status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -397,8 +376,12 @@ import sys
 try:
     host_key = sys.argv[1]
     data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
+except (json.JSONDecodeError, KeyError, IndexError) as e:
+    sys.stderr.write(f"Error extracting host value: {e}\n")
+    sys.exit(1)
+except Exception as e:
+    sys.stderr.write(f"Unexpected error: {e}\n")
+    sys.exit(1)
 
 def get_with_dots(payload, dotted_key):
     node = payload
