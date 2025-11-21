@@ -25,9 +25,8 @@ setup() {
   fi
 
   if ! command -v getent >/dev/null 2>&1; then
-    # TODO: Provide getent stub or document NSS requirements for cluster formation tests.
-    # Root cause: Tests use getent for hostname resolution verification in discovery workflow.
-    # Estimated fix: 15m to create a getent stub or document the dependency in test README.
+    # Documented dependency: discovery checks rely on host NSS/getent for .local validation.
+    # See docs/mdns_troubleshooting.md#integration-test-prerequisites for setup details.
     skip "getent not available"
   fi
 
