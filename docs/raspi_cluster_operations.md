@@ -45,7 +45,7 @@ Traefik is your ingress controller.
    [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
-   just cf:tunnel:install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
    ```
 
 3. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
