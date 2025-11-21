@@ -53,7 +53,7 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
 2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](../cloudflare_tunnel.md)):
 
    ```bash
-   just cf:tunnel:install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
    ```
 
 3. Create a Tunnel route in the Cloudflare dashboard from your FQDN to
@@ -64,7 +64,13 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
 4. Install the app:
 
    ```bash
-   just dspace:install env=dev host=dspace-v3.<your-domain>
+   just helm-oci-install \
+     release=dspace namespace=dspace \
+     chart=oci://ghcr.io/democratizedspace/charts/dspace \
+     values=docs/examples/dspace.values.dev.yaml \
+     version_file=docs/apps/dspace.version \
+     host=dspace-v3.<your-domain> \
+     default_tag=v3-latest
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
@@ -76,7 +82,12 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
 6. Iterate new builds from v3:
 
    ```bash
-   just dspace:upgrade tag=v3-<shortsha>
+   just helm-oci-upgrade \
+     release=dspace namespace=dspace \
+     chart=oci://ghcr.io/democratizedspace/charts/dspace \
+     values=docs/examples/dspace.values.dev.yaml \
+     version_file=docs/apps/dspace.version \
+     tag=v3-<shortsha>
    ```
 
 ## Troubleshooting
