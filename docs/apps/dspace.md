@@ -14,7 +14,7 @@ changing the arguments.
 
 ```bash
 # Install or upgrade the release with a Traefik ingress host (defaults to v3-latest image tag)
-just helm:oci-install \
+just helm-oci-install \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml \
@@ -23,10 +23,10 @@ just helm:oci-install \
   default_tag=v3-latest
 
 # Check pods and ingress status with the public URL
-just app:status namespace=dspace release=dspace
+just app-status namespace=dspace release=dspace
 
 # Bump the image tag and roll the release (optionally override chart version)
-just helm:oci-upgrade \
+just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml \

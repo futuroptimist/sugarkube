@@ -276,7 +276,7 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-_helm:oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' allow_install='false' reuse_values='false':
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -342,12 +342,13 @@ _helm:oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     helm "${helm_args[@]}"
 
-helm:oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm:oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
 
-helm:oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm:oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
-app:status namespace='' release='' host_key='ingress.host':
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
+
+app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -370,32 +371,32 @@ app:status namespace='' release='' host_key='ingress.host':
                 --namespace "{{ namespace }}" \
                 --all --output json 2>/dev/null |
                 python3 - "{{ host_key }}" <<'PY'
-import json
-import sys
+                import json
+                import sys
 
-try:
-    host_key = sys.argv[1]
-    data = json.load(sys.stdin)
-except (json.JSONDecodeError, KeyError, IndexError) as e:
-    sys.stderr.write(f"Error extracting host value: {e}\n")
-    sys.exit(1)
-except Exception as e:
-    sys.stderr.write(f"Unexpected error: {e}\n")
-    sys.exit(1)
+                try:
+                    host_key = sys.argv[1]
+                    data = json.load(sys.stdin)
+                except (json.JSONDecodeError, KeyError, IndexError) as e:
+                    sys.stderr.write(f"Error extracting host value: {e}\n")
+                    sys.exit(1)
+                except Exception as e:
+                    sys.stderr.write(f"Unexpected error: {e}\n")
+                    sys.exit(1)
 
-def get_with_dots(payload, dotted_key):
-    node = payload
-    for part in dotted_key.split('.'):
-        if not isinstance(node, dict):
-            return None
-        node = node.get(part)
-    return node
+                def get_with_dots(payload, dotted_key):
+                    node = payload
+                    for part in dotted_key.split('.'):
+                        if not isinstance(node, dict):
+                            return None
+                        node = node.get(part)
+                    return node
 
-if isinstance(data, dict):
-    host_value = get_with_dots(data, host_key)
-    if host_value:
-        print(host_value)
-PY
+                if isinstance(data, dict):
+                    host_value = get_with_dots(data, host_key)
+                    if host_value:
+                        print(host_value)
+                PY
         )"
     else
         host=""
