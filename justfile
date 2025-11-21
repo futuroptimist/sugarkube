@@ -276,6 +276,138 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' allow_install='false' reuse_values='false':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
+        echo "Set release, namespace, and chart to deploy." >&2
+        exit 1
+    fi
+
+    chart_version="{{ version }}"
+    if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
+        chart_version="$(
+            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 | tr -d '[:space:]' || true
+        )"
+        if [ -z "${chart_version}" ]; then
+            echo "Warning: version_file '{{ version_file }}' did not contain a valid version" >&2
+        fi
+    fi
+
+    version_args=()
+    if [ -n "${chart_version}" ]; then
+        version_args+=(--version "${chart_version}")
+    fi
+
+    value_args=()
+    if [ -n "{{ values }}" ]; then
+        value_args+=(-f "{{ values }}")
+    fi
+
+    image_tag="{{ tag }}"
+    if [ -z "${image_tag}" ] && [ -n "{{ default_tag }}" ]; then
+        image_tag="{{ default_tag }}"
+    fi
+
+    set_args=()
+    if [ -n "{{ host }}" ]; then
+        set_args+=(--set ingress.host="{{ host }}")
+    fi
+    if [ -n "${image_tag}" ]; then
+        set_args+=(--set image.tag="${image_tag}")
+    fi
+
+    helm_args=(upgrade "{{ release }}" "{{ chart }}" --namespace "{{ namespace }}")
+
+    if [ "{{ allow_install }}" = "true" ]; then
+        helm_args+=(--install --create-namespace)
+    fi
+
+    if [ "{{ reuse_values }}" = "true" ]; then
+        helm_args+=(--reuse-values)
+    fi
+
+    if [ ${#value_args[@]} -gt 0 ]; then
+        helm_args+=("${value_args[@]}")
+    fi
+
+    if [ ${#set_args[@]} -gt 0 ]; then
+        helm_args+=("${set_args[@]}")
+    fi
+
+    if [ ${#version_args[@]} -gt 0 ]; then
+        helm_args+=("${version_args[@]}")
+    fi
+
+    helm "${helm_args[@]}"
+
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
+
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
+    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
+
+app-status namespace='' release='' host_key='ingress.host':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ namespace }}" ]; then
+        echo "Set namespace to inspect." >&2
+        exit 1
+    fi
+
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "kubectl is required to check the deployment." >&2
+        exit 1
+    fi
+
+    kubectl -n "{{ namespace }}" get pods
+    kubectl -n "{{ namespace }}" get ingress
+
+    if [ -n "{{ release }}" ] && command -v helm >/dev/null 2>&1; then
+        host="$(
+            helm get values "{{ release }}" \
+                --namespace "{{ namespace }}" \
+                --all --output json 2>/dev/null |
+                python3 - "{{ host_key }}" <<'PY'
+                import json
+                import sys
+
+                try:
+                    host_key = sys.argv[1]
+                    data = json.load(sys.stdin)
+                except (json.JSONDecodeError, KeyError, IndexError) as e:
+                    sys.stderr.write(f"Error extracting host value: {e}\n")
+                    sys.exit(1)
+                except Exception as e:
+                    sys.stderr.write(f"Unexpected error: {e}\n")
+                    sys.exit(1)
+
+                def get_with_dots(payload, dotted_key):
+                    node = payload
+                    for part in dotted_key.split('.'):
+                        if not isinstance(node, dict):
+                            return None
+                        node = node.get(part)
+                    return node
+
+                if isinstance(data, dict):
+                    host_value = get_with_dots(data, host_key)
+                    if host_value:
+                        print(host_value)
+                PY
+        )"
+    else
+        host=""
+    fi
+
+    if [ -n "${host}" ]; then
+        printf 'Public URL: https://%s\n' "${host}"
+    else
+        echo "Public URL host not recorded; check the Helm release values."
+    fi
+
 wipe:
     #!/usr/bin/env bash
     set -euo pipefail

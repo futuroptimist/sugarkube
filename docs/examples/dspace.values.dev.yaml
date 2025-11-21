@@ -1,0 +1,6 @@
+# Example values for deploying democratized.space via Helm.
+# The ingress host is set by the installer command.
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
