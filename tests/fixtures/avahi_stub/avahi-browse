@@ -45,9 +45,9 @@ for file in "${services_dir}"/*.service; do
       txt) txt="$value" ;;
     esac
   done < <(grep -E '^(instance|type|port|host|ipv4|txt)=' "${file}")
-  # Basic validation: ensure required variables are not empty and do not contain newlines
+  # Basic validation: ensure required variables are not empty and do not contain control characters
   for var in instance type port host ipv4; do
-    if [[ -z "${!var}" ]] || [[ "${!var}" =~ [^[:print:]] ]]; then
+    if [[ -z "${!var}" ]] || [[ "${!var}" =~ [[:cntrl:]] ]]; then
       continue 2
     fi
   done
