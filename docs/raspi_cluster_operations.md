@@ -29,6 +29,48 @@ logs, preparing Helm, and rolling out real workloads like
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
 
+## Deploy your first app (dspace@v3)
+
+If you want a fast path to your first live app, follow this numbered tutorial. It
+assumes your `env=dev` cluster is online and reachable with kubectl.
+
+1. Confirm Traefik is present:
+
+   ```bash
+   kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+   ```
+
+2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
+
+   ```bash
+   just cf:tunnel:install env=dev token=$CF_TUNNEL_TOKEN
+   ```
+
+3. Create a Tunnel route in the Cloudflare dashboard from your FQDN to
+   `http://traefik.kube-system.svc.cluster.local:80`. Cluster DNS makes the
+   `traefik.kube-system.svc.cluster.local` hostname resolvable from every node,
+   so the tunnel can reach Traefik reliably.
+
+4. Install the app from the [dspace v3 docs][dspace-v3-docs]:
+
+   ```bash
+   just dspace:install env=dev host=dspace-v3.<your-domain>
+   ```
+
+5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
+
+   ```bash
+   kubectl -n dspace get ingress,pods,svc
+   ```
+
+6. Iterate new builds from v3:
+
+   ```bash
+   just dspace:upgrade tag=v3-<shortsha>
+   ```
+
+[dspace-v3-docs]: https://github.com/democratizedspace/dspace/tree/v3/docs
+
 ## Step 1: Verify your 3-node control plane is healthy
 
 After completing the cluster setup from `raspi_cluster_setup.md`, you should have
