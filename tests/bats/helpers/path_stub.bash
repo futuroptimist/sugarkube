@@ -16,3 +16,29 @@ stub_command() {
   cat >"${target}"
   chmod +x "${target}"
 }
+
+# shim_missing_command ensures a command is available in PATH when running tests
+# on minimal environments. When the command already exists, it leaves the system
+# binary intact unless --force is provided. When missing (or forced), it creates
+# a stub via stub_command using the provided stdin body.
+shim_missing_command() {
+  local force=0
+  if [ "$1" = "--force" ]; then
+    force=1
+    shift || true
+  fi
+
+  local name="$1"
+  shift || true
+
+  if [ -z "${name}" ]; then
+    echo "shim_missing_command: command name required" >&2
+    return 1
+  fi
+
+  if [ "${force}" -ne 1 ] && command -v "${name}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  stub_command "${name}" "$@"
+}
