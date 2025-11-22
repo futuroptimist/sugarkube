@@ -34,15 +34,6 @@ setup() {
     skip "avahi-publish not available even after enabling stub"
   fi
 
-  if ! command -v getent >/dev/null 2>&1; then
-    # TODO: Provide a getent/NSS stub so mDNS lookups don't depend on host config.
-    # Root cause: Integration checks rely on host NSS to resolve .local records via Avahi.
-    # Estimated fix: 15m to add a bats stub or bundle libc-bin/nss-mdns alongside the harness.
-    # Documented dependency: discovery checks rely on host NSS/getent for .local validation.
-    # See docs/mdns_troubleshooting.md#integration-test-prerequisites for setup details.
-    skip "getent not available"
-  fi
-
   export TEST_ROOT="${BATS_TEST_TMPDIR}"
   export SCRIPTS_ROOT="${BATS_CWD}/scripts"
 
