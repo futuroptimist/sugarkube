@@ -25,8 +25,8 @@ avahi-browse --parsable --resolve _k3s-sugar-dev._tcp
 
 Running the Bats suites (for example,
 `tests/integration/cluster_formation_e2e.bats`) with `AVAHI_AVAILABLE=1` relies on
-host binaries instead of hermetic stubs. Confirm the following before running the
-integration harness:
+host binaries by default, but now falls back to hermetic stubs when available.
+Confirm the following before running the integration harness:
 
 - `avahi-browse` and `avahi-publish` are installed (usually via `avahi-utils`).
 - `getent hosts sugarkube0.local` (or another `.local` hostname) returns results, which
@@ -34,9 +34,11 @@ integration harness:
   `hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4` appears in
   `/etc/nsswitch.conf` if lookups fail.
 
-If these commands are missing on your development host, the integration suite will skip with
-clear messages—installing the utilities or enabling NSS support lets the tests exercise the
-discovery workflow end-to-end.
+If these commands are missing on your development host, the integration suite will enable
+the bundled stubs before skipping: Avahi clients are shimmed from
+`tests/fixtures/avahi_stub/`, and `getent` is shimmed from
+`tests/fixtures/getent_stub/`. Install the real utilities or enable NSS support to exercise
+the discovery workflow end-to-end.
 
 ---
 

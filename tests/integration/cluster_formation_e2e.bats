@@ -5,11 +5,19 @@
 setup() {
   local helper_path
   helper_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../fixtures/avahi_stub" && pwd)"/avahi_stub_helpers.bash
+  local getent_helper_path
+  getent_helper_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../fixtures/getent_stub" && pwd)"/getent_stub_helpers.bash
 
   if [ "${AVAHI_AVAILABLE:-0}" != "1" ] || ! command -v avahi-publish >/dev/null 2>&1; then
     # shellcheck source=tests/fixtures/avahi_stub/avahi_stub_helpers.bash
     . "${helper_path}"
     enable_avahi_stub
+  fi
+
+  if ! command -v getent >/dev/null 2>&1; then
+    # shellcheck source=tests/fixtures/getent_stub/getent_stub_helpers.bash
+    . "${getent_helper_path}"
+    enable_getent_stub
   fi
 
   if ! command -v avahi-browse >/dev/null 2>&1; then
