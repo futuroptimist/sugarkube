@@ -5,11 +5,19 @@
 setup() {
   local helper_path
   helper_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../fixtures/avahi_stub" && pwd)"/avahi_stub_helpers.bash
+  local getent_helper_path
+  getent_helper_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../fixtures/getent_stub" && pwd)"/getent_stub_helpers.bash
 
   if [ "${AVAHI_AVAILABLE:-0}" != "1" ] || ! command -v avahi-publish >/dev/null 2>&1; then
     # shellcheck source=tests/fixtures/avahi_stub/avahi_stub_helpers.bash
     . "${helper_path}"
     enable_avahi_stub
+  fi
+
+  if ! command -v getent >/dev/null 2>&1; then
+    # shellcheck source=tests/fixtures/getent_stub/getent_stub_helpers.bash
+    . "${getent_helper_path}"
+    enable_getent_stub
   fi
 
   if ! command -v avahi-browse >/dev/null 2>&1; then
@@ -24,15 +32,6 @@ setup() {
     # Root cause: CI environment lacks Avahi tools by default
     # Estimated fix: Add avahi-utils to CI image or use stub-only tests
     skip "avahi-publish not available even after enabling stub"
-  fi
-
-  if ! command -v getent >/dev/null 2>&1; then
-    # TODO: Provide a getent/NSS stub so mDNS lookups don't depend on host config.
-    # Root cause: Integration checks rely on host NSS to resolve .local records via Avahi.
-    # Estimated fix: 15m to add a bats stub or bundle libc-bin/nss-mdns alongside the harness.
-    # Documented dependency: discovery checks rely on host NSS/getent for .local validation.
-    # See docs/mdns_troubleshooting.md#integration-test-prerequisites for setup details.
-    skip "getent not available"
   fi
 
   export TEST_ROOT="${BATS_TEST_TMPDIR}"

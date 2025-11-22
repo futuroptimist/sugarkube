@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Minimal getent stub for hosts/NSS lookups in integration tests.
+set -euo pipefail
+
+subcommand="${1:-}"
+case "${subcommand}" in
+  hosts|ahostsv4|ahostsv6)
+    host="${2:-}"
+    if [ -z "${host}" ]; then
+      exit 2
+    fi
+    ipv4="${GETENT_STUB_IPV4:-127.0.0.1}"
+    printf '%s %s\n' "${ipv4}" "${host}"
+    exit 0
+    ;;
+  *)
+    # Unsupported database
+    exit 2
+    ;;
+esac
