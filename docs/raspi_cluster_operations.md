@@ -108,6 +108,36 @@ kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 and confirm the `traefik` service exists before continuing. The dspace v3 k3s-sugarkube-dev
 guide assumes Traefik is installed and reachable via this flow.
 
+## Check cluster, Helm, and Traefik status
+
+When you want a quick health dashboard, run the high-level status recipe:
+
+```bash
+just cluster-status
+```
+
+This read-only command prints:
+
+- Cluster nodes via `kubectl get nodes -o wide`
+- Helm availability on the node (version and `which helm`)
+- Traefik pods and services in `kube-system`
+- Any ingress classes configured in the cluster
+
+Example (abbreviated) output:
+
+```text
+=== Cluster nodes (kubectl get nodes) ===
+ip-10-0-0-1   Ready    control-plane,etcd   v1.28.7+k3s1   10.0.0.1   ...
+
+=== Helm status (CLI on this node) ===
+v3.13.0+gXXXXXXXX
+```
+
+This is a convenient health dashboard to confirm your 3-node HA cluster is up, Helm is available,
+and Traefik is installed before deploying apps like dspace. For the underlying `kubectl` and
+`helm` commands that this wraps, see the manual operations guide:
+`docs/raspi_cluster_operations_manual.md`.
+
 ## Deploy your first app (generic ingress path)
 
 If you want a fast path to your first live app, follow this numbered tutorial.

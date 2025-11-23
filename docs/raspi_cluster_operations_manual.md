@@ -97,7 +97,35 @@ Re-run the service check and note the ClusterIP or LoadBalancer address:
 sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik
 ```
 
-## 3. Expose your first app (manual ingress path)
+## 3. Manual cluster, Helm, and Traefik status checks
+
+Use these raw commands to mirror what `just cluster-status` reports.
+
+- **Cluster nodes:** Shows all nodes, their readiness, roles, versions, and IPs.
+
+  ```bash
+  sudo kubectl get nodes -o wide
+  ```
+
+- **Helm CLI:** Confirms Helm is installed and discoverable on PATH.
+
+  ```bash
+  helm version --short
+  which helm
+  ```
+
+- **Traefik and ingress:** Lists Traefik pods/services in `kube-system` and any ingress classes.
+
+  ```bash
+  sudo kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik
+  sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+  sudo kubectl get ingressclass
+  ```
+
+The `just cluster-status` command in `docs/raspi_cluster_operations.md` is a wrapper around these
+manual checks.
+
+## 4. Expose your first app (manual ingress path)
 
 This mirrors the quick-start flow that relies on Traefik and Cloudflare Tunnel,
 but spells out the underlying commands.
@@ -141,7 +169,7 @@ but spells out the underlying commands.
    sudo kubectl -n <app-namespace> get ingress,pods,svc
    ```
 
-## 4. Verify the 3-node control plane by hand
+## 5. Verify the 3-node control plane by hand
 
 Check node readiness without the `just status` wrapper:
 
@@ -165,7 +193,7 @@ scp pi@<control-plane-host>:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo kubectl config rename-context default sugar-dev
 ```
 
-## 5. Capture sanitized bring-up logs manually
+## 6. Capture sanitized bring-up logs manually
 
 The `just save-logs` recipe wraps a log filter around `just up`. To do it
 yourself:
@@ -182,7 +210,7 @@ The filtered log prints its destination when the run finishes (or when you
 press <kbd>Ctrl</kbd>+<kbd>C</kbd>). Commit the sanitized file under `logs/up/`
 for future debugging.
 
-## 6. Deploy token.place manually
+## 7. Deploy token.place manually
 
 With Helm installed (see "Install Helm manually" above), clone the repository and update dependencies:
 
@@ -202,7 +230,7 @@ helm upgrade --install token-place ./token-place \
 sudo kubectl get pods -n token-place
 ```
 
-## 7. Deploy dspace
+## 8. Deploy dspace
 
 Clone and deploy the dspace chart:
 
@@ -221,7 +249,7 @@ sudo kubectl get ing -n dspace
 Use the Ingress host from the final command to reach dspace through Traefik and
 your Cloudflare tunnel.
 
-## 8. Bootstrap Flux without the helper
+## 9. Bootstrap Flux without the helper
 
 Update `flux/gotk-sync.yaml` so the `GitRepository` URL and
 `spec.path` point at your repository and environment. Then apply the bundled
@@ -237,7 +265,7 @@ sudo kubectl -n flux-system get pods
 Once the controllers are running, Flux will reconcile the sources and
 Kustomizations you referenced in `gotk-sync.yaml`.
 
-## 9. Additional manual operations
+## 10. Additional manual operations
 
 - **Scale workloads:** `sudo kubectl scale deployment <name> --replicas=3 -n <ns>`.
 - **Inspect logs:** `sudo kubectl logs <pod> -n <ns>` (use `-c` for multi-container
