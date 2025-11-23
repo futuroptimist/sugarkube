@@ -61,7 +61,7 @@ ingress controller. Other controllers can work, but this guide only documents th
 Check whether Traefik already exists in the `kube-system` namespace:
 
 ```bash
-sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 ```
 
 - If the command returns a `traefik` service (ClusterIP or LoadBalancer), continue to the next
@@ -69,14 +69,18 @@ sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 - If it prints `No resources found in kube-system namespace.`, install Traefik before deploying
   apps.
 
-For the shortest path, install Traefik via the new helper recipe:
+For the shortest path, install Traefik via the new helper recipe. Run the following as your
+normal user (e.g. `pi`), not with `sudo`:
 
 ```bash
 just traefik-install
 ```
 
-This installs Traefik into `kube-system`, waits for readiness, and prints the discovered
-service. Re-run the status recipe any time to check the ingress controller:
+This recipe refuses to run as root, ensures `$HOME/.kube/config` is readable by copying
+`/etc/rancher/k3s/k3s.yaml` if needed, installs or upgrades Traefik in `kube-system`, waits for
+readiness, and prints the discovered service. It is safe to re-run.
+
+Re-run the status recipe any time to check the ingress controller:
 
 ```bash
 just traefik-status
@@ -98,6 +102,13 @@ helm upgrade --install traefik traefik/traefik \
 This installs a minimal Traefik release into `kube-system` with a ClusterIP service. Adjust the
 Helm values or refer to the [official Traefik docs](https://doc.traefik.io/traefik/) for
 advanced configuration such as TLS, load balancers, or custom entrypoints.
+
+**Notes:**
+
+- If your kubeconfig was previously root-owned (e.g., `/home/pi/.kube/config` unreadable), the
+  recipe overwrites it with a user-owned copy of `/etc/rancher/k3s/k3s.yaml`.
+- If you try to run `sudo just traefik-install`, it will fail fast and prompt you to rerun as your
+  normal user.
 
 After installation, re-run:
 
