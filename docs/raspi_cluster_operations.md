@@ -70,6 +70,7 @@ helm repo update
 helm upgrade --install traefik traefik/traefik \
   --namespace kube-system \
   --create-namespace \
+  --set service.type=ClusterIP \
   --wait
 ```
 

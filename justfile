@@ -267,16 +267,19 @@ traefik-install namespace='kube-system' version='':
     helm repo add traefik https://traefik.github.io/charts --force-update
     helm repo update
 
-    version_args=()
+    helm_args=(
+        upgrade --install traefik traefik/traefik
+        --namespace "{{ namespace }}"
+        --create-namespace
+        --set service.type=ClusterIP
+        --wait
+    )
+
     if [ -n "{{ version }}" ]; then
-        version_args+=(--version "{{ version }}")
+        helm_args+=(--version "{{ version }}")
     fi
 
-    helm upgrade --install traefik traefik/traefik \
-        --namespace "{{ namespace }}" \
-        --create-namespace \
-        --wait \
-        "${version_args[@]:-}"
+    helm "${helm_args[@]}"
 
     kubectl -n "{{ namespace }}" get svc -l app.kubernetes.io/name=traefik
 
