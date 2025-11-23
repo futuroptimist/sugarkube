@@ -69,14 +69,20 @@ sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 - If it prints `No resources found in kube-system namespace.`, install Traefik before deploying
   apps.
 
-For the shortest path, install Traefik via the new helper recipe:
+For the shortest path, install Traefik via the new helper recipe. Run the following as your
+normal user (e.g., `pi`), **not** with `sudo`:
 
 ```bash
 just traefik-install
 ```
 
-This installs Traefik into `kube-system`, waits for readiness, and prints the discovered
-service. Re-run the status recipe any time to check the ingress controller:
+This recipe ensures you have a readable kubeconfig at `$HOME/.kube/config` (copying
+`/etc/rancher/k3s/k3s.yaml` if needed), installs or upgrades Traefik in `kube-system`, waits for
+readiness, and prints the discovered service. It is safe to re-run and will fix a root-owned
+`~/.kube/config` automatically. If you try `sudo just traefik-install`, it will exit with a clear
+error telling you to re-run without sudo.
+
+Re-run the status recipe any time to check the ingress controller:
 
 ```bash
 just traefik-status

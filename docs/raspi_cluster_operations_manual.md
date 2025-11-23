@@ -68,6 +68,10 @@ steps.
 
 Ensure Helm is installed (see "Install Helm manually" above) before proceeding.
 
+Note: The recommended path for most users is the automated `just traefik-install` recipe described
+in `raspi_cluster_operations.md`, which prepares kubeconfig and installs Traefik idempotently. Use
+the manual steps here for debugging or customized setups.
+
 Check whether Traefik is already present:
 
 ```bash
