@@ -298,7 +298,7 @@ traefik-install namespace='kube-system' version='':
     fi
 
     if [ -r "${HOME}/.kube/config" ]; then
-        :
+        echo "User kubeconfig exists and is readable at ${HOME}/.kube/config."
     else
         if [ -f /etc/rancher/k3s/k3s.yaml ]; then
             echo "Creating a user kubeconfig from /etc/rancher/k3s/k3s.yaml..."
@@ -312,7 +312,7 @@ traefik-install namespace='kube-system' version='':
             exit 1
         fi
 
-        if ! kubectl version --short --client >/dev/null 2>&1; then
+        if ! kubectl version --client >/dev/null 2>&1; then
             echo "WARNING: kubectl client not found or not working." >&2
             echo "Helm may still fail if kubectl is missing." >&2
         fi
