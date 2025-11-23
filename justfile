@@ -255,6 +255,40 @@ cf-tunnel-install env='dev' token='':
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
 
+traefik-install namespace='kube-system' version='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if ! command -v helm >/dev/null 2>&1; then
+        echo "Install Helm before installing Traefik (see docs/raspi_cluster_operations.md)." >&2
+        exit 1
+    fi
+
+    helm repo add traefik https://traefik.github.io/charts --force-update
+    helm repo update
+
+    helm_args=(
+        upgrade --install traefik traefik/traefik
+        --namespace "{{ namespace }}"
+        --create-namespace
+        --set service.type=ClusterIP
+        --wait
+    )
+
+    if [ -n "{{ version }}" ]; then
+        helm_args+=(--version "{{ version }}")
+    fi
+
+    helm "${helm_args[@]}"
+
+    kubectl -n "{{ namespace }}" get svc -l app.kubernetes.io/name=traefik
+
+traefik-status namespace='kube-system':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    kubectl -n "{{ namespace }}" get svc,po -l app.kubernetes.io/name=traefik
+
 cf-tunnel-route host='':
     #!/usr/bin/env bash
     set -Eeuo pipefail

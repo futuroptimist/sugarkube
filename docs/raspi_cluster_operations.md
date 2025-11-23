@@ -9,6 +9,7 @@ personas:
 **📚 Part 3 of 3** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
 - **Previous:** [Part 2 - Quick-Start Setup](raspi_cluster_setup.md)
 - **See also:** [Part 1 - Manual Setup](raspi_cluster_setup_manual.md)
+- **Manual companion:** [Raspberry Pi Cluster Operations (Manual)](raspi_cluster_operations_manual.md)
 
 `raspi_cluster_setup.md` gets every Raspberry Pi onto the same HA k3s control plane.
 This follow-up guide covers the day-two routine: checking cluster health, capturing
@@ -29,42 +30,93 @@ logs, preparing Helm, and rolling out real workloads like
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
 
+## Install and verify Traefik ingress
+
+Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
+services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the
+default ingress controller. Other controllers can work, but this guide only documents the
+Traefik path.
+
+Check whether Traefik already exists in the `kube-system` namespace:
+
+```bash
+sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+```
+
+- If the command returns a `traefik` service (ClusterIP or LoadBalancer), continue to the next
+  section.
+- If it prints `No resources found in kube-system namespace.`, install Traefik before deploying
+  apps.
+
+For the shortest path, install Traefik via the new helper recipe:
+
+```bash
+just traefik-install
+```
+
+This installs Traefik into `kube-system`, waits for readiness, and prints the discovered
+service. Re-run the status recipe any time to check the ingress controller:
+
+```bash
+just traefik-status
+```
+
+Traefik is not installed automatically by the base cluster bootstrap. To add it using the
+official Helm chart:
+
+```bash
+helm repo add traefik https://traefik.github.io/charts
+helm repo update
+helm upgrade --install traefik traefik/traefik \
+  --namespace kube-system \
+  --create-namespace \
+  --set service.type=ClusterIP \
+  --wait
+```
+
+This installs a minimal Traefik release into `kube-system` with a ClusterIP service. Adjust the
+Helm values or refer to the [official Traefik docs](https://doc.traefik.io/traefik/) for
+advanced configuration such as TLS, load balancers, or custom entrypoints.
+
+After installation, re-run:
+
+```bash
+kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+```
+
+and confirm the `traefik` service exists before continuing. The dspace v3 k3s-sugarkube-dev
+guide assumes Traefik is installed and reachable via this flow.
+
 ## Deploy your first app (generic ingress path)
 
 If you want a fast path to your first live app, follow this numbered tutorial.
 It assumes your `env=dev` cluster is online and reachable with kubectl and that
-Traefik is your ingress controller.
+Traefik is installed per the section above.
 
-1. Confirm Traefik is present:
-
-   ```bash
-   sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
-   ```
-
-2. Install Cloudflare Tunnel on a node that can reach the cluster API (see
+1. Install Cloudflare Tunnel on a node that can reach the cluster API (see
    [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
    just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
    ```
 
-3. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
+2. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
    `http://traefik.kube-system.svc.cluster.local:80`. Cluster DNS makes the
    `traefik.kube-system.svc.cluster.local` hostname resolvable from every node,
    so the tunnel can reach Traefik reliably.
 
-4. Install your app using its Helm or `just` recipe. For example, the
+3. Install your app using its Helm or `just` recipe. For example, the
    [dspace app guide](apps/dspace.md) shows how to deploy dspace v3 with a
    Traefik ingress host and tested values.
 
-5. Verify everything is healthy, then browse to the FQDN on your phone or
+4. Verify everything is healthy, then browse to the FQDN on your phone or
    laptop:
 
    ```bash
    kubectl -n <app-namespace> get ingress,pods,svc
    ```
 
-6. Iterate new builds using your app's upgrade instructions (e.g., the dspace
+5. Iterate new builds using your app's upgrade instructions (e.g., the dspace
    guide covers rolling new `v3-<shortsha>` images).
 
 ## Step 1: Verify your 3-node control plane is healthy

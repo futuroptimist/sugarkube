@@ -20,13 +20,13 @@ personas:
 
 Quick reference for the most common recipes when bringing up a 3-node HA dev cluster:
 
-- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev cluster  
+- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev cluster
   _When to use:_ Run this twice per server during initial bring-up (first run patches memory cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an existing cluster.
 
-- **`just save-logs env=dev`** — run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/`  
+- **`just save-logs env=dev`** — run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/`
   _When to use:_ Capture sanitized logs during the second run for troubleshooting or documentation. The logs are automatically filtered to remove sensitive data.
 
-- **`just cat-node-token`** — display the k3s node token for joining nodes  
+- **`just cat-node-token`** — display the k3s node token for joining nodes
   _When to use:_ After bootstrapping the first node, use this to retrieve the token that other nodes need to join the cluster. Copy the output and set it as `SUGARKUBE_TOKEN_DEV` on subsequent nodes.
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
@@ -126,10 +126,10 @@ without retyping the file path.
 Copy the long `K10…` string to a safe place—you will export it on every joining node.
 
 > **Important: Bootstrap vs Join**
-> The first node does **not** need `SUGARKUBE_TOKEN_DEV` set. Running `just up dev` 
-> without the token environment variable tells Sugarkube to **bootstrap** a new cluster 
-> and mint the token above. Subsequent nodes **must** export `SUGARKUBE_TOKEN_DEV` 
-> before running `just up dev` to signal they should **join** the existing cluster, not 
+> The first node does **not** need `SUGARKUBE_TOKEN_DEV` set. Running `just up dev`
+> without the token environment variable tells Sugarkube to **bootstrap** a new cluster
+> and mint the token above. Subsequent nodes **must** export `SUGARKUBE_TOKEN_DEV`
+> before running `just up dev` to signal they should **join** the existing cluster, not
 > create a new one.
 
 > **TLS SAN for mDNS**
@@ -158,7 +158,8 @@ Nodes still discover each other via mDNS, but the registration address is used f
 
 ### Remaining control-plane peers or agents
 
-Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the saved token before the second run so it can join the cluster:
+Each additional Pi repeats the same two `just up dev` runs. After the reboot, export the
+saved token before the second run so it can join the cluster:
 
 ```bash
 export SUGARKUBE_SERVERS=3
@@ -166,7 +167,8 @@ export SUGARKUBE_TOKEN_DEV="K10abc123..."  # token from the first server
 just up dev
 ```
 
-When fewer than three servers are present, the node elects itself into the HA control plane; otherwise it settles in as an agent.
+When fewer than three servers are present, the node elects itself into the HA control plane;
+otherwise it settles in as an agent.
 
 > Need sanitized log capture or mDNS hostname filtering? See
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md#step-2-capture-and-commit-sanitized-bring-up-logs)
@@ -186,9 +188,13 @@ timestamped copy under `logs/up/` so you can attach the file to bug reports.
 
 ### Switch environments as needed
 
-`just up <env>` works for `int`, `prod`, or other environments—you simply provide the matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the same LAN as long as they advertise distinct tokens.
+`just up <env>` works for `int`, `prod`, or other environments—you simply provide the
+matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the
+same LAN as long as they advertise distinct tokens.
 
-Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh) or `just flux-bootstrap env=dev`.
+Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the
+control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh)
+or `just flux-bootstrap env=dev`.
 
 ---
 
@@ -470,20 +476,20 @@ The following quick tips address the most common issues:
 - **Cluster discovery fails: "No joinable servers found via mDNS service browsing"**
 
   This means the joining node couldn't find any k3s servers advertising on the network.
-  
+
   **Check the basics:**
   - Confirm multicast (UDP 5353) is allowed on your network/firewall
   - Verify both nodes are on the same L2 subnet
   - Verify `avahi-daemon` is running on both nodes: `sudo systemctl status avahi-daemon`
   - Check that `/etc/nsswitch.conf` contains `mdns4_minimal`
-  
+
   **Verify the bootstrap node is advertising:**
   Run this on the bootstrap node (sugarkube0):
   ```bash
   # Should show the k3s service with port 6443
   avahi-browse --all --resolve --terminate | grep -A5 'k3s-sugar-dev'
   ```
-  
+
   **Verify the joining node can see the advertisement:**
   Run this on the joining node (sugarkube1):
   ```bash
@@ -491,17 +497,17 @@ The following quick tips address the most common issues:
   avahi-browse --all --resolve | grep -A5 'k3s-sugar-dev'
   # Press Ctrl+C after a few seconds
   ```
-  
+
   **If avahi-browse sees nothing:**
   This usually indicates a network issue (multicast blocked) or Avahi daemon not running.
-  
+
   **Enable detailed mDNS debugging:**
   ```bash
   export SUGARKUBE_DEBUG=1
   export SUGARKUBE_MDNS_WIRE_PROOF=1
   just up dev 2>&1 | tee debug.log
   ```
-  
+
   Check `debug.log` for lines starting with `[k3s-discover mdns]` to see what avahi-browse
   is finding (or not finding).
 
@@ -509,7 +515,7 @@ The following quick tips address the most common issues:
 
   By default, avahi-browse waits for actual mDNS multicast responses (not just cached entries).
   This is necessary for initial cluster formation but can be slow on congested networks.
-  
+
   - Increase the timeout: `export SUGARKUBE_MDNS_QUERY_TIMEOUT=30`
   - Check network quality: high packet loss or multicast flooding can delay responses
   - Verify no mDNS reflector or proxy is interfering with multicast
@@ -522,7 +528,7 @@ The following quick tips address the most common issues:
 
   Expect the API advert (`port 6443`) with TXT records `k3s=1`,
   `cluster=<name>`, `env=<env>`, `role=server`.
-  
+
   **Note:** Using `--terminate` flag is fast but only shows cached entries. If you just
   published a service, you might need to wait a few seconds or omit `--terminate` to see
   fresh results.
@@ -545,24 +551,24 @@ The following quick tips address the most common issues:
   ```bash
   # Check k3s service status
   sudo systemctl status k3s
-  
+
   # View recent k3s logs
   sudo journalctl -u k3s -n 100 --no-pager
-  
+
   # Check for certificate errors
   sudo journalctl -u k3s | grep -i "certificate\|tls\|x509" | tail -20
-  
+
   # Check for connection errors
   sudo journalctl -u k3s | grep -i "connection\|refused\|timeout" | tail -20
-  
+
   # Verify k3s can reach the remote server
   curl -k https://sugarkube0.local:6443/livez
   # Should return HTTP 401 or 200 (both mean API is alive)
-  
+
   # Check if k3s is trying to connect to the right server
   grep K3S_URL /etc/systemd/system/k3s.service.env
   grep ExecStart /etc/systemd/system/k3s.service | grep -o 'server [^ ]*'
-  
+
   # Verify k3s token is set correctly
   grep K3S_TOKEN /etc/systemd/system/k3s.service.env | wc -c
   # Should show >50 characters if token is present
@@ -572,15 +578,15 @@ The following quick tips address the most common issues:
   ```bash
   # Check if k3s server is running and responsive
   sudo kubectl get nodes
-  
+
   # Verify the API certificate includes IP addresses
   openssl s_client -connect localhost:6443 </dev/null 2>/dev/null | \
     openssl x509 -text | grep -A1 "Subject Alternative Name"
   # Should include both hostnames AND IP addresses
-  
+
   # Check k3s logs for connection attempts from joining nodes
   sudo journalctl -u k3s | grep -E "join|etcd|member" | tail -30
-  
+
   # Verify etcd cluster health (for HA clusters)
   sudo k3s etcd-snapshot save --name diagnostic
   sudo k3s etcd-snapshot ls
@@ -592,11 +598,11 @@ The following quick tips address the most common issues:
   nc -zv sugarkube0.local 6443  # k3s API
   nc -zv sugarkube0.local 2379  # etcd client
   nc -zv sugarkube0.local 2380  # etcd peer
-  
+
   # Check if ports are actually listening on sugarkube0
   # Run on sugarkube0:
   sudo ss -tlnp | grep -E ":(6443|2379|2380)"
-  
+
   # Verify no firewall is blocking
   # Run on both nodes:
   sudo iptables -L -n | grep -E "6443|2379|2380"
@@ -613,7 +619,14 @@ The following quick tips address the most common issues:
 
 ---
 
-Once all three default nodes for an environment report `Ready`, proceed to the deployment playbooks (`token.place`, `dspace`, etc.) as usual.
+Once all three default nodes for an environment report `Ready`, proceed to the deployment
+playbooks (`token.place`, `dspace`, etc.) as usual. The base bootstrap does **not** install an
+ingress controller.
+
+Install Traefik using the [Traefik ingress][traefik-ingress] steps before rolling out HTTP
+applications.
+
+[traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
 
 > For a step-by-step deep dive, see
 > [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
