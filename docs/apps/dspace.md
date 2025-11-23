@@ -123,7 +123,7 @@ This guide assumes you expose the cluster through a persistent Cloudflare Tunnel
 public hostname is `https://staging.democratized.space`.
 
 For detailed instructions on creating the Cloudflare Tunnel and DNS records, see:
-./cloudflare_tunnel.md
+../cloudflare_tunnel.md
 
 ## Troubleshooting
 
