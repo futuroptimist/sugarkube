@@ -316,6 +316,7 @@ helm-status:
 
 # Install Traefik as the cluster ingress using Helm.
 # Run as a normal user (not root); ensures $HOME/.kube/config is readable by copying
+
 # /etc/rancher/k3s/k3s.yaml if needed and uses it via KUBECONFIG for kubectl/helm.
 traefik-install namespace='kube-system' version='':
     #!/usr/bin/env bash
