@@ -67,9 +67,11 @@ official Helm chart:
 ```bash
 helm repo add traefik https://traefik.github.io/charts
 helm repo update
-helm install traefik traefik/traefik \
+helm upgrade --install traefik traefik/traefik \
   --namespace kube-system \
-  --create-namespace
+  --create-namespace \
+  --set service.type=ClusterIP \
+  --wait
 ```
 
 This installs a minimal Traefik release into `kube-system` with a ClusterIP service. Adjust the
@@ -79,7 +81,7 @@ advanced configuration such as TLS, load balancers, or custom entrypoints.
 After installation, re-run:
 
 ```bash
-sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 ```
 
 and confirm the `traefik` service exists before continuing. The dspace v3 k3s-sugarkube-dev
