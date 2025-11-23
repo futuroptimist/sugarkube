@@ -66,6 +66,10 @@ steps.
 
 ## 2. Install and verify Traefik ingress manually
 
+Most users should stick with the `just traefik-install` command in
+[raspi_cluster_operations.md](raspi_cluster_operations.md). Use the manual path here when
+debugging or applying custom Traefik settings.
+
 Ensure Helm is installed (see "Install Helm manually" above) before proceeding.
 
 Check whether Traefik is already present:
