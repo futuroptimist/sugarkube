@@ -37,22 +37,33 @@ managing releases. Rather than applying dozens of YAML files manually, Helm char
 and upgrade applications with a single command.
 
 First, ensure Helm is installed. The Sugarkube Pi image includes Helm by default, but if you're
-working with a minimal OS, install it:
+working with a minimal OS, use the `just` recipes from the repository root:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version
-```
+1. Install (or detect) Helm:
 
-**What you should see:** Output showing Helm version 3.x (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`).
+   ```bash
+   just helm-install
+   ```
 
-You can also run `just helm-install` from the sugarkube repo root to install Helm using these same
-steps.
+   This detects whether Helm is already present. If missing, it installs Helm 3 using the official
+   `get-helm-3` script and prints the installed version on success.
+
+2. Verify Helm is working:
+
+   ```bash
+   just helm-status
+   ```
+
+   This prints the Helm version and fails if Helm is not installed correctly.
+
+If you prefer to install Helm manually or are unable to use the `just` recipes, see the manual
+operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
 
 ## Install and verify Traefik ingress
 
-**Prerequisite:** Helm must already be installed (see the "Install Helm" section above), or via
-`just helm-install`.
+**Prerequisite:** Ensure Helm is installed and `just helm-status` succeeds (see the "Install Helm"
+section above). For the underlying manual commands, see
+`docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
 
 Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default

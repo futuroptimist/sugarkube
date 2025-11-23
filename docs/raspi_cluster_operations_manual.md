@@ -52,17 +52,25 @@ clusters.
 
 ## 1. Install Helm manually
 
-If Helm is missing, install it first:
+If Helm is missing, install it with the official script used by the `just` recipe:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version
 ```
 
-**What you should see:** Output showing Helm version 3.x (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`).
+Verify the binary is available and on your path:
 
-You can also run `just helm-install` from the sugarkube repo root to install Helm using these same
-steps.
+```bash
+helm version
+which helm
+```
+
+**What you should see:** A Helm 3 version string (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`)
+and a path such as `/usr/local/bin/helm`.
+
+If you prefer to use the high-level Just recipes instead of running these commands manually, see the
+“Install Helm” section in `docs/raspi_cluster_operations.md` and run `just helm-install` followed by
+`just helm-status`.
 
 ## 2. Install and verify Traefik ingress manually
 
