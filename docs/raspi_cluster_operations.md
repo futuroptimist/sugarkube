@@ -38,7 +38,7 @@ Traefik is your ingress controller.
 1. Confirm Traefik is present:
 
    ```bash
-   kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+   sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
    ```
 
 2. Install Cloudflare Tunnel on a node that can reach the cluster API (see
