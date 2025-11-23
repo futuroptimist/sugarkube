@@ -173,6 +173,7 @@ status:
     sudo k3s kubectl get nodes -o wide
 
 # Show a summarized status of the HA cluster, Helm CLI, and Traefik ingress.
+
 # This is a read-only health dashboard for debugging and quick checks.
 cluster-status:
     #!/usr/bin/env bash
