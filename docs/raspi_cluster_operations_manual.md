@@ -74,7 +74,9 @@ If you prefer to use the high-level Just recipes instead of running these comman
 
 ## 2. Install and verify Traefik ingress manually
 
-Ensure Helm is installed (see "Install Helm manually" above) before proceeding.
+Ensure Helm is installed (see "Install Helm manually" above) before proceeding. The
+recommended path for most users is still `just traefik-install` from the main operations guide;
+use the manual steps below for debugging or custom setups.
 
 Check whether Traefik is already present:
 
