@@ -255,12 +255,41 @@ cf-tunnel-install env='dev' token='':
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
 
+# Install the Helm CLI on the current node (idempotent; safe to re-run).
+helm-install:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if command -v helm >/dev/null 2>&1; then
+        echo "Helm is already installed; nothing to do."
+        helm version --short || true
+        exit 0
+    fi
+
+    echo "Helm not found; installing Helm 3 via the official script..."
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+    echo "Helm installed:"
+    helm version --short
+
+# Print the Helm version if installed.
+helm-status:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if command -v helm >/dev/null 2>&1; then
+        helm version --short
+    else
+        echo "Helm is not installed." >&2
+        exit 1
+    fi
+
 traefik-install namespace='kube-system' version='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     if ! command -v helm >/dev/null 2>&1; then
-        echo "Install Helm before installing Traefik (see docs/raspi_cluster_operations.md)." >&2
+        echo "Helm is not installed. Run 'just helm-install' first (see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
         exit 1
     fi
 

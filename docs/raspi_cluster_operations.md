@@ -30,12 +30,33 @@ logs, preparing Helm, and rolling out real workloads like
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
 
+## Install Helm (prerequisite for Traefik and Helm workloads)
+
+Helm simplifies Kubernetes application deployment by packaging manifests, providing templating, and
+managing releases. Rather than applying dozens of YAML files manually, Helm charts let you install
+and upgrade applications with a single command.
+
+First, ensure Helm is installed. The Sugarkube Pi image includes Helm by default, but if you're
+working with a minimal OS, install it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
+```
+
+**What you should see:** Output showing Helm version 3.x (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`).
+
+You can also run `just helm-install` from the sugarkube repo root to install Helm using these same
+steps.
+
 ## Install and verify Traefik ingress
 
+**Prerequisite:** Helm must already be installed (see the "Install Helm" section above), or via
+`just helm-install`.
+
 Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
-services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the
-default ingress controller. Other controllers can work, but this guide only documents the
-Traefik path.
+services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
+ingress controller. Other controllers can work, but this guide only documents the Traefik path.
 
 Check whether Traefik already exists in the `kube-system` namespace:
 
@@ -236,27 +257,11 @@ git commit -m "docs: add sanitized bring-up logs for dev cluster"
 
 > **💡 Troubleshooting:** Need help interpreting your logs? The [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) explains how to read up logs and sanitized mDNS output, with examples of common failure scenarios and their solutions.
 
-## Step 3: Install Helm and deploy token.place
+## Step 3: Deploy token.place
 
-Now that your cluster is healthy and documented, you're ready to deploy real
-applications. [token.place](https://github.com/futuroptimist/token.place) is a
-sample workload designed for Kubernetes clusters like yours.
-
-### Why use Helm?
-
-Helm simplifies Kubernetes application deployment by packaging manifests, providing
-templating, and managing releases. Rather than applying dozens of YAML files
-manually, Helm charts let you install and upgrade applications with a single command.
-
-First, ensure Helm is installed. The Sugarkube Pi image includes Helm by default,
-but if you're working with a minimal OS, install it:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version
-```
-
-**What you should see:** Output showing Helm version 3.x (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`).
+Now that your cluster is healthy, documented, and equipped with Helm, you're ready to deploy real
+applications. [token.place](https://github.com/futuroptimist/token.place) is a sample workload
+designed for Kubernetes clusters like yours.
 
 ### Clone the token.place repository
 
