@@ -90,9 +90,9 @@ but spells out the underlying commands.
 
    ```bash
    kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
-    kubectl -n cloudflare create secret generic tunnel-token \
-      --from-literal=token="<cloudflare-tunnel-token>" \
-      --dry-run=client -o yaml | kubectl apply -f -
+   kubectl -n cloudflare create secret generic tunnel-token \
+     --from-literal=token="<cloudflare-tunnel-token>" \
+     --dry-run=client -o yaml | kubectl apply -f -
    ```
 
 2. Install the Cloudflare Tunnel Helm chart:
