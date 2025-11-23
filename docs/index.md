@@ -59,11 +59,18 @@ Start with the basics and progress toward a fully autonomous solar cube.
 
 ## Raspberry Pi cluster series
 
-Follow this three-part series to build and operate a production-ready k3s cluster on Raspberry Pi hardware:
+Follow this series to build and operate a production-ready k3s cluster on Raspberry
+Pi hardware:
 
-1. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with detailed explanations of each step, perfect for understanding what the quick-start automates and troubleshooting when things go wrong.
-2. [raspi_cluster_setup.md](raspi_cluster_setup.md) — Quick-start guide for a 3-node HA cluster using automated discovery and one-command deployment per node.
-3. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including Helm deployments, workload management (token.place, dspace), and Flux GitOps integration.
+1. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with
+   detailed explanations of each step, perfect for understanding what the
+   quick-start automates and troubleshooting when things go wrong.
+2. [raspi_cluster_setup.md](raspi_cluster_setup.md) — Quick-start guide for a 3-node HA
+   cluster using automated discovery and one-command deployment per node.
+3. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including
+   Helm deployments, workload management (token.place, dspace), and Flux GitOps integration.
+4. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual
+   counterpart to Part 3 with raw commands for ingress, Cloudflare Tunnel, Helm apps, and Flux.
 
 ## LLM Prompts
 - [prompts/codex/automation.md](prompts/codex/automation.md) — baseline Codex instructions for maintaining the repo
