@@ -75,8 +75,19 @@ If you prefer to use the high-level Just recipes instead of running these comman
 ## 2. Install and verify Traefik ingress manually
 
 Most users should stick with the `just traefik-install` command in
-[raspi_cluster_operations.md](raspi_cluster_operations.md). Use the manual path here when
-debugging or applying custom Traefik settings.
+[raspi_cluster_operations.md](raspi_cluster_operations.md). It creates or repairs
+`~/.kube/config` from `/etc/rancher/k3s/k3s.yaml`, exports `KUBECONFIG=$HOME/.kube/config` for its
+commands, and installs or upgrades the Traefik Helm release automatically. Use the manual path here
+when debugging or applying custom Traefik settings.
+
+To mirror the automated kubeconfig behavior manually before running kubectl:
+
+```bash
+export KUBECONFIG=$HOME/.kube/config
+kubectl get nodes
+```
+
+This keeps all commands pointed at the user-owned kubeconfig instead of `/etc/rancher/k3s/k3s.yaml`.
 
 Ensure Helm is installed (see "Install Helm manually" above) before proceeding.
 

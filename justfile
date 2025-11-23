@@ -179,6 +179,8 @@ cluster-status:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    export KUBECONFIG="${HOME}/.kube/config"
+
     echo "=== Cluster nodes (kubectl get nodes) ==="
     kubectl get nodes -o wide || echo "kubectl get nodes failed; is your kubeconfig pointing at the cluster?"
 
@@ -310,8 +312,7 @@ helm-status:
 
 # Install Traefik as the cluster ingress using Helm.
 # Run as a normal user (not root); ensures $HOME/.kube/config is readable by copying
-
-# /etc/rancher/k3s/k3s.yaml if needed.
+# /etc/rancher/k3s/k3s.yaml if needed and uses it via KUBECONFIG for kubectl/helm.
 traefik-install namespace='kube-system' version='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -329,7 +330,8 @@ traefik-install namespace='kube-system' version='':
             echo "Creating a user kubeconfig from /etc/rancher/k3s/k3s.yaml..."
             sudo mkdir -p "${HOME}/.kube"
             sudo cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config"
-            sudo chown "$(id -u):$(id -g)" "${HOME}/.kube/config"
+            sudo chown -R "$(id -u):$(id -g)" "${HOME}/.kube"
+            chmod 700 "${HOME}/.kube"
             chmod 600 "${HOME}/.kube/config"
         else
             echo "ERROR: No readable kubeconfig at ${HOME}/.kube/config." >&2
@@ -342,6 +344,8 @@ traefik-install namespace='kube-system' version='':
             echo "Helm may still fail if kubectl is missing." >&2
         fi
     fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     if ! command -v helm >/dev/null 2>&1; then
         echo "Helm is not installed. Run 'just helm-install' first" >&2
@@ -371,6 +375,8 @@ traefik-install namespace='kube-system' version='':
 traefik-status namespace='kube-system':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     kubectl -n "{{ namespace }}" get svc,po -l app.kubernetes.io/name=traefik
 

@@ -87,10 +87,12 @@ For the shortest path, install Traefik via the new helper recipe. Run this as yo
 just traefik-install
 ```
 
-The recipe ensures you have a readable kubeconfig at `$HOME/.kube/config` by copying
-`/etc/rancher/k3s/k3s.yaml` if needed, installs or upgrades the Traefik Helm release in the
-`kube-system` namespace, and waits for readiness before printing the discovered service. It is
-safe to rerun if you need to repair a root-owned kubeconfig or confirm Traefik is installed.
+The recipe creates or repairs `$HOME/.kube` and `$HOME/.kube/config` for the current user by
+copying `/etc/rancher/k3s/k3s.yaml` if needed, then sets `KUBECONFIG=$HOME/.kube/config` so its
+`kubectl` and `helm` commands always use the user-owned kubeconfig. This avoids permission issues
+with `/etc/rancher/k3s/k3s.yaml` remaining root-only. It installs or upgrades the Traefik Helm
+release in the `kube-system` namespace, waits for readiness, and prints the discovered service. It
+is safe to rerun if you need to repair a root-owned kubeconfig or confirm Traefik is installed.
 
 If you try to run `sudo just traefik-install`, the recipe will stop with an error reminding you to
 run it without sudo so it uses the correct kubeconfig.
