@@ -122,7 +122,7 @@ Use these raw commands to mirror what `just cluster-status` reports.
   sudo kubectl get ingressclass
   ```
 
-The `just cluster-status` command in `docs/raspi_cluster_operations.md` is a wrapper around these
+The `just cluster-status` command in `raspi_cluster_operations.md` is a wrapper around these
 manual checks.
 
 ## 4. Expose your first app (manual ingress path)
