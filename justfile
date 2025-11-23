@@ -172,6 +172,30 @@ status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
 
+# Show a summarized status of the HA cluster, Helm CLI, and Traefik ingress.
+
+# This is a read-only health dashboard for debugging and quick checks.
+cluster-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "=== Cluster nodes (kubectl get nodes) ==="
+    kubectl get nodes -o wide || echo "kubectl get nodes failed; is your kubeconfig pointing at the cluster?"
+
+    echo
+    echo "=== Helm status (CLI on this node) ==="
+    helm version --short || echo "Helm is not installed or not on PATH."
+    which helm || echo "No helm binary found on PATH."
+
+    echo
+    echo "=== Traefik status (pods and service in kube-system) ==="
+    kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik || echo "No Traefik pods found in kube-system."
+    kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik || echo "No Traefik services found in kube-system."
+
+    echo
+    echo "=== Ingress classes (cluster-wide) ==="
+    kubectl get ingressclass || echo "No ingress classes found."
+
 # Run twice per server during initial bring-up to build a 3-node HA control plane.
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
