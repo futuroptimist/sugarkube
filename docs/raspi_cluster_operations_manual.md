@@ -76,6 +76,9 @@ If you prefer to use the high-level Just recipes instead of running these comman
 
 Ensure Helm is installed (see "Install Helm manually" above) before proceeding.
 
+Most users should prefer the automated `just traefik-install` flow described in
+`raspi_cluster_operations.md`; the steps below are primarily for debugging or custom setups.
+
 Check whether Traefik is already present:
 
 ```bash
