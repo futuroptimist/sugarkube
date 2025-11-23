@@ -308,12 +308,44 @@ helm-status:
         exit 1
     fi
 
+# Install Traefik as the cluster ingress using Helm.
+# Run as a normal user (not root); ensures $HOME/.kube/config is readable by copying
+
+# /etc/rancher/k3s/k3s.yaml if needed.
 traefik-install namespace='kube-system' version='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    if [ "$(id -u)" -eq 0 ] || [ -n "${SUDO_USER:-}" ]; then
+        echo "ERROR: Do not run 'just traefik-install' with sudo." >&2
+        echo "Run it as your normal user (e.g. pi) after kubeconfig is configured." >&2
+        exit 1
+    fi
+
+    if [ -r "${HOME}/.kube/config" ]; then
+        echo "User kubeconfig exists and is readable at ${HOME}/.kube/config."
+    else
+        if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+            echo "Creating a user kubeconfig from /etc/rancher/k3s/k3s.yaml..."
+            sudo mkdir -p "${HOME}/.kube"
+            sudo cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config"
+            sudo chown "$(id -u):$(id -g)" "${HOME}/.kube/config"
+            chmod 600 "${HOME}/.kube/config"
+        else
+            echo "ERROR: No readable kubeconfig at ${HOME}/.kube/config." >&2
+            echo "       /etc/rancher/k3s/k3s.yaml not found; install k3s or set up kubeconfig." >&2
+            exit 1
+        fi
+
+        if ! kubectl version --client >/dev/null 2>&1; then
+            echo "WARNING: kubectl client not found or not working." >&2
+            echo "Helm may still fail if kubectl is missing." >&2
+        fi
+    fi
+
     if ! command -v helm >/dev/null 2>&1; then
-        echo "Helm is not installed. Run 'just helm-install' first (see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
+        echo "Helm is not installed. Run 'just helm-install' first" >&2
+        echo "(see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
         exit 1
     fi
 

@@ -72,7 +72,7 @@ ingress controller. Other controllers can work, but this guide only documents th
 Check whether Traefik already exists in the `kube-system` namespace:
 
 ```bash
-sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
+kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 ```
 
 - If the command returns a `traefik` service (ClusterIP or LoadBalancer), continue to the next
@@ -80,14 +80,22 @@ sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 - If it prints `No resources found in kube-system namespace.`, install Traefik before deploying
   apps.
 
-For the shortest path, install Traefik via the new helper recipe:
+For the shortest path, install Traefik via the new helper recipe. Run this as your normal user
+(e.g., `pi`), not with `sudo`:
 
 ```bash
 just traefik-install
 ```
 
-This installs Traefik into `kube-system`, waits for readiness, and prints the discovered
-service. Re-run the status recipe any time to check the ingress controller:
+The recipe ensures you have a readable kubeconfig at `$HOME/.kube/config` by copying
+`/etc/rancher/k3s/k3s.yaml` if needed, installs or upgrades the Traefik Helm release in the
+`kube-system` namespace, and waits for readiness before printing the discovered service. It is
+safe to rerun if you need to repair a root-owned kubeconfig or confirm Traefik is installed.
+
+If you try to run `sudo just traefik-install`, the recipe will stop with an error reminding you to
+run it without sudo so it uses the correct kubeconfig.
+
+Re-run the status recipe any time to check the ingress controller:
 
 ```bash
 just traefik-status
