@@ -4,11 +4,37 @@ Use the packaged Helm chart from GHCR to install the dspace v3 stack into your c
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
 changing the arguments.
 
+The public staging environment for dspace defaults to the `staging.democratized.space`
+hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
+configured accordingly.
+
 ## Prerequisites
 
 - A working k3s cluster with Traefik Ingress available.
 - Cloudflare Tunnel client installed on the node that can reach the cluster API.
-- A Cloudflare Tunnel route created for the public hostname that will front dspace.
+- A Cloudflare Tunnel route created for the public hostname that will front dspace (defaults to
+  `staging.democratized.space`).
+
+## Container image and Helm chart
+
+- Image repository: `ghcr.io/democratizedspace/dspace`
+  - Example tag: `ghcr.io/democratizedspace/dspace:v3-latest`
+  - Additional tags such as `v3-<short-sha>` or `v<semver>` can be used for specific builds.
+- Helm chart: `oci://ghcr.io/democratizedspace/charts/dspace:<chartVersion>`
+  - Example: `oci://ghcr.io/democratizedspace/charts/dspace:3.0.0` (chartVersion comes from
+    `Chart.yaml`).
+
+Example Sugarkube values snippet targeting the staging environment:
+
+```yaml
+images:
+  dspace: ghcr.io/democratizedspace/dspace:v3-latest
+
+charts:
+  dspace:
+    chart: oci://ghcr.io/democratizedspace/charts/dspace:3.0.0
+    host: staging.democratized.space
+```
 
 ## Quickstart
 
@@ -19,7 +45,7 @@ just helm-oci-install \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml \
   version_file=docs/apps/dspace.version \
-  host=dspace-v3.<your-domain> \
+  host=staging.democratized.space \
   default_tag=v3-latest
 
 # Check pods and ingress status with the public URL
@@ -59,7 +85,8 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
 3. Create a Tunnel route in the Cloudflare dashboard from your FQDN to
    `http://traefik.kube-system.svc.cluster.local:80`. Cluster DNS makes the
    `traefik.kube-system.svc.cluster.local` hostname resolvable from every node,
-   so the tunnel can reach Traefik reliably.
+   so the tunnel can reach Traefik reliably. The default public FQDN for the
+   staging environment is `staging.democratized.space`.
 
 4. Install the app:
 
@@ -69,7 +96,7 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
      chart=oci://ghcr.io/democratizedspace/charts/dspace \
      values=docs/examples/dspace.values.dev.yaml \
      version_file=docs/apps/dspace.version \
-     host=dspace-v3.<your-domain> \
+     host=staging.democratized.space \
      default_tag=v3-latest
    ```
 
@@ -89,6 +116,14 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
      version_file=docs/apps/dspace.version \
      tag=v3-<shortsha>
    ```
+
+## Networking via Cloudflare Tunnel
+
+This guide assumes you expose the cluster through a persistent Cloudflare Tunnel. The expected
+public hostname is `https://staging.democratized.space`.
+
+For detailed instructions on creating the Cloudflare Tunnel and DNS records, see:
+./cloudflare_tunnel.md
 
 ## Troubleshooting
 
