@@ -238,12 +238,16 @@ mdns-reset:
 kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown "$USER":"$USER" ~/.kube/config
+    sudo chown -R "$USER":"$USER" ~/.kube
+    chmod 700 ~/.kube
+    chmod 600 ~/.kube/config
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     : "${token:=${CF_TUNNEL_TOKEN:-}}"
     if [ -z "${token}" ]; then
@@ -405,6 +409,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    export KUBECONFIG="${HOME}/.kube/config"
+
     if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
@@ -476,6 +482,8 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     if [ -z "{{ namespace }}" ]; then
         echo "Set namespace to inspect." >&2

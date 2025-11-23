@@ -83,7 +83,7 @@ when debugging or applying custom Traefik settings.
 To mirror the automated kubeconfig behavior manually before running kubectl:
 
 ```bash
-export KUBECONFIG=$HOME/.kube/config
+export KUBECONFIG="$HOME/.kube/config"
 kubectl get nodes
 ```
 
