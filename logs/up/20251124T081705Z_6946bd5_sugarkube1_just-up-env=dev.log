@@ -1,0 +1,558 @@
+# Sugarkube debug log (sanitized)
+# Source: just up env=dev
+# Generated: 2025-11-24T08:17:05Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] Memory cgroup controller detected.
+[sugarkube] Memory cgroup controller is active; nothing to do.
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=token_resolution token_present=0 allow_bootstrap=1 node_token_state=missing boot_token_state=missing
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=configure_avahi outcome=ok script=/home/pi/sugarkube/scripts/configure_avahi.sh
+ts=2025-11-24T00:17:07-08:00 level=info event=iptables_preflight msg="iptables binary is missing" severity=warn outcome=warn details="variant=missing,version=unavailable,nft=yes,kube-proxy=iptables,kube-proxy-source=default" variant=missing version=unavailable nft_available=yes kube_proxy_mode="iptables" kube_proxy_source="default" kube_proxy_nft_configured=0 remediation="install_iptables_package"
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=absence_gate_skipped reason=SUGARKUBE_SKIP_ABSENCE_GATE=1
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=avahi_health_check status=active
+ts=2025-11-24T00:17:07-08:00 level=info event=discover phase=discover_existing cluster=sugar environment=env=dev
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=simple_discovery_enabled
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=simple_discovery_start phase=discover_via_service_browse
+ts=2025-11-24T00:17:07-08:00 level=info event=discover event=simple_discovery_config no_terminate=1 timeout=30 service_type=_k3s-sugar-env=dev._tcp cluster=sugar environment=env=dev debug_enabled=1
+[k3s-discover mdns] query_mdns: mode=server-select, cluster=sugar, env=env=dev
+[k3s-discover mdns] query_mdns: service_types=['_k3s-sugar-env=dev._tcp', '_https._tcp']
+[k3s-discover mdns] query_mdns: timeout=30.0s
+[k3s-discover mdns] query_mdns: no_terminate=1
+[k3s-discover mdns] _load_lines_from_avahi: browsing service_type=_k3s-sugar-env=dev._tcp, resolve=True
+[k3s-discover mdns] _invoke_avahi: command=avahi-browse --parsable --resolve _k3s-sugar-env=dev._tcp
+[k3s-discover mdns] _invoke_avahi: timeout=30.0s
+[k3s-discover mdns] avahi-browse attempt 1 timed out after 30s
+[k3s-discover mdns] Retrying after timeout (attempt 1)...
+[k3s-discover mdns] avahi-browse attempt 2 timed out after 30s
+[k3s-discover mdns] avahi-browse failed after retries (exit 124), trying D-Bus browser...
+[k3s-discover mdns] D-Bus browse via gdbus failed (exit 1): Usage:
+  gdbus call [OPTION…]
+
+Invoke a method on a remote object.
+
+Connection Endpoint Options:
+  -y, --system          Connect to the system bus
+  -e, --session         Connect to the session bus
+  -a, --address         Connect to given D-Bus address
+
+Application Options:
+  -d, --dest            Destination name to invoke method on
+  -o, --object-path     Object path to invoke method on
+  -m, --method          Method and interface name
+  -t, --timeout         Timeout in seconds
+  -i, --interactive     Allow interactive authorisation
+
+
+[k3s-discover mdns] D-Bus browse via busctl failed (exit 1): busctl: invalid option -- '1'
+
+[k3s-discover mdns] Browse failed; dumping avahi-daemon journal for diagnostics...
+[k3s-discover mdns] === Avahi daemon journal (last 200 lines) ===
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for [REDACTED_IP] on lo.*.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for 127.0.0.1 on lo.IPv4.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:16:24 sugarkube1 avahi-daemon[556]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 2991172648.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::6387:ddfe:f078:e6e1 on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::7a90:375a:cfcd:25cf on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::6387:ddfe:f078:e6e1 on eth0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2 on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::7a90:375a:cfcd:25cf on wlan0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.51 on wlan0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Got SIGTERM, quitting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopping avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 exiting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: avahi-daemon.service: Deactivated successfully.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopped avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Process 556 died: No such process; trying to remove PID file. (/run/avahi-daemon//pid)
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 705609698.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] === End of Avahi daemon journal ===
+[k3s-discover mdns] _load_lines_from_avahi: got 0 normalized lines from _k3s-sugar-env=dev._tcp
+[k3s-discover mdns] _load_lines_from_avahi: browsing service_type=_https._tcp, resolve=True
+[k3s-discover mdns] _invoke_avahi: command=avahi-browse --parsable --resolve _https._tcp
+[k3s-discover mdns] _invoke_avahi: timeout=30.0s
+[k3s-discover mdns] avahi-browse attempt 1 timed out after 30s
+[k3s-discover mdns] Retrying after timeout (attempt 1)...
+[k3s-discover mdns] avahi-browse attempt 2 timed out after 30s
+[k3s-discover mdns] avahi-browse failed after retries (exit 124), trying D-Bus browser...
+[k3s-discover mdns] D-Bus browse via gdbus failed (exit 1): Usage:
+  gdbus call [OPTION…]
+
+Invoke a method on a remote object.
+
+Connection Endpoint Options:
+  -y, --system          Connect to the system bus
+  -e, --session         Connect to the session bus
+  -a, --address         Connect to given D-Bus address
+
+Application Options:
+  -d, --dest            Destination name to invoke method on
+  -o, --object-path     Object path to invoke method on
+  -m, --method          Method and interface name
+  -t, --timeout         Timeout in seconds
+  -i, --interactive     Allow interactive authorisation
+
+
+[k3s-discover mdns] D-Bus browse via busctl failed (exit 1): busctl: invalid option -- '1'
+
+[k3s-discover mdns] Browse failed; dumping avahi-daemon journal for diagnostics...
+[k3s-discover mdns] === Avahi daemon journal (last 200 lines) ===
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for [REDACTED_IP] on lo.*.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for 127.0.0.1 on lo.IPv4.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:16:24 sugarkube1 avahi-daemon[556]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 2991172648.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::6387:ddfe:f078:e6e1 on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::7a90:375a:cfcd:25cf on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::6387:ddfe:f078:e6e1 on eth0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2 on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::7a90:375a:cfcd:25cf on wlan0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.51 on wlan0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Got SIGTERM, quitting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopping avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 exiting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: avahi-daemon.service: Deactivated successfully.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopped avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Process 556 died: No such process; trying to remove PID file. (/run/avahi-daemon//pid)
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 705609698.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] === End of Avahi daemon journal ===
+[k3s-discover mdns] _load_lines_from_avahi: got 0 normalized lines from _https._tcp
+[k3s-discover mdns] query_mdns: initial browse returned 0 lines, 0 records
+[k3s-discover mdns] query_mdns: no records found, trying without --resolve
+[k3s-discover mdns] _load_lines_from_avahi: browsing service_type=_k3s-sugar-env=dev._tcp, resolve=False
+[k3s-discover mdns] _invoke_avahi: command=avahi-browse --parsable _k3s-sugar-env=dev._tcp
+[k3s-discover mdns] _invoke_avahi: timeout=30.0s
+[k3s-discover mdns] avahi-browse attempt 1 timed out after 30s
+[k3s-discover mdns] Retrying after timeout (attempt 1)...
+[k3s-discover mdns] avahi-browse attempt 2 timed out after 30s
+[k3s-discover mdns] avahi-browse failed after retries (exit 124), trying D-Bus browser...
+[k3s-discover mdns] D-Bus browse via gdbus failed (exit 1): Usage:
+  gdbus call [OPTION…]
+
+Invoke a method on a remote object.
+
+Connection Endpoint Options:
+  -y, --system          Connect to the system bus
+  -e, --session         Connect to the session bus
+  -a, --address         Connect to given D-Bus address
+
+Application Options:
+  -d, --dest            Destination name to invoke method on
+  -o, --object-path     Object path to invoke method on
+  -m, --method          Method and interface name
+  -t, --timeout         Timeout in seconds
+  -i, --interactive     Allow interactive authorisation
+
+
+[k3s-discover mdns] D-Bus browse via busctl failed (exit 1): busctl: invalid option -- '1'
+
+[k3s-discover mdns] Browse failed; dumping avahi-daemon journal for diagnostics...
+[k3s-discover mdns] === Avahi daemon journal (last 200 lines) ===
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for [REDACTED_IP] on lo.*.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for 127.0.0.1 on lo.IPv4.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:16:24 sugarkube1 avahi-daemon[556]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 2991172648.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::6387:ddfe:f078:e6e1 on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::7a90:375a:cfcd:25cf on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::6387:ddfe:f078:e6e1 on eth0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2 on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::7a90:375a:cfcd:25cf on wlan0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.51 on wlan0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Got SIGTERM, quitting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopping avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 exiting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: avahi-daemon.service: Deactivated successfully.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopped avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Process 556 died: No such process; trying to remove PID file. (/run/avahi-daemon//pid)
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 705609698.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] === End of Avahi daemon journal ===
+[k3s-discover mdns] _load_lines_from_avahi: got 0 normalized lines from _k3s-sugar-env=dev._tcp
+[k3s-discover mdns] _load_lines_from_avahi: browsing service_type=_https._tcp, resolve=False
+[k3s-discover mdns] _invoke_avahi: command=avahi-browse --parsable _https._tcp
+[k3s-discover mdns] _invoke_avahi: timeout=30.0s
+[k3s-discover mdns] avahi-browse attempt 1 timed out after 30s
+[k3s-discover mdns] Retrying after timeout (attempt 1)...
+[k3s-discover mdns] avahi-browse attempt 2 timed out after 30s
+[k3s-discover mdns] avahi-browse failed after retries (exit 124), trying D-Bus browser...
+[k3s-discover mdns] D-Bus browse via gdbus failed (exit 1): Usage:
+  gdbus call [OPTION…]
+
+Invoke a method on a remote object.
+
+Connection Endpoint Options:
+  -y, --system          Connect to the system bus
+  -e, --session         Connect to the session bus
+  -a, --address         Connect to given D-Bus address
+
+Application Options:
+  -d, --dest            Destination name to invoke method on
+  -o, --object-path     Object path to invoke method on
+  -m, --method          Method and interface name
+  -t, --timeout         Timeout in seconds
+  -i, --interactive     Allow interactive authorisation
+
+
+[k3s-discover mdns] D-Bus browse via busctl failed (exit 1): busctl: invalid option -- '1'
+
+[k3s-discover mdns] Browse failed; dumping avahi-daemon journal for diagnostics...
+[k3s-discover mdns] === Avahi daemon journal (last 200 lines) ===
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for [REDACTED_IP] on lo.*.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for 127.0.0.1 on lo.IPv4.
+[k3s-discover mdns] Nov 24 00:16:23 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:16:24 sugarkube1 avahi-daemon[556]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 2991172648.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::6387:ddfe:f078:e6e1 on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::7a90:375a:cfcd:25cf on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:16:27 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::6387:ddfe:f078:e6e1 on eth0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2 on wlan0.*.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::7a90:375a:cfcd:25cf on wlan0.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.51 on wlan0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Got SIGTERM, quitting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopping avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv6 with address ::1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 exiting.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: avahi-daemon.service: Deactivated successfully.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Stopped avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Process 556 died: No such process; trying to remove PID file. (/run/avahi-daemon//pid)
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Found user 'avahi' (UID 105) and group 'avahi' (GID 111).
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped root privileges.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: avahi-daemon 0.8 starting up.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully called chroot().
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped remaining capabilities.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv6 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv4 for mDNS.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Network interface enumeration completed.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.
+[k3s-discover mdns] Nov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for 192.168.86.50 on eth0.IPv4.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 705609698.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.
+[k3s-discover mdns] Nov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.
+[k3s-discover mdns] === End of Avahi daemon journal ===
+[k3s-discover mdns] _load_lines_from_avahi: got 0 normalized lines from _https._tcp
+[k3s-discover mdns] query_mdns: returning 0 results for mode=server-select
+ts=2025-11-24T00:21:13-08:00 level=info event=discover event=simple_discovery_no_servers token_present=0
+ts=2025-11-24T00:21:13-08:00 level=info event=discover event=simple_discovery_bootstrap reason=no_token
+ts=2025-11-24T00:21:13-08:00 level=info event=discover event=simple_discovery_bootstrap
+ts=2025-11-24T00:21:13-08:00 level=info event=mdns_publish phase=bootstrap_attempt cluster=sugar environment=env=dev host=sugarkube1.local
+ts=2025-11-24T00:21:13-08:00 level=info event=mdns_publish outcome=attempt role=bootstrap host=sugarkube1.local method=static phase=bootstrap leader=sugarkube1.local attempt=1
+mdns resolution status action=ok nss_ok=1 resolve_ok=0 browse_ok=0 hosts_updated=0
+Timed out waiting for Avahi to publish k3s-sugar-env=dev@sugarkube1.local (bootstrap)
+Avahi reload wait failed; continuing with direct confirmation
+Verifying host record for sugarkube1.local with avahi-resolve...
+SUCCESS: Host record sugarkube1.local is advertised: sugarkube1.local	192.168.86.50
+ts=2025-11-24T00:21:47-08:00 level=info event=mdns_publish outcome=ok role=bootstrap host=sugarkube1.local method=static phase=bootstrap leader=sugarkube1.local confirm_outcome=ok confirm_latency_ms=1101 confirm_bucket=ms_1000_1999 confirm_attempts=1 confirm_dbus_status=1 confirm_cli_status=0 reload_status=0 attempts=1
+ts=2025-11-24T00:21:47-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=27 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-24T00:21:48-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1063 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-env=dev._tcp
+ts=2025-11-24T00:21:48-08:00 level=info event=discover msg="Avahi liveness probe retry" severity=warn attempt=1 lines=0
+ts=2025-11-24T00:21:49-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=28 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-24T00:21:51-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1063 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-env=dev._tcp
+ts=2025-11-24T00:21:51-08:00 level=info event=discover event=avahi_liveness outcome=ok method=mdns_ready attempt=2 fallback=dbus_unavailable dbus=unavailable
+ts=2025-11-24T00:21:52-08:00 level=info event=mdns_selfcheck phase=start role=bootstrap host=sugarkube1.local attempts=20
+ts=2025-11-24T00:21:58-08:00 level=info event=mdns_selfcheck msg="advertisement not observed for sugarkube1.local; status=4" severity=error role=bootstrap
+event=net_diag check=systemctl_is_active_avahi reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 exit_code=0 output=active
+event=net_diag check=avahi_daemon_version reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 exit_code=0 output=avahi-daemon\ 0.8
+event=net_diag check=systemctl_is_active_systemd_resolved reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 exit_code=3 output=inactive
+event=net_diag check=systemd_resolved_mdns_state reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 source=none active=0 exit_code=0 output=inactive
+event=net_diag check=mdns_resolution_status reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 host=sugarkube1.local service_type=_k3s-sugar-env=dev._tcp nss_ip=192.168.86.50 resolve_ip=none browse_match=1 exit_code=0 output=nss_ok=1\ resolve_ok=0\ browse_ok=1
+event=net_diag check=udp_5353_processes reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 source=ss exit_code=0 output=UNCONN\ 0\ \ \ \ \ \ 0\ \ \ \ \ \ \ \ \ \ \ \ [REDACTED_IP]:5353\ \ \ \ \ \ [REDACTED_IP]:\*\ \ \ \ users:\(\(\"avahi-daemon\"\,pid=974\,fd=12\)\)\;UNCONN\ 0\ \ \ \ \ \ 0\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \*:5353\ \ \ \ \ \ \ \ \ \ \ \ \*:\*\ \ \ \ users:\(\(\"avahi-daemon\"\,pid=974\,fd=13\)\)
+event=net_diag check=ip_brief_up reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 iface=eth0 exit_code=0 output=eth0\ \ \ \ \ \ \ \ \ \ \ \ \ UP\ \ \ \ \ \ \ \ \ \ \ \ \ 192.168.86.50/24\ fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea/64\ fe80::6387:ddfe:f078:e6e1/64\ 
+event=net_diag check=ip_route reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 iface=eth0 exit_code=0 output=default\ via\ 192.168.86.1\ dev\ eth0\ proto\ dhcp\ src\ 192.168.86.50\ metric\ 100\ \;192.168.86.0/24\ dev\ eth0\ proto\ kernel\ scope\ link\ src\ 192.168.86.50\ metric\ 100\ 
+event=net_diag check=tcpdump_5353 reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 iface=eth0 matches=0 self_answers=no exit_code=124 output=tcpdump:\ verbose\ output\ suppressed\,\ use\ -v\[v\]...\ for\ full\ protocol\ decode\;listening\ on\ eth0\,\ link-type\ EN10MB\ \(Ethernet\)\,\ snapshot\ length\ 262144\ bytes\;00:22:02.251608\ IP6\ fdd1:f818:d4e2:f916:92ca:faff:fe10:10b4.5353\ \>\ ff02::fb.5353:\ 0\ SRV\ \(QM\)\?\ d21c8cf232212044._trel._udp.local.\ \(51\)\;00:22:02.253191\ IP6\ fdd1:f818:d4e2:f916:92ca:faff:fe10:51a.5353\ \>\ ff02::fb.5353:\ 0\*-\ \[0q\]\ 2/0/0\ \(Cache\ flush\)\ SRV\ 4ED76A0CFEE1.local.:35098\ 0\ 0\,\ \(Cache\ flush\)\ AAAA\ fdd1:f818:d4e2:f916:92ca:faff:fe10:51a\ \(106\)\;\;2\ packets\ captured\;2\ packets\ received\ by\ filter\;0\ packets\ dropped\ by\ kernel
+event=avahi_conf_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 path=/etc/avahi/avahi-daemon.conf rc=0 output=$'[server]\nuse-ipv4=yes\nuse-ipv6=yes\nratelimit-interval-usec=1000000\nratelimit-burst=1000\nallow-interfaces=eth0\nenable-dbus=yes\n[wide-area]\nenable-wide-area=no\n[publish]\npublish-hinfo=no\npublish-workstation=yes\n[reflector]\n[rlimits]'
+event=mdns_wire_probe iface=eth0 service_type=_k3s-sugar-env=dev._tcp status=no_entry_group answers=not_collected dbus_rc=4 dbus_command=python3\ mdns_wire_probe_dbus_summary dbus_duration_ms=86 dbus_summary=\{\"entry_groups\":\ \[\]\,\ \"errors\":\ \{\}\,\ \"service_type\":\ \"_k3s-sugar-env=dev._tcp\"\,\ \"states\":\ \{\}\}
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 rc=0 lines=200 output=$'Nov 24 00:16:23 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Found user \'avahi\' (UID 105) and group \'avahi\' (GID 111).\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped root privileges.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 starting up.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully called chroot().\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped remaining capabilities.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv6 with address ::1.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv6 for mDNS.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv4 for mDNS.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Network interface enumeration completed.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for [REDACTED_IP] on lo.*.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for 127.0.0.1 on lo.IPv4.\nNov 24 00:16:23 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:16:24 sugarkube1 avahi-daemon[556]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 2991172648.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv6 for mDNS.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::6387:ddfe:f078:e6e1 on eth0.*.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv4 for mDNS.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.50 on eth0.IPv4.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv6 for mDNS.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::7a90:375a:cfcd:25cf on wlan0.*.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::6387:ddfe:f078:e6e1 on eth0.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2 on wlan0.*.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::7a90:375a:cfcd:25cf on wlan0.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv4 for mDNS.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.51 on wlan0.IPv4.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Got SIGTERM, quitting.\nNov 24 00:17:06 sugarkube1 systemd[1]: Stopping avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv6 with address ::1.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 exiting.\nNov 24 00:17:06 sugarkube1 systemd[1]: avahi-daemon.service: Deactivated successfully.\nNov 24 00:17:06 sugarkube1 systemd[1]: Stopped avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:17:06 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Process 556 died: No such process; trying to remove PID file. (/run/avahi-daemon//pid)\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Found user \'avahi\' (UID 105) and group \'avahi\' (GID 111).\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped root privileges.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: avahi-daemon 0.8 starting up.\nNov 24 00:17:06 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully called chroot().\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped remaining capabilities.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv6 for mDNS.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv4 for mDNS.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Network interface enumeration completed.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for 192.168.86.50 on eth0.IPv4.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 705609698.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Loading service file /services/k3s-sugar-env=dev.service.\nNov 24 00:21:15 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Got SIGHUP, reloading.\nNov 24 00:21:15 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:21:16 sugarkube1 avahi-daemon[974]: Service "k3s-sugar-env=dev@sugarkube1.local (bootstrap)" (/services/k3s-sugar-env=dev.service) successfully established.'
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 pattern=successfully_established matches=1 output=Nov\ 24\ 00:21:16\ sugarkube1\ avahi-daemon\[974\]:\ Service\ \"k3s-sugar-env=dev@sugarkube1.local\ \(bootstrap\)\"\ \(/services/k3s-sugar-env=dev.service\)\ successfully\ established.
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 pattern=failed_to_read_service_file matches=0 output=none
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 pattern=failed_to_parse_xml matches=0 output=none
+ts=2025-11-24T00:22:06-08:00 level=info event=mdns_selfcheck msg="bootstrap advertisement not visible; refreshing Avahi service" severity=warn host=sugarkube1.local role=bootstrap
+ts=2025-11-24T00:22:07-08:00 level=info event=mdns_publish outcome=attempt role=bootstrap host=sugarkube1.local method=static phase=bootstrap leader=sugarkube1.local attempt=1
+mdns resolution status action=ok nss_ok=1 resolve_ok=0 browse_ok=1 hosts_updated=0
+Timed out waiting for Avahi to publish k3s-sugar-env=dev@sugarkube1.local (bootstrap)
+Avahi reload wait failed; continuing with direct confirmation
+Verifying host record for sugarkube1.local with avahi-resolve...
+SUCCESS: Host record sugarkube1.local is advertised: sugarkube1.local	192.168.86.50
+ts=2025-11-24T00:22:41-08:00 level=info event=mdns_publish outcome=ok role=bootstrap host=sugarkube1.local method=static phase=bootstrap leader=sugarkube1.local confirm_outcome=ok confirm_latency_ms=1102 confirm_bucket=ms_1000_1999 confirm_attempts=1 confirm_dbus_status=1 confirm_cli_status=0 reload_status=0 attempts=1
+ts=2025-11-24T00:22:41-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=33 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-24T00:22:42-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1076 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-env=dev._tcp
+ts=2025-11-24T00:22:42-08:00 level=info event=discover msg="Avahi liveness probe retry" severity=warn attempt=1 lines=0
+ts=2025-11-24T00:22:43-08:00 level=info event=mdns_ready event=mdns_ready_dbus outcome=call_failed method=dbus elapsed_ms=39 ownership_attempts=1 bus_destination=org.freedesktop.Avahi bus_object=/org/freedesktop/Avahi/Server bus_interface=org.freedesktop.Avahi.Server bus_method=GetVersionString bus_owner=owned bus_code=1 bus_error=Call_failed:_Method_GetVersionString_with_signature__on_interface_org.freedesktop.Avahi.Server_doesnt_exist
+ts=2025-11-24T00:22:44-08:00 level=info event=mdns_ready event=mdns_ready outcome=ok method=cli elapsed_ms=1083 dbus_fallback=true dbus_status=1 service_type=_k3s-sugar-env=dev._tcp
+ts=2025-11-24T00:22:44-08:00 level=info event=discover event=avahi_liveness outcome=ok method=mdns_ready attempt=2 fallback=dbus_unavailable dbus=unavailable
+ts=2025-11-24T00:22:45-08:00 level=info event=mdns_selfcheck phase=start role=bootstrap host=sugarkube1.local attempts=20
+ts=2025-11-24T00:22:52-08:00 level=info event=mdns_selfcheck msg="advertisement not observed for sugarkube1.local; status=4" severity=error role=bootstrap
+event=net_diag check=systemctl_is_active_avahi reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 exit_code=0 output=active
+event=net_diag check=avahi_daemon_version reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 exit_code=0 output=avahi-daemon\ 0.8
+event=net_diag check=systemctl_is_active_systemd_resolved reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 exit_code=3 output=inactive
+event=net_diag check=systemd_resolved_mdns_state reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 source=none active=0 exit_code=0 output=inactive
+event=net_diag check=mdns_resolution_status reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 host=sugarkube1.local service_type=_k3s-sugar-env=dev._tcp nss_ip=192.168.86.50 resolve_ip=none browse_match=1 exit_code=0 output=nss_ok=1\ resolve_ok=0\ browse_ok=1
+event=net_diag check=udp_5353_processes reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 source=ss exit_code=0 output=UNCONN\ 0\ \ \ \ \ \ 0\ \ \ \ \ \ \ \ \ \ \ \ [REDACTED_IP]:5353\ \ \ \ \ \ [REDACTED_IP]:\*\ \ \ \ users:\(\(\"avahi-daemon\"\,pid=974\,fd=12\)\)\;UNCONN\ 0\ \ \ \ \ \ 0\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \*:5353\ \ \ \ \ \ \ \ \ \ \ \ \*:\*\ \ \ \ users:\(\(\"avahi-daemon\"\,pid=974\,fd=13\)\)
+event=net_diag check=ip_brief_up reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 iface=eth0 exit_code=0 output=eth0\ \ \ \ \ \ \ \ \ \ \ \ \ UP\ \ \ \ \ \ \ \ \ \ \ \ \ 192.168.86.50/24\ fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea/64\ fe80::6387:ddfe:f078:e6e1/64\ 
+event=net_diag check=ip_route reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 iface=eth0 exit_code=0 output=default\ via\ 192.168.86.1\ dev\ eth0\ proto\ dhcp\ src\ 192.168.86.50\ metric\ 100\ \;192.168.86.0/24\ dev\ eth0\ proto\ kernel\ scope\ link\ src\ 192.168.86.50\ metric\ 100\ 
+event=net_diag check=tcpdump_5353 reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 iface=eth0 matches=0 self_answers=no exit_code=124 output=tcpdump:\ verbose\ output\ suppressed\,\ use\ -v\[v\]...\ for\ full\ protocol\ decode\;listening\ on\ eth0\,\ link-type\ EN10MB\ \(Ethernet\)\,\ snapshot\ length\ 262144\ bytes\;00:22:54.103364\ IP\ 192.168.86.91.5353\ \>\ [REDACTED_IP].5353:\ 0\ \[1a\]\ \[3q\]\ SRV\ \(QM\)\?\ Yetunde\'s\ 2nd\ TV._airplay._tcp.local.\ A\ \(QM\)\?\ Android-2.local.\ TXT\ \(QM\)\?\ Yetunde\'s\ 2nd\ TV._airplay._tcp.local.\ \(552\)\;00:22:54.338738\ IP\ 192.168.86.24.5353\ \>\ [REDACTED_IP].5353:\ 0\*-\ \[0q\]\ 2/0/5\ \(Cache\ flush\)\ SRV\ Android-2.local.:7000\ 0\ 0\,\ \(Cache\ flush\)\ A\ 192.168.86.24\ \(219\)\;00:22:54.339295\ IP6\ fe80::a97:98ff:fe39:fe65.5353\ \>\ ff02::fb.5353:\ 0\*-\ \[0q\]\ 2/0/5\ \(Cache\ flush\)\ SRV\ Android-2.local.:7000\ 0\ 0\,\ \(Cache\ flush\)\ A\ 192.168.86.24\ \(219\)\;00:22:54.453305\ IP\ 192.168.86.24.5353\ \>\ [REDACTED_IP].5353:\ 0\*-\ \[0q\]\ 1/0/0\ \(Cache\ flush\)\ A\ 192.168.86.24\ \(47\)\;00:22:58.459028\ IP\ 192.168.86.113.5353\ \>\ [REDACTED_IP].5353:\ 0\*-\ \[0q\]\ 1/0/0\ \(Cache\ flush\)\ A\ 192.168.86.113\ \(46\)\;00:22:58.934671\ IP\ 192.168.86.22.5353\ \>\ [REDACTED_IP].5353:\ 0\*-\ \[0q\]\ 1/0/0\ PTR\ 57B24C33-B706-4601-B3C8-860440BA7995._asquic._udp.local.\ \(81\)\;00:22:58.935619\ IP6\ fe80::8da:7db6:be62:3460.5353\ \>\ ff02::fb.5353:\ 0\*-\ \[0q\]\ 1/0/0\ PTR\ 57B24C33-B706-4601-B3C8-860440BA7995._asquic._udp.local.\ \(81\)\;\;7\ packets\ captured\;7\ packets\ received\ by\ filter\;0\ packets\ dropped\ by\ kernel
+event=avahi_conf_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 path=/etc/avahi/avahi-daemon.conf rc=0 output=$'[server]\nuse-ipv4=yes\nuse-ipv6=yes\nratelimit-interval-usec=1000000\nratelimit-burst=1000\nallow-interfaces=eth0\nenable-dbus=yes\n[wide-area]\nenable-wide-area=no\n[publish]\npublish-hinfo=no\npublish-workstation=yes\n[reflector]\n[rlimits]'
+event=mdns_wire_probe iface=eth0 service_type=_k3s-sugar-env=dev._tcp status=no_entry_group answers=not_collected dbus_rc=4 dbus_command=python3\ mdns_wire_probe_dbus_summary dbus_duration_ms=80 dbus_summary=\{\"entry_groups\":\ \[\]\,\ \"errors\":\ \{\}\,\ \"service_type\":\ \"_k3s-sugar-env=dev._tcp\"\,\ \"states\":\ \{\}\}
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 rc=0 lines=200 output=$'Nov 24 00:16:23 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Found user \'avahi\' (UID 105) and group \'avahi\' (GID 111).\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped root privileges.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 starting up.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully called chroot().\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Successfully dropped remaining capabilities.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv6 with address ::1.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv6 for mDNS.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: New relevant interface lo.IPv4 for mDNS.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Network interface enumeration completed.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for [REDACTED_IP] on lo.*.\nNov 24 00:16:23 sugarkube1 avahi-daemon[556]: Registering new address record for 127.0.0.1 on lo.IPv4.\nNov 24 00:16:23 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:16:24 sugarkube1 avahi-daemon[556]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 2991172648.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv6 for mDNS.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::6387:ddfe:f078:e6e1 on eth0.*.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: New relevant interface eth0.IPv4 for mDNS.\nNov 24 00:16:26 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.50 on eth0.IPv4.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv6 for mDNS.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fe80::7a90:375a:cfcd:25cf on wlan0.*.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fe80::6387:ddfe:f078:e6e1.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.\nNov 24 00:16:27 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::6387:ddfe:f078:e6e1 on eth0.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fe80::7a90:375a:cfcd:25cf.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2 on wlan0.*.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Withdrawing address record for fe80::7a90:375a:cfcd:25cf on wlan0.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Joining mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: New relevant interface wlan0.IPv4 for mDNS.\nNov 24 00:16:29 sugarkube1 avahi-daemon[556]: Registering new address record for 192.168.86.51 on wlan0.IPv4.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Files changed, reloading.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Got SIGTERM, quitting.\nNov 24 00:17:06 sugarkube1 systemd[1]: Stopping avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv6 with address fdd1:f818:d4e2:f916:33e8:eca0:572b:8da2.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface wlan0.IPv4 with address 192.168.86.51.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv6 with address ::1.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: Leaving mDNS multicast group on interface lo.IPv4 with address 127.0.0.1.\nNov 24 00:17:06 sugarkube1 avahi-daemon[556]: avahi-daemon 0.8 exiting.\nNov 24 00:17:06 sugarkube1 systemd[1]: avahi-daemon.service: Deactivated successfully.\nNov 24 00:17:06 sugarkube1 systemd[1]: Stopped avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:17:06 sugarkube1 systemd[1]: Starting avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Process 556 died: No such process; trying to remove PID file. (/run/avahi-daemon//pid)\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Found user \'avahi\' (UID 105) and group \'avahi\' (GID 111).\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped root privileges.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: avahi-daemon 0.8 starting up.\nNov 24 00:17:06 sugarkube1 systemd[1]: Started avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully called chroot().\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Successfully dropped remaining capabilities.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv6 with address fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv6 for mDNS.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Joining mDNS multicast group on interface eth0.IPv4 with address 192.168.86.50.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: New relevant interface eth0.IPv4 for mDNS.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Network interface enumeration completed.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea on eth0.*.\nNov 24 00:17:06 sugarkube1 avahi-daemon[974]: Registering new address record for 192.168.86.50 on eth0.IPv4.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Server startup complete. Host name is sugarkube1.local. Local service cookie is 705609698.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:17:07 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: No service file found in /etc/avahi/services.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Loading service file /services/k3s-sugar-env=dev.service.\nNov 24 00:21:15 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:21:15 sugarkube1 avahi-daemon[974]: Got SIGHUP, reloading.\nNov 24 00:21:15 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:21:16 sugarkube1 avahi-daemon[974]: Service "k3s-sugar-env=dev@sugarkube1.local (bootstrap)" (/services/k3s-sugar-env=dev.service) successfully established.\nNov 24 00:22:08 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:22:08 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:22:08 sugarkube1 avahi-daemon[974]: Files changed, reloading.\nNov 24 00:22:08 sugarkube1 avahi-daemon[974]: Service group file /services/k3s-sugar-env=dev.service changed, reloading.\nNov 24 00:22:08 sugarkube1 systemd[1]: Reloading avahi-daemon.service - Avahi mDNS/DNS-SD Stack...\nNov 24 00:22:08 sugarkube1 avahi-daemon[974]: Got SIGHUP, reloading.\nNov 24 00:22:08 sugarkube1 systemd[1]: Reloaded avahi-daemon.service - Avahi mDNS/DNS-SD Stack.\nNov 24 00:22:09 sugarkube1 avahi-daemon[974]: Service "k3s-sugar-env=dev@sugarkube1.local (bootstrap)" (/services/k3s-sugar-env=dev.service) successfully established.'
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 pattern=successfully_established matches=2 output=Nov\ 24\ 00:21:16\ sugarkube1\ avahi-daemon\[974\]:\ Service\ \"k3s-sugar-env=dev@sugarkube1.local\ \(bootstrap\)\"\ \(/services/k3s-sugar-env=dev.service\)\ successfully\ established.\;Nov\ 24\ 00:22:09\ sugarkube1\ avahi-daemon\[974\]:\ Service\ \"k3s-sugar-env=dev@sugarkube1.local\ \(bootstrap\)\"\ \(/services/k3s-sugar-env=dev.service\)\ successfully\ established.
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 pattern=failed_to_read_service_file matches=0 output=none
+event=avahi_journal_dump reason=mdns_selfcheck_failure attempt=20 role=bootstrap host=sugarkube1.local cluster=sugar environment=env=dev expected_ipv4=192.168.86.50 mode=strict strict_status=4 relaxed_attempted=0 pattern=failed_to_parse_xml matches=0 output=none
+ts=2025-11-24T00:22:59-08:00 level=info event=mdns_selfcheck msg="failed to confirm bootstrap advertisement after Avahi reload" severity=error host=sugarkube1.local role=bootstrap
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">k3s-sugar-env=dev@sugarkube1.local (bootstrap)</name>
+  <service>
+    <type>_k3s-sugar-env=dev._tcp</type>
+    <host-name>sugarkube1.local</host-name>
+    <port>6443</port>
+    <txt-record>k3s=1</txt-record>
+    <txt-record>cluster=sugar</txt-record>
+    <txt-record>env=env=dev</txt-record>
+    <txt-record>role=bootstrap</txt-record>
+    <txt-record>phase=bootstrap</txt-record>
+    <txt-record>leader=sugarkube1.local</txt-record>
+    <txt-record>host=sugarkube1.local</txt-record>
+    <txt-record>ip4=192.168.86.50</txt-record>
+    <txt-record>ip6=fdd1:f818:d4e2:f916:4451:e79:a4b9:8aea</txt-record>
+  </service>
+</service-group>
+ts=2025-11-24T00:22:59-08:00 level=info event=discover msg="Failed to publish bootstrap service" severity=error phase=bootstrap
+ts=2025-11-24T00:22:59-08:00 level=info event=discover msg="Other nodes will not be able to discover this bootstrap node via mDNS" severity=error phase=bootstrap
+ts=2025-11-24T00:22:59-08:00 level=info event=discover msg="Cannot proceed with cluster formation - mDNS advertisement is required" severity=error phase=bootstrap
+Summary:
+  Dependencies elapsed_ms=738
+  Memory cgroup elapsed_ms=40
+  Avahi configure elapsed_ms=234
+  WLAN disable elapsed_ms=554
+  Node IP configure elapsed_ms=65
+  k3s discover/install elapsed_ms=352465
+
+[debug] Log saved to logs/up/20251124T081705Z_6946bd5_sugarkube1_just-up-env=dev.log
