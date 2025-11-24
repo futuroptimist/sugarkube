@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_SUMMARY_LIB="${SCRIPT_DIR}/lib/summary.sh"
 SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${DEFAULT_SUMMARY_LIB}}"
 
+DEFAULT_KUBECONFIG_LIB="${SCRIPT_DIR}/lib/kubeconfig.sh"
+
 if [ "${SUMMARY_LIB}" = "${DEFAULT_SUMMARY_LIB}" ]; then
   if [ -f "${DEFAULT_SUMMARY_LIB}" ]; then
     # shellcheck disable=SC1091  # Optional helper bundled with the repo
@@ -15,6 +17,11 @@ if [ "${SUMMARY_LIB}" = "${DEFAULT_SUMMARY_LIB}" ]; then
 elif [ -f "${SUMMARY_LIB}" ]; then
   # shellcheck disable=SC1090,SC1091  # Runtime-configured summary helper
   . "${SUMMARY_LIB}"
+fi
+
+if [ -f "${DEFAULT_KUBECONFIG_LIB}" ]; then
+  # shellcheck disable=SC1091
+  . "${DEFAULT_KUBECONFIG_LIB}"
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
 
@@ -5176,6 +5183,10 @@ done
 if [ -f /etc/rancher/k3s/k3s.yaml ]; then
   run_privileged mkdir -p /root/.kube
   run_privileged cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+fi
+
+if command -v kubeconfig::ensure_user_kubeconfig >/dev/null 2>&1; then
+  kubeconfig::ensure_user_kubeconfig || true
 fi
 
 # Display cluster formation summary with next steps
