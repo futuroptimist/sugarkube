@@ -209,6 +209,8 @@ ha3-untaint-control-plane:
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    export KUBECONFIG="${HOME}/.kube/config"
+
     echo "Removing node-role.kubernetes.io/control-plane:NoSchedule taint from all nodes (if present)..."
 
     nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
@@ -218,8 +220,8 @@ ha3-untaint-control-plane:
     fi
 
     for node in ${nodes}; do
-        taints=$(kubectl get node "${node}" -o jsonpath='{.spec.taints}' 2>/dev/null || echo "")
-        if echo "${taints}" | grep -q 'node-role.kubernetes.io/control-plane:NoSchedule'; then
+        control_plane_taint=$(kubectl get node "${node}" -o jsonpath="{.spec.taints[?(@.key=='node-role.kubernetes.io/control-plane' && @.effect=='NoSchedule')].key}" 2>/dev/null || echo "")
+        if [ -n "${control_plane_taint}" ]; then
             echo "  - Untainting ${node}"
             kubectl taint nodes "${node}" node-role.kubernetes.io/control-plane:NoSchedule- || true
         else
