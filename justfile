@@ -204,6 +204,7 @@ ha3 env='dev':
 
 # Remove the control-plane NoSchedule taint from all nodes so they can run workloads.
 # This is intended for the homelab topology where all three HA control-plane nodes
+
 # also act as workers.
 ha3-untaint-control-plane:
     #!/usr/bin/env bash
