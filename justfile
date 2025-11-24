@@ -179,6 +179,8 @@ cluster-status:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    export KUBECONFIG="${HOME}/.kube/config"
+
     echo "=== Cluster nodes (kubectl get nodes) ==="
     kubectl get nodes -o wide || echo "kubectl get nodes failed; is your kubeconfig pointing at the cluster?"
 
@@ -236,12 +238,16 @@ mdns-reset:
 kubeconfig env='dev':
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown "$USER":"$USER" ~/.kube/config
+    sudo chown -R "$USER":"$USER" ~/.kube
+    chmod 700 ~/.kube
+    chmod 600 ~/.kube/config
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     : "${token:=${CF_TUNNEL_TOKEN:-}}"
     if [ -z "${token}" ]; then
@@ -311,7 +317,7 @@ helm-status:
 # Install Traefik as the cluster ingress using Helm.
 # Run as a normal user (not root); ensures $HOME/.kube/config is readable by copying
 
-# /etc/rancher/k3s/k3s.yaml if needed.
+# /etc/rancher/k3s/k3s.yaml if needed and uses it via KUBECONFIG for kubectl/helm.
 traefik-install namespace='kube-system' version='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -329,7 +335,8 @@ traefik-install namespace='kube-system' version='':
             echo "Creating a user kubeconfig from /etc/rancher/k3s/k3s.yaml..."
             sudo mkdir -p "${HOME}/.kube"
             sudo cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config"
-            sudo chown "$(id -u):$(id -g)" "${HOME}/.kube/config"
+            sudo chown -R "$(id -u):$(id -g)" "${HOME}/.kube"
+            chmod 700 "${HOME}/.kube"
             chmod 600 "${HOME}/.kube/config"
         else
             echo "ERROR: No readable kubeconfig at ${HOME}/.kube/config." >&2
@@ -342,6 +349,8 @@ traefik-install namespace='kube-system' version='':
             echo "Helm may still fail if kubectl is missing." >&2
         fi
     fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     if ! command -v helm >/dev/null 2>&1; then
         echo "Helm is not installed. Run 'just helm-install' first" >&2
@@ -372,6 +381,8 @@ traefik-status namespace='kube-system':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    export KUBECONFIG="${HOME}/.kube/config"
+
     kubectl -n "{{ namespace }}" get svc,po -l app.kubernetes.io/name=traefik
 
 cf-tunnel-route host='':
@@ -398,6 +409,8 @@ cf-tunnel-route host='':
 _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
@@ -470,6 +483,8 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
 
     if [ -z "{{ namespace }}" ]; then
         echo "Set namespace to inspect." >&2
