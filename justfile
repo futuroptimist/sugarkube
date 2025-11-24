@@ -449,7 +449,7 @@ traefik-install namespace='kube-system' version='':
     fi
 
     helm_args=(
-        helm upgrade --install traefik traefik/traefik
+        upgrade --install traefik traefik/traefik
         --namespace "{{ namespace }}"
         --create-namespace
         --wait
@@ -462,7 +462,7 @@ traefik-install namespace='kube-system' version='':
     fi
 
     echo "Installing or upgrading Traefik via Helm in namespace '{{ namespace }}'..."
-    if ! "${helm_args[@]}"; then
+    if ! helm "${helm_args[@]}"; then
         echo "ERROR: Helm failed to install or upgrade the 'traefik' release in namespace '{{ namespace }}'." >&2
         echo "Helm status output:" >&2
         helm status traefik --namespace "{{ namespace }}" || echo "helm status failed" >&2
