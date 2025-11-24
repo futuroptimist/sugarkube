@@ -179,10 +179,22 @@ cluster-status:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    export KUBECONFIG="${HOME}/.kube/config"
+    if [ -z "${KUBECONFIG:-}" ] && [ -r "$HOME/.kube/config" ]; then
+        export KUBECONFIG="$HOME/.kube/config"
+    fi
+
+    kubectl_ok=0
+    if kubectl version --short >/dev/null 2>&1; then
+        kubectl_ok=1
+    fi
 
     echo "=== Cluster nodes (kubectl get nodes) ==="
-    kubectl get nodes -o wide || echo "kubectl get nodes failed; is your kubeconfig pointing at the cluster?"
+    if [ "${kubectl_ok}" -eq 0 ]; then
+        echo "kubectl is not configured for this cluster (or the API server is unreachable)."
+        echo "Check that KUBECONFIG is set correctly and that the k3s server is running."
+    else
+        kubectl get nodes -o wide
+    fi
 
     echo
     echo "=== Helm status (CLI on this node) ==="
@@ -191,12 +203,22 @@ cluster-status:
 
     echo
     echo "=== Traefik status (pods and service in kube-system) ==="
-    kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik || echo "No Traefik pods found in kube-system."
-    kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik || echo "No Traefik services found in kube-system."
+    if [ "${kubectl_ok}" -eq 0 ]; then
+        echo "Skipping Traefik checks because kubectl cannot reach the cluster."
+    else
+        kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik \
+          || echo "No Traefik pods"
+        kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik \
+          || echo "No Traefik service"
+    fi
 
     echo
     echo "=== Ingress classes (cluster-wide) ==="
-    kubectl get ingressclass || echo "No ingress classes found."
+    if [ "${kubectl_ok}" -eq 0 ]; then
+        echo "Skipping ingress class checks because kubectl cannot reach the cluster."
+    else
+        kubectl get ingressclass || echo "No ingress classes found."
+    fi
 
 # Run twice per server during initial bring-up to build a 3-node HA control plane.
 ha3 env='dev':

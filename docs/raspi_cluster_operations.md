@@ -233,6 +233,11 @@ ip-10-0-0-1   Ready    control-plane,etcd   v1.28.7+k3s1   10.0.0.1   ...
 v3.13.0+gXXXXXXXX
 ```
 
+If `kubectl` cannot reach the cluster (for example, kubeconfig is not set yet), the command
+will say so and skip the Kubernetes-dependent checks instead of showing low-level client
+errors. In that case, run `kubectl version` or `kubectl get nodes` directly and fix your
+kubeconfig or server connectivity before relying on `just cluster-status`.
+
 This is a convenient health dashboard to confirm your 3-node HA cluster is up, Helm is available,
 and Traefik is installed before deploying apps like dspace. For the underlying `kubectl` and
 `helm` commands that this wraps, see the manual operations guide:
