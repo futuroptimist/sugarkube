@@ -179,7 +179,12 @@ cluster-status:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${HOME}/.kube/config"
+
+    if [ ! -r "${KUBECONFIG}" ]; then
+        echo "WARNING: kubeconfig missing at ${KUBECONFIG}; kubectl may fail." >&2
+    fi
 
     echo "=== Cluster nodes (kubectl get nodes) ==="
     kubectl get nodes -o wide || echo "kubectl get nodes failed; is your kubeconfig pointing at the cluster?"
@@ -210,6 +215,7 @@ ha3-untaint-control-plane:
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${HOME}/.kube/config"
 
     echo "Removing node-role.kubernetes.io/control-plane:NoSchedule taint from all nodes (if present)..."
