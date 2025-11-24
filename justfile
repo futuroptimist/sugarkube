@@ -245,7 +245,7 @@ ha3-untaint-control-plane:
     fi
 
     # Probe whether kubectl can reach the cluster
-    if ! kubectl version --short >/dev/null 2>&1; then
+    if ! kubectl version >/dev/null 2>&1; then
         echo "ERROR: kubectl cannot reach the cluster." >&2
         echo "Check whether k3s is running and KUBECONFIG is set correctly." >&2
         echo "Tip: if you have a working k3s kubeconfig at /etc/rancher/k3s/k3s.yaml," >&2
