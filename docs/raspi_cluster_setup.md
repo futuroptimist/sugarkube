@@ -16,6 +16,66 @@ personas:
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, and other day-two workflows.
 
+## Clone SD to SSD (happy path)
+
+If your Raspberry Pi is booted from the SD card and you have an NVMe/SSD attached, you can
+migrate the system to the SSD using the `clone-ssd` helper. This is the short “happy path” for
+the common case.
+
+1. Boot the Pi from the freshly flashed SD card with the NVMe/SSD connected.
+
+2. SSH into the Pi as `pi` and change into the `sugarkube` repo:
+
+   ```bash
+   cd ~/sugarkube
+   ```
+
+3. Use `lsblk` to identify the NVMe/SSD device:
+
+   ```bash
+   lsblk
+   ```
+
+   Look for a device with:
+
+   - `TYPE` of `disk`, and
+   - a `NAME` like `nvme0n1` (for an NVMe drive) or another block device representing your SSD.
+
+   The boot SD card will typically appear as something like `mmcblk0` with the root/boot
+   partitions under it. The NVMe/SSD will usually have a different name, e.g. `nvme0n1`.
+
+4. Set the `TARGET` environment variable to that device (for example, if your NVMe shows up as
+   `/dev/nvme0n1`):
+
+   ```bash
+   export TARGET=/dev/nvme0n1
+   ```
+
+5. Run the clone helper:
+
+   ```bash
+   just clone-ssd
+   ```
+
+   The `clone-ssd` recipe will run preflight checks, clone the SD card to the SSD/NVMe, and
+   update boot configuration so the system can boot from the SSD. It will print a success message
+   once the clone is complete.
+
+6. After the clone completes, cleanly shut down the Pi:
+
+   ```bash
+   sudo shutdown -h now
+   ```
+
+   Wait for the Pi to power off completely, then remove the SD card. On the next power-on, the Pi
+   should boot from the SSD/NVMe.
+
+For a more detailed walkthrough of the SD→NVMe process (including validation and recovery steps),
+see:
+
+- [Pi image quickstart](./pi_image_quickstart.md)
+- [SD to NVMe migration](./storage/sd-to-nvme.md)
+
 ## Helper commands cheat sheet
 
 Quick reference for the most common recipes when bringing up a 3-node HA dev cluster:
