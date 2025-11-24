@@ -238,7 +238,25 @@ ha3-untaint-control-plane:
     set -Eeuo pipefail
 
     scripts/ensure_user_kubeconfig.sh || true
-    export KUBECONFIG="${HOME}/.kube/config"
+
+    # Use user kubeconfig if available
+    if [ -z "${KUBECONFIG:-}" ] && [ -r "$HOME/.kube/config" ]; then
+        export KUBECONFIG="$HOME/.kube/config"
+    fi
+
+    # Probe whether kubectl can reach the cluster
+    if ! kubectl version --short >/dev/null 2>&1; then
+        echo "ERROR: kubectl cannot reach the cluster." >&2
+        echo "Check whether k3s is running and KUBECONFIG is set correctly." >&2
+        echo "Tip: if you have a working k3s kubeconfig at /etc/rancher/k3s/k3s.yaml," >&2
+        echo "you can create a user kubeconfig with:" >&2
+        echo "  sudo mkdir -p \"$HOME/.kube\"" >&2
+        echo "  sudo cp /etc/rancher/k3s/k3s.yaml \"$HOME/.kube/config\"" >&2
+        echo "  sudo chown \"$(id -u):$(id -g)\" \"$HOME/.kube/config\"" >&2
+        echo "  chmod 600 \"$HOME/.kube/config\"" >&2
+        echo "Then re-run this command as your normal user." >&2
+        exit 1
+    fi
 
     echo "Removing node-role.kubernetes.io/control-plane:NoSchedule taint from all nodes (if present)..."
 
