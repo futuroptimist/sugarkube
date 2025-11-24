@@ -1,0 +1,15 @@
+# Sugarkube debug log (sanitized)
+# Source: just up dev
+# Generated: 2025-11-24T07:56:37Z
+# Secrets and external IP addresses have been redacted.
+[sugarkube] All apt packages already installed.
+[sugarkube] avahi-daemon service already active.
+[sugarkube] mDNS resolver already configured in /etc/nsswitch.conf.
+[sugarkube] WARNING: Memory cgroup controller is disabled; k3s will fail to start.
+[sugarkube] Hint: run scripts/check_memory_cgroup.sh or add 'cgroup_memory=1 cgroup_enable=memory' to /boot/cmdline.txt and reboot.
+[sugarkube] Hint: runtime cmdline is missing 'cgroup_memory=1'.
+[sugarkube] Hint: runtime cmdline is missing 'cgroup_enable=memory'.
+[sugarkube] k3s requires the Linux memory cgroup controller, but it is not active.
+[sugarkube] Updated /boot/firmware/cmdline.txt (added: cgroup_memory=1 cgroup_enable=memory)
+Created symlink /etc/systemd/system/multi-user.target.wants/sugarkube-post-reboot.service → /etc/systemd/system/sugarkube-post-reboot.service.
+[sugarkube] Rebooting now to apply kernel parameters…
