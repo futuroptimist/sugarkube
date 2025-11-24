@@ -46,6 +46,19 @@ def test_prefers_env_specific_token(default_env):
     assert result.stdout.strip() == "dev-specific-token"
 
 
+def test_env_token_used_in_ha_mode(default_env):
+    env = dict(default_env)
+    env["SUGARKUBE_SERVERS"] = "3"
+    env["SUGARKUBE_TOKEN_DEV"] = "dev-ha-token"
+
+    result = run_discover(["--check-token-only"], env)
+
+    assert result.returncode == 0
+    assert "token_present=1" in result.stderr
+    assert "ha_mode=1" in result.stderr
+    assert "token_source_kind=env" in result.stderr
+
+
 def test_reads_node_token_file(default_env, tmp_path):
     node_token_path = tmp_path / "node-token"
     node_token_path.write_text("K10node::server:abc123\n", encoding="utf-8")

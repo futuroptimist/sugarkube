@@ -466,16 +466,60 @@ EOF_HELP
   shift
 done
 
+TOKEN_SOURCE_KIND="none"
+TOKEN_SOURCE_DETAIL="none"
+
 case "${ENVIRONMENT}" in
-  dev) TOKEN="${SUGARKUBE_TOKEN_DEV:-${SUGARKUBE_TOKEN:-}}" ;;
-  int) TOKEN="${SUGARKUBE_TOKEN_INT:-${SUGARKUBE_TOKEN:-}}" ;;
-  prod) TOKEN="${SUGARKUBE_TOKEN_PROD:-${SUGARKUBE_TOKEN:-}}" ;;
-  *) TOKEN="${SUGARKUBE_TOKEN:-}" ;;
+  dev)
+    if [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_DEV}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_DEV"
+    elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
+    fi
+    ;;
+  int)
+    if [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_INT}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_INT"
+    elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
+    fi
+    ;;
+  prod)
+    if [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_PROD}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_PROD"
+    elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
+    fi
+    ;;
+  *)
+    if [ -n "${SUGARKUBE_TOKEN:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
+    fi
+    ;;
 esac
 
 RESOLVED_TOKEN_SOURCE=""
 INITIAL_TOKEN="${TOKEN:-}"
+INITIAL_TOKEN_SOURCE_KIND="${TOKEN_SOURCE_KIND}"
+INITIAL_TOKEN_SOURCE_DETAIL="${TOKEN_SOURCE_DETAIL}"
+
 TOKEN=""
+TOKEN_SOURCE_KIND="none"
+TOKEN_SOURCE_DETAIL="none"
 
 resolve_server_join_token() {
   local resolver="${SCRIPT_DIR}/resolve_server_token.sh"
@@ -510,7 +554,17 @@ resolve_server_join_token() {
 
   TOKEN="${resolved_output}"
   if [ -n "${TOKEN}" ]; then
-    RESOLVED_TOKEN_SOURCE="${resolver}"
+    if [ -n "${INITIAL_TOKEN:-}" ] \
+      && [ "${INITIAL_TOKEN_SOURCE_KIND}" = "env" ] \
+      && [ -n "${INITIAL_TOKEN_SOURCE_DETAIL:-}" ]; then
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="${INITIAL_TOKEN_SOURCE_DETAIL}"
+      RESOLVED_TOKEN_SOURCE="env:${INITIAL_TOKEN_SOURCE_DETAIL}"
+    else
+      TOKEN_SOURCE_KIND="resolver"
+      TOKEN_SOURCE_DETAIL="${resolver}"
+      RESOLVED_TOKEN_SOURCE="${resolver}"
+    fi
   fi
 
   return 0
@@ -554,6 +608,8 @@ if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] || [ "${USER_PROVIDED_NODE_PATH}" -eq 1 ];
     if [ -n "${token__node_raw}" ] && [ "${token__node_raw#\#}" = "${token__node_raw}" ]; then
       TOKEN="${token__node_raw}"
       RESOLVED_TOKEN_SOURCE="${NODE_TOKEN_PATH}"
+      TOKEN_SOURCE_KIND="file"
+      TOKEN_SOURCE_DETAIL="${NODE_TOKEN_PATH}"
       NODE_TOKEN_STATE="value"
     fi
   fi
@@ -577,6 +633,8 @@ if [ "${USER_PROVIDED_TOKEN}" -eq 1 ] || [ "${USER_PROVIDED_BOOT_PATH}" -eq 1 ];
           if [ -n "${token__boot_value}" ]; then
             TOKEN="${token__boot_value}"
             RESOLVED_TOKEN_SOURCE="${BOOT_TOKEN_PATH}"
+            TOKEN_SOURCE_KIND="file"
+            TOKEN_SOURCE_DETAIL="${BOOT_TOKEN_PATH}"
             BOOT_TOKEN_STATE="value"
           else
             BOOT_TOKEN_STATE="empty"
@@ -611,9 +669,32 @@ if [ "${NODE_TOKEN_STATE}" = "value" ] || [ "${BOOT_TOKEN_STATE}" = "value" ] ||
   TOKEN_PRESENT=1
 fi
 
+if [ "${TOKEN_PRESENT}" -eq 1 ] && [ -z "${RESOLVED_TOKEN_SOURCE:-}" ] \
+  && [ -n "${INITIAL_TOKEN_SOURCE_DETAIL:-}" ] \
+  && [ "${INITIAL_TOKEN_SOURCE_KIND:-}" = "env" ]; then
+  RESOLVED_TOKEN_SOURCE="env:${INITIAL_TOKEN_SOURCE_DETAIL}"
+  TOKEN_SOURCE_KIND="env"
+  TOKEN_SOURCE_DETAIL="${INITIAL_TOKEN_SOURCE_DETAIL}"
+fi
+
+if [ -z "${TOKEN_SOURCE_KIND:-}" ] || [ "${TOKEN_SOURCE_KIND}" = "none" ]; then
+  if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
+    TOKEN_SOURCE_KIND="resolver"
+    TOKEN_SOURCE_DETAIL="${RESOLVED_TOKEN_SOURCE}"
+  else
+    TOKEN_SOURCE_KIND="none"
+    TOKEN_SOURCE_DETAIL="none"
+  fi
+fi
+
 token_source_kv=""
 if [ -n "${RESOLVED_TOKEN_SOURCE:-}" ]; then
   token_source_kv="token_source=\"$(escape_log_value "${RESOLVED_TOKEN_SOURCE}")\""
+fi
+
+ha_mode=0
+if [ "${SERVERS_DESIRED}" -gt 1 ]; then
+  ha_mode=1
 fi
 
 log_info discover \
@@ -622,6 +703,9 @@ log_info discover \
   "allow_bootstrap=${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" \
   "node_token_state=${NODE_TOKEN_STATE}" \
   "boot_token_state=${BOOT_TOKEN_STATE}" \
+  "ha_mode=${ha_mode}" \
+  "token_source_kind=${TOKEN_SOURCE_KIND}" \
+  "token_source_detail=\"$(escape_log_value "${TOKEN_SOURCE_DETAIL}")\"" \
   "${token_source_kv}" >&2
 
 if [ -z "${TOKEN:-}" ] && [ "${ALLOW_BOOTSTRAP_WITHOUT_TOKEN}" -ne 1 ]; then

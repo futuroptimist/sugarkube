@@ -143,6 +143,10 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 > **Key principle:** The presence or absence of `SUGARKUBE_TOKEN_DEV` (or `SUGARKUBE_TOKEN_INT`, `SUGARKUBE_TOKEN_PROD`) is how you signal your intent. Without a token, `just up dev` creates a new cluster. With a token, it joins an existing one.
 
+> **HA shorthand behaves the same.** Export `SUGARKUBE_TOKEN_DEV` (or the env-specific
+> token) before running `just ha3 env=dev` and it will join, exactly as `just up dev`
+> does. If no token is exported, the HA wrapper bootstraps instead of joining.
+
 Every Raspberry Pi follows the same rhythm:
 
 > **Time sync prerequisite**
