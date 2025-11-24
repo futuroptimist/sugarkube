@@ -8,7 +8,7 @@ if [ -f "${KUBECONFIG_LIB}" ]; then
   # shellcheck disable=SC1091
   . "${KUBECONFIG_LIB}"
 else
-  echo "kubeconfig library not found at ${KUBECONFIG_LIB}" >&2
+  echo "kubeconfig library not found at ${KUBECONFIG_LIB}; kubeconfig setup skipped" >&2
   exit 1
 fi
 
