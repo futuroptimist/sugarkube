@@ -184,7 +184,7 @@ cluster-status:
     fi
 
     kubectl_ok=0
-    if kubectl version --short >/dev/null 2>&1; then
+    if kubectl version >/dev/null 2>&1; then
         kubectl_ok=1
     fi
 
