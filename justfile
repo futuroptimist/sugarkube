@@ -202,6 +202,33 @@ cluster-status:
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+# Remove the control-plane NoSchedule taint from all nodes so they can run workloads.
+# This is intended for the homelab topology where all three HA control-plane nodes
+# also act as workers.
+ha3-untaint-control-plane:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    echo "Removing node-role.kubernetes.io/control-plane:NoSchedule taint from all nodes (if present)..."
+
+    nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+    if [ -z "${nodes}" ]; then
+        echo "No nodes found. Is the cluster up and kubeconfig configured?" >&2
+        exit 1
+    fi
+
+    for node in ${nodes}; do
+        taints=$(kubectl get node "${node}" -o jsonpath='{.spec.taints}' 2>/dev/null || echo "")
+        if echo "${taints}" | grep -q 'node-role.kubernetes.io/control-plane:NoSchedule'; then
+            echo "  - Untainting ${node}"
+            kubectl taint nodes "${node}" node-role.kubernetes.io/control-plane:NoSchedule- || true
+        else
+            echo "  - ${node}: no control-plane NoSchedule taint present"
+        fi
+    done
+
+    echo "Done. All nodes should now be schedulable for workloads."
+
 # Capture sanitized logs to logs/up/ during cluster bring-up (useful for troubleshooting and documentation).
 save-logs env='dev':
     SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}

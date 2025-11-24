@@ -129,6 +129,40 @@ kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 and confirm the `traefik` service exists before continuing. The dspace v3 k3s-sugarkube-dev
 guide assumes Traefik is installed and reachable via this flow.
 
+## Using control-plane nodes as workers (homelab mode)
+
+In this project’s default Raspberry Pi homelab topology, we run a three-node HA k3s control
+plane (sugarkube0/1/2) and also use those nodes for workloads (web apps and APIs).
+
+By default, k3s taints control-plane nodes with:
+
+```bash
+node-role.kubernetes.io/control-plane:NoSchedule
+```
+
+This prevents normal workloads (including Traefik) from being scheduled on those nodes and
+leads to events like:
+
+```text
+0/3 nodes are available: 3 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: true}.
+```
+
+To treat all three nodes as schedulable workers in your homelab cluster, run:
+
+```bash
+just ha3-untaint-control-plane
+```
+
+This command:
+
+- Lists all nodes in the cluster.
+- Removes the `node-role.kubernetes.io/control-plane:NoSchedule` taint where present.
+- Leaves nodes without that taint unchanged.
+
+After running it, all nodes become eligible to run workloads like Traefik and your apps. This is
+appropriate for a low-traffic, non-commercial homelab cluster. If you later add dedicated worker
+nodes and want a stricter separation, you can reapply taints or avoid running this helper.
+
 ## Check cluster, Helm, and Traefik status
 
 When you want a quick health dashboard, run the high-level status recipe:
