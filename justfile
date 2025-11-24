@@ -452,17 +452,38 @@ traefik-install namespace='kube-system' version='':
         upgrade --install traefik traefik/traefik
         --namespace "{{ namespace }}"
         --create-namespace
-        --set service.type=ClusterIP
         --wait
+        --timeout 5m
+        --set service.type=ClusterIP
     )
 
     if [ -n "{{ version }}" ]; then
         helm_args+=(--version "{{ version }}")
     fi
 
-    helm "${helm_args[@]}"
+    echo "Installing or upgrading Traefik via Helm in namespace '{{ namespace }}'..."
+    if ! helm "${helm_args[@]}"; then
+        echo "ERROR: Helm failed to install or upgrade the 'traefik' release in namespace '{{ namespace }}'." >&2
+        echo "Helm status output:" >&2
+        helm status traefik --namespace "{{ namespace }}" || echo "helm status failed" >&2
+        exit 1
+    fi
 
-    kubectl -n "{{ namespace }}" get svc -l app.kubernetes.io/name=traefik
+    echo "Checking for Traefik Service 'traefik' in namespace '{{ namespace }}'..."
+    if ! kubectl -n "{{ namespace }}" get svc traefik >/dev/null 2>&1; then
+        echo "WARNING: Helm reports 'traefik' is deployed, but the Service 'traefik' was not found in namespace '{{ namespace }}'." >&2
+        echo "Current Traefik-related Services in '{{ namespace }}':" >&2
+        kubectl -n "{{ namespace }}" get svc | grep -i traefik || echo "  (none)" >&2
+        echo "Current Traefik-related Deployments and Pods in '{{ namespace }}':" >&2
+        kubectl -n "{{ namespace }}" get deploy,pods | grep -i traefik || echo "  (none)" >&2
+        echo "You may need to inspect Helm status and pod logs for details:" >&2
+        echo "  helm status traefik -n {{ namespace }}" >&2
+        echo "  kubectl -n {{ namespace }} describe deploy traefik" >&2
+        echo "  kubectl -n {{ namespace }} logs -l app.kubernetes.io/name=traefik" >&2
+        exit 1
+    fi
+
+    echo "Traefik Service 'traefik' is present in namespace '{{ namespace }}'."
 
 traefik-status namespace='kube-system':
     #!/usr/bin/env bash
