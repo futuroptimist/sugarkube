@@ -97,6 +97,37 @@ is safe to rerun if you need to repair a root-owned kubeconfig or confirm Traefi
 If you try to run `sudo just traefik-install`, the recipe will stop with an error reminding you to
 run it without sudo so it uses the correct kubeconfig.
 
+**Gateway API CRDs and Helm ownership**
+
+Traefik's Helm chart expects the Gateway API CRDs to be owned by the `traefik-crd` release in the
+`kube-system` namespace. If those CRDs already exist without that Helm metadata (for example,
+installed by k3s or applied manually), the Traefik CRD chart refuses to install.
+
+The `just traefik-install` recipe now performs a preflight check:
+
+- If Gateway API CRDs are missing, it proceeds and Traefik will create them.
+- If it finds existing CRDs that are not owned by `traefik-crd` in `kube-system`, it fails fast
+  with an error and prints remediation commands.
+
+When the error appears, you have two options:
+
+1. **Delete the CRDs** so Traefik recreates them (safest for a fresh homelab cluster with no
+   workloads using Gateway API):
+
+   ```bash
+   kubectl delete crd backendtlspolicies.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io \
+     gateways.gateway.networking.k8s.io grpcroutes.gateway.networking.k8s.io \
+     httproutes.gateway.networking.k8s.io referencegrants.gateway.networking.k8s.io
+   ```
+
+2. **Patch the existing CRDs** so `traefik-crd` can adopt them:
+
+   ```bash
+   kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
+   kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \
+     meta.helm.sh/release-namespace=kube-system --overwrite
+   ```
+
 Re-run the status recipe any time to check the ingress controller:
 
 ```bash

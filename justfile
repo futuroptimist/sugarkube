@@ -391,6 +391,63 @@ traefik-install namespace='kube-system' version='':
     helm repo add traefik https://traefik.github.io/charts --force-update
     helm repo update
 
+    GATEWAY_CRDS=$(
+      kubectl get crd \
+        backendtlspolicies.gateway.networking.k8s.io \
+        gatewayclasses.gateway.networking.k8s.io \
+        gateways.gateway.networking.k8s.io \
+        grpcroutes.gateway.networking.k8s.io \
+        httproutes.gateway.networking.k8s.io \
+        referencegrants.gateway.networking.k8s.io \
+        --ignore-not-found \
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
+    )
+
+    if [ -z "${GATEWAY_CRDS}" ]; then
+        echo "No existing Gateway API CRDs detected; Traefik will create them."
+    else
+        echo "Found existing Gateway API CRDs:"
+        echo "  ${GATEWAY_CRDS}"
+    fi
+
+    CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP=""
+
+    for crd in ${GATEWAY_CRDS}; do
+        MANAGED_BY=$(kubectl get "crd/${crd}" \
+            -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
+        REL_NAME=$(kubectl get "crd/${crd}" \
+            -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "")
+        REL_NS=$(kubectl get "crd/${crd}" \
+            -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "")
+
+        if [ "${MANAGED_BY}" != "Helm" ] || \
+            [ "${REL_NAME}" != "traefik-crd" ] || \
+            [ "${REL_NS}" != "{{ namespace }}" ]; then
+            CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP="${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP} ${crd}"
+        fi
+    done
+
+    if [ -n "${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" ]; then
+        echo "ERROR: Found existing Gateway API CRDs that are NOT owned by the traefik-crd Helm release:" >&2
+        echo "  ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
+        echo >&2
+        echo "Traefik's CRD chart will refuse to install while these CRDs exist without the expected Helm metadata." >&2
+        echo "To fix this, you have two options:" >&2
+        echo "  1) Delete the Gateway API CRDs and let Traefik recreate them (safe in a fresh cluster):" >&2
+        echo "       kubectl delete crd ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
+        echo "  2) Patch the existing CRDs to add the Helm labels/annotations so traefik-crd can adopt them:" >&2
+        echo "       kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite" >&2
+        echo "       kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \\" >&2
+        echo "         meta.helm.sh/release-namespace={{ namespace }} --overwrite" >&2
+        echo >&2
+        echo "See docs/raspi_cluster_operations.md for details." >&2
+        exit 1
+    fi
+
+    if [ -n "${GATEWAY_CRDS}" ]; then
+        echo "Existing Gateway API CRDs appear to be managed by traefik-crd; proceeding with Helm install."
+    fi
+
     helm_args=(
         upgrade --install traefik traefik/traefik
         --namespace "{{ namespace }}"
