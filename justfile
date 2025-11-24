@@ -370,7 +370,7 @@ traefik-install namespace='kube-system' version='':
         httproutes.gateway.networking.k8s.io \
         referencegrants.gateway.networking.k8s.io \
         --ignore-not-found \
-        -o name 2>/dev/null || true
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
     )
 
     if [ -z "${GATEWAY_CRDS}" ]; then
@@ -383,16 +383,16 @@ traefik-install namespace='kube-system' version='':
     CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP=""
 
     for crd in ${GATEWAY_CRDS}; do
-        MANAGED_BY=$(kubectl get "${crd}" \
+        MANAGED_BY=$(kubectl get "crd/${crd}" \
             -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
-        REL_NAME=$(kubectl get "${crd}" \
+        REL_NAME=$(kubectl get "crd/${crd}" \
             -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "")
-        REL_NS=$(kubectl get "${crd}" \
+        REL_NS=$(kubectl get "crd/${crd}" \
             -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "")
 
         if [ "${MANAGED_BY}" != "Helm" ] || \
             [ "${REL_NAME}" != "traefik-crd" ] || \
-            [ "${REL_NS}" != "kube-system" ]; then
+            [ "${REL_NS}" != "{{ namespace }}" ]; then
             CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP="${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP} ${crd}"
         fi
     done
@@ -404,11 +404,11 @@ traefik-install namespace='kube-system' version='':
         echo "Traefik's CRD chart will refuse to install while these CRDs exist without the expected Helm metadata." >&2
         echo "To fix this, you have two options:" >&2
         echo "  1) Delete the Gateway API CRDs and let Traefik recreate them (safe in a fresh cluster):" >&2
-        echo "       kubectl delete crd ${GATEWAY_CRDS}" >&2
+        echo "       kubectl delete crd ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
         echo "  2) Patch the existing CRDs to add the Helm labels/annotations so traefik-crd can adopt them:" >&2
         echo "       kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite" >&2
         echo "       kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \\" >&2
-        echo "         meta.helm.sh/release-namespace=kube-system --overwrite" >&2
+        echo "         meta.helm.sh/release-namespace={{ namespace }} --overwrite" >&2
         echo >&2
         echo "See docs/raspi_cluster_operations.md for details." >&2
         exit 1
