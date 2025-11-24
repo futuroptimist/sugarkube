@@ -64,11 +64,63 @@ the common case.
    Wait for the Pi to power off completely, then remove the SD card. On the next power-on, the Pi
    should boot from the SSD/NVMe.
 
+After cloning to SSD and rebooting, see
+[Configure Git identity and GitHub access](#configure-git-identity-and-github-access-pi) to set up
+commits and pushes from the node.
+
 For a more detailed walkthrough of the SD→NVMe process (including validation and recovery steps),
 see:
 
 - [Pi image quickstart](./pi_image_quickstart.md)
 - [SD to NVMe migration](./storage/sd-to-nvme.md)
+
+## Configure Git identity and GitHub access (Pi)
+
+After re-imaging a Pi and cloning the `sugarkube` repo, configure Git and GitHub so you can commit
+and push logs and changes from the node.
+
+### 1. Set Git author identity
+
+Set the display name and GitHub noreply email for commits made from the `pi` user (replace the
+placeholders with your details):
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your_github_username@users.noreply.github.com"
+```
+
+- `user.name` is the display name that will appear on commits from this Pi.
+- `user.email` uses your GitHub noreply address so commits map to your GitHub account.
+
+### 2. Authenticate Git pushes via GitHub CLI
+
+Install GitHub CLI if needed and start the device/browser login flow:
+
+```bash
+# Install GitHub CLI if needed
+type gh >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y gh
+
+# Start the login flow
+gh auth login
+```
+
+Choose the following when prompted:
+
+- **GitHub.com**
+- **HTTPS** for the Git protocol
+- **Yes** to "Authenticate Git with your GitHub credentials?"
+- **Login with a web browser**
+
+The CLI will show a one-time code and a URL like `https://github.com/login/device`. On a computer
+where you are already signed into GitHub, open that URL, enter the code, approve the login, and
+return to the Pi. Once it reports "Authentication complete," verify pushes work:
+
+```bash
+git remote -v
+git push origin main
+```
+
+You should now be able to push without retyping your username and password each time.
 
 ## Helper commands cheat sheet
 
