@@ -44,24 +44,18 @@ the common case.
    The boot SD card will typically appear as something like `mmcblk0` with the root/boot
    partitions under it. The NVMe/SSD will usually have a different name, e.g. `nvme0n1`.
 
-4. Set the `TARGET` environment variable to that device (for example, if your NVMe shows up as
+4. Run the clone helper, specifying the target device (for example, if your NVMe shows up as
    `/dev/nvme0n1`):
 
    ```bash
-   export TARGET=/dev/nvme0n1
-   ```
-
-5. Run the clone helper:
-
-   ```bash
-   just clone-ssd
+   sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
    ```
 
    The `clone-ssd` recipe will run preflight checks, clone the SD card to the SSD/NVMe, and
    update boot configuration so the system can boot from the SSD. It will print a success message
    once the clone is complete.
 
-6. After the clone completes, cleanly shut down the Pi:
+5. After the clone completes, cleanly shut down the Pi:
 
    ```bash
    sudo shutdown -h now
