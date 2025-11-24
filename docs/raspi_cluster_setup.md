@@ -85,8 +85,8 @@ Set the display name and GitHub noreply email for commits made from the `pi` use
 placeholders with your details):
 
 ```bash
-git config --global user.name "<Your Name>"
-git config --global user.email "<your_github_username>@users.noreply.github.com"
+git config --global user.name "Your Name"
+git config --global user.email "your_github_username@users.noreply.github.com"
 ```
 
 - `user.name` is the display name that will appear on commits from this Pi.
