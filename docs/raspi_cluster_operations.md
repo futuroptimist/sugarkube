@@ -204,6 +204,10 @@ This command:
 - Removes the `node-role.kubernetes.io/control-plane:NoSchedule` taint where present.
 - Leaves nodes without that taint unchanged.
 
+This command expects kubectl to be configured for the cluster (for example, using
+`~/.kube/config`). If kubectl cannot reach the API server, it prints a clear error and exits
+instead of surfacing low-level client errors.
+
 After running it, all nodes become eligible to run workloads like Traefik and your apps. This is
 appropriate for a low-traffic, non-commercial homelab cluster. If you later add dedicated worker
 nodes and want a stricter separation, you can reapply taints or avoid running this helper.
