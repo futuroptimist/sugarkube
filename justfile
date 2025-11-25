@@ -489,9 +489,13 @@ traefik-install namespace='kube-system' version='':
     fi
 
     if ! command -v helm >/dev/null 2>&1; then
-        echo "Helm is not installed. Run 'just helm-install' first" >&2
-        echo "(see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
-        exit 1
+        echo "Helm is not installed; installing it now." >&2
+        echo "See docs/raspi_cluster_operations.md#install-helm-prerequisite-for-traefik-and-helm-workloads." >&2
+        if ! curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash; then
+            echo "ERROR: Failed to install Helm automatically. Run 'just helm-install' and re-run 'just traefik-install'." >&2
+            echo "Reference: docs/raspi_cluster_operations.md#install-helm-prerequisite-for-traefik-and-helm-workloads." >&2
+            exit 1
+        fi
     fi
 
     helm repo add traefik https://traefik.github.io/charts --force-update
