@@ -490,7 +490,7 @@ traefik-install namespace='kube-system' version='':
 
     if ! command -v helm >/dev/null 2>&1; then
         echo "Helm is not installed. Run 'just helm-install' first" >&2
-        echo "(see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
+        echo "(see docs/raspi_cluster_operations.md#install-helm), then re-run 'just traefik-install'." >&2
         exit 1
     fi
 
@@ -552,6 +552,26 @@ traefik-install namespace='kube-system' version='':
 
     if [ -n "${GATEWAY_CRDS}" ]; then
         echo "Existing Gateway API CRDs appear to be managed by traefik-crd; proceeding with Helm install."
+    fi
+
+    crd_args=(
+        upgrade --install traefik-crd traefik/traefik-crd
+        --namespace "{{ namespace }}"
+        --create-namespace
+        --wait
+        --timeout 5m
+    )
+
+    if [ -n "{{ version }}" ]; then
+        crd_args+=(--version "{{ version }}")
+    fi
+
+    echo "Installing or upgrading Traefik Gateway API CRDs via Helm in namespace '{{ namespace }}'..."
+    if ! helm "${crd_args[@]}"; then
+        echo "ERROR: Helm failed to install or upgrade the 'traefik-crd' release in namespace '{{ namespace }}'." >&2
+        echo "Helm status output:" >&2
+        helm status traefik-crd --namespace "{{ namespace }}" || echo "helm status failed" >&2
+        exit 1
     fi
 
     helm_args=(

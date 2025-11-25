@@ -734,7 +734,8 @@ playbooks (`token.place`, `dspace`, etc.) as usual. The base bootstrap does **no
 ingress controller.
 
 Install Traefik using the [Traefik ingress][traefik-ingress] steps before rolling out HTTP
-applications.
+applications. That section covers `just traefik-install` plus quick verification commands to
+confirm the Traefik pods and Service are ready in `kube-system`.
 
 [traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
 

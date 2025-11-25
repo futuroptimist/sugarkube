@@ -89,9 +89,20 @@ just traefik-install
 
 The recipe creates or repairs `$HOME/.kube` and `$HOME/.kube/config` for the current user by
 copying `/etc/rancher/k3s/k3s.yaml` if needed, then sets `KUBECONFIG=$HOME/.kube/config` so its
-`kubectl` and `helm` commands always use the user-owned kubeconfig. This avoids permission issues
-with `/etc/rancher/k3s/k3s.yaml` remaining root-only. It now:
+`kubectl` and `helm` commands always use the user-owned kubeconfig. It installs the `traefik-crd`
+and `traefik` Helm releases in `kube-system` and is safe to rerun. After the command finishes,
+verify the deployment:
 
+```bash
+kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik
+kubectl -n kube-system get svc traefik
+```
+
+You should see Traefik pods in `Running` and a `traefik` Service (ClusterIP or LoadBalancer)
+before deploying workloads. The recipe now:
+
+- Installs or upgrades the Traefik Gateway API CRDs with the `traefik-crd` chart, matching any
+  `--version` provided to the recipe.
 - Installs or upgrades the Traefik Helm release in the `kube-system` namespace with
   `helm upgrade --install traefik ... --wait --timeout=5m` so Helm waits for resources to become
   Ready.
