@@ -258,6 +258,11 @@ ha3-untaint-control-plane:
         exit 1
     fi
 
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: 'jq' is required but not installed. Please install 'jq' and try again." >&2
+        exit 1
+    fi
+
     echo "Untainting control-plane nodes so they can schedule workloads..."
 
     nodes=$(kubectl get nodes -o name)
@@ -454,6 +459,11 @@ traefik-install namespace='kube-system' version='':
     if ! kubectl get nodes >/dev/null 2>&1; then
         echo "kubectl cannot reach the cluster (kubectl get nodes failed)." >&2
         echo "Check KUBECONFIG and k3s server status. Aborting Traefik install." >&2
+        exit 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: 'jq' is required but not installed. Please install 'jq' and try again." >&2
         exit 1
     fi
 

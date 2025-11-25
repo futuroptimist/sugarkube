@@ -1,6 +1,6 @@
 # Outage Report: Traefik install timeout on ha3 due to control-plane taints
 
-**Date**: 2025-11
+**Date**: 2025-11-21
 **Component**: Traefik install helper (ha3 dev topology)
 **Severity**: Medium (ingress unavailable until manual intervention)
 **Status**: Resolved
