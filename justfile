@@ -602,7 +602,7 @@ traefik-install namespace='kube-system' version='':
         fi
     else
         deduped_release_names=$(tr ' ' '\n' <<<"${CRD_HELM_RELEASE_NAMES}" | sed '/^$/d' | sort -u | tr '\n' ' ')
-        echo "Gateway API CRDs already exist and are managed by Helm (release names: ${deduped_release_names:-none}); skipping traefik-crd chart install."
+        echo "Gateway API CRDs already exist and are managed by Helm (release names:${deduped_release_names:+ ${deduped_release_names}}); skipping traefik-crd chart install."
     fi
 
     helm_args=(
