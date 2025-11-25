@@ -733,8 +733,9 @@ Once all three default nodes for an environment report `Ready`, proceed to the d
 playbooks (`token.place`, `dspace`, etc.) as usual. The base bootstrap does **not** install an
 ingress controller.
 
-Install Traefik using the [Traefik ingress][traefik-ingress] steps before rolling out HTTP
-applications.
+Before deploying any HTTP applications, install Traefik by running `just traefik-install` from the
+sugarkube repo and following the verification checks in the [Traefik ingress][traefik-ingress]
+section.
 
 [traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
 

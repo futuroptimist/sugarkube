@@ -69,43 +69,36 @@ Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traff
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
 ingress controller. Other controllers can work, but this guide only documents the Traefik path.
 
-Check whether Traefik already exists in the `kube-system` namespace:
+Quick path (dev cluster):
 
-```bash
-kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
-```
+1. Run the helper (as your normal user, not with `sudo`):
 
-- If the command returns a `traefik` service (ClusterIP or LoadBalancer), continue to the next
-  section.
-- If it prints `No resources found in kube-system namespace.`, install Traefik before deploying
-  apps.
+   ```bash
+   just traefik-install
+   ```
 
-For the shortest path, install Traefik via the new helper recipe. Run this as your normal user
-(e.g., `pi`), not with `sudo`:
+   The recipe repairs `$HOME/.kube/config` if needed, installs Helm automatically when missing, and
+   uses `helm upgrade --install traefik ... --wait --timeout=5m` to ensure the release becomes
+   Ready.
 
-```bash
-just traefik-install
-```
+2. Verify the pods and service exist in `kube-system`:
 
-The recipe creates or repairs `$HOME/.kube` and `$HOME/.kube/config` for the current user by
-copying `/etc/rancher/k3s/k3s.yaml` if needed, then sets `KUBECONFIG=$HOME/.kube/config` so its
-`kubectl` and `helm` commands always use the user-owned kubeconfig. This avoids permission issues
-with `/etc/rancher/k3s/k3s.yaml` remaining root-only. It now:
+   ```bash
+   kubectl -n kube-system get pods,svc -l app.kubernetes.io/name=traefik
+   ```
 
-- Installs or upgrades the Traefik Helm release in the `kube-system` namespace with
-  `helm upgrade --install traefik ... --wait --timeout=5m` so Helm waits for resources to become
-  Ready.
-- Checks Helm’s exit code and, on failure, prints `helm status traefik -n kube-system` to give
-  immediate context.
-- Verifies the `traefik` Service exists and, if missing, prints a small snapshot of Traefik-related
-  Services, Deployments, and Pods to speed up troubleshooting.
+   You should see a `traefik` service (ClusterIP by default) and at least one running Traefik pod.
+   For a deeper check, port-forward the Traefik dashboard locally (no public exposure):
+
+   ```bash
+   kubectl -n kube-system port-forward svc/traefik 9000:9000
+   # Then visit http://localhost:9000/dashboard/ to confirm the UI loads
+   ```
 
 If the recipe fails, read the printed Helm status output. Then inspect the Traefik pod logs and
 describe output as suggested, fix any underlying issues (CRDs, taints, network, etc.), and re-run
-`just traefik-install`.
-
-It is safe to rerun the recipe if you need to repair a root-owned kubeconfig or confirm Traefik is
-installed.
+`just traefik-install`. It is safe to rerun the recipe if you need to repair a root-owned
+kubeconfig or confirm Traefik is installed.
 
 If you try to run `sudo just traefik-install`, the recipe will stop with an error reminding you to
 run it without sudo so it uses the correct kubeconfig.
