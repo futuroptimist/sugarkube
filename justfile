@@ -481,11 +481,11 @@ traefik-install namespace='kube-system' version='':
         )
     ' >/dev/null; then
         cat <<'EOF' >&2
-All nodes in this cluster are tainted as control-plane with NoSchedule and there are no worker
-nodes. Traefik pods (which do not tolerate that taint by default) will remain Pending and Helm
-will time out. For the dev ha3 topology, run `just ha3-untaint-control-plane` first to make the
-nodes schedulable, then re-run `just traefik-install`.
-EOF
+        All nodes in this cluster are tainted as control-plane with NoSchedule and there are no worker
+        nodes. Traefik pods (which do not tolerate that taint by default) will remain Pending and Helm
+        will time out. For the dev ha3 topology, run `just ha3-untaint-control-plane` first to make the
+        nodes schedulable, then re-run `just traefik-install`.
+        EOF
         exit 1
     fi
 
