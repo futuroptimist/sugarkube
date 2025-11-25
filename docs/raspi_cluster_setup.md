@@ -14,7 +14,7 @@ personas:
 
 > **Next step:** When the control plane is stable, continue with
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
-> Helm, and other day-two workflows.
+> Helm, ingress (Traefik), and other day-two workflows.
 
 ## Clone SD to SSD (happy path)
 
@@ -136,6 +136,16 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
   _When to use:_ After bootstrapping the first node, use this to retrieve the token that other nodes need to join the cluster. Copy the output and set it as `SUGARKUBE_TOKEN_DEV` on subsequent nodes.
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
+
+## Post-bootstrap: install ingress
+
+After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying any apps:
+
+```bash
+just traefik-install
+```
+
+Verification steps and troubleshooting live in [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
 
 ## How Discovery Works
 
