@@ -20,7 +20,7 @@ elif [ -f "${SUMMARY_LIB}" ]; then
 fi
 
 if [ -f "${DEFAULT_KUBECONFIG_LIB}" ]; then
-  # shellcheck disable=SC1091
+  # shellcheck source=lib/kubeconfig.sh disable=SC1091
   . "${DEFAULT_KUBECONFIG_LIB}"
 fi
 SUMMARY_DBUS_RECORDED="${SUMMARY_DBUS_RECORDED:-0}"
