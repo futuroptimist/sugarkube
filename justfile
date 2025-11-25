@@ -245,8 +245,8 @@ ha3-untaint-control-plane:
     fi
 
     # Probe whether kubectl can reach the cluster
-    if ! kubectl version >/dev/null 2>&1; then
-        echo "ERROR: kubectl cannot reach the cluster." >&2
+    if ! kubectl get nodes >/dev/null 2>&1; then
+        echo "ERROR: kubectl cannot reach the cluster (kubectl get nodes failed)." >&2
         echo "Check whether k3s is running and KUBECONFIG is set correctly." >&2
         echo "Tip: if you have a working k3s kubeconfig at /etc/rancher/k3s/k3s.yaml," >&2
         echo "you can create a user kubeconfig with:" >&2
@@ -258,25 +258,48 @@ ha3-untaint-control-plane:
         exit 1
     fi
 
-    echo "Removing node-role.kubernetes.io/control-plane:NoSchedule taint from all nodes (if present)..."
+    echo "Untainting control-plane nodes so they can schedule workloads..."
 
-    nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+    nodes=$(kubectl get nodes -o name)
     if [ -z "${nodes}" ]; then
         echo "No nodes found. Is the cluster up and kubeconfig configured?" >&2
         exit 1
     fi
 
     for node in ${nodes}; do
-        control_plane_taint=$(kubectl get node "${node}" -o jsonpath="{.spec.taints[?(@.key=='node-role.kubernetes.io/control-plane' && @.effect=='NoSchedule')].key}" 2>/dev/null || echo "")
-        if [ -n "${control_plane_taint}" ]; then
-            echo "  - Untainting ${node}"
-            kubectl taint nodes "${node}" node-role.kubernetes.io/control-plane:NoSchedule- || true
+        node_name=${node#node/}
+
+        echo
+        echo "Node: ${node_name}"
+        echo "Current taints:"
+        kubectl get node "${node_name}" \
+            -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
+
+        echo "Removing control-plane/master taints (if present)..."
+        kubectl taint nodes "${node_name}" node-role.kubernetes.io/control-plane- || true
+        kubectl taint nodes "${node_name}" node-role.kubernetes.io/master- || true
+
+        remaining_taints=$(kubectl get node "${node_name}" -o json | jq -r '
+            .spec.taints // []
+            | map(select(
+                (.key == "node-role.kubernetes.io/control-plane") or
+                (.key == "node-role.kubernetes.io/master")
+            ))
+            | length
+        ')
+
+        if [ "${remaining_taints}" -eq 0 ]; then
+            echo "Result: ${node_name} has no control-plane/master taints."
         else
-            echo "  - ${node}: no control-plane NoSchedule taint present"
+            echo "Result: ${node_name} still has control-plane/master taints:"
+            kubectl get node "${node_name}" \
+                -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
         fi
     done
 
-    echo "Done. All nodes should now be schedulable for workloads."
+    echo
+    echo "Done. Current node taints:"
+    kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 
 # Capture sanitized logs to logs/up/ during cluster bring-up (useful for troubleshooting and documentation).
 save-logs env='dev':
@@ -428,6 +451,34 @@ traefik-install namespace='kube-system' version='':
 
     export KUBECONFIG="${HOME}/.kube/config"
 
+    if ! kubectl get nodes >/dev/null 2>&1; then
+        echo "kubectl cannot reach the cluster (kubectl get nodes failed)." >&2
+        echo "Check KUBECONFIG and k3s server status. Aborting Traefik install." >&2
+        exit 1
+    fi
+
+    nodes_json=$(kubectl get nodes -o json)
+    if echo "${nodes_json}" | jq -e '
+        (.items | length > 0) and
+        all(
+          .items[];
+          any(
+            (.spec.taints // [])[]?;
+            ((.key == "node-role.kubernetes.io/control-plane" or
+              .key == "node-role.kubernetes.io/master") and
+             .effect == "NoSchedule")
+          )
+        )
+    ' >/dev/null; then
+        cat <<'EOF' >&2
+All nodes in this cluster are tainted as control-plane with NoSchedule and there are no worker
+nodes. Traefik pods (which do not tolerate that taint by default) will remain Pending and Helm
+will time out. For the dev ha3 topology, run `just ha3-untaint-control-plane` first to make the
+nodes schedulable, then re-run `just traefik-install`.
+EOF
+        exit 1
+    fi
+
     if ! command -v helm >/dev/null 2>&1; then
         echo "Helm is not installed. Run 'just helm-install' first" >&2
         echo "(see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
@@ -512,6 +563,11 @@ traefik-install namespace='kube-system' version='':
         echo "ERROR: Helm failed to install or upgrade the 'traefik' release in namespace '{{ namespace }}'." >&2
         echo "Helm status output:" >&2
         helm status traefik --namespace "{{ namespace }}" || echo "helm status failed" >&2
+        if command -v kubectl >/dev/null 2>&1; then
+            echo "Recent Traefik-related events (if any):" >&2
+            kubectl -n "{{ namespace }}" get events --sort-by=.lastTimestamp \
+                | grep -i traefik | tail -n 20 || true
+        fi
         exit 1
     fi
 

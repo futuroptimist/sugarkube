@@ -201,8 +201,12 @@ just ha3-untaint-control-plane
 This command:
 
 - Lists all nodes in the cluster.
-- Removes the `node-role.kubernetes.io/control-plane:NoSchedule` taint where present.
-- Leaves nodes without that taint unchanged.
+- Removes the `node-role.kubernetes.io/control-plane:NoSchedule` and
+  `node-role.kubernetes.io/master:NoSchedule` taints where present.
+- Leaves nodes without those taints unchanged and shows the resulting taint state.
+
+Before installing Traefik on the ha3 topology, run this helper so the three control-plane nodes
+can schedule the Traefik pods and the k3s klipper-helm jobs that bootstrap the addon.
 
 This command expects kubectl to be configured for the cluster (for example, using
 `~/.kube/config`). If kubectl cannot reach the API server, it prints a clear error and exits
