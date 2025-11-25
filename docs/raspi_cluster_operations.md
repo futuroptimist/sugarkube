@@ -100,6 +100,63 @@ Traefik release (`traefik` or `traefik-crd`) in `kube-system` and fails fast wit
 commands if other owners are found. Patch or delete conflicting CRDs, then rerun the recipe so the
 Traefik charts can adopt them cleanly.
 
+If you see an error like:
+
+```text
+ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release ...
+```
+
+Follow these steps to diagnose and resolve the issue:
+
+1. **List Gateway API CRDs:**
+
+   ```bash
+   kubectl get crd | grep gateway.networking.k8s.io
+   ```
+
+2. **Inspect their Helm metadata:**
+
+   ```bash
+   kubectl get crd gatewayclasses.gateway.networking.k8s.io \
+     -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by} / {.metadata.annotations.meta\.helm\.sh/release-name} / {.metadata.annotations.meta\.helm\.sh/release-namespace}'
+   ```
+
+   Valid output for Traefik-owned CRDs looks like: `Helm / traefik-crd / kube-system` or
+   `Helm / traefik / kube-system`. If any value is empty or belongs to another release, the recipe
+   will fail.
+
+3. **Option A: Delete and recreate (fresh homelab clusters):**
+
+   If this is a new cluster and you don't need the existing Gateway API resources:
+
+   ```bash
+   kubectl delete crd \
+     backendtlspolicies.gateway.networking.k8s.io \
+     gatewayclasses.gateway.networking.k8s.io \
+     gateways.gateway.networking.k8s.io \
+     grpcroutes.gateway.networking.k8s.io \
+     httproutes.gateway.networking.k8s.io \
+     referencegrants.gateway.networking.k8s.io
+   ```
+
+   Then rerun `just traefik-install` and the Traefik CRD chart will create them with correct
+   Helm metadata.
+
+4. **Option B: Patch for Helm adoption (advanced):**
+
+   If you need to preserve the CRDs (e.g., other Gateway API resources exist), patch each one:
+
+   ```bash
+   for crd in gatewayclasses.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io; do
+     kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
+     kubectl annotate crd "${crd}" \
+       meta.helm.sh/release-name=traefik-crd \
+       meta.helm.sh/release-namespace=kube-system --overwrite
+   done
+   ```
+
+   Replace the CRD names with the full list from step 1. After patching, rerun `just traefik-install`.
+
 ## Using control-plane nodes as workers (homelab mode)
 
 In this project’s default Raspberry Pi homelab topology, we run a three-node HA k3s control
