@@ -69,6 +69,16 @@ Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traff
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
 ingress controller. Other controllers can work, but this guide only documents the Traefik path.
 
+**Quick path (dev cluster):**
+
+1. Install or repair Traefik: `just traefik-install`
+2. Verify pods: `kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik`
+3. Verify service: `kubectl -n kube-system get svc traefik`
+4. (Optional) Dashboard check: `just traefik-status`
+
+Run these steps as your normal user after `just up dev` finishes. They are idempotent and safe to
+re-run if you need to repair kubeconfig permissions or check readiness.
+
 Check whether Traefik already exists in the `kube-system` namespace:
 
 ```bash
