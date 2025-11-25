@@ -153,9 +153,58 @@ Follow these steps to diagnose and resolve the issue:
        meta.helm.sh/release-name=traefik-crd \
        meta.helm.sh/release-namespace=kube-system --overwrite
    done
-   ```
+  ```
 
-   Replace the CRD names with the full list from step 1. After patching, rerun `just traefik-install`.
+  Replace the CRD names with the full list from step 1. After patching, rerun `just traefik-install`.
+
+### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
+
+Run this helper to inspect Gateway API CRD ownership before (or after) attempting
+`just traefik-install`.
+
+```bash
+just traefik-crd-doctor
+```
+
+The doctor reads CRD labels/annotations and reports whether Traefik can safely manage them:
+
+- **Healthy Traefik ownership:**
+
+  ```text
+  ✅ CRD gatewayclasses.gateway.networking.k8s.io: owned by release traefik-crd in namespace kube-system (OK)
+  ```
+
+- **Missing CRDs (fresh cluster):**
+
+  ```text
+  ⚠️  CRD httproutes.gateway.networking.k8s.io: missing
+  No problematic Gateway API CRDs detected.
+  ```
+
+- **Problematic ownership (installed by something else):**
+
+  ```text
+  ⚠️  CRD gatewayclasses.gateway.networking.k8s.io: exists but managed-by=, release-name=other, release-namespace=default (NOT a Traefik release in kube-system)
+
+  Suggested commands (dry-run only by default):
+    kubectl delete crd gatewayclasses.gateway.networking.k8s.io
+    kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
+    kubectl annotate crd <name> \
+      meta.helm.sh/release-name=traefik-crd \
+      meta.helm.sh/release-namespace=kube-system \
+      --overwrite
+  ```
+
+In the problematic case, the doctor exits non-zero and prints exact `kubectl` commands. You can
+either delete the CRDs (safest on new clusters) or patch/adopt them as shown above, then rerun the
+doctor and `just traefik-install`.
+
+> ⚠️ **Dangerous foot-gun: `apply` mode**
+>
+> `just traefik-crd-doctor apply=1` will execute destructive `kubectl delete crd ...` operations
+> against cluster-wide Gateway API CRDs after an interactive `y/N` confirmation. This can break
+> workloads that depend on Gateway API resources. Use it only on fresh homelab clusters where you
+> fully understand the impact. By default, the doctor is read-only and recommended for diagnostics.
 
 ## Using control-plane nodes as workers (homelab mode)
 
