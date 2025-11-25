@@ -61,118 +61,101 @@ operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manual
 
 ## Install and verify Traefik ingress
 
-**Prerequisite:** Ensure Helm is installed and `just helm-status` succeeds (see the "Install Helm"
-section above). For the underlying manual commands, see
-`docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
-
 Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
 ingress controller. Other controllers can work, but this guide only documents the Traefik path.
 
-Check whether Traefik already exists in the `kube-system` namespace:
-
-```bash
-kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
-```
-
-- If the command returns a `traefik` service (ClusterIP or LoadBalancer), continue to the next
-  section.
-- If it prints `No resources found in kube-system namespace.`, install Traefik before deploying
-  apps.
-
-For the shortest path, install Traefik via the new helper recipe. Run this as your normal user
-(e.g., `pi`), not with `sudo`:
+Run the helper recipe as your normal user (e.g., `pi`), not with `sudo`:
 
 ```bash
 just traefik-install
 ```
 
-The recipe creates or repairs `$HOME/.kube` and `$HOME/.kube/config` for the current user by
-copying `/etc/rancher/k3s/k3s.yaml` if needed, then sets `KUBECONFIG=$HOME/.kube/config` so its
-`kubectl` and `helm` commands always use the user-owned kubeconfig. This avoids permission issues
-with `/etc/rancher/k3s/k3s.yaml` remaining root-only. It now:
+What this does:
 
-- Installs or upgrades the Traefik Helm release in the `kube-system` namespace with
-  `helm upgrade --install traefik ... --wait --timeout=5m` so Helm waits for resources to become
-  Ready.
-- Checks Helm’s exit code and, on failure, prints `helm status traefik -n kube-system` to give
-  immediate context.
-- Verifies the `traefik` Service exists and, if missing, prints a small snapshot of Traefik-related
-  Services, Deployments, and Pods to speed up troubleshooting.
+- Repairs `$HOME/.kube/config` from `/etc/rancher/k3s/k3s.yaml` when needed so Helm and kubectl use a
+  user-owned kubeconfig.
+- Installs Helm-controlled Gateway API CRDs via the `traefik-crd` chart when possible, or skips the
+  CRD chart when the CRDs already belong to an existing Traefik release.
+- Installs or upgrades the Traefik Helm release in `kube-system` with
+  `helm upgrade --install ... --wait --timeout=5m`.
+- Verifies the `traefik` Service exists and prints quick troubleshooting hints if it does not.
 
-If the recipe fails, read the printed Helm status output. Then inspect the Traefik pod logs and
-describe output as suggested, fix any underlying issues (CRDs, taints, network, etc.), and re-run
-`just traefik-install`.
-
-It is safe to rerun the recipe if you need to repair a root-owned kubeconfig or confirm Traefik is
-installed.
-
-If you try to run `sudo just traefik-install`, the recipe will stop with an error reminding you to
-run it without sudo so it uses the correct kubeconfig.
-
-**Gateway API CRDs and Helm ownership**
-
-Traefik's Helm chart expects the Gateway API CRDs to be owned by the `traefik-crd` release in the
-`kube-system` namespace. If those CRDs already exist without that Helm metadata (for example,
-installed by k3s or applied manually), the Traefik CRD chart refuses to install.
-
-The `just traefik-install` recipe now performs a preflight check:
-
-- If Gateway API CRDs are missing, it proceeds and Traefik will create them.
-- If it finds existing CRDs that are not owned by `traefik-crd` in `kube-system`, it fails fast
-  with an error and prints remediation commands.
-
-When the error appears, you have two options:
-
-1. **Delete the CRDs** so Traefik recreates them (safest for a fresh homelab cluster with no
-   workloads using Gateway API):
-
-   ```bash
-   kubectl delete crd backendtlspolicies.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io \
-     gateways.gateway.networking.k8s.io grpcroutes.gateway.networking.k8s.io \
-     httproutes.gateway.networking.k8s.io referencegrants.gateway.networking.k8s.io
-   ```
-
-2. **Patch the existing CRDs** so `traefik-crd` can adopt them:
-
-   ```bash
-   kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
-   kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \
-     meta.helm.sh/release-namespace=kube-system --overwrite
-   ```
-
-Re-run the status recipe any time to check the ingress controller:
+Verify the install with any of the following:
 
 ```bash
+kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik
+kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 just traefik-status
 ```
 
-Traefik is not installed automatically by the base cluster bootstrap. To add it using the
-official Helm chart:
+Re-run `just traefik-install` any time; it is idempotent and safe to use after fixing kubeconfig,
+taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
+`docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
 
-```bash
-helm repo add traefik https://traefik.github.io/charts
-helm repo update
-helm upgrade --install traefik traefik/traefik \
-  --namespace kube-system \
-  --create-namespace \
-  --set service.type=ClusterIP \
-  --wait \
-  --timeout 5m
+**Gateway API CRDs and Helm ownership**
+
+Traefik's CRDs must be managed by Helm. The recipe checks that the Gateway API CRDs are owned by a
+Traefik release (`traefik` or `traefik-crd`) in `kube-system` and fails fast with remediation
+commands if other owners are found. Patch or delete conflicting CRDs, then rerun the recipe so the
+Traefik charts can adopt them cleanly.
+
+If you see an error like:
+
+```text
+ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release ...
 ```
 
-This installs a minimal Traefik release into `kube-system` with a ClusterIP service. Adjust the
-Helm values or refer to the [official Traefik docs](https://doc.traefik.io/traefik/) for
-advanced configuration such as TLS, load balancers, or custom entrypoints.
+Follow these steps to diagnose and resolve the issue:
 
-After installation, re-run:
+1. **List Gateway API CRDs:**
 
-```bash
-kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
-```
+   ```bash
+   kubectl get crd | grep gateway.networking.k8s.io
+   ```
 
-and confirm the `traefik` service exists before continuing. The dspace v3 k3s-sugarkube-dev
-guide assumes Traefik is installed and reachable via this flow.
+2. **Inspect their Helm metadata:**
+
+   ```bash
+   kubectl get crd gatewayclasses.gateway.networking.k8s.io \
+     -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by} / {.metadata.annotations.meta\.helm\.sh/release-name} / {.metadata.annotations.meta\.helm\.sh/release-namespace}'
+   ```
+
+   Valid output for Traefik-owned CRDs looks like: `Helm / traefik-crd / kube-system` or
+   `Helm / traefik / kube-system`. If any value is empty or belongs to another release, the recipe
+   will fail.
+
+3. **Option A: Delete and recreate (fresh homelab clusters):**
+
+   If this is a new cluster and you don't need the existing Gateway API resources:
+
+   ```bash
+   kubectl delete crd \
+     backendtlspolicies.gateway.networking.k8s.io \
+     gatewayclasses.gateway.networking.k8s.io \
+     gateways.gateway.networking.k8s.io \
+     grpcroutes.gateway.networking.k8s.io \
+     httproutes.gateway.networking.k8s.io \
+     referencegrants.gateway.networking.k8s.io
+   ```
+
+   Then rerun `just traefik-install` and the Traefik CRD chart will create them with correct
+   Helm metadata.
+
+4. **Option B: Patch for Helm adoption (advanced):**
+
+   If you need to preserve the CRDs (e.g., other Gateway API resources exist), patch each one:
+
+   ```bash
+   for crd in gatewayclasses.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io; do
+     kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
+     kubectl annotate crd "${crd}" \
+       meta.helm.sh/release-name=traefik-crd \
+       meta.helm.sh/release-namespace=kube-system --overwrite
+   done
+   ```
+
+   Replace the CRD names with the full list from step 1. After patching, rerun `just traefik-install`.
 
 ## Using control-plane nodes as workers (homelab mode)
 

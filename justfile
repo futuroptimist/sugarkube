@@ -517,6 +517,7 @@ traefik-install namespace='kube-system' version='':
     fi
 
     CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP=""
+    CRD_HELM_RELEASE_NAMES=""
 
     for crd in ${GATEWAY_CRDS}; do
         MANAGED_BY=$(kubectl get "crd/${crd}" \
@@ -526,16 +527,45 @@ traefik-install namespace='kube-system' version='':
         REL_NS=$(kubectl get "crd/${crd}" \
             -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "")
 
+        if [ -n "${REL_NAME}" ]; then
+            CRD_HELM_RELEASE_NAMES="${CRD_HELM_RELEASE_NAMES} ${REL_NAME}"
+        fi
+
+        # Filter to only accepted release names (traefik or traefik-crd).
+        # Any other release name (e.g., "my-gateway-api") is treated as unowned
+        # by clearing REL_NAME, which triggers the ownership check below.
+        case "${REL_NAME}" in
+            traefik|traefik-crd)
+                ;;  # expected release names
+            *)
+                REL_NAME=""
+                ;;
+        esac
+
         if [ "${MANAGED_BY}" != "Helm" ] || \
-            [ "${REL_NAME}" != "traefik-crd" ] || \
+            [ -z "${REL_NAME}" ] || \
             [ "${REL_NS}" != "{{ namespace }}" ]; then
             CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP="${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP} ${crd}"
         fi
     done
 
     if [ -n "${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" ]; then
-        echo "ERROR: Found existing Gateway API CRDs that are NOT owned by the traefik-crd Helm release:" >&2
+        echo "ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release (traefik or traefik-crd):" >&2
         echo "  ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
+        echo >&2
+        echo "Current metadata for each problematic CRD:" >&2
+        for bad_crd in ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}; do
+            crd_managed=$(kubectl get "crd/${bad_crd}" \
+                -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "<unset>")
+            crd_rel=$(kubectl get "crd/${bad_crd}" \
+                -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "<unset>")
+            crd_ns=$(kubectl get "crd/${bad_crd}" \
+                -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "<unset>")
+            echo "  - ${bad_crd}" >&2
+            echo "      app.kubernetes.io/managed-by: ${crd_managed}" >&2
+            echo "      meta.helm.sh/release-name: ${crd_rel}" >&2
+            echo "      meta.helm.sh/release-namespace: ${crd_ns}" >&2
+        done
         echo >&2
         echo "Traefik's CRD chart will refuse to install while these CRDs exist without the expected Helm metadata." >&2
         echo "To fix this, you have two options:" >&2
@@ -551,7 +581,28 @@ traefik-install namespace='kube-system' version='':
     fi
 
     if [ -n "${GATEWAY_CRDS}" ]; then
-        echo "Existing Gateway API CRDs appear to be managed by traefik-crd; proceeding with Helm install."
+        echo "Existing Gateway API CRDs appear to be managed by a Traefik Helm release; proceeding with Helm install."
+    fi
+
+    crd_release_present=0
+    if helm status traefik-crd --namespace "{{ namespace }}" >/dev/null 2>&1; then
+        crd_release_present=1
+    fi
+
+    if [ -z "${GATEWAY_CRDS}" ] || [ "${crd_release_present}" -eq 1 ]; then
+        echo "Installing or upgrading Traefik Gateway API CRDs via Helm in namespace '{{ namespace }}'..."
+        if ! helm upgrade --install traefik-crd traefik/traefik-crd \
+            --namespace "{{ namespace }}" \
+            --create-namespace \
+            --wait \
+            --timeout 5m; then
+            echo "ERROR: Helm failed to install or upgrade the 'traefik-crd' release in namespace '{{ namespace }}'." >&2
+            helm status traefik-crd --namespace "{{ namespace }}" || true
+            exit 1
+        fi
+    else
+        deduped_release_names=$(tr ' ' '\n' <<<"${CRD_HELM_RELEASE_NAMES}" | sed '/^$/d' | sort -u | tr '\n' ' ')
+        echo "Gateway API CRDs already exist and are managed by Helm (release names:${deduped_release_names:+ ${deduped_release_names}}); skipping traefik-crd chart install."
     fi
 
     helm_args=(
