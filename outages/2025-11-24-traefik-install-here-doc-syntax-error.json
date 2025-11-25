@@ -3,8 +3,8 @@
   "date": "2025-11-24",
   "component": "just traefik-install recipe",
   "longForm": "outages/2025-11-24-traefik-install-here-doc-syntax-error.md",
-  "rootCause": "A new multi-line preflight message was added to the traefik-install just recipe using a here-document, but the closing EOF marker was missing in the justfile, leaving the here-doc unterminated when rendered to shell.",
-  "resolution": "Replaced the faulty here-doc with explicit echo statements and added a pytest that renders the traefik-install recipe with just --show and validates it with bash -n to prevent future syntax regressions.",
+  "rootCause": "A multi-line warning message was added to traefik-install using an unclosed here-doc, leaving the generated shell script unterminated and causing bash parse failures before any preflight or Helm logic executed.",
+  "resolution": "Replaced the problematic here-doc with explicit echo statements and added a pytest that runs just --show traefik-install through bash -n to catch syntax regressions in CI.",
   "references": [
     "justfile",
     "tests/test_traefik_install_script_syntax.py",
