@@ -494,94 +494,65 @@ traefik-install namespace='kube-system' version='':
         exit 1
     fi
 
+    source scripts/traefik_crd_lib.sh
+
     helm repo add traefik https://traefik.github.io/charts --force-update
     helm repo update
 
-    GATEWAY_CRDS=$(
-      kubectl get crd \
-        backendtlspolicies.gateway.networking.k8s.io \
-        gatewayclasses.gateway.networking.k8s.io \
-        gateways.gateway.networking.k8s.io \
-        grpcroutes.gateway.networking.k8s.io \
-        httproutes.gateway.networking.k8s.io \
-        referencegrants.gateway.networking.k8s.io \
-        --ignore-not-found \
-        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
-    )
+    declare -ag EXISTING_GATEWAY_CRDS
+    declare -ag PROBLEMATIC_GATEWAY_CRDS
+    declare -ag CRD_HELM_RELEASE_NAMES
 
-    if [ -z "${GATEWAY_CRDS}" ]; then
-        echo "No existing Gateway API CRDs detected; Traefik will create them."
-    else
-        echo "Found existing Gateway API CRDs:"
-        echo "  ${GATEWAY_CRDS}"
-    fi
+    traefik_collect_gateway_crd_state "{{ namespace }}"
 
-    CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP=""
-    CRD_HELM_RELEASE_NAMES=""
+    EXISTING_GATEWAY_CRDS=()
+    PROBLEMATIC_GATEWAY_CRDS=()
+    CRD_HELM_RELEASE_NAMES=()
 
-    for crd in ${GATEWAY_CRDS}; do
-        MANAGED_BY=$(kubectl get "crd/${crd}" \
-            -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
-        REL_NAME=$(kubectl get "crd/${crd}" \
-            -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "")
-        REL_NS=$(kubectl get "crd/${crd}" \
-            -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "")
-
-        if [ -n "${REL_NAME}" ]; then
-            CRD_HELM_RELEASE_NAMES="${CRD_HELM_RELEASE_NAMES} ${REL_NAME}"
-        fi
-
-        # Filter to only accepted release names (traefik or traefik-crd).
-        # Any other release name (e.g., "my-gateway-api") is treated as unowned
-        # by clearing REL_NAME, which triggers the ownership check below.
-        case "${REL_NAME}" in
-            traefik|traefik-crd)
-                ;;  # expected release names
-            *)
-                REL_NAME=""
+    for crd in "${TRAEFIK_GATEWAY_CRDS[@]}"; do
+        class=${GATEWAY_CRD_CLASS["${crd}"]:-missing}
+        case "${class}" in
+            missing)
+                ;;
+            ok)
+                EXISTING_GATEWAY_CRDS+=("${crd}")
+                rel_name=${GATEWAY_CRD_RELEASE_NAME["${crd}"]:-}
+                if [ -n "${rel_name}" ]; then
+                    CRD_HELM_RELEASE_NAMES+=("${rel_name}")
+                fi
+                ;;
+            problem)
+                EXISTING_GATEWAY_CRDS+=("${crd}")
+                PROBLEMATIC_GATEWAY_CRDS+=("${crd}")
                 ;;
         esac
-
-        if [ "${MANAGED_BY}" != "Helm" ] || \
-            [ -z "${REL_NAME}" ] || \
-            [ "${REL_NS}" != "{{ namespace }}" ]; then
-            CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP="${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP} ${crd}"
-        fi
     done
 
-    if [ -n "${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" ]; then
+    if [ ${#PROBLEMATIC_GATEWAY_CRDS[@]} -gt 0 ]; then
         echo "ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release (traefik or traefik-crd):" >&2
-        echo "  ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
+        echo "  ${PROBLEMATIC_GATEWAY_CRDS[*]}" >&2
         echo >&2
         echo "Current metadata for each problematic CRD:" >&2
-        for bad_crd in ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}; do
-            crd_managed=$(kubectl get "crd/${bad_crd}" \
-                -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "<unset>")
-            crd_rel=$(kubectl get "crd/${bad_crd}" \
-                -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "<unset>")
-            crd_ns=$(kubectl get "crd/${bad_crd}" \
-                -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "<unset>")
+        for bad_crd in "${PROBLEMATIC_GATEWAY_CRDS[@]}"; do
+            crd_managed=${GATEWAY_CRD_MANAGED_BY["${bad_crd}"]:-<unset>}
+            crd_rel=${GATEWAY_CRD_RELEASE_NAME["${bad_crd}"]:-<unset>}
+            crd_ns=${GATEWAY_CRD_RELEASE_NAMESPACE["${bad_crd}"]:-<unset>}
             echo "  - ${bad_crd}" >&2
-            echo "      app.kubernetes.io/managed-by: ${crd_managed}" >&2
-            echo "      meta.helm.sh/release-name: ${crd_rel}" >&2
-            echo "      meta.helm.sh/release-namespace: ${crd_ns}" >&2
+            echo "      app.kubernetes.io/managed-by: ${crd_managed:-<unset>}" >&2
+            echo "      meta.helm.sh/release-name: ${crd_rel:-<unset>}" >&2
+            echo "      meta.helm.sh/release-namespace: ${crd_ns:-<unset>}" >&2
         done
         echo >&2
         echo "Traefik's CRD chart will refuse to install while these CRDs exist without the expected Helm metadata." >&2
-        echo "To fix this, you have two options:" >&2
-        echo "  1) Delete the Gateway API CRDs and let Traefik recreate them (safe in a fresh cluster):" >&2
-        echo "       kubectl delete crd ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
-        echo "  2) Patch the existing CRDs to add the Helm labels/annotations so traefik-crd can adopt them:" >&2
-        echo "       kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite" >&2
-        echo "       kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \\" >&2
-        echo "         meta.helm.sh/release-namespace={{ namespace }} --overwrite" >&2
-        echo >&2
+        echo "Run 'just traefik-crd-doctor' for a detailed report and suggested commands to fix ownership." >&2
         echo "See docs/raspi_cluster_operations.md for details." >&2
         exit 1
     fi
 
-    if [ -n "${GATEWAY_CRDS}" ]; then
+    if [ ${#EXISTING_GATEWAY_CRDS[@]} -gt 0 ]; then
         echo "Existing Gateway API CRDs appear to be managed by a Traefik Helm release; proceeding with Helm install."
+    else
+        echo "No existing Gateway API CRDs detected; Traefik will create them."
     fi
 
     crd_release_present=0
@@ -589,7 +560,7 @@ traefik-install namespace='kube-system' version='':
         crd_release_present=1
     fi
 
-    if [ -z "${GATEWAY_CRDS}" ] || [ "${crd_release_present}" -eq 1 ]; then
+    if [ ${#EXISTING_GATEWAY_CRDS[@]} -eq 0 ] || [ "${crd_release_present}" -eq 1 ]; then
         echo "Installing or upgrading Traefik Gateway API CRDs via Helm in namespace '{{ namespace }}'..."
         if ! helm upgrade --install traefik-crd traefik/traefik-crd \
             --namespace "{{ namespace }}" \
@@ -601,7 +572,7 @@ traefik-install namespace='kube-system' version='':
             exit 1
         fi
     else
-        deduped_release_names=$(tr ' ' '\n' <<<"${CRD_HELM_RELEASE_NAMES}" | sed '/^$/d' | sort -u | tr '\n' ' ')
+        deduped_release_names=$(printf '%s\n' "${CRD_HELM_RELEASE_NAMES[@]}" | sed '/^$/d' | sort -u | tr '\n' ' ')
         echo "Gateway API CRDs already exist and are managed by Helm (release names:${deduped_release_names:+ ${deduped_release_names}}); skipping traefik-crd chart install."
     fi
 
@@ -646,6 +617,210 @@ traefik-install namespace='kube-system' version='':
     fi
 
     echo "Traefik Service 'traefik' is present in namespace '{{ namespace }}'."
+
+traefik-crd-doctor namespace='kube-system' apply='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
+
+    source scripts/traefik_crd_lib.sh
+
+    declare -ga CURRENT_PROBLEMATIC
+    declare -ga CURRENT_MISSING
+    declare -ga CURRENT_OK
+
+    render_crd_report() {
+        CURRENT_PROBLEMATIC=()
+        CURRENT_MISSING=()
+        CURRENT_OK=()
+
+        traefik_collect_gateway_crd_state "{{ namespace }}"
+
+        for crd in "${TRAEFIK_GATEWAY_CRDS[@]}"; do
+            class=${GATEWAY_CRD_CLASS["${crd}"]:-missing}
+            case "${class}" in
+                missing)
+                    CURRENT_MISSING+=("${crd}")
+                    echo "⚠️  CRD ${crd}: missing"
+                    ;;
+                ok)
+                    CURRENT_OK+=("${crd}")
+                    rel=${GATEWAY_CRD_RELEASE_NAME["${crd}"]:-<unknown>}
+                    rel_ns=${GATEWAY_CRD_RELEASE_NAMESPACE["${crd}"]:-<unknown>}
+                    echo "✅ CRD ${crd}: owned by release ${rel} in namespace ${rel_ns} (OK)"
+                    ;;
+                problem)
+                    CURRENT_PROBLEMATIC+=("${crd}")
+                    managed=${GATEWAY_CRD_MANAGED_BY["${crd}"]:-<unset>}
+                    rel=${GATEWAY_CRD_RELEASE_NAME["${crd}"]:-<unset>}
+                    rel_ns=${GATEWAY_CRD_RELEASE_NAMESPACE["${crd}"]:-<unset>}
+                    printf '⚠️  CRD %s: exists but managed-by=%s, release-name=%s, ' \
+                        "${crd}" "${managed:-<unset>}" "${rel:-<unset>}"
+                    printf 'release-namespace=%s ' "${rel_ns:-<unset>}"
+                    printf '(NOT a Traefik release in {{ namespace }})\n'
+                    ;;
+            esac
+        done
+    }
+
+    render_crd_report
+
+    if [ ${#CURRENT_PROBLEMATIC[@]} -gt 0 ]; then
+        echo ""
+        echo "Suggested commands (dry-run only by default):"
+        echo "  Delete and let Traefik recreate (recommended for fresh clusters):"
+        echo "    kubectl delete crd ${CURRENT_PROBLEMATIC[*]}"
+        echo "  Patch existing CRDs so traefik-crd can adopt them:"
+        echo "    kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite"
+        echo "    kubectl annotate crd <name> \
+      meta.helm.sh/release-name=traefik-crd \
+      meta.helm.sh/release-namespace={{ namespace }} \
+      --overwrite"
+    else
+        echo ""
+        echo "No problematic Gateway API CRDs detected."
+    fi
+
+    apply_flag="${TRAEFIK_CRD_DOCTOR_APPLY:-{{ apply }}}"
+
+    if [ "${apply_flag}" = "1" ]; then
+        echo ""
+        cat <<'EOF_WARNING'
+WARNING: traefik-crd-doctor apply mode will make **destructive changes** to cluster-wide CRDs.
+This can break other workloads if they depend on Gateway API resources.
+Only use this mode on a fresh homelab cluster where you understand the consequences.
+EOF_WARNING
+
+        if [ ${#CURRENT_PROBLEMATIC[@]} -eq 0 ]; then
+            echo "No problematic Gateway API CRDs detected; nothing to apply."
+        else
+            echo "Planned delete commands:"
+            echo "  kubectl delete crd ${CURRENT_PROBLEMATIC[*]}"
+            echo "Planned patch commands (not auto-applied in this mode):"
+            echo "  kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite"
+            echo "  kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \
+    meta.helm.sh/release-namespace={{ namespace }} --overwrite"
+
+            read -r -p "Proceed with these changes? [y/N]: " confirm
+            if [[ ! "${confirm}" =~ ^[yY]$ ]]; then
+                echo "Aborting apply; no changes were made."
+            else
+                echo "Executing: kubectl delete crd ${CURRENT_PROBLEMATIC[*]}"
+                if ! kubectl delete crd "${CURRENT_PROBLEMATIC[@]}"; then
+                    echo "Apply failed while deleting problematic CRDs." >&2
+                    exit 1
+                fi
+
+                echo ""
+                echo "Re-running CRD report after apply..."
+                render_crd_report
+            fi
+        fi
+    fi
+
+    if [ ${#CURRENT_PROBLEMATIC[@]} -gt 0 ]; then
+        exit 1
+    fi
+
+
+traefik-crd-doctor namespace='kube-system' apply='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${HOME}/.kube/config"
+
+    source scripts/traefik_crd_lib.sh
+
+    declare -ga CURRENT_PROBLEMATIC
+    declare -ga CURRENT_MISSING
+    declare -ga CURRENT_OK
+
+    render_crd_report() {
+        CURRENT_PROBLEMATIC=()
+        CURRENT_MISSING=()
+        CURRENT_OK=()
+
+        traefik_collect_gateway_crd_state "{{ namespace }}"
+
+        for crd in "${TRAEFIK_GATEWAY_CRDS[@]}"; do
+            class=${GATEWAY_CRD_CLASS["${crd}"]:-missing}
+            case "${class}" in
+                missing)
+                    CURRENT_MISSING+=("${crd}")
+                    echo "⚠️  CRD ${crd}: missing"
+                    ;;
+                ok)
+                    CURRENT_OK+=("${crd}")
+                    rel=${GATEWAY_CRD_RELEASE_NAME["${crd}"]:-<unknown>}
+                    rel_ns=${GATEWAY_CRD_RELEASE_NAMESPACE["${crd}"]:-<unknown>}
+                    echo "✅ CRD ${crd}: owned by release ${rel} in namespace ${rel_ns} (OK)"
+                    ;;
+                problem)
+                    CURRENT_PROBLEMATIC+=("${crd}")
+                    managed=${GATEWAY_CRD_MANAGED_BY["${crd}"]:-<unset>}
+                    rel=${GATEWAY_CRD_RELEASE_NAME["${crd}"]:-<unset>}
+                    rel_ns=${GATEWAY_CRD_RELEASE_NAMESPACE["${crd}"]:-<unset>}
+                    echo "⚠️  CRD ${crd}: exists but managed-by=${managed:-<unset>}, release-name=${rel:-<unset>}, release-namespace=${rel_ns:-<unset>} (NOT a Traefik release in {{ namespace }})"
+                    ;;
+            esac
+        done
+    }
+
+    render_crd_report
+
+    if [ ${#CURRENT_PROBLEMATIC[@]} -gt 0 ]; then
+        echo ""
+        echo "Suggested commands (dry-run only by default):"
+        echo "  Delete and let Traefik recreate (recommended for fresh clusters):"
+        echo "    kubectl delete crd ${CURRENT_PROBLEMATIC[*]}"
+        echo "  Patch existing CRDs so traefik-crd can adopt them:"
+        echo "    kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite"
+        echo "    kubectl annotate crd <name> \\n      meta.helm.sh/release-name=traefik-crd \\n      meta.helm.sh/release-namespace={{ namespace }} \\n      --overwrite"
+    else
+        echo ""
+        echo "No problematic Gateway API CRDs detected."
+    fi
+
+    apply_flag="${TRAEFIK_CRD_DOCTOR_APPLY:-{{ apply }}}"
+
+    if [ "${apply_flag}" = "1" ]; then
+        echo ""
+        cat <<'EOF'
+WARNING: traefik-crd-doctor apply mode will make **destructive changes** to cluster-wide CRDs.
+This can break other workloads if they depend on Gateway API resources.
+Only use this mode on a fresh homelab cluster where you understand the consequences.
+EOF
+
+        if [ ${#CURRENT_PROBLEMATIC[@]} -eq 0 ]; then
+            echo "No problematic Gateway API CRDs detected; nothing to apply."
+        else
+            echo "Planned delete commands:"
+            echo "  kubectl delete crd ${CURRENT_PROBLEMATIC[*]}"
+            echo "Planned patch commands (not auto-applied in this mode):"
+            echo "  kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite"
+            echo "  kubectl annotate crd <name> meta.helm.sh/release-name=traefik-crd \\n    meta.helm.sh/release-namespace={{ namespace }} --overwrite"
+
+            read -r -p "Proceed with these changes? [y/N]: " confirm
+            if [[ ! "${confirm}" =~ ^[yY]$ ]]; then
+                echo "Aborting apply; no changes were made."
+            else
+                echo "Executing: kubectl delete crd ${CURRENT_PROBLEMATIC[*]}"
+                if ! kubectl delete crd "${CURRENT_PROBLEMATIC[@]}"; then
+                    echo "Apply failed while deleting problematic CRDs." >&2
+                    exit 1
+                fi
+
+                echo ""
+                echo "Re-running CRD report after apply..."
+                render_crd_report
+            fi
+        fi
+    fi
+
+    if [ ${#CURRENT_PROBLEMATIC[@]} -gt 0 ]; then
+        exit 1
+    fi
 
 traefik-status namespace='kube-system':
     #!/usr/bin/env bash

@@ -1,0 +1,6 @@
+backendtlspolicies.gateway.networking.k8s.io|present|Helm|traefik|kube-system
+gatewayclasses.gateway.networking.k8s.io|present|Helm|traefik-crd|kube-system
+gateways.gateway.networking.k8s.io|present|Helm|traefik|kube-system
+grpcroutes.gateway.networking.k8s.io|present|Helm|traefik-crd|kube-system
+httproutes.gateway.networking.k8s.io|present|Helm|traefik|kube-system
+referencegrants.gateway.networking.k8s.io|present|Helm|traefik-crd|kube-system

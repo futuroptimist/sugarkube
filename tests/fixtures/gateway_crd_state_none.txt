@@ -1,0 +1,6 @@
+backendtlspolicies.gateway.networking.k8s.io|missing|||
+gatewayclasses.gateway.networking.k8s.io|missing|||
+gateways.gateway.networking.k8s.io|missing|||
+grpcroutes.gateway.networking.k8s.io|missing|||
+httproutes.gateway.networking.k8s.io|missing|||
+referencegrants.gateway.networking.k8s.io|missing|||

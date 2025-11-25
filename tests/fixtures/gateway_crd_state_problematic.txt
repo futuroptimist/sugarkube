@@ -1,0 +1,6 @@
+backendtlspolicies.gateway.networking.k8s.io|present|||wrong-ns
+gatewayclasses.gateway.networking.k8s.io|present|operator|other-release|kube-system
+gateways.gateway.networking.k8s.io|present|Helm|other|default
+grpcroutes.gateway.networking.k8s.io|present|||kube-system
+httproutes.gateway.networking.k8s.io|present|Helm|gateway-api|kube-system
+referencegrants.gateway.networking.k8s.io|present|||another-ns
