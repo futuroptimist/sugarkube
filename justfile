@@ -597,10 +597,10 @@ traefik-install namespace='kube-system' version='':
 
     if [ "${#TRAEFIK_CRD_PRESENT[@]}" -eq 0 ] || [ "${crd_release_present}" -eq 1 ]; then
         echo "Installing or upgrading Traefik Gateway API CRDs via Helm in namespace '{{ namespace }}'..."
-        if ! helm upgrade --install traefik-crd traefik/traefik-crd \\
-            --namespace "{{ namespace }}" \\
-            --create-namespace \\
-            --wait \\
+        if ! helm upgrade --install traefik-crd traefik/traefik-crd \
+            --namespace "{{ namespace }}" \
+            --create-namespace \
+            --wait \
             --timeout 5m; then
             echo "ERROR: Helm failed to install or upgrade the 'traefik-crd' release in namespace '{{ namespace }}'." >&2
             helm status traefik-crd --namespace "{{ namespace }}" || true

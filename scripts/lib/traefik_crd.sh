@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-set -euo pipefail
+
+# Guard against multiple sourcing.
+if [ -n "${SUGARKUBE_TRAEFIK_CRD_LIB_SOURCED:-}" ]; then
+  return 0
+fi
+SUGARKUBE_TRAEFIK_CRD_LIB_SOURCED=1
 
 TRAEFIK_GATEWAY_CRDS=(
   backendtlspolicies.gateway.networking.k8s.io
@@ -185,7 +190,7 @@ traefik_crd::apply_delete() {
     return 0
   fi
 
-  echo "Running: kubectl delete crd ${TRAEFIK_CRD_PROBLEMS[*]}"
+  echo "Running: kubectl delete crd ${TRAEFIK_CRD_PROBLEMS[@]}"
   kubectl delete crd "${TRAEFIK_CRD_PROBLEMS[@]}"
 }
 

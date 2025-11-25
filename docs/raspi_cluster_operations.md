@@ -130,7 +130,7 @@ Example outputs:
 - Problematic CRDs installed by something else:
 
   ```text
-  ⚠️  gateways.gateway.networking.k8s.io: exists but managed-by=, release-name=other-release, release-namespace=default (NOT a Traefik Helm release in kube-system)
+  ⚠️  gateways.gateway.networking.k8s.io: managed-by=, release-name=other-release, release-namespace=default (expected Traefik Helm in kube-system)
   Recommended actions:
     1) Delete and let Traefik recreate (fresh clusters):
        kubectl delete crd gateways.gateway.networking.k8s.io
