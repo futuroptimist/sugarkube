@@ -531,11 +531,13 @@ traefik-install namespace='kube-system' version='':
             CRD_HELM_RELEASE_NAMES="${CRD_HELM_RELEASE_NAMES} ${REL_NAME}"
         fi
 
+        # Filter to only accepted release names (traefik or traefik-crd).
+        # Any other release name (e.g., "my-gateway-api") is treated as unowned
+        # by clearing REL_NAME, which triggers the ownership check below.
         case "${REL_NAME}" in
             traefik|traefik-crd)
                 ;;  # expected release names
             *)
-                # Treat any other release name as unowned for our validation
                 REL_NAME=""
                 ;;
         esac
@@ -550,6 +552,20 @@ traefik-install namespace='kube-system' version='':
     if [ -n "${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" ]; then
         echo "ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release (traefik or traefik-crd):" >&2
         echo "  ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}" >&2
+        echo >&2
+        echo "Current metadata for each problematic CRD:" >&2
+        for bad_crd in ${CRDS_WITHOUT_TRAEFIK_HELM_OWNERSHIP}; do
+            crd_managed=$(kubectl get "crd/${bad_crd}" \
+                -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "<unset>")
+            crd_rel=$(kubectl get "crd/${bad_crd}" \
+                -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "<unset>")
+            crd_ns=$(kubectl get "crd/${bad_crd}" \
+                -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "<unset>")
+            echo "  - ${bad_crd}" >&2
+            echo "      app.kubernetes.io/managed-by: ${crd_managed}" >&2
+            echo "      meta.helm.sh/release-name: ${crd_rel}" >&2
+            echo "      meta.helm.sh/release-namespace: ${crd_ns}" >&2
+        done
         echo >&2
         echo "Traefik's CRD chart will refuse to install while these CRDs exist without the expected Helm metadata." >&2
         echo "To fix this, you have two options:" >&2
