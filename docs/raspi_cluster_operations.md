@@ -98,64 +98,60 @@ taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
 Traefik's CRDs must be managed by Helm. The recipe checks that the Gateway API CRDs are owned by a
 Traefik release (`traefik` or `traefik-crd`) in `kube-system` and fails fast with remediation
 commands if other owners are found. Patch or delete conflicting CRDs, then rerun the recipe so the
-Traefik charts can adopt them cleanly.
+Traefik charts can adopt them cleanly. When `just traefik-install` hits this condition it will
+point you at the doctor below for a full report.
 
-If you see an error like:
+### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
 
-```text
-ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release ...
+`just traefik-crd-doctor` inspects Gateway API CRDs, reports their Helm metadata, and prints
+exact `kubectl` commands to fix ownership issues. By default it is **read-only**—no changes are
+applied unless you explicitly opt in.
+
+Run the doctor before retrying Traefik installs:
+
+```bash
+just traefik-crd-doctor
 ```
 
-Follow these steps to diagnose and resolve the issue:
+Examples of what you might see:
 
-1. **List Gateway API CRDs:**
+- Clean state: `✅ gatewayclasses.gateway.networking.k8s.io: owned by release traefik-crd in
+  namespace kube-system (OK)` followed by `Existing CRDs are already owned by Traefik Helm
+  releases.`
+- Missing CRDs: `⚠️  httproutes.gateway.networking.k8s.io: missing (will be created by Traefik CRD
+  chart)` followed by `All expected CRDs are missing, so the Traefik CRD chart can create them.`
+- Problematic CRDs installed by something else: `⚠️  gateways.gateway.networking.k8s.io: exists but
+  managed-by=<unset>, release-name=other, release-namespace=default (NOT a Traefik release in
+  kube-system)` plus a summary of what to fix.
 
-   ```bash
-   kubectl get crd | grep gateway.networking.k8s.io
-   ```
+When problems are detected, the doctor prints two sets of commands (still in dry-run mode):
 
-2. **Inspect their Helm metadata:**
-
-   ```bash
-   kubectl get crd gatewayclasses.gateway.networking.k8s.io \
-     -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by} / {.metadata.annotations.meta\.helm\.sh/release-name} / {.metadata.annotations.meta\.helm\.sh/release-namespace}'
-   ```
-
-   Valid output for Traefik-owned CRDs looks like: `Helm / traefik-crd / kube-system` or
-   `Helm / traefik / kube-system`. If any value is empty or belongs to another release, the recipe
-   will fail.
-
-3. **Option A: Delete and recreate (fresh homelab clusters):**
-
-   If this is a new cluster and you don't need the existing Gateway API resources:
+1. Delete and recreate (safest for fresh clusters):
 
    ```bash
-   kubectl delete crd \
-     backendtlspolicies.gateway.networking.k8s.io \
-     gatewayclasses.gateway.networking.k8s.io \
-     gateways.gateway.networking.k8s.io \
-     grpcroutes.gateway.networking.k8s.io \
-     httproutes.gateway.networking.k8s.io \
-     referencegrants.gateway.networking.k8s.io
+   kubectl delete crd <crd-name-1> <crd-name-2> ...
    ```
 
-   Then rerun `just traefik-install` and the Traefik CRD chart will create them with correct
-   Helm metadata.
-
-4. **Option B: Patch for Helm adoption (advanced):**
-
-   If you need to preserve the CRDs (e.g., other Gateway API resources exist), patch each one:
+2. Patch for Helm adoption (advanced clusters keeping existing Gateway API data):
 
    ```bash
-   for crd in gatewayclasses.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io; do
-     kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
-     kubectl annotate crd "${crd}" \
-       meta.helm.sh/release-name=traefik-crd \
-       meta.helm.sh/release-namespace=kube-system --overwrite
-   done
+   kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
+   kubectl annotate crd <name> \
+     meta.helm.sh/release-name=traefik-crd \
+     meta.helm.sh/release-namespace=kube-system \
+     --overwrite
    ```
 
-   Replace the CRD names with the full list from step 1. After patching, rerun `just traefik-install`.
+After cleaning up CRDs with either method, rerun `just traefik-install` to let the Traefik chart
+recreate or adopt them cleanly.
+
+> ⚠️ **Dangerous foot-gun: `apply` mode**
+>
+> `just traefik-crd-doctor apply=1` (or `TRAEFIK_CRD_DOCTOR_APPLY=1 just traefik-crd-doctor`) will
+> run destructive `kubectl delete` commands against *cluster-wide* Gateway API CRDs after an
+> interactive confirmation prompt. Only use this on a fresh homelab cluster where you are confident
+> no other workloads depend on Gateway API. The default read-only mode is recommended for most
+> operators.
 
 ## Using control-plane nodes as workers (homelab mode)
 
