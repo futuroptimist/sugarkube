@@ -1,0 +1,13 @@
+{
+  "id": "traefik-ha3-install-timeout-control-plane-taint",
+  "date": "2025-11-21",
+  "component": "Traefik install helper (ha3 dev topology)",
+  "longForm": "outages/2025-11-21-traefik-ha3-install-timeout-control-plane-taint.md",
+  "rootCause": "All nodes in the ha3 dev cluster were tainted with control-plane NoSchedule, leaving no schedulable nodes for Traefik or klipper-helm jobs, and the ha3-untaint-control-plane helper failed to remove the taints.",
+  "resolution": "Update ha3-untaint-control-plane to forcibly remove control-plane/master taints with verification and add traefik-install preflight checks that fail fast when every node is tainted.",
+  "references": [
+    "just ha3-untaint-control-plane",
+    "just traefik-install",
+    "kubectl get nodes -o json"
+  ]
+}
