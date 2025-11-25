@@ -489,8 +489,22 @@ traefik-install namespace='kube-system' version='':
     fi
 
     if ! command -v helm >/dev/null 2>&1; then
-        echo "Helm is not installed. Run 'just helm-install' first" >&2
-        echo "(see docs/raspi_cluster_operations.md), then re-run 'just traefik-install'." >&2
+        echo "Helm is not installed; running 'just helm-install' (see docs/raspi_cluster_operations.md)." >&2
+
+        if command -v just >/dev/null 2>&1; then
+            if ! just --justfile "{{ invocation_directory() }}/justfile" helm-install; then
+                echo "ERROR: 'just helm-install' failed. See docs/raspi_cluster_operations.md#install-helm-prerequisite-for-traefik-and-helm-workloads for manual steps." >&2
+                exit 1
+            fi
+        else
+            echo "ERROR: 'just' is not on PATH. Install Helm manually as documented in docs/raspi_cluster_operations.md#install-helm-prerequisite-for-traefik-and-helm-workloads, then re-run this recipe." >&2
+            exit 1
+        fi
+    fi
+
+    if ! command -v helm >/dev/null 2>&1; then
+        echo "Helm is still missing after running 'just helm-install'." >&2
+        echo "Follow docs/raspi_cluster_operations.md#install-helm-prerequisite-for-traefik-and-helm-workloads to install Helm, then re-run 'just traefik-install'." >&2
         exit 1
     fi
 
