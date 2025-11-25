@@ -535,6 +535,7 @@ traefik-install namespace='kube-system' version='':
             traefik|traefik-crd)
                 ;;  # expected release names
             *)
+                # Treat any other release name as unowned for our validation
                 REL_NAME=""
                 ;;
         esac
@@ -584,7 +585,7 @@ traefik-install namespace='kube-system' version='':
             exit 1
         fi
     else
-        deduped_release_names=$(tr ' ' '\n' <<<"${CRD_HELM_RELEASE_NAMES}" | sed '/^$/d' | sort -u | tr '\n' ' ' | xargs || true)
+        deduped_release_names=$(tr ' ' '\n' <<<"${CRD_HELM_RELEASE_NAMES}" | sed '/^$/d' | sort -u | tr '\n' ' ')
         echo "Gateway API CRDs already exist and are managed by Helm (release names:${deduped_release_names:+ ${deduped_release_names}}); skipping traefik-crd chart install."
     fi
 
