@@ -562,9 +562,9 @@ traefik-install namespace='kube-system' version='':
             crd_ns=$(kubectl get "crd/${bad_crd}" \
                 -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "<unset>")
             echo "  - ${bad_crd}" >&2
-            echo "      app.kubernetes.io/managed-by: ${crd_managed:-<unset>}" >&2
-            echo "      meta.helm.sh/release-name: ${crd_rel:-<unset>}" >&2
-            echo "      meta.helm.sh/release-namespace: ${crd_ns:-<unset>}" >&2
+            echo "      app.kubernetes.io/managed-by: ${crd_managed}" >&2
+            echo "      meta.helm.sh/release-name: ${crd_rel}" >&2
+            echo "      meta.helm.sh/release-namespace: ${crd_ns}" >&2
         done
         echo >&2
         echo "Traefik's CRD chart will refuse to install while these CRDs exist without the expected Helm metadata." >&2
