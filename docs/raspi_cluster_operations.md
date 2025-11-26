@@ -30,6 +30,43 @@ logs, preparing Helm, and rolling out real workloads like
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
 
+## Golden path: HA dev cluster → Helm → Traefik → workloads
+
+Follow this sequence after imaging and booting the Pis:
+
+1. **Form or re-run the HA cluster:** From each node, use the quick-start flow in
+   [raspi_cluster_setup.md](./raspi_cluster_setup.md) and verify:
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+2. **Install Helm (required before any Helm chart installs):**
+
+   ```bash
+   just helm-install
+   just helm-status
+   ```
+
+3. **Inspect Gateway API CRDs:** Missing CRDs or a fully healthy set are both OK; the Traefik doctor
+   only fails on problematic ownership and prints remediation steps.
+
+   ```bash
+   just traefik-crd-doctor
+   ```
+
+4. **Install and verify Traefik ingress:**
+
+   ```bash
+   just traefik-install
+   just traefik-status
+   ```
+
+5. **Deploy workloads:** Continue with the workload sections in this guide (for example,
+   [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
+   ingress is healthy.
+
 ## Install Helm (prerequisite for Traefik and Helm workloads)
 
 Helm simplifies Kubernetes application deployment by packaging manifests, providing templating, and
@@ -60,6 +97,8 @@ If you prefer to install Helm manually or are unable to use the `just` recipes, 
 operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
 
 ## Install and verify Traefik ingress
+
+> This section expands step 4 of the golden path above (installing and validating Traefik).
 
 Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
@@ -97,8 +136,8 @@ taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
 
 Traefik's Gateway API CRDs must be managed by Helm. The recipe uses the CRD doctor to confirm that
 any existing CRDs are owned by a Traefik release in `kube-system`. Missing CRDs are acceptable—the
-main `traefik/traefik` chart will create them. If `just traefik-install` reports ownership
-problems, run the doctor before retrying the install.
+main `traefik/traefik` chart will create them—and already healthy, Traefik-owned CRDs are also fine.
+If `just traefik-install` reports ownership problems, run the doctor before retrying the install.
 
 ### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
 
@@ -117,6 +156,10 @@ For non-default namespaces, pass the `namespace` argument:
 ```bash
 just traefik-crd-doctor namespace=my-other-namespace
 ```
+
+If the doctor reports no problematic CRDs with either all CRDs **missing** or all CRDs **healthy**, you
+are good to proceed—Traefik will create missing CRDs during install or already owns the healthy set.
+Only the problematic states require action; follow the recommended commands the doctor prints.
 
 Example outputs:
 
@@ -196,6 +239,9 @@ remain, then re-run `just traefik-install` to complete the installation.
 > cluster-wide Gateway API CRDs. Only use this on a fresh homelab cluster where you are sure nothing
 > else depends on Gateway API. By default the doctor is read-only and is the recommended way to
 > diagnose issues.
+
+> **Next step:** With ingress healthy, continue to the workload sections (token.place, dspace, or your
+> own apps) later in this guide so Traefik can route external traffic.
 
 ## Using control-plane nodes as workers (homelab mode)
 
