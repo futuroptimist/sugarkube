@@ -30,7 +30,9 @@ reduce typing:
 Use this manual as the full reference when you need to reason about every moving
 part (pi-image builds, SSD migration, or bespoke rehearsals). Otherwise, stick to
 the quick start plus the new day-two guide so operators only type the minimum
-necessary commands.
+necessary commands. When the control plane is steady, transition to
+[raspi_cluster_operations.md](raspi_cluster_operations.md) (or the manual companion) to install
+Helm, validate Gateway API CRDs, and deploy Traefik ingress before workloads.
 
 This expanded guide walks through building a three-node Raspberry Pi 5 cluster and installing k3s
 so you can run [token.place](https://github.com/futuroptimist/token.place) and

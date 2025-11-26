@@ -15,7 +15,8 @@ personas:
 Use this manual when you need the long-form commands that back the day-two helpers
 in `raspi_cluster_operations.md`. It pairs each automated recipe with an equivalent
 shell sequence so you can reason about every change or adapt it to nonstandard
-clusters.
+clusters. Follow the quick-start path first, then return here when you need the
+raw commands behind Helm, Traefik ingress, and workloads.
 
 ## What the quick start automates
 
@@ -81,7 +82,8 @@ commands, and installs or upgrades the Traefik Helm release automatically. Use t
 when debugging or applying custom Traefik settings. The automated recipe also performs a Gateway
 API CRD ownership preflight and will stop with a descriptive error if existing CRDs are missing the
 Helm metadata that Traefik expects; the commands below are the underlying delete/patch options
-you can run when that happens.
+you can run when that happens. All-missing and all-healthy CRDs are success states; only conflicts
+reported by the doctor need manual cleanup.
 
 To mirror the automated kubeconfig behavior manually before running kubectl:
 
@@ -122,9 +124,10 @@ helm upgrade --install traefik traefik/traefik \
 ```
 
 These values enable Traefik's Kubernetes Gateway controller and associated CRDs so
-that the main `traefik` release owns them. Existing clusters using a legacy
-`traefik-crd` release (from k3s) are still accepted by the CRD doctor; new installs
-will use the main `traefik` release as the CRD owner.
+that the main `traefik` release owns them. Missing CRDs are fine—the chart will
+create them—and preexisting CRDs without Helm metadata can be adopted. If the
+Gateway API CRD doctor reports conflicts, delete or patch the CRDs using the
+doctor's recommended commands before retrying the install.
 
 Re-run the service check and note the ClusterIP or LoadBalancer address:
 
