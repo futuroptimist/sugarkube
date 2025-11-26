@@ -172,7 +172,7 @@ Recommended actions:
   2) Patch to mark Helm ownership (advanced):
      kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
      kubectl annotate crd <name> \
-       meta.helm.sh/release-name=traefik-crd \
+       meta.helm.sh/release-name=traefik \
        meta.helm.sh/release-namespace=kube-system --overwrite
 SUGGEST_EOF
 }
