@@ -77,11 +77,11 @@ If you prefer to use the high-level Just recipes instead of running these comman
 Most users should stick with the `just traefik-install` command in
 [raspi_cluster_operations.md](raspi_cluster_operations.md). It creates or repairs
 `~/.kube/config` from `/etc/rancher/k3s/k3s.yaml`, exports `KUBECONFIG=$HOME/.kube/config` for its
-commands, and installs or upgrades the Traefik Helm release automatically. Use the manual path here
-when debugging or applying custom Traefik settings. The automated recipe also performs a Gateway
-API CRD ownership preflight and will stop with a descriptive error if existing CRDs are missing the
-Helm metadata that Traefik expects; the commands below are the underlying delete/patch options
-you can run when that happens.
+commands, runs the Gateway API CRD doctor, and installs or upgrades the Traefik Helm release
+automatically. Use the manual path here when debugging or applying custom Traefik settings. The
+automated recipe performs a CRD ownership preflight and will stop with a descriptive error if
+existing CRDs are missing the Helm metadata that Traefik expects; the commands below are the
+underlying delete/patch options you can run when that happens.
 
 To mirror the automated kubeconfig behavior manually before running kubectl:
 
@@ -121,10 +121,15 @@ helm upgrade --install traefik traefik/traefik \
   --wait
 ```
 
-These values enable Traefik's Kubernetes Gateway controller and associated CRDs so
-that the main `traefik` release owns them. Existing clusters using a legacy
-`traefik-crd` release (from k3s) are still accepted by the CRD doctor; new installs
-will use the main `traefik` release as the CRD owner.
+These values enable Traefik's Kubernetes Gateway controller and associated CRDs so that the main
+`traefik` release owns them. Run `just traefik-crd-doctor` before and after a manual install to
+confirm there are no problematic CRDs:
+
+- "No problematic CRDs" with all CRDs missing is expected on fresh clusters; the chart will create
+  them.
+- "No problematic CRDs" with all CRDs healthy means Traefik already owns them.
+- If the doctor reports conflicts, delete or patch using its recommended commands, then retry the
+  install.
 
 Re-run the service check and note the ClusterIP or LoadBalancer address:
 

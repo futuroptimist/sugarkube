@@ -10,11 +10,24 @@ personas:
 - **Previous:** [Part 1 - Manual Setup](raspi_cluster_setup_manual.md)
 - **Next:** [Part 3 - Operations & Helm](raspi_cluster_operations.md)
 
-`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
+`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard
+image and share the same LAN, you can create a per-environment k3s cluster with a single command per
+node.
 
-> **Next step:** When the control plane is stable, continue with
-> [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
-> Helm, ingress (Traefik), and other day-two workflows.
+**Golden path (quick recap):**
+
+1. Flash the sugarkube image and boot each Pi on the same LAN (see
+   [pi_image_quickstart.md](./pi_image_quickstart.md)).
+2. Create the 3-node HA `dev` cluster and verify status:
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+3. Continue with [raspi_cluster_operations.md](./raspi_cluster_operations.md) to install Helm,
+   verify Gateway API CRDs with `just traefik-crd-doctor`, and deploy Traefik ingress before adding
+   workloads.
 
 ## Clone SD to SSD (happy path)
 
@@ -745,6 +758,10 @@ ingress controller.
 
 Install Traefik using the [Traefik ingress][traefik-ingress] steps before rolling out HTTP
 applications.
+
+> **Next step:** Continue with [raspi_cluster_operations.md](./raspi_cluster_operations.md) to install
+> Helm, run the Gateway API CRD doctor, deploy Traefik ingress, and validate the cluster before
+> shipping workloads.
 
 [traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
 
