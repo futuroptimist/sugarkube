@@ -74,7 +74,9 @@ If you prefer to use the high-level Just recipes instead of running these comman
 
 ## 2. Install and verify Traefik ingress manually
 
-The manual commands here are the low-level equivalent of the `just helm-install` / `just traefik-install` sequence described in the golden path; `just traefik-crd-doctor` remains the primary way to validate CRDs in both flows.
+The manual commands here are the low-level equivalent of the `just helm-install` / `just traefik-install` sequence described in the golden path.
+
+Note that `just traefik-crd-doctor` remains the primary way to validate CRDs in both flows.
 
 Most users should stick with the `just traefik-install` command in
 [raspi_cluster_operations.md](raspi_cluster_operations.md). It creates or repairs
