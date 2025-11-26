@@ -85,11 +85,11 @@ ssh sugarkube0
 cd ~/sugarkube
 
 # Token copied from the Cloudflare dashboard command snippet
-export CF_TUNNEL_TOKEN="YOUR_TUNNEL_TOKEN_HERE"
+export CF_TUNNEL_TOKEN="<tunnel-token>"
 
 # Optional: keep tunnel names aligned with the dashboard
 export CF_TUNNEL_NAME="dspace-staging-k3s"
-export CF_TUNNEL_ID="YOUR_TUNNEL_ID_HERE"
+export CF_TUNNEL_ID="<dashboard-tunnel-id>"
 
 # Install the connector (creates namespace, Secret, and Helm release)
 just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
