@@ -110,12 +110,22 @@ traefik_crd::classify_all() {
 
 traefik_crd::print_report() {
   local namespace="${1:-kube-system}"
+  local apply_mode="${2:-0}"
+
+  local has_problems=false
+  if [ "${#TRAEFIK_CRD_PROBLEMS[@]}" -gt 0 ]; then
+    has_problems=true
+  fi
 
   echo "=== Gateway API CRD ownership check (expected release namespace: ${namespace}) ==="
   local crd
   for crd in "${TRAEFIK_GATEWAY_CRDS[@]}"; do
     if traefik_crd::array_contains "${crd}" TRAEFIK_CRD_MISSING[@]; then
-      printf '⚠️  %s: missing or not present\n' "${crd}"
+      if [ "${has_problems}" = false ]; then
+        printf '✅ %s: missing (will be created by the Traefik chart if enabled)\n' "${crd}"
+      else
+        printf '⚠️  %s: missing or not present\n' "${crd}"
+      fi
       continue
     fi
 
@@ -131,7 +141,7 @@ traefik_crd::print_report() {
     fi
 
     if traefik_crd::array_contains "${crd}" TRAEFIK_CRD_UNMANAGED[@]; then
-      printf '⚠️  %s: present without Helm ownership metadata (will adopt into Traefik release)\n' "${crd}"
+      printf '✅ %s: present without Helm ownership metadata (will adopt into Traefik release)\n' "${crd}"
       continue
     fi
 
@@ -144,6 +154,38 @@ traefik_crd::print_report() {
     printf '⚠️  %s: managed-by=%s, release-name=%s, release-namespace=%s (expected Traefik Helm in %s)\n' \
       "${crd}" "${managed}" "${rel_name}" "${rel_namespace}" "${namespace}"
   done
+
+  echo
+
+  local has_present=false
+  if [ "${#TRAEFIK_CRD_PRESENT[@]}" -gt 0 ]; then
+    has_present=true
+  fi
+
+  local has_unmanaged=false
+  if [ "${#TRAEFIK_CRD_UNMANAGED[@]}" -gt 0 ]; then
+    has_unmanaged=true
+  fi
+
+  if [ "${has_problems}" = true ]; then
+    echo "Detected problematic Gateway API CRDs that block clean Traefik ownership. See the recommended actions below."
+  elif [ "${has_present}" = false ]; then
+    echo "No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can create them when installed."
+  elif [ "${has_unmanaged}" = true ]; then
+    echo "No problematic Gateway API CRDs detected. Existing CRDs are present without Helm ownership metadata; Traefik can adopt them into its release."
+  else
+    echo "No problematic Gateway API CRDs detected. Existing CRDs are already owned by Traefik Helm releases."
+  fi
+
+  if [ "${apply_mode}" = "1" ]; then
+    return 0
+  fi
+
+  if [ "${has_problems}" = false ] && [ "${has_present}" = false ]; then
+    echo "Next step: run 'just traefik-install' to install Traefik and let it create the CRDs."
+  elif [ "${has_problems}" = false ]; then
+    echo "Next step: you can safely run 'just traefik-install' (or rerun it) if you want to upgrade Traefik."
+  fi
 }
 
 traefik_crd::print_problem_details() {
@@ -178,14 +220,14 @@ traefik_crd::print_suggestions() {
 
   cat <<SUGGEST_EOF
 Recommended actions:
-  1) Delete and let Traefik recreate (fresh clusters):
+  1) Delete and let Traefik recreate (safest for fresh clusters):
      kubectl delete crd ${joined}
 
-  2) Patch to mark Helm ownership (advanced):
+  2) Patch to mark Helm ownership (advanced; for preserving existing Gateway API workloads):
      kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
      kubectl annotate crd <name> \
        meta.helm.sh/release-name=traefik \
-       meta.helm.sh/release-namespace=kube-system --overwrite
+      meta.helm.sh/release-namespace=kube-system --overwrite
 SUGGEST_EOF
 }
 
