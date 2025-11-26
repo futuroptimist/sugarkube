@@ -184,7 +184,7 @@ traefik_crd::print_report() {
   if [ "${has_problems}" = false ] && [ "${has_present}" = false ]; then
     echo "Next step: run 'just traefik-install' to install Traefik and let it create the CRDs."
   elif [ "${has_problems}" = false ]; then
-    echo "Next step: you can safely run 'just traefik-install' (or rerun it) if you want to upgrade Traefik."
+    echo "Next step: you can safely run 'just traefik-install' (or re-run it) if you want to upgrade Traefik."
   fi
 }
 
@@ -227,7 +227,7 @@ Recommended actions:
      kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
      kubectl annotate crd <name> \
        meta.helm.sh/release-name=traefik \
-      meta.helm.sh/release-namespace=kube-system --overwrite
+       meta.helm.sh/release-namespace=kube-system --overwrite
 SUGGEST_EOF
 }
 
