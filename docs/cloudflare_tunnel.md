@@ -62,7 +62,7 @@ the canonical way to install the connector on the Pi.
    ```
 2. Install or update the chart and Secret on the cluster (the namespace is created if needed):
    ```bash
-   just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+   just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
    ```
 3. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
@@ -71,6 +71,36 @@ the canonical way to install the connector on the Pi.
    ```
    `curl http://localhost:2000/ready` returning `200` means the connector is up and Cloudflare can
    reach this cluster.
+
+### Worked example: dspace staging on sugarkube0
+
+Below is the full sequence for deploying the dspace staging connector on the primary control-plane
+node:
+
+```bash
+# SSH into the control-plane node
+ssh sugarkube0
+
+# Navigate to the Sugarkube checkout
+cd ~/sugarkube
+
+# Token copied from the Cloudflare dashboard command snippet
+export CF_TUNNEL_TOKEN="YOUR_TUNNEL_TOKEN_HERE"
+
+# Optional: keep tunnel names aligned with the dashboard
+export CF_TUNNEL_NAME="dspace-staging-k3s"
+export CF_TUNNEL_ID="YOUR_TUNNEL_ID_HERE"
+
+# Install the connector (creates namespace, Secret, and Helm release)
+just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
+
+# Verify the connector is healthy
+kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
+kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhost:2000/ready
+```
+
+> **Tip**: Replace the placeholder values above with the real token and ID from your Cloudflare
+> dashboard.
 
 Once `cloudflared` is running with the correct token, Cloudflare links the named tunnel to the
 cluster so requests to `staging.democratized.space` reach Traefik.
