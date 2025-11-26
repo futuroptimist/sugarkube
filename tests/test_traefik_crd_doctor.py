@@ -217,7 +217,7 @@ def test_doctor_reports_healthy_traefik_owned_crds(tmp_path: pathlib.Path) -> No
             name: {
                 "labels": {"app.kubernetes.io/managed-by": "Helm"},
                 "annotations": {
-                    "meta.helm.sh/release-name": "traefik-crd",
+                    "meta.helm.sh/release-name": "traefik",
                     "meta.helm.sh/release-namespace": "kube-system",
                 },
             }
@@ -228,7 +228,7 @@ def test_doctor_reports_healthy_traefik_owned_crds(tmp_path: pathlib.Path) -> No
     result, _, log_path = _run_doctor(tmp_path, healthy_state)
 
     assert result.returncode == 0
-    assert "owned by release traefik-crd" in result.stdout
+    assert "owned by release traefik" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
 

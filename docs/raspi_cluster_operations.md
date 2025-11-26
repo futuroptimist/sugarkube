@@ -75,10 +75,12 @@ What this does:
 
 - Repairs `$HOME/.kube/config` from `/etc/rancher/k3s/k3s.yaml` when needed so Helm and kubectl use a
   user-owned kubeconfig.
-- Installs Helm-controlled Gateway API CRDs via the `traefik-crd` chart when possible, or skips the
-  CRD chart when the CRDs already belong to an existing Traefik release.
+- Classifies existing Gateway API CRDs via the shared helper library. Conflicting CRD
+  ownership triggers a hard failure with guidance to run `just traefik-crd-doctor`.
+  Missing CRDs are fine and will be created by the main Traefik chart.
 - Installs or upgrades the Traefik Helm release in `kube-system` with
-  `helm upgrade --install ... --wait --timeout=5m`.
+  `helm upgrade --install traefik traefik/traefik --wait --timeout=5m`, explicitly
+  enabling Traefik's Gateway API integration so CRDs are managed by the main chart.
 - Verifies the `traefik` Service exists and prints quick troubleshooting hints if it does not.
 
 Verify the install with any of the following:
@@ -95,10 +97,12 @@ taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
 
 **Gateway API CRDs and Helm ownership**
 
-Traefik's CRDs must be managed by Helm. The recipe checks that the Gateway API CRDs are owned by a
-Traefik release (`traefik` or `traefik-crd`) in `kube-system` and fails fast with remediation
-commands if other owners are found. If `just traefik-install` reports ownership problems, run the
-doctor before retrying the install.
+Traefik's CRDs must be managed by Helm. The recipe checks Gateway API CRDs for Helm ownership
+by a Traefik release in `kube-system` (the main release is `traefik`; legacy `traefik-crd`
+ownership from k3s is tolerated). Missing CRDs are acceptable because the main
+`traefik/traefik` chart will create them. Conflicting ownership causes
+`just traefik-install` to fail quickly with instructions to run `just traefik-crd-doctor`
+for remediation steps.
 
 ### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
 
@@ -124,7 +128,7 @@ Example outputs:
 
   ```text
   === Gateway API CRD ownership check (expected release namespace: kube-system) ===
-  ✅ gatewayclasses.gateway.networking.k8s.io: owned by release traefik-crd in namespace kube-system (OK)
+  ✅ gatewayclasses.gateway.networking.k8s.io: owned by release traefik in namespace kube-system (OK)
   ```
 
 - Missing CRDs (safe for Traefik to create):
@@ -144,7 +148,7 @@ Example outputs:
     2) Patch to mark Helm ownership (advanced):
        kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
        kubectl annotate crd <name> \
-         meta.helm.sh/release-name=traefik-crd \
+         meta.helm.sh/release-name=traefik \
          meta.helm.sh/release-namespace=kube-system --overwrite
   ```
 
@@ -168,7 +172,7 @@ Suggested remediation commands:
   for crd in gatewayclasses.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io; do
     kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
     kubectl annotate crd "${crd}" \
-      meta.helm.sh/release-name=traefik-crd \
+      meta.helm.sh/release-name=traefik \
       meta.helm.sh/release-namespace=kube-system --overwrite
   done
   ```
