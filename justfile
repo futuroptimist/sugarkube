@@ -449,6 +449,8 @@ traefik-crd-doctor apply='0' namespace='kube-system':
         traefik_crd::print_suggestions
     fi
 
+    traefik_crd::print_next_steps "${apply_flag}"
+
     if [ "${apply_flag}" != "1" ]; then
         if [ "${#TRAEFIK_CRD_PROBLEMS[@]}" -gt 0 ]; then
             exit 1
@@ -465,6 +467,8 @@ traefik-crd-doctor apply='0' namespace='kube-system':
     echo
     echo "Planned destructive commands:"
     echo "  kubectl delete crd ${TRAEFIK_CRD_PROBLEMS[*]}"
+    echo
+    echo "You can re-run 'just traefik-crd-doctor' after apply and then 'just traefik-install'."
     echo
     read -r -p "Proceed with these changes? [y/N]: " reply
     case "${reply}" in
