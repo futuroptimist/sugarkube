@@ -121,6 +121,11 @@ helm upgrade --install traefik traefik/traefik \
   --wait
 ```
 
+These values enable Traefik's Kubernetes Gateway controller and associated CRDs so
+that the main `traefik` release owns them. Existing clusters using a legacy
+`traefik-crd` release (from k3s) are still accepted by the CRD doctor; new installs
+will use the main `traefik` release as the CRD owner.
+
 Re-run the service check and note the ClusterIP or LoadBalancer address:
 
 ```bash
