@@ -98,6 +98,8 @@ operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manual
 
 ## Install and verify Traefik ingress
 
+> This section expands step 4 of the golden path above (installing and validating Traefik).
+
 Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
 ingress controller. Other controllers can work, but this guide only documents the Traefik path.
