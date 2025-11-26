@@ -173,6 +173,7 @@ traefik_crd::print_report() {
     echo "No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can create them when installed."
   elif [ "${has_unmanaged}" = true ]; then
     echo "No problematic Gateway API CRDs detected. Existing CRDs are present without Helm ownership metadata; Traefik can adopt them into its release."
+    echo "Traefik will add Helm labels/annotations and take ownership of these CRDs during install."
   else
     echo "No problematic Gateway API CRDs detected. Existing CRDs are already owned by Traefik Helm releases."
   fi

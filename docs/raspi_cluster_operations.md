@@ -130,7 +130,10 @@ Example outputs:
 - Missing CRDs (safe for Traefik to create):
 
   ```text
-  ⚠️  httproutes.gateway.networking.k8s.io: missing or not present
+  ✅ httproutes.gateway.networking.k8s.io: missing (will be created by the Traefik chart if enabled)
+
+  No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can create them when installed.
+  Next step: run 'just traefik-install' to install Traefik and let it create the CRDs.
   ```
 
 - Problematic CRDs installed by something else:
