@@ -97,65 +97,93 @@ taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
 
 Traefik's CRDs must be managed by Helm. The recipe checks that the Gateway API CRDs are owned by a
 Traefik release (`traefik` or `traefik-crd`) in `kube-system` and fails fast with remediation
-commands if other owners are found. Patch or delete conflicting CRDs, then rerun the recipe so the
-Traefik charts can adopt them cleanly.
+commands if other owners are found. If `just traefik-install` reports ownership problems, run the
+doctor before retrying the install.
 
-If you see an error like:
+### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
 
-```text
-ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release ...
+This helper inspects the Gateway API CRDs and their Helm metadata, reports whether Traefik can
+safely manage them, and prints the exact `kubectl` commands to fix conflicts. It defaults to a
+read-only dry-run; destructive changes require the explicit `apply=1` flag and user confirmation.
+
+Run it any time you see Traefik CRD ownership errors:
+
+```bash
+just traefik-crd-doctor
 ```
 
-Follow these steps to diagnose and resolve the issue:
+For non-default namespaces, pass the `namespace` argument:
 
-1. **List Gateway API CRDs:**
+```bash
+just traefik-crd-doctor namespace=my-other-namespace
+```
 
-   ```bash
-   kubectl get crd | grep gateway.networking.k8s.io
-   ```
+Example outputs:
 
-2. **Inspect their Helm metadata:**
+- Clean Traefik ownership:
 
-   ```bash
-   kubectl get crd gatewayclasses.gateway.networking.k8s.io \
-     -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by} / {.metadata.annotations.meta\.helm\.sh/release-name} / {.metadata.annotations.meta\.helm\.sh/release-namespace}'
-   ```
+  ```text
+  === Gateway API CRD ownership check (expected release namespace: kube-system) ===
+  ✅ gatewayclasses.gateway.networking.k8s.io: owned by release traefik-crd in namespace kube-system (OK)
+  ```
 
-   Valid output for Traefik-owned CRDs looks like: `Helm / traefik-crd / kube-system` or
-   `Helm / traefik / kube-system`. If any value is empty or belongs to another release, the recipe
-   will fail.
+- Missing CRDs (safe for Traefik to create):
 
-3. **Option A: Delete and recreate (fresh homelab clusters):**
+  ```text
+  ⚠️  httproutes.gateway.networking.k8s.io: missing or not present
+  ```
 
-   If this is a new cluster and you don't need the existing Gateway API resources:
+- Problematic CRDs installed by something else:
 
-   ```bash
-   kubectl delete crd \
-     backendtlspolicies.gateway.networking.k8s.io \
-     gatewayclasses.gateway.networking.k8s.io \
-     gateways.gateway.networking.k8s.io \
-     grpcroutes.gateway.networking.k8s.io \
-     httproutes.gateway.networking.k8s.io \
-     referencegrants.gateway.networking.k8s.io
-   ```
+  ```text
+  ⚠️  gateways.gateway.networking.k8s.io: managed-by=, release-name=other-release, release-namespace=default (expected Traefik Helm in kube-system)
+  Recommended actions:
+    1) Delete and let Traefik recreate (fresh clusters):
+       kubectl delete crd gateways.gateway.networking.k8s.io
 
-   Then rerun `just traefik-install` and the Traefik CRD chart will create them with correct
-   Helm metadata.
+    2) Patch to mark Helm ownership (advanced):
+       kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
+       kubectl annotate crd <name> \
+         meta.helm.sh/release-name=traefik-crd \
+         meta.helm.sh/release-namespace=kube-system --overwrite
+  ```
 
-4. **Option B: Patch for Helm adoption (advanced):**
+Suggested remediation commands:
 
-   If you need to preserve the CRDs (e.g., other Gateway API resources exist), patch each one:
+- **Delete and recreate (recommended for fresh homelab clusters):**
 
-   ```bash
-   for crd in gatewayclasses.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io; do
-     kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
-     kubectl annotate crd "${crd}" \
-       meta.helm.sh/release-name=traefik-crd \
-       meta.helm.sh/release-namespace=kube-system --overwrite
-   done
-   ```
+  ```bash
+  kubectl delete crd \
+    backendtlspolicies.gateway.networking.k8s.io \
+    gatewayclasses.gateway.networking.k8s.io \
+    gateways.gateway.networking.k8s.io \
+    grpcroutes.gateway.networking.k8s.io \
+    httproutes.gateway.networking.k8s.io \
+    referencegrants.gateway.networking.k8s.io
+  ```
 
-   Replace the CRD names with the full list from step 1. After patching, rerun `just traefik-install`.
+- **Patch for Helm adoption (advanced):**
+
+  ```bash
+  for crd in gatewayclasses.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io; do
+    kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
+    kubectl annotate crd "${crd}" \
+      meta.helm.sh/release-name=traefik-crd \
+      meta.helm.sh/release-namespace=kube-system --overwrite
+  done
+  ```
+
+  Replace the CRD names with the full list if you prefer patching over deletion.
+
+After deleting or patching the CRDs, re-run `just traefik-crd-doctor` until no problematic CRDs
+remain, then re-run `just traefik-install` to complete the installation.
+
+> ⚠️ **Dangerous foot-gun: `apply` mode**
+>
+> `just traefik-crd-doctor apply=1` will run destructive `kubectl delete` commands against
+> cluster-wide Gateway API CRDs. Only use this on a fresh homelab cluster where you are sure nothing
+> else depends on Gateway API. By default the doctor is read-only and is the recommended way to
+> diagnose issues.
 
 ## Using control-plane nodes as workers (homelab mode)
 
