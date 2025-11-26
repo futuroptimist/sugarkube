@@ -257,6 +257,23 @@ def test_doctor_reports_problematic_crds(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.skipif(JUST_BIN is None, reason="just is not installed in the test environment")
+def test_doctor_allows_unmanaged_crds(tmp_path: pathlib.Path) -> None:
+    unmanaged_state = {
+        "crds": {
+            name: {"labels": {}, "annotations": {}} for name in GATEWAY_CRDS
+        }
+    }
+
+    result, state_path, log_path = _run_doctor(tmp_path, unmanaged_state)
+
+    assert result.returncode == 0
+    assert "present without Helm ownership metadata" in result.stdout
+    assert "Recommended actions" not in result.stdout
+    assert json.loads(state_path.read_text()) == unmanaged_state
+    assert not log_path.exists() or log_path.read_text() == ""
+
+
+@pytest.mark.skipif(JUST_BIN is None, reason="just is not installed in the test environment")
 def test_doctor_apply_mode_runs_delete_on_confirmation(tmp_path: pathlib.Path) -> None:
     problematic_state = {
         "crds": {

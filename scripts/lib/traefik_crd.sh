@@ -21,6 +21,7 @@ TRAEFIK_EXPECTED_RELEASES=(traefik traefik-crd)
 TRAEFIK_CRD_PRESENT=()
 TRAEFIK_CRD_MISSING=()
 TRAEFIK_CRD_OK=()
+TRAEFIK_CRD_UNMANAGED=()
 TRAEFIK_CRD_PROBLEMS=()
 TRAEFIK_CRD_PROBLEM_DETAILS=()
 TRAEFIK_CRD_RELEASE_NAMES=()
@@ -29,6 +30,7 @@ traefik_crd::reset_state() {
   TRAEFIK_CRD_PRESENT=()
   TRAEFIK_CRD_MISSING=()
   TRAEFIK_CRD_OK=()
+  TRAEFIK_CRD_UNMANAGED=()
   TRAEFIK_CRD_PROBLEMS=()
   TRAEFIK_CRD_PROBLEM_DETAILS=()
   TRAEFIK_CRD_RELEASE_NAMES=()
@@ -87,6 +89,11 @@ traefik_crd::classify_all() {
       TRAEFIK_CRD_RELEASE_NAMES+=("${rel_name}")
     fi
 
+    if [ -z "${managed_by}" ] && [ -z "${rel_name}" ] && [ -z "${rel_namespace}" ]; then
+      TRAEFIK_CRD_UNMANAGED+=("${crd}")
+      continue
+    fi
+
     if [ "${managed_by}" = "Helm" ] && \
       traefik_crd::is_expected_release "${rel_name}" && \
       [ "${rel_namespace}" = "${namespace}" ]; then
@@ -120,6 +127,11 @@ traefik_crd::print_report() {
       rel_namespace=$(cut -d '|' -f 3 <<<"${detail}")
       printf '✅ %s: owned by release %s in namespace %s (OK)\n' \
         "${crd}" "${rel_name}" "${rel_namespace}"
+      continue
+    fi
+
+    if traefik_crd::array_contains "${crd}" TRAEFIK_CRD_UNMANAGED[@]; then
+      printf '⚠️  %s: present without Helm ownership metadata (will adopt into Traefik release)\n' "${crd}"
       continue
     fi
 
@@ -192,6 +204,29 @@ traefik_crd::apply_delete() {
 
   echo "Running: kubectl delete crd ${TRAEFIK_CRD_PROBLEMS[@]}"
   kubectl delete crd "${TRAEFIK_CRD_PROBLEMS[@]}"
+}
+
+traefik_crd::adopt_unmanaged() {
+  if [ "${#TRAEFIK_CRD_UNMANAGED[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  local namespace="${1:-kube-system}"
+  local release_name="${2:-traefik}"
+
+  echo "Adopting unmanaged Gateway API CRDs into Helm release '${release_name}' in namespace '${namespace}'..."
+  local crd
+  for crd in "${TRAEFIK_CRD_UNMANAGED[@]}"; do
+    if ! kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite; then
+      echo "WARNING: Failed to label ${crd}; ownership metadata may remain unset." >&2
+      continue
+    fi
+    if ! kubectl annotate crd "${crd}" \
+      "meta.helm.sh/release-name=${release_name}" \
+      "meta.helm.sh/release-namespace=${namespace}" --overwrite; then
+      echo "WARNING: Failed to annotate ${crd}; ownership metadata may remain unset." >&2
+    fi
+  done
 }
 
 traefik_crd::array_contains() {

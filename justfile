@@ -636,6 +636,11 @@ traefik-install namespace='kube-system' version='':
 
     echo "Traefik Service 'traefik' is present in namespace '{{ namespace }}'."
 
+    traefik_crd::classify_all "{{ namespace }}"
+    if [ "${#TRAEFIK_CRD_UNMANAGED[@]}" -gt 0 ]; then
+        traefik_crd::adopt_unmanaged "{{ namespace }}" traefik
+    fi
+
 traefik-status namespace='kube-system':
     #!/usr/bin/env bash
     set -Eeuo pipefail
