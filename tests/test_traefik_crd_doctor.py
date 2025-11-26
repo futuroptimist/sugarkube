@@ -234,6 +234,30 @@ def test_doctor_reports_healthy_traefik_owned_crds(tmp_path: pathlib.Path) -> No
 
 
 @pytest.mark.skipif(JUST_BIN is None, reason="just is not installed in the test environment")
+def test_doctor_reports_healthy_legacy_traefik_crd_owned_crds(tmp_path: pathlib.Path) -> None:
+    """Verify backward compatibility with legacy traefik-crd release ownership from k3s."""
+    legacy_state = {
+        "crds": {
+            name: {
+                "labels": {"app.kubernetes.io/managed-by": "Helm"},
+                "annotations": {
+                    "meta.helm.sh/release-name": "traefik-crd",
+                    "meta.helm.sh/release-namespace": "kube-system",
+                },
+            }
+            for name in GATEWAY_CRDS
+        }
+    }
+
+    result, _, log_path = _run_doctor(tmp_path, legacy_state)
+
+    assert result.returncode == 0
+    assert "owned by release traefik-crd" in result.stdout
+    assert "Recommended actions" not in result.stdout
+    assert not log_path.exists() or log_path.read_text() == ""
+
+
+@pytest.mark.skipif(JUST_BIN is None, reason="just is not installed in the test environment")
 def test_doctor_reports_problematic_crds(tmp_path: pathlib.Path) -> None:
     problematic_state = {
         "crds": {
