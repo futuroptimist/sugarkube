@@ -80,8 +80,8 @@ Most users should stick with the `just traefik-install` command in
 commands, and installs or upgrades the Traefik Helm release automatically. Use the manual path here
 when debugging or applying custom Traefik settings. The automated recipe also performs a Gateway
 API CRD ownership preflight and will stop with a descriptive error if existing CRDs are missing the
-Helm metadata that `traefik-crd` expects; the commands below are the underlying delete/patch options
-you can run when that happens.
+Helm metadata that the Traefik chart expects; the commands below are the underlying delete/patch
+options you can run when that happens.
 
 To mirror the automated kubeconfig behavior manually before running kubectl:
 
