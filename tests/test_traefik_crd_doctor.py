@@ -170,7 +170,10 @@ def test_traefik_crd_doctor_script_is_syntactically_valid() -> None:
 
 
 def _run_doctor(
-    tmp_path: pathlib.Path, state: Dict[str, object], args: list[str] | None = None, input_text: str = ""
+    tmp_path: pathlib.Path,
+    state: Dict[str, object],
+    args: list[str] | None = None,
+    input_text: str = "",
 ) -> Tuple[subprocess.CompletedProcess[str], pathlib.Path, pathlib.Path]:
     state_path, log_path, kubectl_path = kubectl_stub(tmp_path)
     state_path.write_text(json.dumps(state))
@@ -204,7 +207,9 @@ def test_doctor_reports_missing_crds(tmp_path: pathlib.Path) -> None:
     result, state_path, log_path = _run_doctor(tmp_path, {"crds": {}})
 
     assert result.returncode == 0
-    assert "missing or not present" in result.stdout
+    assert "missing (will be created by the Traefik chart if enabled)" in result.stdout
+    assert "All expected CRDs are missing" in result.stdout
+    assert "Next step: run 'just traefik-install' to install Traefik" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
     assert json.loads(state_path.read_text()) == {"crds": {}}
@@ -229,6 +234,8 @@ def test_doctor_reports_healthy_traefik_owned_crds(tmp_path: pathlib.Path) -> No
 
     assert result.returncode == 0
     assert "owned by release traefik" in result.stdout
+    assert "Existing CRDs are owned by Traefik Helm releases" in result.stdout
+    assert "Next step: you can safely run 'just traefik-install'" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
 
@@ -253,6 +260,7 @@ def test_doctor_reports_healthy_legacy_traefik_crd_owned_crds(tmp_path: pathlib.
 
     assert result.returncode == 0
     assert "owned by release traefik-crd" in result.stdout
+    assert "Existing CRDs are owned by Traefik Helm releases" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
 
@@ -274,8 +282,10 @@ def test_doctor_reports_problematic_crds(tmp_path: pathlib.Path) -> None:
     result, _, log_path = _run_doctor(tmp_path, problematic_state)
 
     assert result.returncode != 0
+    assert "Problematic Gateway API CRDs block clean Traefik ownership" in result.stdout
     assert "Recommended actions" in result.stdout
     assert "kubectl delete crd" in result.stdout
+    assert "Next step: resolve the problematic CRDs" in result.stdout
     if log_path.exists():
         assert log_path.read_text() in {"", "\n"}
 
@@ -291,7 +301,9 @@ def test_doctor_allows_unmanaged_crds(tmp_path: pathlib.Path) -> None:
     result, state_path, log_path = _run_doctor(tmp_path, unmanaged_state)
 
     assert result.returncode == 0
-    assert "present without Helm ownership metadata" in result.stdout
+    assert "present without Helm metadata (Traefik will adopt)" in result.stdout
+    assert "Existing CRDs can be adopted by Traefik Helm releases" in result.stdout
+    assert "Next step: run 'just traefik-install' to adopt" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert json.loads(state_path.read_text()) == unmanaged_state
     assert not log_path.exists() or log_path.read_text() == ""
