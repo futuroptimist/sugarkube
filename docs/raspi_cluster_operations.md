@@ -30,6 +30,44 @@ logs, preparing Helm, and rolling out real workloads like
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
 
+## Happy path: HA cluster → Helm → Traefik → workloads
+
+Follow this linear path immediately after finishing `raspi_cluster_setup.md`:
+
+1. Confirm the HA control plane is up:
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+2. Install Helm and verify it is usable (Traefik depends on it):
+
+   ```bash
+   just helm-install
+   just helm-status
+   ```
+
+3. Check Gateway API CRDs and let Traefik own or create them as needed:
+
+   ```bash
+   just traefik-crd-doctor
+   ```
+
+   - "No problematic CRDs" with all CRDs missing is good—Traefik will create them.
+   - "No problematic CRDs" with all CRDs healthy is also good—Traefik already owns them.
+   - If the doctor prints remediation commands, apply them and rerun the check.
+
+4. Install Traefik and confirm the ingress controller is ready:
+
+   ```bash
+   just traefik-install
+   just traefik-status
+   ```
+
+5. Deploy workloads (for example token.place or dspace) once ingress is healthy and
+   `just traefik-status` passes.
+
 ## Install Helm (prerequisite for Traefik and Helm workloads)
 
 Helm simplifies Kubernetes application deployment by packaging manifests, providing templating, and
@@ -196,6 +234,11 @@ remain, then re-run `just traefik-install` to complete the installation.
 > cluster-wide Gateway API CRDs. Only use this on a fresh homelab cluster where you are sure nothing
 > else depends on Gateway API. By default the doctor is read-only and is the recommended way to
 > diagnose issues.
+
+> **Next step:** With Traefik healthy, deploy workloads such as
+> [token.place](https://github.com/futuroptimist/token.place) or
+> [democratized.space (dspace)](https://github.com/democratizedspace/dspace). The ingress controller
+> must be ready before their Helm charts expose HTTP routes.
 
 ## Using control-plane nodes as workers (homelab mode)
 
