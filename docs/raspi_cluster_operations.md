@@ -136,6 +136,15 @@ Example outputs:
   Next step: run 'just traefik-install' to install Traefik and let it create the CRDs.
   ```
 
+- Unmanaged CRDs (no Helm ownership metadata; Traefik will adopt them):
+
+  ```text
+  ✅ gateways.gateway.networking.k8s.io: present without Helm ownership metadata (will adopt into Traefik release)
+
+  No problematic Gateway API CRDs detected. Existing CRDs are present without Helm ownership metadata; Traefik can adopt them into its release.
+  Traefik will add Helm labels/annotations and take ownership of these CRDs during install.
+  ```
+
 - Problematic CRDs installed by something else:
 
   ```text

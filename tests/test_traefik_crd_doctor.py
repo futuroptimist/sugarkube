@@ -299,6 +299,7 @@ def test_doctor_allows_unmanaged_crds(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0
     assert "present without Helm ownership metadata" in result.stdout
     assert "No problematic Gateway API CRDs detected" in result.stdout
+    assert "Traefik will add Helm labels/annotations and take ownership" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert json.loads(state_path.read_text()) == unmanaged_state
     assert not log_path.exists() or log_path.read_text() == ""
