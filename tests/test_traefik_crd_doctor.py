@@ -204,8 +204,9 @@ def test_doctor_reports_missing_crds(tmp_path: pathlib.Path) -> None:
     result, state_path, log_path = _run_doctor(tmp_path, {"crds": {}})
 
     assert result.returncode == 0
-    assert "missing or not present" in result.stdout
-    assert "Recommended actions" not in result.stdout
+    assert "missing (will be created" in result.stdout
+    assert "All expected CRDs are missing; Traefik will create them during install." in result.stdout
+    assert "Next step: run 'just traefik-install'" in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
     assert json.loads(state_path.read_text()) == {"crds": {}}
 
@@ -229,7 +230,8 @@ def test_doctor_reports_healthy_traefik_owned_crds(tmp_path: pathlib.Path) -> No
 
     assert result.returncode == 0
     assert "owned by release traefik" in result.stdout
-    assert "Recommended actions" not in result.stdout
+    assert "Existing CRDs are already owned by Traefik Helm releases." in result.stdout
+    assert "Next step: you can safely run 'just traefik-install'" in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
 
 
@@ -253,7 +255,7 @@ def test_doctor_reports_healthy_legacy_traefik_crd_owned_crds(tmp_path: pathlib.
 
     assert result.returncode == 0
     assert "owned by release traefik-crd" in result.stdout
-    assert "Recommended actions" not in result.stdout
+    assert "Existing CRDs are already owned by Traefik Helm releases." in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
 
 
@@ -274,6 +276,7 @@ def test_doctor_reports_problematic_crds(tmp_path: pathlib.Path) -> None:
     result, _, log_path = _run_doctor(tmp_path, problematic_state)
 
     assert result.returncode != 0
+    assert "Detected problematic Gateway API CRDs blocking clean Traefik ownership." in result.stdout
     assert "Recommended actions" in result.stdout
     assert "kubectl delete crd" in result.stdout
     if log_path.exists():
@@ -292,7 +295,7 @@ def test_doctor_allows_unmanaged_crds(tmp_path: pathlib.Path) -> None:
 
     assert result.returncode == 0
     assert "present without Helm ownership metadata" in result.stdout
-    assert "Recommended actions" not in result.stdout
+    assert "Existing CRDs will be adopted by the Traefik Helm release" in result.stdout
     assert json.loads(state_path.read_text()) == unmanaged_state
     assert not log_path.exists() or log_path.read_text() == ""
 
