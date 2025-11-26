@@ -575,40 +575,19 @@ traefik-install namespace='kube-system' version='':
     traefik_crd::print_report "{{ namespace }}"
 
     if [ "${#TRAEFIK_CRD_PROBLEMS[@]}" -gt 0 ]; then
-        echo "ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release (traefik or traefik-crd):" >&2
+        echo "ERROR: Found existing Gateway API CRDs that are NOT owned by a Traefik Helm release in namespace '{{ namespace }}':" >&2
         echo "  ${TRAEFIK_CRD_PROBLEMS[*]}" >&2
         echo >&2
         traefik_crd::print_problem_details >&2
         echo >&2
-        echo "Run 'just traefik-crd-doctor' for a detailed report and suggested remediation commands." >&2
+        echo "Run 'just traefik-crd-doctor' for a detailed report and suggested kubectl commands." >&2
         exit 1
     fi
 
     if [ "${#TRAEFIK_CRD_PRESENT[@]}" -eq 0 ]; then
-        echo "No existing Gateway API CRDs detected; Traefik will create them."
+        echo "No existing Gateway API CRDs detected; Traefik will create them via the main chart."
     else
         echo "Existing Gateway API CRDs appear to be managed by a Traefik Helm release; proceeding with Helm install."
-    fi
-
-    crd_release_present=0
-    if helm status traefik-crd --namespace "{{ namespace }}" >/dev/null 2>&1; then
-        crd_release_present=1
-    fi
-
-    if [ "${#TRAEFIK_CRD_PRESENT[@]}" -eq 0 ] || [ "${crd_release_present}" -eq 1 ]; then
-        echo "Installing or upgrading Traefik Gateway API CRDs via Helm in namespace '{{ namespace }}'..."
-        if ! helm upgrade --install traefik-crd traefik/traefik-crd \
-            --namespace "{{ namespace }}" \
-            --create-namespace \
-            --wait \
-            --timeout 5m; then
-            echo "ERROR: Helm failed to install or upgrade the 'traefik-crd' release in namespace '{{ namespace }}'." >&2
-            helm status traefik-crd --namespace "{{ namespace }}" || true
-            exit 1
-        fi
-    else
-        deduped_release_names=$(traefik_crd::dedupe_release_names)
-        echo "Gateway API CRDs already exist and are managed by Helm (release names:${deduped_release_names:+ ${deduped_release_names}}); skipping traefik-crd chart install."
     fi
 
     helm_args=(
@@ -618,6 +597,8 @@ traefik-install namespace='kube-system' version='':
         --wait
         --timeout 5m
         --set service.type=ClusterIP
+        --set experimental.kubernetesGateway.enabled=true
+        --set providers.kubernetesGateway.enabled=true
     )
 
     if [ -n "{{ version }}" ]; then
