@@ -79,9 +79,9 @@ Most users should stick with the `just traefik-install` command in
 `~/.kube/config` from `/etc/rancher/k3s/k3s.yaml`, exports `KUBECONFIG=$HOME/.kube/config` for its
 commands, and installs or upgrades the Traefik Helm release automatically. Use the manual path here
 when debugging or applying custom Traefik settings. The automated recipe also performs a Gateway
-API CRD ownership preflight and will stop with a descriptive error if existing CRDs are missing the
-Helm metadata that Traefik expects; the commands below are the underlying delete/patch options
-you can run when that happens.
+API CRD ownership preflight via `just traefik-crd-doctor` and stops with a descriptive error if
+existing CRDs are owned by anything other than the Traefik release in `kube-system`. The commands
+below mirror the safe delete/patch options when you need to remediate CRDs before a manual install.
 
 To mirror the automated kubeconfig behavior manually before running kubectl:
 
@@ -93,6 +93,16 @@ kubectl get nodes
 This keeps all commands pointed at the user-owned kubeconfig instead of `/etc/rancher/k3s/k3s.yaml`.
 
 Ensure Helm is installed (see "Install Helm manually" above) before proceeding.
+
+Run a CRD check before installing to ensure Traefik can own the Gateway API definitions:
+
+```bash
+just traefik-crd-doctor
+```
+
+- "No problematic CRDs" with missing CRDs is healthy—the Traefik chart will create them.
+- "No problematic CRDs" with existing healthy CRDs is also healthy—Traefik already owns them.
+- If problems are reported, apply the suggested delete or patch actions, then re-run the doctor.
 
 Check whether Traefik is already present:
 
@@ -122,9 +132,9 @@ helm upgrade --install traefik traefik/traefik \
 ```
 
 These values enable Traefik's Kubernetes Gateway controller and associated CRDs so
-that the main `traefik` release owns them. Existing clusters using a legacy
-`traefik-crd` release (from k3s) are still accepted by the CRD doctor; new installs
-will use the main `traefik` release as the CRD owner.
+that the main `traefik` release owns them. The CRD doctor treats both missing CRDs
+and already-healthy CRDs as success paths because the Helm chart will create or
+continue managing them during the install.
 
 Re-run the service check and note the ClusterIP or LoadBalancer address:
 

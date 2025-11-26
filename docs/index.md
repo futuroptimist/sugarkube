@@ -36,7 +36,10 @@ Review the safety notes before working with power components.
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
 - [archived/pi_image_improvement_checklist.md](archived/pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration
-- [raspi_cluster_setup.md](raspi_cluster_setup.md) — build a three-node k3s cluster and deploy apps
+- [raspi_cluster_setup.md](raspi_cluster_setup.md) — **start here to build the 3-node HA k3s cluster**
+  on Raspberry Pi hardware
+- [raspi_cluster_operations.md](raspi_cluster_operations.md) — continue here to install Helm,
+  Traefik ingress, and day-two workflows once the cluster is up
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
@@ -62,13 +65,14 @@ Start with the basics and progress toward a fully autonomous solar cube.
 Follow this series to build and operate a production-ready k3s cluster on Raspberry
 Pi hardware:
 
-1. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with
-   detailed explanations of each step, perfect for understanding what the
-   quick-start automates and troubleshooting when things go wrong.
-2. [raspi_cluster_setup.md](raspi_cluster_setup.md) — Quick-start guide for a 3-node HA
+1. [raspi_cluster_setup.md](raspi_cluster_setup.md) — Quick-start guide for a 3-node HA
    cluster using automated discovery and one-command deployment per node.
-3. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including
-   Helm deployments, workload management (token.place, dspace), and Flux GitOps integration.
+2. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including
+   Helm deployments, Traefik ingress, workload management (token.place, dspace), and Flux GitOps
+   integration.
+3. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with
+   detailed explanations of each step, perfect for understanding what the quick-start automates
+   and troubleshooting when things go wrong.
 4. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual
    counterpart to Part 3 with raw commands for ingress, Cloudflare Tunnel, Helm apps, and Flux.
 
