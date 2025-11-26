@@ -110,12 +110,13 @@ traefik_crd::classify_all() {
 
 traefik_crd::print_report() {
   local namespace="${1:-kube-system}"
+  local apply_mode="${2:-0}"
 
   echo "=== Gateway API CRD ownership check (expected release namespace: ${namespace}) ==="
   local crd
   for crd in "${TRAEFIK_GATEWAY_CRDS[@]}"; do
     if traefik_crd::array_contains "${crd}" TRAEFIK_CRD_MISSING[@]; then
-      printf '⚠️  %s: missing or not present\n' "${crd}"
+      printf '✅ %s: missing (will be created by the Traefik chart if enabled)\n' "${crd}"
       continue
     fi
 
@@ -131,7 +132,7 @@ traefik_crd::print_report() {
     fi
 
     if traefik_crd::array_contains "${crd}" TRAEFIK_CRD_UNMANAGED[@]; then
-      printf '⚠️  %s: present without Helm ownership metadata (will adopt into Traefik release)\n' "${crd}"
+      printf '✅ %s: present without Helm ownership metadata (Traefik will adopt)\n' "${crd}"
       continue
     fi
 
@@ -141,9 +142,35 @@ traefik_crd::print_report() {
     managed=$(cut -d '|' -f 2 <<<"${problem}")
     rel_name=$(cut -d '|' -f 3 <<<"${problem}")
     rel_namespace=$(cut -d '|' -f 4 <<<"${problem}")
-    printf '⚠️  %s: managed-by=%s, release-name=%s, release-namespace=%s (expected Traefik Helm in %s)\n' \
-      "${crd}" "${managed}" "${rel_name}" "${rel_namespace}" "${namespace}"
+    printf '⚠️  %s: managed-by=%s, release-name=%s, ' "${crd}" "${managed}" "${rel_name}"
+    printf 'release-namespace=%s (expected Traefik Helm ns %s)\n' "${rel_namespace}" "${namespace}"
   done
+
+  echo
+  if [ "${#TRAEFIK_CRD_PROBLEMS[@]}" -eq 0 ]; then
+    if [ "${#TRAEFIK_CRD_PRESENT[@]}" -eq 0 ]; then
+      echo "No problematic Gateway API CRDs."
+      echo "All expected CRDs are missing; Traefik will create them during install."
+      if [ "${apply_mode}" != "1" ]; then
+        echo "Next step: run 'just traefik-install' to install Traefik and let it create the CRDs."
+      fi
+    elif [ "${#TRAEFIK_CRD_PRESENT[@]}" -eq "${#TRAEFIK_CRD_OK[@]}" ]; then
+      echo "No problematic Gateway API CRDs."
+      echo "Existing CRDs are already owned by Traefik Helm releases."
+      if [ "${apply_mode}" != "1" ]; then
+        echo "Next step: you can safely run 'just traefik-install' to install or upgrade Traefik."
+      fi
+    else
+      echo "No problematic Gateway API CRDs."
+      echo "Existing CRDs will be adopted by the Traefik Helm release."
+      if [ "${apply_mode}" != "1" ]; then
+        echo "Next step: run 'just traefik-install' to let Traefik adopt and manage these CRDs."
+      fi
+    fi
+  else
+    echo "Detected problematic Gateway API CRDs blocking clean Traefik ownership."
+    echo "See the recommended actions below."
+  fi
 }
 
 traefik_crd::print_problem_details() {
@@ -178,14 +205,14 @@ traefik_crd::print_suggestions() {
 
   cat <<SUGGEST_EOF
 Recommended actions:
-  1) Delete and let Traefik recreate (fresh clusters):
+  1) Delete and let Traefik recreate (safest for fresh clusters):
      kubectl delete crd ${joined}
 
-  2) Patch to mark Helm ownership (advanced):
+  2) Patch to mark Helm ownership (advanced; keep if you must preserve Gateway API resources):
      kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
      kubectl annotate crd <name> \
        meta.helm.sh/release-name=traefik \
-       meta.helm.sh/release-namespace=kube-system --overwrite
+        meta.helm.sh/release-namespace=kube-system --overwrite
 SUGGEST_EOF
 }
 
@@ -194,6 +221,7 @@ traefik_crd::print_apply_warning() {
 WARNING: traefik-crd-doctor apply mode will make destructive changes to cluster-wide CRDs.
 This can break workloads that depend on Gateway API resources.
 Only use this on a fresh homelab cluster if you are sure nothing else depends on these CRDs.
+You can re-run 'just traefik-crd-doctor' after apply and then 'just traefik-install'.
 WARN_EOF
 }
 
@@ -214,7 +242,7 @@ traefik_crd::adopt_unmanaged() {
   local namespace="${1:-kube-system}"
   local release_name="${2:-traefik}"
 
-  echo "Adopting unmanaged Gateway API CRDs into Helm release '${release_name}' in namespace '${namespace}'..."
+  echo "Adopting unmanaged Gateway CRDs into Helm release '${release_name}' (ns ${namespace})..."
   local crd
   for crd in "${TRAEFIK_CRD_UNMANAGED[@]}"; do
     if ! kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite; then
