@@ -112,6 +112,12 @@ Run it any time you see Traefik CRD ownership errors:
 just traefik-crd-doctor
 ```
 
+For non-default namespaces, pass the `namespace` argument:
+
+```bash
+just traefik-crd-doctor namespace=my-other-namespace
+```
+
 Example outputs:
 
 - Clean Traefik ownership:
@@ -168,6 +174,9 @@ Suggested remediation commands:
   ```
 
   Replace the CRD names with the full list if you prefer patching over deletion.
+
+After deleting or patching the CRDs, re-run `just traefik-crd-doctor` until no problematic CRDs
+remain, then re-run `just traefik-install` to complete the installation.
 
 > ⚠️ **Dangerous foot-gun: `apply` mode**
 >
