@@ -81,7 +81,9 @@ commands, and installs or upgrades the Traefik Helm release automatically. Use t
 when debugging or applying custom Traefik settings. The automated recipe also performs a Gateway
 API CRD ownership preflight and will stop with a descriptive error if existing CRDs are missing the
 Helm metadata that Traefik expects; the commands below are the underlying delete/patch options
-you can run when that happens.
+you can run when that happens. Run `just traefik-crd-doctor` in dry-run mode before or after these
+steps: "all missing" CRDs or "all healthy" CRDs are good outcomes, and only conflicting ownership
+states need remediation.
 
 To mirror the automated kubeconfig behavior manually before running kubectl:
 

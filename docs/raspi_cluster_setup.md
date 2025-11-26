@@ -16,6 +16,47 @@ personas:
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, ingress (Traefik), and other day-two workflows.
 
+## Golden path: SD card → 3-node HA cluster → ingress ready
+
+This is the single happy path for new operators. Each step links to deeper sections below or in the
+operations guide:
+
+1. **Flash and boot the Pis:** Follow [pi_image_quickstart.md](./pi_image_quickstart.md) to flash the
+   SD cards, boot each Pi, and complete the initial network configuration covered later in this
+   guide.
+2. **Bring up the 3-node HA dev cluster:** Run the automated bring-up twice per node (first pass
+   applies system tweaks, second pass joins/bootstraps):
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+3. **Install Helm (prerequisite for Traefik and workloads):**
+
+   ```bash
+   just helm-install
+   just helm-status
+   ```
+
+4. **Check Gateway API CRDs:** The Traefik doctor validates CRD ownership and suggests fixes. Missing
+   CRDs are fine—Traefik can create them; fully healthy CRDs are also fine.
+
+   ```bash
+   just traefik-crd-doctor
+   ```
+
+5. **Install and verify Traefik ingress:**
+
+   ```bash
+   just traefik-install
+   just traefik-status
+   ```
+
+6. **Deploy workloads:** Continue with
+   [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress) to
+   publish services through Traefik and install apps like token.place and dspace.
+
 ## Clone SD to SSD (happy path)
 
 If your Raspberry Pi is booted from the SD card and you have an NVMe/SSD attached, you can
@@ -747,6 +788,9 @@ Install Traefik using the [Traefik ingress][traefik-ingress] steps before rollin
 applications.
 
 [traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
+
+> **Next step:** Move to [raspi_cluster_operations.md](./raspi_cluster_operations.md) to install Helm,
+> validate Traefik ingress, and continue with workloads and day-two routines.
 
 > For a step-by-step deep dive, see
 > [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
