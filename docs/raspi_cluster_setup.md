@@ -137,6 +137,20 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
 
+### Golden path checkpoints
+
+Use the same commands on each node for the default 3-node dev cluster, then hand off to the
+operations guide for Helm and ingress:
+
+```bash
+just ha3 env=dev
+just cluster-status
+```
+
+Once `cluster-status` reports all nodes `Ready`, continue with
+[raspi_cluster_operations.md](./raspi_cluster_operations.md) to install Helm, run the Gateway API
+CRD doctor, and deploy Traefik ingress.
+
 ## Post-bootstrap: install ingress
 
 After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying any apps:
@@ -745,6 +759,10 @@ ingress controller.
 
 Install Traefik using the [Traefik ingress][traefik-ingress] steps before rolling out HTTP
 applications.
+
+> **Next step:** Switch to [raspi_cluster_operations.md](./raspi_cluster_operations.md) to install
+> Helm, validate Gateway API CRDs with `just traefik-crd-doctor`, and deploy Traefik ingress before
+> shipping workloads.
 
 [traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
 

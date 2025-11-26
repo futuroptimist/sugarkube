@@ -21,14 +21,48 @@ logs, preparing Helm, and rolling out real workloads like
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
 
-## In this guide you will:
+## Golden path: SD → 3-node HA → Helm → Traefik → workloads
 
-- Verify the health of your three-node HA control plane
-- Capture and commit sanitized bring-up logs for debugging and documentation
-- Install Helm and deploy the token.place workload
-- Deploy the democratized.space (dspace) application
-- Hook your cluster into Flux for GitOps-managed releases
-- Learn operational recipes for day-to-day cluster management
+1. **Image SD cards, boot the Pis, and confirm networking** — follow
+   [raspi_cluster_setup.md](./raspi_cluster_setup.md#detailed-walkthrough-same-subnet-dhcp-friendly)
+   to flash, boot, and place all nodes on the same LAN with multicast enabled.
+2. **Form the HA dev cluster** — run the HA wrapper on each node until `cluster-status` is
+   healthy:
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+3. **Install Helm** — set up the Helm CLI before installing any charts:
+
+   ```bash
+   just helm-install
+   just helm-status
+   ```
+
+4. **Check Gateway API CRDs** — verify Traefik can own the CRDs and remediate if needed:
+
+   ```bash
+   just traefik-crd-doctor
+   ```
+
+   - "No problematic CRDs" with all missing is good—the Traefik chart will create them.
+   - "No problematic CRDs" with all healthy is good—Traefik already owns them.
+   - If problems appear, run the recommended doctor actions, then re-run the check.
+
+5. **Install and verify Traefik ingress** — deploy the ingress controller and confirm readiness:
+
+   ```bash
+   just traefik-install
+   just traefik-status
+   ```
+
+6. **Deploy workloads** — proceed to token.place, dspace, or your own apps that rely on
+   ingress. See [pi_token_dspace.md](./pi_token_dspace.md) and
+   [token_place_sample_datasets.md](./token_place_sample_datasets.md) for examples.
+
+The sections below provide detail and troubleshooting for each stage.
 
 ## Install Helm (prerequisite for Traefik and Helm workloads)
 
@@ -57,7 +91,8 @@ working with a minimal OS, use the `just` recipes from the repository root:
    This prints the Helm version and fails if Helm is not installed correctly.
 
 If you prefer to install Helm manually or are unable to use the `just` recipes, see the manual
-operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
+operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manually`. Helm is the
+prerequisite for the Traefik ingress install in the next section.
 
 ## Install and verify Traefik ingress
 
@@ -96,9 +131,10 @@ taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
 **Gateway API CRDs and Helm ownership**
 
 Traefik's Gateway API CRDs must be managed by Helm. The recipe uses the CRD doctor to confirm that
-any existing CRDs are owned by a Traefik release in `kube-system`. Missing CRDs are acceptable—the
-main `traefik/traefik` chart will create them. If `just traefik-install` reports ownership
-problems, run the doctor before retrying the install.
+any existing CRDs are owned by a Traefik release in `kube-system`. Both "all missing" and "all
+healthy" outcomes are successes: missing CRDs are created by the main `traefik/traefik` chart, and
+healthy CRDs remain owned by Traefik. If `just traefik-install` reports ownership problems, run the
+doctor before retrying the install.
 
 ### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
 
@@ -196,6 +232,10 @@ remain, then re-run `just traefik-install` to complete the installation.
 > cluster-wide Gateway API CRDs. Only use this on a fresh homelab cluster where you are sure nothing
 > else depends on Gateway API. By default the doctor is read-only and is the recommended way to
 > diagnose issues.
+
+Once Traefik is healthy, deploy workloads like token.place and dspace that rely on ingress. Follow
+[pi_token_dspace.md](./pi_token_dspace.md) for app-specific values and ingress hosts, or adapt the
+same pattern for your own charts.
 
 ## Using control-plane nodes as workers (homelab mode)
 
