@@ -21,6 +21,46 @@ logs, preparing Helm, and rolling out real workloads like
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
 
+## Golden path: SD → HA k3s → Helm → Traefik
+
+1. Image the SD card, boot each Pi on the same LAN, and follow
+   [raspi_cluster_setup.md](./raspi_cluster_setup.md) to prep the nodes.
+2. Form the three-node HA control plane and confirm node health:
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+3. Install and verify Helm (required for Traefik and other charts):
+
+   ```bash
+   just helm-install
+   just helm-status
+   ```
+
+4. Inspect Gateway API CRDs and remediate if needed:
+
+   ```bash
+   just traefik-crd-doctor
+   ```
+
+   - "No problematic CRDs" with everything **missing** is good—Traefik will create the CRDs during
+     install.
+   - "No problematic CRDs" with everything **healthy** is also good—Traefik already owns them.
+   - If the doctor flags conflicts, follow the recommended actions before installing.
+
+5. Install and verify Traefik ingress:
+
+   ```bash
+   just traefik-install
+   just traefik-status
+   ```
+
+6. Deploy workloads that rely on ingress, such as
+   [token.place](https://github.com/futuroptimist/token.place) or
+   [dspace](https://github.com/democratizedspace/dspace).
+
 ## In this guide you will:
 
 - Verify the health of your three-node HA control plane
@@ -58,6 +98,8 @@ working with a minimal OS, use the `just` recipes from the repository root:
 
 If you prefer to install Helm manually or are unable to use the `just` recipes, see the manual
 operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
+
+With Helm confirmed, proceed to the Gateway API CRD doctor and Traefik ingress sections below.
 
 ## Install and verify Traefik ingress
 
@@ -105,6 +147,9 @@ problems, run the doctor before retrying the install.
 This helper inspects the Gateway API CRDs and their Helm metadata, reports whether Traefik can
 safely manage them, and prints the exact `kubectl` commands to fix conflicts. It defaults to a
 read-only dry-run; destructive changes require the explicit `apply=1` flag and user confirmation.
+
+Success looks like either all CRDs missing (Traefik will create them) or all present and healthy
+under the Traefik release. Any "problematic" CRDs require action before re-running the installer.
 
 Run it any time you see Traefik CRD ownership errors:
 
@@ -196,6 +241,12 @@ remain, then re-run `just traefik-install` to complete the installation.
 > cluster-wide Gateway API CRDs. Only use this on a fresh homelab cluster where you are sure nothing
 > else depends on Gateway API. By default the doctor is read-only and is the recommended way to
 > diagnose issues.
+
+**Next step:** deploy workloads that rely on ingress, such as
+[token.place](https://github.com/futuroptimist/token.place) or
+[dspace](https://github.com/democratizedspace/dspace). Refer back to
+[raspi_cluster_setup.md](./raspi_cluster_setup.md#post-bootstrap-move-to-helm-and-ingress) for the
+end-to-end flow.
 
 ## Using control-plane nodes as workers (homelab mode)
 

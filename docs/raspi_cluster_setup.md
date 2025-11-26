@@ -16,6 +16,22 @@ personas:
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, ingress (Traefik), and other day-two workflows.
 
+## Golden path overview
+
+1. Flash the SD card, boot each Pi on the same LAN, and confirm they can reach each other (see
+   [pi_image_quickstart.md](./pi_image_quickstart.md) and the mDNS guidance later in this doc).
+2. Form the three-node HA control plane from any Pi:
+
+   ```bash
+   just ha3 env=dev
+   just cluster-status
+   ```
+
+   The HA wrapper runs the two-pass `just up dev` flow with `SUGARKUBE_SERVERS=3` set for you and
+   reports node readiness.
+3. Move on to [raspi_cluster_operations.md](./raspi_cluster_operations.md) to install Helm, run the
+   Gateway API CRD doctor, deploy Traefik ingress, and begin installing workloads.
+
 ## Clone SD to SSD (happy path)
 
 If your Raspberry Pi is booted from the SD card and you have an NVMe/SSD attached, you can
@@ -137,15 +153,20 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
 
-## Post-bootstrap: install ingress
+## Post-bootstrap: move to Helm and ingress
 
-After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying any apps:
+When `just up dev`/`just ha3 env=dev` completes and `just cluster-status` shows every server `Ready`, switch to the operations guide to install Helm, verify Gateway API CRDs, and deploy Traefik ingress before launching workloads:
 
 ```bash
+just helm-install
+just helm-status
+just traefik-crd-doctor
 just traefik-install
+just traefik-status
 ```
 
-Verification steps and troubleshooting live in [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
+The detailed steps and remediation tips live in
+[raspi_cluster_operations.md](./raspi_cluster_operations.md).
 
 ## How Discovery Works
 

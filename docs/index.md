@@ -48,6 +48,12 @@ Review the safety notes before working with power components.
 - [hardware/index.md](hardware/index.md) — curated hub for safety notes and hardware build guides
 - [software/index.md](software/index.md) — single stop for automation, playbooks, and contributor tooling
 
+> **Start here for the Pi cluster journey:**
+> - [raspi_cluster_setup.md](raspi_cluster_setup.md) — flash the SD card, boot the Pis, and form the
+>   three-node HA k3s control plane.
+> - [raspi_cluster_operations.md](raspi_cluster_operations.md) — install Helm, verify Gateway API
+>   CRDs, deploy Traefik ingress, and move on to workloads.
+
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work
 - [electronics_basics.md](electronics_basics.md) — wiring, tools, and safety
