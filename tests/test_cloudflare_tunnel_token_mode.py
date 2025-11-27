@@ -51,6 +51,7 @@ def cf_recipe_body() -> str:
 @pytest.fixture(scope="module")
 def deployment_patch_json(cf_recipe_body: str) -> str:
     """Extract the deployment patch JSON from the cf-tunnel-install recipe."""
+
     match = re.search(
         r"deployment_patch=\$\(cat <<-?'PATCH'\n(?P<patch>.*?)\n[ \t]*PATCH\n[ \t]*\)\n",
         cf_recipe_body,
@@ -69,41 +70,68 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
     for phrase in (
         "tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"",
         "metrics: 0.0.0.0:2000",
+        "warp-routing:",
         "service: http_status:404",
     ):
         assert phrase in config_yaml, f"Missing expected config fragment: {phrase!r}"
 
 
 def test_deployment_patch_enforces_token_mode(deployment_patch_json: str) -> None:
-    patch = json.loads(deployment_patch_json)
-    container = patch["spec"]["template"]["spec"]["containers"][0]
+    patch_ops = json.loads(deployment_patch_json)
+    assert isinstance(patch_ops, list), "Deployment patch should be a JSON patch list"
 
-    env_vars = {env["name"]: env for env in container.get("env", [])}
-    assert "TUNNEL_TOKEN" in env_vars
-    ref = env_vars["TUNNEL_TOKEN"].get("valueFrom", {}).get("secretKeyRef", {})
-    assert ref.get("name") == "tunnel-token"
-    assert ref.get("key") == "token"
+    def _value_for_path(path: str):
+        for op in patch_ops:
+            if op.get("path") == path:
+                return op.get("value")
+        pytest.fail(f"Patch missing path {path}")
 
-    assert container.get("command") == ["/bin/sh", "-c"]
-    args = container.get("args", [])
-    assert args and "--token \"$TUNNEL_TOKEN\"" in args[0]
+    env_value = _value_for_path("/spec/template/spec/containers/0/env")
+    assert env_value == [
+        {
+            "name": "TUNNEL_TOKEN",
+            "valueFrom": {
+                "secretKeyRef": {"name": "tunnel-token", "key": "token"}
+            },
+        }
+    ]
 
-    volume_mounts = container.get("volumeMounts", [])
-    mount_names = {mount["name"] for mount in volume_mounts}
-    assert mount_names == {"cloudflare-tunnel-config"}
+    command_value = _value_for_path("/spec/template/spec/containers/0/command")
+    assert command_value == ["/bin/sh", "-c"]
 
-    volumes = patch["spec"]["template"]["spec"].get("volumes", [])
-    volume_names = {vol["name"] for vol in volumes}
-    assert volume_names == {"cloudflare-tunnel-config"}
+    args_value = _value_for_path("/spec/template/spec/containers/0/args")
+    assert any("--token \"$TUNNEL_TOKEN\"" in arg for arg in args_value)
+
+    volumes_value = _value_for_path("/spec/template/spec/volumes")
+    assert volumes_value == [
+        {
+            "name": "cloudflare-tunnel-config",
+            "configMap": {
+                "name": "cloudflare-tunnel",
+                "items": [{"key": "config.yaml", "path": "config.yaml"}],
+            },
+        }
+    ]
+
+    volume_mount_value = _value_for_path("/spec/template/spec/containers/0/volumeMounts")
+    assert volume_mount_value == [
+        {
+            "name": "cloudflare-tunnel-config",
+            "mountPath": "/etc/cloudflared/config",
+            "readOnly": True,
+        }
+    ]
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
     assert "rollout status deployment/cloudflare-tunnel" in cf_recipe_body
     assert "--wait" not in cf_recipe_body
+    assert "kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s" in cf_recipe_body
 
 
 def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_json: str) -> None:
     assert "credentials.json" not in deployment_patch_json
+    assert "creds" not in deployment_patch_json
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
