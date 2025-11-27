@@ -378,6 +378,8 @@ cf-tunnel-install env='dev' token='':
 
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
+    echo "Ensuring Secret cloudflare/tunnel-token exists (token is not logged)..."
+
     kubectl -n cloudflare create secret generic tunnel-token \
         --from-literal=token="${token}" \
         --dry-run=client -o yaml | kubectl apply -f -
@@ -407,10 +409,11 @@ cf-tunnel-install env='dev' token='':
         fi
     fi
 
+    echo "Installing/upgrading cloudflare-tunnel Helm release (continuing to token patch even if pods start in legacy mode)..."
+
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
-        --wait \
         --values - <<<"${values_yaml}"; then
         echo "Helm upgrade/install failed; diagnostics to follow:"
         helm -n cloudflare status cloudflare-tunnel || true
@@ -418,34 +421,35 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
-    # Patch the config to token mode (no origin cert / credentials.json)
-    configmap_yaml="apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cloudflare-tunnel\n  namespace: cloudflare\ndata:\n  config.yaml: |\n    tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"\n    warp-routing:\n      enabled: false\n    metrics: 0.0.0.0:2000\n    no-autoupdate: true\n    ingress:\n      - service: http_status:404\n"
-    printf '%b' "${configmap_yaml}" | kubectl apply -f -
+    tunnel_name="${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
 
-    # Force the upstream chart into token mode: config.yaml for metrics/ingress,
-    # TUNNEL_TOKEN from Secret/tunnel-token, and explicit `--token` on the run command.
-    # This patch removes the need for origin certificates or credentials.json.
+    python3 "{{ invocation_directory() }}/scripts/force_cloudflare_token_mode.py" \
+        configmap --tunnel-name "${tunnel_name}" \
+        | kubectl apply -f -
+
     if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
         echo "cloudflare-tunnel deployment not found after Helm install; aborting." >&2
         helm -n cloudflare status cloudflare-tunnel || true
         exit 1
     fi
 
-    # Build the deployment patch as a variable to avoid heredoc parsing issues
-    deployment_patch='{"spec":{"template":{"spec":{"containers":[{"name":"cloudflare-tunnel","env":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}],"command":["/bin/sh","-c","exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"${TUNNEL_TOKEN}\""]}]}}}}'
-    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
+    kubectl -n cloudflare get deployment cloudflare-tunnel -o json \
+        | python3 "{{ invocation_directory() }}/scripts/force_cloudflare_token_mode.py" patch-deployment --stdin \
+        | kubectl apply -f -
 
     # Verify the patched rollout becomes healthy
-    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=120s; then
+    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
         echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+        kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
         exit 1
     fi
 
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
-        '- Secret: cloudflare/tunnel-token (key: token)' \
+        "- Secret: cloudflare/tunnel-token (key: token)" \
+        "- Tunnel name: ${tunnel_name}" \
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
 
