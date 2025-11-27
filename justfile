@@ -359,11 +359,44 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
+    # Strip common prefixes from Cloudflare dashboard snippets to tolerate copy/paste mistakes.
+    token="$(printf '%s' "${token}" | tr -d '\r\n' |
+        sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    if [ "${token#export }" != "${token}" ]; then
+        token="${token#export }"
+        token="$(printf '%s' "${token}" |
+            sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    fi
+    for prefix in token TUNNEL_TOKEN CF_TUNNEL_TOKEN; do
+        if [ "${token#${prefix}=}" != "${token}" ]; then
+            token="${token#${prefix}=}"
+            break
+        fi
+    done
+    if [ "${token#*[[:space:]]cloudflared[[:space:]]*}" != "${token}" ] &&
+       printf '%s' "${token}" | grep -q '[[:space:]]'; then
+        token="${token##* }"
+    fi
+
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
     kubectl -n cloudflare create secret generic tunnel-token \
         --from-literal=token="${token}" \
         --dry-run=client -o yaml | kubectl apply -f -
+
+    existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
+    if [ -n "${existing}" ] && [ "${existing}" != "[]" ]; then
+        status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
+        if [ -z "${status}" ]; then
+            if helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -q 'STATUS: failed'; then
+                status='failed'
+            fi
+        fi
+        if [ "${status}" = "failed" ]; then
+            echo "Existing 'cloudflare-tunnel' release failed; uninstalling before re-deploy..."
+            helm -n cloudflare uninstall cloudflare-tunnel || true
+        fi
+    fi
 
     helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
     helm repo update cloudflare
@@ -381,7 +414,12 @@ cf-tunnel-install env='dev' token='':
         --namespace cloudflare \
         --create-namespace \
         --wait \
-        --values - <<<"${values_yaml}"
+        --values - <<<"${values_yaml}" || {
+            echo "Helm deploy failed; gathering diagnostics..." >&2
+            helm -n cloudflare status cloudflare-tunnel || true
+            kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+            exit 1
+        }
 
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
