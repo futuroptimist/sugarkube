@@ -407,16 +407,21 @@ cf-tunnel-install env='dev' token='':
         fi
     fi
 
-    helm_exit=0
+    helm_exit_code=0
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
         --values - <<<"${values_yaml}"; then
-        helm_exit=$?
+        helm_exit_code=$?
         echo "Helm upgrade/install failed; diagnostics to follow:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
-        exit ${helm_exit}
+    fi
+
+    if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
+        echo "cloudflare-tunnel deployment not found after Helm install; aborting." >&2
+        helm -n cloudflare status cloudflare-tunnel || true
+        exit 1
     fi
 
     configmap_yaml=$(cat <<-'EOF'
@@ -437,12 +442,6 @@ cf-tunnel-install env='dev' token='':
     EOF
     )
     printf '%s' "${configmap_yaml}" | kubectl apply -f -
-
-    if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
-        echo "cloudflare-tunnel deployment not found after Helm install; aborting." >&2
-        helm -n cloudflare status cloudflare-tunnel || true
-        exit 1
-    fi
 
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
     # Replace the chart's default config/creds volumes with a single token-mode config volume.
@@ -483,7 +482,13 @@ cf-tunnel-install env='dev' token='':
               {
                 "name": "cloudflare-tunnel-config",
                 "configMap": {
-                  "name": "cloudflare-tunnel"
+                  "name": "cloudflare-tunnel",
+                  "items": [
+                    {
+                      "key": "config.yaml",
+                      "path": "config.yaml"
+                    }
+                  ]
                 }
               }
             ]
@@ -505,11 +510,16 @@ cf-tunnel-install env='dev' token='':
     fi
 
     printf '%s\n' \
-        'Cloudflare Tunnel chart deployed.' \
+        'Cloudflare Tunnel chart deployed in token mode.' \
         '- Secret: cloudflare/tunnel-token (key: token)' \
         "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
+
+    if [ "${helm_exit_code}" -ne 0 ]; then
+        printf '%s\n' "NOTE: Helm reported errors (exit code ${helm_exit_code})," \
+            "but token-mode patches were applied. Inspect the deployment status above." >&2
+    fi
 
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
 helm-install:

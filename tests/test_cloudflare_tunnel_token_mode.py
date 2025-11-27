@@ -66,6 +66,8 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
 
     config_yaml = match.group("body")
     assert "credentials-file" not in config_yaml
+    assert "warp-routing:" in config_yaml
+    assert "enabled: false" in config_yaml
     for phrase in (
         "tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"",
         "metrics: 0.0.0.0:2000",
@@ -96,14 +98,20 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_json: str) -> Non
     volume_names = {vol["name"] for vol in volumes}
     assert volume_names == {"cloudflare-tunnel-config"}
 
+    config_map = volumes[0]["configMap"]
+    assert config_map["name"] == "cloudflare-tunnel"
+    items = config_map.get("items", [])
+    assert any(item.get("key") == "config.yaml" for item in items)
+
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
-    assert "rollout status deployment/cloudflare-tunnel" in cf_recipe_body
+    assert "kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s" in cf_recipe_body
     assert "--wait" not in cf_recipe_body
 
 
 def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_json: str) -> None:
     assert "credentials.json" not in deployment_patch_json
+    assert "creds" not in deployment_patch_json
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
