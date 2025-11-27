@@ -398,9 +398,8 @@ cf-tunnel-install env='dev' token='':
     if [ -n "${existing}" ]; then
         status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
         if [ -z "${status}" ]; then
-            if helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -qE '^STATUS: (failed|pending-install)'; then
-                status=$(helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -oE '^STATUS: (failed|pending-install)' | cut -d' ' -f2)
-            fi
+            helm_status_output=$(helm -n cloudflare status cloudflare-tunnel 2>/dev/null || true)
+            status=$(printf '%s\n' "${helm_status_output}" | grep -oE '^STATUS: (failed|pending-install)' | cut -d' ' -f2 || true)
         fi
         if [ "${status}" = "failed" ] || [ "${status}" = "pending-install" ]; then
             echo "Existing 'cloudflare-tunnel' Helm release is in ${status} state; uninstalling before re-deploy..."
