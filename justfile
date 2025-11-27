@@ -418,6 +418,46 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
+    # Patch the config to token mode (no origin cert / credentials.json)
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflare-tunnel
+  namespace: cloudflare
+data:
+  config.yaml: |
+    tunnel: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}
+    warp-routing:
+      enabled: false
+    metrics: 0.0.0.0:2000
+    no-autoupdate: true
+    ingress:
+      - service: http_status:404
+EOF
+
+    # Force the deployment to use the token-based connector mode
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge -p "$(cat <<'EOF'
+spec:
+  template:
+    spec:
+      containers:
+        - name: cloudflare-tunnel
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tunnel-token
+                  key: token
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token "${TUNNEL_TOKEN}"
+EOF
+    )"
+
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
         '- Secret: cloudflare/tunnel-token (key: token)' \
