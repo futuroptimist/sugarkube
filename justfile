@@ -359,6 +359,21 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
+    # Strip common prefixes to tolerate Cloudflare dashboard copy-paste patterns.
+    token="$(printf '%s' "${token}" | tr -d '\r\n')"
+    case "${token}" in
+        export\ *) token="${token#export }" ;;
+    esac
+    for prefix in token= TUNNEL_TOKEN= CF_TUNNEL_TOKEN=; do
+        case "${token}" in
+            ${prefix}*) token="${token#${prefix}}" ;;
+        esac
+    done
+    if printf '%s' "${token}" | grep -qi 'cloudflared' && \
+        printf '%s' "${token}" | grep -q '[[:space:]]'; then
+        token="$(printf '%s' "${token}" | awk '{print $NF}')"
+    fi
+
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
     kubectl -n cloudflare create secret generic tunnel-token \
@@ -377,11 +392,31 @@ cf-tunnel-install env='dev' token='':
         '  ingress: []'
     )
 
+    existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
+    if [ -n "${existing}" ] && [ "${existing}" != "[]" ]; then
+        status=""
+        if command -v jq >/dev/null 2>&1; then
+            status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
+        else
+            status=$(helm -n cloudflare status cloudflare-tunnel 2>/dev/null \
+                | awk -F': ' '/^STATUS:/ {print $2}' | head -n1 || true)
+        fi
+        if [ "${status}" = "failed" ]; then
+            echo "Existing 'cloudflare-tunnel' Helm release is in failed state; uninstalling before re-deploy..."
+            helm -n cloudflare uninstall cloudflare-tunnel || true
+        fi
+    fi
+
     helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
         --wait \
-        --values - <<<"${values_yaml}"
+        --values - <<<"${values_yaml}" || {
+            echo "Helm deployment failed; collecting diagnostics..." >&2
+            helm -n cloudflare status cloudflare-tunnel || true
+            kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+            exit 1
+        }
 
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \

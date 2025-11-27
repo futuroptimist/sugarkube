@@ -60,6 +60,9 @@ the canonical way to install the connector on the Pi.
    export CF_TUNNEL_NAME="<dashboard-tunnel-name>"   # Optional: overrides sugarkube-<env>
    export CF_TUNNEL_ID="<dashboard-tunnel-id>"        # Optional: helps keep names aligned
    ```
+   The `cf-tunnel-install` recipe tolerates copy/paste snippets like `token=<token>`,
+   `TUNNEL_TOKEN=<token>`, or even full `cloudflared ... --token <token>` commands, but for clarity
+   and security you should still export just the bare token string.
 2. Install or update the chart and Secret on the cluster (the namespace is created if needed):
    ```bash
    just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
