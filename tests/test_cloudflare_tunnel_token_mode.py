@@ -49,7 +49,7 @@ def cf_recipe_body() -> str:
 
 
 def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
-    match = re.search(r"configmap_yaml=\$\(cat <<EOF\n(?P<body>.*?)\nEOF", cf_recipe_body, re.S)
+    match = re.search(r"configmap_yaml=\$\(cat <<-?'?EOF'?\n(?P<body>.*?)\n[ \t]*EOF", cf_recipe_body, re.S)
     assert match, "ConfigMap heredoc missing from cf-tunnel-install"
 
     config_yaml = match.group("body")
@@ -63,7 +63,11 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
 
 
 def test_deployment_patch_enforces_token_mode(cf_recipe_body: str) -> None:
-    match = re.search(r"deployment_patch=\$\(cat <<'PATCH'\n(?P<patch>.*?)\nPATCH\n\)\n", cf_recipe_body, re.S)
+    match = re.search(
+        r"deployment_patch=\$\(cat <<-?'PATCH'\n(?P<patch>.*?)\n[ \t]*PATCH\n[ \t]*\)\n",
+        cf_recipe_body,
+        re.S,
+    )
     assert match, "Deployment patch heredoc missing from cf-tunnel-install"
 
     patch_json = match.group("patch")

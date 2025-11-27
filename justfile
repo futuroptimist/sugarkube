@@ -419,23 +419,23 @@ cf-tunnel-install env='dev' token='':
         exit ${helm_exit}
     fi
 
-    configmap_yaml=$(cat <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cloudflare-tunnel
-  namespace: cloudflare
-data:
-  config.yaml: |
-    tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
-    warp-routing:
-      enabled: false
-    metrics: 0.0.0.0:2000
-    no-autoupdate: true
-    ingress:
-      - service: http_status:404
-EOF
-)
+    configmap_yaml=$(cat <<-'EOF'
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cloudflare-tunnel
+      namespace: cloudflare
+    data:
+      config.yaml: |
+        tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
+        warp-routing:
+          enabled: false
+        metrics: 0.0.0.0:2000
+        no-autoupdate: true
+        ingress:
+          - service: http_status:404
+    EOF
+    )
     printf '%s' "${configmap_yaml}" | kubectl apply -f -
 
     if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
@@ -445,52 +445,52 @@ EOF
     fi
 
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
-    deployment_patch=$(cat <<'PATCH'
-{
-  "spec": {
-    "template": {
+    deployment_patch=$(cat <<-'PATCH'
+    {
       "spec": {
-        "containers": [
-          {
-            "name": "cloudflare-tunnel",
-            "env": [
+        "template": {
+          "spec": {
+            "containers": [
               {
-                "name": "TUNNEL_TOKEN",
-                "valueFrom": {
-                  "secretKeyRef": {
-                    "name": "tunnel-token",
-                    "key": "token"
+                "name": "cloudflare-tunnel",
+                "env": [
+                  {
+                    "name": "TUNNEL_TOKEN",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "tunnel-token",
+                        "key": "token"
+                      }
+                    }
                   }
-                }
+                ],
+                "command": ["/bin/sh", "-c"],
+                "args": [
+                  "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+                ],
+                "volumeMounts": [
+                  {
+                    "name": "cloudflare-tunnel-config",
+                    "mountPath": "/etc/cloudflared/config",
+                    "readOnly": true
+                  }
+                ]
               }
             ],
-            "command": ["/bin/sh", "-c"],
-            "args": [
-              "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
-            ],
-            "volumeMounts": [
+            "volumes": [
               {
                 "name": "cloudflare-tunnel-config",
-                "mountPath": "/etc/cloudflared/config",
-                "readOnly": true
+                "configMap": {
+                  "name": "cloudflare-tunnel"
+                }
               }
             ]
           }
-        ],
-        "volumes": [
-          {
-            "name": "cloudflare-tunnel-config",
-            "configMap": {
-              "name": "cloudflare-tunnel"
-            }
-          }
-        ]
+        }
       }
     }
-  }
-}
-PATCH
-)
+    PATCH
+    )
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
 
     # Allow up to 180s for rollout to complete; this accounts for image pull times and the deployment reaching ready state.
