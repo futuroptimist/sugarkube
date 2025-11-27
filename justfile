@@ -436,7 +436,15 @@ data:
       - service: http_status:404
 EOF
 
-    # Force the deployment to use the token-based connector mode
+    # Force the upstream chart into token mode: config.yaml for metrics/ingress,
+    # TUNNEL_TOKEN from Secret/tunnel-token, and explicit `--token` on the run command.
+    # This patch removes the need for origin certificates or credentials.json.
+    if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
+        echo "cloudflare-tunnel deployment not found after Helm install; aborting." >&2
+        helm -n cloudflare status cloudflare-tunnel || true
+        exit 1
+    fi
+
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "$(cat <<'EOF'
 spec:
   template:
@@ -456,6 +464,14 @@ spec:
               exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token "${TUNNEL_TOKEN}"
 EOF
     )"
+
+    # Verify the patched rollout becomes healthy
+    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=120s; then
+        echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
+        helm -n cloudflare status cloudflare-tunnel || true
+        kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+        exit 1
+    fi
 
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
