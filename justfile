@@ -419,22 +419,8 @@ cf-tunnel-install env='dev' token='':
     fi
 
     # Patch the config to token mode (no origin cert / credentials.json)
-    cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cloudflare-tunnel
-  namespace: cloudflare
-data:
-  config.yaml: |
-    tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
-    warp-routing:
-      enabled: false
-    metrics: 0.0.0.0:2000
-    no-autoupdate: true
-    ingress:
-      - service: http_status:404
-EOF
+    configmap_yaml="apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cloudflare-tunnel\n  namespace: cloudflare\ndata:\n  config.yaml: |\n    tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"\n    warp-routing:\n      enabled: false\n    metrics: 0.0.0.0:2000\n    no-autoupdate: true\n    ingress:\n      - service: http_status:404\n"
+    printf '%b' "${configmap_yaml}" | kubectl apply -f -
 
     # Force the upstream chart into token mode: config.yaml for metrics/ingress,
     # TUNNEL_TOKEN from Secret/tunnel-token, and explicit `--token` on the run command.
@@ -445,25 +431,9 @@ EOF
         exit 1
     fi
 
-    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "$(cat <<'EOF'
-spec:
-  template:
-    spec:
-      containers:
-        - name: cloudflare-tunnel
-          env:
-            - name: TUNNEL_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: tunnel-token
-                  key: token
-          command:
-            - /bin/sh
-            - -c
-            - |
-              exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token "${TUNNEL_TOKEN}"
-EOF
-    )"
+    # Build the deployment patch as a variable to avoid heredoc parsing issues
+    deployment_patch='{"spec":{"template":{"spec":{"containers":[{"name":"cloudflare-tunnel","env":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}],"command":["/bin/sh","-c","exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"${TUNNEL_TOKEN}\""]}]}}}}'
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
 
     # Verify the patched rollout becomes healthy
     if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=120s; then
