@@ -55,7 +55,7 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
     config_yaml = match.group("body")
     assert "credentials-file" not in config_yaml
     for phrase in (
-        "tunnel: \"${CF_TUNNEL_NAME:-sugarkube-",
+        "tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"",
         "metrics: 0.0.0.0:2000",
         "service: http_status:404",
     ):
@@ -63,7 +63,7 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
 
 
 def test_deployment_patch_enforces_token_mode(cf_recipe_body: str) -> None:
-    match = re.search(r"deployment_patch <<'PATCH'\n(?P<patch>.*?)\nPATCH", cf_recipe_body, re.S)
+    match = re.search(r"deployment_patch=\$\(cat <<'PATCH'\n(?P<patch>.*?)\nPATCH\n\)\n", cf_recipe_body, re.S)
     assert match, "Deployment patch heredoc missing from cf-tunnel-install"
 
     patch_json = match.group("patch")

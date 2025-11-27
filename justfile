@@ -444,7 +444,8 @@ EOF
         exit 1
     fi
 
-    read -r -d '' deployment_patch <<'PATCH'
+    # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
+    deployment_patch=$(cat <<'PATCH'
 {
   "spec": {
     "template": {
@@ -489,8 +490,10 @@ EOF
   }
 }
 PATCH
+)
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
 
+    # Allow up to 180s for rollout to complete; this accounts for image pull times and the deployment reaching ready state.
     if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
         echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
