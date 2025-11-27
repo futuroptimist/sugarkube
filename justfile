@@ -371,7 +371,7 @@ cf-tunnel-install env='dev' token='':
         esac
     done
     if printf '%s' "${token}" | grep -q "cloudflared"; then
-        token="$(set -- ${token}; printf '%s' "${!#}")"
+        token="$(printf '%s' "${token}" | awk '{print $NF}')"
     fi
 
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
