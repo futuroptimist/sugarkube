@@ -427,7 +427,7 @@ metadata:
   namespace: cloudflare
 data:
   config.yaml: |
-    tunnel: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}
+    tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
     warp-routing:
       enabled: false
     metrics: 0.0.0.0:2000
@@ -437,7 +437,7 @@ data:
 EOF
 
     # Force the deployment to use the token-based connector mode
-    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge -p "$(cat <<'EOF'
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "$(cat <<'EOF'
 spec:
   template:
     spec:
@@ -452,7 +452,6 @@ spec:
           command:
             - /bin/sh
             - -c
-          args:
             - |
               exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token "${TUNNEL_TOKEN}"
 EOF
