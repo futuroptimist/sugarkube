@@ -70,13 +70,17 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
         "tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"",
         "metrics: 0.0.0.0:2000",
         "service: http_status:404",
+        "warp-routing:",
     ):
         assert phrase in config_yaml, f"Missing expected config fragment: {phrase!r}"
 
 
 def test_deployment_patch_enforces_token_mode(deployment_patch_json: str) -> None:
-    patch = json.loads(deployment_patch_json)
-    container = patch["spec"]["template"]["spec"]["containers"][0]
+    patch_ops = json.loads(deployment_patch_json)
+
+    container_op = next((op for op in patch_ops if op.get("path") == "/spec/template/spec/containers"), None)
+    assert container_op, "Container replace op missing"
+    container = container_op["value"][0]
 
     env_vars = {env["name"]: env for env in container.get("env", [])}
     assert "TUNNEL_TOKEN" in env_vars
@@ -92,18 +96,25 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_json: str) -> Non
     mount_names = {mount["name"] for mount in volume_mounts}
     assert mount_names == {"cloudflare-tunnel-config"}
 
-    volumes = patch["spec"]["template"]["spec"].get("volumes", [])
+    volumes_op = next((op for op in patch_ops if op.get("path") == "/spec/template/spec/volumes"), None)
+    assert volumes_op, "Volumes replace op missing"
+    volumes = volumes_op["value"]
     volume_names = {vol["name"] for vol in volumes}
     assert volume_names == {"cloudflare-tunnel-config"}
+    config_map = volumes[0].get("configMap", {})
+    assert config_map.get("name") == "cloudflare-tunnel"
+    assert {item.get("key") for item in config_map.get("items", [])} == {"config.yaml"}
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
-    assert "rollout status deployment/cloudflare-tunnel" in cf_recipe_body
+    assert "kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s" in cf_recipe_body
+    assert "helm upgrade --install cloudflare-tunnel" in cf_recipe_body
     assert "--wait" not in cf_recipe_body
 
 
 def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_json: str) -> None:
     assert "credentials.json" not in deployment_patch_json
+    assert "creds" not in deployment_patch_json
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
