@@ -418,6 +418,46 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
+    # Enforce token-based connector mode: run cloudflared using the JWT from the Secret
+    # instead of a credentials.json file (the upstream chart only supports the legacy mode).
+    patch_payload='{
+      "spec": {
+        "template": {
+          "spec": {
+            "containers": [
+              {
+                "name": "cloudflare-tunnel",
+                "command": ["/bin/sh"],
+                "args": ["-c", "cloudflared tunnel run --token \"${TUNNEL_TOKEN}\" --metrics 0.0.0.0:2000 --no-autoupdate"],
+                "env": [
+                  {
+                    "name": "TUNNEL_TOKEN",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "tunnel-token",
+                        "key": "token"
+                      }
+                    }
+                  }
+                ],
+                "volumeMounts": []
+              }
+            ],
+            "volumes": []
+          }
+        }
+      }
+    }'
+
+    if ! kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge -p "${patch_payload}"; then
+        echo "kubectl patch failed; diagnostics to follow:"
+        helm -n cloudflare status cloudflare-tunnel || true
+        kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+        exit 1
+    fi
+
+    kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=120s
+
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
         '- Secret: cloudflare/tunnel-token (key: token)' \
