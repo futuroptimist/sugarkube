@@ -33,14 +33,17 @@ and
 2. Navigate to **Networks → Tunnels** (or **Connectors → Cloudflare Tunnel**, depending on the
    current UI).
 3. Click **Create a tunnel**.
-4. Choose **Cloudflared** as the connector type.
+4. Choose **Cloudflared** as the connector type. We run the **token-based connector mode** (JWT
+   from the dashboard) inside Kubernetes; no origin certificate or `credentials.json` file is used.
 5. Name the tunnel (for example, `dspace-staging-k3s`).
 6. Click **Save tunnel**. The dashboard will show OS-specific commands (Windows/Mac/Debian/Docker,
    etc.) that include a tunnel token. **Do not run these commands on your workstation**; we will use
    the token with Sugarkube in Step 2.
    - If the dashboard shows a command like `cloudflared service install <tunnel-token>`, copy the
      `<tunnel-token>` portion (not the whole command) and store it securely. We will pass it to
-     `just cf-tunnel-install` in the cluster.
+     `just cf-tunnel-install` in the cluster. The installer tolerates the full copied snippet
+     (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, `CF_TUNNEL_TOKEN=<jwt>`, or
+     `cloudflared ... --token <jwt>`), but exporting the bare JWT is still recommended.
 
 Refer to Cloudflare’s guide for full details:
 [Create a tunnel in the dashboard](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/).
@@ -51,7 +54,7 @@ This is the “Install and run a connector” step from the Cloudflare UI. It mu
 k3s cluster (for example, `sugarkube0`), **not** on your workstation. `just cf-tunnel-install` is
 the canonical way to install the connector on the Pi.
 
-### Deploy the Helm chart via Sugarkube
+### Deploy the Helm chart via Sugarkube (token mode)
 
 1. Export the tunnel token from Step 1 (add optional name and ID overrides to keep dashboard names
    aligned):
@@ -64,9 +67,12 @@ the canonical way to install the connector on the Pi.
    ```bash
    just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
    ```
-   The recipe now strips common prefixes (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, or a full
-   `cloudflared ... --token <jwt>` command), but for clarity and security you should still export
-   just the bare token string when possible.
+   The recipe strips common prefixes (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, `CF_TUNNEL_TOKEN=<jwt>`,
+   or a full `cloudflared ... --token <jwt>` command), but for clarity and security you should
+   still export just the bare token string when possible. The installer writes the JWT into a
+   Secret and wires it into the Deployment as the `TUNNEL_TOKEN` environment variable. It also
+   overwrites the ConfigMap so the pod runs purely in token mode—no origin certificate or
+   `credentials.json` is required.
 3. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
@@ -106,7 +112,9 @@ kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhos
 > dashboard.
 
 Once `cloudflared` is running with the correct token, Cloudflare links the named tunnel to the
-cluster so requests to `staging.democratized.space` reach Traefik.
+cluster so requests to `staging.democratized.space` reach Traefik. If pod logs ever show
+`Cannot determine default origin certificate path`, the ConfigMap likely reverted to the
+credentials-file flow; rerun `just cf-tunnel-install` to re-apply the token-mode configuration.
 
 ## Step 3 – Publish the staging application (route to Traefik)
 
