@@ -50,50 +50,51 @@ Refer to Cloudflare’s guide for full details:
 This is the “Install and run a connector” step from the Cloudflare UI. It must run on a node in the
 k3s cluster (for example, `sugarkube0`), **not** on your workstation. `just cf-tunnel-install` is
 the canonical way to install the connector on the Pi. The recipe now deploys Cloudflare’s
-**token-based connector mode** (JWT from the dashboard), so no origin certificates or
-`credentials.json` files are required.
+**token-based connector mode** (connector token (JWT) from the dashboard), so no origin
+certificates or `credentials.json` files are required.
 
-### Names and environments: who controls what?
+### Names, environments, and how tunnels are selected
 
-- **Cloudflare tunnel name** (for example, `dspace-staging-v3`): lives entirely in Cloudflare and is
-  bound to the connector token you copy from the dashboard.
-- **Sugarkube `env`** (for example, `dev`, `staging`): controls Sugarkube naming/labels such as the
-  default tunnel name `sugarkube-<env>`.
-- **CF_TUNNEL_NAME**: overrides the Sugarkube default tunnel name so you can match the Cloudflare
-  dashboard name exactly.
+- **Cloudflare tunnel name** (for example, `dspace-staging-v3`): defined in the Cloudflare dashboard
+  and tied to the connector token you copy.
+- **Sugarkube `env`** (for example, `dev`, `staging`): affects Sugarkube naming/labels, including the
+  default tunnel name `sugarkube-<env>`, but does **not** decide which Cloudflare tunnel you join.
+- **CF_TUNNEL_NAME**: optionally overrides the Sugarkube default so the in-cluster name matches the
+  Cloudflare dashboard name.
 
-The **connector token (JWT)** is the canonical link between the k3s cluster and the Cloudflare
-tunnel. It is safe to run a staging tunnel token on a cluster you label as `env=dev` as long as you
-also set `CF_TUNNEL_NAME` to the Cloudflare tunnel’s name:
-
-```bash
-export CF_TUNNEL_TOKEN="<CONNECTOR_TOKEN_FROM_DASHBOARD>"
-export CF_TUNNEL_NAME="dspace-staging-v3"
-just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
-```
-
-The token and `CF_TUNNEL_NAME` decide which Cloudflare tunnel you connect to; `env` mostly governs
-Sugarkube-side labels and defaults.
+The **connector token (JWT) + `CF_TUNNEL_NAME`** determine the Cloudflare tunnel the cluster joins.
+It is safe to run a staging tunnel on a cluster whose Sugarkube `env` is `dev` so long as both the
+token and `CF_TUNNEL_NAME` come from that staging tunnel in the dashboard. Sugarkube’s `env`
+controls labels and defaults; the tunnel token controls connectivity.
 
 ### Deploy the Helm chart via Sugarkube
 
-1. Export the tunnel token from Step 1 (add optional name and ID overrides to keep dashboard names
-   aligned):
+This is the canonical set of commands to run on the Pi; the naming rules above explain how the
+Cloudflare tunnel, Sugarkube `env`, and `CF_TUNNEL_NAME` interact.
+
+1. Point `kubectl` at the cluster and move to the Sugarkube checkout:
+   ```bash
+   export KUBECONFIG="$HOME/.kube/config"
+   cd ~/sugarkube
+   ```
+2. Export the connector token (and optional naming overrides) from the Cloudflare dashboard entry
+   for your tunnel:
    ```bash
    export CF_TUNNEL_TOKEN="<tunnel-token>"
-   export CF_TUNNEL_NAME="<dashboard-tunnel-name>"   # Optional: overrides sugarkube-<env>
-   export CF_TUNNEL_ID="<dashboard-tunnel-id>"        # Optional: helps keep names aligned
+   export CF_TUNNEL_NAME="dspace-staging-v3"   # Optional override to match the dashboard name
+   export CF_TUNNEL_ID="<dashboard-tunnel-id>" # Optional: helpful for alignment, not required
    ```
-2. Install or update the chart and Secret on the cluster (the namespace is created if needed):
+3. Install or update the chart and Secret on the cluster (namespace is created if needed):
    ```bash
-   just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
+   just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
    ```
-   The recipe now strips common prefixes (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, or a full
-   `cloudflared ... --token <jwt>` command), but for clarity and security you should still export
-   just the bare token string when possible. The Secret is mounted directly into the Deployment as
-   `TUNNEL_TOKEN`, and the chart is patched to run `cloudflared tunnel run --token "$TUNNEL_TOKEN"`
-   with metrics/readiness on `:2000` and **no** `credentials.json` or origin cert references.
-3. Verify readiness (Pods should report `/ready` = `200`):
+   Omitting the `token=` argument falls back to `CF_TUNNEL_TOKEN` in the environment, but passing it
+   explicitly keeps the intent obvious. The recipe strips common prefixes (`token=<jwt>`,
+   `TUNNEL_TOKEN=<jwt>`, or a full `cloudflared ... --token <jwt>` command) and mounts the Secret
+   directly as `TUNNEL_TOKEN`. The chart is patched to run `cloudflared tunnel run --token
+   "$TUNNEL_TOKEN"` with metrics/readiness on `:2000` and **no** `credentials.json` or origin cert
+   references.
+4. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
    kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhost:2000/ready
@@ -107,33 +108,32 @@ Below is the full sequence for deploying the `dspace-staging-v3` tunnel on the p
 control-plane node while keeping the Sugarkube environment set to `dev`:
 
 ```bash
-# SSH into the control-plane node
-ssh sugarkube0
+# On sugarkube0
+export KUBECONFIG="$HOME/.kube/config"
 
-# Navigate to the Sugarkube checkout
 cd ~/sugarkube
 
-# Token copied from the Cloudflare dashboard command snippet
+# Connector token from the Cloudflare dashboard for the dspace-staging-v3 tunnel
 export CF_TUNNEL_TOKEN="<tunnel-token for dspace-staging-v3>"
 
-# Keep tunnel names aligned with the dashboard
+# Keep names aligned with the Cloudflare dashboard
 export CF_TUNNEL_NAME="dspace-staging-v3"
+# (Optional) CF_TUNNEL_ID if helpful, but not required
 
-# Install the connector (creates namespace, Secret, and Helm release)
+# Run the installer against the dev Sugarkube environment
 just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
-
-# Verify the connector is healthy
-kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
-kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhost:2000/ready
 ```
 
-> **Tip**: Replace the placeholder values above with the real token and ID from your Cloudflare
-> dashboard.
+Even though the Sugarkube environment is `dev`, this connects the cluster to the `dspace-staging-v3`
+tunnel and routes `staging.democratized.space` because both the connector token and
+`CF_TUNNEL_NAME` come from that tunnel in the Cloudflare dashboard. If you prefer a matching
+Sugarkube environment, switch `env=dev` to `env=staging` while keeping the same token and
+`CF_TUNNEL_NAME` values.
 
 If the pod logs ever show `Cannot determine default origin certificate path`, the deployment is
 still trying to use the legacy origin-cert / `credentials.json` flow. Re-run `just cf-tunnel-install`
-to reapply the token-based patch; the recipe now removes any `credentials-file` references and
-forces `cloudflared tunnel run --token "$TUNNEL_TOKEN"`.
+to reapply the token-based patch; the recipe removes any `credentials-file` references and forces
+`cloudflared tunnel run --token "$TUNNEL_TOKEN"`.
 
 Once `cloudflared` is running with the correct token, Cloudflare links the named tunnel to the
 cluster so requests to `staging.democratized.space` reach Traefik.
