@@ -64,6 +64,9 @@ the canonical way to install the connector on the Pi.
    ```bash
    just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
    ```
+   The recipe strips common prefixes like `token=<tunnel-token>` or even full
+   `cloudflared ... --token <tunnel-token>` commands, but for clarity and security prefer exporting
+   just the bare token string.
 3. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
