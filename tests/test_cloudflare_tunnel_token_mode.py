@@ -48,6 +48,18 @@ def cf_recipe_body() -> str:
     return _extract_cf_recipe_body()
 
 
+@pytest.fixture(scope="module")
+def deployment_patch_json(cf_recipe_body: str) -> str:
+    """Extract the deployment patch JSON from the cf-tunnel-install recipe."""
+    match = re.search(
+        r"deployment_patch=\$\(cat <<-?'PATCH'\n(?P<patch>.*?)\n[ \t]*PATCH\n[ \t]*\)\n",
+        cf_recipe_body,
+        re.S,
+    )
+    assert match, "Deployment patch heredoc missing from cf-tunnel-install"
+    return match.group("patch")
+
+
 def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
     match = re.search(r"configmap_yaml=\$\(cat <<-?'?EOF'?\n(?P<body>.*?)\n[ \t]*EOF", cf_recipe_body, re.S)
     assert match, "ConfigMap heredoc missing from cf-tunnel-install"
@@ -62,16 +74,8 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
         assert phrase in config_yaml, f"Missing expected config fragment: {phrase!r}"
 
 
-def test_deployment_patch_enforces_token_mode(cf_recipe_body: str) -> None:
-    match = re.search(
-        r"deployment_patch=\$\(cat <<-?'PATCH'\n(?P<patch>.*?)\n[ \t]*PATCH\n[ \t]*\)\n",
-        cf_recipe_body,
-        re.S,
-    )
-    assert match, "Deployment patch heredoc missing from cf-tunnel-install"
-
-    patch_json = match.group("patch")
-    patch = json.loads(patch_json)
+def test_deployment_patch_enforces_token_mode(deployment_patch_json: str) -> None:
+    patch = json.loads(deployment_patch_json)
     container = patch["spec"]["template"]["spec"]["containers"][0]
 
     env_vars = {env["name"]: env for env in container.get("env", [])}
@@ -98,14 +102,8 @@ def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> N
     assert "--wait" not in cf_recipe_body
 
 
-def test_deployment_patch_does_not_reference_credentials_file(cf_recipe_body: str) -> None:
-    match = re.search(
-        r"deployment_patch=\$\(cat <<-?'PATCH'\n(?P<patch>.*?)\n[ \t]*PATCH\n[ \t]*\)\n",
-        cf_recipe_body,
-        re.S,
-    )
-    assert match, "Deployment patch heredoc missing from cf-tunnel-install"
-    assert "credentials.json" not in match.group("patch")
+def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_json: str) -> None:
+    assert "credentials.json" not in deployment_patch_json
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
