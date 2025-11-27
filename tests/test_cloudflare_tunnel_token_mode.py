@@ -98,6 +98,16 @@ def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> N
     assert "--wait" not in cf_recipe_body
 
 
+def test_deployment_patch_does_not_reference_credentials_file(cf_recipe_body: str) -> None:
+    match = re.search(
+        r"deployment_patch=\$\(cat <<-?'PATCH'\n(?P<patch>.*?)\n[ \t]*PATCH\n[ \t]*\)\n",
+        cf_recipe_body,
+        re.S,
+    )
+    assert match, "Deployment patch heredoc missing from cf-tunnel-install"
+    assert "credentials.json" not in match.group("patch")
+
+
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
     text = CLOUDFLARE_DOC.read_text(encoding="utf-8")
     for phrase in (

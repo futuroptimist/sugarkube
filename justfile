@@ -445,6 +445,8 @@ cf-tunnel-install env='dev' token='':
     fi
 
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
+    # Replace the chart's default config/creds volumes with a single token-mode config volume.
+    # This ensures the pod never mounts credentials.json or any origin certificate material.
     deployment_patch=$(cat <<-'PATCH'
     {
       "spec": {
