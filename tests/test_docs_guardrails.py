@@ -38,6 +38,15 @@ def test_cloudflare_tunnel_doc_and_recipe_remain() -> None:
     operations_text = RASPI_OPERATIONS_DOC.read_text(encoding="utf-8")
     assert "cloudflare_tunnel.md" in operations_text, "Operations guide should reference the Cloudflare Tunnel documentation."
 
+    doc_text = CLOUDFLARE_DOC.read_text(encoding="utf-8")
+    for phrase in (
+        "TUNNEL_TOKEN",
+        "token-based",
+        "CF_TUNNEL_NAME",
+        "credentials.json",
+    ):
+        assert phrase in doc_text, f"Cloudflare doc should mention {phrase} token workflow."
+
 
 def test_raspi_operations_dspace_onboarding_persists() -> None:
     operations_text = RASPI_OPERATIONS_DOC.read_text(encoding="utf-8")
