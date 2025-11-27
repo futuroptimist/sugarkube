@@ -359,6 +359,21 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
+    # Tolerate common Cloudflare dashboard copy/paste patterns so the Secret always gets just the JWT.
+    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -e 's/^ *//' -e 's/ *$//')"
+    if printf '%s' "${token}" | grep -qi '^export '; then
+        token="${token#export }"
+        token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
+    fi
+    for prefix in token= TUNNEL_TOKEN= CF_TUNNEL_TOKEN=; do
+        case "${token}" in
+            ${prefix}*) token="${token#${prefix}}" ;;
+        esac
+    done
+    if printf '%s' "${token}" | grep -q "cloudflared"; then
+        token="$(set -- ${token}; printf '%s' "${!#}")"
+    fi
+
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
     kubectl -n cloudflare create secret generic tunnel-token \
@@ -377,11 +392,30 @@ cf-tunnel-install env='dev' token='':
         '  ingress: []'
     )
 
-    helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
+    existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
+    if [ -n "${existing}" ]; then
+        status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
+        if [ -z "${status}" ]; then
+            if helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -q '^STATUS: failed'; then
+                status='failed'
+            fi
+        fi
+        if [ "${status}" = "failed" ]; then
+            echo "Existing 'cloudflare-tunnel' Helm release is in failed state; uninstalling before re-deploy..."
+            helm -n cloudflare uninstall cloudflare-tunnel || true
+        fi
+    fi
+
+    if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
         --wait \
-        --values - <<<"${values_yaml}"
+        --values - <<<"${values_yaml}"; then
+        echo "Helm upgrade/install failed; diagnostics to follow:"
+        helm -n cloudflare status cloudflare-tunnel || true
+        kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+        exit 1
+    fi
 
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
