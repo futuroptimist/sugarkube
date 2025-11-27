@@ -53,6 +53,28 @@ the canonical way to install the connector on the Pi. The recipe now deploys Clo
 **token-based connector mode** (JWT from the dashboard), so no origin certificates or
 `credentials.json` files are required.
 
+### Names and environments: who controls what?
+
+- **Cloudflare tunnel name** (for example, `dspace-staging-v3`): lives entirely in Cloudflare and is
+  bound to the connector token you copy from the dashboard.
+- **Sugarkube `env`** (for example, `dev`, `staging`): controls Sugarkube naming/labels such as the
+  default tunnel name `sugarkube-<env>`.
+- **CF_TUNNEL_NAME**: overrides the Sugarkube default tunnel name so you can match the Cloudflare
+  dashboard name exactly.
+
+The **connector token (JWT)** is the canonical link between the k3s cluster and the Cloudflare
+tunnel. It is safe to run a staging tunnel token on a cluster you label as `env=dev` as long as you
+also set `CF_TUNNEL_NAME` to the Cloudflare tunnel’s name:
+
+```bash
+export CF_TUNNEL_TOKEN="<CONNECTOR_TOKEN_FROM_DASHBOARD>"
+export CF_TUNNEL_NAME="dspace-staging-v3"
+just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+```
+
+The token and `CF_TUNNEL_NAME` decide which Cloudflare tunnel you connect to; `env` mostly governs
+Sugarkube-side labels and defaults.
+
 ### Deploy the Helm chart via Sugarkube
 
 1. Export the tunnel token from Step 1 (add optional name and ID overrides to keep dashboard names
@@ -70,7 +92,7 @@ the canonical way to install the connector on the Pi. The recipe now deploys Clo
    `cloudflared ... --token <jwt>` command), but for clarity and security you should still export
    just the bare token string when possible. The Secret is mounted directly into the Deployment as
    `TUNNEL_TOKEN`, and the chart is patched to run `cloudflared tunnel run --token "$TUNNEL_TOKEN"`
-   with metrics/readiness on `:2000`.
+   with metrics/readiness on `:2000` and **no** `credentials.json` or origin cert references.
 3. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
@@ -79,10 +101,10 @@ the canonical way to install the connector on the Pi. The recipe now deploys Clo
    `curl http://localhost:2000/ready` returning `200` means the connector is up and Cloudflare can
    reach this cluster.
 
-### Worked example: dspace staging on sugarkube0
+### Worked example: dspace staging tunnel on the `dev` Sugarkube env
 
-Below is the full sequence for deploying the dspace staging connector on the primary control-plane
-node:
+Below is the full sequence for deploying the `dspace-staging-v3` tunnel on the primary
+control-plane node while keeping the Sugarkube environment set to `dev`:
 
 ```bash
 # SSH into the control-plane node
@@ -92,14 +114,13 @@ ssh sugarkube0
 cd ~/sugarkube
 
 # Token copied from the Cloudflare dashboard command snippet
-export CF_TUNNEL_TOKEN="<tunnel-token>"
+export CF_TUNNEL_TOKEN="<tunnel-token for dspace-staging-v3>"
 
-# Optional: keep tunnel names aligned with the dashboard
-export CF_TUNNEL_NAME="dspace-staging-k3s"
-export CF_TUNNEL_ID="<dashboard-tunnel-id>"
+# Keep tunnel names aligned with the dashboard
+export CF_TUNNEL_NAME="dspace-staging-v3"
 
 # Install the connector (creates namespace, Secret, and Helm release)
-just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
+just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
 
 # Verify the connector is healthy
 kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
@@ -111,7 +132,8 @@ kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhos
 
 If the pod logs ever show `Cannot determine default origin certificate path`, the deployment is
 still trying to use the legacy origin-cert / `credentials.json` flow. Re-run `just cf-tunnel-install`
-to reapply the token-based patch.
+to reapply the token-based patch; the recipe now removes any `credentials-file` references and
+forces `cloudflared tunnel run --token "$TUNNEL_TOKEN"`.
 
 Once `cloudflared` is running with the correct token, Cloudflare links the named tunnel to the
 cluster so requests to `staging.democratized.space` reach Traefik.
