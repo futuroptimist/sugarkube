@@ -54,7 +54,8 @@ the canonical way to install the connector on the Pi.
 ### Deploy the Helm chart via Sugarkube
 
 1. Export the tunnel token from Step 1 (add optional name and ID overrides to keep dashboard names
-   aligned):
+   aligned). The connector now runs in **token mode**—no origin certificate or `credentials.json`
+   is needed:
    ```bash
    export CF_TUNNEL_TOKEN="<tunnel-token>"
    export CF_TUNNEL_NAME="<dashboard-tunnel-name>"   # Optional: overrides sugarkube-<env>
@@ -64,9 +65,12 @@ the canonical way to install the connector on the Pi.
    ```bash
    just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
    ```
-   The recipe now strips common prefixes (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, or a full
+   The recipe strips common prefixes (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, or a full
    `cloudflared ... --token <jwt>` command), but for clarity and security you should still export
-   just the bare token string when possible.
+   just the bare token string when possible. The token is written to `Secret/tunnel-token` and
+   wired into the deployment via `TUNNEL_TOKEN`; the pod executes
+   `cloudflared tunnel run --token "$TUNNEL_TOKEN"` with the metrics/ready server still
+   exposed on `:2000` and ingress rules disabled (`ingress: []`).
 3. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
@@ -104,6 +108,10 @@ kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhos
 
 > **Tip**: Replace the placeholder values above with the real token and ID from your Cloudflare
 > dashboard.
+
+> If pod logs show `Cannot determine default origin certificate path`, the chart is still pointing
+> at a credentials file. Re-run `just cf-tunnel-install ...` to regenerate the deployment; it should
+> mount only the token secret and no longer reference `/etc/cloudflared/creds/credentials.json`.
 
 Once `cloudflared` is running with the correct token, Cloudflare links the named tunnel to the
 cluster so requests to `staging.democratized.space` reach Traefik.

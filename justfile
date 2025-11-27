@@ -378,7 +378,9 @@ cf-tunnel-install env='dev' token='':
 
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
-    kubectl -n cloudflare create secret generic tunnel-token \
+    secret_name="tunnel-token"
+
+    kubectl -n cloudflare create secret generic "${secret_name}" \
         --from-literal=token="${token}" \
         --dry-run=client -o yaml | kubectl apply -f -
 
@@ -390,9 +392,107 @@ cf-tunnel-install env='dev' token='':
         'cloudflare:' \
         "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"" \
         "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
-        '  secretName: tunnel-token' \
+        "  secretName: ${secret_name}" \
         '  ingress: []'
     )
+
+    if ! python3 - <<'PY' >/dev/null 2>&1
+import yaml
+PY
+    then
+        pip3 install --user --quiet pyyaml
+    fi
+
+    post_renderer=$(mktemp)
+    trap 'rm -f "${post_renderer}"' EXIT
+
+    cat >"${post_renderer}" <<'PY'
+#!/usr/bin/env python3
+"""Post-renderer to switch the cloudflared chart to token-based auth."""
+
+import os
+import sys
+from typing import Any, Dict, List
+
+import yaml
+
+
+def remove_credentials_line(config: str) -> str:
+    lines = []
+    for line in config.splitlines():
+        if "credentials-file:" in line:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def ensure_token_env(container: Dict[str, Any], secret_name: str) -> None:
+    env: List[Dict[str, Any]] = [
+        e for e in container.get("env", []) if e.get("name") != "TUNNEL_TOKEN"
+    ]
+    env.append(
+        {
+            "name": "TUNNEL_TOKEN",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": secret_name,
+                    "key": "token",
+                }
+            },
+        }
+    )
+    container["env"] = env
+
+
+def transform_docs(docs: List[Dict[str, Any]], secret_name: str) -> List[Dict[str, Any]]:
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+
+        if doc.get("kind") == "ConfigMap" and doc.get("data", {}).get("config.yaml"):
+            cfg = doc["data"]["config.yaml"]
+            doc["data"]["config.yaml"] = remove_credentials_line(cfg)
+
+        is_deploy = doc.get("kind") == "Deployment"
+        is_tunnel = doc.get("metadata", {}).get("name") == "cloudflare-tunnel"
+        if is_deploy and is_tunnel:
+            pod_spec = doc.get("spec", {}).get("template", {}).get("spec", {})
+            containers = pod_spec.get("containers", [])
+            if not containers:
+                continue
+
+            container = containers[0]
+            ensure_token_env(container, secret_name)
+
+            cmd = (
+                "cloudflared tunnel --config /etc/cloudflared/config/config.yaml "
+                "run --token \"$TUNNEL_TOKEN\""
+            )
+            container["command"] = ["/bin/sh", "-c"]
+            container["args"] = [cmd]
+
+            mounts = container.get("volumeMounts", [])
+            container["volumeMounts"] = [
+                vm for vm in mounts if vm.get("name") != "creds"
+            ]
+
+            volumes = pod_spec.get("volumes", [])
+            pod_spec["volumes"] = [v for v in volumes if v.get("name") != "creds"]
+
+    return docs
+
+
+def main() -> None:
+    secret_name = os.environ.get("CLOUDFLARE_TUNNEL_SECRET", "tunnel-token")
+    docs = list(yaml.safe_load_all(sys.stdin))
+    docs = transform_docs(docs, secret_name)
+    yaml.safe_dump_all(docs, sys.stdout, sort_keys=False)
+
+
+if __name__ == "__main__":
+    main()
+PY
+    chmod +x "${post_renderer}"
 
     existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
     if [ -n "${existing}" ]; then
@@ -407,9 +507,11 @@ cf-tunnel-install env='dev' token='':
         fi
     fi
 
-    if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
+    if ! CLOUDFLARE_TUNNEL_SECRET="${secret_name}" \
+        helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
+        --post-renderer "${post_renderer}" \
         --wait \
         --values - <<<"${values_yaml}"; then
         echo "Helm upgrade/install failed; diagnostics to follow:"
