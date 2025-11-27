@@ -407,7 +407,6 @@ cf-tunnel-install env='dev' token='':
         fi
     fi
 
-    helm_exit=0
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
@@ -416,6 +415,7 @@ cf-tunnel-install env='dev' token='':
         echo "Helm upgrade/install failed; diagnostics to follow:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+        exit "${helm_exit}"
     fi
 
     if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
@@ -468,6 +468,17 @@ cf-tunnel-install env='dev' token='':
       },
       {
         "op": "replace",
+        "path": "/spec/template/spec/containers/0/volumeMounts",
+        "value": [
+          {
+            "name": "cloudflare-tunnel-config",
+            "mountPath": "/etc/cloudflared/config",
+            "readOnly": true
+          }
+        ]
+      },
+      {
+        "op": "replace",
         "path": "/spec/template/spec/containers/0/env",
         "value": [
           {
@@ -492,17 +503,6 @@ cf-tunnel-install env='dev' token='':
         "value": [
           "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
         ]
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/volumeMounts",
-        "value": [
-          {
-            "name": "cloudflare-tunnel-config",
-            "mountPath": "/etc/cloudflared/config",
-            "readOnly": true
-          }
-        ]
       }
     ]
     PATCH
@@ -524,10 +524,6 @@ cf-tunnel-install env='dev' token='':
         "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
-
-    if [ "${helm_exit}" -ne 0 ]; then
-        printf '%s\n' "Note: Helm reported errors (exit code ${helm_exit}) but token-mode patches were applied."
-    fi
 
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
 helm-install:
