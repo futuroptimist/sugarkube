@@ -373,6 +373,8 @@ cf-tunnel-install env='dev' token='':
     if printf '%s' "${token}" | grep -q "cloudflared"; then
         token="$(printf '%s' "${token}" | awk '{print $NF}')"
     fi
+    # Final whitespace trim after all token transforms
+    token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
 
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
@@ -396,12 +398,12 @@ cf-tunnel-install env='dev' token='':
     if [ -n "${existing}" ]; then
         status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
         if [ -z "${status}" ]; then
-            if helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -q '^STATUS: failed'; then
-                status='failed'
+            if helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -qE '^STATUS: (failed|pending-install)'; then
+                status=$(helm -n cloudflare status cloudflare-tunnel 2>/dev/null | grep -oE '^STATUS: (failed|pending-install)' | cut -d' ' -f2)
             fi
         fi
-        if [ "${status}" = "failed" ]; then
-            echo "Existing 'cloudflare-tunnel' Helm release is in failed state; uninstalling before re-deploy..."
+        if [ "${status}" = "failed" ] || [ "${status}" = "pending-install" ]; then
+            echo "Existing 'cloudflare-tunnel' Helm release is in ${status} state; uninstalling before re-deploy..."
             helm -n cloudflare uninstall cloudflare-tunnel || true
         fi
     fi
