@@ -407,15 +407,15 @@ cf-tunnel-install env='dev' token='':
         fi
     fi
 
+    helm_exit_code=0
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
-        --wait \
         --values - <<<"${values_yaml}"; then
+        helm_exit_code=$?
         echo "Helm upgrade/install failed; diagnostics to follow:"
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
-        exit 1
     fi
 
     # Patch the config to token mode (no origin cert / credentials.json)
@@ -431,21 +431,32 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
-    # Build the deployment patch as a variable to avoid heredoc parsing issues
-    deployment_patch='{"spec":{"template":{"spec":{"containers":[{"name":"cloudflare-tunnel","env":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}],"command":["/bin/sh","-c","exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"${TUNNEL_TOKEN}\""]}]}}}}'
-    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
+    deployment_patch='[
+      {"op":"replace","path":"/spec/template/spec/volumes","value":[{"name":"config","configMap":{"name":"cloudflare-tunnel"}}]},
+      {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
+      {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[{"name":"config","mountPath":"/etc/cloudflared/config"}]},
+      {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c"]},
+      {"op":"replace","path":"/spec/template/spec/containers/0/args","value":["exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""]}
+    ]'
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
     # Verify the patched rollout becomes healthy
-    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=120s; then
+    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
         echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+        kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
         exit 1
+    fi
+
+    if [ "${helm_exit_code}" -ne 0 ]; then
+        echo "Helm reported an error earlier; investigate helm status above. Token-mode patches still applied." >&2
     fi
 
     printf '%s\n' \
         'Cloudflare Tunnel chart deployed.' \
         '- Secret: cloudflare/tunnel-token (key: token)' \
+        "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
 

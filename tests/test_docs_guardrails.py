@@ -36,11 +36,32 @@ def test_cloudflare_tunnel_doc_and_recipe_remain() -> None:
         assert phrase in text, "Cloudflare Tunnel just recipes should remain discoverable."
 
     operations_text = RASPI_OPERATIONS_DOC.read_text(encoding="utf-8")
-    assert "cloudflare_tunnel.md" in operations_text, "Operations guide should reference the Cloudflare Tunnel documentation."
+    assert "cloudflare_tunnel.md" in operations_text, (
+        "Operations guide should reference the Cloudflare Tunnel documentation."
+    )
+
+
+def test_cloudflare_tunnel_doc_calls_out_token_mode_details() -> None:
+    text = CLOUDFLARE_DOC.read_text(encoding="utf-8")
+
+    for phrase in (
+        "CF_TUNNEL_TOKEN",
+        "CF_TUNNEL_NAME",
+        "connector token (JWT)",
+        "token-based connector mode",
+    ):
+        assert phrase in text, f"Cloudflare tunnel doc should mention {phrase}"
+
+    assert "credentials.json" in text, "Doc should describe moving away from credentials.json"
+    assert (
+        "Cannot determine default origin certificate path" in text
+    ), "Doc should include error guidance for origin cert paths."
 
 
 def test_raspi_operations_dspace_onboarding_persists() -> None:
     operations_text = RASPI_OPERATIONS_DOC.read_text(encoding="utf-8")
 
     for phrase in ("## Step 4: Deploy dspace", "helm upgrade --install dspace"):
-        assert phrase in operations_text, f"Operations guide should retain '{phrase}' for dspace onboarding."
+        assert phrase in operations_text, (
+            f"Operations guide should retain '{phrase}' for dspace onboarding."
+        )
