@@ -102,6 +102,28 @@ Cloudflare tunnel, Sugarkube `env`, and `CF_TUNNEL_NAME` interact.
    `curl http://localhost:2000/ready` returning `200` means the connector is up and Cloudflare can
    reach this cluster.
 
+#### Recovery and reset
+
+- Inspect status and logs if the rollout wedges:
+  ```bash
+  just cf-tunnel-debug
+  ```
+- Hard reset the connector resources without deleting the token Secret:
+  ```bash
+  just cf-tunnel-reset
+  ```
+  The reset removes the Deployment, pods, ConfigMap, and Helm release but keeps the `tunnel-token`
+  Secret by default. Commented guidance in the recipe shows how to delete the Secret if you truly
+  want a full wipe.
+- Reinstall in token mode after a reset (rerunning the recipe is idempotent and includes
+  teardown+retry logic if a rollout fails):
+  ```bash
+  just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+  ```
+
+Reset + reinstall is the canonical recovery path for a badly wedged connector. The Secret is
+preserved unless you explicitly delete it, keeping the JWT safe between runs while you iterate.
+
 ### Worked example: dspace staging tunnel on the `dev` Sugarkube env
 
 Below is the full sequence for deploying the `dspace-staging-v3` tunnel on the primary
