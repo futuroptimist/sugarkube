@@ -446,55 +446,60 @@ cf-tunnel-install env='dev' token='':
     # Replace the chart's default config/creds volumes with a single token-mode config volume.
     # This ensures the pod never mounts credentials.json or any origin certificate material.
     read -r -d '' deployment_patch <<'PATCH' || true
-    {
-      "spec": {
-        "template": {
-          "spec": {
-            "volumes": [
-              {
-                "name": "cloudflare-tunnel-config",
-                "configMap": {
-                  "name": "cloudflare-tunnel",
-                  "items": [
-                    { "key": "config.yaml", "path": "config.yaml" }
-                  ]
-                }
-              }
-            ],
-            "containers": [
-              {
-                "name": "cloudflare-tunnel",
-                "env": [
-                  {
-                    "name": "TUNNEL_TOKEN",
-                    "valueFrom": {
-                      "secretKeyRef": {
-                        "name": "tunnel-token",
-                        "key": "token"
-                      }
-                    }
-                  }
-                ],
-                "volumeMounts": [
-                  {
-                    "name": "cloudflare-tunnel-config",
-                    "mountPath": "/etc/cloudflared/config",
-                    "readOnly": true
-                  }
-                ],
-                "command": ["/bin/sh", "-c"],
-                "args": [
-                  "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
-                ]
-              }
-            ]
+    [
+      {
+        "op": "replace",
+        "path": "/spec/template/spec/volumes",
+        "value": [
+          {
+            "name": "cloudflare-tunnel-config",
+            "configMap": {
+              "name": "cloudflare-tunnel",
+              "items": [
+                { "key": "config.yaml", "path": "config.yaml" }
+              ]
+            }
           }
-        }
+        ]
+      },
+      {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/env",
+        "value": [
+          {
+            "name": "TUNNEL_TOKEN",
+            "valueFrom": {
+              "secretKeyRef": {
+                "name": "tunnel-token",
+                "key": "token"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/volumeMounts",
+        "value": [
+          {
+            "name": "cloudflare-tunnel-config",
+            "mountPath": "/etc/cloudflared/config",
+            "readOnly": true
+          }
+        ]
+      },
+      { "op": "add", "path": "/spec/template/spec/containers/0/command", "value": ["/bin/sh", "-c"] },
+      {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/args",
+        "value": [
+          "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+        ]
       }
-    }
+    ]
     PATCH
 
-    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
     # Allow up to 180s for rollout to complete; this accounts for image pull times and the deployment reaching ready state.
     if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
