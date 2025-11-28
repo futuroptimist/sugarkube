@@ -502,17 +502,36 @@ cf-tunnel-install env='dev' token='':
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
+    helm_note_printed=0
+
     # Allow up to 180s for rollout to complete; this accounts for image pull times and the deployment reaching ready state.
     if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
         echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
         kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
-        exit 1
+
+        echo "Attempting teardown + retry: deleting existing pods and retrying rollout..." >&2
+        kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel || true
+
+        sleep 5
+
+        if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=60s; then
+            echo "cloudflare-tunnel still failing after teardown+retry; see logs above." >&2
+            helm -n cloudflare status cloudflare-tunnel || true
+            kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+            kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
+            if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
+                echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
+                helm_note_printed=1
+            fi
+            exit 1
+        fi
     fi
 
-    if [ "${helm_exit_code:-0}" -ne 0 ]; then
+    if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
         echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
+        helm_note_printed=1
     fi
 
     printf '%s\n' \
@@ -521,6 +540,59 @@ cf-tunnel-install env='dev' token='':
         "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
         '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
         '- Readiness endpoint: /ready must return 200'
+
+# Hard reset the Cloudflare Tunnel resources in the cluster for a fresh cf-tunnel-install.
+cf-tunnel-reset:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    # Delete deployment, pods, and configmap; keep the Secret so the token isn't lost by default.
+    kubectl -n cloudflare delete deploy cloudflare-tunnel --ignore-not-found=true
+    kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel --ignore-not-found=true
+    kubectl -n cloudflare delete configmap cloudflare-tunnel --ignore-not-found=true
+
+    # Optionally, keep this commented out but documented for a full nuke:
+    # kubectl -n cloudflare delete secret tunnel-token --ignore-not-found=true
+
+    # Delete the Helm release (if present) to guarantee a clean slate.
+    if helm -n cloudflare list --filter '^cloudflare-tunnel$' | grep -q cloudflare-tunnel; then
+        helm -n cloudflare uninstall cloudflare-tunnel || true
+    fi
+
+    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=dev token=\"${CF_TUNNEL_TOKEN:-<your-token>}\"' to reinstall."
+
+# Show Cloudflare Tunnel status and recent logs (for debugging rollout failures).
+cf-tunnel-debug:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    echo "=== Helm release ==="
+    helm -n cloudflare status cloudflare-tunnel || echo "No Helm release."
+
+    echo
+    echo "=== Deployment + pods ==="
+    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel -o wide || true
+
+    echo
+    echo "=== ConfigMap (config.yaml) ==="
+    kubectl -n cloudflare get configmap cloudflare-tunnel -o yaml || true
+
+    echo
+    echo "=== Deployment container + volumes ==="
+    kubectl -n cloudflare get deploy cloudflare-tunnel -o yaml | sed -n '/containers:/,/volumes:/p' || true
+
+    echo
+    echo "=== Recent logs from one pod ==="
+    POD=$(kubectl -n cloudflare get pods -l app.kubernetes.io/name=cloudflare-tunnel -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$POD" ]; then
+        kubectl -n cloudflare logs "$POD" --tail=50 || true
+    else
+        echo "No Cloudflare Tunnel pods to show logs for."
+    fi
 
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
 helm-install:
