@@ -407,15 +407,15 @@ cf-tunnel-install env='dev' token='':
         fi
     fi
 
+    helm_exit_code=0
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
         --namespace cloudflare \
         --create-namespace \
         --values - <<<"${values_yaml}"; then
-        helm_exit=$?
+        helm_exit_code=$?
         echo "Helm upgrade/install failed; diagnostics to follow:" >&2
         helm -n cloudflare status cloudflare-tunnel || true
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
-        exit "${helm_exit}"
     fi
 
     if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
@@ -436,7 +436,6 @@ cf-tunnel-install env='dev' token='':
         warp-routing:
           enabled: false
         metrics: 0.0.0.0:2000
-        no-autoupdate: true
         ingress:
           - service: http_status:404
     EOF
@@ -446,68 +445,56 @@ cf-tunnel-install env='dev' token='':
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
     # Replace the chart's default config/creds volumes with a single token-mode config volume.
     # This ensures the pod never mounts credentials.json or any origin certificate material.
-    deployment_patch=$(cat <<-'PATCH'
-    [
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/volumes",
-        "value": [
-          {
-            "name": "cloudflare-tunnel-config",
-            "configMap": {
-              "name": "cloudflare-tunnel",
-              "items": [
-                {
-                  "key": "config.yaml",
-                  "path": "config.yaml"
+    read -r -d '' deployment_patch <<-'PATCH' || true
+    {
+      "spec": {
+        "template": {
+          "spec": {
+            "volumes": [
+              {
+                "name": "cloudflare-tunnel-config",
+                "configMap": {
+                  "name": "cloudflare-tunnel",
+                  "items": [
+                    { "key": "config.yaml", "path": "config.yaml" }
+                  ]
                 }
-              ]
-            }
-          }
-        ]
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/volumeMounts",
-        "value": [
-          {
-            "name": "cloudflare-tunnel-config",
-            "mountPath": "/etc/cloudflared/config",
-            "readOnly": true
-          }
-        ]
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/env",
-        "value": [
-          {
-            "name": "TUNNEL_TOKEN",
-            "valueFrom": {
-              "secretKeyRef": {
-                "name": "tunnel-token",
-                "key": "token"
               }
-            }
+            ],
+            "containers": [
+              {
+                "name": "cloudflare-tunnel",
+                "env": [
+                  {
+                    "name": "TUNNEL_TOKEN",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "tunnel-token",
+                        "key": "token"
+                      }
+                    }
+                  }
+                ],
+                "volumeMounts": [
+                  {
+                    "name": "cloudflare-tunnel-config",
+                    "mountPath": "/etc/cloudflared/config",
+                    "readOnly": true
+                  }
+                ],
+                "command": ["/bin/sh", "-c"],
+                "args": [
+                  "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+                ]
+              }
+            ]
           }
-        ]
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/command",
-        "value": ["/bin/sh", "-c"]
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/args",
-        "value": [
-          "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
-        ]
+        }
       }
-    ]
+    }
     PATCH
-    )
-    kubectl -n cloudflare patch deployment cloudflare-tunnel --type=json --patch "${deployment_patch}"
+
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type merge --patch "${deployment_patch}"
 
     # Allow up to 180s for rollout to complete; this accounts for image pull times and the deployment reaching ready state.
     if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
@@ -516,6 +503,10 @@ cf-tunnel-install env='dev' token='':
         kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
         kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
         exit 1
+    fi
+
+    if [ "${helm_exit_code:-0}" -ne 0 ]; then
+        echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
     fi
 
     printf '%s\n' \
