@@ -102,6 +102,25 @@ Cloudflare tunnel, Sugarkube `env`, and `CF_TUNNEL_NAME` interact.
    `curl http://localhost:2000/ready` returning `200` means the connector is up and Cloudflare can
    reach this cluster.
 
+### Recovery and reset
+
+- Inspect the current connector state and logs:
+  ```bash
+  just cf-tunnel-debug
+  ```
+- If the Deployment is wedged, reset it (keeps `Secret/tunnel-token` by default):
+  ```bash
+  just cf-tunnel-reset
+  ```
+- Reinstall in token mode after a reset:
+  ```bash
+  just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+  ```
+
+Re-running these recipes is safe and idempotent. The reset preserves the token Secret unless you
+uncomment the optional delete line. Resetting and then reinstalling is the canonical way to recover
+from CrashLoopBackOffs or lingering ReplicaSets and converge to a known-good token-mode state.
+
 ### Worked example: dspace staging tunnel on the `dev` Sugarkube env
 
 Below is the full sequence for deploying the `dspace-staging-v3` tunnel on the primary
