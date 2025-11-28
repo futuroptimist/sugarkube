@@ -13,8 +13,8 @@ JUSTFILE = REPO_ROOT / "justfile"
 CLOUDFLARE_DOC = REPO_ROOT / "docs" / "cloudflare_tunnel.md"
 
 
-def _extract_cf_recipe_body() -> str:
-    """Return the full body of the cf-tunnel-install recipe."""
+def _extract_recipe_body(recipe: str) -> str:
+    """Return the full body of the given recipe from the justfile."""
 
     lines = JUSTFILE.read_text(encoding="utf-8").splitlines()
     body: list[str] = []
@@ -36,11 +36,17 @@ def _extract_cf_recipe_body() -> str:
             if line and not line[0].isspace() and line.strip() not in {')'}:
                 break
             continue
-        if line.startswith("cf-tunnel-install"):
+        if line.startswith(recipe):
             capture = True
     if not body:
-        pytest.fail("cf-tunnel-install recipe missing from justfile")
+        pytest.fail(f"{recipe} recipe missing from justfile")
     return "\n".join(body)
+
+
+def _extract_cf_recipe_body() -> str:
+    """Return the full body of the cf-tunnel-install recipe."""
+
+    return _extract_recipe_body("cf-tunnel-install")
 
 
 @pytest.fixture(scope="module")
@@ -156,3 +162,37 @@ def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
         "credentials.json",
     ):
         assert phrase in text, f"Documentation missing token-mode guidance: {phrase}"
+
+
+def test_reset_and_debug_recipes_exist() -> None:
+    just_text = JUSTFILE.read_text(encoding="utf-8")
+    assert re.search(r"^cf-tunnel-reset:\s*$", just_text, re.M)
+    assert re.search(r"^cf-tunnel-debug:\s*$", just_text, re.M)
+
+
+def test_cf_tunnel_reset_commands_present_and_safe() -> None:
+    body = _extract_recipe_body("cf-tunnel-reset")
+
+    for expected in (
+        "kubectl -n cloudflare delete deploy cloudflare-tunnel",
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel",
+        "helm -n cloudflare uninstall cloudflare-tunnel",
+    ):
+        assert expected in body
+
+    for line in body.splitlines():
+        if "kubectl -n cloudflare delete secret tunnel-token" in line:
+            assert line.lstrip().startswith("#"), "tunnel-token delete must be optional/commented"
+
+
+def test_cf_tunnel_install_deletes_pods_then_retries_rollout(cf_recipe_body: str) -> None:
+    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in cf_recipe_body
+
+    rollouts = re.findall(
+        r"kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=\d+s",
+        cf_recipe_body,
+    )
+    assert len(rollouts) >= 2, "expected initial rollout plus retry after teardown"
+    assert any("--timeout=60s" in cmd for cmd in rollouts)
+
+    assert "cloudflare-tunnel still failing after teardown+retry" in cf_recipe_body
