@@ -67,30 +67,10 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
     return json.loads(match.group("patch"))
 
 
-def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
-    match = re.search(r"configmap_yaml=\$\(cat <<-?'?EOF'?\n(?P<body>.*?)\n[ \t]*EOF", cf_recipe_body, re.S)
-    assert match, "ConfigMap heredoc missing from cf-tunnel-install"
-
-    config_yaml = match.group("body")
-    expected = """
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: cloudflare-tunnel
-      namespace: cloudflare
-    data:
-      config.yaml: |
-        tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
-        warp-routing:
-          enabled: false
-        metrics: 0.0.0.0:2000
-        no-autoupdate: true
-        ingress:
-          - service: http_status:404
-    """
-    assert config_yaml.strip() == expected.strip()
-    assert "credentials-file" not in config_yaml
-    assert "secret containing" not in config_yaml
+def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
+    assert "configmap_yaml" not in cf_recipe_body
+    assert "kind: ConfigMap" not in cf_recipe_body
+    assert "config.yaml" not in cf_recipe_body
 
 
 def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) -> None:
@@ -98,13 +78,7 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     volumes = ops_by_path.get("/spec/template/spec/volumes")
     assert volumes and volumes.get("op") == "replace"
-    volume_list = volumes.get("value")
-    assert isinstance(volume_list, list)
-    assert len(volume_list) == 1
-    volume = volume_list[0]
-    assert volume["name"] == "cloudflare-tunnel-config"
-    assert volume["configMap"]["name"] == "cloudflare-tunnel"
-    assert volume["configMap"]["items"] == [{"key": "config.yaml", "path": "config.yaml"}]
+    assert volumes.get("value") == []
 
     env_op = ops_by_path.get("/spec/template/spec/containers/0/env")
     assert env_op and env_op.get("op") in {"add", "replace"}
@@ -123,18 +97,12 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
     assert args_op and args_op.get("op") in {"add", "replace"}
     args = args_op.get("value") or []
     assert args == [
-        "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+        "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""
     ]
 
     volume_mounts = ops_by_path.get("/spec/template/spec/containers/0/volumeMounts")
     assert volume_mounts and volume_mounts.get("op") in {"add", "replace"}
-    mounts = volume_mounts.get("value") or []
-    assert len(mounts) == 1
-    assert mounts[0] == {
-        "name": "cloudflare-tunnel-config",
-        "mountPath": "/etc/cloudflared/config",
-        "readOnly": True,
-    }
+    assert volume_mounts.get("value") == []
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -162,6 +130,8 @@ def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_o
     patch_text = json.dumps(deployment_patch_ops)
     assert "credentials.json" not in patch_text
     assert "creds" not in patch_text
+    assert "/etc/cloudflared/config" not in patch_text
+    assert "cloudflare-tunnel-config" not in patch_text
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
@@ -191,3 +161,4 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
 
     assert "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel" in debug_body
     assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
+    assert "No ConfigMap created in token-only mode" in debug_body
