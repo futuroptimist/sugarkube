@@ -67,30 +67,10 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
     return json.loads(match.group("patch"))
 
 
-def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
-    match = re.search(r"configmap_yaml=\$\(cat <<-?'?EOF'?\n(?P<body>.*?)\n[ \t]*EOF", cf_recipe_body, re.S)
-    assert match, "ConfigMap heredoc missing from cf-tunnel-install"
-
-    config_yaml = match.group("body")
-    expected = """
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: cloudflare-tunnel
-      namespace: cloudflare
-    data:
-      config.yaml: |
-        tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
-        warp-routing:
-          enabled: false
-        metrics: 0.0.0.0:2000
-        no-autoupdate: true
-        ingress:
-          - service: http_status:404
-    """
-    assert config_yaml.strip() == expected.strip()
-    assert "credentials-file" not in config_yaml
-    assert "secret containing" not in config_yaml
+def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
+    assert "configmap_yaml" not in cf_recipe_body
+    assert "kind: ConfigMap" not in cf_recipe_body
+    assert "config.yaml" not in cf_recipe_body
 
 
 def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) -> None:
@@ -181,3 +161,4 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
 
     assert "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel" in debug_body
     assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
+    assert "No ConfigMap created in token-only mode" in debug_body

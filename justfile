@@ -424,25 +424,6 @@ cf-tunnel-install env='dev' token='':
         exit 1
     fi
 
-    configmap_yaml=$(cat <<-'EOF'
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: cloudflare-tunnel
-      namespace: cloudflare
-    data:
-      config.yaml: |
-        tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
-        warp-routing:
-          enabled: false
-        metrics: 0.0.0.0:2000
-        no-autoupdate: true
-        ingress:
-          - service: http_status:404
-    EOF
-    )
-    printf '%s\n' "${configmap_yaml}" | kubectl apply -f -
-
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
     # Remove config/creds volumes entirely so the pod never mounts credentials.json or any origin certificate material.
     read -r -d '' deployment_patch <<'PATCH' || true
@@ -561,8 +542,8 @@ cf-tunnel-debug:
     kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel -o wide || true
 
     echo
-    echo "=== ConfigMap (config.yaml) ==="
-    kubectl -n cloudflare get configmap cloudflare-tunnel -o yaml || true
+    echo "=== ConfigMap ==="
+    echo "No ConfigMap created in token-only mode; configuration is passed via CLI args."
 
     echo
     echo "=== Deployment container + volumes ==="
