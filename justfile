@@ -544,7 +544,7 @@ cf-tunnel-install env='dev' token='':
 # Hard reset the Cloudflare Tunnel resources in the cluster for a fresh cf-tunnel-install.
 cf-tunnel-reset:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
@@ -561,12 +561,12 @@ cf-tunnel-reset:
         helm -n cloudflare uninstall cloudflare-tunnel || true
     fi
 
-    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=dev token=\"$CF_TUNNEL_TOKEN\"' to reinstall."
+    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=dev token=\"${CF_TUNNEL_TOKEN:-<your-token>}\"' to reinstall."
 
 # Show Cloudflare Tunnel status and recent logs (for debugging rollout failures).
 cf-tunnel-debug:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
