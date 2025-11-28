@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -67,14 +68,29 @@ def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
 
     config_yaml = match.group("body")
     assert "credentials-file" not in config_yaml
-    assert "no-autoupdate" not in config_yaml
-    for phrase in (
-        "tunnel: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"",
-        "warp-routing:",
-        "metrics: 0.0.0.0:2000",
-        "service: http_status:404",
-    ):
-        assert phrase in config_yaml, f"Missing expected config fragment: {phrase!r}"
+
+    expected_yaml = textwrap.dedent(
+        """
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: cloudflare-tunnel
+          namespace: cloudflare
+        data:
+          config.yaml: |
+            tunnel: "${CF_TUNNEL_NAME:-sugarkube-{{ env }}}"
+            warp-routing:
+              enabled: false
+            metrics: 0.0.0.0:2000
+            no-autoupdate: true
+            ingress:
+              - service: http_status:404
+        """
+    ).strip()
+
+    normalized = textwrap.dedent(config_yaml).strip()
+
+    assert normalized == expected_yaml
 
 
 def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) -> None:
@@ -91,7 +107,7 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
     assert volume["configMap"]["items"] == [{"key": "config.yaml", "path": "config.yaml"}]
 
     env_op = ops_by_path.get("/spec/template/spec/containers/0/env")
-    assert env_op and env_op.get("op") == "add"
+    assert env_op and env_op.get("op") in {"add", "replace"}
     assert env_op.get("value") == [
         {
             "name": "TUNNEL_TOKEN",
@@ -100,16 +116,18 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
     ]
 
     command_op = ops_by_path.get("/spec/template/spec/containers/0/command")
-    assert command_op and command_op.get("op") == "add"
+    assert command_op and command_op.get("op") in {"add", "replace"}
     assert command_op.get("value") == ["/bin/sh", "-c"]
 
     args_op = ops_by_path.get("/spec/template/spec/containers/0/args")
-    assert args_op and args_op.get("op") == "add"
+    assert args_op and args_op.get("op") in {"add", "replace"}
     args = args_op.get("value") or []
-    assert any("--token \"$TUNNEL_TOKEN\"" in arg for arg in args)
+    assert args == [
+        "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+    ]
 
     volume_mounts = ops_by_path.get("/spec/template/spec/containers/0/volumeMounts")
-    assert volume_mounts and volume_mounts.get("op") == "add"
+    assert volume_mounts and volume_mounts.get("op") in {"add", "replace"}
     mounts = volume_mounts.get("value") or []
     assert len(mounts) == 1
     assert mounts[0] == {
