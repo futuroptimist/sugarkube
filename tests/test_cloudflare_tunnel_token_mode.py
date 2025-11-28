@@ -68,7 +68,11 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
 
 
 def test_configmap_patch_strips_credentials_file(cf_recipe_body: str) -> None:
-    match = re.search(r"configmap_yaml=\$\(cat <<-?'?EOF'?\n(?P<body>.*?)\n[ \t]*EOF", cf_recipe_body, re.S)
+    configmap_regex = (
+        r"configmap_yaml=\$\(cat <<-?'?EOF'?\n(?P<body>.*?)\n"
+        r"[ \t]*EOF"
+    )
+    match = re.search(configmap_regex, cf_recipe_body, re.S)
     assert match, "ConfigMap heredoc missing from cf-tunnel-install"
 
     config_yaml = match.group("body")
@@ -100,11 +104,7 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
     assert volumes and volumes.get("op") == "replace"
     volume_list = volumes.get("value")
     assert isinstance(volume_list, list)
-    assert len(volume_list) == 1
-    volume = volume_list[0]
-    assert volume["name"] == "cloudflare-tunnel-config"
-    assert volume["configMap"]["name"] == "cloudflare-tunnel"
-    assert volume["configMap"]["items"] == [{"key": "config.yaml", "path": "config.yaml"}]
+    assert volume_list == []
 
     env_op = ops_by_path.get("/spec/template/spec/containers/0/env")
     assert env_op and env_op.get("op") in {"add", "replace"}
@@ -123,18 +123,16 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
     assert args_op and args_op.get("op") in {"add", "replace"}
     args = args_op.get("value") or []
     assert args == [
-        "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+        (
+            "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run "
+            '--token "$TUNNEL_TOKEN"'
+        )
     ]
 
     volume_mounts = ops_by_path.get("/spec/template/spec/containers/0/volumeMounts")
     assert volume_mounts and volume_mounts.get("op") in {"add", "replace"}
     mounts = volume_mounts.get("value") or []
-    assert len(mounts) == 1
-    assert mounts[0] == {
-        "name": "cloudflare-tunnel-config",
-        "mountPath": "/etc/cloudflared/config",
-        "readOnly": True,
-    }
+    assert mounts == []
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -147,7 +145,10 @@ def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> N
 
 
 def test_teardown_retry_is_baked_into_cf_tunnel_install(cf_recipe_body: str) -> None:
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in cf_recipe_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
+        in cf_recipe_body
+    )
 
     rollout_calls = re.findall(
         r"kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=\d+s",
@@ -158,10 +159,13 @@ def test_teardown_retry_is_baked_into_cf_tunnel_install(cf_recipe_body: str) -> 
     assert "exit 1" in cf_recipe_body
 
 
-def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_ops: list[dict]) -> None:
+def test_deployment_patch_does_not_reference_credentials_file(
+    deployment_patch_ops: list[dict],
+) -> None:
     patch_text = json.dumps(deployment_patch_ops)
     assert "credentials.json" not in patch_text
     assert "creds" not in patch_text
+    assert "/etc/cloudflared/config" not in patch_text
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
@@ -181,7 +185,10 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     debug_body = _extract_recipe_body("cf-tunnel-debug")
 
     assert "kubectl -n cloudflare delete deploy cloudflare-tunnel" in reset_body
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in reset_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
+        in reset_body
+    )
     assert "helm -n cloudflare uninstall cloudflare-tunnel" in reset_body
 
     # Secret deletion must remain optional/commented.
@@ -189,5 +196,8 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
         if "delete secret tunnel-token" in line:
             assert line.strip().startswith("#"), "Secret deletion should be commented/optional"
 
-    assert "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel" in debug_body
+    assert (
+        "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel"
+        in debug_body
+    )
     assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
