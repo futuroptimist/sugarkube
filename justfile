@@ -436,11 +436,12 @@ cf-tunnel-install env='dev' token='':
         warp-routing:
           enabled: false
         metrics: 0.0.0.0:2000
+        no-autoupdate: true
         ingress:
           - service: http_status:404
     EOF
     )
-    printf '%s' "${configmap_yaml}" | kubectl apply -f -
+    printf '%s\n' "${configmap_yaml}" | kubectl apply -f -
 
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
     # Replace the chart's default config/creds volumes with a single token-mode config volume.
@@ -488,7 +489,11 @@ cf-tunnel-install env='dev' token='':
           }
         ]
       },
-      { "op": "add", "path": "/spec/template/spec/containers/0/command", "value": ["/bin/sh", "-c"] },
+      {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/command",
+        "value": ["/bin/sh", "-c"]
+      },
       {
         "op": "add",
         "path": "/spec/template/spec/containers/0/args",
