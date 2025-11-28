@@ -444,24 +444,13 @@ cf-tunnel-install env='dev' token='':
     printf '%s\n' "${configmap_yaml}" | kubectl apply -f -
 
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
-    # Replace the chart's default config/creds volumes with a single token-mode config volume.
-    # This ensures the pod never mounts credentials.json or any origin certificate material.
+    # Remove config/creds volumes entirely so the pod never mounts credentials.json or any origin certificate material.
     read -r -d '' deployment_patch <<'PATCH' || true
     [
       {
         "op": "replace",
         "path": "/spec/template/spec/volumes",
-        "value": [
-          {
-            "name": "cloudflare-tunnel-config",
-            "configMap": {
-              "name": "cloudflare-tunnel",
-              "items": [
-                { "key": "config.yaml", "path": "config.yaml" }
-              ]
-            }
-          }
-        ]
+        "value": []
       },
       {
         "op": "replace",
@@ -481,20 +470,14 @@ cf-tunnel-install env='dev' token='':
       {
         "op": "replace",
         "path": "/spec/template/spec/containers/0/volumeMounts",
-        "value": [
-          {
-            "name": "cloudflare-tunnel-config",
-            "mountPath": "/etc/cloudflared/config",
-            "readOnly": true
-          }
-        ]
+        "value": []
       },
       { "op": "replace", "path": "/spec/template/spec/containers/0/command", "value": ["/bin/sh", "-c"] },
       {
         "op": "replace",
         "path": "/spec/template/spec/containers/0/args",
         "value": [
-          "exec cloudflared tunnel --config /etc/cloudflared/config/config.yaml run --token \"$TUNNEL_TOKEN\""
+          "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""
         ]
       }
     ]
