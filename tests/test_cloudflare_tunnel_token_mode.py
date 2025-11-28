@@ -13,8 +13,8 @@ JUSTFILE = REPO_ROOT / "justfile"
 CLOUDFLARE_DOC = REPO_ROOT / "docs" / "cloudflare_tunnel.md"
 
 
-def _extract_cf_recipe_body() -> str:
-    """Return the full body of the cf-tunnel-install recipe."""
+def _extract_recipe_body(recipe: str) -> str:
+    """Return the full body of the requested recipe."""
 
     lines = JUSTFILE.read_text(encoding="utf-8").splitlines()
     body: list[str] = []
@@ -27,25 +27,35 @@ def _extract_cf_recipe_body() -> str:
                 if line.strip() == heredoc_end:
                     heredoc_end = None
                 continue
-            if "<<EOF" in line:
+            if re.search(r"<<[-']?EOF", line):
                 heredoc_end = "EOF"
                 continue
-            if "<<'PATCH'" in line:
+            if re.search(r"<<['-]?PATCH", line):
                 heredoc_end = "PATCH"
                 continue
             if line and not line[0].isspace() and line.strip() not in {')'}:
                 break
             continue
-        if line.startswith("cf-tunnel-install"):
+        if line.startswith(f"{recipe} ") or line.startswith(f"{recipe}:"):
             capture = True
     if not body:
-        pytest.fail("cf-tunnel-install recipe missing from justfile")
+        pytest.fail(f"{recipe} recipe missing from justfile")
     return "\n".join(body)
 
 
 @pytest.fixture(scope="module")
 def cf_recipe_body() -> str:
-    return _extract_cf_recipe_body()
+    return _extract_recipe_body("cf-tunnel-install")
+
+
+@pytest.fixture(scope="module")
+def cf_reset_body() -> str:
+    return _extract_recipe_body("cf-tunnel-reset")
+
+
+@pytest.fixture(scope="module")
+def cf_debug_body() -> str:
+    return _extract_recipe_body("cf-tunnel-debug")
 
 
 @pytest.fixture(scope="module")
@@ -144,6 +154,36 @@ def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_o
     patch_text = json.dumps(deployment_patch_ops)
     assert "credentials.json" not in patch_text
     assert "creds" not in patch_text
+
+
+def test_cf_tunnel_reset_and_debug_recipes_exist(cf_reset_body: str, cf_debug_body: str) -> None:
+    assert cf_reset_body.strip()
+    assert cf_debug_body.strip()
+
+
+def test_cf_tunnel_reset_preserves_secret(cf_reset_body: str) -> None:
+    assert "kubectl -n cloudflare delete deploy cloudflare-tunnel" in cf_reset_body
+    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in cf_reset_body
+    assert "helm -n cloudflare uninstall cloudflare-tunnel" in cf_reset_body
+
+    secret_deletes = [
+        line
+        for line in cf_reset_body.splitlines()
+        if "kubectl -n cloudflare delete secret tunnel-token" in line
+        and not line.lstrip().startswith("#")
+    ]
+    assert not secret_deletes, "Reset should not delete tunnel-token by default"
+
+
+def test_cf_tunnel_install_includes_teardown_retry(cf_recipe_body: str) -> None:
+    delete_pod_cmd = "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
+    assert delete_pod_cmd in cf_recipe_body
+
+    rollout_calls = cf_recipe_body.count(
+        "kubectl -n cloudflare rollout status deployment/cloudflare-tunnel"
+    )
+    assert rollout_calls >= 2
+    assert "still failing after teardown+retry" in cf_recipe_body
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
