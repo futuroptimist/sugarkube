@@ -355,124 +355,88 @@ cf-tunnel-install env='dev' token='':
 
     : "${token:=${CF_TUNNEL_TOKEN:-}}"
     if [ -z "${token}" ]; then
-        echo "Set CF_TUNNEL_TOKEN or pass token=<tunnel-token> to proceed." >&2
-        exit 1
+    echo "Set CF_TUNNEL_TOKEN or pass token=<tunnel-token> to proceed." >&2
+    exit 1
     fi
 
     # Tolerate common Cloudflare dashboard copy/paste patterns so the Secret always gets just the JWT.
     token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -e 's/^ *//' -e 's/ *$//')"
     if printf '%s' "${token}" | grep -qi '^export '; then
-        token="${token#export }"
-        token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
+    token="${token#export }"
+    token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
     fi
     for prefix in token= TUNNEL_TOKEN= CF_TUNNEL_TOKEN=; do
-        case "${token}" in
-            ${prefix}*) token="${token#${prefix}}" ;;
-        esac
+    case "${token}" in
+    ${prefix}*) token="${token#${prefix}}" ;;
+    esac
     done
     if printf '%s' "${token}" | grep -q "cloudflared"; then
-        token="$(printf '%s' "${token}" | awk '{print $NF}')"
+    token="$(printf '%s' "${token}" | awk '{print $NF}')"
     fi
     # Final whitespace trim after all token transforms
     token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
 
     token_len=${#token}
     if [ "${token_len}" -lt 16 ]; then
-        echo "ERROR: CF_TUNNEL_TOKEN appears too short; copy the full token from the dashboard." >&2
-        exit 1
+    echo "ERROR: CF_TUNNEL_TOKEN appears too short; copy the full token from the dashboard." >&2
+    exit 1
     fi
     if ! printf '%s' "${token}" | grep -q '^eyJ'; then
-        echo "WARNING: CF_TUNNEL_TOKEN does not look like a JWT (missing 'eyJ' prefix)." >&2
-        echo "Ensure you copied the connector token from the 'tunnel run --token' snippet." >&2
+    echo "WARNING: CF_TUNNEL_TOKEN does not look like a JWT (missing 'eyJ' prefix)." >&2
+    echo "Ensure you copied the connector token from the 'tunnel run --token' snippet." >&2
     fi
 
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
     kubectl -n cloudflare create secret generic tunnel-token \
-        --from-literal=token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+    --from-literal=token="${token}" \
+    --dry-run=client -o yaml | kubectl apply -f -
 
     helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
     helm repo update cloudflare
 
     values_yaml=$(printf '%s\n' \
-        'fullnameOverride: cloudflare-tunnel' \
-        'cloudflare:' \
-        "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"" \
-        "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
-        '  secretName: tunnel-token' \
-        '  ingress: []'
+    'fullnameOverride: cloudflare-tunnel' \
+    'cloudflare:' \
+    "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"" \
+    "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
+    '  secretName: tunnel-token' \
+    '  ingress: []'
     )
 
     existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
     if [ -n "${existing}" ]; then
-        status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
-        if [ -z "${status}" ]; then
-            helm_status_output=$(helm -n cloudflare status cloudflare-tunnel 2>/dev/null || true)
-            status=$(printf '%s\n' "${helm_status_output}" | grep -oE '^STATUS: (failed|pending-install)' | cut -d' ' -f2 || true)
-        fi
-        if [ "${status}" = "failed" ] || [ "${status}" = "pending-install" ]; then
-            echo "Existing 'cloudflare-tunnel' Helm release is in ${status} state; uninstalling before re-deploy..."
-            helm -n cloudflare uninstall cloudflare-tunnel || true
-        fi
+    status=$(printf '%s\n' "${existing}" | jq -r '.[0].status' 2>/dev/null || echo '')
+    if [ -z "${status}" ]; then
+    helm_status_output=$(helm -n cloudflare status cloudflare-tunnel 2>/dev/null || true)
+    status=$(printf '%s\n' "${helm_status_output}" | grep -oE '^STATUS: (failed|pending-install)' | cut -d' ' -f2 || true)
+    fi
+    if [ "${status}" = "failed" ] || [ "${status}" = "pending-install" ]; then
+    echo "Existing 'cloudflare-tunnel' Helm release is in ${status} state; uninstalling before re-deploy..."
+    helm -n cloudflare uninstall cloudflare-tunnel || true
+    fi
     fi
 
     helm_exit_code=0
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
-        --namespace cloudflare \
-        --create-namespace \
-        --values - <<<"${values_yaml}"; then
-        helm_exit_code=$?
-        echo "Helm upgrade/install failed; diagnostics to follow:" >&2
-        helm -n cloudflare status cloudflare-tunnel || true
-        kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+    --namespace cloudflare \
+    --create-namespace \
+    --values - <<<"${values_yaml}"; then
+    helm_exit_code=$?
+    echo "Helm upgrade/install failed; diagnostics to follow:" >&2
+    helm -n cloudflare status cloudflare-tunnel || true
+    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
     fi
 
     if ! kubectl -n cloudflare get deploy cloudflare-tunnel >/dev/null 2>&1; then
-        echo "cloudflare-tunnel deployment not found after Helm install; aborting." >&2
-        helm -n cloudflare status cloudflare-tunnel || true
-        exit 1
+    echo "cloudflare-tunnel deployment not found after Helm install; aborting." >&2
+    helm -n cloudflare status cloudflare-tunnel || true
+    exit 1
     fi
 
     # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
     # Remove config/creds volumes entirely so the pod never mounts credentials.json or any origin certificate material.
-    read -r -d '' deployment_patch <<'PATCH' || true
-    [
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/volumes",
-        "value": []
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/env",
-        "value": [
-          {
-            "name": "TUNNEL_TOKEN",
-            "valueFrom": {
-              "secretKeyRef": {
-                "name": "tunnel-token",
-                "key": "token"
-              }
-            }
-          }
-        ]
-      },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/volumeMounts",
-        "value": []
-      },
-      { "op": "replace", "path": "/spec/template/spec/containers/0/command", "value": ["/bin/sh", "-c"] },
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/containers/0/args",
-        "value": [
-          "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""
-        ]
-      }
-    ]
-    PATCH
+    deployment_patch='[{"op":"replace","path":"/spec/template/spec/volumes","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},{"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c"]},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""]}]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
@@ -480,61 +444,61 @@ cf-tunnel-install env='dev' token='':
 
     # Allow up to 180s for rollout to complete; this accounts for image pull times and the deployment reaching ready state.
     if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=180s; then
-        echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
-        helm -n cloudflare status cloudflare-tunnel || true
-        kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
-        kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
+    echo "cloudflare-tunnel rollout did not become ready; diagnostics:" >&2
+    helm -n cloudflare status cloudflare-tunnel || true
+    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+    kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
 
-        echo "Attempting teardown + retry: deleting existing pods and retrying rollout..." >&2
-        kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel || true
+    echo "Attempting teardown + retry: deleting existing pods and retrying rollout..." >&2
+    kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel || true
 
-        sleep 5
+    sleep 5
 
-        if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=60s; then
-            echo "cloudflare-tunnel still failing after teardown+retry; see logs above." >&2
-            helm -n cloudflare status cloudflare-tunnel || true
-            kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
-            logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
-            printf '%s\n' "${logs}"
-            if printf '%s' "${logs}" | grep -q "Cannot determine default origin certificate path"; then
-                cat <<'EOF' >&2
-                NOTE: cloudflared is still trying to use origin certificate / credentials.json flow.
-                This usually means the token you provided is not valid for 'cloudflared tunnel run --token'.
-
-                Please:
-                  - Open the Cloudflare dashboard for your tunnel (for example, dspace-staging-v3).
-                  - Find the snippet that looks like:
-
-                      cloudflared tunnel --no-autoupdate run --token <TOKEN>
-
-                  - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:
-
-                      just cf-tunnel-reset
-                      just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
-
-                If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT
-                work with 'tunnel run --token'.
-                EOF
-            fi
-            if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
-                echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
-                helm_note_printed=1
-            fi
-            exit 1
-        fi
+    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=60s; then
+    echo "cloudflare-tunnel still failing after teardown+retry; see logs above." >&2
+    helm -n cloudflare status cloudflare-tunnel || true
+    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+    logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
+    printf '%s\n' "${logs}"
+    if printf '%s' "${logs}" | grep -q "Cannot determine default origin certificate path"; then
+    printf '%s\n' \
+    "NOTE: cloudflared is still trying to use origin certificate / credentials.json flow." \
+    "This usually means the token you provided is not valid for 'cloudflared tunnel run --token'." \
+    "" \
+    "Please:" \
+    "  - Open the Cloudflare dashboard for your tunnel (for example, dspace-staging-v3)." \
+    "  - Find the snippet that looks like:" \
+    "" \
+    "      cloudflared tunnel --no-autoupdate run --token <TOKEN>" \
+    "" \
+    "  - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:" \
+    "" \
+    "      just cf-tunnel-reset" \
+    "      just cf-tunnel-install env=dev token=\"$CF_TUNNEL_TOKEN\"" \
+    "" \
+    "If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT" \
+    "work with 'tunnel run --token'." \
+    >&2
+    fi
+    if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
+    echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
+    helm_note_printed=1
+    fi
+    exit 1
+    fi
     fi
 
     if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
-        echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
-        helm_note_printed=1
+    echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
+    helm_note_printed=1
     fi
 
     printf '%s\n' \
-        'Cloudflare Tunnel chart deployed in token mode.' \
-        '- Secret: cloudflare/tunnel-token (key: token)' \
-        "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
-        '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
-        '- Readiness endpoint: /ready must return 200'
+    'Cloudflare Tunnel chart deployed in token mode.' \
+    '- Secret: cloudflare/tunnel-token (key: token)' \
+    "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
+    '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
+    '- Readiness endpoint: /ready must return 200'
 
 # Hard reset the Cloudflare Tunnel resources in the cluster for a fresh cf-tunnel-install.
 cf-tunnel-reset:

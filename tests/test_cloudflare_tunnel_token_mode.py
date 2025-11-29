@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -39,7 +42,7 @@ def _extract_recipe_body(name: str) -> str:
             if "<<'PATCH'" in line:
                 heredoc_end = "PATCH"
                 continue
-            if line and not line[0].isspace() and line.strip() not in {')'}:
+            if line and not line[0].isspace() and line.strip() not in {')', 'EOF', 'PATCH'}:
                 break
             continue
         if line.startswith(f"{name} ") or line.startswith(f"{name}:"):
@@ -59,12 +62,107 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
     """Extract and parse the deployment patch JSON patch payload."""
 
     match = re.search(
-        r"deployment_patch.*?<<'PATCH'.*?\n[ \t]*(?P<patch>\[.*\])\n[ \t]*PATCH",
+        r"deployment_patch.*?<<-?'PATCH'.*?\n[ \t]*(?P<patch>\[.*\])\n[ \t]*PATCH",
         cf_recipe_body,
         re.S,
     )
-    assert match, "Deployment patch heredoc missing from cf-tunnel-install"
-    return json.loads(match.group("patch"))
+    if not match:
+        match = re.search(
+            r"deployment_patch=\$?'(?P<patch>\[.*\])'",
+            cf_recipe_body,
+            re.S,
+        )
+
+    assert match, "Deployment patch declaration missing from cf-tunnel-install"
+
+    patch_text = match.group("patch")
+    if "\\n" in patch_text:
+        patch_text = patch_text.encode("utf-8").decode("unicode_escape")
+
+    return json.loads(patch_text)
+
+
+def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None:
+    body = cf_recipe_body.splitlines()
+
+    opening_counts: dict[str, int] = {}
+    terminator_counts: dict[str, int] = {}
+    terminator_allows_tabs: dict[str, bool] = {}
+
+    for line in body:
+        line_stripped = line.strip()
+        eof_opening = re.search(r"<<-?['\"]?EOF['\"]?", line)
+        patch_opening = re.search(r"<<-?['\"]?PATCH['\"]?", line)
+
+        if eof_opening:
+            opening_counts["EOF"] = opening_counts.get("EOF", 0) + 1
+            if "-" in eof_opening.group(0):
+                terminator_allows_tabs["EOF"] = True
+        if patch_opening:
+            opening_counts["PATCH"] = opening_counts.get("PATCH", 0) + 1
+            if "-" in patch_opening.group(0):
+                terminator_allows_tabs["PATCH"] = True
+        if line_stripped == "EOF":
+            terminator_counts["EOF"] = terminator_counts.get("EOF", 0) + 1
+        if line_stripped == "PATCH":
+            terminator_counts["PATCH"] = terminator_counts.get("PATCH", 0) + 1
+
+    for terminator, expected_count in opening_counts.items():
+        actual_count = terminator_counts.get(terminator, 0)
+        assert actual_count == expected_count, (
+            f"Expected {expected_count} {terminator!r} terminators but found {actual_count}"
+        )
+        allow_tabs = terminator_allows_tabs.get(terminator, False)
+        assert not any(
+            _terminator_has_invalid_whitespace(line, terminator, allow_tabs) for line in body
+        ), (
+            f"Terminator {terminator!r} must not be indented or have trailing whitespace"
+        )
+
+
+def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: bool) -> bool:
+    stripped = line.strip()
+    if stripped != terminator:
+        return False
+
+    if line.rstrip("\t ") != stripped:
+        return True
+
+    prefix = line[: len(line) - len(stripped)]
+    if not allow_tabs:
+        return prefix != ""
+
+    return any(ch != "\t" for ch in prefix)
+
+
+def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
+    script = textwrap.dedent(
+        """#!/usr/bin/env bash
+        set -euo pipefail
+
+        # Dummy env so expansions don't blow up under bash -n
+        printf -v CF_TUNNEL_TOKEN '%s' "example-token"
+        printf -v CF_TUNNEL_NAME '%s' "dummy"
+        env="dev"
+
+        # Dummy helm/kubectl that never run under bash -n, but define the names
+        helm() { :; }
+        kubectl() { :; }
+
+        """
+    ) + cf_recipe_body + "\n"
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write(script)
+        path = f.name
+
+    try:
+        result = subprocess.run(["bash", "-n", path], capture_output=True, text=True)
+        assert (
+            result.returncode == 0
+        ), f"bash -n failed for cf-tunnel-install script: {result.stderr}"
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
