@@ -347,11 +347,32 @@ kubeconfig env='dev':
     chmod 600 ~/.kube/config
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
+origin_cert_guidance := """
+  NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
+  This happens when the connector token is invalid for remote-managed mode or the tunnel itself is not set to
+  config_src="cloudflare".
+
+  Please verify all of the following:
+    - Copy the connector token from the Cloudflare dashboard snippet that looks like:
+
+        cloudflared tunnel --no-autoupdate run --token <TOKEN>
+
+      Copy only <TOKEN> into CF_TUNNEL_TOKEN (not an Access service token, not the full command).
+    - In the dashboard/API, confirm the tunnel is remote-managed (config_src="cloudflare"), not a locally-managed
+      tunnel created solely with cert.pem + credentials.json. Recreate the tunnel via the remote-managed guide if needed.
+    - After correcting the token/tunnel, run:
+
+        just cf-tunnel-reset
+        just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+"""
+
 cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     export KUBECONFIG="${HOME}/.kube/config"
+
+    origin_cert_guidance="{{ origin_cert_guidance }}"
 
     : "${token:=${CF_TUNNEL_TOKEN:-}}"
     if [ -z "${token}" ]; then
@@ -472,26 +493,6 @@ PATCH
     logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
     printf '%s\n' "${logs}"
 
-      origin_cert_guidance=$(cat <<'EOF'
-  NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
-  This happens when the connector token is invalid for remote-managed mode or the tunnel itself is not set to
-  config_src="cloudflare".
-
-  Please verify all of the following:
-    - Copy the connector token from the Cloudflare dashboard snippet that looks like:
-
-        cloudflared tunnel --no-autoupdate run --token <TOKEN>
-
-      Copy only <TOKEN> into CF_TUNNEL_TOKEN (not an Access service token, not the full command).
-    - In the dashboard/API, confirm the tunnel is remote-managed (config_src="cloudflare"), not a locally-managed
-      tunnel created solely with cert.pem + credentials.json. Recreate the tunnel via the remote-managed guide if needed.
-    - After correcting the token/tunnel, run:
-
-        just cf-tunnel-reset
-        just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
-EOF
-      )
-
       if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
       printf '%s\n' "${origin_cert_guidance}" >&2
       fi
@@ -544,6 +545,8 @@ cf-tunnel-debug:
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
+    origin_cert_guidance="{{ origin_cert_guidance }}"
+
     echo "=== Helm release ==="
     helm -n cloudflare status cloudflare-tunnel || echo "No Helm release."
 
@@ -565,26 +568,6 @@ cf-tunnel-debug:
     if [ -n "$POD" ]; then
         logs=$(kubectl -n cloudflare logs "$POD" --tail=50 2>/dev/null || true)
         printf '%s\n' "${logs}"
-
-        origin_cert_guidance=$(cat <<'EOF'
-  NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
-  This happens when the connector token is invalid for remote-managed mode or the tunnel itself is not set to
-  config_src="cloudflare".
-
-  Please verify all of the following:
-    - Copy the connector token from the Cloudflare dashboard snippet that looks like:
-
-        cloudflared tunnel --no-autoupdate run --token <TOKEN>
-
-      Copy only <TOKEN> into CF_TUNNEL_TOKEN (not an Access service token, not the full command).
-    - In the dashboard/API, confirm the tunnel is remote-managed (config_src="cloudflare"), not a locally-managed
-      tunnel created solely with cert.pem + credentials.json. Recreate the tunnel via the remote-managed guide if needed.
-    - After correcting the token/tunnel, run:
-
-        just cf-tunnel-reset
-        just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
-EOF
-)
 
         if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
             printf '%s\n' "${origin_cert_guidance}" >&2

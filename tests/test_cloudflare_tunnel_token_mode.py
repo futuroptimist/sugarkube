@@ -22,6 +22,15 @@ def _extract_cf_recipe_body() -> str:
     return _extract_recipe_body("cf-tunnel-install")
 
 
+@pytest.fixture(scope="module")
+def origin_cert_guidance_text() -> str:
+    just_text = JUSTFILE.read_text(encoding="utf-8")
+    match = re.search(r"origin_cert_guidance := \"\"\"(?P<body>.*?)\"\"\"", just_text, re.S)
+    assert match, "origin_cert_guidance helper missing from justfile"
+
+    return match.group("body")
+
+
 def _extract_recipe_body(name: str) -> str:
     """Return the body of the given recipe name (including indented lines)."""
 
@@ -268,11 +277,12 @@ def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
     assert "does not look like a JWT" in cf_recipe_body
 
 
-def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str) -> None:
+def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
-    assert "behaving like a locally-managed tunnel" in cf_recipe_body
-    assert "config_src=\"cloudflare\"" in cf_recipe_body
-    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+    assert "origin_cert_guidance" in cf_recipe_body
+    assert 'config_src="cloudflare"' in origin_cert_guidance_text
+    assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
+    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in origin_cert_guidance_text
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
@@ -296,8 +306,9 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     assert "No ConfigMap created in token-only mode" in debug_body
 
 
-def test_debug_recipe_surfaces_origin_cert_guidance() -> None:
+def test_debug_recipe_surfaces_origin_cert_guidance(origin_cert_guidance_text: str) -> None:
     debug_body = _extract_recipe_body("cf-tunnel-debug")
 
-    assert "behaving like a locally-managed tunnel" in debug_body
-    assert "config_src=\"cloudflare\"" in debug_body
+    assert "origin_cert_guidance" in debug_body
+    assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
+    assert 'config_src="cloudflare"' in origin_cert_guidance_text
