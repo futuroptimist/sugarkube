@@ -458,17 +458,14 @@ cf-tunnel-install env='dev' token='':
     # Force remote-managed token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared
     # exactly as documented for Kubernetes token deployments. Remove config/creds volumes entirely so the pod never
     # mounts credentials.json or any origin certificate material.
-      deployment_patch=$(cat <<'PATCH'
-[
-  {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
-  {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
-  {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
-  {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
-  {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
-  {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
-]
-PATCH
-      )
+    deployment_patch='[
+    {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
+    {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
+    {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
+    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
+    {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
+    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
+    ]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
@@ -493,9 +490,9 @@ PATCH
     logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
     printf '%s\n' "${logs}"
 
-      if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
-      printf '%s\n' "${origin_cert_guidance}" >&2
-      fi
+        if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
+            printf '%s\n' "${origin_cert_guidance}" >&2
+        fi
     if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
     echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
     helm_note_printed=1
