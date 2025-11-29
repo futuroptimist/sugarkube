@@ -73,22 +73,28 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
 def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None:
     body = cf_recipe_body.splitlines()
 
-    openings: list[str] = []
+    opening_counts: dict[str, int] = {}
+    terminator_counts: dict[str, int] = {}
 
     for line in body:
         line_stripped = line.strip()
         if "<<'EOF'" in line or "<<EOF" in line_stripped:
-            openings.append("EOF")
+            opening_counts["EOF"] = opening_counts.get("EOF", 0) + 1
         if "<<'PATCH'" in line or "<<PATCH" in line_stripped:
-            openings.append("PATCH")
+            opening_counts["PATCH"] = opening_counts.get("PATCH", 0) + 1
+        if line_stripped == "EOF":
+            terminator_counts["EOF"] = terminator_counts.get("EOF", 0) + 1
+        if line_stripped == "PATCH":
+            terminator_counts["PATCH"] = terminator_counts.get("PATCH", 0) + 1
 
-    for terminator in openings:
-        assert any(
-            line.strip() == terminator for line in body
-        ), f"Missing terminator {terminator!r} in cf-tunnel-install heredoc"
+    for terminator, expected_count in opening_counts.items():
+        actual_count = terminator_counts.get(terminator, 0)
+        assert actual_count == expected_count, (
+            f"Expected {expected_count} {terminator!r} terminators but found {actual_count}"
+        )
         assert not any(
-            line.endswith(terminator) and line.strip() != terminator for line in body
-        ), f"Terminator {terminator!r} must not be indented"
+            line.strip() == terminator and line != line.strip() for line in body
+        ), f"Terminator {terminator!r} must not be indented or have trailing whitespace"
 
 
 def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
