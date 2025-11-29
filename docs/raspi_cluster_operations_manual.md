@@ -181,21 +181,19 @@ but spells out the underlying commands.
      --dry-run=client -o yaml | sudo kubectl apply -f -
    ```
 
-2. Install the Cloudflare Tunnel Helm chart:
+2. Install the Cloudflare Tunnel connector in remote-managed token mode (same
+   shape as `just cf-tunnel-install`):
 
    ```bash
-   helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
-   helm repo update cloudflare
+   export CF_TUNNEL_NAME="${CF_TUNNEL_NAME:-sugarkube-dev}"   # Optional override to match the dashboard
 
-   helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
-     --namespace cloudflare \
-     --create-namespace \
-     --wait \
-     --set cloudflare.tunnelName="${CF_TUNNEL_NAME:-sugarkube-dev}" \
-     --set cloudflare.tunnelId="${CF_TUNNEL_ID:-}" \
-     --set cloudflare.secretName=tunnel-token \
-     --set cloudflare.ingress="{}"
+   just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
    ```
+
+   This patches the Helm deployment to run `cloudflared tunnel --no-autoupdate
+   --metrics 0.0.0.0:2000 run` with `TUNNEL_TOKEN` from the `tunnel-token`
+   Secret, and removes all origin-certificate / `credentials.json` config so
+   the pod behaves strictly as a remote-managed tunnel.
 
 3. Create a Cloudflare route from your chosen FQDN to
    `http://traefik.kube-system.svc.cluster.local:80` in the dashboard. Use the

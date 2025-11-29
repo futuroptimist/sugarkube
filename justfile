@@ -434,9 +434,20 @@ cf-tunnel-install env='dev' token='':
     exit 1
     fi
 
-    # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
-    # Remove config/creds volumes entirely so the pod never mounts credentials.json or any origin certificate material.
-    deployment_patch='[{"op":"replace","path":"/spec/template/spec/volumes","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},{"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c"]},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""]}]'
+    # Force remote-managed token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared
+    # exactly as documented for Kubernetes token deployments. Remove config/creds volumes entirely so the pod never
+    # mounts credentials.json or any origin certificate material.
+      deployment_patch=$(cat <<'PATCH'
+[
+  {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
+  {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
+  {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
+  {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
+  {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
+  {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
+]
+PATCH
+      )
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
@@ -460,26 +471,30 @@ cf-tunnel-install env='dev' token='':
     kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
     logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
     printf '%s\n' "${logs}"
-    if printf '%s' "${logs}" | grep -q "Cannot determine default origin certificate path"; then
-    printf '%s\n' \
-    "NOTE: cloudflared is still trying to use origin certificate / credentials.json flow." \
-    "This usually means the token you provided is not valid for 'cloudflared tunnel run --token'." \
-    "" \
-    "Please:" \
-    "  - Open the Cloudflare dashboard for your tunnel (for example, dspace-staging-v3)." \
-    "  - Find the snippet that looks like:" \
-    "" \
-    "      cloudflared tunnel --no-autoupdate run --token <TOKEN>" \
-    "" \
-    "  - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:" \
-    "" \
-    "      just cf-tunnel-reset" \
-    "      just cf-tunnel-install env=dev token=\"$CF_TUNNEL_TOKEN\"" \
-    "" \
-    "If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT" \
-    "work with 'tunnel run --token'." \
-    >&2
-    fi
+
+      origin_cert_guidance=$(cat <<'EOF'
+  NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
+  This happens when the connector token is invalid for remote-managed mode or the tunnel itself is not set to
+  config_src="cloudflare".
+
+  Please verify all of the following:
+    - Copy the connector token from the Cloudflare dashboard snippet that looks like:
+
+        cloudflared tunnel --no-autoupdate run --token <TOKEN>
+
+      Copy only <TOKEN> into CF_TUNNEL_TOKEN (not an Access service token, not the full command).
+    - In the dashboard/API, confirm the tunnel is remote-managed (config_src="cloudflare"), not a locally-managed
+      tunnel created solely with cert.pem + credentials.json. Recreate the tunnel via the remote-managed guide if needed.
+    - After correcting the token/tunnel, run:
+
+        just cf-tunnel-reset
+        just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+EOF
+      )
+
+      if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
+      printf '%s\n' "${origin_cert_guidance}" >&2
+      fi
     if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
     echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
     helm_note_printed=1
@@ -548,7 +563,32 @@ cf-tunnel-debug:
     echo "=== Recent logs from one pod ==="
     POD=$(kubectl -n cloudflare get pods -l app.kubernetes.io/name=cloudflare-tunnel -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [ -n "$POD" ]; then
-        kubectl -n cloudflare logs "$POD" --tail=50 || true
+        logs=$(kubectl -n cloudflare logs "$POD" --tail=50 2>/dev/null || true)
+        printf '%s\n' "${logs}"
+
+        origin_cert_guidance=$(cat <<'EOF'
+  NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
+  This happens when the connector token is invalid for remote-managed mode or the tunnel itself is not set to
+  config_src="cloudflare".
+
+  Please verify all of the following:
+    - Copy the connector token from the Cloudflare dashboard snippet that looks like:
+
+        cloudflared tunnel --no-autoupdate run --token <TOKEN>
+
+      Copy only <TOKEN> into CF_TUNNEL_TOKEN (not an Access service token, not the full command).
+    - In the dashboard/API, confirm the tunnel is remote-managed (config_src="cloudflare"), not a locally-managed
+      tunnel created solely with cert.pem + credentials.json. Recreate the tunnel via the remote-managed guide if needed.
+    - After correcting the token/tunnel, run:
+
+        just cf-tunnel-reset
+        just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+EOF
+)
+
+        if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
+            printf '%s\n' "${origin_cert_guidance}" >&2
+        fi
     else
         echo "No Cloudflare Tunnel pods to show logs for."
     fi

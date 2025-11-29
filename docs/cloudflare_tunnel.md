@@ -55,8 +55,10 @@ Refer to Cloudflare’s guide for full details:
 This is the “Install and run a connector” step from the Cloudflare UI. It must run on a node in the
 k3s cluster (for example, `sugarkube0`), **not** on your workstation. `just cf-tunnel-install` is
 the canonical way to install the connector on the Pi. The recipe now deploys Cloudflare’s
-**token-based connector mode** (connector token (JWT) from the dashboard), so no origin
-certificates or `credentials.json` files are required.
+**token-based connector mode** (connector token (JWT) from the dashboard) in the remote-managed
+configuration: the pod sets `TUNNEL_TOKEN` from the `tunnel-token` Secret and runs
+`cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run` with **no** `credentials.json` or
+origin certificate references.
 
 ### Names, environments, and how tunnels are selected
 
@@ -97,9 +99,9 @@ Cloudflare tunnel, Sugarkube `env`, and `CF_TUNNEL_NAME` interact.
    Omitting the `token=` argument falls back to `CF_TUNNEL_TOKEN` in the environment, but passing it
    explicitly keeps the intent obvious. The recipe strips common prefixes (`token=<jwt>`,
    `TUNNEL_TOKEN=<jwt>`, or a full `cloudflared ... --token <jwt>` command) and mounts the Secret
-   directly as `TUNNEL_TOKEN`. The chart is patched to run `cloudflared tunnel --no-autoupdate run
-   --token "$TUNNEL_TOKEN"` with metrics/readiness on `:2000` and **no** `credentials.json` or
-   origin cert references.
+   directly as `TUNNEL_TOKEN`. The chart is patched to run `cloudflared tunnel --no-autoupdate
+   --metrics 0.0.0.0:2000 run` using the `TUNNEL_TOKEN` environment variable and **no**
+   `credentials.json` or origin cert references.
 4. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
@@ -164,10 +166,23 @@ Sugarkube environment, switch `env=dev` to `env=staging` while keeping the same 
 `CF_TUNNEL_NAME` values.
 
 If the pod logs ever show `Cannot determine default origin certificate path`, the deployment is
-still trying to use the legacy origin-cert / `credentials.json` flow. This almost always means the
-token was copied from the wrong snippet (for example, `cloudflared service install <TOKEN>`). Re-run
-`just cf-tunnel-reset` followed by `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"` using a
-token from the `cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>` snippet.
+still trying to use the legacy origin-cert / `credentials.json` flow. That means `cloudflared` is
+behaving as a **locally-managed** tunnel instead of the expected remote-managed token mode. This
+usually means one of the following:
+
+- The tunnel token was copied from the wrong snippet (for example, `cloudflared service install
+  <TOKEN>` or an Access token instead of the connector token).
+- The Cloudflare tunnel itself is not configured as remote-managed (`config_src="cloudflare"`) in
+  the dashboard/API.
+
+To fix the issue, regenerate or recopy the connector token from the
+`cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>` snippet for a remote-managed
+tunnel, ensure the tunnel is marked as remote-managed, then run:
+
+```bash
+just cf-tunnel-reset
+just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+```
 
 > **Common pitfalls**
 >
