@@ -189,14 +189,19 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     command_op = ops_by_path.get("/spec/template/spec/containers/0/command")
     assert command_op and command_op.get("op") in {"add", "replace"}
-    assert command_op.get("value") == ["/bin/sh", "-c"]
+    assert command_op.get("value") == [
+        "cloudflared",
+        "tunnel",
+        "--no-autoupdate",
+        "--metrics",
+        "0.0.0.0:2000",
+        "run",
+    ]
 
     args_op = ops_by_path.get("/spec/template/spec/containers/0/args")
     assert args_op and args_op.get("op") in {"add", "replace"}
     args = args_op.get("value") or []
-    assert args == [
-        "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""
-    ]
+    assert args == []
 
     volume_mounts = ops_by_path.get("/spec/template/spec/containers/0/volumeMounts")
     assert volume_mounts and volume_mounts.get("op") in {"add", "replace"}
@@ -258,8 +263,18 @@ def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
 
 def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
+    assert "origin certificate / credentials.json flow" in cf_recipe_body
+    assert "remote-managed" in cf_recipe_body
+
+
+def test_cf_tunnel_install_explains_remote_managed_recovery(cf_recipe_body: str) -> None:
+    assert "recreate the tunnel as a remote-managed tunnel" in cf_recipe_body
+    assert "Copy ONLY the <TOKEN>" in cf_recipe_body
     assert "not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
-    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+    assert (
+        '"cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"'
+        in cf_recipe_body
+    )
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
