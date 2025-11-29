@@ -189,14 +189,23 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     command_op = ops_by_path.get("/spec/template/spec/containers/0/command")
     assert command_op and command_op.get("op") in {"add", "replace"}
-    assert command_op.get("value") == ["/bin/sh", "-c"]
+    assert command_op.get("value") == [
+        "cloudflared",
+        "tunnel",
+        "--no-autoupdate",
+        "--metrics",
+        "0.0.0.0:2000",
+        "run",
+    ]
 
     args_op = ops_by_path.get("/spec/template/spec/containers/0/args")
     assert args_op and args_op.get("op") in {"add", "replace"}
     args = args_op.get("value") or []
-    assert args == [
-        "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""
-    ]
+    assert args == []
+
+    image_op = ops_by_path.get("/spec/template/spec/containers/0/image")
+    assert image_op and image_op.get("op") in {"add", "replace"}
+    assert image_op.get("value") == "cloudflare/cloudflared:2024.8.3"
 
     volume_mounts = ops_by_path.get("/spec/template/spec/containers/0/volumeMounts")
     assert volume_mounts and volume_mounts.get("op") in {"add", "replace"}
@@ -213,7 +222,10 @@ def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> N
 
 
 def test_teardown_retry_is_baked_into_cf_tunnel_install(cf_recipe_body: str) -> None:
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in cf_recipe_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
+        in cf_recipe_body
+    )
 
     rollout_calls = re.findall(
         r"kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=\d+s",
@@ -258,8 +270,9 @@ def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
 
 def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
-    assert "not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
+    assert "behaving like a locally-managed tunnel" in cf_recipe_body
     assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+    assert "configured as remote-managed (config_src = \\\"cloudflare\\\")" in cf_recipe_body
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
@@ -267,7 +280,10 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     debug_body = _extract_recipe_body("cf-tunnel-debug")
 
     assert "kubectl -n cloudflare delete deploy cloudflare-tunnel" in reset_body
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in reset_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
+        in reset_body
+    )
     assert "helm -n cloudflare uninstall cloudflare-tunnel" in reset_body
 
     # Secret deletion must remain optional/commented.
@@ -275,6 +291,9 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
         if "delete secret tunnel-token" in line:
             assert line.strip().startswith("#"), "Secret deletion should be commented/optional"
 
-    assert "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel" in debug_body
+    assert (
+        "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel"
+        in debug_body
+    )
     assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
     assert "No ConfigMap created in token-only mode" in debug_body
