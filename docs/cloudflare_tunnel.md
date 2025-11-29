@@ -38,9 +38,15 @@ and
 6. Click **Save tunnel**. The dashboard will show OS-specific commands (Windows/Mac/Debian/Docker,
    etc.) that include a tunnel token. **Do not run these commands on your workstation**; we will use
    the token with Sugarkube in Step 2.
-   - If the dashboard shows a command like `cloudflared service install <tunnel-token>`, copy the
-     `<tunnel-token>` portion (not the whole command) and store it securely. We will pass it to
-     `just cf-tunnel-install` in the cluster.
+   - For Sugarkube, copy the connector token from the snippet that looks like:
+
+     ```bash
+     cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>
+     ```
+
+     Only the `<CONNECTOR_TOKEN>` portion should be saved and passed to `CF_TUNNEL_TOKEN`. Tokens
+     from `cloudflared service install <TOKEN>` or `cloudflared tunnel login` will not work with
+     `cloudflared tunnel run --token`.
 
 Refer to Cloudflare’s guide for full details:
 [Create a tunnel in the dashboard](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/).
@@ -52,6 +58,36 @@ k3s cluster (for example, `sugarkube0`), **not** on your workstation. `just cf-t
 the canonical way to install the connector on the Pi. The recipe now deploys Cloudflare’s
 **token-based connector mode** (connector token (JWT) from the dashboard), so no origin
 certificates or `credentials.json` files are required.
+
+Use the **connector token** from the Cloudflare snippet that explicitly shows:
+
+```bash
+cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>
+```
+
+Set `CF_TUNNEL_TOKEN` to only `<CONNECTOR_TOKEN>`—not the full command and not `token=<value>`.
+
+> **Common pitfalls**
+>
+> - Copying the token from a `cloudflared service install <TOKEN>` snippet instead of the
+>   `cloudflared tunnel --no-autoupdate run --token <TOKEN>` snippet.
+> - Including the `token=` prefix or the entire command instead of just `<TOKEN>`.
+> - Using a token for a different tunnel than the one configured for `staging.democratized.space`.
+>
+> If `cf-tunnel-install` fails and the pod logs mention:
+>
+> ```text
+> Cannot determine default origin certificate path. No file cert.pem ...
+> error parsing tunnel ID: Error locating origin cert: client didn't specify origincert path
+> ```
+>
+> it almost always means the provided token is not valid for `cloudflared tunnel run --token`. In
+> that case, regenerate or recopy the connector token from the correct snippet and run:
+>
+> ```bash
+> just cf-tunnel-reset
+> just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+> ```
 
 ### Names, environments, and how tunnels are selected
 
@@ -138,8 +174,9 @@ export KUBECONFIG="$HOME/.kube/config"
 
 cd ~/sugarkube
 
-# Connector token from the Cloudflare dashboard for the dspace-staging-v3 tunnel
-export CF_TUNNEL_TOKEN="<tunnel-token for dspace-staging-v3>"
+# Connector token from the Cloudflare dashboard snippet
+# (cloudflared tunnel --no-autoupdate run --token <TOKEN>)
+export CF_TUNNEL_TOKEN="<connector-token for dspace-staging-v3>"
 
 # Keep names aligned with the Cloudflare dashboard
 export CF_TUNNEL_NAME="dspace-staging-v3"
