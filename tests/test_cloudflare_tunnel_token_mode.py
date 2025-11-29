@@ -33,7 +33,7 @@ def _extract_recipe_body(name: str) -> str:
                 if line.strip() == heredoc_end:
                     heredoc_end = None
                 continue
-            if "<<EOF" in line:
+            if "<<EOF" in line or "<<'EOF'" in line:
                 heredoc_end = "EOF"
                 continue
             if "<<'PATCH'" in line:
@@ -140,10 +140,22 @@ def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
         "token-based connector mode",
         "CF_TUNNEL_NAME",
         "connector token (JWT)",
-        "cloudflared tunnel run --token",
+        "cloudflared tunnel --no-autoupdate run --token",
         "credentials.json",
+        "CF_TUNNEL_TOKEN",
     ):
         assert phrase in text, f"Documentation missing token-mode guidance: {phrase}"
+
+
+def test_cf_tunnel_install_validates_token_and_guides_on_origin_cert_error(
+    cf_recipe_body: str,
+) -> None:
+    assert "CF_TUNNEL_TOKEN" in cf_recipe_body
+    assert "token_len" in cf_recipe_body
+    assert "appears too short" in cf_recipe_body
+    assert "does not look like a JWT" in cf_recipe_body
+    assert "Cannot determine default origin certificate path" in cf_recipe_body
+    assert "not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
