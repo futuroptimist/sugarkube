@@ -97,9 +97,9 @@ Cloudflare tunnel, Sugarkube `env`, and `CF_TUNNEL_NAME` interact.
    Omitting the `token=` argument falls back to `CF_TUNNEL_TOKEN` in the environment, but passing it
    explicitly keeps the intent obvious. The recipe strips common prefixes (`token=<jwt>`,
    `TUNNEL_TOKEN=<jwt>`, or a full `cloudflared ... --token <jwt>` command) and mounts the Secret
-   directly as `TUNNEL_TOKEN`. The chart is patched to run `cloudflared tunnel --no-autoupdate run
-   --token "$TUNNEL_TOKEN"` with metrics/readiness on `:2000` and **no** `credentials.json` or
-   origin cert references.
+   directly as `TUNNEL_TOKEN`. The deployment runs `cloudflared tunnel --no-autoupdate --metrics
+   0.0.0.0:2000 run`, relying on the `TUNNEL_TOKEN` environment variable (no config file or
+   `credentials.json`).
 4. Verify readiness (Pods should report `/ready` = `200`):
    ```bash
    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
@@ -165,9 +165,12 @@ Sugarkube environment, switch `env=dev` to `env=staging` while keeping the same 
 
 If the pod logs ever show `Cannot determine default origin certificate path`, the deployment is
 still trying to use the legacy origin-cert / `credentials.json` flow. This almost always means the
-token was copied from the wrong snippet (for example, `cloudflared service install <TOKEN>`). Re-run
-`just cf-tunnel-reset` followed by `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"` using a
-token from the `cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>` snippet.
+tunnel is not remote-managed or the token was copied from the wrong snippet (for example,
+`cloudflared service install <TOKEN>`). Re-run `just cf-tunnel-reset` followed by
+`just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"` using a token from the
+`cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>` snippet. If the tunnel was
+created locally (config source not set to Cloudflare), recreate it in remote-managed mode from the
+dashboard/API before retrying.
 
 > **Common pitfalls**
 >
