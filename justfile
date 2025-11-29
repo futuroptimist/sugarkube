@@ -376,6 +376,15 @@ cf-tunnel-install env='dev' token='':
     # Final whitespace trim after all token transforms
     token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
 
+    token_len=${#token}
+    if [ "${token_len}" -lt 16 ]; then
+        echo "ERROR: CF_TUNNEL_TOKEN appears too short; please copy the full token from the Cloudflare dashboard." >&2
+        exit 1
+    fi
+    if ! printf '%s' "${token}" | grep -q '^eyJ'; then
+        echo "WARNING: CF_TUNNEL_TOKEN does not look like a JWT (no 'eyJ' prefix). This may be the wrong token snippet from the Cloudflare dashboard." >&2
+    fi
+
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
     kubectl -n cloudflare create secret generic tunnel-token \
@@ -484,7 +493,27 @@ cf-tunnel-install env='dev' token='':
             echo "cloudflare-tunnel still failing after teardown+retry; see logs above." >&2
             helm -n cloudflare status cloudflare-tunnel || true
             kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
-            kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
+            logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
+            printf '%s\n' "${logs}"
+            if printf '%s' "${logs}" | grep -q "Cannot determine default origin certificate path"; then
+                cat <<'EOF' >&2
+NOTE: cloudflared is still trying to use origin certificate / credentials.json flow.
+This usually means the token you provided is not valid for 'cloudflared tunnel run --token'.
+
+Please:
+  - Open the Cloudflare dashboard for your tunnel (e.g. dspace-staging-v3),
+  - Find the snippet that looks like:
+
+      cloudflared tunnel --no-autoupdate run --token <TOKEN>
+
+  - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:
+
+      just cf-tunnel-reset
+      just cf-tunnel-install env=dev token="${CF_TUNNEL_TOKEN:-<your-token>}"
+
+If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT work with 'tunnel run --token'.
+EOF
+            fi
             if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
                 echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
                 helm_note_printed=1
