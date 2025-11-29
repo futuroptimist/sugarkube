@@ -13,8 +13,8 @@ inside the cluster.
 
 > Cloudflare has two big modes for tunnels: **remotely-managed** (token-only, created in the
 > dashboard) and **locally-managed** (requires `cloudflared login` and a `cert.pem`). Sugarkube uses
-> the **remotely-managed** model only. If you create the tunnel in the Cloudflare dashboard as shown
-> below, you are already using the correct mode.
+> the **remotely-managed, token-based connector mode** only. If you create the tunnel in the
+> Cloudflare dashboard as shown below, you are already using the correct mode.
 
 ## TL;DR checklist
 
@@ -64,9 +64,9 @@ and
    cloudflared tunnel run --token <TUNNEL_TOKEN>
    ```
 
-   The only part Sugarkube needs is `<TUNNEL_TOKEN>` – the long string starting with `eyJ...`. You
-   can copy it from **any** of the commands on this page; they all use the same token. Copy only the
-   token value, not the whole command.
+   The only part Sugarkube needs is `<TUNNEL_TOKEN>` – the long connector token (JWT) starting with
+   `eyJ...`. You can copy it from **any** of the commands on this page; they all use the same token.
+   Copy only the token value, not the whole command.
 
 Refer to Cloudflare’s guide for full details:
 [Create a tunnel in the dashboard](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/).
@@ -75,10 +75,9 @@ Refer to Cloudflare’s guide for full details:
 
 This is the “Install and run a connector” step from the Cloudflare UI. It must run on a node in the
 k3s cluster (for example, `sugarkube0`), **not** on your workstation. `just cf-tunnel-install` is
-the canonical way to install the connector on the Pi. The recipe deploys Cloudflare’s
-**token-only, remote-managed** mode: the pod sets `TUNNEL_TOKEN` from the `tunnel-token` Secret and
-runs `cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run` with **no** `cert.pem` or
-`credentials.json`.
+the canonical way to install the connector on the Pi. The recipe deploys Cloudflare’s **token-based
+connector mode**: the pod sets `TUNNEL_TOKEN` from the `tunnel-token` Secret and runs `cloudflared tunnel --no-autoupdate run --token "$TUNNEL_TOKEN"`
+(plus metrics flags) with **no** `cert.pem` or `credentials.json`.
 
 ### Names, environments, and how tunnels are selected
 
