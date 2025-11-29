@@ -401,7 +401,10 @@ cf-tunnel-install env='dev' token='':
     "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"" \
     "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
     '  secretName: tunnel-token' \
-    '  ingress: []'
+    '  ingress: []' \
+    'image:' \
+    '  repository: cloudflare/cloudflared' \
+    '  tag: 2024.8.3'
     )
 
     existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
@@ -434,9 +437,10 @@ cf-tunnel-install env='dev' token='':
     exit 1
     fi
 
-    # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with --token.
-    # Remove config/creds volumes entirely so the pod never mounts credentials.json or any origin certificate material.
-    deployment_patch='[{"op":"replace","path":"/spec/template/spec/volumes","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},{"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c"]},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""]}]'
+    # Force token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared with the
+    # remote-managed token workflow. Remove config/creds volumes entirely so the pod never mounts credentials.json
+    # or any origin certificate material.
+    deployment_patch='[{"op":"replace","path":"/spec/template/spec/volumes","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},{"op":"replace","path":"/spec/template/spec/containers/0/envFrom","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]},{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"}]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
@@ -460,24 +464,24 @@ cf-tunnel-install env='dev' token='':
     kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
     logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
     printf '%s\n' "${logs}"
-    if printf '%s' "${logs}" | grep -q "Cannot determine default origin certificate path"; then
+    if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
     printf '%s\n' \
-    "NOTE: cloudflared is still trying to use origin certificate / credentials.json flow." \
-    "This usually means the token you provided is not valid for 'cloudflared tunnel run --token'." \
+    "cloudflared is still attempting the local origin-cert / credentials.json flow instead of token mode." \
+    "This happens when the tunnel is not remote-managed or the supplied token is not valid for" \
+    "'cloudflared tunnel run --token'." \
     "" \
-    "Please:" \
-    "  - Open the Cloudflare dashboard for your tunnel (for example, dspace-staging-v3)." \
-    "  - Find the snippet that looks like:" \
+    "Actions to take:" \
+    "  - Confirm the tunnel is remote-managed (config_src = cloudflare) in the Cloudflare dashboard/API." \
+    "  - Copy the connector token from the snippet:" \
     "" \
     "      cloudflared tunnel --no-autoupdate run --token <TOKEN>" \
     "" \
-    "  - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:" \
+    "    Do not use Access service tokens or locally-generated credentials.json tokens." \
+    "  - If unsure, recreate the tunnel via the dashboard/API using the remote-managed flow." \
+    "  - Re-run:" \
     "" \
     "      just cf-tunnel-reset" \
     "      just cf-tunnel-install env=dev token=\"$CF_TUNNEL_TOKEN\"" \
-    "" \
-    "If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT" \
-    "work with 'tunnel run --token'." \
     >&2
     fi
     if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
@@ -538,7 +542,7 @@ cf-tunnel-debug:
 
     echo
     echo "=== ConfigMap ==="
-    echo "No ConfigMap created in token-only mode; configuration is passed via CLI args."
+    echo "No ConfigMap created in token-only mode; configuration is injected via env/command."
 
     echo
     echo "=== Deployment container + volumes ==="

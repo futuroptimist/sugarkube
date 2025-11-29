@@ -1,0 +1,12 @@
+{
+  "id": "2025-11-29-cloudflare-tunnel-token-mode",
+  "date": "2025-11-29",
+  "component": "cloudflare-tunnel dev env token-only mode",
+  "rootCause": "Cloudflared pods on the Pi k3s cluster were deployed with the token-only recipe but still attempted the local origin certificate flow, emitting 'Cannot determine default origin certificate path'. The tunnel tokens in use were either copied from non-remote-managed flows or were not wired via the canonical remote-managed TUNNEL_TOKEN path, so cloudflared continued to look for cert.pem/credentials.json instead of honoring the connector token.",
+  "resolution": "Aligned the deployment with Cloudflare's remote-managed guidance by injecting TUNNEL_TOKEN from the tunnel-token Secret and running `cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run` without any config or origin cert mounts. Added clearer debug messaging about remote-managed tunnels and tightened tests around token-mode manifests to catch regressions earlier.",
+  "references": [
+    "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/",
+    "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/install-and-setup/tunnel-guide/kubernetes/",
+    "https://github.com/futuroptimist/sugarkube/commit/f36c96419a56fb0259ac147702c53bacc8f9e3d9"
+  ]
+}
