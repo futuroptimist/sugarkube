@@ -498,23 +498,23 @@ cf-tunnel-install env='dev' token='':
             printf '%s\n' "${logs}"
             if printf '%s' "${logs}" | grep -q "Cannot determine default origin certificate path"; then
                 cat <<'EOF' >&2
-                NOTE: cloudflared is still trying to use origin certificate / credentials.json flow.
-                This usually means the token you provided is not valid for 'cloudflared tunnel run --token'.
+    NOTE: cloudflared is still trying to use origin certificate / credentials.json flow.
+    This usually means the token you provided is not valid for 'cloudflared tunnel run --token'.
 
-                Please:
-                  - Open the Cloudflare dashboard for your tunnel (for example, dspace-staging-v3).
-                  - Find the snippet that looks like:
+    Please:
+      - Open the Cloudflare dashboard for your tunnel (for example, dspace-staging-v3).
+      - Find the snippet that looks like:
 
-                      cloudflared tunnel --no-autoupdate run --token <TOKEN>
+          cloudflared tunnel --no-autoupdate run --token <TOKEN>
 
-                  - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:
+      - Copy ONLY the <TOKEN> part into CF_TUNNEL_TOKEN and re-run:
 
-                      just cf-tunnel-reset
-                      just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+          just cf-tunnel-reset
+          just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
 
-                If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT
-                work with 'tunnel run --token'.
-                EOF
+    If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT
+    work with 'tunnel run --token'.
+    EOF
             fi
             if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
                 echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
