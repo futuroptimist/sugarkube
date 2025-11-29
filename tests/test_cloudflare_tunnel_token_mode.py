@@ -145,6 +145,24 @@ def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
     ):
         assert phrase in text, f"Documentation missing token-mode guidance: {phrase}"
 
+    assert (
+        "cloudflared tunnel --no-autoupdate run --token" in text
+    ), "Docs should call out the no-autoupdate token snippet"
+    assert "CF_TUNNEL_TOKEN" in text, "Docs should tie CF_TUNNEL_TOKEN to the connector snippet"
+
+
+def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
+    assert "CF_TUNNEL_TOKEN" in cf_recipe_body
+    assert "token_len=" in cf_recipe_body
+    assert "appears too short" in cf_recipe_body
+    assert "does not look like a JWT" in cf_recipe_body
+
+
+def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str) -> None:
+    assert "Cannot determine default origin certificate path" in cf_recipe_body
+    assert "not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
+    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     reset_body = _extract_recipe_body("cf-tunnel-reset")
