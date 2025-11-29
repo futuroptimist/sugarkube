@@ -472,7 +472,7 @@ cf-tunnel-install env='dev' token='':
         ]
       }
     ]
-    PATCH
+PATCH
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
 
@@ -514,7 +514,7 @@ cf-tunnel-install env='dev' token='':
 
                 If you're copying from a 'cloudflared service install <token>' snippet instead, that token will NOT
                 work with 'tunnel run --token'.
-                EOF
+EOF
             fi
             if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
                 echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2

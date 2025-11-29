@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -39,7 +42,7 @@ def _extract_recipe_body(name: str) -> str:
             if "<<'PATCH'" in line:
                 heredoc_end = "PATCH"
                 continue
-            if line and not line[0].isspace() and line.strip() not in {')'}:
+            if line and not line[0].isspace() and line.strip() not in {')', 'EOF', 'PATCH'}:
                 break
             continue
         if line.startswith(f"{name} ") or line.startswith(f"{name}:"):
@@ -65,6 +68,57 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
     )
     assert match, "Deployment patch heredoc missing from cf-tunnel-install"
     return json.loads(match.group("patch"))
+
+
+def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None:
+    body = cf_recipe_body.splitlines()
+
+    openings: list[str] = []
+
+    for line in body:
+        line_stripped = line.strip()
+        if "<<'EOF'" in line or "<<EOF" in line_stripped:
+            openings.append("EOF")
+        if "<<'PATCH'" in line or "<<PATCH" in line_stripped:
+            openings.append("PATCH")
+
+    for terminator in openings:
+        assert any(
+            line.strip() == terminator for line in body
+        ), f"Missing terminator {terminator!r} in cf-tunnel-install heredoc"
+        assert not any(
+            line.endswith(terminator) and line.strip() != terminator for line in body
+        ), f"Terminator {terminator!r} must not be indented"
+
+
+def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
+    script = textwrap.dedent(
+        """#!/usr/bin/env bash
+        set -euo pipefail
+
+        # Dummy env so expansions don't blow up under bash -n
+        printf -v CF_TUNNEL_TOKEN '%s' "example-token"
+        printf -v CF_TUNNEL_NAME '%s' "dummy"
+        env="dev"
+
+        # Dummy helm/kubectl that never run under bash -n, but define the names
+        helm() { :; }
+        kubectl() { :; }
+
+        """
+    ) + cf_recipe_body + "\n"
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write(script)
+        path = f.name
+
+    try:
+        result = subprocess.run(["bash", "-n", path], capture_output=True, text=True)
+        assert (
+            result.returncode == 0
+        ), f"bash -n failed for cf-tunnel-install script: {result.stderr}"
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
