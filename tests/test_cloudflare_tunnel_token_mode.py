@@ -33,7 +33,7 @@ def _extract_recipe_body(name: str) -> str:
                 if line.strip() == heredoc_end:
                     heredoc_end = None
                 continue
-            if "<<EOF" in line:
+            if "<<EOF" in line or "<<'EOF'" in line:
                 heredoc_end = "EOF"
                 continue
             if "<<'PATCH'" in line:
@@ -134,6 +134,16 @@ def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_o
     assert "cloudflare-tunnel-config" not in patch_text
 
 
+def test_cf_tunnel_install_validates_token(cf_recipe_body: str) -> None:
+    assert "token_len=${#token}" in cf_recipe_body
+    assert "CF_TUNNEL_TOKEN appears too short" in cf_recipe_body
+    assert "grep -q '^eyJ'" in cf_recipe_body
+    assert "does not look like a JWT" in cf_recipe_body
+    assert "Cannot determine default origin certificate path" in cf_recipe_body
+    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+    assert "token you provided is not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
+
+
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
     text = CLOUDFLARE_DOC.read_text(encoding="utf-8")
     for phrase in (
@@ -144,6 +154,13 @@ def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
         "credentials.json",
     ):
         assert phrase in text, f"Documentation missing token-mode guidance: {phrase}"
+
+
+def test_cloudflare_docs_call_out_connector_token_snippet() -> None:
+    text = CLOUDFLARE_DOC.read_text(encoding="utf-8")
+    assert "cloudflared tunnel --no-autoupdate run --token <CONNECTOR_TOKEN>" in text
+    assert "CF_TUNNEL_TOKEN" in text
+    assert "cloudflared service install" in text
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
