@@ -22,6 +22,15 @@ def _extract_cf_recipe_body() -> str:
     return _extract_recipe_body("cf-tunnel-install")
 
 
+@pytest.fixture(scope="module")
+def origin_cert_guidance_text() -> str:
+    just_text = JUSTFILE.read_text(encoding="utf-8")
+    match = re.search(r"origin_cert_guidance := \"\"\"(?P<body>.*?)\"\"\"", just_text, re.S)
+    assert match, "origin_cert_guidance helper missing from justfile"
+
+    return match.group("body")
+
+
 def _extract_recipe_body(name: str) -> str:
     """Return the body of the given recipe name (including indented lines)."""
 
@@ -189,18 +198,27 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     command_op = ops_by_path.get("/spec/template/spec/containers/0/command")
     assert command_op and command_op.get("op") in {"add", "replace"}
-    assert command_op.get("value") == ["/bin/sh", "-c"]
+    assert command_op.get("value") == [
+        "cloudflared",
+        "tunnel",
+        "--no-autoupdate",
+        "--metrics",
+        "0.0.0.0:2000",
+        "run",
+    ]
 
     args_op = ops_by_path.get("/spec/template/spec/containers/0/args")
     assert args_op and args_op.get("op") in {"add", "replace"}
     args = args_op.get("value") or []
-    assert args == [
-        "exec cloudflared tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token \"$TUNNEL_TOKEN\""
-    ]
+    assert args == []
 
     volume_mounts = ops_by_path.get("/spec/template/spec/containers/0/volumeMounts")
     assert volume_mounts and volume_mounts.get("op") in {"add", "replace"}
     assert volume_mounts.get("value") == []
+
+    image_op = ops_by_path.get("/spec/template/spec/containers/0/image")
+    assert image_op and image_op.get("op") in {"add", "replace"}
+    assert image_op.get("value") == "cloudflare/cloudflared:2024.8.3"
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -213,7 +231,10 @@ def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> N
 
 
 def test_teardown_retry_is_baked_into_cf_tunnel_install(cf_recipe_body: str) -> None:
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in cf_recipe_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
+        in cf_recipe_body
+    )
 
     rollout_calls = re.findall(
         r"kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=\d+s",
@@ -256,10 +277,12 @@ def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
     assert "does not look like a JWT" in cf_recipe_body
 
 
-def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str) -> None:
+def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
-    assert "not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
-    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+    assert "origin_cert_guidance" in cf_recipe_body
+    assert 'config_src="cloudflare"' in origin_cert_guidance_text
+    assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
+    assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in origin_cert_guidance_text
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
@@ -275,6 +298,17 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
         if "delete secret tunnel-token" in line:
             assert line.strip().startswith("#"), "Secret deletion should be commented/optional"
 
-    assert "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel" in debug_body
+    assert (
+        "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel"
+        in debug_body
+    )
     assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
     assert "No ConfigMap created in token-only mode" in debug_body
+
+
+def test_debug_recipe_surfaces_origin_cert_guidance(origin_cert_guidance_text: str) -> None:
+    debug_body = _extract_recipe_body("cf-tunnel-debug")
+
+    assert "origin_cert_guidance" in debug_body
+    assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
+    assert 'config_src="cloudflare"' in origin_cert_guidance_text
