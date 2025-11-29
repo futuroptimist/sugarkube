@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -71,6 +74,34 @@ def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
     assert "configmap_yaml" not in cf_recipe_body
     assert "kind: ConfigMap" not in cf_recipe_body
     assert "config.yaml" not in cf_recipe_body
+
+
+def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None:
+    body_lines = cf_recipe_body.splitlines()
+
+    indented_lines = [
+        len(line) - len(line.lstrip()) for line in body_lines if line and line[0].isspace()
+    ]
+    min_indent = min(indented_lines, default=0)
+    dedented = [line[min_indent:] if len(line) >= min_indent else line for line in body_lines]
+
+    openings: list[str] = []
+
+    for line in body_lines:
+        line_stripped = line.strip()
+        if "<<'EOF'" in line or "<<EOF" in line_stripped:
+            openings.append("EOF")
+        if "<<'PATCH'" in line or "<<PATCH" in line_stripped:
+            openings.append("PATCH")
+
+    for terminator in openings:
+        assert any(l == terminator for l in dedented), (
+            f"Missing terminator {terminator!r} in cf-tunnel-install heredoc",
+        )
+        assert not any(
+            (len(line) - len(line.lstrip())) > min_indent and line.strip() == terminator
+            for line in body_lines
+        ), f"Terminator {terminator!r} must not be indented"
 
 
 def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) -> None:
@@ -162,6 +193,36 @@ def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
     assert "not valid for 'cloudflared tunnel run --token'" in cf_recipe_body
     assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in cf_recipe_body
+
+
+def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
+    script_body = cf_recipe_body.replace("{{ env }}", "${env}")
+
+    script = textwrap.dedent(
+        """#!/usr/bin/env bash
+        set -euo pipefail
+
+        CF_TUNNEL_TOKEN="dummy"
+        CF_TUNNEL_NAME="dummy"
+        env="dev"
+
+        helm() { :; }
+        kubectl() { :; }
+
+        """
+    ) + script_body + "\n"
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write(script)
+        path = Path(f.name)
+
+    try:
+        result = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
+        assert result.returncode == 0, (
+            f"bash -n failed for cf-tunnel-install script: {result.stderr}",
+        )
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
