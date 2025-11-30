@@ -24,6 +24,12 @@ avahi-browse --parsable --resolve _k3s-sugar-dev._tcp
 
 ## Quick Test
 
+### CI/Local safety net
+
+- Integration tests now rely on the hermetic Avahi CLI stubs under `tests/fixtures/avahi_stub`.
+- The roundtrip self-check fails (instead of skipping) if `avahi-{publish,browse,resolve}`
+  are missing, guaranteeing we always exercise mDNS discovery logic.
+
 ### Verify bootstrap node is advertising:
 
 ```bash
