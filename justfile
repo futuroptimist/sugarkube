@@ -861,6 +861,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     export KUBECONFIG="${HOME}/.kube/config"
 
+    allow_install="{{ allow_install }}"
+    reuse_values="{{ reuse_values }}"
+
     raw_args=(
         "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
         "{{ version_file }}" "{{ tag }}" "{{ default_tag }}"
@@ -918,6 +921,28 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         esac
     done
 
+    strip_prefix() {
+        local value="${1}"
+        local key="${2}"
+        local prefix="${key}="
+
+        while [[ "${value}" == "${prefix}"* ]]; do
+            value="${value#${prefix}}"
+        done
+
+        printf '%s' "${value}"
+    }
+
+    release="$(strip_prefix "${release}" release)"
+    namespace="$(strip_prefix "${namespace}" namespace)"
+    chart="$(strip_prefix "${chart}" chart)"
+    values="$(strip_prefix "${values}" values)"
+    host="$(strip_prefix "${host}" host)"
+    version="$(strip_prefix "${version}" version)"
+    version_file="$(strip_prefix "${version_file}" version_file)"
+    tag="$(strip_prefix "${tag}" tag)"
+    default_tag="$(strip_prefix "${default_tag}" default_tag)"
+
     if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
@@ -962,13 +987,18 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         set_args+=(--set image.tag="${image_tag}")
     fi
 
+    if [[ "${chart}" == chart=* ]]; then
+        echo "Internal bug: normalized chart still has leading 'chart=': '${chart}'" >&2
+        exit 1
+    fi
+
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
-    if [ "{{ allow_install }}" = "true" ]; then
+    if [ "${allow_install}" = "true" ]; then
         helm_args+=(--install --create-namespace)
     fi
 
-    if [ "{{ reuse_values }}" = "true" ]; then
+    if [ "${reuse_values}" = "true" ]; then
         helm_args+=(--reuse-values)
     fi
 
@@ -987,10 +1017,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'
 
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
