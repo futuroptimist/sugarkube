@@ -861,18 +861,62 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     export KUBECONFIG="${HOME}/.kube/config"
 
-    if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
+    release_val=''
+    namespace_val=''
+    chart_val=''
+    values_val=''
+    host_val=''
+    version_val=''
+    version_file_val=''
+    tag_val=''
+    default_tag_val=''
+
+    raw_args=(
+        "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
+        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}"
+    )
+
+    for token in "${raw_args[@]}"; do
+        if [ -z "${token}" ]; then
+            continue
+        fi
+
+        case "${token}" in
+            release=*) release_val="${token#release=}" ;;
+            namespace=*) namespace_val="${token#namespace=}" ;;
+            chart=*) chart_val="${token#chart=}" ;;
+            values=*) values_val="${token#values=}" ;;
+            host=*) host_val="${token#host=}" ;;
+            version=*) version_val="${token#version=}" ;;
+            version_file=*) version_file_val="${token#version_file=}" ;;
+            tag=*) tag_val="${token#tag=}" ;;
+            default_tag=*) default_tag_val="${token#default_tag=}" ;;
+            *)
+                if [ -z "${release_val}" ]; then release_val="${token}"; continue; fi
+                if [ -z "${namespace_val}" ]; then namespace_val="${token}"; continue; fi
+                if [ -z "${chart_val}" ]; then chart_val="${token}"; continue; fi
+                if [ -z "${values_val}" ]; then values_val="${token}"; continue; fi
+                if [ -z "${host_val}" ]; then host_val="${token}"; continue; fi
+                if [ -z "${version_val}" ]; then version_val="${token}"; continue; fi
+                if [ -z "${version_file_val}" ]; then version_file_val="${token}"; continue; fi
+                if [ -z "${tag_val}" ]; then tag_val="${token}"; continue; fi
+                if [ -z "${default_tag_val}" ]; then default_tag_val="${token}"; continue; fi
+                ;;
+        esac
+    done
+
+    if [ -z "${release_val}" ] || [ -z "${namespace_val}" ] || [ -z "${chart_val}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
     fi
 
-    chart_version="{{ version }}"
-    if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
+    chart_version="${version_val}"
+    if [ -z "${chart_version}" ] && [ -n "${version_file_val}" ] && [ -f "${version_file_val}" ]; then
         chart_version="$(
-            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 | tr -d '[:space:]' || true
+            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${version_file_val}" | head -n1 | tr -d '[:space:]' || true
         )"
         if [ -z "${chart_version}" ]; then
-            echo "Warning: version_file '{{ version_file }}' did not contain a valid version" >&2
+            echo "Warning: version_file '${version_file_val}' did not contain a valid version" >&2
         fi
     fi
 
@@ -882,8 +926,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
 
     value_args=()
-    if [ -n "{{ values }}" ]; then
-        IFS=',' read -ra value_files <<< "{{ values }}"
+    if [ -n "${values_val}" ]; then
+        IFS=',' read -ra value_files <<< "${values_val}"
         for value_file in "${value_files[@]}"; do
             value_file="$(echo "${value_file}" | xargs)"
             if [ -n "${value_file}" ]; then
@@ -892,20 +936,20 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         done
     fi
 
-    image_tag="{{ tag }}"
-    if [ -z "${image_tag}" ] && [ -n "{{ default_tag }}" ]; then
-        image_tag="{{ default_tag }}"
+    image_tag="${tag_val}"
+    if [ -z "${image_tag}" ] && [ -n "${default_tag_val}" ]; then
+        image_tag="${default_tag_val}"
     fi
 
     set_args=()
-    if [ -n "{{ host }}" ]; then
-        set_args+=(--set ingress.host="{{ host }}")
+    if [ -n "${host_val}" ]; then
+        set_args+=(--set ingress.host="${host_val}")
     fi
     if [ -n "${image_tag}" ]; then
         set_args+=(--set image.tag="${image_tag}")
     fi
 
-    helm_args=(upgrade "{{ release }}" "{{ chart }}" --namespace "{{ namespace }}")
+    helm_args=(upgrade "${release_val}" "${chart_val}" --namespace "${namespace_val}")
 
     if [ "{{ allow_install }}" = "true" ]; then
         helm_args+=(--install --create-namespace)
@@ -930,10 +974,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'
 
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
