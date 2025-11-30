@@ -3,7 +3,7 @@
   "date": "2025-11-29",
   "component": "helm-oci-install (dspace)",
   "rootCause": "helm-oci-install / _helm-oci-deploy forwarded chart arguments as chart=oci://..., so Helm reported invalid chart URL format as chart=chart=oci://... when using the documented key=value CLI pattern.",
-  "resolution": "Normalized helm-oci-install arguments so _helm-oci-deploy strips key prefixes before calling Helm, ensuring the chart value is only passed once and validating the generated command with just -n.",
+  "resolution": "Forwarded helm-oci-install/upgrade arguments positionally, hardened _helm-oci-deploy to strip repeated key prefixes before constructing Helm args, and added a CI dry-run test to guard against chart= prefixes in oci:// URLs.",
   "references": [
     "docs/apps/dspace.md#quickstart",
     "justfile",
