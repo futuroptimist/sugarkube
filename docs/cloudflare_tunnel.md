@@ -24,8 +24,8 @@ inside the cluster.
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure a Public hostname routing `staging.democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
-- Confirm readiness: `kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhost:2000/ready`
-  should return HTTP 200.
+- Confirm readiness (optional): port-forward `/ready` from `sugarkube0` in one shell and curl it from
+  another shell (see detailed steps below).
 
 ## Prerequisites
 
@@ -135,15 +135,33 @@ Run these commands on `sugarkube0` (or whichever node has the Sugarkube checkout
    (`token=<jwt>`, `TUNNEL_TOKEN=<jwt>`, or a full `cloudflared ... --token <jwt>` command) and mounts
    the Secret directly as `TUNNEL_TOKEN`.
 
-4. Verify readiness (Pods should report `/ready` = `200`):
+4. Verify readiness (optional manual check):
 
-   ```bash
-   kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel
-   kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhost:2000/ready
-   ```
+   The `cloudflare/cloudflared:2024.8.3` image is minimal and does **not** ship `curl`, so
+   `kubectl exec ... curl ...` will fail with `executable file not found`. Kubernetes already probes
+   `/ready` on port `2000`, and the Cloudflare dashboard shows a **Connected** status when the tunnel
+   is healthy. If you still want to manually inspect readiness, use this two-shell port-forward
+   approach:
 
-   `curl http://localhost:2000/ready` returning `200` means the connector is up and Cloudflare can
-   reach this cluster.
+   - **Shell 1 on `sugarkube0` (or any node with `kubectl` access): keep this running**
+
+     ```bash
+     kubectl -n cloudflare port-forward deploy/cloudflare-tunnel 2000:2000
+     ```
+
+   - **Shell 2 on the same host while Shell 1 is active:**
+
+     ```bash
+     curl -fsS http://localhost:2000/ready
+     ```
+
+     A JSON response with `"status":200` indicates a healthy tunnel, for example:
+
+     ```json
+     {"status":200,"readyConnections":4,"connectorId":"..."}
+     ```
+
+   You can stop the port-forward once you have checked the response.
 
 ### Worked example: dspace staging tunnel on the `dev` Sugarkube env
 
@@ -169,7 +187,12 @@ just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
 
 # Sanity check: connector pod should be ready
 kubectl -n cloudflare get pods -l app.kubernetes.io/name=cloudflare-tunnel
-kubectl -n cloudflare exec deploy/cloudflare-tunnel -- curl -fsS http://localhost:2000/ready
+
+# Optional manual check (two shells):
+# Shell 1 (leave running):
+kubectl -n cloudflare port-forward deploy/cloudflare-tunnel 2000:2000
+# Shell 2 on the same host:
+curl -fsS http://localhost:2000/ready
 ```
 
 Even though the Sugarkube environment is `dev`, this connects the cluster to the `dspace-staging-v3`
