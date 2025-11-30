@@ -883,7 +883,13 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     value_args=()
     if [ -n "{{ values }}" ]; then
-        value_args+=(-f "{{ values }}")
+        IFS=',' read -ra value_files <<< "{{ values }}"
+        for value_file in "${value_files[@]}"; do
+            value_file="$(echo "${value_file}" | xargs)"
+            if [ -n "${value_file}" ]; then
+                value_args+=(-f "${value_file}")
+            fi
+        done
     fi
 
     image_tag="{{ tag }}"

@@ -1,0 +1,4 @@
+ingress:
+  enabled: true
+  className: traefik
+  host: staging.democratized.space
