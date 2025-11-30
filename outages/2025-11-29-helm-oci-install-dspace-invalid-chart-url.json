@@ -1,0 +1,13 @@
+{
+  "id": "2025-11-29-helm-oci-install-dspace-invalid-chart-url",
+  "date": "2025-11-29",
+  "component": "helm-oci-install (dspace)",
+  "rootCause": "helm-oci-install forwarded CLI inputs like chart=oci://... directly, so _helm-oci-deploy built helm commands using values prefixed with the argument names, producing chart=chart=oci://... and triggering invalid chart URL errors.",
+  "resolution": "Normalize helm-oci parameters to strip any leading name= prefixes before building helm arguments so that chart values are passed exactly once while keeping the documented just interface, and verify the generated command with just -n.",
+  "references": [
+    "docs/k3s-sugarkube-dev.md#step-5-install-or-upgrade-the-helm-release",
+    "justfile",
+    "just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version default_tag=v3-latest",
+    "PR: <PR number>"
+  ]
+}
