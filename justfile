@@ -876,7 +876,18 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     tag=""
     default_tag=""
 
-    for raw_arg in "${raw_args[@]}"; do
+    assign_if_empty() {
+        local var_name="${1}"
+        local var_value="${2}"
+
+        if [ -z "${!var_name}" ]; then
+            printf -v "${var_name}" '%s' "${var_value}"
+        fi
+    }
+
+    for raw_index in "${!raw_args[@]}"; do
+        raw_arg="${raw_args[${raw_index}]}"
+
         if [ -z "${raw_arg}" ]; then
             continue
         fi
@@ -892,25 +903,17 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             tag=*) tag="${raw_arg#tag=}" ;;
             default_tag=*) default_tag="${raw_arg#default_tag=}" ;;
             *)
-                if [ -z "${release}" ]; then
-                    release="${raw_arg}"
-                elif [ -z "${namespace}" ]; then
-                    namespace="${raw_arg}"
-                elif [ -z "${chart}" ]; then
-                    chart="${raw_arg}"
-                elif [ -z "${values}" ]; then
-                    values="${raw_arg}"
-                elif [ -z "${host}" ]; then
-                    host="${raw_arg}"
-                elif [ -z "${version}" ]; then
-                    version="${raw_arg}"
-                elif [ -z "${version_file}" ]; then
-                    version_file="${raw_arg}"
-                elif [ -z "${tag}" ]; then
-                    tag="${raw_arg}"
-                elif [ -z "${default_tag}" ]; then
-                    default_tag="${raw_arg}"
-                fi
+                case "${raw_index}" in
+                    0) assign_if_empty release "${raw_arg}" ;;
+                    1) assign_if_empty namespace "${raw_arg}" ;;
+                    2) assign_if_empty chart "${raw_arg}" ;;
+                    3) assign_if_empty values "${raw_arg}" ;;
+                    4) assign_if_empty host "${raw_arg}" ;;
+                    5) assign_if_empty version "${raw_arg}" ;;
+                    6) assign_if_empty version_file "${raw_arg}" ;;
+                    7) assign_if_empty tag "${raw_arg}" ;;
+                    8) assign_if_empty default_tag "${raw_arg}" ;;
+                esac
                 ;;
         esac
     done
