@@ -876,6 +876,17 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     tag=""
     default_tag=""
 
+    normalize_value() {
+        local key="$1"
+        local value="$2"
+
+        while [[ "${value}" == "${key}="* ]]; do
+            value="${value#${key}=}"
+        done
+
+        printf '%s' "${value}"
+    }
+
     assign_if_empty() {
         local var_name="${1}"
         local var_value="${2}"
@@ -918,8 +929,23 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         esac
     done
 
+    release="$(normalize_value release "${release}")"
+    namespace="$(normalize_value namespace "${namespace}")"
+    chart="$(normalize_value chart "${chart}")"
+    values="$(normalize_value values "${values}")"
+    host="$(normalize_value host "${host}")"
+    version="$(normalize_value version "${version}")"
+    version_file="$(normalize_value version_file "${version_file}")"
+    tag="$(normalize_value tag "${tag}")"
+    default_tag="$(normalize_value default_tag "${default_tag}")"
+
     if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
+        exit 1
+    fi
+
+    if [[ "${chart}" == chart=* ]]; then
+        echo "Internal bug: normalized chart still has leading 'chart=': '${chart}'" >&2
         exit 1
     fi
 
@@ -987,10 +1013,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='true' reuse_values='false'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'
 
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' host='{{ host }}' version='{{ version }}' version_file='{{ version_file }}' tag='{{ tag }}' default_tag='{{ default_tag }}' allow_install='false' reuse_values='true'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
