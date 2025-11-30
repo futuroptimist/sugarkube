@@ -861,18 +861,72 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     export KUBECONFIG="${HOME}/.kube/config"
 
-    if [ -z "{{ release }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ chart }}" ]; then
+    raw_args=(
+        "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
+        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}"
+    )
+
+    release=""
+    namespace=""
+    chart=""
+    values=""
+    host=""
+    version=""
+    version_file=""
+    tag=""
+    default_tag=""
+
+    for raw_arg in "${raw_args[@]}"; do
+        if [ -z "${raw_arg}" ]; then
+            continue
+        fi
+
+        case "${raw_arg}" in
+            release=*) release="${raw_arg#release=}" ;;
+            namespace=*) namespace="${raw_arg#namespace=}" ;;
+            chart=*) chart="${raw_arg#chart=}" ;;
+            values=*) values="${raw_arg#values=}" ;;
+            host=*) host="${raw_arg#host=}" ;;
+            version=*) version="${raw_arg#version=}" ;;
+            version_file=*) version_file="${raw_arg#version_file=}" ;;
+            tag=*) tag="${raw_arg#tag=}" ;;
+            default_tag=*) default_tag="${raw_arg#default_tag=}" ;;
+            *)
+                if [ -z "${release}" ]; then
+                    release="${raw_arg}"
+                elif [ -z "${namespace}" ]; then
+                    namespace="${raw_arg}"
+                elif [ -z "${chart}" ]; then
+                    chart="${raw_arg}"
+                elif [ -z "${values}" ]; then
+                    values="${raw_arg}"
+                elif [ -z "${host}" ]; then
+                    host="${raw_arg}"
+                elif [ -z "${version}" ]; then
+                    version="${raw_arg}"
+                elif [ -z "${version_file}" ]; then
+                    version_file="${raw_arg}"
+                elif [ -z "${tag}" ]; then
+                    tag="${raw_arg}"
+                elif [ -z "${default_tag}" ]; then
+                    default_tag="${raw_arg}"
+                fi
+                ;;
+        esac
+    done
+
+    if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
     fi
 
-    chart_version="{{ version }}"
-    if [ -z "${chart_version}" ] && [ -n "{{ version_file }}" ] && [ -f "{{ version_file }}" ]; then
+    chart_version="${version}"
+    if [ -z "${chart_version}" ] && [ -n "${version_file}" ] && [ -f "${version_file}" ]; then
         chart_version="$(
-            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "{{ version_file }}" | head -n1 | tr -d '[:space:]' || true
+            sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${version_file}" | head -n1 | tr -d '[:space:]' || true
         )"
         if [ -z "${chart_version}" ]; then
-            echo "Warning: version_file '{{ version_file }}' did not contain a valid version" >&2
+            echo "Warning: version_file '${version_file}' did not contain a valid version" >&2
         fi
     fi
 
@@ -882,8 +936,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
 
     value_args=()
-    if [ -n "{{ values }}" ]; then
-        IFS=',' read -ra value_files <<< "{{ values }}"
+    if [ -n "${values}" ]; then
+        IFS=',' read -ra value_files <<< "${values}"
         for value_file in "${value_files[@]}"; do
             value_file="$(echo "${value_file}" | xargs)"
             if [ -n "${value_file}" ]; then
@@ -892,20 +946,20 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         done
     fi
 
-    image_tag="{{ tag }}"
-    if [ -z "${image_tag}" ] && [ -n "{{ default_tag }}" ]; then
-        image_tag="{{ default_tag }}"
+    image_tag="${tag}"
+    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
+        image_tag="${default_tag}"
     fi
 
     set_args=()
-    if [ -n "{{ host }}" ]; then
-        set_args+=(--set ingress.host="{{ host }}")
+    if [ -n "${host}" ]; then
+        set_args+=(--set ingress.host="${host}")
     fi
     if [ -n "${image_tag}" ]; then
         set_args+=(--set image.tag="${image_tag}")
     fi
 
-    helm_args=(upgrade "{{ release }}" "{{ chart }}" --namespace "{{ namespace }}")
+    helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
     if [ "{{ allow_install }}" = "true" ]; then
         helm_args+=(--install --create-namespace)
