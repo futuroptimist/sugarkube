@@ -4,6 +4,13 @@ Use the packaged Helm chart from GHCR to install the dspace v3 stack into your c
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
 changing the arguments.
 
+Values files are split so you can layer staging-specific ingress settings on top of the default
+development values:
+
+- `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
+- `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
+  `staging.democratized.space`.
+
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
 configured accordingly.
@@ -39,13 +46,12 @@ charts:
 ## Quickstart
 
 ```bash
-# Install or upgrade the release with a Traefik ingress host (defaults to v3-latest image tag)
+# Install or upgrade the release with staging ingress overrides (defaults to v3-latest image tag)
 just helm-oci-install \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
-  host=staging.democratized.space \
   default_tag=v3-latest
 
 # Check pods and ingress status with the public URL
@@ -55,7 +61,7 @@ just app-status namespace=dspace release=dspace
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
   tag=v3-<shortsha>
 ```
@@ -94,9 +100,8 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
    just helm-oci-install \
      release=dspace namespace=dspace \
      chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml \
+     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
      version_file=docs/apps/dspace.version \
-     host=staging.democratized.space \
      default_tag=v3-latest
    ```
 
@@ -112,7 +117,7 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
    just helm-oci-upgrade \
      release=dspace namespace=dspace \
      chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml \
+     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
      version_file=docs/apps/dspace.version \
      tag=v3-<shortsha>
    ```
