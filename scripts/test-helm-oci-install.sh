@@ -10,6 +10,7 @@ if ! command -v just >/dev/null 2>&1; then
 fi
 
 tmp_bin="$(mktemp -d)"
+trap 'rm -rf "${tmp_bin}"' EXIT
 helm_log="${tmp_bin}/helm.log"
 
 cat >"${tmp_bin}/helm" <<'SH'
