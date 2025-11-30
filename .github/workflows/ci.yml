@@ -35,10 +35,15 @@ jobs:
             libdw-dev \
             libglib2.0-bin \
             libnss-mdns \
+            just \
             ncat \
             zlib1g-dev \
             binutils-dev \
             libiberty-dev
+
+      - name: Verify helm-oci-install just recipe
+        run: |
+          ./scripts/test-helm-oci-install.sh
 
       - name: Ensure Avahi services are running
         run: |
