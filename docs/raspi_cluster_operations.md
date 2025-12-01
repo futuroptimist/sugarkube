@@ -467,6 +467,7 @@ Quick reference for the most common recipes when operating your cluster:
 | `just status` | Display cluster nodes with `kubectl get nodes -o wide` | Check overall cluster health and node readiness. Guards against running before k3s is installed. |
 | `just kubeconfig env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
+| `just dspace-debug-logs` | Dump dspace pod logs and Traefik ingress logs (last 200 lines each) | Investigate dspace 500s or routing issues from Traefik to dspace. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
 
@@ -806,6 +807,32 @@ As you continue operating your cluster, these recipes will be helpful:
 
 - **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to roll the dspace v3
   release to the latest published image tag in GHCR without retyping chart arguments.
+
+### Collect dspace logs (emergency debugging)
+
+When dspace returns HTTP 500s (from Traefik or directly), you can dump the most
+relevant logs with a single command:
+
+```bash
+# From the sugarkube repo root on a cluster node:
+just dspace-debug-logs
+```
+
+If dspace runs in a different namespace, override it:
+
+```bash
+just dspace-debug-logs namespace=my-dspace-namespace
+```
+
+The output includes:
+
+- A pod listing in the dspace namespace.
+- The last 200 log lines for each pod labeled `app.kubernetes.io/name=dspace`.
+- The last 200 Traefik log lines in `kube-system`.
+
+Scan for JSON log lines containing `"level":"error"` from the dspace server and
+Traefik entries reporting 5xx responses for `staging.democratized.space` or other
+dspace hosts.
 
 ### Document outages and incidents
 
