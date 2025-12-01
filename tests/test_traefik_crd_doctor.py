@@ -60,9 +60,16 @@ def metadata(name: str):
     return state.get("crds", {}).get(name, {})
 
 
-if cmd == "get" and len(args) >= 2 and args[1] == "crd":
-    if len(args) >= 3 and args[2].startswith("crd/"):
-        name = args[2].split("/", 1)[1]
+if cmd == "get" and len(args) >= 2:
+    # Handle both `kubectl get crd crd/NAME` and `kubectl get crd/NAME` formats
+    resource_arg = None
+    if args[1] == "crd" and len(args) >= 3:
+        resource_arg = args[2]
+    elif args[1].startswith("crd/"):
+        resource_arg = args[1]
+
+    if resource_arg and resource_arg.startswith("crd/"):
+        name = resource_arg.split("/", 1)[1]
         jsonpath = ""
         if "-o" in args:
             idx = args.index("-o")
@@ -78,7 +85,7 @@ if cmd == "get" and len(args) >= 2 and args[1] == "crd":
             value = meta.get("annotations", {}).get("meta.helm.sh/release-namespace", "")
         sys.stdout.write(value)
         sys.exit(0 if name in state.get("crds", {}) else 1)
-    else:
+    elif args[1] == "crd":
         names = []
         for arg in args[2:]:
             if arg.startswith("-"):
@@ -87,6 +94,9 @@ if cmd == "get" and len(args) >= 2 and args[1] == "crd":
         existing = [name for name in names if name in state.get("crds", {})]
         if existing:
             sys.stdout.write("\n".join(existing) + "\n")
+        sys.exit(0)
+    else:
+        log(sys.argv[1:])
         sys.exit(0)
 elif cmd == "delete" and len(args) >= 2 and args[1] == "crd":
     names = [a for a in args[2:] if not a.startswith("-")]
