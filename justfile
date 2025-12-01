@@ -1023,6 +1023,15 @@ helm-oci-install release='' namespace='' chart='' values='' host='' version='' v
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
+# Fast redeploy of dspace v3 from GHCR (emergency push)
+dspace-oci-redeploy:
+    @just helm-oci-install \
+      release='dspace' namespace='dspace' \
+      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
+      values='docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml' \
+      version_file='docs/apps/dspace.version' \
+      tag='' default_tag='v3-latest'
+
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail

@@ -660,6 +660,72 @@ kubectl get ing -n dspace
 If you configured a load balancer or Ingress controller, you'll see the external
 address where dspace is accessible.
 
+### Fast manual redeploy (emergency push for Helm workloads)
+
+When the cluster is already healthy (k3s, Traefik, Cloudflare tunnel) and you have
+published a new dspace image (for example, `v3-latest` now points at a fresh build),
+you can force a quick redeploy of the running Helm release. This uses the existing
+Sugarkube OCI helpers and relies on Kubernetes' default rolling upgrade strategy.
+
+From the sugarkube repo root on any cluster node:
+
+```bash
+just helm-oci-install \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+  version_file=docs/apps/dspace.version \
+  default_tag=v3-latest
+```
+
+If the release already exists and you prefer an upgrade-only flow, use the
+`helm-oci-upgrade` wrapper (same arguments):
+
+```bash
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+  version_file=docs/apps/dspace.version \
+  default_tag=v3-latest
+```
+
+Prefer a shorter alias? Use the dedicated emergency wrapper:
+
+```bash
+just dspace-oci-redeploy
+```
+
+What happens under the hood:
+
+- Both recipes call the shared `_helm-oci-deploy` helper.
+- Helm performs `upgrade --install` (or `upgrade` if you used the upgrade recipe) against the
+  running `dspace` release.
+- Kubernetes rolls the dspace pods to the new image according to the Deployment's update
+  strategy (no special draining or surge tuning is applied here).
+
+Emergency redeploy checklist:
+
+1. Confirm the cluster and Traefik are healthy:
+
+   ```bash
+   just cluster-status
+   ```
+
+2. Ensure your dspace image is pushed and `v3-latest` (or your chosen tag) points at the new
+   build. See the dspace repo docs for tagging guidance.
+3. Run the fast redeploy command (either `helm-oci-install` or `helm-oci-upgrade` above).
+4. Verify pods and logs:
+
+   ```bash
+   kubectl get pods -n dspace -o wide
+   kubectl logs -n dspace -l app.kubernetes.io/name=dspace --tail=100
+   ```
+
+This is intentionally the "fast and slightly dangerous" path. A more conservative rollout could
+add pre-checks, temporary replica adjustments, or tuned update strategies, but the steps above
+optimize for getting the new build live quickly.
+
 ## Step 5: Hook the cluster into Flux for GitOps
 
 With your applications deployed manually, the final step is to automate future
@@ -750,6 +816,10 @@ As you continue operating your cluster, these recipes will be helpful:
 
 - **Recover from misconfiguration:** If a node accidentally joins the wrong cluster,
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
+
+- **Fast dspace redeploy:** Run `just dspace-oci-redeploy` to force an emergency
+  upgrade of the dspace Helm release from the published GHCR OCI chart (uses
+  `v3-latest` by default).
 
 ### Document outages and incidents
 
