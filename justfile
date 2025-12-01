@@ -345,9 +345,7 @@ kubeconfig env='dev':
     sudo chown -R "$USER":"$USER" ~/.kube
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
-    env_name="{{ env }}"
-    scope_name="sugar-${env_name#env=}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
