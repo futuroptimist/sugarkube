@@ -467,6 +467,7 @@ Quick reference for the most common recipes when operating your cluster:
 | `just status` | Display cluster nodes with `kubectl get nodes -o wide` | Check overall cluster health and node readiness. Guards against running before k3s is installed. |
 | `just kubeconfig env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
+| `just dspace-debug-logs` | Dump dspace pod logs plus Traefik logs (last 200 lines each) | Investigate HTTP 500s or routing issues affecting dspace. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
 
@@ -787,6 +788,32 @@ kubectl get helmrelease -A
 ```
 
 You should see `token-place` with a `Ready` condition indicating successful deployment.
+
+### Collect dspace logs (emergency debugging)
+
+When democratized.space (dspace) starts returning HTTP 500 responses (directly or via Traefik),
+capture the most relevant logs with a single recipe from the Sugarkube repo root:
+
+```bash
+just dspace-debug-logs
+```
+
+For alternative namespaces, pass the namespace argument:
+
+```bash
+just dspace-debug-logs namespace=my-dspace-namespace
+```
+
+The output includes:
+
+- A list of pods in the dspace namespace
+- The last 200 log lines for each dspace pod (matching `app.kubernetes.io/name=dspace`)
+- The last 200 Traefik log lines in `kube-system`
+
+What to inspect:
+
+- JSON log entries with `"level":"error"` emitted by the dspace server
+- Traefik log lines showing 5xx responses for `staging.democratized.space` or other dspace hosts
 
 ## Additional operational recipes
 
