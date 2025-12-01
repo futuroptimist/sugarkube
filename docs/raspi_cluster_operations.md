@@ -660,6 +660,62 @@ kubectl get ing -n dspace
 If you configured a load balancer or Ingress controller, you'll see the external
 address where dspace is accessible.
 
+### Fast manual redeploy (emergency push for Helm workloads)
+
+When dspace (or any Helm-managed workload) is already running and you have a new
+container image published, you can force a quick redeploy without worrying about zero
+downtime. The examples below assume:
+
+- The Raspberry Pi k3s cluster is healthy and reachable.
+- Traefik and the Cloudflare tunnel are already working.
+- The dspace chart is available as an OCI artifact in GHCR and an initial deploy is done.
+
+From the sugarkube repo root on a cluster node, trigger a fast redeploy with the existing
+Helm OCI helper (uses `upgrade --install` under the hood):
+
+```bash
+just helm-oci-install \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+  version_file=docs/apps/dspace.version \
+  default_tag=v3-latest
+```
+
+This calls the shared `_helm-oci-deploy` helper, which runs `helm upgrade --install` with
+the provided values, version file, and tag defaults. Kubernetes then rolls the dspace pods
+to the new image following the Deployment's update strategy.
+
+If you prefer a single-purpose wrapper for this emergency push, use the `just` recipe added
+for dspace v3:
+
+```bash
+just dspace-oci-redeploy
+```
+
+Checklist for a fast redeploy:
+
+1. Confirm cluster and ingress health:
+
+   ```bash
+   just cluster-status
+   ```
+
+2. Ensure the new dspace image is published and the `v3-latest` tag points to it (see the
+   dspace repo for build/push steps).
+
+3. Run the redeploy command (`just dspace-oci-install ...` or `just dspace-oci-redeploy`).
+
+4. Verify pods and logs:
+
+   ```bash
+   kubectl get pods -n dspace -o wide
+   kubectl logs -n dspace -l app.kubernetes.io/name=dspace --tail=100
+   ```
+
+> This path is intentionally fast and slightly risky. For more conservative rollouts you can
+> adjust replica counts or update strategies in the chart values before redeploying.
+
 ## Step 5: Hook the cluster into Flux for GitOps
 
 With your applications deployed manually, the final step is to automate future
@@ -741,6 +797,9 @@ As you continue operating your cluster, these recipes will be helpful:
 
 - **Test token.place samples:** Run `just token-place-samples` to replay bundled
   health checks before exposing the workloads to external traffic.
+
+- **Redeploy dspace quickly:** Run `just dspace-oci-redeploy` to pull the latest
+  dspace OCI Helm chart version and roll pods to the `v3-latest` image tag.
 
 - **Reconcile platform changes:** Use `just platform-apply env=dev` to trigger an
   immediate Flux reconciliation of the platform Kustomization.
