@@ -468,6 +468,7 @@ Quick reference for the most common recipes when operating your cluster:
 | `just kubeconfig env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
+| `just dspace-debug-logs` | Dump dspace and Traefik logs for the last 200 lines each | Investigating 500s or routing issues for dspace. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
 
 ## Step 2: Capture and commit sanitized bring-up logs
@@ -712,6 +713,33 @@ strategy.
 
 > This path is intentionally fast and slightly risky. For more conservative rollouts,
 > consider tweaking replica counts or update strategies before running the upgrade.
+
+### Collect dspace logs (emergency debugging)
+
+If dspace begins returning HTTP 500s (either directly or through Traefik), use a single
+recipe to collect the most relevant logs for triage.
+
+```bash
+# From the sugarkube repo root on a cluster node:
+just dspace-debug-logs
+```
+
+If you use a different namespace, override it:
+
+```bash
+just dspace-debug-logs namespace=my-dspace-namespace
+```
+
+The output includes:
+
+- A pod listing for the dspace namespace.
+- The last 200 log lines from each dspace pod (labeled `app.kubernetes.io/name=dspace`).
+- The last 200 lines of Traefik logs from `kube-system`.
+
+Look for JSON log entries containing `"level":"error"` from the dspace server and
+Traefik entries showing 5xx responses for `staging.democratized.space` or other dspace
+hosts. Pair these details with the structured logs in the dspace repo to pinpoint why
+`/`, `/config.json`, or `/healthz` are failing.
 
 ## Step 5: Hook the cluster into Flux for GitOps
 

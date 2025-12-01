@@ -1032,6 +1032,41 @@ dspace-oci-redeploy:
       version_file='docs/apps/dspace.version' \
       tag='' default_tag='v3-latest'
 
+# Dump dspace and Traefik logs for debugging HTTP 500s.
+dspace-debug-logs namespace='dspace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    ns="{{ namespace }}"
+
+    echo "=== dspace pods in namespace ${ns} ==="
+    kubectl get pods -n "${ns}" -o wide || {
+      echo "Failed to list dspace pods in namespace ${ns}" >&2
+    }
+
+    echo
+    echo "=== dspace logs (last 200 lines per pod) ==="
+    # Logs for all pods labeled as dspace
+    dspace_pods=$(kubectl get pods -n "${ns}" -l app.kubernetes.io/name=dspace -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+    if [ -z "${dspace_pods}" ]; then
+      echo "No pods found with label app.kubernetes.io/name=dspace in namespace ${ns}" >&2
+    else
+      for pod in ${dspace_pods}; do
+        echo
+        echo "--- dspace pod: ${pod} ---"
+        kubectl logs -n "${ns}" "${pod}" --tail=200 || {
+          echo "Failed to fetch logs for pod ${pod}" >&2
+        }
+      done
+    fi
+
+    echo
+    echo "=== Traefik logs (last 200 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
+      echo "Failed to fetch Traefik logs" >&2
+    }
+
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail
