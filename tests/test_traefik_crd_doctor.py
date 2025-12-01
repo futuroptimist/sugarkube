@@ -181,6 +181,7 @@ def _run_doctor(
             "PATH": f"{kubectl_path.parent}:{env['PATH']}",
             "KUBECTL_STATE": str(state_path),
             "KUBECTL_LOG": str(log_path),
+            "KUBECTL_BIN": str(kubectl_path),
         }
     )
 

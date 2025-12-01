@@ -352,6 +352,7 @@ def test_just_up_dev_two_nodes(tmp_path):
             "SUGARKUBE_SKIP_SYSTEMCTL": "1",
             "SUGARKUBE_SERVERS": "2",
             "SUGARKUBE_TOKEN": "dummy",
+            "SUGARKUBE_ALLOW_ROOTLESS_DEPS": "1",
             "TEST_NSSWITCH": str(nsswitch_path),
             "JUST_UP_PRIMARY_HOST": "pi0.local",
             "JUST_UP_LOG": str(log_path),
