@@ -96,6 +96,57 @@ working with a minimal OS, use the `just` recipes from the repository root:
 If you prefer to install Helm manually or are unable to use the `just` recipes, see the manual
 operations guide: `docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
 
+### Authenticate Helm with OCI registries (GHCR for dspace)
+
+Sugarkube's Helm helpers (for example, `just helm-oci-install`) and newer workload docs assume you
+can pull charts directly from OCI registries such as `ghcr.io`. GitHub Container Registry (GHCR)
+requires an authenticated bearer token even for public Helm charts. Skipping authentication leads
+to errors like:
+
+```text
+Error: failed to perform "FetchReference" on source:
+  GET "https://ghcr.io/v2/democratizedspace/charts/dspace/manifests/3.0.0":
+  GET "https://ghcr.io/token?scope=repository%3Ademocratizedspace%2Fcharts%2Fdspace%3Apull&service=ghcr.io":
+  response status code 401: unauthorized: authentication required
+```
+
+Authenticate once per node that will pull OCI charts:
+
+```bash
+# 1) Create a GitHub Personal Access Token with the `read:packages` scope.
+# 2) Then, on each node that will pull OCI charts:
+
+export GHCR_USERNAME="your_github_username"
+export GHCR_PAT="your_pat_with_read_packages"
+
+echo "${GHCR_PAT}" | helm registry login ghcr.io \
+  --username "${GHCR_USERNAME}" \
+  --password-stdin
+```
+
+Safety tips:
+
+- Never commit the PAT to Git. Store the exports in a root-owned file outside the repo or in a
+  private shell profile.
+- Re-run the login on each node if the PAT rotates or you rebuild the cluster.
+
+Why this matters for dspace:
+
+- The dspace Helm chart is published at `oci://ghcr.io/democratizedspace/charts/dspace` with
+  semantic versions such as `3.0.0`.
+- Commands like `helm pull oci://ghcr.io/democratizedspace/charts/dspace --version 3.0.0` and
+  `just helm-oci-install ... chart=oci://ghcr.io/democratizedspace/charts/dspace ...` require the
+  GHCR login above.
+- Once Helm and GHCR login are working, higher-level recipes such as `just helm-oci-install` can
+  be used for OCI-hosted workloads (see the workload-specific docs for full examples).
+
+Common errors:
+
+- **401 / `authentication required`:** Run `helm registry login ghcr.io` with a PAT that has the
+  `read:packages` scope.
+- **`...:3.0.0: not found`:** The requested chart version is absent—check the version documented in
+  the dspace repo (for example, `docs/apps/dspace.version`) and pull that version instead.
+
 ## Install and verify Traefik ingress
 
 > This section expands step 4 of the golden path above (installing and validating Traefik).
@@ -534,6 +585,15 @@ showing `1/1` or `2/2` depending on the number of containers per pod. If pods ar
 With token.place running, you can deploy additional workloads like
 [democratized.space (dspace)](https://github.com/democratizedspace/dspace), a
 companion application for your cluster.
+
+> **Note:** There are two ways to deploy dspace:
+> - **Manual Helm install** (documented below) by cloning the dspace repo and running
+>   `helm upgrade --install ...` directly.
+> - **Sugarkube + OCI Helm chart path** using `helm-oci-install` and the dspace v3 guide in the
+>   dspace repo (recommended once Helm and GHCR login are working).
+>
+> For the sugarkube-centric path, see:
+> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-dev.md
 
 ### Why deploy dspace?
 
