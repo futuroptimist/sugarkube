@@ -26,6 +26,7 @@ GPIO
 GPT
 Gabriel
 Grafana
+GHCR
 HATs
 IPs
 IRL
