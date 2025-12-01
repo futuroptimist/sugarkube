@@ -45,7 +45,7 @@ def save_state(data):
 
 def log(args):
     existing = log_path.read_text() if log_path.exists() else ""
-    log_path.write_text(existing + " ".join(args) + "\n")
+    log_path.write_text(existing + " ".join(args) + "\\n")
 
 
 state = load_state()
@@ -93,7 +93,7 @@ if cmd == "get" and len(args) >= 2:
             names.append(arg)
         existing = [name for name in names if name in state.get("crds", {})]
         if existing:
-            sys.stdout.write("\n".join(existing) + "\n")
+            sys.stdout.write("\\n".join(existing) + "\\n")
         sys.exit(0)
     else:
         log(sys.argv[1:])

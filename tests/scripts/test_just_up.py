@@ -10,7 +10,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _write_executable(path: Path, content: str) -> None:
-    path.write_text(textwrap.dedent(content), encoding="utf-8")
+    # For scripts where shebang is on same line as """, we need to handle dedent specially
+    # Split into first line (shebang) and rest, dedent the rest separately
+    lines = content.split('\n', 1)
+    if len(lines) == 2 and lines[0].startswith('#!'):
+        shebang = lines[0]
+        body = textwrap.dedent(lines[1])
+        result = shebang + '\n' + body
+    else:
+        result = textwrap.dedent(content)
+    path.write_text(result, encoding="utf-8")
     path.chmod(0o755)
 
 

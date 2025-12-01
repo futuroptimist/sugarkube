@@ -107,6 +107,13 @@ ensure_avahi_enabled() {
 ensure_nsswitch_mdns() {
   local nsswitch='/etc/nsswitch.conf'
   local backup
+
+  # Skip nsswitch modification in test/rootless mode
+  if [ "${SUGARKUBE_ALLOW_ROOTLESS_DEPS:-0}" = "1" ]; then
+    log 'Skipping nsswitch.conf modification in rootless/test mode.'
+    return
+  fi
+
   if [ ! -f "$nsswitch" ]; then
     log 'WARNING: /etc/nsswitch.conf missing; cannot validate mDNS resolver configuration.'
     return
@@ -118,7 +125,10 @@ ensure_nsswitch_mdns() {
   fi
 
   backup="${nsswitch}.bak.$(date +%Y%m%d%H%M%S)"
-  cp -a -- "$nsswitch" "$backup"
+  if ! cp -a -- "$nsswitch" "$backup" 2>/dev/null; then
+    log 'WARNING: Cannot backup /etc/nsswitch.conf (permission denied). Skipping mDNS configuration.'
+    return
+  fi
   log "Updating hosts line in /etc/nsswitch.conf (backup at ${backup})."
   sed -i 's/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' "$nsswitch"
 }
