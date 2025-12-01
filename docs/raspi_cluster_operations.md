@@ -660,6 +660,59 @@ kubectl get ing -n dspace
 If you configured a load balancer or Ingress controller, you'll see the external
 address where dspace is accessible.
 
+### Fast manual redeploy (emergency push for Helm workloads)
+
+Once dspace (or any Helm release) is running, you can perform a fast, manual redeploy
+whenever you push a new image tag. This path assumes the cluster is healthy, Traefik is
+serving ingress, and the dspace OCI chart is already published to GHCR. The goal is to
+roll pods quickly without extra ceremony—Kubernetes handles the rolling update using the
+deployment's defaults.
+
+**Quick redeploy for dspace v3 (OCI chart):**
+
+```bash
+# From the sugarkube repo root on a cluster node:
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+  version_file=docs/apps/dspace.version \
+  default_tag=v3-latest
+```
+
+If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
+recipe:
+
+```bash
+just dspace-oci-redeploy
+```
+
+Under the hood, both commands call the shared `_helm-oci-deploy` helper via
+`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release.
+Kubernetes then rolls the dspace pods to the new image using the Deployment's update
+strategy.
+
+**Emergency redeploy checklist:**
+
+1. Confirm the cluster and Traefik are healthy:
+
+    ```bash
+    just cluster-status
+    ```
+
+2. Ensure your new image is pushed and `v3-latest` (or the tag you pass via `tag=`)
+   points at the desired build (see the dspace repo docs for image build/publish steps).
+3. Run the redeploy command (`just helm-oci-upgrade ...` or `just dspace-oci-redeploy`).
+4. Verify pods and logs:
+
+    ```bash
+    kubectl get pods -n dspace -o wide
+    kubectl logs -n dspace -l app.kubernetes.io/name=dspace --tail=100
+    ```
+
+> This path is intentionally fast and slightly risky. For more conservative rollouts,
+> consider tweaking replica counts or update strategies before running the upgrade.
+
 ## Step 5: Hook the cluster into Flux for GitOps
 
 With your applications deployed manually, the final step is to automate future
@@ -750,6 +803,9 @@ As you continue operating your cluster, these recipes will be helpful:
 
 - **Recover from misconfiguration:** If a node accidentally joins the wrong cluster,
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
+
+- **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to roll the dspace v3
+  release to the latest published image tag in GHCR without retyping chart arguments.
 
 ### Document outages and incidents
 
