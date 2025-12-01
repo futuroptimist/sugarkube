@@ -1037,6 +1037,8 @@ dspace-debug-logs namespace='dspace':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
     ns="{{ namespace }}"
 
     echo "=== dspace pods in namespace ${ns} ==="
