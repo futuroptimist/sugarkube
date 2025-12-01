@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _write_executable(path: Path, content: str) -> None:
-    path.write_text(textwrap.dedent(content).lstrip("\n"), encoding="utf-8")
+    path.write_text(textwrap.dedent(content), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -34,8 +34,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "sudo",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "sudo:$@" >> "{log_path}"
         while [ "$#" -gt 0 ]; do
@@ -62,8 +61,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "apt-get",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "apt-get:$@" >> "{log_path}"
         exit 0
@@ -72,8 +70,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "systemctl",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "systemctl:$@" >> "{log_path}"
         exit 0
@@ -82,8 +79,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "ip",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         if [ "$#" -ge 5 ] && [ "$1" = "-4" ] && [ "$2" = "-o" ] \
           && [ "$3" = "addr" ] && [ "$4" = "show" ]; then
@@ -97,8 +93,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "ss",
-        """
-        #!/usr/bin/env bash
+        """#!/usr/bin/env bash
         set -euo pipefail
         run_dir="${SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}"
         if [ -f "${run_dir}/server-ready" ]; then
@@ -111,8 +106,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "timeout",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "timeout:$@" >> "{log_path}"
         exit 1
@@ -121,8 +115,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "curl",
-        f"""
-        #!/usr/bin/env python3
+        f"""#!/usr/bin/env python3
         import pathlib
         import sys
 
@@ -140,8 +133,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "avahi-publish-service",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "avahi-publish-service:$@" >> "{log_path}"
         run_dir="${{SUGARKUBE_RUNTIME_DIR:-/run/sugarkube}}"
@@ -178,8 +170,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "avahi-publish-address",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "avahi-publish-address:$@" >> "{log_path}"
         trap 'echo "avahi-publish-address:TERM" >> "{log_path}"; exit 0' TERM INT
@@ -189,8 +180,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "avahi-browse",
-        f"""
-        #!/usr/bin/env python3
+        f"""#!/usr/bin/env python3
         import os
         import pathlib
         import sys
@@ -290,8 +280,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "grep",
-        f"""
-        #!/usr/bin/env python3
+        f"""#!/usr/bin/env python3
         import os
         import pathlib
         import subprocess
@@ -311,8 +300,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "sed",
-        f"""
-        #!/usr/bin/env python3
+        f"""#!/usr/bin/env python3
         import os
         import pathlib
         import re
@@ -341,8 +329,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
     _write_executable(
         bin_dir / "pgrep",
-        f"""
-        #!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
         set -euo pipefail
         echo "pgrep:$@" >> "{log_path}"
         exit 1
