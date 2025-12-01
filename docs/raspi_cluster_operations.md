@@ -469,6 +469,7 @@ Quick reference for the most common recipes when operating your cluster:
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
+| `just dspace-debug-logs` | Dump dspace and Traefik logs for the last 200 lines each | Investigating 500s or routing issues for dspace. |
 
 ## Step 2: Capture and commit sanitized bring-up logs
 
@@ -712,6 +713,33 @@ strategy.
 
 > This path is intentionally fast and slightly risky. For more conservative rollouts,
 > consider tweaking replica counts or update strategies before running the upgrade.
+
+### Collect dspace logs (emergency debugging)
+
+When dspace returns HTTP 500 responses—either directly or via Traefik—you can dump the
+most relevant logs in one shot from the sugarkube repo root on a cluster node:
+
+```bash
+just dspace-debug-logs
+```
+
+The recipe accepts an optional namespace override if your deployment differs:
+
+```bash
+just dspace-debug-logs namespace=my-dspace-namespace
+```
+
+What the output includes:
+
+- A pod listing for the dspace namespace.
+- The last 200 log lines for every pod labeled `app.kubernetes.io/name=dspace`.
+- The last 200 lines of Traefik logs in `kube-system`.
+
+Hints while reviewing the dump:
+
+- Look for dspace JSON log entries with `"level":"error"` to pinpoint server failures.
+- Scan the Traefik section for 5xx responses on hosts like `staging.democratized.space` to
+  catch ingress-level issues.
 
 ## Step 5: Hook the cluster into Flux for GitOps
 
