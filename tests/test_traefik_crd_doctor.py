@@ -79,10 +79,10 @@ if cmd == "get" and len(args) >= 2:
         value = ""
         if "managed-by" in jsonpath:
             value = meta.get("labels", {}).get("app.kubernetes.io/managed-by", "")
-        elif "release-name" in jsonpath:
-            value = meta.get("annotations", {}).get("meta.helm.sh/release-name", "")
         elif "release-namespace" in jsonpath:
             value = meta.get("annotations", {}).get("meta.helm.sh/release-namespace", "")
+        elif "release-name" in jsonpath:
+            value = meta.get("annotations", {}).get("meta.helm.sh/release-name", "")
         sys.stdout.write(value)
         sys.exit(0 if name in state.get("crds", {}) else 1)
     elif args[1] == "crd":

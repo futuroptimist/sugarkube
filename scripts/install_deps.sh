@@ -7,6 +7,11 @@ log() {
 }
 
 require_root() {
+  if [ "${SUGARKUBE_ALLOW_ROOTLESS_DEPS:-0}" = "1" ]; then
+    log 'WARNING: Running install_deps.sh without root privileges (tests or dry-run mode).'
+    return 0
+  fi
+
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     log 'ERROR: This script must be run as root (try via sudo).'
     exit 1
