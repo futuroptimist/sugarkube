@@ -1423,6 +1423,17 @@ ensure_avahi_liveness_signal() {
   local ready_status=0
   local ready_output=""
 
+  local cli_only=0
+  local dbus_enabled="${SUGARKUBE_MDNS_DBUS:-1}"
+  case "${dbus_enabled}" in
+    ''|*[!0-9]*) dbus_enabled=1 ;;
+  esac
+  if [ "${dbus_enabled}" -eq 0 ]; then
+    cli_only=1
+    dbus_note="dbus=disabled"
+    dbus_reason="dbus_disabled"
+  fi
+
   # Use mdns_ready() wrapper function for robust D-Bus + CLI fallback
   # Note: SUGARKUBE_AVAHI_DBUS_WAIT_MS is the external API, converted to
   # AVAHI_DBUS_WAIT_MS for mdns_ready.sh internal use
@@ -1440,9 +1451,17 @@ ensure_avahi_liveness_signal() {
   local attempt
   for attempt in 1 2; do
     ready_status=0
-    ready_output="$(
-      AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/mdns_ready.sh" 2>&1
-    )" || ready_status=$?
+    if [ "${cli_only}" -eq 1 ]; then
+      if command -v avahi-browse >/dev/null 2>&1; then
+        ready_output="$(avahi-browse --all --terminate --timeout=2 2>&1)" || ready_status=$?
+      else
+        ready_status=127
+      fi
+    else
+      ready_output="$(
+        AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/mdns_ready.sh" 2>&1
+      )" || ready_status=$?
+    fi
     
     if [ -n "${ready_output}" ]; then
       printf '%s\n' "${ready_output}" >&2
@@ -1464,7 +1483,11 @@ ensure_avahi_liveness_signal() {
       # This is important even if D-Bus is working, to confirm services are advertised
       local browse_output=""
       local browse_status=0
-      browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
+      if [ "${cli_only}" -eq 1 ]; then
+        browse_output="${ready_output}"
+      else
+        browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
+      fi
       local lines
       lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
       
