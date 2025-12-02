@@ -2,6 +2,8 @@
 # Regression tests for l4_probe.sh to prevent future breakages.
 # These tests validate edge cases and ensure consistent behavior.
 
+load helpers/l4_probe_helpers
+
 setup() {
   LISTENER_PIDS=()
   if command -v ncat >/dev/null 2>&1; then
@@ -18,32 +20,6 @@ teardown() {
       wait "${pid}" 2>/dev/null || true
     fi
   done
-}
-
-start_listener() {
-  local port="$1"
-  local max_wait=20
-  local i=0
-
-  "${NCAT_HELPER}" -lk 127.0.0.1 "${port}" >/dev/null 2>&1 &
-  LISTENER_PIDS+=("$!")
-
-  while [ $i -lt $max_wait ]; do
-    if python3 -c "import socket; s=socket.socket(); s.settimeout(0.05); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.1
-    i=$((i + 1))
-  done
-}
-
-allocate_port() {
-  python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
 }
 
 # Regression: l4_probe must output valid JSON on each line
