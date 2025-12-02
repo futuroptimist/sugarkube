@@ -3,7 +3,7 @@
 
 # Start a listener and wait for it to actually be accepting connections.
 # This avoids race conditions where we try to connect before the listener is ready.
-# Returns 0 if listener is ready, 1 if timeout waiting for listener.
+# Fails the test immediately if the listener does not start in time.
 start_listener() {
   local port="$1"
   local max_wait="${2:-20}"  # 2 seconds max by default (20 * 0.1s)
@@ -20,8 +20,7 @@ start_listener() {
     sleep 0.1
     i=$((i + 1))
   done
-  echo "Warning: listener may not be ready on port ${port} after ${max_wait} attempts" >&2
-  return 1
+  fail "listener did not start on port ${port} after ${max_wait} attempts"
 }
 
 # Allocate a port that is guaranteed to be free.
