@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load helpers/l4_probe_helpers
+
 setup() {
   LISTENER_PIDS=()
   if command -v ncat >/dev/null 2>&1; then
@@ -16,23 +18,6 @@ teardown() {
       wait "${pid}" 2>/dev/null || true
     fi
   done
-}
-
-start_listener() {
-  local port="$1"
-  "${NCAT_HELPER}" -lk 127.0.0.1 "${port}" >/dev/null 2>&1 &
-  LISTENER_PIDS+=("$!")
-  # Give the listener a moment to start accepting connections.
-  sleep 0.1
-}
-
-allocate_port() {
-  python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
 }
 
 @test "l4_probe reports open port as open" {

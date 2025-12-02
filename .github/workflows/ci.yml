@@ -79,7 +79,7 @@ jobs:
         id: pytest
         continue-on-error: true
         run: |
-          pytest -q --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml
+          pytest -vv --durations=25 --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml
 
       - name: Upload to Codecov
         if: always()
