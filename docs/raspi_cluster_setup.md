@@ -190,13 +190,14 @@ Verification steps and troubleshooting live in [raspi_cluster_operations.md](./r
 
 ### Configure kubectl for the `pi` user on the cluster nodes
 
-`k3s` writes its kubeconfig to `/etc/rancher/k3s/k3s.yaml` as `root`, so `kubectl` defaults to requiring `sudo` on the Pis. Copy the kubeconfig into the `pi` home directory and fix ownership to use `kubectl` without `sudo` on each node:
+`k3s` writes its kubeconfig to `/etc/rancher/k3s/k3s.yaml` as `root`, so `kubectl` defaults to requiring `sudo` on the Pis. Copy the kubeconfig into the `pi` home directory, fix ownership, and lock down permissions to use `kubectl` without `sudo` on each node:
 
 ```bash
 # As root or via sudo on the node:
 sudo mkdir -p /home/pi/.kube
 sudo cp /etc/rancher/k3s/k3s.yaml /home/pi/.kube/config
 sudo chown pi:pi /home/pi/.kube/config
+sudo chmod 600 /home/pi/.kube/config
 
 # Then as pi:
 kubectl get nodes
