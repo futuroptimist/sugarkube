@@ -340,12 +340,16 @@ mdns-reset:
 
 # Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
 kubeconfig env='dev':
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
     sudo chown -R "$USER":"$USER" ~/.kube
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "sugar-{{ env }}"
+    env_name="{{ env }}"
+    scope_name="sugar-${env_name#env=}"
+    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
@@ -622,7 +626,8 @@ traefik-crd-doctor apply='0' namespace='kube-system':
     source "${crd_lib}"
 
     namespace="{{ namespace }}"
-    apply_flag="${TRAEFIK_CRD_DOCTOR_APPLY:-{{ apply }}}"
+    apply_arg="${apply:-0}"
+    apply_flag="${TRAEFIK_CRD_DOCTOR_APPLY:-${apply_arg#*=}}"
 
     traefik_crd::classify_all "${namespace}"
     traefik_crd::print_report "${namespace}" "${apply_flag}"
@@ -1031,6 +1036,43 @@ dspace-oci-redeploy:
       values='docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml' \
       version_file='docs/apps/dspace.version' \
       tag='' default_tag='v3-latest'
+
+# Dump dspace and Traefik logs for debugging HTTP 500s.
+dspace-debug-logs namespace='dspace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    ns="{{ namespace }}"
+
+    echo "=== dspace pods in namespace ${ns} ==="
+    kubectl get pods -n "${ns}" -o wide || {
+      echo "Failed to list dspace pods in namespace ${ns}" >&2
+    }
+
+    echo
+    echo "=== dspace logs (last 200 lines per pod) ==="
+    # Logs for all pods labeled as dspace
+    dspace_pods=$(kubectl get pods -n "${ns}" -l app.kubernetes.io/name=dspace -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+    if [ -z "${dspace_pods}" ]; then
+      echo "No pods found with label app.kubernetes.io/name=dspace in namespace ${ns}" >&2
+    else
+      for pod in ${dspace_pods}; do
+        echo
+        echo "--- dspace pod: ${pod} ---"
+        kubectl logs -n "${ns}" "${pod}" --tail=200 || {
+          echo "Failed to fetch logs for pod ${pod}" >&2
+        }
+      done
+    fi
+
+    echo
+    echo "=== Traefik logs (last 200 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
+      echo "Failed to fetch Traefik logs" >&2
+    }
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash

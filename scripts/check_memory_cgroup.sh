@@ -15,6 +15,10 @@ if [ "$(uname -s)" != "Linux" ]; then
 fi
 
 ensure_root() {
+  # Allow tests to skip root elevation to avoid infinite loops with stubbed sudo.
+  if [ "${ALLOW_NON_ROOT:-0}" = "1" ]; then
+    return 0
+  fi
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     exec sudo -E -- "$0" "$@"
   fi

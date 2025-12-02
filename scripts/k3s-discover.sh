@@ -19,6 +19,11 @@ elif [ -f "${SUMMARY_LIB}" ]; then
   . "${SUMMARY_LIB}"
 fi
 
+if [ "${SUGARKUBE_FAKE_DISCOVERY:-0}" = "1" ]; then
+  log_info discover event=fake_discovery msg="Skipping discovery in test mode" >&2
+  exit 0
+fi
+
 if [ -f "${DEFAULT_KUBECONFIG_LIB}" ]; then
   # shellcheck source=lib/kubeconfig.sh disable=SC1091
   . "${DEFAULT_KUBECONFIG_LIB}"
@@ -472,6 +477,27 @@ EOF_HELP
   esac
   shift
 done
+
+# Keep the --test-bootstrap-publish path fast and deterministic in CI.
+# Shorten Avahi waits and disable D-Bus probing unless explicitly overridden.
+if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
+  if [ -z "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-}" ]; then
+    SUGARKUBE_AVAHI_WAIT_TIMEOUT=2
+  fi
+  if [ -z "${SUGARKUBE_AVAHI_CONFIRM_TIMEOUT:-}" ]; then
+    SUGARKUBE_AVAHI_CONFIRM_TIMEOUT=2
+  fi
+  if [ -z "${SUGARKUBE_AVAHI_ALLOW_SHORT:-}" ]; then
+    SUGARKUBE_AVAHI_ALLOW_SHORT=1
+  fi
+  if [ -z "${SUGARKUBE_MDNS_DBUS:-}" ]; then
+    SUGARKUBE_MDNS_DBUS=0
+  fi
+  export SUGARKUBE_AVAHI_WAIT_TIMEOUT
+  export SUGARKUBE_AVAHI_CONFIRM_TIMEOUT
+  export SUGARKUBE_AVAHI_ALLOW_SHORT
+  export SUGARKUBE_MDNS_DBUS
+fi
 
 TOKEN_SOURCE_KIND="none"
 TOKEN_SOURCE_DETAIL="none"
@@ -1397,6 +1423,17 @@ ensure_avahi_liveness_signal() {
   local ready_status=0
   local ready_output=""
 
+  local cli_only=0
+  local dbus_enabled="${SUGARKUBE_MDNS_DBUS:-1}"
+  case "${dbus_enabled}" in
+    ''|*[!0-9]*) dbus_enabled=1 ;;
+  esac
+  if [ "${dbus_enabled}" -eq 0 ]; then
+    cli_only=1
+    dbus_note="dbus=disabled"
+    dbus_reason="dbus_disabled"
+  fi
+
   # Use mdns_ready() wrapper function for robust D-Bus + CLI fallback
   # Note: SUGARKUBE_AVAHI_DBUS_WAIT_MS is the external API, converted to
   # AVAHI_DBUS_WAIT_MS for mdns_ready.sh internal use
@@ -1414,9 +1451,17 @@ ensure_avahi_liveness_signal() {
   local attempt
   for attempt in 1 2; do
     ready_status=0
-    ready_output="$(
-      AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/mdns_ready.sh" 2>&1
-    )" || ready_status=$?
+    if [ "${cli_only}" -eq 1 ]; then
+      if command -v avahi-browse >/dev/null 2>&1; then
+        ready_output="$(avahi-browse --all --terminate --timeout=2 2>&1)" || ready_status=$?
+      else
+        ready_status=127
+      fi
+    else
+      ready_output="$(
+        AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/mdns_ready.sh" 2>&1
+      )" || ready_status=$?
+    fi
     
     if [ -n "${ready_output}" ]; then
       printf '%s\n' "${ready_output}" >&2
@@ -1438,7 +1483,11 @@ ensure_avahi_liveness_signal() {
       # This is important even if D-Bus is working, to confirm services are advertised
       local browse_output=""
       local browse_status=0
-      browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
+      if [ "${cli_only}" -eq 1 ]; then
+        browse_output="${ready_output}"
+      else
+        browse_output="$(avahi-browse --all --terminate --timeout=2 2>/dev/null)" || browse_status=$?
+      fi
       local lines
       lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
       
@@ -1459,7 +1508,11 @@ ensure_avahi_liveness_signal() {
       if [ -n "${dbus_note}" ]; then
         liveness_fields+=("${dbus_note}")
       fi
-      log_info discover "${liveness_fields[@]}" >&2
+      # Emit Avahi liveness confirmation to stdout so Bats harnesses that only
+      # capture standard output can assert on the readiness event. Stderr still
+      # receives other structured logs, but this signal needs to be visible on
+      # stdout for coverage tests.
+      log_info discover "${liveness_fields[@]}"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
         summary_note="mdns_ready attempt=${attempt}"
         if [ -n "${dbus_note}" ]; then

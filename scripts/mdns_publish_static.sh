@@ -753,22 +753,26 @@ PY
 AVAHI_WAIT_ERROR_REASON=""
 AVAHI_WAIT_ERROR_MESSAGE=""
 
-wait_for_avahi_publication() {
-  local service_display timeout_seconds start_epoch pattern deadline now journal_output failure_line
-  service_display="$1"
-  timeout_seconds="$2"
-  start_epoch="$3"
+  wait_for_avahi_publication() {
+    local service_display timeout_seconds start_epoch pattern deadline now journal_output failure_line
+    service_display="$1"
+    timeout_seconds="$2"
+    start_epoch="$3"
 
-  case "${timeout_seconds}" in
-    ''|*[!0-9]*)
+    local allow_short_waits="${SUGARKUBE_AVAHI_ALLOW_SHORT:-0}"
+
+    case "${timeout_seconds}" in
+      ''|*[!0-9]*)
+        timeout_seconds=30
+        ;;
+    esac
+
+    if [ "${allow_short_waits}" != "1" ] && [ "${timeout_seconds}" -lt 30 ]; then
       timeout_seconds=30
-      ;;
-  esac
-  
-  # Ensure minimum timeout of 30 seconds
-  if [ "${timeout_seconds}" -lt 30 ]; then
-    timeout_seconds=30
-  fi
+    fi
+    if [ "${allow_short_waits}" = "1" ] && [ "${timeout_seconds}" -lt 1 ]; then
+      timeout_seconds=1
+    fi
 
   if ! command -v journalctl >/dev/null 2>&1; then
     echo "journalctl not available; skipping Avahi publication confirmation" >&2
@@ -1012,6 +1016,11 @@ confirm_avahi_publication() {
   local sleep_cap_ms=4000
   local attempt=1
 
+  local dbus_enabled="${SUGARKUBE_MDNS_DBUS:-1}"
+  case "${dbus_enabled}" in
+    ''|*[!0-9]*) dbus_enabled=1 ;;
+  esac
+
   CONFIRM_SUCCESS=0
   CONFIRM_LATENCY_MS=0
   CONFIRM_ATTEMPTS=0
@@ -1023,7 +1032,7 @@ confirm_avahi_publication() {
     local dbus_status=2
     local cli_status=2
 
-    if command -v gdbus >/dev/null 2>&1 || command -v busctl >/dev/null 2>&1; then
+    if [ "${dbus_enabled}" -ne 0 ] && { command -v gdbus >/dev/null 2>&1 || command -v busctl >/dev/null 2>&1; }; then
       if check_service_via_dbus "${instance}" "${service_type}" "${domain}" "${expected_host}" "${expected_port}"; then
         dbus_status=0
       else
@@ -1141,21 +1150,25 @@ verify_host_record() {
   fi
 }
 
-reload_avahi_daemon() {
-  local service_display timeout_seconds start_epoch
-  service_display="$1"
-  timeout_seconds="$2"
+  reload_avahi_daemon() {
+    local service_display timeout_seconds start_epoch
+    service_display="$1"
+    timeout_seconds="$2"
 
-  case "${timeout_seconds}" in
-    ''|*[!0-9]*)
+    local allow_short_waits="${SUGARKUBE_AVAHI_ALLOW_SHORT:-0}"
+
+    case "${timeout_seconds}" in
+      ''|*[!0-9]*)
+        timeout_seconds=30
+        ;;
+    esac
+
+    if [ "${allow_short_waits}" != "1" ] && [ "${timeout_seconds}" -lt 30 ]; then
       timeout_seconds=30
-      ;;
-  esac
-  
-  # Ensure minimum timeout of 30 seconds
-  if [ "${timeout_seconds}" -lt 30 ]; then
-    timeout_seconds=30
-  fi
+    fi
+    if [ "${allow_short_waits}" = "1" ] && [ "${timeout_seconds}" -lt 1 ]; then
+      timeout_seconds=1
+    fi
 
   if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ] || ! command -v systemctl >/dev/null 2>&1; then
     return 0
