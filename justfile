@@ -991,6 +991,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     if [ -n "${image_tag}" ]; then
         set_args+=(--set image.tag="${image_tag}")
+        set_args+=(--set image.pullPolicy=Always)
     fi
 
     if [[ "${chart}" == chart=* ]]; then
