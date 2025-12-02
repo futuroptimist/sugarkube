@@ -45,7 +45,7 @@ def save_state(data):
 
 def log(args):
     existing = log_path.read_text() if log_path.exists() else ""
-    log_path.write_text(existing + " ".join(args) + "\n")
+    log_path.write_text(existing + " ".join(args) + "\\n")
 
 
 state = load_state()
@@ -60,9 +60,16 @@ def metadata(name: str):
     return state.get("crds", {}).get(name, {})
 
 
-if cmd == "get" and len(args) >= 2 and args[1] == "crd":
-    if len(args) >= 3 and args[2].startswith("crd/"):
-        name = args[2].split("/", 1)[1]
+if cmd == "get" and len(args) >= 2:
+    # Handle both `kubectl get crd crd/NAME` and `kubectl get crd/NAME` formats
+    resource_arg = None
+    if args[1] == "crd" and len(args) >= 3:
+        resource_arg = args[2]
+    elif args[1].startswith("crd/"):
+        resource_arg = args[1]
+
+    if resource_arg and resource_arg.startswith("crd/"):
+        name = resource_arg.split("/", 1)[1]
         jsonpath = ""
         if "-o" in args:
             idx = args.index("-o")
@@ -72,13 +79,13 @@ if cmd == "get" and len(args) >= 2 and args[1] == "crd":
         value = ""
         if "managed-by" in jsonpath:
             value = meta.get("labels", {}).get("app.kubernetes.io/managed-by", "")
-        elif "release-name" in jsonpath:
-            value = meta.get("annotations", {}).get("meta.helm.sh/release-name", "")
         elif "release-namespace" in jsonpath:
             value = meta.get("annotations", {}).get("meta.helm.sh/release-namespace", "")
+        elif "release-name" in jsonpath:
+            value = meta.get("annotations", {}).get("meta.helm.sh/release-name", "")
         sys.stdout.write(value)
         sys.exit(0 if name in state.get("crds", {}) else 1)
-    else:
+    elif args[1] == "crd":
         names = []
         for arg in args[2:]:
             if arg.startswith("-"):
@@ -86,7 +93,10 @@ if cmd == "get" and len(args) >= 2 and args[1] == "crd":
             names.append(arg)
         existing = [name for name in names if name in state.get("crds", {})]
         if existing:
-            sys.stdout.write("\n".join(existing) + "\n")
+            sys.stdout.write("\\n".join(existing) + "\\n")
+        sys.exit(0)
+    else:
+        log(sys.argv[1:])
         sys.exit(0)
 elif cmd == "delete" and len(args) >= 2 and args[1] == "crd":
     names = [a for a in args[2:] if not a.startswith("-")]
@@ -181,7 +191,6 @@ def _run_doctor(
             "PATH": f"{kubectl_path.parent}:{env['PATH']}",
             "KUBECTL_STATE": str(state_path),
             "KUBECTL_LOG": str(log_path),
-            "KUBECTL_BIN": str(kubectl_path),
         }
     )
 

@@ -340,6 +340,8 @@ mdns-reset:
 
 # Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
 kubeconfig env='dev':
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
     sudo chown -R "$USER":"$USER" ~/.kube

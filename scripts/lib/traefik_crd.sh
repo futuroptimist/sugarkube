@@ -18,8 +18,6 @@ TRAEFIK_GATEWAY_CRDS=(
 
 TRAEFIK_EXPECTED_RELEASES=(traefik traefik-crd)
 
-: "${KUBECTL_BIN:=kubectl}"
-
 TRAEFIK_CRD_PRESENT=()
 TRAEFIK_CRD_MISSING=()
 TRAEFIK_CRD_OK=()
@@ -36,10 +34,6 @@ traefik_crd::reset_state() {
   TRAEFIK_CRD_PROBLEMS=()
   TRAEFIK_CRD_PROBLEM_DETAILS=()
   TRAEFIK_CRD_RELEASE_NAMES=()
-}
-
-traefik_crd::kubectl() {
-  "${KUBECTL_BIN}" "$@"
 }
 
 traefik_crd::gateway_crds() {
@@ -74,7 +68,7 @@ traefik_crd::classify_all() {
   traefik_crd::reset_state
 
   for crd in "${TRAEFIK_GATEWAY_CRDS[@]}"; do
-    if ! traefik_crd::kubectl get "crd/${crd}" >/dev/null 2>&1; then
+    if ! kubectl get "crd/${crd}" >/dev/null 2>&1; then
       TRAEFIK_CRD_MISSING+=("${crd}")
       continue
     fi
@@ -84,11 +78,11 @@ traefik_crd::classify_all() {
     local managed_by
     local rel_name
     local rel_namespace
-    managed_by=$(traefik_crd::kubectl get "crd/${crd}" \
+    managed_by=$(kubectl get "crd/${crd}" \
       -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
-    rel_name=$(traefik_crd::kubectl get "crd/${crd}" \
+    rel_name=$(kubectl get "crd/${crd}" \
       -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "")
-    rel_namespace=$(traefik_crd::kubectl get "crd/${crd}" \
+    rel_namespace=$(kubectl get "crd/${crd}" \
       -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "")
 
     if [ -n "${rel_name}" ]; then
@@ -228,11 +222,11 @@ traefik_crd::print_suggestions() {
   cat <<SUGGEST_EOF
 Recommended actions:
   1) Delete and let Traefik recreate (safest for fresh clusters):
-     ${KUBECTL_BIN} delete crd ${joined}
+     kubectl delete crd ${joined}
 
   2) Patch to mark Helm ownership (advanced; for preserving existing Gateway API workloads):
-     ${KUBECTL_BIN} label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
-     ${KUBECTL_BIN} annotate crd <name> \
+     kubectl label crd <name> app.kubernetes.io/managed-by=Helm --overwrite
+     kubectl annotate crd <name> \
        meta.helm.sh/release-name=traefik \
        meta.helm.sh/release-namespace=kube-system --overwrite
 SUGGEST_EOF
@@ -251,8 +245,8 @@ traefik_crd::apply_delete() {
     return 0
   fi
 
-  echo "Running: ${KUBECTL_BIN} delete crd ${TRAEFIK_CRD_PROBLEMS[@]}"
-  traefik_crd::kubectl delete crd "${TRAEFIK_CRD_PROBLEMS[@]}"
+  echo "Running: kubectl delete crd ${TRAEFIK_CRD_PROBLEMS[@]}"
+  kubectl delete crd "${TRAEFIK_CRD_PROBLEMS[@]}"
 }
 
 traefik_crd::adopt_unmanaged() {
@@ -266,11 +260,11 @@ traefik_crd::adopt_unmanaged() {
   echo "Adopting unmanaged Gateway API CRDs into Helm release '${release_name}' in namespace '${namespace}'..."
   local crd
   for crd in "${TRAEFIK_CRD_UNMANAGED[@]}"; do
-    if ! traefik_crd::kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite; then
+    if ! kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite; then
       echo "WARNING: Failed to label ${crd}; ownership metadata may remain unset." >&2
       continue
     fi
-    if ! traefik_crd::kubectl annotate crd "${crd}" \
+    if ! kubectl annotate crd "${crd}" \
       "meta.helm.sh/release-name=${release_name}" \
       "meta.helm.sh/release-namespace=${namespace}" --overwrite; then
       echo "WARNING: Failed to annotate ${crd}; ownership metadata may remain unset." >&2
