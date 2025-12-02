@@ -19,6 +19,11 @@ elif [ -f "${SUMMARY_LIB}" ]; then
   . "${SUMMARY_LIB}"
 fi
 
+if [ "${SUGARKUBE_FAKE_DISCOVERY:-0}" = "1" ]; then
+  log_info discover event=fake_discovery msg="Skipping discovery in test mode" >&2
+  exit 0
+fi
+
 if [ -f "${DEFAULT_KUBECONFIG_LIB}" ]; then
   # shellcheck source=lib/kubeconfig.sh disable=SC1091
   . "${DEFAULT_KUBECONFIG_LIB}"

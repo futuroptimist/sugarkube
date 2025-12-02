@@ -626,7 +626,8 @@ traefik-crd-doctor apply='0' namespace='kube-system':
     source "${crd_lib}"
 
     namespace="{{ namespace }}"
-    apply_flag="${TRAEFIK_CRD_DOCTOR_APPLY:-{{ apply }}}"
+    apply_arg="${apply:-0}"
+    apply_flag="${TRAEFIK_CRD_DOCTOR_APPLY:-${apply_arg#*=}}"
 
     traefik_crd::classify_all "${namespace}"
     traefik_crd::print_report "${namespace}" "${apply_flag}"

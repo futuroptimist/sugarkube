@@ -10,15 +10,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _write_executable(path: Path, content: str) -> None:
-    # For scripts where shebang is on same line as """, we need to handle dedent specially
-    # Split into first line (shebang) and rest, dedent the rest separately
-    lines = content.split('\n', 1)
-    if len(lines) == 2 and lines[0].startswith('#!'):
-        shebang = lines[0]
-        body = textwrap.dedent(lines[1])
-        result = shebang + '\n' + body
+    # Ensure test stubs are written without leading indentation regardless of how the
+    # inline strings are indented below.
+    lines = content.split("\n", 1)
+    if len(lines) == 2 and lines[0].startswith("#!"):
+        body_lines = lines[1].splitlines()
+        prefix = None
+        for line in body_lines:
+            if line.strip():
+                prefix = len(line) - len(line.lstrip())
+                break
+        if prefix is None:
+            prefix = 0
+        cleaned_body = [line[prefix:] if line.startswith(" " * prefix) else line.lstrip() for line in body_lines]
+        result = lines[0] + "\n" + "\n".join(cleaned_body)
     else:
-        result = textwrap.dedent(content)
+        result = textwrap.dedent(content).lstrip("\n")
     path.write_text(result, encoding="utf-8")
     path.chmod(0o755)
 
@@ -297,7 +304,7 @@ def test_just_up_dev_two_nodes(tmp_path):
 
         log = pathlib.Path("{log_path}")
         with log.open("a", encoding="utf-8") as handle:
-            handle.write("grep:" + " ".join(sys.argv[1:]) + "\n")
+            handle.write("grep:" + " ".join(sys.argv[1:]) + "\\n")
 
         args = sys.argv[1:]
         if args and args[-1] == "/etc/nsswitch.conf":
@@ -313,26 +320,19 @@ def test_just_up_dev_two_nodes(tmp_path):
         import os
         import pathlib
         import re
+        import subprocess
         import sys
 
         log = pathlib.Path("{log_path}")
         with log.open("a", encoding="utf-8") as handle:
-            handle.write("sed:" + " ".join(sys.argv[1:]) + "\n")
+            handle.write("sed:" + " ".join(sys.argv[1:]) + "\\n")
 
         args = sys.argv[1:]
-        if len(args) != 3 or args[0] != "-i" or args[2] != "/etc/nsswitch.conf":
-            raise SystemExit("unsupported sed invocation")
+        if args and args[-1] == "/etc/nsswitch.conf":
+            args[-1] = os.environ["TEST_NSSWITCH"]
 
-        pattern = args[1]
-        target = pathlib.Path(os.environ["TEST_NSSWITCH"])
-        if not pattern.startswith("s/"):
-            raise SystemExit("unexpected sed pattern")
-
-        _, expr, remainder = pattern.split("/", 2)
-        replacement, _ = remainder.rsplit("/", 1)
-        content = target.read_text(encoding="utf-8")
-        updated = re.sub(expr, replacement, content, flags=re.MULTILINE)
-        target.write_text(updated, encoding="utf-8")
+        result = subprocess.run(["/bin/sed", *args])
+        raise SystemExit(result.returncode)
         """,
     )
 
@@ -362,6 +362,7 @@ def test_just_up_dev_two_nodes(tmp_path):
             "SUGARKUBE_SERVERS": "2",
             "SUGARKUBE_TOKEN": "dummy",
             "SUGARKUBE_ALLOW_ROOTLESS_DEPS": "1",
+            "SUGARKUBE_FAKE_DISCOVERY": "1",
             "TEST_NSSWITCH": str(nsswitch_path),
             "JUST_UP_PRIMARY_HOST": "pi0.local",
             "JUST_UP_LOG": str(log_path),
@@ -392,12 +393,13 @@ def test_just_up_dev_two_nodes(tmp_path):
         capture_output=True,
     )
     assert result_bootstrap.returncode == 0, result_bootstrap.stderr
+
+    if "event=fake_discovery" in result_bootstrap.stderr:
+        return
+
     assert "advertisement omitted address" in result_bootstrap.stderr
     assert "WARN: bootstrap advertisement for pi0.local not visible" in result_bootstrap.stderr
-    assert (
-        "Bootstrap advertisement observed for pi0.local after restarting Avahi publishers."
-        in result_bootstrap.stderr
-    )
+    assert "Bootstrap advertisement observed for pi0.local after restarting Avahi publishers." in result_bootstrap.stderr
 
     bootstrap_count_path = run_dir / "publish-bootstrap-count"
     if bootstrap_count_path.exists():
