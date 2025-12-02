@@ -991,6 +991,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     if [ -n "${image_tag}" ]; then
         set_args+=(--set image.tag="${image_tag}")
+        # Ensure environments that rely on mutable tags (e.g., dev/staging) always re-pull the image.
+        set_args+=(--set image.pullPolicy=Always)
     fi
 
     if [[ "${chart}" == chart=* ]]; then

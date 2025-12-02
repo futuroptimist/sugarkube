@@ -21,6 +21,10 @@ logs, preparing Helm, and rolling out real workloads like
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
 
+> **Note on kubectl without sudo**
+> If you've copied `/etc/rancher/k3s/k3s.yaml` into `/home/pi/.kube/config` on the Pis
+> (see the setup guide), you can drop `sudo` from the kubectl examples below.
+
 ## In this guide you will:
 
 - Verify the health of your three-node HA control plane
@@ -691,7 +695,9 @@ just dspace-oci-redeploy
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 `helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release.
 Kubernetes then rolls the dspace pods to the new image using the Deployment's update
-strategy.
+strategy. When an image tag is specified (including `v3-latest`), the helper also sets
+`image.pullPolicy=Always` so the nodes re-check GHCR on each redeploy. For production,
+prefer immutable tags such as `v3-<sha>` so you can pin a specific build.
 
 **Emergency redeploy checklist:**
 
