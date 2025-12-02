@@ -188,6 +188,25 @@ just traefik-install
 
 Verification steps and troubleshooting live in [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
 
+### Configure kubectl for the pi user on the cluster nodes
+
+k3s writes its kubeconfig to `/etc/rancher/k3s/k3s.yaml` as root. Copy it into the `pi`
+user's home directory so you can run `kubectl` without `sudo` directly on each node:
+
+```bash
+# As root or via sudo on the node:
+sudo mkdir -p /home/pi/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml /home/pi/.kube/config
+sudo chown pi:pi /home/pi/.kube/config
+
+# Then as pi:
+kubectl get nodes
+```
+
+After this, `kubectl` reads `~/.kube/config`, so you can omit `sudo` when working on the
+Pis themselves. On your workstation, `just kubeconfig env=dev` remains the recommended way
+to pull down the kubeconfig from the cluster.
+
 ## How Discovery Works
 
 Nodes discover each other **automatically** via mDNS (multicast DNS) service browsing:

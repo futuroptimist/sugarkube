@@ -17,6 +17,12 @@ logs, preparing Helm, and rolling out real workloads like
 [token.place](https://github.com/futuroptimist/token.place) and
 [democratized.space (dspace)](https://github.com/democratizedspace/dspace).
 
+> **kubectl without sudo on the Pis**
+> If you've copied `/etc/rancher/k3s/k3s.yaml` to `~/.kube/config` for the `pi` user (see
+> [raspi_cluster_setup.md](./raspi_cluster_setup.md#configure-kubectl-for-the-pi-user-on-the-cluster-nodes)),
+> you can omit `sudo` from the `kubectl` commands in this guide when running them on the
+> nodes themselves.
+
 > **Prerequisite**
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
@@ -692,6 +698,11 @@ Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 `helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release.
 Kubernetes then rolls the dspace pods to the new image using the Deployment's update
 strategy.
+
+When you pass an explicit image tag (either via `tag=` or `default_tag=`), the helper also
+sets `image.pullPolicy=Always` so the nodes re-check GHCR for that tag on each redeploy.
+For production, prefer immutable tags (e.g., `v3-<sha>`) to avoid surprises from mutable
+tags like `v3-latest`.
 
 **Emergency redeploy checklist:**
 
