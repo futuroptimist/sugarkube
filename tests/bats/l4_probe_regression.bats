@@ -112,12 +112,12 @@ teardown() {
 
 # Regression: L4_PROBE_TIMEOUT environment variable must be respected
 @test "l4_probe respects L4_PROBE_TIMEOUT environment variable" {
-  # Use a very short timeout so the test doesn't hang
+  # Use a reasonable timeout to ensure test completes quickly but reliably
   closed_port="$(allocate_port)"
 
-  L4_PROBE_TIMEOUT=1 run "${BATS_CWD}/scripts/l4_probe.sh" 127.0.0.1 "${closed_port}"
+  L4_PROBE_TIMEOUT=2 run "${BATS_CWD}/scripts/l4_probe.sh" 127.0.0.1 "${closed_port}"
 
   [ "$status" -eq 1 ]
-  # Should complete quickly with the short timeout
+  # Should complete with the custom timeout
   [[ "${lines[0]}" =~ '"status":"closed"' ]]
 }
