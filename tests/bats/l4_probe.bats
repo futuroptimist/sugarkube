@@ -18,14 +18,29 @@ teardown() {
   done
 }
 
+# Start a listener and wait for it to actually be accepting connections.
+# This avoids race conditions where we try to connect before the listener is ready.
 start_listener() {
   local port="$1"
+  local max_wait=20  # 2 seconds max (20 * 0.1s)
+  local i=0
+
   "${NCAT_HELPER}" -lk 127.0.0.1 "${port}" >/dev/null 2>&1 &
   LISTENER_PIDS+=("$!")
-  # Give the listener a moment to start accepting connections.
-  sleep 0.1
+
+  # Wait until the port is actually accepting connections
+  while [ $i -lt $max_wait ]; do
+    if python3 -c "import socket; s=socket.socket(); s.settimeout(0.05); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  echo "Warning: listener may not be ready on port ${port}" >&2
 }
 
+# Allocate a port that is guaranteed to be free and bindable.
+# Uses a retry loop to handle rare race conditions under instrumentation tools.
 allocate_port() {
   python3 - <<'PY'
 import socket
