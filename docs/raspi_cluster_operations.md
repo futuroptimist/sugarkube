@@ -18,9 +18,9 @@ logs, preparing Helm, and rolling out real workloads like
 [democratized.space (dspace)](https://github.com/democratizedspace/dspace).
 
 > **Note**
-> If you copied the k3s kubeconfig to `/home/pi/.kube/config` on the Pis (see
-> [raspi_cluster_setup.md](./raspi_cluster_setup.md#configure-kubectl-for-the-pi-user-on-the-cluster-nodes)),
-> you can omit `sudo` from the `kubectl` examples in this guide.
+> If you've copied the k3s kubeconfig to `/home/pi/.kube/config` and set
+> `KUBECONFIG=$HOME/.kube/config` for the `pi` user (see the setup guide), you can omit `sudo`
+> from the `kubectl` examples in this guide when running them on the Pis.
 
 > **Prerequisite**
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
