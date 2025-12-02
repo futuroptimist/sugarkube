@@ -203,7 +203,20 @@ sudo chmod 600 /home/pi/.kube/config
 kubectl get nodes
 ```
 
-After this, `kubectl` reads `~/.kube/config` and no longer needs `sudo` on that node. On your workstation, `just kubeconfig env=dev` remains the recommended way to download the kubeconfig from the cluster.
+By default, `k3s kubectl` looks at `/etc/rancher/k3s/k3s.yaml`. To tell `kubectl` to use the
+copy in your home directory, set `KUBECONFIG` for the `pi` user:
+
+```bash
+# As pi:
+echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc
+source ~/.bashrc
+
+kubectl get nodes
+```
+
+After this, `kubectl` (and `k3s kubectl`) reads `~/.kube/config` for `pi` and no longer needs
+`sudo` on that node. On your workstation, `just kubeconfig env=dev` remains the recommended way
+to download the kubeconfig from the cluster.
 
 ## How Discovery Works
 
