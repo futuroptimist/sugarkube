@@ -478,6 +478,27 @@ EOF_HELP
   shift
 done
 
+# Keep the --test-bootstrap-publish path fast and deterministic in CI.
+# Shorten Avahi waits and disable D-Bus probing unless explicitly overridden.
+if [ "${TEST_PUBLISH_BOOTSTRAP:-0}" -eq 1 ]; then
+  if [ -z "${SUGARKUBE_AVAHI_WAIT_TIMEOUT:-}" ]; then
+    SUGARKUBE_AVAHI_WAIT_TIMEOUT=2
+  fi
+  if [ -z "${SUGARKUBE_AVAHI_CONFIRM_TIMEOUT:-}" ]; then
+    SUGARKUBE_AVAHI_CONFIRM_TIMEOUT=2
+  fi
+  if [ -z "${SUGARKUBE_AVAHI_ALLOW_SHORT:-}" ]; then
+    SUGARKUBE_AVAHI_ALLOW_SHORT=1
+  fi
+  if [ -z "${SUGARKUBE_MDNS_DBUS:-}" ]; then
+    SUGARKUBE_MDNS_DBUS=0
+  fi
+  export SUGARKUBE_AVAHI_WAIT_TIMEOUT
+  export SUGARKUBE_AVAHI_CONFIRM_TIMEOUT
+  export SUGARKUBE_AVAHI_ALLOW_SHORT
+  export SUGARKUBE_MDNS_DBUS
+fi
+
 TOKEN_SOURCE_KIND="none"
 TOKEN_SOURCE_DETAIL="none"
 

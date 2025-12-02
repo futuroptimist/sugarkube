@@ -97,8 +97,20 @@ PY
   local method=""
   local dbus_status=0
 
+  # Allow tests and CI to bypass D-Bus probing entirely. Some containers ship
+  # a non-functional system bus that causes `busctl` to wait for the full
+  # AVAHI_DBUS_WAIT_MS window (or longer). When SUGARKUBE_MDNS_DBUS=0 is set,
+  # skip the D-Bus probes and immediately fall back to the fast CLI path.
+  local dbus_enabled="${SUGARKUBE_MDNS_DBUS:-1}"
+  case "${dbus_enabled}" in
+    ''|*[!0-9]*) dbus_enabled=1 ;;
+  esac
+  if [ "${dbus_enabled}" -eq 0 ]; then
+    dbus_status=127
+  fi
+
   # Try D-Bus method first - check ownership, then GetVersionString
-  if command -v busctl >/dev/null 2>&1; then
+  if [ "${dbus_status}" -eq 0 ] && command -v busctl >/dev/null 2>&1; then
     # Poll for D-Bus ownership of org.freedesktop.Avahi with backoff
     local poll_interval_ms=200
     local poll_cap_ms=2000
@@ -217,7 +229,7 @@ PY
           bus_error="${bus_error}"
       fi
     fi
-  elif command -v gdbus >/dev/null 2>&1; then
+  elif [ "${dbus_status}" -eq 0 ] && command -v gdbus >/dev/null 2>&1; then
     # Fallback to gdbus if busctl not available
     local dbus_timeout_secs
     dbus_timeout_secs="$(python3 - <<PY
