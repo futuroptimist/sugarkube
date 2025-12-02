@@ -1485,7 +1485,11 @@ ensure_avahi_liveness_signal() {
       if [ -n "${dbus_note}" ]; then
         liveness_fields+=("${dbus_note}")
       fi
-      log_info discover "${liveness_fields[@]}" >&2
+      # Emit Avahi liveness confirmation to stdout so Bats harnesses that only
+      # capture standard output can assert on the readiness event. Stderr still
+      # receives other structured logs, but this signal needs to be visible on
+      # stdout for coverage tests.
+      log_info discover "${liveness_fields[@]}"
       if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
         summary_note="mdns_ready attempt=${attempt}"
         if [ -n "${dbus_note}" ]; then
