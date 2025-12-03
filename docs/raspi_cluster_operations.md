@@ -699,9 +699,10 @@ just dspace-oci-redeploy
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
-`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release.
-Kubernetes then rolls the dspace pods to the new image using the Deployment's update
-strategy.
+`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release
+and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle even
+when `v3-latest` is republished with the same tag. The helper waits for the rollout to
+finish and exits non-zero if Kubernetes reports a failure.
 
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
@@ -847,8 +848,9 @@ As you continue operating your cluster, these recipes will be helpful:
 - **Recover from misconfiguration:** If a node accidentally joins the wrong cluster,
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
 
-- **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to roll the dspace v3
-  release to the latest published image tag in GHCR without retyping chart arguments.
+- **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to pull the latest
+  dspace v3 chart from GHCR and force a rollout restart so pods refresh to the newest
+  `v3-latest` image digest without retyping chart arguments.
 
 ### Document outages and incidents
 
