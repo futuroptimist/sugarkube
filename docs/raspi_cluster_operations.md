@@ -686,6 +686,11 @@ just helm-oci-upgrade \
   default_tag=v3-latest
 ```
 
+The dspace chart exposes `DSPACE_ENV` via the top-level `environment` field in the values
+files. In this repo, `docs/examples/dspace.values.dev.yaml` sets `environment: dev` and
+`docs/examples/dspace.values.staging.yaml` sets `environment: staging`, which surface in
+`/healthz` and the homepage build badge.
+
 If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
 recipe:
 
