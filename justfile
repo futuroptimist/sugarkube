@@ -1031,12 +1031,30 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
 
 # Fast redeploy of dspace v3 from GHCR (emergency push).
 dspace-oci-redeploy:
-    @just helm-oci-upgrade \
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    just helm-oci-upgrade \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values='docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml' \
       version_file='docs/apps/dspace.version' \
       tag='' default_tag='v3-latest'
+
+    echo "Restarting dspace deployment to pick up the latest image..."
+    if ! kubectl -n dspace rollout restart deploy/dspace; then
+        echo "ERROR: Failed to trigger rollout restart for deploy/dspace in namespace dspace." >&2
+        exit 1
+    fi
+
+    echo "Waiting for the dspace rollout to complete..."
+    if ! kubectl -n dspace rollout status deploy/dspace --timeout=120s; then
+        echo "ERROR: dspace rollout did not complete successfully." >&2
+        exit 1
+    fi
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':
