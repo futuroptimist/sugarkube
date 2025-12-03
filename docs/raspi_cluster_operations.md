@@ -699,9 +699,10 @@ just dspace-oci-redeploy
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
-`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release.
-Kubernetes then rolls the dspace pods to the new image using the Deployment's update
-strategy.
+`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release
+and then forcing a Kubernetes rollout restart of `deploy/dspace` in the `dspace`
+namespace. That restart ensures new pods are created and pull the latest
+`ghcr.io/democratizedspace/dspace:v3-latest` digest even when the tag is reused.
 
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
@@ -718,7 +719,8 @@ to pin a specific image.
 
 2. Ensure your new image is pushed and `v3-latest` (or the tag you pass via `tag=`)
    points at the desired build (see the dspace repo docs for image build/publish steps).
-3. Run the redeploy command (`just helm-oci-upgrade ...` or `just dspace-oci-redeploy`).
+3. Run the redeploy command (`just helm-oci-upgrade ...` or `just dspace-oci-redeploy`),
+   which now triggers a rollout restart and waits for it to complete.
 4. Verify pods and logs:
 
     ```bash
@@ -848,7 +850,8 @@ As you continue operating your cluster, these recipes will be helpful:
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
 
 - **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to roll the dspace v3
-  release to the latest published image tag in GHCR without retyping chart arguments.
+  release to the latest published image tag in GHCR, forcing a Deployment rollout so
+  pods always restart on the newest image.
 
 ### Document outages and incidents
 
