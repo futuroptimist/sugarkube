@@ -698,6 +698,12 @@ Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 Kubernetes then rolls the dspace pods to the new image using the Deployment's update
 strategy.
 
+The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
+`environment` value in the dspace values file). In this repo,
+`docs/examples/dspace.values.dev.yaml` sets `environment: dev` and
+`docs/examples/dspace.values.staging.yaml` sets `environment: staging`, which surface in
+`/healthz` responses and the homepage build badge.
+
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
 each redeploy. For production, prefer immutable tags (for example, `v3-<sha>`) if you want
