@@ -1,3 +1,5 @@
+environment: staging
+
 ingress:
   enabled: true
   className: traefik

@@ -703,6 +703,12 @@ When you pass an image tag (including the default `v3-latest`), the helper sets
 each redeploy. For production, prefer immutable tags (for example, `v3-<sha>`) if you want
 to pin a specific image.
 
+The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
+`environment` value in the dspace values file). In this repo,
+`docs/examples/dspace.values.dev.yaml` sets `environment: dev` and
+`docs/examples/dspace.values.staging.yaml` sets `environment: staging`, which show up in
+`/healthz` and the homepage build badge.
+
 **Emergency redeploy checklist:**
 
 1. Confirm the cluster and Traefik are healthy:
