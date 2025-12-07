@@ -154,6 +154,10 @@ def _setup_namespace_pair() -> Tuple[Dict[str, str], List[List[str]]]:
         text=True,
     )
     if ping.returncode != 0:
+        # TODO: Stabilize the network namespace ping path in CI to avoid spurious skips.
+        # Root cause: Kernel or container limitations sometimes prevent namespace-to-namespace
+        #   pings, so the harness bails out instead of exercising fail-open behavior.
+        # Estimated fix: 2h to mock the connectivity check or provision CAP_NET_ADMIN reliably.
         pytest.skip("Network namespace connectivity test failed")
 
     return (
@@ -353,6 +357,9 @@ exit 0
 
     real_getent = shutil.which("getent")
     if real_getent is None:
+        # TODO: Bundle getent in the test environment so the stub harness can proxy calls.
+        # Root cause: The getent utility is missing on minimal containers, blocking DNS stubbing.
+        # Estimated fix: 30m to install the package in CI and note the dependency locally.
         pytest.skip("getent not available for stub harness")
     getent_stub = bin_dir / "getent"
     _write_executable(
@@ -386,6 +393,10 @@ exec "{real_getent}" "$@"
 
     real_avahi_browse = shutil.which("avahi-browse")
     if real_avahi_browse is None:
+        # TODO: Provide an avahi-browse shim for stub mode when the binary is unavailable.
+        # Root cause: Some environments omit Avahi tooling, preventing the harness from setting
+        #   up the browse stub used by the fail-open tests.
+        # Estimated fix: 45m to vendor a tiny shell shim or add the package to CI images.
         pytest.skip("avahi-browse not available for stub harness")
     avahi_browse_stub = bin_dir / "avahi-browse"
     _write_executable(

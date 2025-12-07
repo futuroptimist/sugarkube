@@ -13,6 +13,10 @@ REQUIRED_TOOLS = ("xz", "bsdtar", "gzip", "sha256sum")
 def test_artifact_detection_shell_script(tmp_path: Path) -> None:
     missing = [tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None]
     if missing:
+        # TODO: Provision the compression and checksum tools in the test runtime image.
+        # Root cause: The artifact detection harness depends on xz/bsdtar/gzip/sha256sum
+        #   binaries that may be absent on contributor machines or slim containers.
+        # Estimated fix: 1h to install the packages in CI and document the local prerequisites.
         pytest.skip(f"missing tools required for artifact detection test: {', '.join(missing)}")
 
     repo_root = Path(__file__).resolve().parents[1]

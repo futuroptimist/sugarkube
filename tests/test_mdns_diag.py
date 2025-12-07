@@ -14,6 +14,9 @@ def mdns_diag_script():
     assert script.is_file(), f"mdns_diag.sh is not a file at {script}"
     # Check if executable
     if not script.stat().st_mode & 0o111:
+        # TODO: Ensure mdns_diag.sh has executable permissions in checked-in mode and CI images.
+        # Root cause: Some packaging steps strip the executable bit, causing the fixture to skip.
+        # Estimated fix: 30m to audit file permissions and add a chmod step to the release process.
         pytest.skip("mdns_diag.sh is not executable")
     return script
 
@@ -60,6 +63,9 @@ def test_mdns_diag_hostname_option(mdns_diag_script):
         # We're just checking it accepts the option
         assert "Hostname: testhost.local" in result.stdout or "Hostname: testhost.local" in result.stderr
     except subprocess.TimeoutExpired:
+        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
+        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
+        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
         pytest.skip("avahi/mDNS not available or hanging in CI environment")
 
 
@@ -77,6 +83,9 @@ def test_mdns_diag_service_type_option(mdns_diag_script):
         # We're just checking it accepts the option
         assert "Service:  _test._tcp" in result.stdout or "Service:  _test._tcp" in result.stderr
     except subprocess.TimeoutExpired:
+        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
+        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
+        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
         pytest.skip("avahi/mDNS not available or hanging in CI environment")
 
 
@@ -100,6 +109,9 @@ def test_mdns_diag_output_format(mdns_diag_script):
         checks = ["Checking D-Bus", "Checking Avahi daemon", "Browsing for", "Resolving"]
         assert any(check in output for check in checks), "Should perform at least one check"
     except subprocess.TimeoutExpired:
+        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
+        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
+        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
         pytest.skip("avahi/mDNS not available or hanging in CI environment")
 
 
@@ -124,6 +136,9 @@ def test_mdns_diag_environment_variables(mdns_diag_script):
         assert "envhost.local" in output, "Should use MDNS_DIAG_HOSTNAME from environment"
         assert "_k3s-testcluster-testenv._tcp" in output, "Should use cluster and env from environment"
     except subprocess.TimeoutExpired:
+        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
+        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
+        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
         pytest.skip("avahi/mDNS not available or hanging in CI environment")
 
 
@@ -157,4 +172,7 @@ def test_mdns_diag_exit_codes(mdns_diag_script):
         )
         assert result.returncode in [0, 1], f"Normal run should exit with 0 or 1, got {result.returncode}"
     except subprocess.TimeoutExpired:
+        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
+        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
+        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
         pytest.skip("avahi/mDNS not available or hanging in CI environment")

@@ -115,6 +115,9 @@ def test_requires_gh(tmp_path):
 
 def test_dry_run_succeeds_without_gh(tmp_path):
     if shutil.which("gh"):
+        # TODO: Force PATH isolation in CI to validate the dry-run reminder consistently.
+        # Root cause: When gh is installed, the dry-run branch is never exercised.
+        # Estimated fix: 45m to set PATH to a temp bin before invoking the helper in CI.
         pytest.skip("gh present on PATH; dry-run reminder test requires it to be missing")
 
     env = os.environ.copy()
@@ -143,6 +146,10 @@ def test_dry_run_logs_missing_curl_and_sha256sum(tmp_path):
 
     python_path = shutil.which("python3") or shutil.which("python")
     if not python_path:
+        # TODO: Stub a python shim in the fake PATH used by the download helper.
+        # Root cause: Some environments may lack a python executable once PATH is overridden
+        #   for the dry-run harness.
+        # Estimated fix: 30m to seed the fake bin with a tiny python wrapper for the test.
         pytest.skip("python interpreter not found for stubbed PATH")
     (fake_bin / "python3").symlink_to(python_path)
 

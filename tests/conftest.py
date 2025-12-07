@@ -53,6 +53,9 @@ def require_tools(tools: Iterable[str]) -> None:
             missing.append(tool)
 
     if missing:
+        # TODO: Package the required CLI tools with the test environment so suites don't skip.
+        # Root cause: Some contributors run the tests on minimal images lacking networking utils.
+        # Estimated fix: 1h to document the dependencies and add them to CI bootstrap.
         pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
 
 
@@ -65,4 +68,7 @@ def ensure_root_privileges() -> None:
 
     probe = subprocess.run(["unshare", "-n", "true"], capture_output=True, text=True)
     if probe.returncode != 0:
+        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
+        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
+        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
         pytest.skip("Insufficient privileges for network namespace operations")
