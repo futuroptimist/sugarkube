@@ -127,6 +127,9 @@ def netns_setup():
             text=True,
         )
         if ping_result.returncode != 0:
+            # TODO: Harden namespace connectivity setup so the browse test runs in CI reliably.
+            # Root cause: Some kernels block ICMP in nested namespaces, causing the fixture to skip.
+            # Estimated fix: 2h to swap ping for a lightweight TCP check or mock connectivity.
             pytest.skip("Network namespace connectivity test failed")
 
         yield {
@@ -204,6 +207,10 @@ def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
         )
 
         if browse_result.returncode != 0 or service_name not in browse_result.stdout:
+            # TODO: Provide an Avahi stub or fixture that guarantees local discovery succeeds.
+            # Root cause: The host's Avahi setup may not advertise services inside namespaces,
+            #   leading to nondeterministic skips.
+            # Estimated fix: 2h to add a stub responder or package Avahi in the test runner.
             pytest.skip(
                 "Service not discoverable within same namespace - Avahi may not be configured"
             )

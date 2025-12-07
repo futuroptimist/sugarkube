@@ -379,7 +379,8 @@ When adding a test skip directive:
    ```
 
    Regression coverage: `tests/test_bats_skip_guidelines.py` enforces the comment block
-   around each `skip` invocation.
+   around each `skip` invocation, and `tests/test_pytest_skip_guidelines.py` applies the
+   same TODO/Root cause/Estimated fix block to `pytest.skip` calls in the Python suite.
 
 2. **Update this document**:
    - Add entry to relevant section

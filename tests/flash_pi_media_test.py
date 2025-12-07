@@ -58,6 +58,10 @@ def test_flash_imgxz_to_regular_file(tmp_path):
 
 def test_requires_root_without_override(tmp_path):
     if hasattr(os, "geteuid") and os.geteuid() == 0:
+        # TODO: Run the permission check in an unprivileged container to avoid root-only skips.
+        # Root cause: The test asserts root detection behavior, but running as root bypasses
+        #   the code path entirely.
+        # Estimated fix: 1h to enforce a non-root UID in the test harness or document sudo use.
         pytest.skip("Running as root; cannot exercise the permission check")
     content = b"data" * 512
     img, archive = make_image(tmp_path, content)
