@@ -3,7 +3,7 @@ Description=Trigger node token export when k3s token appears
 
 [Path]
 PathExists=/var/lib/rancher/k3s/server/node-token
-PathChanged=/var/lib/rancher/k3s/server/node-token
+PathModified=/var/lib/rancher/k3s/server/node-token
 Unit=sugarkube-export-node-token.service
 
 [Install]
