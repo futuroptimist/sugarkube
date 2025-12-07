@@ -751,7 +751,7 @@ bats -f "dbus self-check waits for avahi bus" tests/bats/mdns_selfcheck.bats
 **Tests**: Hang around test 5-6
 
 ### Root Cause
-Tests likely missing curl stubs and/or avahi command stubs, causing script to wait on real network operations.
+Tests were missing curl stubs and/or Avahi command stubs, causing script to wait on real network operations. Hermetic Avahi CLI stubs are now enabled in `tests/integration/cluster_formation_e2e.bats` so the discover flow suite runs without host avahi-utils.
 
 ### Investigation Steps
 
@@ -1008,9 +1008,10 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
 
 - [x] **discover_flow.bats**: Investigate and fix timeouts
   - [x] Identify hanging tests (5, 6, 7)
-  - [x] Add skip directives with documentation  
+  - [x] Add skip directives with documentation
   - [x] Tests 1-4, 8 pass successfully
-  - [ ] Create outage: 2025-11-04-discover-flow-missing-stubs.json (deferred - skipped tests don't need outages)
+  - [x] Create outage: 2025-11-04-discover-flow-missing-stubs.json (tracked by
+        `tests/test_outage_dates.py::test_discover_flow_missing_stubs_outage_record_present`)
   - **Status (2025-11-05)**: ⏭️ SKIPPED tests 5-7 - Complex k3s integration, needs dedicated PR
 
 - [x] **join_gate.bats**: Investigate and fix timeouts

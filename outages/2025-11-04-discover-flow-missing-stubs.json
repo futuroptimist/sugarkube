@@ -1,0 +1,11 @@
+{
+  "id": "discover-flow-missing-stubs",
+  "date": "2025-11-04",
+  "component": "k3s-discover",
+  "rootCause": "discover_flow.bats tests 5-7 stalled because Avahi and systemctl stubs were missing, forcing skips to keep CI green while stub parity work was deferred and hermetic coverage waited on stubbed avahi-browse/avahi-publish.",
+  "resolution": "Enabled hermetic Avahi CLI stubs in cluster_formation_e2e.bats and unskipped the discover flow coverage so CI runs without host avahi-utils while still exercising the flow end-to-end.",
+  "references": [
+    "notes/ci-test-fixes-action-plan.md#discover_flowbats-investigate-and-fix-timeouts",
+    "tests/integration/cluster_formation_e2e.bats"
+  ]
+}

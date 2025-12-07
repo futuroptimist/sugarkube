@@ -144,3 +144,24 @@ def test_outage_records_conform_to_schema() -> None:
                         f"but got '{json_type}'"
                     )
 
+
+def test_discover_flow_missing_stubs_outage_record_present() -> None:
+    """Ensure the deferred discover-flow outage record now exists."""
+
+    repo_root = Path(__file__).resolve().parent.parent
+    outages_dir = repo_root / "outages"
+    expected_id = "discover-flow-missing-stubs"
+    matching_files = list(outages_dir.glob(f"*{expected_id}*.json"))
+
+    assert matching_files, (
+        "Documented outage for discover_flow.bats stub gaps should exist; "
+        "see notes/ci-test-fixes-action-plan.md"
+    )
+
+    outage = json.loads(matching_files[0].read_text(encoding="utf-8"))
+    assert outage.get("id") == expected_id, "Outage id should be descriptive"
+    assert (
+        outage.get("component") == "k3s-discover"
+    ), "Component should identify the failing flow"
+    assert "stub" in outage.get("rootCause", ""), "Root cause should mention missing stubs"
+    assert outage.get("references"), "Outage should cite related docs or tests"
