@@ -191,7 +191,37 @@ ensure_systemd_unit_active() {
   return "${rc}"
 }
 
+warn_if_systemd_unit_disabled() {
+  local unit="$1"
+
+  if [ -z "${unit}" ]; then
+    return 0
+  fi
+
+  if [ "${SUGARKUBE_SKIP_SYSTEMCTL:-0}" = "1" ]; then
+    log_debug discover_systemd outcome=skip reason=skip_flag check=is-enabled \
+      unit="${unit}" >&2
+    return 0
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_debug discover_systemd outcome=skip reason=systemctl_missing check=is-enabled \
+      unit="${unit}" >&2
+    return 0
+  fi
+
+  if systemctl is-enabled --quiet "${unit}"; then
+    log_debug discover_systemd outcome=ok state=enabled check=is-enabled unit="${unit}" >&2
+    return 0
+  fi
+
+  log_warn_msg discover "systemd unit disabled; enable for reliable discovery" \
+    "unit=${unit}" "check=is-enabled"
+  return 0
+}
+
 ensure_avahi_systemd_units() {
+  warn_if_systemd_unit_disabled avahi-daemon || true
   ensure_systemd_unit_active dbus || true
   ensure_systemd_unit_active avahi-daemon || true
 }
@@ -407,6 +437,7 @@ TEST_PUBLISH_BOOTSTRAP=0
 TEST_MDNS_FALLBACK=0
 TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
+TEST_AVAHI_SYSTEMD_CHECK=0
 declare -a TEST_RENDER_ARGS=()
 PRINT_SERVER_HOSTS=0
 
@@ -446,6 +477,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-claim-bootstrap)
       TEST_CLAIM_BOOTSTRAP=1
+      ;;
+    --test-avahi-systemd-check)
+      TEST_AVAHI_SYSTEMD_CHECK=1
       ;;
     --print-server-hosts)
       PRINT_SERVER_HOSTS=1
@@ -4875,6 +4909,11 @@ if [ "${TEST_RENDER_SERVICE}" -eq 1 ]; then
   else
     render_avahi_service_xml "${TEST_RENDER_ARGS[@]}"
   fi
+  exit 0
+fi
+
+if [ "${TEST_AVAHI_SYSTEMD_CHECK:-0}" -eq 1 ]; then
+  warn_if_systemd_unit_disabled avahi-daemon
   exit 0
 fi
 

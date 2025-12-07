@@ -164,6 +164,10 @@ The mDNS discovery system has grown overly complex with multiple layers of fallb
    fi
    ```
 
+**Status update:** A lightweight warning now surfaces when `avahi-daemon` is disabled in
+systemd so operators can enable it before discovery begins (regression coverage:
+`tests/scripts/test_avahi_systemd_check.py`).
+
 **Expected Impact**:
 - **Remove**: ~200 lines of absence gate logic
 - **Faster**: Save 5-25 seconds per node (no restart + stabilization)
