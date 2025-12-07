@@ -562,9 +562,22 @@ install -Dm644 "${REPO_ROOT}/scripts/systemd/ssd-clone.service" \
 install -Dm644 "${REPO_ROOT}/scripts/systemd/avahi-configure.service" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/avahi-configure.service"
 
+install -Dm644 "${REPO_ROOT}/scripts/systemd/sugarkube-export-kubeconfig.service" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/sugarkube-export-kubeconfig.service"
+install -Dm644 "${REPO_ROOT}/scripts/systemd/sugarkube-export-kubeconfig.path" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/sugarkube-export-kubeconfig.path"
+install -Dm644 "${REPO_ROOT}/scripts/systemd/sugarkube-export-node-token.service" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/sugarkube-export-node-token.service"
+install -Dm644 "${REPO_ROOT}/scripts/systemd/sugarkube-export-node-token.path" \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/sugarkube-export-node-token.path"
+
 install -d "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants"
 ln -sf ../first-boot.service \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/first-boot.service"
+ln -sf ../sugarkube-export-kubeconfig.path \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/sugarkube-export-kubeconfig.path"
+ln -sf ../sugarkube-export-node-token.path \
+  "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/etc/systemd/system/multi-user.target.wants/sugarkube-export-node-token.path"
 install -Dm755 "${REPO_ROOT}/systemd/first-boot-prepare.sh" \
   "${PI_GEN_DIR}/stage2/01-sys-tweaks/files/usr/local/sbin/first-boot-prepare.sh"
 install -Dm644 "${REPO_ROOT}/systemd/first-boot-prepare.service" \
