@@ -43,10 +43,11 @@ Recommended options:
 
 The base image now writes sanitized and full kubeconfigs (`/boot/sugarkube-kubeconfig*`) plus the
 k3s node token (`/boot/sugarkube-node-token`) once k3s is online, so you can collect cluster
-credentials without SSH. Systemd path units re-run the exporters whenever the kubeconfig or node
-token appears later in the boot process, replacing any `*(pending)` placeholders automatically. The
-default template still seeds `/boot/sugarkube/` with placeholders for bootstrap tokens or additional
-secrets you may want to mirror on first boot.
+credentials without SSH. The baked-in `sugarkube-export-kubeconfig.path` and
+`sugarkube-export-node-token.path` units re-run the exporters whenever the kubeconfig or node token
+appears later in the boot process, replacing any `*(pending)` placeholders automatically. The
+default template still seeds `/boot/sugarkube/` with placeholders for bootstrap tokens or
+additional secrets you may want to mirror on first boot.
 
 ## Inject secrets safely
 

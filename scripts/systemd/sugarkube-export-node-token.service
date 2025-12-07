@@ -1,0 +1,11 @@
+[Unit]
+Description=Export the Sugarkube node token to the boot partition
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sugarkube/export-node-token.sh
+
+[Install]
+WantedBy=multi-user.target
