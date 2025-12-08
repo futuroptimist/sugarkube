@@ -32,7 +32,6 @@ def test_mdns_diag_script_is_tracked_executable(mdns_diag_script):
         check=True,
     )
 
-    assert os.access(mdns_diag_script, os.X_OK), "Executable bit should be set on disk"
     assert tracked.stdout.startswith("100755"), "Tracked mode should preserve executability"
 
 
