@@ -124,13 +124,13 @@ sync without modifying the host.
    - Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the
      repository root to preview the helper. When you're in a nested directory, call
      `./scripts/sugarkube pi download --dry-run` so the wrapper bootstraps `PYTHONPATH`. Both
-    commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide. Pass the
-    same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight to the
-    shell script, including the preview mode so you can inspect the exact `curl` commands without
-    fetching the artifact. When prerequisites such as the GitHub CLI, `curl`, or `sha256sum` are
-    missing, the dry-run prints reminders instead of exiting so you can install them before running
-    without `--dry-run`. The reminder is now tested with an isolated `PATH` so it still fires even on
-    machines that already have the GitHub CLI installed.
+     commands invoke `scripts/download_pi_image.sh --dry-run` with the flags you provide. Pass the
+     same arguments (`--dir`, `--release`, `--asset`, etc.) to the CLI and they flow straight to the
+     shell script, including the preview mode so you can inspect the exact `curl` commands without
+     fetching the artifact. When prerequisites such as the GitHub CLI, `curl`, or `sha256sum` are
+     missing, the dry-run prints reminders instead of exiting so you can install them before running
+     without `--dry-run`. The reminder is now tested with an isolated `PATH` so it still fires even on
+     machines that already have the GitHub CLI installed.
 
 > [!NOTE]
 > The same repository-root rule applies to other `python -m sugarkube_toolkit ...` examples below.
