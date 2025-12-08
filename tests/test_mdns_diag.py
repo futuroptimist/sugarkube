@@ -12,13 +12,27 @@ def mdns_diag_script():
     script = SCRIPTS_DIR / "mdns_diag.sh"
     assert script.exists(), f"mdns_diag.sh not found at {script}"
     assert script.is_file(), f"mdns_diag.sh is not a file at {script}"
-    # Check if executable
-    if not script.stat().st_mode & 0o111:
-        # TODO: Ensure mdns_diag.sh has executable permissions in checked-in mode and CI images.
-        # Root cause: Some packaging steps strip the executable bit, causing the fixture to skip.
-        # Estimated fix: 30m to audit file permissions and add a chmod step to the release process.
-        pytest.skip("mdns_diag.sh is not executable")
+    assert script.stat().st_mode & 0o111, "mdns_diag.sh must be executable"
     return script
+
+
+def test_mdns_diag_script_is_tracked_executable(mdns_diag_script):
+    """The diagnostic script should stay executable in git and on disk."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "-s",
+            str(mdns_diag_script.relative_to(repo_root)),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert tracked.stdout.startswith("100755"), "Tracked mode should preserve executability"
 
 
 def test_mdns_diag_help_flag(mdns_diag_script):
