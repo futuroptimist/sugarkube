@@ -105,6 +105,19 @@ def _symlink_utilities(bin_dir: Path, commands: list[str]) -> None:
         link_path.symlink_to(system_path)
 
 
+def _isolated_dry_run_env(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """Create a PATH without gh so the dry-run reminder always executes."""
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _symlink_utilities(fake_bin, ["env", "bash", "mkdir", "dirname"])
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    return fake_bin, env
+
+
 def test_requires_gh(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
@@ -114,15 +127,7 @@ def test_requires_gh(tmp_path):
 
 
 def test_dry_run_succeeds_without_gh(tmp_path):
-    if shutil.which("gh"):
-        # TODO: Force PATH isolation in CI to validate the dry-run reminder consistently.
-        # Root cause: When gh is installed, the dry-run branch is never exercised.
-        # Estimated fix: 45m to set PATH to a temp bin before invoking the helper in CI.
-        pytest.skip("gh present on PATH; dry-run reminder test requires it to be missing")
-
-    env = os.environ.copy()
-    env["PATH"] = os.environ.get("PATH", "")
-    env["HOME"] = str(tmp_path / "home")
+    _, env = _isolated_dry_run_env(tmp_path)
 
     result = run_script("download_pi_image.sh", args=["--dry-run"], env=env, cwd=tmp_path)
 
