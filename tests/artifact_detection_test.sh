@@ -48,11 +48,17 @@ verify_checksum_relocation "${tmp}/out1.img.xz"
 # Reset deploy between cases
 rm -rf "${tmp}/deploy"
 
-# Case 2: zip containing a .img (use bsdtar to avoid requiring 'zip')
+# Case 2: zip containing a .img (use Python to avoid extra CLI dependencies)
 mkdir -p "${tmp}/deploy/zipcase"
 echo "hi-from-zip" > "${tmp}/deploy/zipcase/bar.img"
-# bsdtar auto-detects format from extension with -a
-bsdtar -a -cf "${tmp}/deploy/zipcase/bar.zip" -C "${tmp}/deploy/zipcase" bar.img
+python3 - <<PY
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+
+base = Path("${tmp}") / "deploy" / "zipcase"
+with ZipFile(base / "bar.zip", mode="w", compression=ZIP_DEFLATED) as zf:
+    zf.write(base / "bar.img", arcname="bar.img")
+PY
 rm -f "${tmp}/deploy/zipcase/bar.img"
 bash "${SCRIPT}" "${tmp}/deploy" "${tmp}/out2.img.xz"
 test -s "${tmp}/out2.img.xz"
