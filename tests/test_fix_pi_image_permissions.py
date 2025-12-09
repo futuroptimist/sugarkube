@@ -18,7 +18,12 @@ def _run_as(
     cwd: Path,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess:
-    """Execute a command as another user even when runuser/su helpers are missing."""
+    """Execute a command as another user even when runuser/su helpers are missing.
+
+    Falls back to Python's os.setuid/setgid for privilege dropping when runuser
+    and su are unavailable. Requires bash for command execution. The calling process
+    must have appropriate permissions to change user identity.
+    """
     runner = shutil.which("runuser")
     if runner:
         cmd = [runner, "-u", user, "--", "bash", "-c", command]
@@ -55,6 +60,15 @@ def _run_as(
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
 
 
+def test_run_as_raises_when_all_helpers_missing(monkeypatch, tmp_path):
+    """Ensure _run_as raises FileNotFoundError when no privilege helpers exist."""
+
+    monkeypatch.setattr(shutil, "which", lambda binary: None)
+
+    with pytest.raises(FileNotFoundError, match="runuser, su, and python are unavailable"):
+        _run_as("nobody", "true", cwd=tmp_path, env={})
+
+
 def test_run_as_falls_back_to_python_when_privilege_helpers_missing(monkeypatch, tmp_path):
     """Ensure _run_as executes commands even without runuser/su binaries."""
 
@@ -69,7 +83,6 @@ def test_run_as_falls_back_to_python_when_privilege_helpers_missing(monkeypatch,
 
     current_user = pwd.getpwuid(os.geteuid()).pw_name
     env = os.environ.copy()
-    env["TEST_RUN_AS"] = "1"
 
     result = _run_as(current_user, "id -un", cwd=tmp_path, env=env)
 
