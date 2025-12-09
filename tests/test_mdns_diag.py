@@ -35,6 +35,14 @@ def test_mdns_diag_script_is_tracked_executable(mdns_diag_script):
     assert tracked.stdout.startswith("100755"), "Tracked mode should preserve executability"
 
 
+def _stub_env(**overrides: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("MDNS_DIAG_HOSTNAME", "stub.local")
+    env.setdefault("MDNS_DIAG_STUB_MODE", "1")
+    env.update(overrides)
+    return env
+
+
 def test_mdns_diag_help_flag(mdns_diag_script):
     """Test that mdns_diag.sh --help displays usage information."""
     result = subprocess.run(
@@ -59,74 +67,75 @@ def test_mdns_diag_invalid_option(mdns_diag_script):
         timeout=5,
     )
 
-    assert result.returncode == 2, f"Expected exit code 2 for invalid option, got {result.returncode}"
+    assert result.returncode == 2, (
+        "Expected exit code 2 for invalid option, got "
+        f"{result.returncode}"
+    )
     assert "ERROR:" in result.stderr, "Error message should be printed to stderr"
+
+
+def test_mdns_diag_stub_mode_short_circuits_checks(mdns_diag_script):
+    """Stub mode should exit quickly without Avahi tooling."""
+
+    result = subprocess.run(
+        [str(mdns_diag_script)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=_stub_env(MDNS_DIAG_HOSTNAME="speedy.local"),
+    )
+
+    assert result.returncode == 0
+    assert "Stub mode enabled" in result.stdout
+    assert "speedy.local" in result.stdout
 
 
 def test_mdns_diag_hostname_option(mdns_diag_script):
     """Test that mdns_diag.sh accepts --hostname option."""
-    try:
-        result = subprocess.run(
-            [str(mdns_diag_script), "--hostname", "testhost.local"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
 
-        # Script should run but may fail if services aren't available
-        # We're just checking it accepts the option
-        assert "Hostname: testhost.local" in result.stdout or "Hostname: testhost.local" in result.stderr
-    except subprocess.TimeoutExpired:
-        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
-        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
-        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
-        pytest.skip("avahi/mDNS not available or hanging in CI environment")
+    result = subprocess.run(
+        [str(mdns_diag_script), "--hostname", "testhost.local"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=_stub_env(),
+    )
+
+    assert result.returncode == 0
+    assert "Hostname: testhost.local" in result.stdout
 
 
 def test_mdns_diag_service_type_option(mdns_diag_script):
     """Test that mdns_diag.sh accepts --service-type option."""
-    try:
-        result = subprocess.run(
-            [str(mdns_diag_script), "--service-type", "_test._tcp"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
 
-        # Script should run but may fail if services aren't available
-        # We're just checking it accepts the option
-        assert "Service:  _test._tcp" in result.stdout or "Service:  _test._tcp" in result.stderr
-    except subprocess.TimeoutExpired:
-        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
-        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
-        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
-        pytest.skip("avahi/mDNS not available or hanging in CI environment")
+    result = subprocess.run(
+        [str(mdns_diag_script), "--service-type", "_test._tcp"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=_stub_env(),
+    )
+
+    assert result.returncode == 0
+    assert "Service:  _test._tcp" in result.stdout
 
 
 def test_mdns_diag_output_format(mdns_diag_script):
     """Test that mdns_diag.sh produces expected output format."""
-    try:
-        result = subprocess.run(
-            [str(mdns_diag_script)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
 
-        # Check for expected output structure (regardless of success/failure)
-        output = result.stdout + result.stderr
-        assert "=== mDNS Diagnostic ===" in output, "Should have diagnostic header"
-        assert "Hostname:" in output, "Should display hostname"
-        assert "Service:" in output, "Should display service type"
+    result = subprocess.run(
+        [str(mdns_diag_script)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=_stub_env(),
+    )
 
-        # Should have at least one check
-        checks = ["Checking D-Bus", "Checking Avahi daemon", "Browsing for", "Resolving"]
-        assert any(check in output for check in checks), "Should perform at least one check"
-    except subprocess.TimeoutExpired:
-        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
-        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
-        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
-        pytest.skip("avahi/mDNS not available or hanging in CI environment")
+    output = result.stdout
+    assert "=== mDNS Diagnostic ===" in output, "Should have diagnostic header"
+    assert "Hostname:" in output, "Should display hostname"
+    assert "Service:" in output, "Should display service type"
+    assert "Stub mode enabled" in output, "Stub mode should log the short-circuit"
 
 
 def test_mdns_diag_environment_variables(mdns_diag_script):
@@ -137,23 +146,17 @@ def test_mdns_diag_environment_variables(mdns_diag_script):
         "SUGARKUBE_ENV": "testenv",
     }
 
-    try:
-        result = subprocess.run(
-            [str(mdns_diag_script)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env={**os.environ, **env},
-        )
+    result = subprocess.run(
+        [str(mdns_diag_script)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=_stub_env(**env),
+    )
 
-        output = result.stdout + result.stderr
-        assert "envhost.local" in output, "Should use MDNS_DIAG_HOSTNAME from environment"
-        assert "_k3s-testcluster-testenv._tcp" in output, "Should use cluster and env from environment"
-    except subprocess.TimeoutExpired:
-        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
-        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
-        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
-        pytest.skip("avahi/mDNS not available or hanging in CI environment")
+    output = result.stdout
+    assert "envhost.local" in output, "Should use MDNS_DIAG_HOSTNAME from environment"
+    assert "_k3s-testcluster-testenv._tcp" in output, "Should use cluster and env from environment"
 
 
 def test_mdns_diag_exit_codes(mdns_diag_script):
@@ -176,17 +179,11 @@ def test_mdns_diag_exit_codes(mdns_diag_script):
     )
     assert result.returncode == 2, "Invalid option should exit with code 2"
 
-    # Normal run may exit 0 or 1 depending on system state
-    try:
-        result = subprocess.run(
-            [str(mdns_diag_script)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode in [0, 1], f"Normal run should exit with 0 or 1, got {result.returncode}"
-    except subprocess.TimeoutExpired:
-        # TODO: Provide an Avahi stub or skip marker that runs quickly in constrained CI hosts.
-        # Root cause: The command can hang when Avahi is absent or blocked, forcing a timeout.
-        # Estimated fix: 2h to add a stubbed responder or guard the test with a feature flag.
-        pytest.skip("avahi/mDNS not available or hanging in CI environment")
+    result = subprocess.run(
+        [str(mdns_diag_script)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=_stub_env(),
+    )
+    assert result.returncode == 0, "Stub mode should exit with code 0"

@@ -55,6 +55,9 @@ The discovery process follows this sequence:
 - **Journal Logging**: On failure, dumps last 200 lines of avahi-daemon journal
 - **Interface Pinning**: Set `ALLOW_IFACE=eth0` to pin queries to specific interface
 - **Detailed Logging**: Exit codes and stderr are logged for all avahi-browse attempts
+- **Offline-friendly checks**: Run `MDNS_DIAG_STUB_MODE=1 scripts/mdns_diag.sh` to
+  exercise argument handling and environment overrides without Avahi installed; the
+  stub emits a quick summary and exits cleanly on constrained hosts.
 
 ## Troubleshooting
 
