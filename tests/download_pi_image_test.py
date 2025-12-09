@@ -126,11 +126,11 @@ def _ensure_python(bin_dir: Path) -> Path:
         sys.executable,
     ]
     target = bin_dir / "python3"
+    if target.exists():
+        target.unlink()
     for candidate in candidates:
         if not candidate:
             continue
-        if target.exists():
-            target.unlink()
         target.symlink_to(candidate)
         return target
 
@@ -206,7 +206,7 @@ def test_dry_run_logs_missing_curl_and_sha256sum(tmp_path):
     assert checksum_placeholder.exists()
 
 
-def test_python_shim_used_when_not_on_path(tmp_path, monkeypatch):
+def test_python_shim_falls_back_to_sys_executable(tmp_path, monkeypatch):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     create_gh_stub(fake_bin)
@@ -250,6 +250,54 @@ def test_python_shim_used_when_not_on_path(tmp_path, monkeypatch):
     assert result.returncode == 0, result.stderr
     assert "Dry-run" in result.stdout
     assert "GitHub CLI (gh) is not installed" not in result.stdout
+    assert "Dry-run: curl is not installed" in result.stdout
+    assert "Dry-run: sha256sum is not installed" in result.stdout
+
+
+def test_python_shim_bash_fallback_when_no_candidates(tmp_path, monkeypatch):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    real_which = shutil.which
+
+    def missing_python(cmd: str):
+        if cmd in {"python3", "python"}:
+            return None
+        return real_which(cmd)
+
+    monkeypatch.setattr(shutil, "which", missing_python)
+    monkeypatch.setattr(sys, "executable", None)
+
+    shim = _ensure_python(fake_bin)
+    assert shim.exists()
+    assert shim.read_text() == "#!/usr/bin/env bash\necho missing python >&2\nexit 1\n"
+    assert os.access(shim, os.X_OK)
+
+    _symlink_utilities(fake_bin, ["env", "bash", "mkdir", "dirname"])
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = json.dumps(
+        {
+            "tag_name": "v0.0.3",
+            "assets": [
+                {
+                    "name": "sugarkube.img.xz",
+                    "browser_download_url": "https://example.invalid/image",
+                },
+                {
+                    "name": "sugarkube.img.xz.sha256",
+                    "browser_download_url": "https://example.invalid/checksum",
+                },
+            ],
+        }
+    )
+
+    result = run_script("download_pi_image.sh", args=["--dry-run"], env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
     assert "Dry-run: curl is not installed" in result.stdout
     assert "Dry-run: sha256sum is not installed" in result.stdout
 
