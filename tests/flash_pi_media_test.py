@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from scripts import flash_pi_media as flash
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -57,16 +55,14 @@ def test_flash_imgxz_to_regular_file(tmp_path):
 
 
 def test_requires_root_without_override(tmp_path):
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
-        # TODO: Run the permission check in an unprivileged container to avoid root-only skips.
-        # Root cause: The test asserts root detection behavior, but running as root bypasses
-        #   the code path entirely.
-        # Estimated fix: 1h to enforce a non-root UID in the test harness or document sudo use.
-        pytest.skip("Running as root; cannot exercise the permission check")
     content = b"data" * 512
     img, archive = make_image(tmp_path, content)
     device = tmp_path / "device.raw"
     device.touch()
+
+    env = os.environ.copy()
+    env["SUGARKUBE_FLASH_FAKE_EUID"] = "1000"
+    env["SUGARKUBE_FLASH_ALLOW_NONROOT"] = "0"
 
     result = run_flash(
         [
@@ -78,11 +74,38 @@ def test_requires_root_without_override(tmp_path):
             "--keep-mounted",
             "--no-eject",
         ],
-        env=os.environ.copy(),
+        env=env,
     )
 
     assert result.returncode != 0
     assert "Run as root or with sudo" in result.stderr
+
+
+def test_fake_euid_override_requires_integer(tmp_path):
+    content = b"data" * 512
+    img, archive = make_image(tmp_path, content)
+    device = tmp_path / "device.raw"
+    device.touch()
+
+    env = os.environ.copy()
+    env["SUGARKUBE_FLASH_FAKE_EUID"] = "not-an-int"
+    env["SUGARKUBE_FLASH_ALLOW_NONROOT"] = "1"
+
+    result = run_flash(
+        [
+            "--image",
+            str(archive),
+            "--device",
+            str(device),
+            "--assume-yes",
+            "--keep-mounted",
+            "--no-eject",
+        ],
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Ignoring invalid SUGARKUBE_FLASH_FAKE_EUID" in result.stderr
 
 
 def test_cloud_init_override_copies_user_data(tmp_path, monkeypatch):

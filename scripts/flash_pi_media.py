@@ -21,6 +21,9 @@ Flash to an explicit device (non-interactive)::
 
 Regular files are accepted as ``--device`` targets which makes automated
 testing and dry-runs possible without touching real hardware.
+
+For automated tests, set ``SUGARKUBE_FLASH_FAKE_EUID`` to simulate a non-root
+user and exercise the permission guard without changing host credentials.
 """
 
 from __future__ import annotations
@@ -94,6 +97,22 @@ def _format_size(size: int) -> str:
         if size < 1024:
             return f"{size:.2f} {unit}"
     return f"{size:.2f} PiB"
+
+
+def _effective_uid() -> int | None:
+    """Return the effective UID, honoring test overrides when provided."""
+
+    override = os.environ.get("SUGARKUBE_FLASH_FAKE_EUID")
+    if override is not None:
+        try:
+            return int(override)
+        except ValueError:
+            warn("Ignoring invalid SUGARKUBE_FLASH_FAKE_EUID; expected integer")
+
+    if hasattr(os, "geteuid"):
+        return os.geteuid()
+
+    return None
 
 
 @dataclass
@@ -903,8 +922,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     allow_nonroot = args.dry_run or os.environ.get("SUGARKUBE_FLASH_ALLOW_NONROOT") == "1"
-    if hasattr(os, "geteuid"):
-        if not allow_nonroot and os.geteuid() != 0:
+    effective_uid = _effective_uid()
+    if effective_uid is not None:
+        if not allow_nonroot and effective_uid != 0:
             die("Run as root or with sudo")
     elif not allow_nonroot:
         warn(
