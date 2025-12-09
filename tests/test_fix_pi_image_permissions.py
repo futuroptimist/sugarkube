@@ -18,24 +18,68 @@ def _run_as(
     cwd: Path,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess:
+    """Execute a command as another user even when runuser/su helpers are missing."""
     runner = shutil.which("runuser")
     if runner:
         cmd = [runner, "-u", user, "--", "bash", "-c", command]
     else:
-        cmd = ["su", "--preserve-environment", user, "-s", "/bin/bash", "-c", command]
+        su_bin = shutil.which("su")
+        if su_bin:
+            cmd = [
+                su_bin,
+                "--preserve-environment",
+                user,
+                "-s",
+                "/bin/bash",
+                "-c",
+                command,
+            ]
+        else:
+            python_bin = shutil.which("python3") or shutil.which("python")
+            if python_bin is None:
+                raise FileNotFoundError("runuser, su, and python are unavailable for _run_as")
+
+            cmd = [
+                python_bin,
+                "-c",
+                (
+                    "import os, pwd; "
+                    f"info = pwd.getpwnam({user!r}); "
+                    "os.setgid(info.pw_gid); "
+                    "os.setuid(info.pw_uid); "
+                    "os.execvp('bash', ['bash', '-c', "
+                    f"{command!r}"
+                    " ])"
+                ),
+            ]
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+
+
+def test_run_as_falls_back_to_python_when_privilege_helpers_missing(monkeypatch, tmp_path):
+    """Ensure _run_as executes commands even without runuser/su binaries."""
+
+    original_which = shutil.which
+
+    def _without_privilege_helpers(binary: str):
+        if binary in {"runuser", "su"}:
+            return None
+        return original_which(binary)
+
+    monkeypatch.setattr(shutil, "which", _without_privilege_helpers)
+
+    current_user = pwd.getpwuid(os.geteuid()).pw_name
+    env = os.environ.copy()
+    env["TEST_RUN_AS"] = "1"
+
+    result = _run_as(current_user, "id -un", cwd=tmp_path, env=env)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == current_user
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
 @pytest.mark.skipif(getattr(os, "geteuid", lambda: 0)() != 0, reason="requires root privileges")
 def test_fix_permissions_allows_non_root_collect(tmp_path: Path) -> None:
-    if shutil.which("runuser") is None and shutil.which("su") is None:
-        # TODO: Provide a lightweight runuser/su shim in CI to exercise the permission fix path.
-        # Root cause: The test depends on privilege dropping utilities that may not be present on
-        #   minimal distributions.
-        # Estimated fix: 45m to install the required package or vendor a stub for testing.
-        pytest.skip("runuser/su utilities not available")
-
     repo_root = Path(__file__).resolve().parents[1]
     collect_script = repo_root / "scripts" / "collect_pi_image.sh"
     fix_script = repo_root / "scripts" / "fix_pi_image_permissions.sh"
