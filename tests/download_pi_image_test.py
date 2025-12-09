@@ -2,10 +2,9 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import subprocess
 from pathlib import Path
-
-import pytest
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -118,6 +117,28 @@ def _isolated_dry_run_env(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     return fake_bin, env
 
 
+def _ensure_python(bin_dir: Path) -> Path:
+    """Expose a python executable inside the fake PATH used by the tests."""
+
+    candidates = [
+        shutil.which("python3"),
+        shutil.which("python"),
+        sys.executable,
+    ]
+    target = bin_dir / "python3"
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if target.exists():
+            target.unlink()
+        target.symlink_to(candidate)
+        return target
+
+    target.write_text("#!/usr/bin/env bash\necho missing python >&2\nexit 1\n")
+    target.chmod(0o755)
+    return target
+
+
 def test_requires_gh(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path)
@@ -149,14 +170,7 @@ def test_dry_run_logs_missing_curl_and_sha256sum(tmp_path):
     fake_bin.mkdir()
     create_gh_stub(fake_bin)
 
-    python_path = shutil.which("python3") or shutil.which("python")
-    if not python_path:
-        # TODO: Stub a python shim in the fake PATH used by the download helper.
-        # Root cause: Some environments may lack a python executable once PATH is overridden
-        #   for the dry-run harness.
-        # Estimated fix: 30m to seed the fake bin with a tiny python wrapper for the test.
-        pytest.skip("python interpreter not found for stubbed PATH")
-    (fake_bin / "python3").symlink_to(python_path)
+    _ensure_python(fake_bin)
 
     _symlink_utilities(fake_bin, ["env", "bash", "mkdir", "dirname"])
 
@@ -190,6 +204,54 @@ def test_dry_run_logs_missing_curl_and_sha256sum(tmp_path):
     checksum_placeholder = Path(str(dest) + ".sha256.url")
     assert url_placeholder.exists()
     assert checksum_placeholder.exists()
+
+
+def test_python_shim_used_when_not_on_path(tmp_path, monkeypatch):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    create_gh_stub(fake_bin)
+
+    real_which = shutil.which
+
+    def missing_python(cmd: str):
+        if cmd in {"python3", "python"}:
+            return None
+        return real_which(cmd)
+
+    monkeypatch.setattr(shutil, "which", missing_python)
+
+    shim = _ensure_python(fake_bin)
+    assert shim.exists()
+    assert shim.resolve() == Path(sys.executable).resolve()
+
+    _symlink_utilities(fake_bin, ["env", "bash", "mkdir", "dirname"])
+
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin)
+    env["HOME"] = str(tmp_path / "home")
+    env["GH_RELEASE_PAYLOAD"] = json.dumps(
+        {
+            "tag_name": "v0.0.2",
+            "assets": [
+                {
+                    "name": "sugarkube.img.xz",
+                    "browser_download_url": "https://example.invalid/image",
+                },
+                {
+                    "name": "sugarkube.img.xz.sha256",
+                    "browser_download_url": "https://example.invalid/checksum",
+                },
+            ],
+        }
+    )
+
+    result = run_script("download_pi_image.sh", args=["--dry-run"], env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Dry-run" in result.stdout
+    assert "GitHub CLI (gh) is not installed" not in result.stdout
+    assert "Dry-run: curl is not installed" in result.stdout
+    assert "Dry-run: sha256sum is not installed" in result.stdout
 
 
 def _base_env(tmp_path, fake_bin):
