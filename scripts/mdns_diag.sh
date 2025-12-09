@@ -12,6 +12,7 @@ HOSTNAME_TO_CHECK="${MDNS_DIAG_HOSTNAME:-sugarkube0.local}"
 SERVICE_CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 SERVICE_ENV="${SUGARKUBE_ENV:-dev}"
 SERVICE_TYPE="_k3s-${SERVICE_CLUSTER}-${SERVICE_ENV}._tcp"
+STUB_MODE="${MDNS_DIAG_STUB_MODE:-0}"
 
 # Track failures
 declare -a FAILURES=()
@@ -51,6 +52,8 @@ Environment variables:
   MDNS_DIAG_HOSTNAME    Default hostname to check (overridden by --hostname)
   SUGARKUBE_CLUSTER     Cluster name for service type (default: sugar)
   SUGARKUBE_ENV         Environment name for service type (default: dev)
+  MDNS_DIAG_STUB_MODE   When set to a non-zero value, skip Avahi/NSS checks and
+                        emit a quick, local-only diagnostic
 
 Exit codes:
   0   All checks passed
@@ -77,6 +80,12 @@ echo "=== mDNS Diagnostic ==="
 echo "Hostname: ${HOSTNAME_TO_CHECK}"
 echo "Service:  ${SERVICE_TYPE}"
 echo ""
+
+if [ "${STUB_MODE}" != "0" ]; then
+  echo "Stub mode enabled; skipping Avahi and NSS checks."
+  echo "Unset MDNS_DIAG_STUB_MODE to run full diagnostics."
+  exit 0
+fi
 
 # Check 1: systemctl is-active dbus
 echo "▶ Checking D-Bus service..."
@@ -123,7 +132,7 @@ if command -v avahi-browse >/dev/null 2>&1; then
   if [ "${browse_retries}" -lt 1 ]; then
     browse_retries=1
   fi
-  
+
   # Retry avahi-browse in case daemon is still initializing
   for attempt in $(seq 1 "${browse_retries}"); do
     browse_output=""
@@ -134,17 +143,17 @@ if command -v avahi-browse >/dev/null 2>&1; then
     else
       browse_output="$(avahi-browse -rt "${SERVICE_TYPE}" --timeout=3 2>&1)" || browse_status=$?
     fi
-    
+
     if [ "${browse_status}" -eq 0 ]; then
       break
     fi
-    
+
     # If not the last attempt, wait before retrying
     if [ "${attempt}" -lt "${browse_retries}" ]; then
       sleep 1
     fi
   done
-  
+
   if [ "${browse_status}" -eq 0 ]; then
     service_count="$(printf '%s\n' "${browse_output}" | grep -c '^=' || true)"
     if [ "${service_count}" -gt 0 ]; then
@@ -180,7 +189,7 @@ if command -v avahi-resolve >/dev/null 2>&1; then
   else
     resolve_output="$(avahi-resolve -n "${HOSTNAME_TO_CHECK}" -4 2>&1)" || resolve_status=$?
   fi
-  
+
   if [ "${resolve_status}" -eq 0 ] && [ -n "${resolve_output}" ]; then
     resolved_ip="$(printf '%s\n' "${resolve_output}" | awk '{print $2}' | head -n1)"
     if [ -n "${resolved_ip}" ]; then
@@ -209,7 +218,7 @@ if command -v getent >/dev/null 2>&1; then
   else
     getent_output="$(getent hosts "${HOSTNAME_TO_CHECK}" 2>&1)" || getent_status=$?
   fi
-  
+
   if [ "${getent_status}" -eq 0 ] && [ -n "${getent_output}" ]; then
     resolved_ip="$(printf '%s\n' "${getent_output}" | awk '{print $1}' | head -n1)"
     if [ -n "${resolved_ip}" ]; then
@@ -263,10 +272,10 @@ if [ "${#FAILURES[@]}" -gt 0 ]; then
   for failure in "${FAILURES[@]}"; do
     echo "  ✗ ${failure}"
   done
-  
+
   echo ""
   echo "=== Suggested Remediation ==="
-  
+
   # Provide specific remediation based on failures
   for failure in "${FAILURES[@]}"; do
     case "${failure}" in
@@ -303,19 +312,19 @@ if [ "${#FAILURES[@]}" -gt 0 ]; then
         ;;
     esac
   done
-  
+
   # Additional general remediation
   if printf '%s\n' "${FAILURES[@]}" | grep -q "NSS"; then
     echo "• Configure NSS for mDNS resolution:"
     echo "    Edit /etc/nsswitch.conf and ensure 'hosts' line includes 'mdns4_minimal [NOTFOUND=return]' before 'dns'"
     echo "    Example: hosts: files mdns4_minimal [NOTFOUND=return] dns"
   fi
-  
+
   echo ""
   echo "For more information, see:"
   echo "  • Avahi documentation: https://avahi.org/"
   echo "  • Sugarkube docs: docs/pi-cluster-bootstrap.md"
-  
+
   exit 1
 fi
 
