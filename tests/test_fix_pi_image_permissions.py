@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pwd
 import shlex
@@ -34,27 +35,39 @@ def _run_as(
 
     shim = textwrap.dedent(
         """
+        import json
         import os
         import pwd
-        import subprocess
         import sys
 
-        target_user, shell_command = sys.argv[1], sys.argv[2]
-        passwd = pwd.getpwnam(target_user)
+        def main() -> None:
+            target_user, shell_command, env_json = sys.argv[1], sys.argv[2], sys.argv[3]
 
-        os.setgroups([passwd.pw_gid])
-        os.setgid(passwd.pw_gid)
-        os.setuid(passwd.pw_uid)
+            try:
+                passwd = pwd.getpwnam(target_user)
+                os.initgroups(target_user, passwd.pw_gid)
+                os.setgid(passwd.pw_gid)
+                os.setuid(passwd.pw_uid)
+            except Exception as exc:  # pragma: no cover - exercised via shim process
+                print(
+                    f"[shim] Failed to drop privileges to user '{target_user}': {exc}",
+                    file=sys.stderr,
+                )
+                sys.exit(127)
 
-        os.execve(
-            "/bin/bash",
-            ["bash", "-c", shell_command],
-            {**os.environ},
-        )
+            env = json.loads(env_json)
+            os.execve(
+                "/bin/bash",
+                ["bash", "-c", shell_command],
+                env,
+            )
+
+        if __name__ == "__main__":
+            main()
         """
     )
 
-    cmd = [sys.executable, "-c", shim, user, command]
+    cmd = [sys.executable, "-c", shim, user, command, json.dumps(env)]
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
 
 
@@ -174,7 +187,14 @@ def test_fix_permissions_allows_non_root_collect(tmp_path: Path) -> None:
 def test_python_fallback_runs_command_as_target_user(monkeypatch, tmp_path: Path) -> None:
     """Ensure the shim executes when runuser/su are unavailable."""
 
-    monkeypatch.setattr(shutil, "which", lambda _: None)
+    original_which = shutil.which
+
+    def mock_which(cmd: str) -> str | None:
+        if cmd in ("runuser", "su"):
+            return None
+        return original_which(cmd)
+
+    monkeypatch.setattr(shutil, "which", mock_which)
 
     nobody = pwd.getpwnam("nobody")
     env = os.environ.copy()
@@ -189,5 +209,28 @@ def test_python_fallback_runs_command_as_target_user(monkeypatch, tmp_path: Path
     assert result.returncode == 0
     ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     assert len(ids) >= 2
-    assert str(nobody.pw_uid) in ids[0]
-    assert str(nobody.pw_gid) in ids[1]
+    assert ids[0] == str(nobody.pw_uid)
+    assert ids[1] == str(nobody.pw_gid)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+@pytest.mark.skipif(getattr(os, "geteuid", lambda: 0)() != 0, reason="requires root privileges")
+def test_python_fallback_propagates_env(monkeypatch, tmp_path: Path) -> None:
+    """Ensure the shim passes through explicit environment variables."""
+
+    original_which = shutil.which
+
+    def mock_which(cmd: str) -> str | None:
+        if cmd in ("runuser", "su"):
+            return None
+        return original_which(cmd)
+
+    monkeypatch.setattr(shutil, "which", mock_which)
+
+    env = os.environ.copy()
+    env["TEST_VAR"] = "expected_value"
+
+    result = _run_as("nobody", "echo $TEST_VAR", cwd=tmp_path, env=env)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "expected_value"
