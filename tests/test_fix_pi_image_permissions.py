@@ -1,3 +1,5 @@
+"""Exercise permission repair flows, including the shimmed privilege drop path."""
+
 from __future__ import annotations
 
 import os
@@ -6,6 +8,8 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -21,21 +25,42 @@ def _run_as(
     runner = shutil.which("runuser")
     if runner:
         cmd = [runner, "-u", user, "--", "bash", "-c", command]
-    else:
-        cmd = ["su", "--preserve-environment", user, "-s", "/bin/bash", "-c", command]
+        return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+
+    su = shutil.which("su")
+    if su:
+        cmd = [su, "--preserve-environment", user, "-s", "/bin/bash", "-c", command]
+        return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+
+    shim = textwrap.dedent(
+        """
+        import os
+        import pwd
+        import subprocess
+        import sys
+
+        target_user, shell_command = sys.argv[1], sys.argv[2]
+        passwd = pwd.getpwnam(target_user)
+
+        os.setgroups([passwd.pw_gid])
+        os.setgid(passwd.pw_gid)
+        os.setuid(passwd.pw_uid)
+
+        os.execve(
+            "/bin/bash",
+            ["bash", "-c", shell_command],
+            {**os.environ},
+        )
+        """
+    )
+
+    cmd = [sys.executable, "-c", shim, user, command]
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
 @pytest.mark.skipif(getattr(os, "geteuid", lambda: 0)() != 0, reason="requires root privileges")
 def test_fix_permissions_allows_non_root_collect(tmp_path: Path) -> None:
-    if shutil.which("runuser") is None and shutil.which("su") is None:
-        # TODO: Provide a lightweight runuser/su shim in CI to exercise the permission fix path.
-        # Root cause: The test depends on privilege dropping utilities that may not be present on
-        #   minimal distributions.
-        # Estimated fix: 45m to install the required package or vendor a stub for testing.
-        pytest.skip("runuser/su utilities not available")
-
     repo_root = Path(__file__).resolve().parents[1]
     collect_script = repo_root / "scripts" / "collect_pi_image.sh"
     fix_script = repo_root / "scripts" / "fix_pi_image_permissions.sh"
@@ -142,3 +167,27 @@ def test_fix_permissions_allows_non_root_collect(tmp_path: Path) -> None:
         for path, uid, gid, mode in reversed(original_permissions):
             os.chown(path, uid, gid)
             os.chmod(path, mode)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+@pytest.mark.skipif(getattr(os, "geteuid", lambda: 0)() != 0, reason="requires root privileges")
+def test_python_fallback_runs_command_as_target_user(monkeypatch, tmp_path: Path) -> None:
+    """Ensure the shim executes when runuser/su are unavailable."""
+
+    monkeypatch.setattr(shutil, "which", lambda _: None)
+
+    nobody = pwd.getpwnam("nobody")
+    env = os.environ.copy()
+
+    result = _run_as(
+        "nobody",
+        "id -u && id -g",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert result.returncode == 0
+    ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert len(ids) >= 2
+    assert str(nobody.pw_uid) in ids[0]
+    assert str(nobody.pw_gid) in ids[1]
