@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import atexit
 from pathlib import Path
 from typing import Iterable, List
 
@@ -38,6 +41,39 @@ def enable_subprocess_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("COVERAGE_PROCESS_START", str(ROOT / ".coveragerc"))
     _export_pythonpath(monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def ensure_just_available() -> Path:
+    """Install just once per test session when it is not already available."""
+
+    existing = shutil.which("just")
+    if existing:
+        return Path(existing)
+
+    bin_dir = Path(tempfile.mkdtemp(prefix="sugarkube-just-"))
+    atexit.register(lambda: shutil.rmtree(bin_dir, ignore_errors=True))
+
+    env = os.environ.copy()
+    env["SUGARKUBE_JUST_BIN_DIR"] = str(bin_dir)
+
+    result = subprocess.run(
+        ["/bin/bash", str(ROOT / "scripts" / "install_just.sh")],
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to install just: {result.stderr}")
+
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}" + os.environ.get("PATH", "")
+
+    located = shutil.which("just")
+    if not located:
+        pytest.fail("just not available after installation")
+
+    return Path(located)
 
 
 def require_tools(tools: Iterable[str]) -> None:

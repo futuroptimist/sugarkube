@@ -184,6 +184,10 @@ linters, tests, and documentation checks. If you send patches with `git send-ema
 copy [`hooks/sendemail-validate.sample`](hooks/sendemail-validate.sample) to
 `.git/hooks/sendemail-validate` so the email workflow executes the same checks
 after applying your series and scans each patch for secrets before sending.
+The helper now bootstraps the [`just`](https://github.com/casey/just) binary automatically when it
+is missing so the formatting and orchestration recipes never skip; run
+`./scripts/install_just.sh` directly when you want to install the tool ahead of the
+full check suite.
 Running the checks as a non-root user now exports `ALLOW_NON_ROOT=1` and sets
 `BATS_CWD`/`BATS_LIB_PATH` to the repository root so Bats fixtures resolve the
 same way they do in CI. Overriding `ALLOW_NON_ROOT` with any value other than

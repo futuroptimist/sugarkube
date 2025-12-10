@@ -342,9 +342,10 @@ mdns-reset:
 kubeconfig env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
+    user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$USER":"$USER" ~/.kube
+    sudo chown -R "$user":"$user" ~/.kube
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
     env_name="{{ env }}"

@@ -3,21 +3,26 @@ set -euo pipefail
 
 DOCS_ONLY=0
 SKIP_INSTALL=0
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 pip_install() {
+  local prefer_python="${SUGARKUBE_PREFER_PYTHON_PIP:-0}"
+
   if command -v uv >/dev/null 2>&1; then
     uv pip install --system "$@"
     return $?
   fi
 
-  local -a pip_commands=(pip pip3)
-  local cmd
-  for cmd in "${pip_commands[@]}"; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      "$cmd" install "$@"
-      return $?
-    fi
-  done
+  if [ "$prefer_python" -ne 1 ]; then
+    local -a pip_commands=(pip pip3)
+    local cmd
+    for cmd in "${pip_commands[@]}"; do
+      if command -v "$cmd" >/dev/null 2>&1; then
+        "$cmd" install "$@"
+        return $?
+      fi
+    done
+  fi
 
   local -a interpreters=(python3 python)
   local interpreter
@@ -27,6 +32,17 @@ pip_install() {
       return $?
     fi
   done
+
+  if [ "$prefer_python" -ne 1 ]; then
+    local -a pip_commands=(pip pip3)
+    local cmd
+    for cmd in "${pip_commands[@]}"; do
+      if command -v "$cmd" >/dev/null 2>&1; then
+        "$cmd" install "$@"
+        return $?
+      fi
+    done
+  fi
 
   echo "No pip-compatible installer found; install packages manually: $*" >&2
   return 1
@@ -57,6 +73,43 @@ code linters or hardware-specific tooling. Provide --skip-install to skip
 bootstrapping dependencies and rely on tools already present in the
 environment.
 EOF
+}
+
+bootstrap_just() {
+  if [ -z "${SUGARKUBE_JUST_FORCE_INSTALL:-}" ] && command -v just >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ "$SKIP_INSTALL" -eq 1 ]; then
+    echo "just is required but --skip-install was provided; aborting" >&2
+    return 1
+  fi
+
+  local installer="$SCRIPT_DIR/install_just.sh"
+  if [ ! -x "$installer" ]; then
+    echo "install_just.sh not found at $installer" >&2
+    return 1
+  fi
+
+  if ! "$installer"; then
+    echo "Failed to install just; see scripts/install_just.sh logs for details" >&2
+    return 1
+  fi
+
+  if [ -n "${SUGARKUBE_JUST_BIN_DIR:-}" ]; then
+    export PATH="$SUGARKUBE_JUST_BIN_DIR:$PATH"
+  else
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  hash -r
+ 
+  if ! command -v just >/dev/null 2>&1; then
+    echo "just installation completed but binary is not accessible in PATH" >&2
+    return 1
+  fi
+
+  return 0
 }
 
 prepare_test_environment() {
@@ -438,16 +491,26 @@ maybe_install_kicad() {
 # spellcheck and linkcheck dependencies to keep the run lightweight. The full
 # suite installs linting and test helpers as before.
 if [ "$DOCS_ONLY" -eq 1 ]; then
-  if ! command -v pyspelling >/dev/null 2>&1 || \
+  docs_force_python="${SUGARKUBE_DOCS_FORCE_PYTHON_PIP:-0}"
+  docs_force_install="${SUGARKUBE_DOCS_FORCE_INSTALL:-0}"
+
+  if [ "$docs_force_install" -eq 1 ] || ! command -v pyspelling >/dev/null 2>&1 || \
      ! command -v linkchecker >/dev/null 2>&1; then
     if [ "$SKIP_INSTALL" -eq 1 ]; then
       if ! ensure_commands_available pyspelling linkchecker; then
         exit 1
       fi
     else
-      if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
-        echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
-        exit 1
+      if [ "$docs_force_python" -eq 1 ]; then
+        if ! SUGARKUBE_PREFER_PYTHON_PIP=1 pip_install pyspelling linkchecker >/dev/null 2>&1; then
+          echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
+          exit 1
+        fi
+      else
+        if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
+          echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
+          exit 1
+        fi
       fi
       if command -v pyenv >/dev/null 2>&1; then
         pyenv rehash >/dev/null 2>&1
@@ -477,6 +540,10 @@ else
       fi
       hash -r
     fi
+  fi
+
+  if ! bootstrap_just; then
+    exit 1
   fi
 fi
 

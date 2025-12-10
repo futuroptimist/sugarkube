@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.usefixtures("ensure_just_available")
 def test_justfile_formatting() -> None:
     """The justfile should pass just --unstable --fmt --check."""
     repo_root = Path(__file__).resolve().parents[1]
@@ -16,12 +17,7 @@ def test_justfile_formatting() -> None:
 
     assert justfile_path.exists(), "justfile should exist"
 
-    if not shutil.which("just"):
-        # TODO: Install the just binary in the dev environment or vendor a portable build.
-        # Root cause: The formatter check relies on just, which is not guaranteed on minimal
-        #   base images or Windows environments without the toolchain.
-        # Estimated fix: 1h to add just to the CI bootstrap and document a local install step.
-        pytest.skip("just is not installed")
+    assert shutil.which("just"), "just should be installed for formatting checks"
 
     result = subprocess.run(
         ["just", "--unstable", "--fmt", "--check"],

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tarfile
 import textwrap
 from pathlib import Path
 
@@ -16,6 +18,10 @@ def script(tmp_path: Path) -> Path:
     script = tmp_path / "checks.sh"
     script.write_text(script_src.read_text())
     script.chmod(0o755)
+    installer_src = script_src.with_name("install_just.sh")
+    installer = tmp_path / "install_just.sh"
+    installer.write_text(installer_src.read_text())
+    installer.chmod(0o755)
     # create dummy pcbnew module so checks.sh skips KiCad install
     (tmp_path / "pcbnew.py").write_text("")
     return script
@@ -152,8 +158,10 @@ exit 1
     )
 
     env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
     env["PYTHONPATH"] = str(tmp_path)
+    env["SUGARKUBE_DOCS_FORCE_INSTALL"] = "1"
+    env["SUGARKUBE_DOCS_FORCE_PYTHON_PIP"] = "1"
 
     result = subprocess.run(
         ["/bin/bash", str(script), "--docs-only"],
@@ -413,7 +421,7 @@ def test_installs_aspell_as_root_without_sudo(tmp_path: Path, script: Path) -> N
         f.chmod(0o755)
 
     env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -462,7 +470,7 @@ echo "$@" >> {sudo_log}
         f.chmod(0o755)
 
     env = os.environ.copy()
-    env["PATH"] = str(fake_bin)
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
 
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -1047,6 +1055,57 @@ exit 0
     )
     assert result.returncode == 0, result.stderr
     assert "flake8" in pip_log.read_text()
+
+
+def test_bootstraps_just_when_missing(tmp_path: Path, script: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    _prepare_command_stubs(fake_bin)
+
+    tar_path = shutil.which("tar")
+    chmod_path = shutil.which("chmod")
+    dirname_path = shutil.which("dirname")
+    assert tar_path and chmod_path, "tar and chmod must be available for bootstrap stubs"
+
+    for name, target in (("tar", tar_path), ("chmod", chmod_path)):
+        stub = fake_bin / name
+        stub.write_text(f"#!/bin/bash\nexec {target} \"$@\"\n")
+        stub.chmod(0o755)
+
+    if dirname_path:
+        stub = fake_bin / "dirname"
+        stub.write_text(f"#!/bin/bash\nexec {dirname_path} \"$@\"\n")
+        stub.chmod(0o755)
+
+    just_stub = tmp_path / "just"
+    just_stub.write_text("#!/usr/bin/env bash\necho bootstrap\n", encoding="utf-8")
+    just_stub.chmod(0o755)
+
+    tarball = tmp_path / "just.tar.gz"
+    with tarfile.open(tarball, "w:gz") as archive:
+        archive.add(just_stub, arcname="just")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    env["PYTHONPATH"] = str(tmp_path)
+    env["SUGARKUBE_JUST_TARBALL"] = str(tarball)
+    env["SUGARKUBE_JUST_BIN_DIR"] = str(tmp_path / "just-bin")
+    env["SUGARKUBE_JUST_FORCE_INSTALL"] = "1"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    installed = Path(env["SUGARKUBE_JUST_BIN_DIR"]) / "just"
+    assert installed.exists(), "checks.sh should install just when missing"
+    assert installed.stat().st_mode & 0o111
 
 
 def _prepare_command_stubs(fake_bin: Path, env_log: Path | None = None) -> None:
