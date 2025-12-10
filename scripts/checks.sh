@@ -500,13 +500,15 @@ if [ "$DOCS_ONLY" -eq 1 ]; then
       fi
     else
       if [ "$docs_force_python" -eq 1 ]; then
-        SUGARKUBE_PREFER_PYTHON_PIP=1 pip_install pyspelling linkchecker >/dev/null 2>&1
+        if ! SUGARKUBE_PREFER_PYTHON_PIP=1 pip_install pyspelling linkchecker >/dev/null 2>&1; then
+          echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
+          exit 1
+        fi
       else
-        pip_install pyspelling linkchecker >/dev/null 2>&1
-      fi
-      if [ "$?" -ne 0 ]; then
-        echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
-        exit 1
+        if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
+          echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
+          exit 1
+        fi
       fi
       if command -v pyenv >/dev/null 2>&1; then
         pyenv rehash >/dev/null 2>&1
