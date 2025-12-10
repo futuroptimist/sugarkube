@@ -3,6 +3,7 @@ set -euo pipefail
 
 DOCS_ONLY=0
 SKIP_INSTALL=0
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 pip_install() {
   if command -v uv >/dev/null 2>&1; then
@@ -57,6 +58,37 @@ code linters or hardware-specific tooling. Provide --skip-install to skip
 bootstrapping dependencies and rely on tools already present in the
 environment.
 EOF
+}
+
+bootstrap_just() {
+  if [ -z "${SUGARKUBE_JUST_FORCE_INSTALL:-}" ] && command -v just >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ "$SKIP_INSTALL" -eq 1 ]; then
+    echo "just is required but --skip-install was provided; aborting" >&2
+    return 1
+  fi
+
+  local installer="$SCRIPT_DIR/install_just.sh"
+  if [ ! -x "$installer" ]; then
+    echo "install_just.sh not found at $installer" >&2
+    return 1
+  fi
+
+  if ! "$installer"; then
+    echo "Failed to install just; see scripts/install_just.sh logs for details" >&2
+    return 1
+  fi
+
+  if [ -n "${SUGARKUBE_JUST_BIN_DIR:-}" ]; then
+    export PATH="$SUGARKUBE_JUST_BIN_DIR:$PATH"
+  else
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  hash -r
+  return 0
 }
 
 prepare_test_environment() {
@@ -477,6 +509,10 @@ else
       fi
       hash -r
     fi
+  fi
+
+  if ! bootstrap_just; then
+    exit 1
   fi
 fi
 

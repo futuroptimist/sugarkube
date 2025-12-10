@@ -1,10 +1,11 @@
 import os
-import shutil
 import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("ensure_just_available")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,12 +32,6 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def test_just_up_dev_two_nodes(tmp_path):
-    if shutil.which("just") is None:
-        # TODO: Install the just binary in CI and document how to add it to contributor PATHs.
-        # Root cause: The just-based harness cannot run when the executable is missing.
-        # Estimated fix: 1h to add a lightweight installer step and update onboarding notes.
-        pytest.skip("just binary is required for this test")
-
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_path = tmp_path / "commands.log"
