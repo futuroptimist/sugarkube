@@ -8,20 +8,20 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 pip_install() {
   local prefer_python="${SUGARKUBE_PREFER_PYTHON_PIP:-0}"
 
-  if [ "$prefer_python" -eq 1 ]; then
-    local -a interpreters=(python3 python)
-    local interpreter
-    for interpreter in "${interpreters[@]}"; do
-      if command -v "$interpreter" >/dev/null 2>&1; then
-        "$interpreter" -m pip install "$@"
-        return $?
-      fi
-    done
-  fi
-
   if command -v uv >/dev/null 2>&1; then
     uv pip install --system "$@"
     return $?
+  fi
+
+  if [ "$prefer_python" -ne 1 ]; then
+    local -a pip_commands=(pip pip3)
+    local cmd
+    for cmd in "${pip_commands[@]}"; do
+      if command -v "$cmd" >/dev/null 2>&1; then
+        "$cmd" install "$@"
+        return $?
+      fi
+    done
   fi
 
   local -a interpreters=(python3 python)
@@ -33,14 +33,16 @@ pip_install() {
     fi
   done
 
-  local -a pip_commands=(pip pip3)
-  local cmd
-  for cmd in "${pip_commands[@]}"; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      "$cmd" install "$@"
-      return $?
-    fi
-  done
+  if [ "$prefer_python" -ne 1 ]; then
+    local -a pip_commands=(pip pip3)
+    local cmd
+    for cmd in "${pip_commands[@]}"; do
+      if command -v "$cmd" >/dev/null 2>&1; then
+        "$cmd" install "$@"
+        return $?
+      fi
+    done
+  fi
 
   echo "No pip-compatible installer found; install packages manually: $*" >&2
   return 1
