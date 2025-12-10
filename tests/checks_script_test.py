@@ -160,6 +160,8 @@ exit 1
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
     env["PYTHONPATH"] = str(tmp_path)
+    env["SUGARKUBE_DOCS_FORCE_INSTALL"] = "1"
+    env["SUGARKUBE_DOCS_FORCE_PYTHON_PIP"] = "1"
 
     result = subprocess.run(
         ["/bin/bash", str(script), "--docs-only"],

@@ -6,6 +6,19 @@ SKIP_INSTALL=0
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 pip_install() {
+  local prefer_python="${SUGARKUBE_PREFER_PYTHON_PIP:-0}"
+
+  if [ "$prefer_python" -eq 1 ]; then
+    local -a interpreters=(python3 python)
+    local interpreter
+    for interpreter in "${interpreters[@]}"; do
+      if command -v "$interpreter" >/dev/null 2>&1; then
+        "$interpreter" -m pip install "$@"
+        return $?
+      fi
+    done
+  fi
+
   if command -v uv >/dev/null 2>&1; then
     uv pip install --system "$@"
     return $?
@@ -476,14 +489,22 @@ maybe_install_kicad() {
 # spellcheck and linkcheck dependencies to keep the run lightweight. The full
 # suite installs linting and test helpers as before.
 if [ "$DOCS_ONLY" -eq 1 ]; then
-  if ! command -v pyspelling >/dev/null 2>&1 || \
+  docs_force_python="${SUGARKUBE_DOCS_FORCE_PYTHON_PIP:-0}"
+  docs_force_install="${SUGARKUBE_DOCS_FORCE_INSTALL:-0}"
+
+  if [ "$docs_force_install" -eq 1 ] || ! command -v pyspelling >/dev/null 2>&1 || \
      ! command -v linkchecker >/dev/null 2>&1; then
     if [ "$SKIP_INSTALL" -eq 1 ]; then
       if ! ensure_commands_available pyspelling linkchecker; then
         exit 1
       fi
     else
-      if ! pip_install pyspelling linkchecker >/dev/null 2>&1; then
+      if [ "$docs_force_python" -eq 1 ]; then
+        SUGARKUBE_PREFER_PYTHON_PIP=1 pip_install pyspelling linkchecker >/dev/null 2>&1
+      else
+        pip_install pyspelling linkchecker >/dev/null 2>&1
+      fi
+      if [ "$?" -ne 0 ]; then
         echo "Failed to install pyspelling/linkchecker; docs-only checks cannot continue" >&2
         exit 1
       fi
