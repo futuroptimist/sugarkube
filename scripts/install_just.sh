@@ -6,7 +6,7 @@ set -euo pipefail
 # SUGARKUBE_JUST_TARBALL to keep tests hermetic and falls back to the official release
 # archives otherwise.
 
-INSTALL_DIR="${SUGARKUBE_JUST_BIN_DIR:-${XDG_BIN_HOME:-${HOME}/.local/bin}}"
+INSTALL_DIR="${SUGARKUBE_JUST_BIN_DIR:-${HOME}/.local/bin}"
 TARGET="${SUGARKUBE_JUST_TARGET:-}"
 TARBALL="${SUGARKUBE_JUST_TARBALL:-}"
 
@@ -51,6 +51,21 @@ if [ -z "$TARGET" ]; then
           ;;
         aarch64|arm64)
           TARGET="aarch64-unknown-linux-musl"
+          ;;
+        *)
+          log "Unsupported architecture '$arch' for automatic just installation"
+          exit 1
+          ;;
+      esac
+      ;;
+    Darwin)
+      arch=$(uname -m)
+      case "$arch" in
+        x86_64|amd64)
+          TARGET="x86_64-apple-darwin"
+          ;;
+        aarch64|arm64)
+          TARGET="aarch64-apple-darwin"
           ;;
         *)
           log "Unsupported architecture '$arch' for automatic just installation"

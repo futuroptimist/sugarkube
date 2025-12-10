@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,12 +19,9 @@ def test_justfile_formatting() -> None:
 
     assert shutil.which("just"), "just should be installed for formatting checks"
 
-    env = os.environ.copy()
-
     result = subprocess.run(
         ["just", "--unstable", "--fmt", "--check"],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
         check=False,

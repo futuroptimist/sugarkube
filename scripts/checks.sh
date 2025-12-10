@@ -88,6 +88,12 @@ bootstrap_just() {
   fi
 
   hash -r
+ 
+  if ! command -v just >/dev/null 2>&1; then
+    echo "just installation completed but binary is not accessible in PATH" >&2
+    return 1
+  fi
+
   return 0
 }
 

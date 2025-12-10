@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import atexit
 from pathlib import Path
 from typing import Iterable, List
 
@@ -51,6 +52,7 @@ def ensure_just_available() -> Path:
         return Path(existing)
 
     bin_dir = Path(tempfile.mkdtemp(prefix="sugarkube-just-"))
+    atexit.register(lambda: shutil.rmtree(bin_dir, ignore_errors=True))
 
     env = os.environ.copy()
     env["SUGARKUBE_JUST_BIN_DIR"] = str(bin_dir)
