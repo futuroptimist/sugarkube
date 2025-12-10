@@ -218,6 +218,9 @@ cd sugarkube
 pip install pre-commit pyspelling linkchecker
 pre-commit install
 pre-commit run --all-files
+
+# Optional: install the `just` task runner used by the automation wrappers.
+bash scripts/install_just.sh
 ```
 
 If you update documentation, install `aspell` and verify spelling and links.

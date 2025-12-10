@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import shutil
+import os
 import subprocess
 from pathlib import Path
 
-import pytest
+from tests.support.just_installer import ensure_just_available
 
 
 def test_justfile_formatting() -> None:
@@ -16,19 +16,17 @@ def test_justfile_formatting() -> None:
 
     assert justfile_path.exists(), "justfile should exist"
 
-    if not shutil.which("just"):
-        # TODO: Install the just binary in the dev environment or vendor a portable build.
-        # Root cause: The formatter check relies on just, which is not guaranteed on minimal
-        #   base images or Windows environments without the toolchain.
-        # Estimated fix: 1h to add just to the CI bootstrap and document a local install step.
-        pytest.skip("just is not installed")
+    just_path = ensure_just_available()
+    env = os.environ.copy()
+    env["PATH"] = f"{just_path.parent}:{env.get('PATH', '')}"
 
     result = subprocess.run(
-        ["just", "--unstable", "--fmt", "--check"],
+        [str(just_path), "--unstable", "--fmt", "--check"],
         cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
     assert result.returncode == 0, (
