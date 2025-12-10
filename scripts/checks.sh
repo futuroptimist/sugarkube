@@ -11,20 +11,20 @@ pip_install() {
     return $?
   fi
 
-  local -a pip_commands=(pip pip3)
-  local cmd
-  for cmd in "${pip_commands[@]}"; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      "$cmd" install "$@"
-      return $?
-    fi
-  done
-
   local -a interpreters=(python3 python)
   local interpreter
   for interpreter in "${interpreters[@]}"; do
     if command -v "$interpreter" >/dev/null 2>&1; then
       "$interpreter" -m pip install "$@"
+      return $?
+    fi
+  done
+
+  local -a pip_commands=(pip pip3)
+  local cmd
+  for cmd in "${pip_commands[@]}"; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      "$cmd" install "$@"
       return $?
     fi
   done
