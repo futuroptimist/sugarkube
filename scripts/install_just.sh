@@ -26,6 +26,10 @@ try_apt_install() {
 
   if [ "$(id -u)" -eq 0 ]; then
     if apt-get update >/dev/null 2>&1 && apt-get install -y just >/dev/null 2>&1; then
+      if ! command -v just >/dev/null 2>&1; then
+        log "apt-get reported success but just is not on PATH"
+        return 1
+      fi
       return 0
     fi
     return 1
@@ -116,6 +120,11 @@ fi
 
 tar -xzf "$TARBALL" -C "$INSTALL_DIR" just
 chmod +x "$INSTALL_DIR/just"
+
+if [ ! -x "$INSTALL_DIR/just" ]; then
+  log "just binary not found in $INSTALL_DIR after extraction"
+  exit 1
+fi
 
 if [ -n "$cleanup_tarball" ]; then
   rm -f "$cleanup_tarball"
