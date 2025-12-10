@@ -4,7 +4,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-import pytest
+from tests.support.just_installer import ensure_just_available
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,11 +31,7 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def test_just_up_dev_two_nodes(tmp_path):
-    if shutil.which("just") is None:
-        # TODO: Install the just binary in CI and document how to add it to contributor PATHs.
-        # Root cause: The just-based harness cannot run when the executable is missing.
-        # Estimated fix: 1h to add a lightweight installer step and update onboarding notes.
-        pytest.skip("just binary is required for this test")
+    just_path = ensure_just_available()
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -351,7 +347,7 @@ def test_just_up_dev_two_nodes(tmp_path):
     env_common = os.environ.copy()
     env_common.update(
         {
-            "PATH": f"{bin_dir}:{env_common.get('PATH', '')}",
+            "PATH": f"{just_path.parent}:{bin_dir}:{env_common.get('PATH', '')}",
             "SUGARKUBE_RUNTIME_DIR": str(run_dir),
             "SUGARKUBE_AVAHI_SERVICE_DIR": str(avahi_dir),
             "SUGARKUBE_STATE_DIR": str(state_dir),
