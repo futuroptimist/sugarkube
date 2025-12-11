@@ -15,12 +15,13 @@ Set AVAHI_AVAILABLE=1 to enable these tests.
 
 import os
 import subprocess
-import time
 from pathlib import Path
+import time
 
 import pytest
 
 from tests.conftest import ensure_root_privileges, require_tools
+from tests.mdns_namespace_utils import probe_namespace_connectivity
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -31,6 +32,7 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("AVAHI_AVAILABLE") != "1",
     reason="AVAHI_AVAILABLE=1 not set (requires Avahi daemon and root permissions)",
 )
+
 @pytest.fixture
 def netns_setup():
     """Set up a network namespace environment for testing.
@@ -120,16 +122,8 @@ def netns_setup():
         # Wait for interfaces to be ready
         time.sleep(0.5)
 
-        # Verify connectivity
-        ping_result = subprocess.run(
-            ["ip", "netns", "exec", ns1, "ping", "-c", "1", "-W", "2", "192.168.100.2"],
-            capture_output=True,
-            text=True,
-        )
-        if ping_result.returncode != 0:
-            # TODO: Harden namespace connectivity setup so the browse test runs in CI reliably.
-            # Root cause: Some kernels block ICMP in nested namespaces, causing the fixture to skip.
-            # Estimated fix: 2h to swap ping for a lightweight TCP check or mock connectivity.
+        # Use a TCP round trip instead of ICMP to avoid namespace ICMP restrictions
+        if not probe_namespace_connectivity(ns1, ns2, "192.168.100.2"):
             pytest.skip("Network namespace connectivity test failed")
 
         yield {
