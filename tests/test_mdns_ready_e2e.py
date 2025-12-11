@@ -124,6 +124,11 @@ def netns_setup():
 
         # Use a TCP round trip instead of ICMP to avoid namespace ICMP restrictions
         if not probe_namespace_connectivity(ns1, ns2, "192.168.100.2"):
+            # TODO: Stabilize namespace connectivity checks for CI.
+            # Root cause: TCP probes can fail when host policies block veth setup or
+            #   when stale namespaces linger between runs.
+            # Estimated fix: 1h to add retries and ensure namespace cleanup before
+            #   setup.
             pytest.skip("Network namespace connectivity test failed")
 
         yield {
