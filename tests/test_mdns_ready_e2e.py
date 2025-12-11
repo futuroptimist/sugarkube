@@ -7,10 +7,9 @@ These tests verify mDNS service discovery across network boundaries:
 
 These tests require:
 - Root permissions (or CAP_NET_ADMIN)
-- Avahi daemon and utilities (avahi-daemon, avahi-publish, avahi-browse)
+- Avahi daemon and utilities (avahi-daemon, avahi-publish, avahi-browse) or the
+  bundled stub tools
 - Network namespace support (ip netns)
-
-Set AVAHI_AVAILABLE=1 to enable these tests.
 """
 
 import os
@@ -21,16 +20,19 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import ensure_root_privileges, require_tools
+from tests.helpers.avahi_stub import ensure_avahi_stub
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 MDNS_READY_SCRIPT = SCRIPTS_DIR / "mdns_ready.sh"
 
-# Skip all tests in this module if Avahi is not available
-pytestmark = pytest.mark.skipif(
-    os.environ.get("AVAHI_AVAILABLE") != "1",
-    reason="AVAHI_AVAILABLE=1 not set (requires Avahi daemon and root permissions)",
-)
+@pytest.fixture(scope="module", autouse=True)
+def avahi_stub_env(tmp_path_factory) -> None:
+    """Ensure Avahi CLI coverage even when the host packages are missing."""
+
+    ensure_avahi_stub(tmp_path_factory.mktemp("avahi_stub"))
+
+
 @pytest.fixture
 def netns_setup():
     """Set up a network namespace environment for testing.
@@ -48,7 +50,6 @@ def netns_setup():
             - ip2 (str): IP address of ns2 (e.g., 192.168.100.2)
     """
     require_tools([
-        "avahi-daemon",
         "avahi-publish",
         "avahi-browse",
         "ip",
@@ -207,12 +208,8 @@ def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
         )
 
         if browse_result.returncode != 0 or service_name not in browse_result.stdout:
-            # TODO: Provide an Avahi stub or fixture that guarantees local discovery succeeds.
-            # Root cause: The host's Avahi setup may not advertise services inside namespaces,
-            #   leading to nondeterministic skips.
-            # Estimated fix: 2h to add a stub responder or package Avahi in the test runner.
-            pytest.skip(
-                "Service not discoverable within same namespace - Avahi may not be configured"
+            pytest.fail(
+                "Service not discoverable within same namespace - stub tools should guarantee"
             )
 
         # Note: Cross-namespace mDNS requires multicast routing or shared network
