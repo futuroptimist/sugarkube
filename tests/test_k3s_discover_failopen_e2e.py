@@ -286,6 +286,8 @@ def _create_stub_bin(
     ``avahi-browse`` so the harness can observe interactions without mutating the
     host system. Some simply exit successfully, while others log arguments or
     proxy to the real binary with deterministic responses for the test scenario.
+    Where the host lacks dependencies (for example, ``avahi-browse``), inline
+    shims stand in so fail-open behaviour can still be exercised.
 
     Args:
         bin_dir: Directory in which to place the stub executables.
@@ -356,11 +358,6 @@ exit 0
     stubs["check_apiready"] = check_api_stub
 
     real_getent = shutil.which("getent")
-    if real_getent is None:
-        # TODO: Bundle getent in the test environment so the stub harness can proxy calls.
-        # Root cause: The getent utility is missing on minimal containers, blocking DNS stubbing.
-        # Estimated fix: 30m to install the package in CI and note the dependency locally.
-        pytest.skip("getent not available for stub harness")
     getent_stub = bin_dir / "getent"
     _write_executable(
         getent_stub,
@@ -386,30 +383,43 @@ if [ "$#" -ge 2 ]; then
       ;;
   esac
 fi
-exec "{real_getent}" "$@"
+if [ -n "{real_getent or ''}" ]; then
+  exec "{real_getent}" "$@"
+fi
+exit 2
 """,
     )
     stubs["getent"] = getent_stub
 
     real_avahi_browse = shutil.which("avahi-browse")
-    if real_avahi_browse is None:
-        # TODO: Provide an avahi-browse shim for stub mode when the binary is unavailable.
-        # Root cause: Some environments omit Avahi tooling, preventing the harness from setting
-        #   up the browse stub used by the fail-open tests.
-        # Estimated fix: 45m to vendor a tiny shell shim or add the package to CI images.
-        pytest.skip("avahi-browse not available for stub harness")
     avahi_browse_stub = bin_dir / "avahi-browse"
-    _write_executable(
-        avahi_browse_stub,
-        f"""#!/bin/bash
-mode="${{AVAHI_STUB_MODE:-real}}"
-if [ "${{mode}}" = "fail" ]; then
-  echo "avahi-browse stub forcing failure" >&2
-  exit 2
-fi
-exec "{real_avahi_browse}" "$@"
-""",
+    avahi_stub_content = (
+        f"#!/bin/bash\n"
+        f"real_avahi_browse=\"{real_avahi_browse or ''}\"\n"
+        "mode=\"${AVAHI_STUB_MODE:-real}\"\n"
+        "if [ \"${mode}\" = \"fail\" ]; then\n"
+        "  echo \"avahi-browse stub forcing failure\" >&2\n"
+        "  exit 2\n"
+        "fi\n"
+        "if [ -n \"${real_avahi_browse}\" ] && [ \"${mode}\" = \"real\" ]; then\n"
+        "  exec \"${real_avahi_browse}\" \"$@\"\n"
+        "fi\n"
+        "cluster=\"${SUGARKUBE_CLUSTER:-sugar}\"\n"
+        "environment=\"${SUGARKUBE_ENV:-dev}\"\n"
+        "service_type=\"${@: -1}\"\n"
+        "if [ -z \"${service_type}\" ]; then\n"
+        "  service_type=\"_k3s-${cluster}-${environment}._tcp\"\n"
+        "fi\n"
+        "cat <<EOF\n"
+        f";+eth0;IPv4;k3s-${{cluster}}-${{environment}}@{canonical_host} (server);"
+        "${service_type};local\n"
+        f"=;eth0;IPv4;k3s-${{cluster}}-${{environment}}@{canonical_host} (server);"
+        f"${{service_type}};local;{canonical_host};{leader_ip};6443;"
+        "txt=cluster=${cluster};txt=env=${environment};txt=role=server;txt=phase=server\n"
+        "EOF\n"
+        "exit 0\n"
     )
+    _write_executable(avahi_browse_stub, avahi_stub_content)
     stubs["avahi_browse"] = avahi_browse_stub
 
     real_avahi_resolve = shutil.which("avahi-resolve")
@@ -422,7 +432,11 @@ exec "{real_avahi_browse}" "$@"
         stubs["avahi_resolve"] = avahi_resolve_stub
 
     return stubs
-def _safe_terminate_wait(proc: subprocess.Popen[str], timeout: float = PROCESS_TERMINATION_TIMEOUT_SECS) -> None:
+
+
+def _safe_terminate_wait(
+    proc: subprocess.Popen[str], timeout: float = PROCESS_TERMINATION_TIMEOUT_SECS
+) -> None:
     """Best-effort termination helper that never raises during cleanup."""
 
     try:
@@ -453,7 +467,6 @@ def discover_harness(tmp_path: Path):
     require_tools([
         "avahi-daemon",
         "avahi-publish",
-        "avahi-browse",
         "dbus-daemon",
         "ip",
         "unshare",
