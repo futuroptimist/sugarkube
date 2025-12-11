@@ -2,9 +2,9 @@
 
 **Status**: ✅ ALL TESTS FIXED (100% completion as of 2025-11-09)
 
-**Original Date**: 2025-11-04  
-**Context**: Follow-up to PR #1672 which fixed 14/18 mdns_selfcheck tests  
-**Original Goal**: Provide exact, step-by-step instructions to fix all remaining test failures  
+**Original Date**: 2025-11-04
+**Context**: Follow-up to PR #1672 which fixed 14/18 mdns_selfcheck tests
+**Original Goal**: Provide exact, step-by-step instructions to fix all remaining test failures
 **Achievement**: All 42 BATS tests now passing in CI (PRs #1-11, 2025-11-04 to 2025-11-09)
 
 ---
@@ -13,7 +13,7 @@
 
 _This document preserves the original investigation and fix instructions from the 2025-11-04 planning phase. All issues described below have been successfully resolved. This is kept for historical reference and to help future investigators understand the problem-solving approach used._
 
-**For current test status**, see: `notes/ci-test-failures-remaining-work.md`  
+**For current test status**, see: `notes/ci-test-failures-remaining-work.md`
 **For completed fixes**, see: `outages/2025-11-0*.json` entries
 
 ---
@@ -50,7 +50,7 @@ This document provides precise implementation instructions for fixing the 8 rema
 **Root Cause**: The awk command in `scripts/mdns_type_check.sh:173-184` appears to hang in certain test execution contexts, preventing `active_found` from being set to 1.
 
 ### Fix Location
-**File**: `scripts/mdns_type_check.sh`  
+**File**: `scripts/mdns_type_check.sh`
 **Lines**: 173-184
 
 ### Current Code
@@ -150,7 +150,7 @@ fi
 
 ## TEST 3: Service Type Enumeration Warning
 
-**Test**: `tests/bats/mdns_selfcheck.bats:158-200`  
+**Test**: `tests/bats/mdns_selfcheck.bats:158-200`
 **Name**: "mdns self-check warns when enumeration misses but browse succeeds"
 
 ### Current Status
@@ -161,7 +161,7 @@ fi
 Service type is missing from enumeration (_services._dns-sd._udp) but instances ARE found via active query. Script should warn but continue, not fail.
 
 ### Fix Required
-**PRIMARY**: Fix the awk hang issue (see PRIORITY 1 above)  
+**PRIMARY**: Fix the awk hang issue (see PRIORITY 1 above)
 **SECONDARY**: Ensure no additional issues after awk fix
 
 ### Verification After Fix
@@ -198,7 +198,7 @@ ok 1 mdns self-check warns when enumeration misses but browse succeeds
 
 ## TEST 4: Active Query Window Retry Attempts
 
-**Test**: `tests/bats/mdns_selfcheck.bats:202-252`  
+**Test**: `tests/bats/mdns_selfcheck.bats:202-252`
 **Name**: "mdns self-check waits for active queries when instance appears within window"
 
 ### Current Status
@@ -209,7 +209,7 @@ ok 1 mdns self-check warns when enumeration misses but browse succeeds
 Active query retry loop increments `active_attempts` but may not be logging it properly when instances found on 3rd attempt.
 
 ### Fix Required
-**PRIMARY**: Fix the awk hang issue (see PRIORITY 1 above)  
+**PRIMARY**: Fix the awk hang issue (see PRIORITY 1 above)
 **SECONDARY**: Verify logging at line 195
 
 Check that this log line exists and is reached:
@@ -224,7 +224,7 @@ Add before line 195 to ensure we're reaching the success path:
 if [ "${active_count}" -gt 0 ]; then
   # Log before setting variables to debug
   log_debug mdns_selfcheck event=active_query_success count="${active_count}" attempt="${active_attempts}"
-  
+
   # shellcheck disable=SC2034  # Used in sourcing script (mdns_selfcheck.sh)
   INITIAL_BROWSE_OUTPUT="${active_output}"
   # ... rest of existing code
@@ -263,7 +263,7 @@ ok 1 mdns self-check waits for active queries when instance appears within windo
 
 ## TEST 8: Resolution Lag Warning
 
-**Test**: `tests/bats/mdns_selfcheck.bats:381-419`  
+**Test**: `tests/bats/mdns_selfcheck.bats:381-419`
 **Name**: "mdns self-check warns when browse succeeds but resolution lags"
 
 ### Current Status
@@ -274,7 +274,7 @@ ok 1 mdns self-check waits for active queries when instance appears within windo
 When browse finds instance but all resolution methods fail (avahi-resolve, avahi-resolve-host-name, getent all exit with errors), script should return success with warning, not failure.
 
 ### Fix Required
-**File**: `scripts/mdns_selfcheck.sh`  
+**File**: `scripts/mdns_selfcheck.sh`
 **Location**: Main retry loop, after resolution attempts (around lines 550-700)
 
 Find the section where resolution is attempted and check exit code logic. The script should:
@@ -332,7 +332,7 @@ bats -f "warns when browse succeeds but resolution lags" tests/bats/mdns_selfche
 
 ## TEST 9: Browse Empty Failure Reporting
 
-**Test**: `tests/bats/mdns_selfcheck.bats:421-452`  
+**Test**: `tests/bats/mdns_selfcheck.bats:421-452`
 **Name**: "mdns self-check reports failure when no records appear"
 
 ### Current Status
@@ -343,7 +343,7 @@ bats -f "warns when browse succeeds but resolution lags" tests/bats/mdns_selfche
 When browse returns no records after all retry attempts, the final failure logging doesn't include the specific `browse_empty` reason.
 
 ### Fix Required
-**File**: `scripts/mdns_selfcheck.sh`  
+**File**: `scripts/mdns_selfcheck.sh`
 **Location**: End of retry loop, final failure handling (around lines 800-900)
 
 ### Code to Find
@@ -398,7 +398,7 @@ bats -f "reports failure when no records appear" tests/bats/mdns_selfcheck.bats
 
 ## TEST 10: Service Type Missing Exit Code 4
 
-**Test**: `tests/bats/mdns_selfcheck.bats:454-495`  
+**Test**: `tests/bats/mdns_selfcheck.bats:454-495`
 **Name**: "mdns self-check fails fast when service type is missing"
 
 ### Current Status
@@ -409,7 +409,7 @@ bats -f "reports failure when no records appear" tests/bats/mdns_selfcheck.bats
 When service type completely missing (not in _services._dns-sd._udp enumeration AND no instances found via active query), should exit with code 4. Currently may be exiting with different code or hanging.
 
 ### Fix Required
-**PRIMARY**: Fix the awk hang issue (see PRIORITY 1 above)  
+**PRIMARY**: Fix the awk hang issue (see PRIORITY 1 above)
 **SECONDARY**: Verify exit code 4 logic in mdns_type_check.sh:281-305
 
 ### Code to Verify
@@ -422,7 +422,7 @@ if [ "${type_present}" -eq 0 ] && [ "${active_found}" -eq 0 ]; then
   case "${elapsed_ms}" in
     ''|*[!0-9]*) elapsed_ms=0 ;;
   esac
-  
+
   # ... logging code ...
   log_info mdns_selfcheck outcome=fail reason=service_type_missing service_type="${SERVICE_TYPE}" ms_elapsed="${elapsed_ms}" "${available_kv}"
   exit 4
@@ -457,7 +457,7 @@ bats -f "fails fast when service type is missing" tests/bats/mdns_selfcheck.bats
 
 ## TEST 12: IPv4 Mismatch Exit Code 5
 
-**Test**: `tests/bats/mdns_selfcheck.bats:541-583`  
+**Test**: `tests/bats/mdns_selfcheck.bats:541-583`
 **Name**: "mdns self-check returns distinct code on IPv4 mismatch to enable relaxed retry"
 
 ### Current Status
@@ -468,7 +468,7 @@ bats -f "fails fast when service type is missing" tests/bats/mdns_selfcheck.bats
 When discovered IPv4 (10.0.0.5) doesn't match EXPECTED_IPV4 (10.0.0.99), script should exit with code 5 to allow caller to distinguish from other failures and retry with relaxed IP matching.
 
 ### Fix Required
-**File**: `scripts/mdns_selfcheck.sh`  
+**File**: `scripts/mdns_selfcheck.sh`
 **Location**: IPv4 validation after resolution (around lines 600-700)
 
 ### Code to Find
@@ -523,7 +523,7 @@ bats -f "returns distinct code on IPv4 mismatch" tests/bats/mdns_selfcheck.bats
 
 ## TEST 13: Bootstrap Role Filtering
 
-**Test**: `tests/bats/mdns_selfcheck.bats:585-616`  
+**Test**: `tests/bats/mdns_selfcheck.bats:585-616`
 **Name**: "mdns self-check ignores bootstrap advertisement when server required"
 
 ### Current Status
@@ -534,7 +534,7 @@ bats -f "returns distinct code on IPv4 mismatch" tests/bats/mdns_selfcheck.bats
 When EXPECTED_ROLE=server but discovered instance has role=bootstrap, script should filter out the bootstrap instance and report no matching instance found.
 
 ### Fix Required
-**File**: `scripts/mdns_selfcheck.sh`  
+**File**: `scripts/mdns_selfcheck.sh`
 **Location**: Role matching logic in main loop (around lines 530-600)
 
 ### Code to Find
@@ -595,7 +595,7 @@ bats -f "ignores bootstrap advertisement when server required" tests/bats/mdns_s
 
 ## TEST 15: DBus→CLI Fallback Logging
 
-**Test**: `tests/bats/mdns_selfcheck.bats:664-720`  
+**Test**: `tests/bats/mdns_selfcheck.bats:664-720`
 **Name**: "mdns self-check falls back to CLI when dbus browser creation fails"
 
 ### Current Status
@@ -606,7 +606,7 @@ bats -f "ignores bootstrap advertisement when server required" tests/bats/mdns_s
 When SUGARKUBE_MDNS_DBUS=1 but gdbus ServiceBrowserNew fails, script correctly falls back to CLI mode (avahi-browse) and succeeds, but doesn't log the fallback event.
 
 ### Fix Required
-**File**: `scripts/mdns_selfcheck.sh`  
+**File**: `scripts/mdns_selfcheck.sh`
 **Location**: mdns_cli_dbus_fallback function (around line 500-510)
 
 ### Code to Find
@@ -622,7 +622,7 @@ Add logging when fallback is triggered:
 mdns_cli_dbus_fallback() {
   local browse_rc="$1"
   local attempt="$2"
-  
+
   # Check if dbus mode enabled and browser creation failed
   if [ "${SUGARKUBE_MDNS_DBUS:-0}" -eq 1 ] && [ "${browse_rc}" -ne 0 ]; then
     if [ "${DBUS_CLI_FALLBACK_ENABLED}" -eq 0 ]; then
@@ -663,7 +663,7 @@ bats -f "falls back to CLI when dbus browser creation fails" tests/bats/mdns_sel
 
 ## TEST 16: DBus Wait/Retry Logic
 
-**Test**: `tests/bats/mdns_selfcheck.bats:722-828`  
+**Test**: `tests/bats/mdns_selfcheck.bats:722-828`
 **Name**: "mdns dbus self-check waits for avahi bus before browsing"
 
 ### Current Status
@@ -674,7 +674,7 @@ bats -f "falls back to CLI when dbus browser creation fails" tests/bats/mdns_sel
 Test stubs gdbus to fail with ServiceUnknown error for first 2 introspect calls, then succeed on 3rd. The wait_for_avahi_dbus logic should retry when it gets ServiceUnknown error.
 
 ### Fix Required
-**File**: `scripts/mdns_selfcheck_dbus.sh` or wait helper  
+**File**: `scripts/mdns_selfcheck_dbus.sh` or wait helper
 **Location**: Avahi dbus readiness check
 
 ### Code to Find
@@ -692,15 +692,15 @@ Add retry loop with ServiceUnknown error detection:
 wait_for_avahi_dbus() {
   local max_attempts="${1:-10}"
   local attempt=0
-  
+
   while [ "${attempt}" -lt "${max_attempts}" ]; do
     attempt=$((attempt + 1))
-    
+
     if gdbus introspect --system --dest org.freedesktop.Avahi --object-path / >/dev/null 2>&1; then
       log_info mdns_selfcheck event=avahi_dbus_ready outcome=ok attempts="${attempt}"
       return 0
     fi
-    
+
     # Check if error is ServiceUnknown (service not ready yet)
     local error_output
     error_output="$(gdbus introspect --system --dest org.freedesktop.Avahi --object-path / 2>&1 || true)"
@@ -709,12 +709,12 @@ wait_for_avahi_dbus() {
       sleep 0.5
       continue
     fi
-    
+
     # Other error, fail fast
     log_error mdns_selfcheck event=avahi_dbus_error attempt="${attempt}" error="${error_output}"
     return 1
   done
-  
+
   log_error mdns_selfcheck event=avahi_dbus_timeout attempts="${max_attempts}"
   return 1
 }
@@ -747,7 +747,7 @@ bats -f "dbus self-check waits for avahi bus" tests/bats/mdns_selfcheck.bats
 
 ## DISCOVER_FLOW.BATS: Timeout Issues
 
-**File**: `tests/bats/discover_flow.bats`  
+**File**: `tests/bats/discover_flow.bats`
 **Tests**: Hang around test 5-6
 
 ### Root Cause
@@ -810,7 +810,7 @@ EOS
 
 ## JOIN_GATE.BATS: Timeout Issues
 
-**File**: `tests/bats/join_gate.bats`  
+**File**: `tests/bats/join_gate.bats`
 **Tests**: Test 1 hangs
 
 ### Root Cause
@@ -1030,7 +1030,7 @@ Should see all BATS tests passing in the "Run Bash tests under kcov" step.
 
 - [x] **Final validation**:
   - [x] Run full BATS suite locally (41 pass, 0 fail, 0 skip - 100% COMPLETE!)
-  - [x] Push to PR and verify CI passes  
+  - [x] Push to PR and verify CI passes
   - [x] Update notes/ci-test-failures-remaining-work.md with final status
   - **Status (2025-11-10 Final)**: ✅ ALL TEST FAILURES FIXED - 42/42 passing in CI (100%), 40/42 locally + 2 conditional skips, 0 failures 🎉
 
@@ -1048,11 +1048,7 @@ Total estimated time: 4-6 hours for complete implementation and testing.
 
 ## Investigation Findings (2025-11-05)
 
-**Context**: Deep investigation of the 3 remaining unchecked test failures (Tests 8, 15, 16) revealed significantly higher complexity than initial assessment. This section documents those findings to inform future work.
-
-## Investigation Findings (2025-11-05)
-
-**Context**: Deep investigation of the 3 remaining unchecked test failures (Tests 8, 15, 16) revealed significantly higher complexity than initial assessment. This section documents those findings to inform future work.
+**Context**: Deep investigation of the 3 remaining unchecked test failures (Tests 8, 15, 16) revealed significantly higher complexity than initial assessment. This section now archives the resolved work so future contributors can reference the debugging path instead of treating it as open backlog. Regression coverage: `tests/test_ci_test_fixes_action_plan.py` ensures this plan no longer frames completed items as pending follow-ups.
 
 ### Test 3: Enum Warning Log Level - FIXED ✅
 
@@ -1098,7 +1094,7 @@ Total estimated time: 4-6 hours for complete implementation and testing.
 
 5. **Warning Check Logic** (line 844):
    ```bash
-   if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] &&  
+   if [ "${MDNS_RESOLUTION_STATUS_BROWSE}" = "1" ] &&
       [ "${MDNS_RESOLUTION_STATUS_RESOLVE}" = "0" ] &&
       [ "${last_reason}" = "resolve_failed" ]; then
    ```
@@ -1127,7 +1123,7 @@ Total estimated time: 4-6 hours for complete implementation and testing.
 2. Check if getent exit code 2 is being propagated incorrectly
 3. May need to adjust stub or fix resolution logic to ensure status 1 when all methods fail
 
-**Estimated Remaining Effort**: 1-2 hours  
+**Estimated Remaining Effort**: 1-2 hours
 **Complexity**: Medium-High - requires debugging resolution helper logic
 
 **Files Modified So Far**:
@@ -1145,7 +1141,7 @@ see `reason=resolve_failed`. Regression coverage lives in
 
 ### Test 8: Resolution Lag Warning - Higher Complexity Than Expected
 
-**Initial Assessment**: Simple conditional check at line 844  
+**Initial Assessment**: Simple conditional check at line 844
 **Actual Complexity**: Test fixture incompatibility + resolution status code mismatch
 
 #### Issues Discovered
@@ -1200,7 +1196,7 @@ see `reason=resolve_failed`. Regression coverage lives in
 
 ### Test 15: DBus Fallback Logging - Requires Flow Restructuring
 
-**Initial Assessment**: Add logging to mdns_cli_dbus_fallback function  
+**Initial Assessment**: Add logging to mdns_cli_dbus_fallback function
 **Actual Complexity**: Test expects different execution flow than currently implemented
 
 #### Issues Discovered
@@ -1260,7 +1256,7 @@ To make test pass as written, need to:
 
 ### Test 16: DBus Wait Logic - New Implementation Required
 
-**Initial Assessment**: Add retry loop with ServiceUnknown detection  
+**Initial Assessment**: Add retry loop with ServiceUnknown detection
 **Actual Complexity**: Requires new wait function using different tool than existing implementation
 
 #### Issues Discovered
@@ -1288,32 +1284,32 @@ Need to add new wait function in mdns_selfcheck_dbus.sh:
 wait_for_avahi_dbus_gdbus() {
   local max_attempts="${1:-10}"
   local attempt=0
-  
+
   while [ "${attempt}" -lt "${max_attempts}" ]; do
     attempt=$((attempt + 1))
-    
+
     # Try gdbus introspect
     if gdbus introspect --system --dest org.freedesktop.Avahi --object-path / >/dev/null 2>&1; then
       log_info mdns_selfcheck event=avahi_dbus_ready outcome=ok attempts="${attempt}"
       return 0
     fi
-    
+
     # Check error type
     local error_output
     error_output="$(gdbus introspect --system --dest org.freedesktop.Avahi --object-path / 2>&1 || true)"
-    
+
     if [[ "${error_output}" =~ ServiceUnknown ]]; then
       # Service not ready, retry
       log_debug mdns_selfcheck event=avahi_dbus_wait attempt="${attempt}" status=not_ready
       sleep 0.5
       continue
     fi
-    
+
     # Other error, fail fast
     log_error mdns_selfcheck event=avahi_dbus_error attempt="${attempt}"
     return 1
   done
-  
+
   log_error mdns_selfcheck event=avahi_dbus_timeout attempts="${max_attempts}"
   return 1
 }
