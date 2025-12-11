@@ -14,7 +14,9 @@ def test_avahi_stub_enables_cli_tools_when_missing(tmp_path, monkeypatch) -> Non
 
     monkeypatch.setenv("PATH", "")
 
-    ensure_avahi_stub(tmp_path)
+    env_updates = ensure_avahi_stub(tmp_path)
+    for key, value in env_updates.items():
+        monkeypatch.setenv(key, value)
 
     for tool in ("avahi-browse", "avahi-publish", "avahi-resolve", "avahi-resolve-host-name"):
         assert shutil.which(tool), f"{tool} should be available after enabling the stub"

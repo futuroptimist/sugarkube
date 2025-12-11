@@ -27,10 +27,12 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 MDNS_READY_SCRIPT = SCRIPTS_DIR / "mdns_ready.sh"
 
 @pytest.fixture(scope="module", autouse=True)
-def avahi_stub_env(tmp_path_factory) -> None:
+def avahi_stub_env(tmp_path_factory, monkeypatch) -> None:
     """Ensure Avahi CLI coverage even when the host packages are missing."""
 
-    ensure_avahi_stub(tmp_path_factory.mktemp("avahi_stub"))
+    env_updates = ensure_avahi_stub(tmp_path_factory.mktemp("avahi_stub"))
+    for key, value in env_updates.items():
+        monkeypatch.setenv(key, value)
 
 
 @pytest.fixture
