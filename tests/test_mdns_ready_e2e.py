@@ -15,8 +15,8 @@ Set AVAHI_AVAILABLE=1 to enable these tests.
 
 import os
 import subprocess
-from pathlib import Path
 import time
+from pathlib import Path
 
 import pytest
 

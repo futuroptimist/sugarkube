@@ -15,6 +15,7 @@ def probe_namespace_connectivity(
     popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
     run_command: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     timeout_secs: float = 5.0,
+    server_port: int = 18080,
 ) -> bool:
     """Verify connectivity between namespaces using a TCP round trip.
 
@@ -26,15 +27,30 @@ def probe_namespace_connectivity(
     server_script = textwrap.dedent(
         f"""
         import socket
+        import sys
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("{target_ip}", 18080))
+        sock.bind(("{target_ip}", {server_port}))
         sock.listen(1)
-        conn, _ = sock.accept()
-        conn.recv(16)
-        conn.sendall(b"ok")
-        conn.close()
-        sock.close()
+        sock.settimeout({timeout_secs})
+        try:
+            conn, _ = sock.accept()
+            conn.settimeout({timeout_secs})
+            data = b""
+            while len(data) < 4:
+                chunk = conn.recv(4 - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            if data == b"ping":
+                conn.sendall(b"ok")
+            else:
+                sys.exit(1)
+        except socket.timeout:
+            sys.exit(1)
+        finally:
+            sock.close()
         """
     ).strip()
 
@@ -53,7 +69,8 @@ def probe_namespace_connectivity(
         f"""
         import socket
         import sys
-        sock = socket.create_connection(("{target_ip}", 18080), timeout={timeout_secs})
+
+        sock = socket.create_connection(("{target_ip}", {server_port}), timeout={timeout_secs})
         sock.sendall(b"ping")
         sock.settimeout({timeout_secs})
         data = sock.recv(2)
@@ -82,12 +99,17 @@ def probe_namespace_connectivity(
         if client_result.returncode != 0:
             return False
 
-        server_proc.wait(timeout=timeout_secs)
+        try:
+            server_proc.wait(timeout=timeout_secs)
+        except subprocess.TimeoutExpired:
+            return False
         return True
+    except subprocess.TimeoutExpired:
+        return False
     finally:
         if server_proc.poll() is None:
             server_proc.terminate()
             try:
                 server_proc.wait(timeout=1)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 server_proc.kill()
