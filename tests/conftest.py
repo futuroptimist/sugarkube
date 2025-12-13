@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-import atexit
 from pathlib import Path
 from typing import Iterable, List
 
@@ -76,22 +76,67 @@ def ensure_just_available() -> Path:
     return Path(located)
 
 
-def require_tools(tools: Iterable[str]) -> None:
-    """Skip the current test when required system tools are missing."""
+def _install_missing_tools(missing: Iterable[str]) -> list[str]:
+    """Best-effort installer for common CLI dependencies used by the tests.
 
-    missing: List[str] = []
-    for tool in tools:
-        result = subprocess.run([
-            "which",
-            tool,
-        ], capture_output=True, text=True)
-        if result.returncode != 0:
-            missing.append(tool)
+    Note:
+        Installation attempts via apt-get require elevated privileges (root or sudo).
+        If the tests are run as a non-root user, installation will silently fail,
+        which is the intended behavior. If the required tools remain unavailable
+        after the attempt, the test will be skipped as before.
+    """
+
+    installer = shutil.which("apt-get")
+    if not installer:
+        return []
+
+    package_map = {
+        "ip": "iproute2",
+        "ping": "iputils-ping",
+        "unshare": "util-linux",
+        "avahi-browse": "avahi-utils",
+        "avahi-publish": "avahi-utils",
+        "avahi-daemon": "avahi-daemon",
+        "dbus-daemon": "dbus",
+        "dbus-launch": "dbus-x11",
+    }
+
+    packages = sorted({package_map.get(tool, tool) for tool in missing})
+    if not packages:
+        return []
+
+    env = os.environ.copy()
+    env.setdefault("DEBIAN_FRONTEND", "noninteractive")
+
+    update_result = subprocess.run(
+        [installer, "update"], capture_output=True, text=True, env=env
+    )
+    if update_result.returncode != 0:
+        return []
+
+    install_cmd = [installer, "install", "--no-install-recommends", "-y", *packages]
+    install_result = subprocess.run(install_cmd, capture_output=True, text=True, env=env)
+    if install_result.returncode != 0:
+        return []
+
+    return packages
+
+
+def require_tools(tools: Iterable[str]) -> None:
+    """Ensure the current test has access to required system tools."""
+
+    missing: List[str] = [tool for tool in tools if not shutil.which(tool)]
 
     if missing:
-        # TODO: Package the required CLI tools with the test environment so suites don't skip.
-        # Root cause: Some contributors run the tests on minimal images lacking networking utils.
-        # Estimated fix: 1h to document the dependencies and add them to CI bootstrap.
+        _install_missing_tools(missing)
+        missing = [tool for tool in missing if not shutil.which(tool)]
+
+    if missing:
+        # TODO: Ensure required system tools are available for tests.
+        # Root cause: Tools remain unavailable after attempted auto-installation.
+        # This may be due to running on a non-Debian-based system, insufficient privileges,
+        # or installation failures.
+        # Estimated fix: 1h to install tools manually or adjust CI environment to provide them.
         pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
 
 
