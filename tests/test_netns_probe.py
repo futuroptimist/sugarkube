@@ -139,6 +139,37 @@ def test_probe_wait_timeout_triggers_cleanup() -> None:
     assert commands, "Client command should have been executed before timeout"
 
 
+def test_probe_handles_server_wait_error() -> None:
+    """Generic wait errors should fail the probe and trigger cleanup."""
+
+    def runner(cmd, **_: object):  # noqa: ANN001 - subprocess.run signature
+        return SimpleNamespace(returncode=0)
+
+    class _ErrorProc(_DummyProc):
+        def wait(self, timeout: float | None = None) -> int:  # noqa: D401 - test helper
+            self.wait_timeout = timeout
+            raise RuntimeError("boom")
+
+    proc_holder: list[_ErrorProc] = []
+
+    def spawner(cmd, **kwargs: object) -> _ErrorProc:  # noqa: ANN001 - subprocess signature
+        proc = _ErrorProc(cmd, **kwargs)
+        proc_holder.append(proc)
+        return proc
+
+    result = probe_namespace_connectivity(
+        "ns-client",
+        "ns-server",
+        "192.168.50.2",
+        run_cmd=runner,
+        popen_cmd=spawner,
+        sleep_fn=lambda _: None,
+    )
+
+    assert not result, "Probe should return False when wait raises an unexpected error"
+    assert proc_holder and proc_holder[0].terminated, "Server should be terminated on error"
+
+
 def test_probe_uses_configurable_start_delay() -> None:
     """Custom start delay should be passed to the sleep function."""
 

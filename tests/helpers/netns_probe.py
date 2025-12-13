@@ -42,19 +42,17 @@ def probe_namespace_connectivity(
         import socket
         import sys
 
-        sock = socket.socket()
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("{server_ip}", {port}))
-        sock.listen(1)
-        sock.settimeout(2)
-        try:
-            conn, _ = sock.accept()
-            conn.close()
-            sys.exit(0)
-        except Exception:
-            sys.exit(1)
-        finally:
-            sock.close()
+        with socket.socket() as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("{server_ip}", {port}))
+            sock.listen(1)
+            sock.settimeout(2)
+            try:
+                conn, _ = sock.accept()
+                conn.close()
+                sys.exit(0)
+            except Exception:
+                sys.exit(1)
         """
     ).strip()
 
