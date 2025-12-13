@@ -20,11 +20,13 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import ensure_root_privileges, require_tools
+from tests.helpers.netns_probe import probe_namespace_connectivity
 from tests.helpers.avahi_stub import ensure_avahi_stub
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 MDNS_READY_SCRIPT = SCRIPTS_DIR / "mdns_ready.sh"
+
 
 @pytest.fixture(scope="module", autouse=True)
 def avahi_stub_env(tmp_path_factory) -> None:
@@ -43,19 +45,11 @@ def avahi_stub_env(tmp_path_factory) -> None:
 
 @pytest.fixture
 def netns_setup():
-    """Set up a network namespace environment for testing.
+    """Set up a TCP-tested network namespace environment for mDNS end-to-end checks.
 
-    Creates a pair of connected network namespaces that can communicate
-    via a virtual ethernet pair.
-
-    Returns:
-        dict: Namespace configuration with keys:
-            - ns1 (str): Name of first network namespace
-            - ns2 (str): Name of second network namespace
-            - veth1 (str): Name of veth interface in ns1
-            - veth2 (str): Name of veth interface in ns2
-            - ip1 (str): IP address of ns1 (e.g., 192.168.100.1)
-            - ip2 (str): IP address of ns2 (e.g., 192.168.100.2)
+    Creates a pair of connected network namespaces that can communicate via a virtual ethernet
+    pair and validates connectivity with a TCP handshake rather than ICMP ping. The fixture
+    yields a dictionary with namespace metadata used by the tests.
     """
     require_tools([
         "avahi-publish",
@@ -130,15 +124,7 @@ def netns_setup():
         time.sleep(0.5)
 
         # Verify connectivity
-        ping_result = subprocess.run(
-            ["ip", "netns", "exec", ns1, "ping", "-c", "1", "-W", "2", "192.168.100.2"],
-            capture_output=True,
-            text=True,
-        )
-        if ping_result.returncode != 0:
-            # TODO: Harden namespace connectivity setup so the browse test runs in CI reliably.
-            # Root cause: Some kernels block ICMP in nested namespaces, causing the fixture to skip.
-            # Estimated fix: 2h to swap ping for a lightweight TCP check or mock connectivity.
+        if not probe_namespace_connectivity(ns1, ns2, "192.168.100.2"):
             pytest.skip("Network namespace connectivity test failed")
 
         yield {
