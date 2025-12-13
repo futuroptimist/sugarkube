@@ -125,6 +125,12 @@ def netns_setup():
 
         # Verify connectivity
         if not probe_namespace_connectivity(ns1, ns2, "192.168.100.2"):
+            # TODO: Harden namespace connectivity checks when TCP probe fails in CI.
+            # Root cause: Nested network namespaces sometimes lack kernel support or have
+            #             conflicting sysctls that prevent loopback-style veth traffic.
+            # Estimated fix: Detect missing namespace prerequisites earlier and relax CI
+            #                expectations, or provision privileged runners with known-good
+            #                netns settings.
             pytest.skip("Network namespace connectivity test failed")
 
         yield {
