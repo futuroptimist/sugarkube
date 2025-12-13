@@ -77,7 +77,14 @@ def ensure_just_available() -> Path:
 
 
 def _install_missing_tools(missing: Iterable[str]) -> list[str]:
-    """Best-effort installer for common CLI dependencies used by the tests."""
+    """Best-effort installer for common CLI dependencies used by the tests.
+
+    Note:
+        Installation attempts via apt-get require elevated privileges (root or sudo).
+        If the tests are run as a non-root user, installation will silently fail,
+        which is the intended behavior. If the required tools remain unavailable
+        after the attempt, the test will be skipped as before.
+    """
 
     installer = shutil.which("apt-get")
     if not installer:
@@ -91,6 +98,7 @@ def _install_missing_tools(missing: Iterable[str]) -> list[str]:
         "avahi-publish": "avahi-utils",
         "avahi-daemon": "avahi-daemon",
         "dbus-daemon": "dbus",
+        "dbus-launch": "dbus-x11",
     }
 
     packages = sorted({package_map.get(tool, tool) for tool in missing})
@@ -124,6 +132,11 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
+        # TODO: Ensure required system tools are available for tests.
+        # Root cause: Tools remain unavailable after attempted auto-installation.
+        # This may be due to running on a non-Debian-based system, insufficient privileges,
+        # or installation failures.
+        # Estimated fix: 1h to install tools manually or adjust CI environment to provide them.
         pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
 
 

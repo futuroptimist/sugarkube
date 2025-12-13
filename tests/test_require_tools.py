@@ -37,7 +37,10 @@ def test_require_tools_installs_missing_dependencies(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(conftest.shutil, "which", fake_which)
     monkeypatch.setattr(conftest.subprocess, "run", fake_run)
 
-    conftest.require_tools(["ip"])
+    try:
+        conftest.require_tools(["ip"])
+    except pytest.skip.Exception as exc:  # pragma: no cover - explicit failure path
+        pytest.fail(f"require_tools unexpectedly skipped: {exc.msg}")
 
     assert ["/usr/bin/apt-get", "update"] in commands
     assert any("iproute2" in cmd for cmd in commands if cmd[:2] == ["/usr/bin/apt-get", "install"])
@@ -46,7 +49,7 @@ def test_require_tools_installs_missing_dependencies(monkeypatch: pytest.MonkeyP
 def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip gracefully when dependencies remain unavailable after installation attempts."""
 
-    def always_missing(tool: str, path: str | None = None) -> None:  # type: ignore[override]
+    def always_missing(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
         if tool == "apt-get":
             return "/usr/bin/apt-get"
         return None
