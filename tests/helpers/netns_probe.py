@@ -8,6 +8,7 @@ import time
 from typing import Callable
 
 DEFAULT_TCP_PROBE_PORT = 53535
+DEFAULT_SERVER_START_DELAY = 0.2
 
 
 ProbeRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -21,6 +22,7 @@ def probe_namespace_connectivity(
     server_ip: str,
     *,
     port: int = DEFAULT_TCP_PROBE_PORT,
+    server_start_delay: float = DEFAULT_SERVER_START_DELAY,
     run_cmd: ProbeRunner = subprocess.run,
     popen_cmd: ProbeSpawner = subprocess.Popen,
     sleep_fn: SleepFn = time.sleep,
@@ -30,7 +32,9 @@ def probe_namespace_connectivity(
     The probe starts a short-lived TCP listener inside ``server_namespace`` and attempts a
     connection from ``client_namespace``.  The listener exits once the handshake completes so
     the fixture can clean up deterministically.  ``True`` is returned when the client command
-    succeeds and the server process exits with ``0``.
+    succeeds and the server process exits with ``0``.  ``server_start_delay`` configures how long
+    to wait before attempting the client connection so the listener can bind and listen reliably
+    on slower systems.
     """
 
     server_script = textwrap.dedent(
@@ -49,6 +53,8 @@ def probe_namespace_connectivity(
             sys.exit(0)
         except Exception:
             sys.exit(1)
+        finally:
+            sock.close()
         """
     ).strip()
 
@@ -57,10 +63,10 @@ def probe_namespace_connectivity(
         import socket
         import sys
 
-        sock = socket.socket()
-        sock.settimeout(2)
         try:
-            sock.connect(("{server_ip}", {port}))
+            with socket.socket() as sock:
+                sock.settimeout(2)
+                sock.connect(("{server_ip}", {port}))
         except Exception:
             sys.exit(1)
         sys.exit(0)
@@ -79,7 +85,7 @@ def probe_namespace_connectivity(
         return False
 
     try:
-        sleep_fn(0.2)
+        sleep_fn(server_start_delay)
         client_result = run_cmd(
             ["ip", "netns", "exec", client_namespace, "python3", "-c", client_script],
             capture_output=True,
@@ -98,8 +104,11 @@ def probe_namespace_connectivity(
             try:
                 server_proc.terminate()
             except Exception:
+                # Best-effort cleanup during termination; ignore errors from already-exited
+                # processes.
                 pass
             try:
                 server_proc.wait(timeout=1)
             except Exception:
+                # Ignore errors while waiting for the process to exit during best-effort cleanup.
                 pass
