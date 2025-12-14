@@ -147,10 +147,7 @@ jobs:
             target_dir="$(mktemp -d)"
           fi
 
-          DSPACE_COMMIT_SHA="6ffb123ca5afa7928f4f3c3be7d77a2ac3f0d244"
-          echo "Cloning democratizedspace/dspace@${DSPACE_COMMIT_SHA} into ${target_dir}" >&2
-          git clone --depth=1 https://github.com/democratizedspace/dspace.git "${target_dir}"
-          git -C "${target_dir}" checkout "${DSPACE_COMMIT_SHA}"
+          git clone --depth=1 --branch v3 https://github.com/democratizedspace/dspace.git "${target_dir}"
           echo "path=${target_dir}" >>"${GITHUB_OUTPUT}"
 
       - name: Build dspace OCI images (amd64 + arm64)
