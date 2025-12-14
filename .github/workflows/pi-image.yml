@@ -30,6 +30,14 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+      - '**/Dockerfile'
+      - '**/Dockerfile.*'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - 'deploy/**'
+      - 'infra/**'
+      - 'platform/**'
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
@@ -44,6 +52,14 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+      - '**/Dockerfile'
+      - '**/Dockerfile.*'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - 'deploy/**'
+      - 'infra/**'
+      - 'platform/**'
 
 permissions:
   contents: read
@@ -52,6 +68,161 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Lightweight parity smoke test to close CI/prod gaps by testing the shipped OCI image directly.
+  oci-parity-smoke:
+    name: oci-parity-smoke
+    permissions:
+      contents: read
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-latest
+    env:
+      CLONE_DSPACE: ${{ github.event.inputs.clone_dspace }}
+    steps:
+      - name: Detect OCI-related changes
+        id: oci-filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            oci:
+              - '.github/workflows/pi-image.yml'
+              - '**/Dockerfile'
+              - '**/Dockerfile.*'
+              - '**/package.json'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - 'deploy/**'
+              - 'infra/**'
+              - 'platform/**'
+
+      - name: Checkout repository
+        if: >-
+          (github.event_name != 'pull_request_target') &&
+          (github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true')
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout pull request head
+        if: >-
+          (github.event_name == 'pull_request_target') &&
+          (github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true')
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Set up QEMU for arm64
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare dspace source
+        id: dspace-source
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
+        env:
+          CLONE_DSPACE_INPUT: ${{ github.event.inputs.clone_dspace }}
+        run: |
+          set -euo pipefail
+          workspace_repo="${GITHUB_WORKSPACE}/dspace"
+          if [ -d "${workspace_repo}" ]; then
+            echo "Found existing dspace checkout at ${workspace_repo}" >&2
+            echo "path=${workspace_repo}" >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          target_dir="${workspace_repo}"
+          if [ "${CLONE_DSPACE_INPUT}" != "true" ]; then
+            target_dir="$(mktemp -d)"
+          fi
+
+          echo "Cloning democratizedspace/dspace v3 into ${target_dir}" >&2
+          git clone --depth=1 --branch v3 https://github.com/democratizedspace/dspace.git "${target_dir}"
+          echo "path=${target_dir}" >>"${GITHUB_OUTPUT}"
+
+      - name: Build dspace OCI images (amd64 + arm64)
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
+        env:
+          DSPACE_DIR: ${{ steps.dspace-source.outputs.path }}
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            tag="dspace:oci-parity-${platform##*/}"
+            echo "Building ${tag} for ${platform}" >&2
+            docker buildx build \
+              --platform "${platform}" \
+              --tag "${tag}" \
+              --build-arg DSPACE_VERSION="ci-${GITHUB_SHA}" \
+              --file "${DSPACE_DIR}/Dockerfile" \
+              "${DSPACE_DIR}" \
+              --load
+          done
+
+      - name: Run OCI runtime smoke tests
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
+        env:
+          DSPACE_DIR: ${{ steps.dspace-source.outputs.path }}
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            tag="dspace:oci-parity-${platform##*/}"
+            echo "::group::Smoke test ${platform}" >&2
+            docker run --rm --platform "${platform}" "${tag}" \
+              node -e "require('canvas'); console.log('canvas ok')"
+
+            container="dspace-oci-smoke-${platform##*/}"
+            docker run --rm --platform "${platform}" -d --name "${container}" -p 0:8080 "${tag}"
+
+            cleanup() {
+              docker rm -f "${container}" >/dev/null 2>&1 || true
+            }
+            trap cleanup EXIT
+
+            host_port=""
+            for _ in $(seq 1 20); do
+              host_port=$(docker port "${container}" 8080/tcp 2>/dev/null | head -n1 | awk -F: '{print $2}')
+              if [ -n "${host_port}" ]; then
+                break
+              fi
+              sleep 1
+            done
+
+            if [ -z "${host_port}" ]; then
+              echo "Failed to detect forwarded port for ${container}" >&2
+              docker logs "${container}" || true
+              exit 1
+            fi
+
+            for path in "/docs" "/docs/dCarbon"; do
+              echo "Checking ${path} on ${platform}" >&2
+              if ! curl --fail --retry 10 --retry-delay 2 --max-time 10 "http://127.0.0.1:${host_port}${path}" >/tmp/smoke_response; then
+                echo "Request to ${path} failed" >&2
+                docker logs "${container}" || true
+                exit 1
+              fi
+
+              if [ "${path}" = "/docs/dCarbon" ]; then
+                if ! grep -Fq "dCarbon represents the amount of carbon dioxide produced by a player" /tmp/smoke_response; then
+                  echo "Expected dCarbon snippet missing from ${path}" >&2
+                  docker logs "${container}" || true
+                  exit 1
+                fi
+              fi
+            done
+
+            cleanup
+            trap - EXIT
+            echo "::endgroup" >&2
+          done
+
   unit:
     permissions:
       contents: read
@@ -117,6 +288,9 @@ jobs:
 
       - name: Run workflow verify guard test
         run: bash tests/workflow_verify_step_guard_test.sh
+
+      - name: Run OCI parity smoke workflow guard test
+        run: bash tests/oci_parity_smoke_guard_test.sh
 
       - name: Run fix permissions e2e test
         run: bash tests/fix_pi_image_permissions_e2e.sh
