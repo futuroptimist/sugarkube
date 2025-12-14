@@ -161,6 +161,40 @@ def test_pi_image_workflow_covers_preset_and_download_scripts():
     assert "Run Pi Imager preset e2e test" in content
 
 
+def test_pi_image_workflow_has_oci_parity_guardrails():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert "oci-parity-smoke" in content
+    assert "docker/setup-buildx-action@v3" in content
+    assert "dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36" in content
+    assert "docker buildx build \\" in content
+    assert "require('canvas'); console.log('canvas ok')" in content
+    assert "\"/docs\" \"/docs/dCarbon\"" in content
+    assert (
+        "dCarbon represents the amount of carbon dioxide produced by a player" in content
+    )
+    assert "to close CI/prod gaps by testing the shipped OCI image directly" in content
+
+
+def test_pi_image_workflow_pull_request_paths_include_oci_signals():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    paths = _extract_pull_request_paths(content)
+
+    for path in [
+        "**/Dockerfile",
+        "**/Dockerfile.*",
+        "**/package.json",
+        "**/package-lock.json",
+        "**/pnpm-lock.yaml",
+        "deploy/**",
+        "infra/**",
+        "platform/**",
+    ]:
+        assert path in paths
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
