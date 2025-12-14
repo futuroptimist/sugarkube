@@ -30,6 +30,12 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+      - '**/Dockerfile'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - '**/pnpm-workspace.yaml'
+      - 'infra/**/*.mjs'
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
@@ -44,6 +50,12 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+      - '**/Dockerfile'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - '**/pnpm-workspace.yaml'
+      - 'infra/**/*.mjs'
 
 permissions:
   contents: read
@@ -325,3 +337,113 @@ jobs:
             ./sugarkube.img.xz.sha256
             ./sugarkube.img.xz.metadata.json
             ./sugarkube.img.xz.stage-summary.json
+
+  oci-parity-smoke:
+    name: oci-parity-smoke
+    runs-on: ubuntu-latest
+    needs: unit
+    # Close CI/prod gaps by testing the shipped OCI image directly.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+    permissions:
+      contents: read
+    env:
+      CLONE_DSPACE_INPUT: ${{ github.event.inputs.clone_dspace || 'false' }}
+      DSPACE_BRANCH: v3
+      DSPACE_REPO: https://github.com/democratizedspace/dspace.git
+    steps:
+      - name: Checkout repository
+        if: github.event_name != 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout pull request head
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Install QEMU and buildx for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve dspace source
+        id: dspace-source
+        run: |
+          set -euo pipefail
+          if [ "${CLONE_DSPACE_INPUT}" = "true" ] && [ -d "deploy/dspace" ]; then
+            echo "reusing deploy/dspace for OCI parity smoke"
+            echo "path=${PWD}/deploy/dspace" >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          workdir="$(mktemp -d)"
+          git clone --depth=1 --branch "${DSPACE_BRANCH}" "${DSPACE_REPO}" "${workdir}/dspace"
+          echo "path=${workdir}/dspace" >>"${GITHUB_OUTPUT}"
+
+      - name: Build dspace OCI image (amd64)
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag dspace:oci-parity-amd64 \
+            --load \
+            "${{ steps.dspace-source.outputs.path }}"
+
+      - name: Build dspace OCI image (arm64)
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --tag dspace:oci-parity-arm64 \
+            --load \
+            "${{ steps.dspace-source.outputs.path }}"
+
+      - name: Verify native module availability
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 dspace:oci-parity-amd64 \
+            node -e "require('canvas'); console.log('canvas ok')"
+          docker run --rm --platform linux/arm64 dspace:oci-parity-arm64 \
+            node -e "require('canvas'); console.log('canvas ok (arm64)')"
+
+      - name: Run runtime smoke test (amd64)
+        run: |
+          set -euo pipefail
+          container_name="dspace-oci-smoke-amd64"
+
+          docker run --rm -d --platform linux/amd64 \
+            --name "${container_name}" \
+            -p 8080:8080 \
+            dspace:oci-parity-amd64
+
+          cleanup() {
+            docker logs "${container_name}" || true
+            docker rm -f "${container_name}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 30); do
+            if docker exec "${container_name}" curl -fsS "http://127.0.0.1:8080/healthz" >/dev/null 2>&1; then
+              break
+            fi
+
+            if [ "${attempt}" -eq 30 ]; then
+              echo "Server failed to become healthy; dumping logs" >&2
+              cleanup
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker exec "${container_name}" curl -fsS "http://127.0.0.1:8080/docs" > /tmp/oci-docs.html
+          docker exec "${container_name}" curl -fsS "http://127.0.0.1:8080/docs/dCarbon" > /tmp/oci-dcarbon.html
+          grep -qi "dCarbon represents the amount of carbon dioxide produced" /tmp/oci-dcarbon.html

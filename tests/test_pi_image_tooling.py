@@ -161,6 +161,22 @@ def test_pi_image_workflow_covers_preset_and_download_scripts():
     assert "Run Pi Imager preset e2e test" in content
 
 
+def test_pi_image_workflow_watches_oci_parity_paths():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    paths = _extract_pull_request_paths(content)
+
+    for expected in (
+        "**/Dockerfile",
+        "**/package.json",
+        "**/package-lock.json",
+        "**/pnpm-lock.yaml",
+        "**/pnpm-workspace.yaml",
+        "infra/**/*.mjs",
+    ):
+        assert expected in paths, f"Missing pull_request path glob: {expected}"
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
@@ -292,3 +308,13 @@ def test_collect_pi_image_scan_depth_configurable():
 
     assert 'MAX_SCAN_DEPTH="${MAX_SCAN_DEPTH:-6}"' in script_text
     assert 'find "${DEPLOY_ROOT}" -maxdepth "${MAX_SCAN_DEPTH}"' in script_text
+
+
+def test_pi_image_workflow_adds_oci_parity_smoke_job():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert "oci-parity-smoke" in content
+    assert "canvas ok" in content
+    assert "/docs/dCarbon" in content
+    assert "Close CI/prod gaps by testing the shipped OCI image directly." in content
