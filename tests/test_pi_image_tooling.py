@@ -174,7 +174,7 @@ def test_pi_image_workflow_has_oci_parity_guardrails():
     assert (
         "dCarbon represents the amount of carbon dioxide produced by a player" in content
     )
-    assert "closing CI/prod gaps by testing the shipped OCI image directly" in content
+    assert "close CI/prod gaps by testing the shipped OCI image directly" in content
 
 
 def test_pi_image_workflow_pull_request_paths_include_oci_signals():

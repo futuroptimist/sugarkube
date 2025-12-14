@@ -220,7 +220,7 @@ jobs:
 
             cleanup
             trap - EXIT
-            echo "::endgroup" >&2
+            echo "::endgroup::" >&2
           done
 
   unit:
