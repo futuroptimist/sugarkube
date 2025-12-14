@@ -188,34 +188,58 @@ jobs:
             }
             trap cleanup EXIT
 
-            host_port=""
-            for _ in $(seq 1 20); do
-              host_port=$(docker port "${container}" 8080/tcp 2>/dev/null | head -n1 | awk -F: '{print $2}')
-              if [ -n "${host_port}" ]; then
+            dump_docker_state() {
+              docker inspect "${container}" || true
+              docker logs "${container}" || true
+            }
+
+            ready=false
+            for _ in $(seq 1 45); do
+              status=$(docker inspect -f '{{.State.Status}}' "${container}" 2>/dev/null || echo unknown)
+              if [ "${status}" = "exited" ] || [ "${status}" = "dead" ]; then
+                echo "Container ${container} exited before becoming ready" >&2
+                dump_docker_state
+                exit 1
+              fi
+
+              if docker exec "${container}" curl --silent --show-error --fail \
+                --retry-all-errors --retry-connrefused --retry 20 --retry-delay 2 --max-time 10 \
+                http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+                ready=true
                 break
               fi
-              sleep 1
+
+              if docker exec "${container}" curl --silent --show-error --fail \
+                --retry-all-errors --retry-connrefused --retry 20 --retry-delay 2 --max-time 10 \
+                http://127.0.0.1:8080/ >/dev/null 2>&1; then
+                ready=true
+                break
+              fi
+
+              sleep 2
             done
 
-            if [ -z "${host_port}" ]; then
-              echo "Failed to detect forwarded port for ${container}" >&2
-              docker logs "${container}" || true
+            if [ "${ready}" != "true" ]; then
+              echo "Container ${container} did not become ready" >&2
+              dump_docker_state
               exit 1
             fi
 
             for path in "/docs" "/docs/dCarbon"; do
               response_file="/tmp/smoke_response_${platform##*/}"
               echo "Checking ${path} on ${platform}" >&2
-              if ! curl --fail --retry 10 --retry-delay 2 --max-time 10 "http://127.0.0.1:${host_port}${path}" >"${response_file}"; then
+              if ! docker exec "${container}" curl --silent --show-error --fail \
+                --retry-all-errors --retry-connrefused --retry 20 --retry-delay 2 --max-time 10 \
+                "http://127.0.0.1:8080${path}" >"${response_file}"; then
                 echo "Request to ${path} failed" >&2
-                docker logs "${container}" || true
+                dump_docker_state
                 exit 1
               fi
 
               if [ "${path}" = "/docs/dCarbon" ]; then
                 if ! grep -Fq "dCarbon represents the amount of carbon dioxide produced by a player" "${response_file}"; then
                   echo "Expected dCarbon snippet missing from ${path}" >&2
-                  docker logs "${container}" || true
+                  dump_docker_state
                   exit 1
                 fi
               fi
