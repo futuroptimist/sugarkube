@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import yaml
+
 from tests import build_pi_image_test as build_test
 
 
@@ -161,6 +163,18 @@ def test_pi_image_workflow_covers_preset_and_download_scripts():
     assert "Run Pi Imager preset e2e test" in content
 
 
+def test_pi_image_workflow_covers_oci_trigger_paths():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    paths = _extract_pull_request_paths(content)
+
+    assert "**/Dockerfile" in paths
+    assert "**/package.json" in paths
+    assert "**/package-lock.json" in paths
+    assert "**/pnpm-lock.yaml" in paths
+    assert "deploy/**" in paths
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
@@ -292,3 +306,20 @@ def test_collect_pi_image_scan_depth_configurable():
 
     assert 'MAX_SCAN_DEPTH="${MAX_SCAN_DEPTH:-6}"' in script_text
     assert 'find "${DEPLOY_ROOT}" -maxdepth "${MAX_SCAN_DEPTH}"' in script_text
+
+
+def test_pi_image_workflow_wires_oci_parity_smoke_job():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    workflow = yaml.safe_load(workflow_path.read_text())
+    jobs = workflow.get("jobs", {})
+
+    assert "oci-parity-smoke" in jobs, workflow
+    oci_job = jobs["oci-parity-smoke"]
+    step_names = [step.get("name", "") for step in oci_job.get("steps", [])]
+
+    assert "Set up QEMU" in step_names
+    assert "Build dspace OCI image (amd64 + arm64)" in step_names
+
+    smoke_steps = [step.get("run", "") for step in oci_job.get("steps", [])]
+    assert any("canvas ok" in snippet for snippet in smoke_steps)
+    assert any("/docs/dCarbon" in snippet for snippet in smoke_steps)

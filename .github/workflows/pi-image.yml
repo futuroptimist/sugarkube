@@ -27,6 +27,11 @@ on:
       - 'scripts/download_pi_image.sh'
       - 'scripts/render_pi_imager_preset.py'
       - 'scripts/fix_pi_image_permissions.sh'
+      - '**/Dockerfile'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - 'deploy/**'
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
@@ -41,6 +46,11 @@ on:
       - 'scripts/download_pi_image.sh'
       - 'scripts/render_pi_imager_preset.py'
       - 'scripts/fix_pi_image_permissions.sh'
+      - '**/Dockerfile'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - 'deploy/**'
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
@@ -325,3 +335,105 @@ jobs:
             ./sugarkube.img.xz.sha256
             ./sugarkube.img.xz.metadata.json
             ./sugarkube.img.xz.stage-summary.json
+
+  oci-parity-smoke:
+    # Close CI/prod gaps by testing the shipped OCI image directly.
+    permissions:
+      contents: read
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DSPACE_BRANCH: v3
+      DSPACE_IMAGE: ghcr.io/democratizedspace/charts/dspace:oci-smoke
+      DSPACE_VERSION: oci-smoke
+    steps:
+      - name: Checkout repository
+        if: github.event_name != 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout pull request head
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare dspace source
+        env:
+          CLONE_DSPACE: ${{ github.event.inputs.clone_dspace || 'false' }}
+        run: |
+          set -euo pipefail
+          reuse_dir="${GITHUB_WORKSPACE}/dspace"
+          target_dir="${RUNNER_TEMP}/dspace"
+
+          if [ -d "${reuse_dir}/.git" ]; then
+            echo "Reusing existing dspace checkout at ${reuse_dir}" >&2
+            echo "DSPACE_DIR=${reuse_dir}" >>"${GITHUB_ENV}"
+            exit 0
+          fi
+
+          echo "Cloning democratizedspace/dspace@${DSPACE_BRANCH} into ${target_dir}" >&2
+          git clone --depth=1 --branch "${DSPACE_BRANCH}" \
+            https://github.com/democratizedspace/dspace.git "${target_dir}"
+          echo "DSPACE_DIR=${target_dir}" >>"${GITHUB_ENV}"
+
+      - name: Build dspace OCI image (amd64 + arm64)
+        run: |
+          set -euo pipefail
+          build_output="${RUNNER_TEMP}/dspace-image-oci.tar"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag "${DSPACE_IMAGE}" \
+            --build-arg "DSPACE_VERSION=${DSPACE_VERSION}" \
+            --output=type=oci,dest="${build_output}" \
+            "${DSPACE_DIR}"
+          docker load -i "${build_output}"
+          docker image inspect "${DSPACE_IMAGE}" >/dev/null
+
+      - name: Smoke test native modules
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --entrypoint node \
+            "${DSPACE_IMAGE}" \
+            -e "require('canvas'); console.log('canvas ok')"
+
+      - name: Smoke test runtime endpoints
+        run: |
+          set -euo pipefail
+          container_name="dspace-oci-smoke"
+          cleanup() {
+            docker logs "${container_name}" || true
+            docker rm -f "${container_name}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d --rm --name "${container_name}" -p 8080:8080 "${DSPACE_IMAGE}"
+
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:8080/healthz" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS "http://127.0.0.1:8080/docs" >/dev/null
+          curl -fsS "http://127.0.0.1:8080/docs/dCarbon" \
+            | tee /tmp/docs_dcarbon.html \
+            | grep -F "dCarbon represents the amount of carbon dioxide produced by a player"
