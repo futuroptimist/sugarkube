@@ -74,6 +74,7 @@ jobs:
     name: oci-parity-smoke
     permissions:
       contents: read
+      pull-requests: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
