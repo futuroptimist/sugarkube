@@ -167,14 +167,14 @@ def test_pi_image_workflow_has_oci_parity_guardrails():
 
     assert "oci-parity-smoke" in content
     assert "docker/setup-buildx-action@v3" in content
-    assert "dorny/paths-filter@v3" in content
+    assert "dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36" in content
     assert "docker buildx build \\" in content
     assert "require('canvas'); console.log('canvas ok')" in content
     assert "\"/docs\" \"/docs/dCarbon\"" in content
     assert (
         "dCarbon represents the amount of carbon dioxide produced by a player" in content
     )
-    assert "close CI/prod gaps by testing the shipped OCI image directly" in content
+    assert "to close CI/prod gaps by testing the shipped OCI image directly" in content
 
 
 def test_pi_image_workflow_pull_request_paths_include_oci_signals():

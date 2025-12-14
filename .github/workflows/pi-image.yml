@@ -85,7 +85,8 @@ jobs:
     steps:
       - name: Detect OCI-related changes
         id: oci-filter
-        uses: dorny/paths-filter@v3
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
         with:
           filters: |
             oci:
@@ -140,12 +141,14 @@ jobs:
           fi
 
           target_dir="${workspace_repo}"
-          if [ "${CLONE_DSPACE_INPUT}" != "true" ]; then
+          if [ -z "${CLONE_DSPACE_INPUT}" ] || [ "${CLONE_DSPACE_INPUT}" != "true" ]; then
             target_dir="$(mktemp -d)"
           fi
 
-          echo "Cloning democratizedspace/dspace v3 into ${target_dir}" >&2
-          git clone --depth=1 --branch v3 https://github.com/democratizedspace/dspace.git "${target_dir}"
+          DSPACE_COMMIT_SHA="c586f1bd5f4e0fe382e855e31b0a41572ec02fc0"
+          echo "Cloning democratizedspace/dspace@${DSPACE_COMMIT_SHA} into ${target_dir}" >&2
+          git clone --depth=1 https://github.com/democratizedspace/dspace.git "${target_dir}"
+          git -C "${target_dir}" checkout "${DSPACE_COMMIT_SHA}"
           echo "path=${target_dir}" >>"${GITHUB_OUTPUT}"
 
       - name: Build dspace OCI images (amd64 + arm64)
@@ -179,7 +182,7 @@ jobs:
               node -e "require('canvas'); console.log('canvas ok')"
 
             container="dspace-oci-smoke-${platform##*/}"
-            docker run --rm --platform "${platform}" -d --name "${container}" -p 0:8080 "${tag}"
+            docker run --platform "${platform}" -d --name "${container}" -p 0:8080 "${tag}"
 
             cleanup() {
               docker rm -f "${container}" >/dev/null 2>&1 || true
@@ -202,15 +205,16 @@ jobs:
             fi
 
             for path in "/docs" "/docs/dCarbon"; do
+              response_file="/tmp/smoke_response_${platform##*/}"
               echo "Checking ${path} on ${platform}" >&2
-              if ! curl --fail --retry 10 --retry-delay 2 --max-time 10 "http://127.0.0.1:${host_port}${path}" >/tmp/smoke_response; then
+              if ! curl --fail --retry 10 --retry-delay 2 --max-time 10 "http://127.0.0.1:${host_port}${path}" >"${response_file}"; then
                 echo "Request to ${path} failed" >&2
                 docker logs "${container}" || true
                 exit 1
               fi
 
               if [ "${path}" = "/docs/dCarbon" ]; then
-                if ! grep -Fq "dCarbon represents the amount of carbon dioxide produced by a player" /tmp/smoke_response; then
+                if ! grep -Fq "dCarbon represents the amount of carbon dioxide produced by a player" "${response_file}"; then
                   echo "Expected dCarbon snippet missing from ${path}" >&2
                   docker logs "${container}" || true
                   exit 1
