@@ -144,6 +144,9 @@ Why this matters for dspace:
   GHCR login above.
 - Once Helm and GHCR login are working, higher-level recipes such as `just helm-oci-install` can
   be used for OCI-hosted workloads (see the workload-specific docs for full examples).
+- CI now runs an `oci-parity-smoke` job in `.github/workflows/pi-image.yml` that builds and runs
+  the shipped dspace OCI image to catch missing native libraries without modifying the Raspberry
+  Pi OS image.
 
 Common errors:
 

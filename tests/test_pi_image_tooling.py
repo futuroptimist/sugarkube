@@ -161,6 +161,30 @@ def test_pi_image_workflow_covers_preset_and_download_scripts():
     assert "Run Pi Imager preset e2e test" in content
 
 
+def test_pi_image_workflow_covers_oci_parity_paths():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    paths = _extract_pull_request_paths(content)
+
+    for expected in (
+        "docs/apps/dspace.version",
+        "docs/examples/dspace.values.*",
+        "justfile",
+        "sugarkube_toolkit/pi_cluster/bootstrap.py",
+    ):
+        assert expected in paths, f"Missing {expected} in pull_request paths"
+
+
+def test_pi_image_workflow_exposes_oci_parity_smoke():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert "oci-parity-smoke" in content
+    assert "docker/setup-qemu-action@v3" in content
+    assert "node -e \"require('canvas'); console.log('canvas ok')\"" in content
+    assert "http://127.0.0.1:8080/docs/dCarbon" in content
+
+
 def _collect_checkout_refs(workflow_text: str) -> list[str]:
     pattern = re.compile(r"uses:\s*actions/checkout@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)

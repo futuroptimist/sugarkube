@@ -29,6 +29,10 @@ on:
       - 'scripts/fix_pi_image_permissions.sh'
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
+      - 'docs/apps/dspace.version'
+      - 'docs/examples/dspace.values.*'
+      - 'justfile'
+      - 'sugarkube_toolkit/pi_cluster/bootstrap.py'
       - '.github/workflows/pi-image.yml'
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -43,6 +47,10 @@ on:
       - 'scripts/fix_pi_image_permissions.sh'
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
+      - 'docs/apps/dspace.version'
+      - 'docs/examples/dspace.values.*'
+      - 'justfile'
+      - 'sugarkube_toolkit/pi_cluster/bootstrap.py'
       - '.github/workflows/pi-image.yml'
 
 permissions:
@@ -126,6 +134,126 @@ jobs:
 
       - name: Run Avahi hardening test
         run: bash tests/avahi_hardening_test.sh
+
+  # Close CI/prod gaps by exercising the published dspace OCI runtime directly.
+  oci-parity-smoke:
+    name: oci-parity-smoke
+    needs: unit
+    permissions:
+      contents: read
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-latest
+    env:
+      CLONE_DSPACE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.clone_dspace || 'false' }}
+      DSPACE_BRANCH: v3
+      OCI_AMD64_TAG: dspace:oci-parity-smoke
+      OCI_ARM64_TAG: dspace:oci-parity-smoke-arm64
+    steps:
+      - name: Checkout repository
+        if: github.event_name != 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout pull request head
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare dspace sources
+        run: |
+          set -euo pipefail
+          work_dir="${RUNNER_TEMP:-/tmp}/dspace"
+          if [ "${CLONE_DSPACE}" = "true" ] && [ -d "./dspace/.git" ]; then
+            echo "Using local ./dspace checkout (clone_dspace input enabled)"
+            echo "DSPACE_DIR=$PWD/dspace" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ -d "${work_dir}/.git" ]; then
+            echo "Refreshing cached checkout at ${work_dir}"
+            git -C "${work_dir}" fetch origin "${DSPACE_BRANCH}" --depth 1
+            git -C "${work_dir}" checkout "origin/${DSPACE_BRANCH}"
+          else
+            git clone --depth=1 --branch "${DSPACE_BRANCH}" \
+              https://github.com/democratizedspace/dspace.git "${work_dir}"
+          fi
+          echo "DSPACE_DIR=${work_dir}" >> "$GITHUB_ENV"
+
+      - name: Build dspace image (amd64)
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag "${OCI_AMD64_TAG}" \
+            --build-arg DSPACE_VERSION="oci-parity-${GITHUB_SHA:-local}" \
+            --load \
+            "${DSPACE_DIR}"
+
+      - name: Build dspace image (arm64)
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/arm64 \
+            --tag "${OCI_ARM64_TAG}" \
+            --build-arg DSPACE_VERSION="oci-parity-${GITHUB_SHA:-local}" \
+            --output=type=oci,dest="${RUNNER_TEMP:-/tmp}/dspace-arm64.oci" \
+            "${DSPACE_DIR}"
+
+      - name: Verify canvas dependency in runtime image
+        run: |
+          set -euo pipefail
+          docker run --rm "${OCI_AMD64_TAG}" \
+            node -e "require('canvas'); console.log('canvas ok')"
+
+      - name: Run docs parity smoke test
+        run: |
+          set -euo pipefail
+          container="dspace-oci-parity"
+          cleanup() {
+            docker logs "${container}" || true
+            docker rm -f "${container}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --rm --name "${container}" -p 8080:8080 "${OCI_AMD64_TAG}"
+          for attempt in $(seq 1 12); do
+            if curl -fsS "http://127.0.0.1:8080/docs" -o /tmp/docs.html; then
+              break
+            fi
+            sleep 5
+          done
+          if [ ! -s /tmp/docs.html ]; then
+            echo "Docs endpoint failed to serve content" >&2
+            exit 1
+          fi
+          if ! curl -fsS "http://127.0.0.1:8080/docs/dCarbon" \
+            -o /tmp/dcarbon.html; then
+            echo "dCarbon doc endpoint is unavailable" >&2
+            exit 1
+          fi
+          if ! grep -qi \
+            "dCarbon represents the amount of carbon dioxide produced by a player" \
+            /tmp/dcarbon.html; then
+            echo "dCarbon doc missing expected text" >&2
+            exit 1
+          fi
+          echo "OCI parity smoke passed"
 
   build:
     # Only run the expensive image build when manually dispatched
