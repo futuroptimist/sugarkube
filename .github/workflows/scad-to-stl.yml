@@ -39,8 +39,31 @@ jobs:
           set -e
           python scripts/render_pi_cluster_variants.py --output-dir stl/pi_cluster
 
+      - name: Package grouped STL artifacts
+        run: |
+          set -e
+          python scripts/package_stl_artifacts.py --stl-dir stl --out-dir dist/stl_artifacts
+
       - name: Upload STL artifacts
         uses: actions/upload-artifact@v4
         with:
           name: stl-${{ github.sha }}
           path: stl/
+
+      - name: Upload pi cluster stack STL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stl-pi_cluster_stack-${{ github.sha }}
+          path: dist/stl_artifacts/stl-pi_cluster_stack
+
+      - name: Upload pi cluster carriers STL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stl-pi_cluster_carriers-${{ github.sha }}
+          path: dist/stl_artifacts/stl-pi_cluster_carriers
+
+      - name: Upload sugarkube enclosure STL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stl-sugarkube-enclosure-${{ github.sha }}
+          path: dist/stl_artifacts/stl-sugarkube-enclosure

@@ -113,3 +113,16 @@ def test_scad_to_stl_workflow_renders_pi_carrier_stack() -> None:
 
     assert "render_pi_cluster_variants.py" in workflow
     assert "pi_carrier_stack" in workflow
+
+
+def test_scad_to_stl_workflow_uploads_grouped_artifacts() -> None:
+    """The workflow should ship grouped STL artifacts alongside the full bundle."""
+
+    assert WORKFLOW_PATH.exists(), "scad-to-stl workflow should exist to render STL artifacts"
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "stl-${{ github.sha }}" in workflow
+    assert "stl-pi_cluster_stack-${{ github.sha }}" in workflow
+    assert "stl-pi_cluster_carriers-${{ github.sha }}" in workflow
+    assert "stl-sugarkube-enclosure-${{ github.sha }}" in workflow
+    assert "package_stl_artifacts.py" in workflow

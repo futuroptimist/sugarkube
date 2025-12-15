@@ -64,8 +64,11 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
-  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
-  the `stl-${GITHUB_SHA}` artifact from the workflow run if you want prebuilt meshes.
+  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes.
+  Download the grouped `stl-pi_cluster_stack-${GITHUB_SHA}` artifact for the clearest layout:
+  `printed/` and `heatset/` contain the primary stack parts while `variants/` holds the
+  fan/column matrix. The legacy `stl-${GITHUB_SHA}` artifact still includes everything if you need
+  a single bundle.
 
 ---
 
