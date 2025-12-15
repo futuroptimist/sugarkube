@@ -42,7 +42,7 @@ with log_path.open(\"a\", encoding=\"utf-8\") as handle:
 
 
 def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The helper should invoke OpenSCAD for each column_mode/fan_size pair."""
+    """The helper should invoke OpenSCAD for each stack part and fan size."""
 
     assert (
         SCRIPT_PATH.exists()
@@ -74,35 +74,50 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
     assert result.returncode == 0
 
     log_lines = [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(log_lines) == 6, "Expected six OpenSCAD invocations (2 column modes × 3 fan sizes)."
-
-    expected_modes = {"printed", "brass_chain"}
+    expected_modes = {"printed", "heatset"}
+    expected_parts = {"carrier_level", "post", "fan_adapter"}
     expected_fans = {"80", "92", "120"}
-    seen_pairs: set[tuple[str, str]] = set()
+
+    assert len(log_lines) == len(expected_modes) * len(expected_parts) + len(expected_fans) + 1
+
+    seen_parts: set[tuple[str, str]] = set()
+    seen_fans: set[str] = set()
     for line in log_lines:
         assert "--export-format" in line
         assert "binstl" in line
-        mode_fragment = next(
-            (part for part in line.split() if part.startswith('column_mode="')),
-            None,
-        )
-        fan_fragment = next((part for part in line.split() if part.startswith("fan_size=")), None)
-        assert mode_fragment is not None, "column_mode definition missing from OpenSCAD invocation"
-        assert fan_fragment is not None, "fan_size definition missing from OpenSCAD invocation"
-        mode = mode_fragment.split("=")[1].strip('"')
-        fan = fan_fragment.split("=")[1]
-        assert mode in expected_modes
-        assert fan in expected_fans
-        seen_pairs.add((mode, fan))
+        if "export_part=\"fan_wall\"" in line:
+            fan_fragment = next((part for part in line.split() if part.startswith("fan_size=")), None)
+            assert fan_fragment is not None
+            seen_fans.add(fan_fragment.split("=")[1])
+            continue
+        if "export_part=\"assembly\"" in line:
+            continue
+        part_fragment = next((part for part in line.split() if part.startswith('export_part="')), None)
+        mode_fragment = next((part for part in line.split() if part.startswith('standoff_mode="')), None)
+        assert part_fragment is not None
+        assert mode_fragment is not None
+        part_name = part_fragment.split("=")[1].strip('"')
+        mode_name = mode_fragment.split("=")[1].strip('"')
+        assert part_name in expected_parts
+        assert mode_name in expected_modes
+        seen_parts.add((part_name, mode_name))
 
-    assert seen_pairs == {(mode, fan) for mode in expected_modes for fan in expected_fans}
+    assert seen_parts == {(part, mode) for part in expected_parts for mode in expected_modes}
+    assert seen_fans == expected_fans
 
     generated = {path.name for path in output_dir.glob("*.stl")}
-    assert len(generated) == 6
-    for mode in expected_modes:
-        for fan in expected_fans:
-            expected_name = f"pi_carrier_stack_{mode}_fan{fan}.stl"
-            assert expected_name in generated
+    assert {
+        "pi_carrier_stack_carrier_level_printed.stl",
+        "pi_carrier_stack_carrier_level_heatset.stl",
+        "pi_carrier_stack_post_printed.stl",
+        "pi_carrier_stack_post_heatset.stl",
+        "pi_carrier_stack_fan_adapter_printed.stl",
+        "pi_carrier_stack_fan_adapter_heatset.stl",
+        "pi_carrier_stack_fan_wall_fan80.stl",
+        "pi_carrier_stack_fan_wall_fan92.stl",
+        "pi_carrier_stack_fan_wall_fan120.stl",
+        "pi_carrier_stack_preview.stl",
+    }.issubset(generated)
 
 
 def test_scad_to_stl_workflow_renders_pi_carrier_stack() -> None:

@@ -16,12 +16,14 @@ def _touch_stub(path: Path) -> None:
 
 def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> None:
     for name in [
-        "pi_carrier_stack_printed.stl",
-        "pi_carrier_stack_heatset.stl",
+        "pi_carrier_stack_carrier_level_printed.stl",
+        "pi_carrier_stack_carrier_level_heatset.stl",
+        "pi_carrier_stack_post_printed.stl",
+        "pi_carrier_stack_post_heatset.stl",
+        "pi_carrier_stack_fan_adapter_printed.stl",
+        "pi_carrier_stack_fan_adapter_heatset.stl",
         "fan_wall_printed.stl",
         "fan_wall_heatset.stl",
-        "pi_carrier_column_printed.stl",
-        "pi_carrier_column_heatset.stl",
         "pi_carrier_printed.stl",
         "pi_carrier_heatset.stl",
         "pi5_triple_carrier_rot45_printed.stl",
@@ -37,9 +39,8 @@ def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> Non
 
     if include_variants:
         variant_dir = stl_dir / "pi_cluster"
-        for mode in ("printed", "brass_chain"):
-            for fan_size in (80, 92, 120):
-                _touch_stub(variant_dir / f"pi_carrier_stack_{mode}_fan{fan_size}.stl")
+        for fan_size in (80, 92, 120):
+            _touch_stub(variant_dir / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl")
 
 
 def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
@@ -54,22 +55,21 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
 
     stack_root = out_dir / "pi_cluster_stack"
     assert {path.name for path in (stack_root / "printed").iterdir()} == {
-        "pi_carrier_stack_printed.stl",
+        "pi_carrier_stack_carrier_level_printed.stl",
+        "pi_carrier_stack_post_printed.stl",
+        "pi_carrier_stack_fan_adapter_printed.stl",
         "fan_wall_printed.stl",
-        "pi_carrier_column_printed.stl",
     }
     assert {path.name for path in (stack_root / "heatset").iterdir()} == {
-        "pi_carrier_stack_heatset.stl",
+        "pi_carrier_stack_carrier_level_heatset.stl",
+        "pi_carrier_stack_post_heatset.stl",
+        "pi_carrier_stack_fan_adapter_heatset.stl",
         "fan_wall_heatset.stl",
-        "pi_carrier_column_heatset.stl",
     }
     assert {path.name for path in (stack_root / "variants").iterdir()} == {
-        "pi_carrier_stack_printed_fan80.stl",
-        "pi_carrier_stack_printed_fan92.stl",
-        "pi_carrier_stack_printed_fan120.stl",
-        "pi_carrier_stack_brass_chain_fan80.stl",
-        "pi_carrier_stack_brass_chain_fan92.stl",
-        "pi_carrier_stack_brass_chain_fan120.stl",
+        "pi_carrier_stack_fan_wall_fan80.stl",
+        "pi_carrier_stack_fan_wall_fan92.stl",
+        "pi_carrier_stack_fan_wall_fan120.stl",
     }
 
     carriers_root = out_dir / "pi_cluster_carriers"
@@ -96,7 +96,7 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
 
     readme = (stack_root / "README.txt").read_text(encoding="utf-8")
     assert "Pi cluster stack STLs" in readme
-    assert "- printed/\n  - pi_carrier_stack_printed.stl" in readme
+    assert "- printed/\n  - pi_carrier_stack_carrier_level_printed.stl" in readme
     assert "Docs:\n- docs/pi_cluster_stack.md" in readme
     assert ".github/workflows/scad-to-stl.yml" in readme
 
@@ -153,9 +153,10 @@ def test_main_invocation_cleans_previous_outputs(tmp_path: Path) -> None:
     rebuilt_files = {path.name for path in (out_dir / "pi_cluster_stack" / "printed").iterdir()}
     assert "old.stl" not in rebuilt_files
     assert rebuilt_files == {
-        "pi_carrier_stack_printed.stl",
+        "pi_carrier_stack_carrier_level_printed.stl",
+        "pi_carrier_stack_post_printed.stl",
+        "pi_carrier_stack_fan_adapter_printed.stl",
         "fan_wall_printed.stl",
-        "pi_carrier_column_printed.stl",
     }
 
 

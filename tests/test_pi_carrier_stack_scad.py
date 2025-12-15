@@ -8,6 +8,8 @@ SCAD_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
 PI_CARRIER_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier.scad"
 FAN_WALL_PATH = REPO_ROOT / "cad" / "pi_cluster" / "fan_wall.scad"
 DIMENSIONS_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_dimensions.scad"
+STACK_POST_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_stack_post.scad"
+STACK_ADAPTER_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_stack_fan_adapter.scad"
 
 
 def test_pi_dimensions_defines_hole_spacing_constant() -> None:
@@ -59,5 +61,22 @@ def test_pi_carrier_stack_includes_local_dependencies() -> None:
 
     assert "include <./pi_dimensions.scad>" in source
     assert "include <./pi_carrier.scad>" in source
-    assert "use <./pi_carrier_column.scad>" in source
+    assert "pi_stack_post.scad" in source
+    assert "pi_stack_fan_adapter.scad" in source
     assert "use <./fan_wall.scad>" in source
+
+
+def test_stack_mount_hook_present() -> None:
+    """Stack carriers should expose the locating pocket hooks."""
+
+    source = PI_CARRIER_PATH.read_text(encoding="utf-8")
+    assert "include_stack_mounts" in source
+    assert "stack_mount_positions" in source
+    assert "stack_pocket_depth" in source
+
+
+def test_stack_components_exist() -> None:
+    """Modular stack parts should live alongside the carrier source."""
+
+    assert STACK_POST_PATH.exists(), "Add cad/pi_cluster/pi_stack_post.scad for printed spacers"
+    assert STACK_ADAPTER_PATH.exists(), "Add cad/pi_cluster/pi_stack_fan_adapter.scad for fan clamp"
