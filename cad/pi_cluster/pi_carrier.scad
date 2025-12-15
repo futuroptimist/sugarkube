@@ -2,7 +2,7 @@
 // "heatset" → blind hole sized for brass insert
 // "printed" → simple through-hole
 // "nut"     → through-hole with hex recess
-include <pi_dimensions.scad>;
+include <./pi_dimensions.scad>;
 standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 variation = standoff_mode == "printed" ? "through"
           : standoff_mode == "heatset" ? "blind"

@@ -227,7 +227,8 @@ Four columns align with the Pi mounting hole rectangle and carry loads through t
 
 ### 4.4 `pi_carrier_stack.scad`
 
-Top-level assembly that imports existing modules and composes the stack:
+Top-level assembly that imports existing modules and composes the stack (excerpt; see the source for
+all parameters and helper definitions):
 
 ```scad
 // STL renders and assembly notes: docs/pi_cluster_stack.md
@@ -238,10 +239,33 @@ include <./pi_carrier.scad>;
 use <./pi_carrier_column.scad>;
 use <./fan_wall.scad>;
 
+levels = is_undef(levels) ? 3 : levels;
+z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
+column_mode = is_undef(column_mode) ? "printed" : column_mode;
+fan_size = is_undef(fan_size) ? 120 : fan_size;
+fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_stack;
+stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
 expected_column_spacing = pi_hole_spacing;
 assert(abs(column_spacing[0] - expected_column_spacing[0]) <= 0.2);
 assert(abs(column_spacing[1] - expected_column_spacing[1]) <= 0.2);
+
+module _carrier(level) {
+  translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
+    let(standoff_mode = stack_standoff_mode) pi_carrier();
+}
+
+module _columns() {
+  for (x = [-column_spacing[0] / 2, column_spacing[0] / 2])
+    for (y = [-column_spacing[1] / 2, column_spacing[1] / 2])
+      translate([x, y, 0])
+        pi_carrier_column(column_mode = column_mode, levels = levels, z_gap_clear = z_gap_clear);
+}
+
+module _fan_wall() {
+  translate([column_spacing[0] / 2 + fan_offset_from_stack, 0, 0])
+    fan_wall(fan_size = fan_size, levels = levels, z_gap_clear = z_gap_clear, column_spacing = column_spacing);
+}
 
 module pi_carrier_stack(levels = 3, z_gap_clear = 32, fan_size = 120, standoff_mode = "heatset") {
   _columns();
