@@ -35,3 +35,29 @@ def test_stack_doc_deliverables_marked_shipped() -> None:
     assert (
         "## 12. Deliverables checklist" in text
     ), "Stack doc should keep the deliverables checklist header"
+
+
+def test_stack_doc_prefers_grouped_artifact() -> None:
+    """CI download guidance should point to the grouped stack artifact layout."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert "stl-pi_cluster_stack-${GITHUB_SHA}" in text
+    assert "stl-${GITHUB_SHA}" in text
+    for folder in ("printed/", "heatset/", "variants/"):
+        assert folder in text
+
+
+def test_stack_doc_heatset_guidance_is_post_print() -> None:
+    """Remove the outdated pause-to-insert recommendation for heat-set inserts."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert "Pause after the first 2 mm to insert heat-set brass hardware" not in text
+    assert "Install heat-set\n  inserts after printing" in text
+
+
+def test_stack_doc_fan_mount_diameter_consistent() -> None:
+    """The fan hole diameter guidance should consistently target M3 clearance."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert "Ø3.2–3.4" in text
+    assert "M4/#6 pass-through" not in text
