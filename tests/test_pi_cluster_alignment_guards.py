@@ -21,7 +21,7 @@ def test_pi_carrier_stack_includes_column_spacing_guard() -> None:
 
     assert "column_alignment_tolerance)?0.2" in normalized
     assert "alignment_guard_enabled" in normalized
-    assert "expected_column_spacing=[58,49]" in normalized
+    assert "expected_column_spacing=pi_hole_spacing" in normalized
     assert (
         "abs(column_spacing[0]-expected_column_spacing[0])<=column_alignment_tolerance"
         in normalized
@@ -40,7 +40,7 @@ def test_fan_wall_shares_column_spacing_guard() -> None:
 
     assert "column_alignment_tolerance)?0.2" in normalized
     assert "alignment_guard_enabled" in normalized
-    assert "expected_column_spacing=[58,49]" in normalized
+    assert "expected_column_spacing=pi_hole_spacing" in normalized
     assert (
         "abs(column_spacing[0]-expected_column_spacing[0])<=column_alignment_tolerance"
         in normalized

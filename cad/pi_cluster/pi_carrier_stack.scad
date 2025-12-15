@@ -1,7 +1,10 @@
+// STL renders and assembly notes: docs/pi_cluster_stack.md
+// GitHub Actions renders this file via .github/workflows/scad-to-stl.yml.
 _pi_carrier_auto_render = false;
-include <pi_carrier.scad>;
-use <pi_carrier_column.scad>;
-use <fan_wall.scad>;
+include <./pi_dimensions.scad>;
+include <./pi_carrier.scad>;
+use <./pi_carrier_column.scad>;
+use <./fan_wall.scad>;
 
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
@@ -24,12 +27,7 @@ alignment_guard_enabled =
     is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
 column_alignment_tolerance =
     is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
-expected_column_spacing = [58,49];
-assert(
-    expected_column_spacing[0] == pi_hole_spacing[0] &&
-        expected_column_spacing[1] == pi_hole_spacing[1],
-    "expected_column_spacing should mirror pi_hole_spacing"
-);
+expected_column_spacing = pi_hole_spacing;
 
 if (alignment_guard_enabled) {
     assert(

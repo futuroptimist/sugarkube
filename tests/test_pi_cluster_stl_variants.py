@@ -11,6 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "render_pi_cluster_variants.py"
 SCAD_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "scad-to-stl.yml"
 
 
 def _write_stub_openscad(path: Path, log_file: Path) -> None:
@@ -102,3 +103,13 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
         for fan in expected_fans:
             expected_name = f"pi_carrier_stack_{mode}_fan{fan}.stl"
             assert expected_name in generated
+
+
+def test_scad_to_stl_workflow_renders_pi_carrier_stack() -> None:
+    """The STL workflow should explicitly render the pi_carrier_stack matrix."""
+
+    assert WORKFLOW_PATH.exists(), "scad-to-stl workflow should exist to render STL artifacts"
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "render_pi_cluster_variants.py" in workflow
+    assert "pi_carrier_stack" in workflow

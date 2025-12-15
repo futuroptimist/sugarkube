@@ -62,6 +62,11 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
     -D export_part="fan_wall"
   ```
 
+  CI also renders and publishes STL artifacts via the
+  [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
+  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
+  the `stl-${GITHUB_SHA}` artifact from the workflow run if you want prebuilt meshes.
+
 ---
 
 ## Assembly sequence
@@ -117,7 +122,8 @@ docs/
   pi_cluster_stack.md      # design + fabrication guide (this document)
 ```
 
-The CI renders all `.scad` files into `stl/` via `scripts/openscad_render.sh`. Existing regression
+The CI renders all `.scad` files into `stl/` via `scripts/openscad_render.sh` and the
+pi_carrier_stack fan/column matrix via `scripts/render_pi_cluster_variants.py`. Existing regression
 tests under `tests/cad_regress_test.py` automatically exercise the new modules.
 
 ---
@@ -224,22 +230,24 @@ Four columns align with the Pi mounting hole rectangle and carry loads through t
 Top-level assembly that imports existing modules and composes the stack:
 
 ```scad
+// STL renders and assembly notes: docs/pi_cluster_stack.md
+// GitHub Actions renders this file via .github/workflows/scad-to-stl.yml.
 _pi_carrier_auto_render = false;
-include <pi_carrier.scad>
-use <pi_carrier_column.scad>
-use <fan_wall.scad>
+include <./pi_dimensions.scad>;
+include <./pi_carrier.scad>;
+use <./pi_carrier_column.scad>;
+use <./fan_wall.scad>;
 
-module pi_carrier_level(z = 0, standoff_mode = "heatset") {
-  translate([-plate_len / 2, -plate_wid / 2, z])
-    let(standoff_mode = standoff_mode) pi_carrier();
-}
+column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
+expected_column_spacing = pi_hole_spacing;
+assert(abs(column_spacing[0] - expected_column_spacing[0]) <= 0.2);
+assert(abs(column_spacing[1] - expected_column_spacing[1]) <= 0.2);
 
 module pi_carrier_stack(levels = 3, z_gap_clear = 32, fan_size = 120, standoff_mode = "heatset") {
-  columns(levels, z_gap_clear);
-  for (i = [0 : levels - 1])
-    pi_carrier_level(i * z_gap_clear, standoff_mode);
-  fan_wall(fan_size = fan_size, levels = levels, z_gap_clear = z_gap_clear);
-  echo("pi_carrier_stack", levels = levels, fan_size = fan_size, column_mode = column_mode);
+  _columns();
+  for (level = [0 : levels - 1])
+    _carrier(level);
+  _fan_wall();
 }
 
 pi_carrier_stack();
