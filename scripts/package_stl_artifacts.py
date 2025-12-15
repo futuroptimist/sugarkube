@@ -57,19 +57,16 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
     artifacts = {
         "pi_cluster_stack": {
             "title": "Pi cluster stack STLs",
-            "intro": "Printed + heatset stacks plus fan/column variants for different fan sizes.",
+            "intro": "Modular plates, posts, and fan hardware for the stacked triple-Pi carrier.",
             "layout": {
-                "printed": [
-                    stl_dir / "pi_carrier_stack_printed.stl",
-                    stl_dir / "fan_wall_printed.stl",
-                    stl_dir / "pi_carrier_column_printed.stl",
+                "carriers": [
+                    stl_dir / "pi_cluster" / "carrier_level_printed.stl",
+                    stl_dir / "pi_cluster" / "carrier_level_heatset.stl",
                 ],
-                "heatset": [
-                    stl_dir / "pi_carrier_stack_heatset.stl",
-                    stl_dir / "fan_wall_heatset.stl",
-                    stl_dir / "pi_carrier_column_heatset.stl",
-                ],
-                "variants": sorted((stl_dir / "pi_cluster").glob("pi_carrier_stack_*.stl")),
+                "posts": [stl_dir / "pi_cluster" / "stack_post.stl"],
+                "fan_walls": sorted((stl_dir / "pi_cluster").glob("fan_wall_fan*.stl")),
+                "fan_adapters": sorted((stl_dir / "pi_cluster").glob("fan_adapter_fan*.stl")),
+                "preview": sorted((stl_dir / "pi_cluster").glob("assembly_fan*.stl")),
             },
             "docs": [
                 "docs/pi_cluster_stack.md",
