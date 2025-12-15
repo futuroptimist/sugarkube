@@ -52,7 +52,8 @@ def test_stack_doc_heatset_guidance_is_post_print() -> None:
 
     text = DOC_PATH.read_text(encoding="utf-8")
     assert "Pause after the first 2 mm to insert heat-set brass hardware" not in text
-    assert "Install heat-set\n  inserts after printing" in text
+    flattened = " ".join(text.split())
+    assert "Install heat-set inserts after printing" in flattened
 
 
 def test_stack_doc_fan_mount_diameter_consistent() -> None:
