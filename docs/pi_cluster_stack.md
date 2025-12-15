@@ -227,12 +227,14 @@ Four columns align with the Pi mounting hole rectangle and carry loads through t
 
 ### 4.4 `pi_carrier_stack.scad`
 
-Top-level assembly that imports existing modules and composes the stack (excerpt; see the source for
-all parameters and helper definitions):
+Top-level assembly that imports existing modules and composes the stack. Excerpt below shows the
+key defaults and helper modules; see the source for the full parameter list and guard logic:
 
 ```scad
-// STL renders and assembly notes: docs/pi_cluster_stack.md
-// GitHub Actions renders this file via .github/workflows/scad-to-stl.yml.
+// STL artifacts + build docs:
+// - Spec: docs/pi_cluster_stack.md
+// - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
+// - Artifact: stl-${GITHUB_SHA} (contains stl/pi_cluster/pi_carrier_stack_<mode>_fan{80,92,120}.stl)
 _pi_carrier_auto_render = false;
 include <./pi_dimensions.scad>;
 include <./pi_carrier.scad>;
@@ -242,8 +244,16 @@ use <./fan_wall.scad>;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
 column_mode = is_undef(column_mode) ? "printed" : column_mode;
+column_od = is_undef(column_od) ? 12 : column_od;
+column_wall = is_undef(column_wall) ? 2.4 : column_wall;
+carrier_insert_od = is_undef(carrier_insert_od) ? 3.5 : carrier_insert_od;
+carrier_insert_L = is_undef(carrier_insert_L) ? 4.0 : carrier_insert_L;
 fan_size = is_undef(fan_size) ? 120 : fan_size;
+fan_plate_t = is_undef(fan_plate_t) ? 4 : fan_plate_t;
+fan_insert_od = is_undef(fan_insert_od) ? 5.0 : fan_insert_od;
+fan_insert_L = is_undef(fan_insert_L) ? 4.0 : fan_insert_L;
 fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_stack;
+emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
 expected_column_spacing = pi_hole_spacing;
@@ -264,7 +274,16 @@ module _columns() {
 
 module _fan_wall() {
   translate([column_spacing[0] / 2 + fan_offset_from_stack, 0, 0])
-    fan_wall(fan_size = fan_size, levels = levels, z_gap_clear = z_gap_clear, column_spacing = column_spacing);
+    fan_wall(
+      fan_size = fan_size,
+      fan_plate_t = fan_plate_t,
+      fan_insert_od = fan_insert_od,
+      fan_insert_L = fan_insert_L,
+      levels = levels,
+      z_gap_clear = z_gap_clear,
+      column_spacing = column_spacing,
+      emit_dimension_report = emit_dimension_report
+    );
 }
 
 module pi_carrier_stack(levels = 3, z_gap_clear = 32, fan_size = 120, standoff_mode = "heatset") {

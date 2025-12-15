@@ -1,5 +1,7 @@
-// STL renders and assembly notes: docs/pi_cluster_stack.md
-// GitHub Actions renders this file via .github/workflows/scad-to-stl.yml.
+// STL artifacts + build docs:
+// - Spec: docs/pi_cluster_stack.md
+// - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
+// - Artifact: stl-${GITHUB_SHA} (contains stl/pi_cluster/pi_carrier_stack_<mode>_fan{80,92,120}.stl)
 _pi_carrier_auto_render = false;
 include <./pi_dimensions.scad>;
 include <./pi_carrier.scad>;
