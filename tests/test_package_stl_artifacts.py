@@ -14,11 +14,7 @@ def _touch_stub(path: Path) -> None:
     path.write_text("stub", encoding="utf-8")
 
 
-def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
-    """Outputs should be grouped per use case with README guidance."""
-
-    stl_dir = tmp_path / "stl"
-
+def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> None:
     for name in [
         "pi_carrier_stack_printed.stl",
         "pi_carrier_stack_heatset.stl",
@@ -39,10 +35,19 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
     ]:
         _touch_stub(stl_dir / name)
 
-    variant_dir = stl_dir / "pi_cluster"
-    for mode in ("printed", "brass_chain"):
-        for fan_size in (80, 92, 120):
-            _touch_stub(variant_dir / f"pi_carrier_stack_{mode}_fan{fan_size}.stl")
+    if include_variants:
+        variant_dir = stl_dir / "pi_cluster"
+        for mode in ("printed", "brass_chain"):
+            for fan_size in (80, 92, 120):
+                _touch_stub(variant_dir / f"pi_carrier_stack_{mode}_fan{fan_size}.stl")
+
+
+def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
+    """Outputs should be grouped per use case with README guidance."""
+
+    stl_dir = tmp_path / "stl"
+
+    _write_required_stls(stl_dir)
 
     out_dir = tmp_path / "dist"
     package_stl_artifacts(stl_dir=stl_dir, out_dir=out_dir)
@@ -117,27 +122,49 @@ def test_package_stl_artifacts_requires_variants(tmp_path: Path) -> None:
     """Empty variant globs should be reported to the caller."""
 
     stl_dir = tmp_path / "stl"
-    for name in [
-        "pi_carrier_stack_printed.stl",
-        "pi_carrier_stack_heatset.stl",
-        "fan_wall_printed.stl",
-        "fan_wall_heatset.stl",
-        "pi_carrier_column_printed.stl",
-        "pi_carrier_column_heatset.stl",
-        "pi_carrier_printed.stl",
-        "pi_carrier_heatset.stl",
-        "pi5_triple_carrier_rot45_printed.stl",
-        "pi5_triple_carrier_rot45_heatset.stl",
-        "frame_printed.stl",
-        "frame_heatset.stl",
-        "panel_bracket_printed.stl",
-        "panel_bracket_heatset.stl",
-        "sugarkube_printed.stl",
-        "sugarkube_heatset.stl",
-    ]:
-        _touch_stub(stl_dir / name)
+    _write_required_stls(stl_dir, include_variants=False)
 
     with pytest.raises(
         PackagingError, match="No STL files found for pi_cluster_stack/variants"
     ):
         package_stl_artifacts(stl_dir=stl_dir, out_dir=tmp_path / "dist")
+
+
+def test_main_invocation_cleans_previous_outputs(tmp_path: Path) -> None:
+    """CLI should rebuild outputs and remove stale contents."""
+
+    stl_dir = tmp_path / "stl"
+    _write_required_stls(stl_dir)
+
+    out_dir = tmp_path / "dist"
+    stale_root = out_dir / "pi_cluster_stack"
+    stale_root.mkdir(parents=True)
+    _touch_stub(stale_root / "printed" / "old.stl")
+
+    from scripts.package_stl_artifacts import main
+
+    assert main([
+        "--stl-dir",
+        str(stl_dir),
+        "--out-dir",
+        str(out_dir),
+    ]) == 0
+
+    rebuilt_files = {path.name for path in (out_dir / "pi_cluster_stack" / "printed").iterdir()}
+    assert "old.stl" not in rebuilt_files
+    assert rebuilt_files == {
+        "pi_carrier_stack_printed.stl",
+        "fan_wall_printed.stl",
+        "pi_carrier_column_printed.stl",
+    }
+
+
+def test_main_reports_cli_error(tmp_path: Path) -> None:
+    """CLI should surface PackagingError messages via argparse."""
+
+    from scripts.package_stl_artifacts import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--stl-dir", str(tmp_path / "missing")])
+
+    assert excinfo.value.code == 2
