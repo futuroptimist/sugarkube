@@ -62,6 +62,10 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
     -D export_part="fan_wall"
   ```
 
+- CI continuously renders the documented variants via
+  [`scripts/render_pi_cluster_variants.py`](../scripts/render_pi_cluster_variants.py), writing
+  binaries to `stl/pi_cluster/` (available as workflow artifacts on every commit).
+
 ---
 
 ## Assembly sequence

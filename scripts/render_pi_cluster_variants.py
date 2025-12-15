@@ -29,6 +29,8 @@ def render_variants(
             output_path = output_dir / f"pi_carrier_stack_{column_mode}_fan{fan_size}.stl"
             command = [
                 openscad,
+                "-I",
+                str(scad_path.parent),
                 "-o",
                 str(output_path),
                 "--export-format",

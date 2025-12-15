@@ -1,7 +1,8 @@
 _pi_carrier_auto_render = false;
-include <pi_carrier.scad>;
-use <pi_carrier_column.scad>;
-use <fan_wall.scad>;
+// STL renders: scripts/render_pi_cluster_variants.py → stl/pi_cluster/*.stl
+include <./pi_carrier.scad>;
+use <./pi_carrier_column.scad>;
+use <./fan_wall.scad>;
 
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
@@ -24,7 +25,7 @@ alignment_guard_enabled =
     is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
 column_alignment_tolerance =
     is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
-expected_column_spacing = [58,49];
+expected_column_spacing = pi_hole_spacing;
 assert(
     expected_column_spacing[0] == pi_hole_spacing[0] &&
         expected_column_spacing[1] == pi_hole_spacing[1],
