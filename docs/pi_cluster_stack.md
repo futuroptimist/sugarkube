@@ -33,7 +33,7 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 | Item | Qty | Notes |
 | --- | ---: | --- |
 | `pi_carrier.scad` plates | 3 | Print one plate per level; choose the `standoff_mode` (`heatset`, `through`, or `nut`) that matches your fasteners. |
-| Column set (`pi_carrier_stack` columns) | 4 | Print four identical columns; each column spans all levels and accepts radial heat-set inserts or brass standoffs. |
+| Column set (`pi_carrier_stack` columns) | 4 | Print four identical column parts; the set anchors all levels and accepts radial heat-set inserts or brass standoffs. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
 | M2.5 × 22 mm screws | 12 | Primary fasteners that tie the carriers to the columns. |
@@ -48,8 +48,9 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
-- Print columns upright with three perimeter walls and 40 % gyroid infill. Pause after the first
-  2 mm to insert heat-set brass hardware if you prefer captive nuts.
+- Print columns upright with three perimeter walls and 40 % gyroid infill. Install heat-set
+  inserts after printing using a soldering iron + insert tip; an optional early pause is only
+  useful if you are embedding captive nuts mid-print.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
@@ -65,9 +66,9 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
-  the `stl-pi_cluster_stack-${GITHUB_SHA}` artifact for a pre-grouped bundle with
-  `printed/`, `heatset/`, and `variants/` folders. The legacy `stl-${GITHUB_SHA}` artifact still
-  contains every STL if you prefer the full set.
+  the grouped `stl-pi_cluster_stack-${GITHUB_SHA}` artifact (folders: `printed/` → carrier
+  plates/columns, `heatset/` → insert-ready parts, `variants/` → fan-size + column-mode matrix).
+  The all-in-one `stl-${GITHUB_SHA}` bundle still exists for backward compatibility.
 
 ---
 
@@ -174,7 +175,9 @@ function fan_hole_spacing(size) =
     size == 92  ? 82.5 :
     size == 80  ? 71.5 : 105; // default to 120 mm pattern
 
-function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 screws)
+function fan_mount_clearance(size) = 3.4; // M3 clearance (fits typical printers)
+
+function fan_hole_circle_d(size) = 4.5; // Oversize option when skipping bosses
 
 function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
     let(half = spacing / 2)
@@ -187,8 +190,10 @@ function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
 ```
 
 Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards).
-`fan_square_pattern` returns XY offsets for the square bolt pattern so future fan sizes can reuse the
-same layout without duplicating loop logic in consuming modules.
+`fan_mount_clearance` exposes the default Ø3.2–3.4 mm holes sized for M3 hardware, while
+`fan_hole_circle_d` retains the oversized through-hole option when you omit bosses. The
+`fan_square_pattern` helper returns XY offsets for the square bolt pattern so future fan sizes can
+reuse the same layout without duplicating loop logic in consuming modules.
 
 Regression coverage: `tests/test_fan_patterns_scad.py` ensures the helpers stay defined and continue
 returning the documented diameters and offsets.
@@ -207,7 +212,8 @@ Geometry:
 
 - Rectangular plate: `(fan_size + 2 * 12) × (fan_size + 2 * 12) × fan_plate_t`.
 - Central circular cut-out: `fan_size - 10` diameter to maintain a consistent rim.
-- Mount holes: square layout at `fan_hole_spacing(fan_size)`, Ø3.2–3.4 mm through holes.
+- Mount holes: square layout at `fan_hole_spacing(fan_size)`, Ø3.2–3.4 mm through holes sized for M3
+  screws.
   - **Boss option (default):** 6.5 mm OD × `fan_insert.L + 0.6` boss protruding from the side so
     inserts are installed with the part laying flat. Reinforce bosses with ribs.
   - **Through-hole option:** Ø3.2 mm with hex pockets for captive M3 nuts on the exhaust side.
@@ -258,9 +264,11 @@ fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_s
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
+column_alignment_tolerance =
+  is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
 expected_column_spacing = pi_hole_spacing;
-assert(abs(column_spacing[0] - expected_column_spacing[0]) <= 0.2);
-assert(abs(column_spacing[1] - expected_column_spacing[1]) <= 0.2);
+assert(abs(column_spacing[0] - expected_column_spacing[0]) <= column_alignment_tolerance);
+assert(abs(column_spacing[1] - expected_column_spacing[1]) <= column_alignment_tolerance);
 
 module _carrier(level) {
   translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
@@ -298,8 +306,8 @@ module pi_carrier_stack(levels = 3, z_gap_clear = 32, fan_size = 120, standoff_m
 pi_carrier_stack();
 ```
 
-- **Columns:** Place four instances at the Pi hole rectangle corners. Tabs on the right-side columns
-  expose M3 holes for the fan wall.
+- **Columns:** Place four column parts at the Pi hole rectangle corners. Tabs on the right-side
+  columns expose M3 holes for the fan wall.
 - **Fan wall:** Attach using `fan_offset_from_stack` to set the lateral gap. Provide parameters for
   shroud depth and mounting orientation.
 - **Echo diagnostics:** Emit key parameters (`levels`, `fan_size`, `column_mode`) to simplify CI logs.
