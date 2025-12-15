@@ -7,6 +7,12 @@ standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 variation = standoff_mode == "printed" ? "through"
           : standoff_mode == "heatset" ? "blind"
           : standoff_mode;
+include_stack_mounts =
+    is_undef(include_stack_mounts) ? false : include_stack_mounts;
+stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
+stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
+stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.6 : stack_pocket_depth;
+stack_edge_margin = is_undef(stack_edge_margin) ? 15 : stack_edge_margin;
 
 pi_positions = [[0,0], [1,0], [0,1]]; // layout as [x,y] offsets
 board_len = 85;
@@ -41,7 +47,7 @@ nut_thick = 2.0;
 
 board_angle = 0;
 gap_between_boards = 10;
-edge_margin = 5;
+edge_margin = is_undef(edge_margin) ? 5 : edge_margin;
 port_clearance = 6;
 
 // Optional 1602 LCD module (80x36 mm PCB)
@@ -62,8 +68,20 @@ board_spacing_y = rotY + gap_between_boards;
 max_x = max([for(p=pi_positions) p[0]]);
 max_y = max([for(p=pi_positions) p[1]]);
 
-plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*edge_margin;
-plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*edge_margin + 2*port_clearance;
+_edge_margin = include_stack_mounts ? stack_edge_margin : edge_margin;
+plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*_edge_margin;
+plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*_edge_margin + 2*port_clearance;
+
+function _default_stack_mount_positions() = [
+    [ plate_len / 2 - stack_edge_margin,  plate_wid / 2 - stack_edge_margin],
+    [-plate_len / 2 + stack_edge_margin,  plate_wid / 2 - stack_edge_margin],
+    [ plate_len / 2 - stack_edge_margin, -plate_wid / 2 + stack_edge_margin],
+    [-plate_len / 2 + stack_edge_margin, -plate_wid / 2 + stack_edge_margin]
+];
+
+stack_mount_positions = is_undef(stack_mount_positions)
+    ? _default_stack_mount_positions()
+    : stack_mount_positions;
 
 // ---------- Helper functions ----------
 function rot2d(v, ang) = [
@@ -101,6 +119,14 @@ module standoff(pos=[0,0])
 }
 
 // ---------- Base plate ----------
+module _stack_mount(pos=[0,0])
+{
+    translate([pos[0], pos[1], 0])
+        cylinder(h = stack_pocket_depth, r = stack_pocket_d / 2, $fn = 80);
+    translate([pos[0], pos[1], -0.1])
+        cylinder(h = plate_thickness + 0.2, r = stack_bolt_d / 2, $fn = 60);
+}
+
 module base_plate()
 {
     difference()
@@ -111,8 +137,8 @@ module base_plate()
                         plate_wid - 2*corner_radius]);
         if (variation != "blind") {
             for (pos = pi_positions) {
-                pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
-                pcb_cy = edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
+                pcb_cx = _edge_margin + rotX/2 + pos[0]*board_spacing_x;
+                pcb_cy = _edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
                 for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
                 for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
                     vec = rot2d([dx,dy], board_angle);
@@ -121,12 +147,21 @@ module base_plate()
                 }
             }
             if (include_lcd) {
-                lcd_cx = edge_margin + rotX/2 + board_spacing_x;
-                lcd_cy = edge_margin + port_clearance + rotY/2 + board_spacing_y;
+                lcd_cx = _edge_margin + rotX/2 + board_spacing_x;
+                lcd_cy = _edge_margin + port_clearance + rotY/2 + board_spacing_y;
                 for (dx = [-lcd_hole_spacing_x/2, lcd_hole_spacing_x/2])
                 for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
                     translate([lcd_cx+dx, lcd_cy+dy, -0.01])
                         cylinder(h=countersink_depth + 0.02, r=countersink_diam/2, $fn=32);
+            }
+        }
+
+        if (include_stack_mounts) {
+            for (mount_pos = stack_mount_positions) {
+                translate([mount_pos[0] + plate_len/2,
+                           mount_pos[1] + plate_wid/2,
+                           0])
+                    _stack_mount();
             }
         }
     }
@@ -138,8 +173,8 @@ module pi_carrier()
     base_plate();
 
     for (pos = pi_positions) {
-        pcb_cx = edge_margin + rotX/2 + pos[0]*board_spacing_x;
-        pcb_cy = edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
+        pcb_cx = _edge_margin + rotX/2 + pos[0]*board_spacing_x;
+        pcb_cy = _edge_margin + port_clearance + rotY/2 + pos[1]*board_spacing_y;
         for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
         for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
             vec = rot2d([dx,dy], board_angle);
@@ -148,8 +183,8 @@ module pi_carrier()
     }
 
     if (include_lcd) {
-        lcd_cx = edge_margin + rotX/2 + board_spacing_x;
-        lcd_cy = edge_margin + port_clearance + rotY/2 + board_spacing_y;
+        lcd_cx = _edge_margin + rotX/2 + board_spacing_x;
+        lcd_cy = _edge_margin + port_clearance + rotY/2 + board_spacing_y;
         for (dx = [-lcd_hole_spacing_x/2, lcd_hole_spacing_x/2])
         for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
             standoff([lcd_cx+dx, lcd_cy+dy]);

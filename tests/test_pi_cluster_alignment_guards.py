@@ -13,23 +13,15 @@ def _normalize(source: str) -> str:
     return "".join(source.split())
 
 
-def test_pi_carrier_stack_includes_column_spacing_guard() -> None:
-    """pi_carrier_stack.scad should enforce the documented column spacing tolerance."""
+def test_pi_carrier_stack_exposes_stack_mount_defaults() -> None:
+    """pi_carrier_stack.scad should provide stack mount defaults for posts and adapters."""
 
     source = (SCAD_ROOT / "pi_carrier_stack.scad").read_text(encoding="utf-8")
     normalized = _normalize(source)
 
-    assert "column_alignment_tolerance)?0.2" in normalized
-    assert "alignment_guard_enabled" in normalized
-    assert "expected_column_spacing=pi_hole_spacing" in normalized
-    assert (
-        "abs(column_spacing[0]-expected_column_spacing[0])<=column_alignment_tolerance"
-        in normalized
-    )
-    assert (
-        "abs(column_spacing[1]-expected_column_spacing[1])<=column_alignment_tolerance"
-        in normalized
-    )
+    assert "stack_edge_margin" in normalized
+    assert "stack_mount_defaults" in normalized
+    assert "resolved_stack_mount_positions" in normalized
 
 
 def test_fan_wall_shares_column_spacing_guard() -> None:

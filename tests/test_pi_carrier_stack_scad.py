@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -8,6 +9,8 @@ SCAD_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
 PI_CARRIER_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier.scad"
 FAN_WALL_PATH = REPO_ROOT / "cad" / "pi_cluster" / "fan_wall.scad"
 DIMENSIONS_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_dimensions.scad"
+STACK_POST_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_stack_post.scad"
+STACK_FAN_ADAPTER_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_stack_fan_adapter.scad"
 
 
 def test_pi_dimensions_defines_hole_spacing_constant() -> None:
@@ -26,14 +29,12 @@ def test_pi_carrier_uses_shared_hole_spacing() -> None:
     assert "pi_hole_spacing" in source, "pi_carrier.scad should derive spacing from pi_hole_spacing"
 
 
-def test_pi_carrier_stack_column_spacing_uses_shared_constant() -> None:
-    """column_spacing defaults should reuse the Pi hole spacing constant."""
+def test_pi_carrier_stack_reuses_shared_constants() -> None:
+    """Stack assembly should derive spacing from the shared Pi dimensions module."""
 
     source = SCAD_PATH.read_text(encoding="utf-8")
-    assert (
-        "pi_hole_spacing" in source
-    ), "pi_carrier_stack.scad should default column_spacing to pi_hole_spacing"
-    assert "[58, 49]" not in source, "column_spacing literals drift from the shared constant"
+    assert "pi_hole_spacing" in source, "stack should reuse the shared Pi spacing constant"
+    assert "[58, 49]" not in source, "stack spacing should avoid hard-coded literals"
 
 
 def test_fan_wall_column_spacing_uses_shared_constant() -> None:
@@ -59,5 +60,21 @@ def test_pi_carrier_stack_includes_local_dependencies() -> None:
 
     assert "include <./pi_dimensions.scad>" in source
     assert "include <./pi_carrier.scad>" in source
-    assert "use <./pi_carrier_column.scad>" in source
     assert "use <./fan_wall.scad>" in source
+    assert "use <./pi_stack_post.scad>" in source
+    assert "use <./pi_stack_fan_adapter.scad>" in source
+
+
+def test_stack_support_files_exist() -> None:
+    """New modular stack components should be present in the CAD directory."""
+
+    assert STACK_POST_PATH.exists(), "Missing pi_stack_post.scad"
+    assert STACK_FAN_ADAPTER_PATH.exists(), "Missing pi_stack_fan_adapter.scad"
+
+
+def test_pi_carrier_exposes_stack_mounts() -> None:
+    """pi_carrier.scad should allow optional stack mount geometry."""
+
+    source = PI_CARRIER_PATH.read_text(encoding="utf-8")
+    assert "include_stack_mounts" in source
+    assert re.search(r"stack_mount_positions\s*=", source)

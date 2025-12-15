@@ -32,16 +32,18 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 | Item | Qty | Notes |
 | --- | ---: | --- |
-| `pi_carrier.scad` plates | 3 | Print one plate per level; choose the `standoff_mode` (`heatset`, `through`, or `nut`) that matches your fasteners. |
-| Column set (`pi_carrier_stack` column parts) | 4 | Print four identical column parts; current release spans all levels and accepts radial heat-set inserts or brass standoffs. |
+| `pi_carrier.scad` plates | 3 | Print one plate per level; set `include_stack_mounts=true` when rendering the stack-ready version. |
+| Stack posts (`pi_stack_post.scad`) | 8 | Two per gap for a three-level stack; through-bored for M3 tie rods and keyed with locating bosses. |
+| Fan adapter (`pi_stack_fan_adapter.scad`) | 1 | Clamps to the fan-side posts and presents heat-set bosses that match the fan wall tabs. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
-| M2.5 × 22 mm screws | 12 | Primary fasteners that tie the carriers to the columns. |
-| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 12 | Seat into the column pockets when using the printed-column mode. |
+| M3 tie rods or screws | 4 | Length = stack height + adapter; clamp the posts and plates together. |
+| M2.5 × 22 mm screws | 12 | Fasteners that tie each Pi to the carrier standoffs. |
+| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 12 | Seat into the carrier standoffs when using the heat-set variant. |
 | Brass spacers, M2.5 female–female, 11 mm | 12 | Maintains separation between each Pi and the carrier plate. |
 | PC fan (80/92/120 mm) | 1 | Match the fan size to the selected `fan_size` parameter. |
 | M3 × 16 mm screws | 4 | Secure the fan to the wall bosses. |
-| M3 heat-set inserts (5 mm OD × 4 mm) | 4 | Install in the fan wall bosses. |
+| M3 heat-set inserts (5 mm OD × 4 mm) | 4 | Install in the fan wall bosses and adapter bosses. |
 | Cable ties or hook-and-loop straps | 6 | Optional strain relief for USB and Ethernet harnesses. |
 
 ### Print preparation
@@ -65,11 +67,11 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
-  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
-  the grouped `stl-pi_cluster_stack-${GITHUB_SHA}` artifact first; it contains the stack-specific
-  STLs organised under `printed/` (per-part STLs), `heatset/` (insert-ready variants), and
-  `variants/` (matrix renders by column and fan size). The all-in-one `stl-${GITHUB_SHA}` artifact
-  still ships for full-repo coverage and backward compatibility.
+  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes. Grab the grouped
+  `stl-pi_cluster_stack-${GITHUB_SHA}` artifact first; it contains `printed/` and `heatset/`
+  carrier plates, a shared `post/adapter` set, `fan_walls/` for the 80/92/120 mm sizes, and a
+  `preview/` assembly. The all-in-one `stl-${GITHUB_SHA}` artifact still ships for full-repo coverage
+  and backward compatibility.
 
 ---
 
@@ -78,14 +80,16 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 1. **Prep the carriers.** Follow the insert installation guidance in
    [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to seat M2.5 brass inserts or chase printed
    threads. Install the brass spacers so they are ready for board mounting.
-2. **Install column hardware.** Heat the M2.5 inserts and press them into the column pockets at each
-   level. For brass-chain builds, thread female–female standoffs together outside the column and
-   slide the assembly into place once cool.
-3. **Stack the carriers.** Start with the lowest carrier, align a column at each corner, and fasten
-   it with an M2.5 screw. Repeat for the remaining levels, ensuring the cable cut-outs line up.
-4. **Mount the fan wall.** Align the wall bosses with the column tabs and secure them using the same
-   M2.5 screws. Attach the PC fan using the installed M3 inserts and screws, pointing airflow toward
-   the Pis.
+2. **Stage the posts.** Print eight `pi_stack_post` parts and drop their bosses into the carrier
+   pockets. Run the M3 tie rods through the stack mounts to confirm clearance.
+3. **Stack the carriers.** Start with the lowest carrier, thread the tie rods through its stack
+   mounts, and slide a post onto each boss. Add the second carrier, repeat the posts, and finish with
+   the top carrier. Snug the rods so the posts clamp the plates—avoid over-torquing to keep inserts
+   seated.
+4. **Mount the fan adapter and wall.** Clamp the adapter onto the fan-side posts using the same tie
+   rods. Install heat-set inserts in the adapter bosses, align the fan wall tabs, and fasten them
+   with short M3 screws. Attach the PC fan using the installed M3 inserts and screws, pointing
+   airflow toward the Pis.
 5. **Cable and verify.** Route power and Ethernet leads down the rear spine, using cable ties for
    strain relief. Power on each Pi sequentially and confirm airflow keeps PoE HAT temperatures below
    60 °C at idle.
