@@ -148,6 +148,7 @@ All dimensions are in millimetres unless otherwise noted.
 | `column_OD` | 12 | Column outside diameter. |
 | `column_wall` | 2.4 | Column wall thickness (≥ three extrusion widths at 0.4 mm nozzle). |
 | `column_pitch` | `58 × 49` | Column XY spacing matching the Pi hole rectangle for alignment. |
+| `column_alignment_tolerance` | 0.2 | Maximum allowed deviation between configured and expected column spacing; assertions fail when exceeded. |
 | `fan_size` | 120 | Supported values: 80, 92, 120. |
 | `fan_plate_t` | 4 | Thickness of the perpendicular fan plate. |
 | `fan_offset_from_stack` | 15 | Gap from the outermost column to the fan wall (cable clearance). |
@@ -176,7 +177,7 @@ function fan_hole_spacing(size) =
     size == 92  ? 82.5 :
     size == 80  ? 71.5 : 105; // default to 120 mm pattern
 
-function fan_mount_clearance(size) = 3.4; // Ø3.2–3.4 mm clearance for M3 fan screws.
+function fan_mount_clearance() = 3.4; // Ø3.2–3.4 mm clearance for M3 fan screws.
 
 function fan_hole_circle_d(size) =
     4.5; // Optional pass-through when omitting bosses (oversize, loose M3/M4 fit)

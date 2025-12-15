@@ -48,7 +48,7 @@ def test_stack_doc_prefers_grouped_artifact() -> None:
 
 
 def test_stack_doc_heatset_guidance_is_post_print() -> None:
-    """Remove the outdated pause-to-insert recommendation for heat-set inserts."""
+    """Verify that the outdated pause-to-insert recommendation for heat-set inserts has been removed."""
 
     text = DOC_PATH.read_text(encoding="utf-8")
     assert "Pause after the first 2 mm to insert heat-set brass hardware" not in text
