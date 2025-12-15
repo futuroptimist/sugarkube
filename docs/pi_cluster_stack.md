@@ -32,13 +32,13 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 | Item | Qty | Notes |
 | --- | ---: | --- |
-| `pi_carrier.scad` plates | 3 | Print one plate per level; choose the `standoff_mode` (`heatset`, `through`, or `nut`) that matches your fasteners. |
-| Column set (`pi_carrier_stack` columns) | 4 | Print four identical columns; each column spans all levels and accepts radial heat-set inserts or brass standoffs. |
+| `pi_carrier.scad` plates | 3 | Print one per level; pick `standoff_mode` to match fasteners. |
+| Column parts (`pi_carrier_stack`) | 4 | Print four parts; align levels; accept inserts or brass. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
 | M2.5 × 22 mm screws | 12 | Primary fasteners that tie the carriers to the columns. |
-| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 12 | Seat into the column pockets when using the printed-column mode. |
-| Brass spacers, M2.5 female–female, 11 mm | 12 | Maintains separation between each Pi and the carrier plate. |
+| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 12 | Seat into column pockets for printed columns. |
+| Brass spacers, M2.5 female–female, 11 mm | 12 | Maintains Pi-to-carrier separation. |
 | PC fan (80/92/120 mm) | 1 | Match the fan size to the selected `fan_size` parameter. |
 | M3 × 16 mm screws | 4 | Secure the fan to the wall bosses. |
 | M3 heat-set inserts (5 mm OD × 4 mm) | 4 | Install in the fan wall bosses. |
@@ -48,8 +48,9 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
-- Print columns upright with three perimeter walls and 40 % gyroid infill. Pause after the first
-  2 mm to insert heat-set brass hardware if you prefer captive nuts.
+- Print columns upright with three perimeter walls and 40 % gyroid infill. Install heat-set
+  inserts after printing using a soldering iron and insert tip; optionally pause early only when
+  embedding captive nuts or other hardware mid-print.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
@@ -64,10 +65,11 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
-  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
-  the `stl-pi_cluster_stack-${GITHUB_SHA}` artifact for a pre-grouped bundle with
-  `printed/`, `heatset/`, and `variants/` folders. The legacy `stl-${GITHUB_SHA}` artifact still
-  contains every STL if you prefer the full set.
+  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes.
+  Grab the `stl-pi_cluster_stack-${GITHUB_SHA}` artifact for a grouped bundle with `printed/`,
+  `heatset/`, and `variants/` folders so you can pick the STL that matches your fasteners. The
+  legacy `stl-${GITHUB_SHA}` all-in-one artifact still contains every STL for backward
+  compatibility.
 
 ---
 
@@ -77,8 +79,8 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
    [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to seat M2.5 brass inserts or chase printed
    threads. Install the brass spacers so they are ready for board mounting.
 2. **Install column hardware.** Heat the M2.5 inserts and press them into the column pockets at each
-   level. For brass-chain builds, thread female–female standoffs together outside the column and
-   slide the assembly into place once cool.
+   level. For brass-chain builds, thread female–female standoffs together outside each column part
+   and slide the assembly into place once cool.
 3. **Stack the carriers.** Start with the lowest carrier, align a column at each corner, and fasten
    it with an M2.5 screw. Repeat for the remaining levels, ensuring the cable cut-outs line up.
 4. **Mount the fan wall.** Align the wall bosses with the column tabs and secure them using the same
@@ -139,10 +141,10 @@ All dimensions are in millimetres unless otherwise noted.
 | `levels` | 3 | Number of carriers stacked vertically. |
 | `pi_per_carrier` | 3 | Fixed by the existing `pi_carrier.scad` layout (three Pis). |
 | `standoff_mode` | `"heatset"` | Forwarded to `pi_carrier.scad` for board standoffs. |
-| `z_gap_clear` | 32 | Vertical gap between carrier plates; typically `poe_hat_height + intake_margin`. |
+| `z_gap_clear` | 32 | Vertical gap between plates; typically `poe_hat_height + intake_margin`. |
 | `poe_hat_height` | 24 | Expected PoE(+)/aftermarket HAT height; adjustable for vendor variation. |
 | `intake_margin` | 8 | Extra clearance above the HAT fan intake to avoid recirculation. |
-| `column_mode` | `"printed"` | `"printed"` = printed columns with heat-set inserts each level;<br>`"brass_chain"` = daisy-chained brass standoffs aligned to Pi holes. |
+| `column_mode` | `"printed"` | printed columns; `brass_chain` = chained standoffs. |
 | `column_OD` | 12 | Column outside diameter. |
 | `column_wall` | 2.4 | Column wall thickness (≥ three extrusion widths at 0.4 mm nozzle). |
 | `column_pitch` | `58 × 49` | Column XY spacing matching the Pi hole rectangle for alignment. |
@@ -151,7 +153,7 @@ All dimensions are in millimetres unless otherwise noted.
 | `fan_offset_from_stack` | 15 | Gap from the outermost column to the fan wall (cable clearance). |
 | `fan_to_floor` | 15 | Z-offset from the bottom carrier to the fan hole centre (centres airflow). |
 | `fan_insert` | `{od: 5.0, L: 4.0}` | M3 heat-set insert geometry for the fan wall bosses. |
-| `carrier_insert` | `{od: 3.5, L: 4.0}` | M2.5 heat-set insert geometry for Pi columns (matches current defaults). |
+| `carrier_insert` | `{od: 3.5, L: 4.0}` | M2.5 heat-set insert geometry for Pi columns. |
 
 Notes:
 
@@ -174,7 +176,10 @@ function fan_hole_spacing(size) =
     size == 92  ? 82.5 :
     size == 80  ? 71.5 : 105; // default to 120 mm pattern
 
-function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 screws)
+function fan_mount_clearance(size) = 3.4; // Through hole for M3 screws with margin.
+
+function fan_hole_circle_d(size) =
+    4.5; // Oversize pass-through for the no-boss variant (M4/#6 clearance)
 
 function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
     let(half = spacing / 2)
@@ -187,8 +192,10 @@ function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
 ```
 
 Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards).
-`fan_square_pattern` returns XY offsets for the square bolt pattern so future fan sizes can reuse the
-same layout without duplicating loop logic in consuming modules.
+`fan_mount_clearance` and `fan_hole_circle_d` provide the default M3 clearance (boss mode) and the
+oversize through-hole (no-boss mode). `fan_square_pattern` returns XY offsets for the square bolt
+pattern so future fan sizes can reuse the same layout without duplicating loop logic in consuming
+modules.
 
 Regression coverage: `tests/test_fan_patterns_scad.py` ensures the helpers stay defined and continue
 returning the documented diameters and offsets.
@@ -207,21 +214,22 @@ Geometry:
 
 - Rectangular plate: `(fan_size + 2 * 12) × (fan_size + 2 * 12) × fan_plate_t`.
 - Central circular cut-out: `fan_size - 10` diameter to maintain a consistent rim.
-- Mount holes: square layout at `fan_hole_spacing(fan_size)`, Ø3.2–3.4 mm through holes.
+- Mount holes: square layout at `fan_hole_spacing(fan_size)`, Ø3.4 mm clearance for M3 screws.
   - **Boss option (default):** 6.5 mm OD × `fan_insert.L + 0.6` boss protruding from the side so
     inserts are installed with the part laying flat. Reinforce bosses with ribs.
-  - **Through-hole option:** Ø3.2 mm with hex pockets for captive M3 nuts on the exhaust side.
+  - **Through-hole option:** Ø4.5 mm oversize for M3 with optional hex pockets for captive M3
+    nuts on the exhaust side (matches `fan_hole_circle_d`).
 - Wall-to-column interface: two vertical rows of M3 insert bosses along the rear edge spaced per
-  carrier level (`z = 0`, `z_gap_clear`, `2 * z_gap_clear`) plus mid-span bosses for stiffness. These
-  mate with tabs on the right-side columns via M3×8 screws.
+  carrier level (`z = 0`, `z_gap_clear`, `2 * z_gap_clear`) plus mid-span bosses for stiffness.
+  These mate with tabs on the right-side columns via M3×8 screws.
 
 ### 4.3 `pi_carrier_column.scad`
 
 Four columns align with the Pi mounting hole rectangle and carry loads through the stack.
 
-- **Printed mode (`column_mode = "printed"`):** Hollow cylinders (`column_OD`, `column_wall`). At each
-  level add a cross-bored pocket for an M2.5 heat-set insert oriented radially so plate screws pull
-  across layers.
+- **Printed mode (`column_mode = "printed"`):** Hollow cylinders (`column_OD`, `column_wall`). At
+  each level add a cross-bored pocket for an M2.5 heat-set insert oriented radially so plate screws
+  pull across layers.
 - **Brass-chain mode (`column_mode = "brass_chain"`):** Provide a clearance tube for daisy-chained
   M2.5 female–female brass standoffs with shelves every `z_gap_clear` featuring Ø2.8–3.0 mm
   pass-through holes and optional hex pockets to trap nuts during assembly.
@@ -236,7 +244,7 @@ key defaults and helper modules; see the source for the full parameter list and 
 // STL artifacts + build docs:
 // - Spec: docs/pi_cluster_stack.md
 // - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
-// - Artifact: stl-${GITHUB_SHA} (contains stl/pi_cluster/pi_carrier_stack_<mode>_fan{80,92,120}.stl)
+// - Artifacts: stl-pi_cluster_stack-${GITHUB_SHA} (grouped) or stl-${GITHUB_SHA} (full matrix)
 _pi_carrier_auto_render = false;
 include <./pi_dimensions.scad>;
 include <./pi_carrier.scad>;
@@ -258,9 +266,20 @@ fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_s
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
+alignment_guard_enabled = is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
+column_alignment_tolerance =
+    is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
 expected_column_spacing = pi_hole_spacing;
-assert(abs(column_spacing[0] - expected_column_spacing[0]) <= 0.2);
-assert(abs(column_spacing[1] - expected_column_spacing[1]) <= 0.2);
+if (alignment_guard_enabled) {
+  assert(
+    abs(column_spacing[0] - expected_column_spacing[0]) <= column_alignment_tolerance,
+    "column_spacing[0] out of tolerance"
+  );
+  assert(
+    abs(column_spacing[1] - expected_column_spacing[1]) <= column_alignment_tolerance,
+    "column_spacing[1] out of tolerance"
+  );
+}
 
 module _carrier(level) {
   translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
@@ -302,9 +321,10 @@ pi_carrier_stack();
   expose M3 holes for the fan wall.
 - **Fan wall:** Attach using `fan_offset_from_stack` to set the lateral gap. Provide parameters for
   shroud depth and mounting orientation.
-- **Echo diagnostics:** Emit key parameters (`levels`, `fan_size`, `column_mode`) to simplify CI logs.
-  Regression coverage: `tests/test_pi_carrier_stack_scad.py::test_pi_carrier_stack_imports_pi_carrier_module`
-  ensures the assembly reuses `pi_carrier()` instead of placeholder cubes.
+- **Echo diagnostics:** Emit key parameters (`levels`, `fan_size`, `column_mode`) to simplify CI
+  logs. Regression coverage:
+  `tests/test_pi_carrier_stack_scad.py::test_pi_carrier_stack_imports_pi_carrier_module` ensures the
+  assembly reuses `pi_carrier()` instead of placeholder cubes.
 
 ---
 
@@ -323,8 +343,8 @@ pi_carrier_stack();
 
 ## 6. Hardware (per 3×3 stack)
 
-- **Per Raspberry Pi (×9):** M2.5 × 22 pan-head screw + M2.5 11 mm brass spacer (aligns with existing
-  documentation; adjust for washers if needed).
+- **Per Raspberry Pi (×9):** M2.5 × 22 pan-head screw + M2.5 11 mm brass spacer (aligns with
+  existing documentation; adjust for washers if needed).
 - **Columns & carriers:**
   - Printed columns → M2.5 × 8 screws inserted sideways into each carrier (four corners × levels).
   - Brass-chain columns → M2.5 female–female standoffs stacked to `z_gap_clear` height plus long
@@ -374,8 +394,10 @@ pi_carrier_stack();
 
 - Reuse the base: call `pi_carrier()` directly from `pi_carrier_stack.scad`, passing through
   `standoff_mode`.
-- Columns should expose tab spacing as parameters so the fan wall can adjust without geometry edits.
-- Default printed-hole clearances: Ø3.2 mm for M3, Ø2.8 mm for M2.5; heat-set pockets undersized by
+- Columns should expose tab spacing as parameters so the fan wall can adjust without geometry edits;
+  keep guidance flexible so column parts can split in future revisions without invalidating the
+  hardware counts.
+- Default printed-hole clearances: Ø3.4 mm for M3, Ø2.8 mm for M2.5; heat-set pockets undersized by
   0.2 mm relative to insert OD.
 - Add minimal `echo()` summaries to assist CI diagnostics.
 - Keep the Bill of materials and Assembly sequence sections current as tolerances or hardware
@@ -457,10 +479,11 @@ regression checklist when refreshing the stacked carrier design.
       `tests/test_pi_cluster_stack_assembly_doc.py`).
 - [x] Verify column alignment with the 58 mm × 49 mm hole rectangle and fan wall spacing within
       ±0.2 mm. (Regression coverage: `tests/test_pi_cluster_alignment_guards.py`.)
-- [x] Add optional OpenSCAD tests (e.g., `echo()` dimension checks) to aid regression
-      testing. (Regression coverage:
+- [x] Add optional OpenSCAD tests (e.g., `echo()` dimension checks) to aid regression testing.
+      Regression coverage:
       `tests/test_pi_cluster_dimension_reports.py::test_dimension_report_echo_is_declared`,
-      `tests/test_pi_cluster_dimension_reports.py::test_dimension_report_echo_outputs_expected_keys`.)
+      `tests/test_pi_cluster_dimension_reports.py::`
+      `test_dimension_report_echo_outputs_expected_keys`.
 
 ---
 

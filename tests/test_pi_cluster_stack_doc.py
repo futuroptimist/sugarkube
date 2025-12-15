@@ -35,3 +35,31 @@ def test_stack_doc_deliverables_marked_shipped() -> None:
     assert (
         "## 12. Deliverables checklist" in text
     ), "Stack doc should keep the deliverables checklist header"
+
+
+def test_stack_doc_prefers_grouped_artifact() -> None:
+    """The stacked carrier should point at the grouped STL artifact bundle."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    grouped = "stl-pi_cluster_stack-${GITHUB_SHA}"
+    legacy = "stl-${GITHUB_SHA}"
+    assert grouped in text, "Doc should reference the grouped pi_cluster_stack artifact"
+    assert legacy in text, "Doc should keep the legacy monolithic artifact reference"
+    assert text.find(grouped) < text.find(legacy), "Grouped artifact should be preferred over legacy"
+
+
+def test_stack_doc_heatset_guidance_is_post_print() -> None:
+    """The print prep section should no longer suggest mid-print insert installs by default."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert (
+        "Pause after the first 2 mm to insert heat-set brass hardware" not in text
+    ), "Print prep still suggests pausing mid-print for heat-set inserts"
+
+
+def test_fan_mount_holes_use_consistent_diameter() -> None:
+    """The fan hole diameter guidance should share one clearance target."""
+
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert "Ø3.4" in text, "Fan mount holes should call out the 3.4 mm M3 clearance"
+    assert "Ø3.2" not in text, "Remove conflicting Ø3.2–3.4 ranges from the fan mount guidance"
