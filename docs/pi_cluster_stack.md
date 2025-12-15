@@ -33,7 +33,7 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 | Item | Qty | Notes |
 | --- | ---: | --- |
 | `pi_carrier.scad` plates | 3 | Print one plate per level; choose the `standoff_mode` (`heatset`, `through`, or `nut`) that matches your fasteners. |
-| Column set (`pi_carrier_stack` columns) | 4 | Print four identical columns; each column spans all levels and accepts radial heat-set inserts or brass standoffs. |
+| Column set (`pi_carrier_stack` columns) | 4 | Print four identical column parts; each column set spans all levels and accepts radial heat-set inserts or brass standoffs. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
 | M2.5 × 22 mm screws | 12 | Primary fasteners that tie the carriers to the columns. |
@@ -48,8 +48,9 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
-- Print columns upright with three perimeter walls and 40 % gyroid infill. Pause after the first
-  2 mm to insert heat-set brass hardware if you prefer captive nuts.
+- Print columns upright with three perimeter walls and 40 % gyroid infill. Install heat-set inserts
+  after printing using a soldering iron and insert tip. Optional: pause the print only if you plan
+  to embed captive nuts or other hardware mid-print.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
@@ -64,10 +65,11 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
-  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
-  the `stl-pi_cluster_stack-${GITHUB_SHA}` artifact for a pre-grouped bundle with
-  `printed/`, `heatset/`, and `variants/` folders. The legacy `stl-${GITHUB_SHA}` artifact still
-  contains every STL if you prefer the full set.
+  `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Prefer
+  the grouped `stl-pi_cluster_stack-${GITHUB_SHA}` artifact: it includes `printed/` (columns and
+  fan walls), `heatset/` (carrier plates for heat-set mode), and `variants/` (fan sizes and column
+  modes) folders so you can grab the exact STL quickly. The monolithic `stl-${GITHUB_SHA}` artifact
+  still exists for backward compatibility if you need the full matrix in one download.
 
 ---
 
@@ -77,8 +79,8 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
    [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to seat M2.5 brass inserts or chase printed
    threads. Install the brass spacers so they are ready for board mounting.
 2. **Install column hardware.** Heat the M2.5 inserts and press them into the column pockets at each
-   level. For brass-chain builds, thread female–female standoffs together outside the column and
-   slide the assembly into place once cool.
+   level. For brass-chain builds, thread female–female standoffs together outside the column parts
+   and slide the assembly into place once cool.
 3. **Stack the carriers.** Start with the lowest carrier, align a column at each corner, and fasten
    it with an M2.5 screw. Repeat for the remaining levels, ensuring the cable cut-outs line up.
 4. **Mount the fan wall.** Align the wall bosses with the column tabs and secure them using the same
@@ -174,7 +176,10 @@ function fan_hole_spacing(size) =
     size == 92  ? 82.5 :
     size == 80  ? 71.5 : 105; // default to 120 mm pattern
 
-function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 screws)
+function fan_mount_clearance(size) = 3.4; // Clearance for M3 screws (bossed fan mounts)
+
+function fan_hole_circle_d(size) =
+    4.5; // Oversize pass-through for the nut-trap variant; default mounts use fan_mount_clearance()
 
 function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
     let(half = spacing / 2)
@@ -186,7 +191,8 @@ function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
         ];
 ```
 
-Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards).
+Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards). Use
+Ø3.2–3.4 mm clearance for M3 hardware; oversize only when you explicitly need pass-through holes.
 `fan_square_pattern` returns XY offsets for the square bolt pattern so future fan sizes can reuse the
 same layout without duplicating loop logic in consuming modules.
 
@@ -207,10 +213,11 @@ Geometry:
 
 - Rectangular plate: `(fan_size + 2 * 12) × (fan_size + 2 * 12) × fan_plate_t`.
 - Central circular cut-out: `fan_size - 10` diameter to maintain a consistent rim.
-- Mount holes: square layout at `fan_hole_spacing(fan_size)`, Ø3.2–3.4 mm through holes.
+- Mount holes: square layout at `fan_hole_spacing(fan_size)`, Ø3.2–3.4 mm clearance for M3 hardware.
   - **Boss option (default):** 6.5 mm OD × `fan_insert.L + 0.6` boss protruding from the side so
     inserts are installed with the part laying flat. Reinforce bosses with ribs.
-  - **Through-hole option:** Ø3.2 mm with hex pockets for captive M3 nuts on the exhaust side.
+  - **Through-hole option:** Ø3.4 mm pass-through with hex pockets for captive M3 nuts on the exhaust
+    side; oversize only if your printer tolerances demand it.
 - Wall-to-column interface: two vertical rows of M3 insert bosses along the rear edge spaced per
   carrier level (`z = 0`, `z_gap_clear`, `2 * z_gap_clear`) plus mid-span bosses for stiffness. These
   mate with tabs on the right-side columns via M3×8 screws.
@@ -236,7 +243,7 @@ key defaults and helper modules; see the source for the full parameter list and 
 // STL artifacts + build docs:
 // - Spec: docs/pi_cluster_stack.md
 // - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
-// - Artifact: stl-${GITHUB_SHA} (contains stl/pi_cluster/pi_carrier_stack_<mode>_fan{80,92,120}.stl)
+// - Artifact: stl-pi_cluster_stack-${GITHUB_SHA} (grouped STL bundle for the stack)
 _pi_carrier_auto_render = false;
 include <./pi_dimensions.scad>;
 include <./pi_carrier.scad>;
@@ -258,9 +265,13 @@ fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_s
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
+column_alignment_tolerance =
+  is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
 expected_column_spacing = pi_hole_spacing;
-assert(abs(column_spacing[0] - expected_column_spacing[0]) <= 0.2);
-assert(abs(column_spacing[1] - expected_column_spacing[1]) <= 0.2);
+assert(
+  abs(column_spacing[0] - expected_column_spacing[0]) <= column_alignment_tolerance);
+assert(
+  abs(column_spacing[1] - expected_column_spacing[1]) <= column_alignment_tolerance);
 
 module _carrier(level) {
   translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
