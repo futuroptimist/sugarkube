@@ -33,7 +33,7 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 | Item | Qty | Notes |
 | --- | ---: | --- |
 | `pi_carrier.scad` plates | 3 | Print one plate per level; choose the `standoff_mode` (`heatset`, `through`, or `nut`) that matches your fasteners. |
-| Column set (`pi_carrier_stack` columns) | 4 | Print four identical columns; each column spans all levels and accepts radial heat-set inserts or brass standoffs. |
+| Column set (`pi_carrier_stack` column parts) | 4 | Print four identical column parts; current release spans all levels and accepts radial heat-set inserts or brass standoffs. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
 | M2.5 × 22 mm screws | 12 | Primary fasteners that tie the carriers to the columns. |
@@ -48,8 +48,9 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
-- Print columns upright with three perimeter walls and 40 % gyroid infill. Pause after the first
-  2 mm to insert heat-set brass hardware if you prefer captive nuts.
+- Print columns upright with three perimeter walls and 40 % gyroid infill. Install heat-set
+  inserts after printing using a soldering iron and insert tip; optionally pause for captive nuts
+  if you embed hardware mid-print.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
@@ -65,9 +66,10 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and column modes. Grab
-  the `stl-pi_cluster_stack-${GITHUB_SHA}` artifact for a pre-grouped bundle with
-  `printed/`, `heatset/`, and `variants/` folders. The legacy `stl-${GITHUB_SHA}` artifact still
-  contains every STL if you prefer the full set.
+  the grouped `stl-pi_cluster_stack-${GITHUB_SHA}` artifact first; it contains the stack-specific
+  STLs organised under `printed/` (per-part STLs), `heatset/` (insert-ready variants), and
+  `variants/` (matrix renders by column and fan size). The all-in-one `stl-${GITHUB_SHA}` artifact
+  still ships for full-repo coverage and backward compatibility.
 
 ---
 
@@ -146,6 +148,7 @@ All dimensions are in millimetres unless otherwise noted.
 | `column_OD` | 12 | Column outside diameter. |
 | `column_wall` | 2.4 | Column wall thickness (≥ three extrusion widths at 0.4 mm nozzle). |
 | `column_pitch` | `58 × 49` | Column XY spacing matching the Pi hole rectangle for alignment. |
+| `column_alignment_tolerance` | 0.2 | Maximum allowed deviation between configured and expected column spacing; assertions fail when exceeded. |
 | `fan_size` | 120 | Supported values: 80, 92, 120. |
 | `fan_plate_t` | 4 | Thickness of the perpendicular fan plate. |
 | `fan_offset_from_stack` | 15 | Gap from the outermost column to the fan wall (cable clearance). |
@@ -174,7 +177,10 @@ function fan_hole_spacing(size) =
     size == 92  ? 82.5 :
     size == 80  ? 71.5 : 105; // default to 120 mm pattern
 
-function fan_hole_circle_d(size) = 4.5; // M4/#6 pass-through (oversize for M3 screws)
+function fan_mount_clearance() = 3.4; // Ø3.2–3.4 mm clearance for M3 fan screws.
+
+function fan_hole_circle_d(size) =
+    4.5; // Optional pass-through when omitting bosses (oversize, loose M3/M4 fit)
 
 function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
     let(half = spacing / 2)
@@ -187,8 +193,10 @@ function fan_square_pattern(size, spacing = fan_hole_spacing(size)) =
 ```
 
 Values are derived from common PC fan datasheets (Noctua NF-A12x25, Arctic F9, 80 mm guards).
-`fan_square_pattern` returns XY offsets for the square bolt pattern so future fan sizes can reuse the
-same layout without duplicating loop logic in consuming modules.
+`fan_mount_clearance()` tracks the M3 target (Ø3.2–3.4 mm); `fan_hole_circle_d()` is only used when
+you intentionally omit bosses and want a loose pass-through. `fan_square_pattern` returns XY offsets
+for the square bolt pattern so future fan sizes can reuse the same layout without duplicating loop
+logic in consuming modules.
 
 Regression coverage: `tests/test_fan_patterns_scad.py` ensures the helpers stay defined and continue
 returning the documented diameters and offsets.
@@ -236,7 +244,7 @@ key defaults and helper modules; see the source for the full parameter list and 
 // STL artifacts + build docs:
 // - Spec: docs/pi_cluster_stack.md
 // - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
-// - Artifact: stl-${GITHUB_SHA} (contains stl/pi_cluster/pi_carrier_stack_<mode>_fan{80,92,120}.stl)
+// - Artifact: stl-pi_cluster_stack-${GITHUB_SHA} (grouped stack STLs; legacy stl-${GITHUB_SHA} also ships)
 _pi_carrier_auto_render = false;
 include <./pi_dimensions.scad>;
 include <./pi_carrier.scad>;
@@ -259,8 +267,9 @@ emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension
 stack_standoff_mode = is_undef(standoff_mode) ? "heatset" : standoff_mode;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
 expected_column_spacing = pi_hole_spacing;
-assert(abs(column_spacing[0] - expected_column_spacing[0]) <= 0.2);
-assert(abs(column_spacing[1] - expected_column_spacing[1]) <= 0.2);
+column_alignment_tolerance = is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
+assert(abs(column_spacing[0] - expected_column_spacing[0]) <= column_alignment_tolerance);
+assert(abs(column_spacing[1] - expected_column_spacing[1]) <= column_alignment_tolerance);
 
 module _carrier(level) {
   translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
