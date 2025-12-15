@@ -62,6 +62,17 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
     -D export_part="fan_wall"
   ```
 
+### STL artifacts and CI renders
+
+- The [Build STL Artifacts workflow](../.github/workflows/scad-to-stl.yml) renders every
+  `pi_carrier_stack` variant on each CAD change and uploads the meshes as downloadable artifacts
+  (see the `stl/pi_cluster/pi_carrier_stack_<mode>_fan<size>.stl` naming).
+- `scripts/render_pi_cluster_variants.py` drives the fan/column matrix locally or in CI; run it with
+  `python scripts/render_pi_cluster_variants.py --output-dir stl/pi_cluster` to regenerate the
+  documented set.
+- The top-level OpenSCAD file (`cad/pi_cluster/pi_carrier_stack.scad`) includes an in-file comment
+  pointing here so builders can find STL downloads without hunting through CI menus.
+
 ---
 
 ## Assembly sequence

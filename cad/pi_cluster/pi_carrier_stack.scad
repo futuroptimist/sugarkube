@@ -1,7 +1,9 @@
 _pi_carrier_auto_render = false;
-include <pi_carrier.scad>;
-use <pi_carrier_column.scad>;
-use <fan_wall.scad>;
+// STL artifacts: see docs/pi_cluster_stack.md for download links and build steps.
+include <./pi_dimensions.scad>;
+include <./pi_carrier.scad>;
+use <./pi_carrier_column.scad>;
+use <./fan_wall.scad>;
 
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
