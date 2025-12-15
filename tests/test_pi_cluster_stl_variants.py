@@ -113,3 +113,20 @@ def test_scad_to_stl_workflow_renders_pi_carrier_stack() -> None:
 
     assert "render_pi_cluster_variants.py" in workflow
     assert "pi_carrier_stack" in workflow
+
+
+def test_scad_to_stl_workflow_uploads_grouped_artifacts() -> None:
+    """The workflow should publish grouped artifacts for builders."""
+
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    for artifact_name in (
+        "stl-${{ github.sha }}",
+        "stl-pi_cluster_stack-${{ github.sha }}",
+        "stl-pi_cluster_carriers-${{ github.sha }}",
+        "stl-sugarkube-enclosure-${{ github.sha }}",
+    ):
+        assert artifact_name in workflow, f"Missing upload step for {artifact_name}"
+
+    assert "package_stl_artifacts.py" in workflow
+    assert "dist/stl_artifacts" in workflow
