@@ -50,3 +50,14 @@ def test_pi_carrier_stack_imports_pi_carrier_module() -> None:
     source = SCAD_PATH.read_text(encoding="utf-8")
     assert "pi_carrier.scad" in source, "pi_carrier_stack should import pi_carrier.scad"
     assert re.search(r"\bpi_carrier\s*\(", source), "pi_carrier_stack should call pi_carrier()"
+
+
+def test_pi_carrier_stack_includes_local_dependencies() -> None:
+    """Use explicit relative includes so OpenSCAD resolves dependencies reliably."""
+
+    source = SCAD_PATH.read_text(encoding="utf-8")
+
+    assert "include <./pi_dimensions.scad>" in source
+    assert "include <./pi_carrier.scad>" in source
+    assert "use <./pi_carrier_column.scad>" in source
+    assert "use <./fan_wall.scad>" in source
