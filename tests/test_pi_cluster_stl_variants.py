@@ -81,6 +81,8 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
     for line in log_lines:
         assert "--export-format" in line
         assert "binstl" in line
+        assert "-I" in line
+        assert str(SCAD_PATH.parent) in line
         mode_fragment = next(
             (part for part in line.split() if part.startswith('column_mode="')),
             None,

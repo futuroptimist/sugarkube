@@ -37,6 +37,8 @@ def render_variants(
                 f'column_mode="{column_mode}"',
                 "-D",
                 f"fan_size={fan_size}",
+                "-I",
+                str(scad_path.parent),
                 "--",
                 str(scad_path),
             ]

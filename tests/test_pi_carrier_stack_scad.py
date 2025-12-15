@@ -50,3 +50,14 @@ def test_pi_carrier_stack_imports_pi_carrier_module() -> None:
     source = SCAD_PATH.read_text(encoding="utf-8")
     assert "pi_carrier.scad" in source, "pi_carrier_stack should import pi_carrier.scad"
     assert re.search(r"\bpi_carrier\s*\(", source), "pi_carrier_stack should call pi_carrier()"
+
+
+def test_pi_carrier_stack_includes_are_relative_and_documented() -> None:
+    """Includes should resolve even when rendered outside the CAD directory."""
+
+    source = SCAD_PATH.read_text(encoding="utf-8")
+    assert "<./pi_dimensions.scad>" in source
+    assert "<./pi_carrier.scad>" in source
+    assert "<./pi_carrier_column.scad>" in source
+    assert "<./fan_wall.scad>" in source
+    assert "scad-to-stl.yml" in source, "Add a comment pointing to the STL build workflow"

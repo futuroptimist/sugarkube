@@ -62,6 +62,10 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
     -D export_part="fan_wall"
   ```
 
+- Prefer downloading CI-rendered meshes from the **Build STL Artifacts** workflow in the Actions
+  tab (`.github/workflows/scad-to-stl.yml`) to avoid local OpenSCAD drift. The job renders both
+  `export_part` variants plus the documented fan/column matrix for `pi_carrier_stack`.
+
 ---
 
 ## Assembly sequence
