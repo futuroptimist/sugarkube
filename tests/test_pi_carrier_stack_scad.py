@@ -75,6 +75,19 @@ def test_stack_mount_hook_present() -> None:
     assert "stack_pocket_depth" in source
 
 
+def test_stack_carrier_uses_thicker_plate_for_pockets() -> None:
+    """Stack renders should thicken the carrier plate so symmetric pockets do not overlap."""
+
+    source = SCAD_PATH.read_text(encoding="utf-8")
+    assert re.search(
+        r"stack_plate_thickness\s*=\s*is_undef\(stack_plate_thickness\)\s*\?\s*3\.0", source
+    )
+    assert (
+        "plate_thickness = is_undef(plate_thickness) ? stack_plate_thickness : plate_thickness"
+        in source
+    )
+
+
 def test_stack_components_exist() -> None:
     """Modular stack parts should live alongside the carrier source."""
 
@@ -99,3 +112,11 @@ def test_stack_post_boss_clearance() -> None:
     source = STACK_POST_PATH.read_text(encoding="utf-8")
     assert "boss_fit_clearance" in source
     assert "boss_d = stack_pocket_d - boss_fit_clearance" in source
+
+
+def test_fan_adapter_interfaces_align_with_stack_mounts() -> None:
+    """Fan adapter interfaces should follow the fan-side stack mount Y positions."""
+
+    source = STACK_ADAPTER_PATH.read_text(encoding="utf-8")
+    assert "fan_side_positions" in source
+    assert "interface_offsets = [for (pos = fan_side_positions) pos[1]]" in source

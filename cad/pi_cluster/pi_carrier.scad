@@ -15,7 +15,7 @@ hole_spacing = is_undef(hole_spacing) ? pi_hole_spacing : hole_spacing;
 hole_spacing_x = hole_spacing[0];
 hole_spacing_y = hole_spacing[1];
 
-plate_thickness = 2.0;
+plate_thickness = is_undef(plate_thickness) ? 2.0 : plate_thickness;
 corner_radius   = 5.0;  // round base corners to avoid sharp edges
 standoff_height = 6.0;
 standoff_diam = 7.0;   // widened to keep a ≥0.4 mm flange around the 5.8 mm countersink

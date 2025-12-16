@@ -49,6 +49,9 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
+- Stack-ready carrier levels rendered via `pi_carrier_stack.scad` default to a 3.0 mm plate so the
+  1.2 mm symmetric locating pockets key without overlapping; the standalone `pi_carrier.scad`
+  remains a 2.0 mm plate.
 - Print the stack posts upright with three perimeter walls and 40 % gyroid infill. They use a simple
   through-hole for the clamp bolt—no heat-set inserts are required on the posts.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree

@@ -28,7 +28,7 @@ body_span_y = fan_side_span + 20;
 body_height = stack_height;
 center_y = (max([for (p = fan_side_positions) p[1]]) + min([for (p = fan_side_positions) p[1]])) / 2;
 
-interface_offsets = [-column_spacing[0] / 2, column_spacing[0] / 2];
+interface_offsets = [for (pos = fan_side_positions) pos[1]];
 interface_levels = [for (level = [0 : levels - 1]) stack_pocket_depth + level * level_height];
 
 module _post_hole(pos_y) {
