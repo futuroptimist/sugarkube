@@ -1,7 +1,6 @@
 """End-to-end test exercising k3s-discover fail-open fallback and recovery."""
 
 from __future__ import annotations
-
 import os
 import random
 import shutil
@@ -12,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from tests.conftest import ensure_root_privileges, require_tools
-
 import pytest
+
+from tests.conftest import ensure_root_privileges, require_tools
+from tests.helpers.netns_probe import probe_namespace_connectivity
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -47,6 +47,47 @@ class NamespaceProcesses:
     runtime_dir: Path
     dbus: subprocess.Popen[str]
     avahi: subprocess.Popen[str]
+
+
+def _run_ping(client_namespace: str, target_ip: str) -> subprocess.CompletedProcess[str]:
+    """Execute an ICMP ping from the client namespace to the target IP."""
+
+    return subprocess.run(
+        [
+            "ip",
+            "netns",
+            "exec",
+            client_namespace,
+            "ping",
+            "-c",
+            "1",
+            "-W",
+            "2",
+            target_ip,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _verify_namespace_connectivity(
+    client_namespace: str,
+    server_namespace: str,
+    server_ip: str,
+    *,
+    probe=probe_namespace_connectivity,
+    ping_runner=_run_ping,
+) -> None:
+    """Prefer TCP handshake checks before falling back to ICMP pings."""
+
+    if probe(client_namespace, server_namespace, server_ip):
+        return
+
+    ping_result = ping_runner(client_namespace, server_ip)
+    if ping_result.returncode == 0:
+        return
+
+    pytest.skip("Network namespace connectivity test failed")
 
 
 def _setup_namespace_pair() -> Tuple[Dict[str, str], List[List[str]]]:
@@ -137,28 +178,9 @@ def _setup_namespace_pair() -> Tuple[Dict[str, str], List[List[str]]]:
         capture_output=True,
     )
 
-    ping = subprocess.run(
-        [
-            "ip",
-            "netns",
-            "exec",
-            leader_ns,
-            "ping",
-            "-c",
-            "1",
-            "-W",
-            "2",
-            follower_ip,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if ping.returncode != 0:
-        # TODO: Stabilize the network namespace ping path in CI to avoid spurious skips.
-        # Root cause: Kernel or container limitations sometimes prevent namespace-to-namespace
-        #   pings, so the harness bails out instead of exercising fail-open behavior.
-        # Estimated fix: 2h to mock the connectivity check or provision CAP_NET_ADMIN reliably.
-        pytest.skip("Network namespace connectivity test failed")
+    # Connectivity validation prefers TCP handshakes to avoid flaky ICMP probes
+    # (regression coverage: tests/test_k3s_discover_connectivity_check.py).
+    _verify_namespace_connectivity(leader_ns, follower_ns, follower_ip)
 
     return (
         {
