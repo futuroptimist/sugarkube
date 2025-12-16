@@ -13,10 +13,11 @@ include_stack_mounts = true;
 
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
 stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
-stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
+stack_pocket_depth_input = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
 adapter_thickness = is_undef(adapter_thickness) ? 8 : adapter_thickness;
 stack_plate_thickness = is_undef(stack_plate_thickness) ? 3.0 : stack_plate_thickness;
 plate_thickness = is_undef(plate_thickness) ? stack_plate_thickness : plate_thickness;
+stack_pocket_depth = min(stack_pocket_depth_input, plate_thickness / 2 - 0.01);
 
 include <./pi_dimensions.scad>;
 // Shared spacing + fan defaults
