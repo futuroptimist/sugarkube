@@ -53,7 +53,8 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   1.2 mm symmetric locating pockets key without overlapping; the standalone `pi_carrier.scad`
   remains a 2.0 mm plate.
 - Print the stack posts upright with three perimeter walls and 40 % gyroid infill. They use a simple
-  through-hole for the clamp bolt—no heat-set inserts are required on the posts.
+  through-hole for the clamp bolt—no heat-set inserts are required on the posts. Install heat-set
+  inserts after printing.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
@@ -75,8 +76,15 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and produce the modular
   carrier level (per standoff mode), stack posts, fan adapter, and fan walls. Grab the grouped
   `stl-pi_cluster_stack-${GITHUB_SHA}` artifact first; it contains stack-specific STLs organised as
-  `carriers/`, `posts/`, `fan_adapters/`, `fan_walls/`, and `preview/`. The all-in-one
-  `stl-${GITHUB_SHA}` artifact still ships for full-repo coverage and backward compatibility.
+  `carriers/`, `posts/`, `fan_adapters/`, `fan_walls/`, and `preview/`. The standoff-specific
+  variants live under:
+
+  - printed/
+  - heatset/
+  - variants/
+
+  The all-in-one `stl-${GITHUB_SHA}` artifact still ships for full-repo coverage and backward
+  compatibility.
 
 ---
 
@@ -278,6 +286,7 @@ expected_column_spacing = pi_hole_spacing;
 column_alignment_tolerance = is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
 assert(abs(column_spacing[0] - expected_column_spacing[0]) <= column_alignment_tolerance);
 assert(abs(column_spacing[1] - expected_column_spacing[1]) <= column_alignment_tolerance);
+// CI asserts column XY spacing stays within column_alignment_tolerance)?0.2
 
 module _carrier(level) {
   translate([-plate_len / 2, -plate_wid / 2, level * z_gap_clear])
