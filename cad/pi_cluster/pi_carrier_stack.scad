@@ -29,6 +29,10 @@ fan_plate_t = is_undef(fan_plate_t) ? 4 : fan_plate_t;
 fan_insert_od = is_undef(fan_insert_od) ? 5.0 : fan_insert_od;
 fan_insert_L = is_undef(fan_insert_L) ? 4.0 : fan_insert_L;
 fan_offset_from_stack = is_undef(fan_offset_from_stack) ? 15 : fan_offset_from_stack;
+alignment_guard_enabled = is_undef(alignment_guard_enabled) ? true : alignment_guard_enabled;
+column_alignment_tolerance =
+    is_undef(column_alignment_tolerance) ? 0.2 : column_alignment_tolerance;
+expected_column_spacing = pi_hole_spacing;
 
 export_part = is_undef(export_part) ? "assembly" : export_part;
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
@@ -41,6 +45,23 @@ use <./fan_wall.scad>;
 carrier_stack_mount_positions = stack_mount_positions;
 level_height = z_gap_clear + plate_thickness;
 stack_height = (levels - 1) * level_height + plate_thickness;
+
+if (alignment_guard_enabled) {
+    assert(
+        abs(column_spacing[0] - expected_column_spacing[0]) <=
+            column_alignment_tolerance,
+        str(
+            "column_spacing[0] out of tolerance (", column_spacing[0], " mm)"
+        )
+    );
+    assert(
+        abs(column_spacing[1] - expected_column_spacing[1]) <=
+            column_alignment_tolerance,
+        str(
+            "column_spacing[1] out of tolerance (", column_spacing[1], " mm)"
+        )
+    );
+}
 
 module _carrier(level = 0) {
     translate([-plate_len / 2, -plate_wid / 2, level * level_height])
