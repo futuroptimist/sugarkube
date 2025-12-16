@@ -13,6 +13,9 @@ As of 2025-11-10, **all BATS tests run locally** thanks to the bundled ncat stub
 
 All Python tests pass without skips (850+ tests).
 
+- CI now fails fast when required system tools are missing instead of silently
+  skipping affected tests (coverage: `tests/test_require_tools.py`).
+
 **Test Count History**:
 - After PR #4 (2025-11-05): 36 pass, 5 skip (l4_probe tests enabled via ncat installation)
 - After PR #5 (2025-11-05): 37 pass, 4 skip (Test 33 dbus wait retry logic implemented)

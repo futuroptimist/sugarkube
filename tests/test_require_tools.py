@@ -62,3 +62,22 @@ def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(pytest.skip.Exception):
         conftest.require_tools(["unshare", "ip"])
+
+
+def test_require_tools_fails_in_ci_when_tools_remain_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing tools should fail fast in CI instead of silently skipping."""
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(conftest, "_install_missing_tools", lambda missing: [])
+
+    def fake_which(tool: str) -> str | None:
+        return "/usr/bin/apt-get" if tool == "apt-get" else None
+
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    with pytest.raises(pytest.fail.Exception) as excinfo:
+        conftest.require_tools(["ip", "ping"])
+
+    assert "Required tools not available" in str(excinfo.value)

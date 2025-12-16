@@ -132,11 +132,10 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        # TODO: Ensure required system tools are available for tests.
-        # Root cause: Tools remain unavailable after attempted auto-installation.
-        # This may be due to running on a non-Debian-based system, insufficient privileges,
-        # or installation failures.
-        # Estimated fix: 1h to install tools manually or adjust CI environment to provide them.
+        if os.environ.get("CI"):
+            pytest.fail(
+                "Required tools not available after attempted installation; install them in CI"
+            )
         pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
 
 
