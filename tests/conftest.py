@@ -117,18 +117,25 @@ def _install_missing_tools(missing: Iterable[str]) -> list[str]:
         return _run(sudo_cmd)
 
     update_cmd = [installer, "update"]
+    used_sudo = False
     update_result = _run(update_cmd)
     if update_result.returncode != 0:
         sudo_result = _run_with_sudo(update_cmd)
         if sudo_result is None or sudo_result.returncode != 0:
             return []
+        used_sudo = True
 
     install_cmd = [installer, "install", "--no-install-recommends", "-y", *packages]
-    install_result = _run(install_cmd)
-    if install_result.returncode != 0:
-        sudo_result = _run_with_sudo(install_cmd)
-        if sudo_result is None or sudo_result.returncode != 0:
+    if used_sudo:
+        install_result = _run_with_sudo(install_cmd)
+        if install_result is None or install_result.returncode != 0:
             return []
+    else:
+        install_result = _run(install_cmd)
+        if install_result.returncode != 0:
+            sudo_result = _run_with_sudo(install_cmd)
+            if sudo_result is None or sudo_result.returncode != 0:
+                return []
 
     return packages
 
