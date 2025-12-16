@@ -49,9 +49,8 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
-- Print the stack posts upright with three perimeter walls and 40 % gyroid infill. Install heat-set
-  inserts after printing using a soldering iron and insert tip; optionally pause for captive nuts if
-  you embed hardware mid-print.
+- Print the stack posts upright with three perimeter walls and 40 % gyroid infill. They use a simple
+  through-hole for the clamp bolt—no heat-set inserts are required on the posts.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:

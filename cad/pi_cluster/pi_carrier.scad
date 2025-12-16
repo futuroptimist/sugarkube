@@ -48,7 +48,8 @@ port_clearance = 6;
 include_stack_mounts = is_undef(include_stack_mounts) ? false : include_stack_mounts;
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
 stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
-stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
+stack_pocket_depth_input = is_undef(stack_pocket_depth) ? plate_thickness / 2 - 0.1 : stack_pocket_depth;
+stack_pocket_depth = min(stack_pocket_depth_input, plate_thickness / 2);
 
 // Optional 1602 LCD module (80x36 mm PCB)
 // Disable by default; set to true to add the LCD mount
@@ -85,8 +86,8 @@ stack_mount_positions = is_undef(stack_mount_positions)
     ]
     : stack_mount_positions;
 
-assert(stack_pocket_depth <= plate_thickness,
-    "stack_pocket_depth must be ≤ plate_thickness");
+assert(2 * stack_pocket_depth <= plate_thickness,
+    "stack_pocket_depth must be ≤ half of plate_thickness so symmetric pockets do not overlap");
 
 // ---------- Helper functions ----------
 function rot2d(v, ang) = [
