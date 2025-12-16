@@ -9,7 +9,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import pytest
 
@@ -75,8 +75,8 @@ def _verify_namespace_connectivity(
     server_namespace: str,
     server_ip: str,
     *,
-    probe=probe_namespace_connectivity,
-    ping_runner=_run_ping,
+    probe: Callable[[str, str, str], bool] = probe_namespace_connectivity,
+    ping_runner: Callable[[str, str], subprocess.CompletedProcess[str]] = _run_ping,
 ) -> None:
     """Prefer TCP handshake checks before falling back to ICMP pings."""
 

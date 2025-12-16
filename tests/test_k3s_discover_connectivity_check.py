@@ -12,11 +12,11 @@ def test_verify_namespace_connectivity_prefers_tcp_probe() -> None:
 
     calls: list[tuple[str, str, str]] = []
 
-    def probe(client_ns: str, server_ns: str, server_ip: str) -> bool:  # noqa: ANN001
+    def probe(client_ns: str, server_ns: str, server_ip: str) -> bool:  # noqa: ANN001 - signature matches probe_namespace_connectivity
         calls.append((client_ns, server_ns, server_ip))
         return True
 
-    def ping_runner(*_: object, **__: object):  # noqa: ANN001
+    def ping_runner(*_: object, **__: object):  # noqa: ANN001 - signature matches ping_runner
         raise AssertionError("ping should not run when TCP probe succeeds")
 
     _verify_namespace_connectivity(
@@ -29,10 +29,10 @@ def test_verify_namespace_connectivity_prefers_tcp_probe() -> None:
 def test_verify_namespace_connectivity_skips_when_checks_fail() -> None:
     """Failure of both TCP probe and ping should raise pytest.SkipException."""
 
-    def probe(*_: object, **__: object) -> bool:  # noqa: ANN001
+    def probe(*_: object, **__: object) -> bool:  # noqa: ANN001 - signature matches probe_namespace_connectivity
         return False
 
-    def ping_runner(*_: object, **__: object) -> SimpleNamespace:  # noqa: ANN001
+    def ping_runner(*_: object, **__: object) -> SimpleNamespace:  # noqa: ANN001 - signature matches ping_runner
         return SimpleNamespace(returncode=1)
 
     with pytest.raises(pytest.skip.Exception):
