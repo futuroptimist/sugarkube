@@ -8,6 +8,8 @@ SCAD_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
 PI_CARRIER_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier.scad"
 FAN_WALL_PATH = REPO_ROOT / "cad" / "pi_cluster" / "fan_wall.scad"
 DIMENSIONS_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_dimensions.scad"
+STACK_POST_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_stack_post.scad"
+STACK_ADAPTER_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_stack_fan_adapter.scad"
 
 
 def test_pi_dimensions_defines_hole_spacing_constant() -> None:
@@ -59,5 +61,62 @@ def test_pi_carrier_stack_includes_local_dependencies() -> None:
 
     assert "include <./pi_dimensions.scad>" in source
     assert "include <./pi_carrier.scad>" in source
-    assert "use <./pi_carrier_column.scad>" in source
+    assert "pi_stack_post.scad" in source
+    assert "pi_stack_fan_adapter.scad" in source
     assert "use <./fan_wall.scad>" in source
+
+
+def test_stack_mount_hook_present() -> None:
+    """Stack carriers should expose the locating pocket hooks."""
+
+    source = PI_CARRIER_PATH.read_text(encoding="utf-8")
+    assert "include_stack_mounts" in source
+    assert "stack_mount_positions" in source
+    assert "stack_pocket_depth" in source
+
+
+def test_stack_carrier_uses_thicker_plate_for_pockets() -> None:
+    """Stack renders should thicken the carrier plate so symmetric pockets do not overlap."""
+
+    source = SCAD_PATH.read_text(encoding="utf-8")
+    assert re.search(
+        r"stack_plate_thickness\s*=\s*is_undef\(stack_plate_thickness\)\s*\?\s*3\.0", source
+    )
+    assert (
+        "plate_thickness = is_undef(plate_thickness) ? stack_plate_thickness : plate_thickness"
+        in source
+    )
+
+
+def test_stack_components_exist() -> None:
+    """Modular stack parts should live alongside the carrier source."""
+
+    assert STACK_POST_PATH.exists(), "Add cad/pi_cluster/pi_stack_post.scad for printed spacers"
+    assert STACK_ADAPTER_PATH.exists(), "Add cad/pi_cluster/pi_stack_fan_adapter.scad for fan clamp"
+
+
+def test_stack_mount_pockets_on_both_faces() -> None:
+    """Carrier pockets should be cut from the top and bottom faces for symmetry."""
+
+    source = PI_CARRIER_PATH.read_text(encoding="utf-8")
+    assert "plate_thickness - stack_pocket_depth" in source
+    assert re.search(
+        r"mount_x, mount_y, -0\.01\]\)\s*cylinder\(h = stack_pocket_depth \+ 0\.02",
+        source,
+    ), "Bottom pocket should mirror the top pocket when include_stack_mounts=true"
+
+
+def test_stack_post_boss_clearance() -> None:
+    """Posts should key into pockets with a documented clearance."""
+
+    source = STACK_POST_PATH.read_text(encoding="utf-8")
+    assert "boss_fit_clearance" in source
+    assert "boss_d = stack_pocket_d - boss_fit_clearance" in source
+
+
+def test_fan_adapter_interfaces_align_with_stack_mounts() -> None:
+    """Fan adapter interfaces should follow the fan-side stack mount Y positions."""
+
+    source = STACK_ADAPTER_PATH.read_text(encoding="utf-8")
+    assert "fan_side_positions" in source
+    assert "interface_offsets = [for (pos = fan_side_positions) pos[1]]" in source

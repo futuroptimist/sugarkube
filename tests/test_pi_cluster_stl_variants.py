@@ -3,106 +3,110 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
+from typing import Iterable
 
 import pytest
 
+from scripts.render_pi_cluster_variants import (
+    DEFAULT_FAN_SIZES,
+    DEFAULT_STANDOFF_MODES,
+    render_variants,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "render_pi_cluster_variants.py"
-SCAD_PATH = REPO_ROOT / "cad" / "pi_cluster" / "pi_carrier_stack.scad"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "scad-to-stl.yml"
 
 
-def _write_stub_openscad(path: Path, log_file: Path) -> None:
-    script = """#!/usr/bin/env python3
-import os
-import sys
-from pathlib import Path
-
-
-log_path = Path(os.environ[\"OPENSCAD_LOG\"])
-args = sys.argv[1:]
-output = None
-for idx, arg in enumerate(args):
-    if arg == \"-o\":
-        output = Path(args[idx + 1])
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(\"stub\", encoding=\"utf-8\")
-        break
-
-if output is None:
-    raise SystemExit(\"openscad stub expected an -o argument\")
-
-with log_path.open(\"a\", encoding=\"utf-8\") as handle:
-    handle.write(\" ".join(args) + \"\\n\")
-"""
-    path.write_text(script, encoding="utf-8")
-    path.chmod(0o755)
-
-
 def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The helper should invoke OpenSCAD for each column_mode/fan_size pair."""
+    """The helper should invoke OpenSCAD for each stack part and fan size."""
 
     assert (
         SCRIPT_PATH.exists()
     ), "Add scripts/render_pi_cluster_variants.py so CI can render the documented STL matrix"
 
-    log_file = tmp_path / "openscad.log"
-    stub_bin = tmp_path / "openscad"
-    _write_stub_openscad(stub_bin, log_file)
+    scad_stub = tmp_path / "pi_carrier_stack.scad"
+    scad_stub.write_text("// stub scad", encoding="utf-8")
 
-    monkeypatch.setenv("OPENSCAD_LOG", str(log_file))
+    output_dir = tmp_path / "stl" / "pi_cluster"
+    calls: list[list[str]] = []
 
-    output_dir = tmp_path / "stl"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT_PATH),
-            "--openscad",
-            str(stub_bin),
-            "--output-dir",
-            str(output_dir),
-            "--scad-path",
-            str(SCAD_PATH),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    def _stub_run(command: Iterable[str], check: bool = False) -> subprocess.CompletedProcess[str]:
+        args = list(command)
+        calls.append(args)
+        if "-o" in args:
+            output = Path(args[args.index("-o") + 1])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text("stub", encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setenv("OPENSCAD_LOG", "unused")
+    monkeypatch.setattr(subprocess, "run", _stub_run)
+
+    render_variants(
+        openscad="openscad-bin",
+        scad_path=scad_stub,
+        output_dir=output_dir,
+        standoff_modes=DEFAULT_STANDOFF_MODES,
+        fan_sizes=DEFAULT_FAN_SIZES,
     )
 
-    assert result.returncode == 0
-
-    log_lines = [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(log_lines) == 6, "Expected six OpenSCAD invocations (2 column modes × 3 fan sizes)."
-
-    expected_modes = {"printed", "brass_chain"}
+    expected_modes = {"printed", "heatset"}
+    single_render_parts = {"post", "fan_adapter"}
+    expected_carrier_part = "carrier_level"
     expected_fans = {"80", "92", "120"}
-    seen_pairs: set[tuple[str, str]] = set()
-    for line in log_lines:
-        assert "--export-format" in line
-        assert "binstl" in line
-        mode_fragment = next(
-            (part for part in line.split() if part.startswith('column_mode="')),
-            None,
-        )
-        fan_fragment = next((part for part in line.split() if part.startswith("fan_size=")), None)
-        assert mode_fragment is not None, "column_mode definition missing from OpenSCAD invocation"
-        assert fan_fragment is not None, "fan_size definition missing from OpenSCAD invocation"
-        mode = mode_fragment.split("=")[1].strip('"')
-        fan = fan_fragment.split("=")[1]
-        assert mode in expected_modes
-        assert fan in expected_fans
-        seen_pairs.add((mode, fan))
 
-    assert seen_pairs == {(mode, fan) for mode in expected_modes for fan in expected_fans}
+    assert (
+        len(calls)
+        == len(expected_modes)  # carriers per standoff mode
+        + len(single_render_parts)  # mode-agnostic parts
+        + len(expected_fans)  # fan walls
+        + 1  # preview
+    )
+
+    seen_carrier_parts: set[tuple[str, str]] = set()
+    seen_single_parts: set[str] = set()
+    seen_fans: set[str] = set()
+    for args in calls:
+        assert "--export-format" in args
+        assert "binstl" in args
+        if 'export_part="fan_wall"' in args:
+            fan_fragment = next((part for part in args if part.startswith("fan_size=")), None)
+            assert fan_fragment is not None
+            seen_fans.add(fan_fragment.split("=")[1])
+            continue
+        if 'export_part="assembly"' in args:
+            continue
+        part_fragment = next((part for part in args if part.startswith('export_part="')), None)
+        assert part_fragment is not None
+        part_name = part_fragment.split("=")[1].strip('"')
+        if part_name == expected_carrier_part:
+            mode_fragment = next((part for part in args if part.startswith('standoff_mode="')), None)
+            assert mode_fragment is not None
+            mode_name = mode_fragment.split("=")[1].strip('"')
+            assert mode_name in expected_modes
+            seen_carrier_parts.add((part_name, mode_name))
+        else:
+            assert part_name in single_render_parts
+            assert 'standoff_mode="' not in args
+            seen_single_parts.add(part_name)
+
+    assert seen_carrier_parts == {(expected_carrier_part, mode) for mode in expected_modes}
+    assert seen_single_parts == single_render_parts
+    assert seen_fans == expected_fans
 
     generated = {path.name for path in output_dir.glob("*.stl")}
-    assert len(generated) == 6
-    for mode in expected_modes:
-        for fan in expected_fans:
-            expected_name = f"pi_carrier_stack_{mode}_fan{fan}.stl"
-            assert expected_name in generated
+    assert {
+        "pi_carrier_stack_carrier_level_printed.stl",
+        "pi_carrier_stack_carrier_level_heatset.stl",
+        "pi_carrier_stack_post.stl",
+        "pi_carrier_stack_fan_adapter.stl",
+        "pi_carrier_stack_fan_wall_fan80.stl",
+        "pi_carrier_stack_fan_wall_fan92.stl",
+        "pi_carrier_stack_fan_wall_fan120.stl",
+        "pi_carrier_stack_preview.stl",
+    }.issubset(generated)
 
 
 def test_scad_to_stl_workflow_renders_pi_carrier_stack() -> None:

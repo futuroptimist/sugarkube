@@ -15,7 +15,7 @@ hole_spacing = is_undef(hole_spacing) ? pi_hole_spacing : hole_spacing;
 hole_spacing_x = hole_spacing[0];
 hole_spacing_y = hole_spacing[1];
 
-plate_thickness = 2.0;
+plate_thickness = is_undef(plate_thickness) ? 2.0 : plate_thickness;
 corner_radius   = 5.0;  // round base corners to avoid sharp edges
 standoff_height = 6.0;
 standoff_diam = 7.0;   // widened to keep a ≥0.4 mm flange around the 5.8 mm countersink
@@ -41,8 +41,17 @@ nut_thick = 2.0;
 
 board_angle = 0;
 gap_between_boards = 10;
-edge_margin = 5;
+edge_margin = is_undef(edge_margin) ? 5 : edge_margin;
+stack_edge_margin = is_undef(stack_edge_margin) ? 15 : stack_edge_margin;
 port_clearance = 6;
+
+include_stack_mounts = is_undef(include_stack_mounts) ? false : include_stack_mounts;
+stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
+stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
+stack_pocket_depth = min(
+    is_undef(stack_pocket_depth) ? plate_thickness / 2 - 0.1 : stack_pocket_depth,
+    plate_thickness / 2
+);
 
 // Optional 1602 LCD module (80x36 mm PCB)
 // Disable by default; set to true to add the LCD mount
@@ -62,8 +71,25 @@ board_spacing_y = rotY + gap_between_boards;
 max_x = max([for(p=pi_positions) p[0]]);
 max_y = max([for(p=pi_positions) p[1]]);
 
-plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*edge_margin;
-plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*edge_margin + 2*port_clearance;
+carrier_edge_margin = include_stack_mounts ? stack_edge_margin : edge_margin;
+
+plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*carrier_edge_margin;
+plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*carrier_edge_margin + 2*port_clearance;
+
+stack_mount_positions = is_undef(stack_mount_positions)
+    ? let(
+        default_offset_x = plate_len / 2 - stack_edge_margin,
+        default_offset_y = plate_wid / 2 - (stack_edge_margin + port_clearance)
+    ) [
+        [-default_offset_x, -default_offset_y],
+        [default_offset_x, -default_offset_y],
+        [-default_offset_x, default_offset_y],
+        [default_offset_x, default_offset_y]
+    ]
+    : stack_mount_positions;
+
+assert(2 * stack_pocket_depth <= plate_thickness,
+    "stack_pocket_depth must be ≤ half of plate_thickness so symmetric pockets do not overlap");
 
 // ---------- Helper functions ----------
 function rot2d(v, ang) = [
@@ -127,6 +153,23 @@ module base_plate()
                 for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
                     translate([lcd_cx+dx, lcd_cy+dy, -0.01])
                         cylinder(h=countersink_depth + 0.02, r=countersink_diam/2, $fn=32);
+            }
+        }
+
+        if (include_stack_mounts) {
+            for (pos = stack_mount_positions) {
+                mount_x = plate_len / 2 + pos[0];
+                mount_y = plate_wid / 2 + pos[1];
+
+                translate([mount_x, mount_y, -0.01])
+                    cylinder(h = plate_thickness + 0.02, r = stack_bolt_d / 2, $fn = 60);
+
+                // Symmetric locating pockets: one on each face so every carrier plate
+                // is interchangeable in the stack.
+                translate([mount_x, mount_y, plate_thickness - stack_pocket_depth])
+                    cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
+                translate([mount_x, mount_y, -0.01])
+                    cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
             }
         }
     }
