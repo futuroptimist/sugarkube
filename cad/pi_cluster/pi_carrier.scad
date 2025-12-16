@@ -161,7 +161,11 @@ module base_plate()
                 translate([mount_x, mount_y, -0.01])
                     cylinder(h = plate_thickness + 0.02, r = stack_bolt_d / 2, $fn = 60);
 
+                // Symmetric locating pockets: one on each face so every carrier plate
+                // is interchangeable in the stack.
                 translate([mount_x, mount_y, plate_thickness - stack_pocket_depth])
+                    cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
+                translate([mount_x, mount_y, -0.01])
                     cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
             }
         }

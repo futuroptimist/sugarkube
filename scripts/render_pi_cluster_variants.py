@@ -25,24 +25,40 @@ def render_variants(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for mode in standoff_modes:
-        for part in ("carrier_level", "post", "fan_adapter"):
-            output_path = output_dir / f"pi_carrier_stack_{part}_{mode}.stl"
-            command = [
-                openscad,
-                "-o",
-                str(output_path),
-                "--export-format",
-                "binstl",
-                "-D",
-                f'export_part="{part}"',
-                "-D",
-                f'standoff_mode="{mode}"',
-                "-D",
-                "stack_edge_margin=15",
-                "--",
-                str(scad_path),
-            ]
-            subprocess.run(command, check=True)
+        output_path = output_dir / f"pi_carrier_stack_carrier_level_{mode}.stl"
+        command = [
+            openscad,
+            "-o",
+            str(output_path),
+            "--export-format",
+            "binstl",
+            "-D",
+            'export_part="carrier_level"',
+            "-D",
+            f'standoff_mode="{mode}"',
+            "-D",
+            "stack_edge_margin=15",
+            "--",
+            str(scad_path),
+        ]
+        subprocess.run(command, check=True)
+
+    for part in ("post", "fan_adapter"):
+        output_path = output_dir / f"pi_carrier_stack_{part}.stl"
+        command = [
+            openscad,
+            "-o",
+            str(output_path),
+            "--export-format",
+            "binstl",
+            "-D",
+            f'export_part="{part}"',
+            "-D",
+            "stack_edge_margin=15",
+            "--",
+            str(scad_path),
+        ]
+        subprocess.run(command, check=True)
 
     for fan_size in fan_sizes:
         output_path = output_dir / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"

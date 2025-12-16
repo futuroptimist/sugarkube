@@ -37,7 +37,7 @@ use <./fan_wall.scad>;
 
 carrier_stack_mount_positions = stack_mount_positions;
 level_height = z_gap_clear + plate_thickness;
-stack_height = levels * level_height;
+stack_height = (levels - 1) * level_height + plate_thickness;
 
 module _carrier(level = 0) {
     translate([-plate_len / 2, -plate_wid / 2, level * level_height])
@@ -57,7 +57,7 @@ module _posts() {
             translate([
                 pos[0],
                 pos[1],
-                level * level_height + (plate_thickness - stack_pocket_depth)
+                level * level_height + plate_thickness + z_gap_clear / 2
             ])
                 pi_stack_post(
                     stack_bolt_d = stack_bolt_d,
@@ -70,7 +70,7 @@ module _posts() {
 
 module _fan_adapter() {
     fan_side_x = max([for (p = carrier_stack_mount_positions) p[0]]);
-    translate([fan_side_x - adapter_thickness / 2, 0, plate_thickness - stack_pocket_depth])
+    translate([fan_side_x - adapter_thickness / 2, 0, 0])
         pi_stack_fan_adapter(
             stack_bolt_d = stack_bolt_d,
             stack_pocket_d = stack_pocket_d,

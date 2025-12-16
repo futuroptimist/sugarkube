@@ -54,7 +54,7 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
 
     monkeypatch.setenv("OPENSCAD_LOG", str(log_file))
 
-    output_dir = tmp_path / "stl"
+    output_dir = tmp_path / "stl" / "pi_cluster"
     result = subprocess.run(
         [
             sys.executable,
@@ -75,12 +75,20 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
 
     log_lines = [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     expected_modes = {"printed", "heatset"}
-    expected_parts = {"carrier_level", "post", "fan_adapter"}
+    single_render_parts = {"post", "fan_adapter"}
+    expected_carrier_part = "carrier_level"
     expected_fans = {"80", "92", "120"}
 
-    assert len(log_lines) == len(expected_modes) * len(expected_parts) + len(expected_fans) + 1
+    assert (
+        len(log_lines)
+        == len(expected_modes)  # carriers per standoff mode
+        + len(single_render_parts)  # mode-agnostic parts
+        + len(expected_fans)  # fan walls
+        + 1  # preview
+    )
 
-    seen_parts: set[tuple[str, str]] = set()
+    seen_carrier_parts: set[tuple[str, str]] = set()
+    seen_single_parts: set[str] = set()
     seen_fans: set[str] = set()
     for line in log_lines:
         assert "--export-format" in line
@@ -93,26 +101,31 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
         if "export_part=\"assembly\"" in line:
             continue
         part_fragment = next((part for part in line.split() if part.startswith('export_part="')), None)
-        mode_fragment = next((part for part in line.split() if part.startswith('standoff_mode="')), None)
         assert part_fragment is not None
-        assert mode_fragment is not None
         part_name = part_fragment.split("=")[1].strip('"')
-        mode_name = mode_fragment.split("=")[1].strip('"')
-        assert part_name in expected_parts
-        assert mode_name in expected_modes
-        seen_parts.add((part_name, mode_name))
+        if part_name == expected_carrier_part:
+            mode_fragment = next(
+                (part for part in line.split() if part.startswith('standoff_mode="')), None
+            )
+            assert mode_fragment is not None
+            mode_name = mode_fragment.split("=")[1].strip('"')
+            assert mode_name in expected_modes
+            seen_carrier_parts.add((part_name, mode_name))
+        else:
+            assert part_name in single_render_parts
+            assert 'standoff_mode="' not in line
+            seen_single_parts.add(part_name)
 
-    assert seen_parts == {(part, mode) for part in expected_parts for mode in expected_modes}
+    assert seen_carrier_parts == {(expected_carrier_part, mode) for mode in expected_modes}
+    assert seen_single_parts == single_render_parts
     assert seen_fans == expected_fans
 
     generated = {path.name for path in output_dir.glob("*.stl")}
     assert {
         "pi_carrier_stack_carrier_level_printed.stl",
         "pi_carrier_stack_carrier_level_heatset.stl",
-        "pi_carrier_stack_post_printed.stl",
-        "pi_carrier_stack_post_heatset.stl",
-        "pi_carrier_stack_fan_adapter_printed.stl",
-        "pi_carrier_stack_fan_adapter_heatset.stl",
+        "pi_carrier_stack_post.stl",
+        "pi_carrier_stack_fan_adapter.stl",
         "pi_carrier_stack_fan_wall_fan80.stl",
         "pi_carrier_stack_fan_wall_fan92.stl",
         "pi_carrier_stack_fan_wall_fan120.stl",

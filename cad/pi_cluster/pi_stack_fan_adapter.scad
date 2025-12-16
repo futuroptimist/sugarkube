@@ -20,7 +20,7 @@ interface_hole_d = is_undef(interface_hole_d) ? 3.2 : interface_hole_d;
 assert(!is_undef(stack_mount_positions), "stack_mount_positions must align with carrier stack pockets");
 
 level_height = z_gap_clear + plate_thickness;
-stack_height = levels * level_height;
+stack_height = (levels - 1) * level_height + plate_thickness;
 fan_side_x = max([for (p = stack_mount_positions) p[0]]);
 fan_side_positions = [for (p = stack_mount_positions) if (p[0] >= fan_side_x - 0.01) p];
 fan_side_span = max([for (p = fan_side_positions) p[1]]) - min([for (p = fan_side_positions) p[1]]);

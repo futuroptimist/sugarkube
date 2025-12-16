@@ -80,3 +80,22 @@ def test_stack_components_exist() -> None:
 
     assert STACK_POST_PATH.exists(), "Add cad/pi_cluster/pi_stack_post.scad for printed spacers"
     assert STACK_ADAPTER_PATH.exists(), "Add cad/pi_cluster/pi_stack_fan_adapter.scad for fan clamp"
+
+
+def test_stack_mount_pockets_on_both_faces() -> None:
+    """Carrier pockets should be cut from the top and bottom faces for symmetry."""
+
+    source = PI_CARRIER_PATH.read_text(encoding="utf-8")
+    assert "plate_thickness - stack_pocket_depth" in source
+    assert re.search(
+        r"mount_x, mount_y, -0\.01\]\)\s*cylinder\(h = stack_pocket_depth \+ 0\.02",
+        source,
+    ), "Bottom pocket should mirror the top pocket when include_stack_mounts=true"
+
+
+def test_stack_post_boss_clearance() -> None:
+    """Posts should key into pockets with a documented clearance."""
+
+    source = STACK_POST_PATH.read_text(encoding="utf-8")
+    assert "boss_fit_clearance" in source
+    assert "boss_d = stack_pocket_d - boss_fit_clearance" in source
