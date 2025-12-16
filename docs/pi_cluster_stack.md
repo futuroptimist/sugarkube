@@ -33,13 +33,13 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 | Item | Qty | Notes |
 | --- | ---: | --- |
 | `pi_carrier.scad` plates | 3 | Print one plate per level; enable `include_stack_mounts` to add the stack pockets and use the `stack_edge_margin` override for extra perimeter. |
-| Stack posts (`pi_stack_post.scad`) | 8–12 | One per corner per gap (three levels → eight posts). Through-hole sized for the stack bolts with a locating boss sized to the pockets above. |
+| Stack posts (`pi_stack_post.scad`) | 8–12 | One per corner per gap (number of posts = (levels − 1) × 4; e.g., three levels → eight posts, four levels → twelve posts). Through-hole sized for the stack bolts with a locating boss sized to the pockets above. |
 | Fan adapter (`pi_stack_fan_adapter.scad`) | 1 | Clamps onto the two fan-side posts and provides the interface holes for the perpendicular fan wall. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
 | M3 × 60–70 mm screws + nuts | 4 | Clamp the plates and posts together; length depends on chosen post count and nut style. |
-| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 12 | Seat into the carrier standoffs for each Pi. |
-| Brass spacers, M2.5 female–female, 11 mm | 12 | Maintains separation between each Pi and the carrier plate. |
+| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 36 | Seat into the carrier standoffs for all 9 Pis (4 per Pi). |
+| Brass spacers, M2.5 female–female, 11 mm | 36 | Four per Pi (one per mounting point), for all 9 Pis in the stack. Maintains separation between each Pi and the carrier plate. |
 | PC fan (80/92/120 mm) | 1 | Match the fan size to the selected `fan_size` parameter. |
 | M3 × 16 mm screws | 4 | Secure the fan to the wall bosses. |
 | M3 heat-set inserts (5 mm OD × 4 mm) | 4 | Install in the fan wall bosses. |

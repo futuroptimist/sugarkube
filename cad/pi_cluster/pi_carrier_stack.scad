@@ -77,6 +77,7 @@ module _fan_adapter() {
             stack_pocket_depth = stack_pocket_depth,
             levels = levels,
             z_gap_clear = z_gap_clear,
+            plate_thickness = plate_thickness,
             column_spacing = column_spacing,
             stack_mount_positions = carrier_stack_mount_positions
         );

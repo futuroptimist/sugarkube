@@ -1,24 +1,26 @@
 include <./pi_dimensions.scad>;
 
+_pi_carrier_auto_render = false;
+include_stack_mounts = true;
+stack_edge_margin = is_undef(stack_edge_margin) ? 15 : stack_edge_margin;
+edge_margin = is_undef(edge_margin) ? stack_edge_margin : edge_margin;
+include <./pi_carrier.scad>;
+
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
 stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
 stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
+plate_thickness = is_undef(plate_thickness) ? 2.0 : plate_thickness;
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
 adapter_thickness = is_undef(adapter_thickness) ? 8 : adapter_thickness;
 interface_extension = is_undef(interface_extension) ? 10 : interface_extension;
 interface_hole_d = is_undef(interface_hole_d) ? 3.2 : interface_hole_d;
-stack_mount_positions = is_undef(stack_mount_positions)
-    ? [
-        [-75, -65],
-        [75, -65],
-        [-75, 65],
-        [75, 65]
-    ]
-    : stack_mount_positions;
 
-stack_height = levels * z_gap_clear;
+assert(!is_undef(stack_mount_positions), "stack_mount_positions must align with carrier stack pockets");
+
+level_height = z_gap_clear + plate_thickness;
+stack_height = levels * level_height;
 fan_side_x = max([for (p = stack_mount_positions) p[0]]);
 fan_side_positions = [for (p = stack_mount_positions) if (p[0] >= fan_side_x - 0.01) p];
 fan_side_span = max([for (p = fan_side_positions) p[1]]) - min([for (p = fan_side_positions) p[1]]);
@@ -27,7 +29,7 @@ body_height = stack_height;
 center_y = (max([for (p = fan_side_positions) p[1]]) + min([for (p = fan_side_positions) p[1]])) / 2;
 
 interface_offsets = [-column_spacing[0] / 2, column_spacing[0] / 2];
-interface_levels = [for (level = [0 : levels - 1]) stack_pocket_depth + level * z_gap_clear];
+interface_levels = [for (level = [0 : levels - 1]) stack_pocket_depth + level * level_height];
 
 module _post_hole(pos_y) {
     translate([adapter_thickness / 2, pos_y - center_y, 0])
@@ -54,6 +56,7 @@ module pi_stack_fan_adapter(
     stack_pocket_depth = stack_pocket_depth,
     levels = levels,
     z_gap_clear = z_gap_clear,
+    plate_thickness = plate_thickness,
     column_spacing = column_spacing,
     adapter_thickness = adapter_thickness,
     interface_extension = interface_extension,
