@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Iterable, List
 
@@ -150,6 +151,9 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
+        # TODO: Ensure required CLI tools are preinstalled or provide per-suite fallbacks.
+        # Root cause: Tools remain unavailable after automated installation attempts.
+        # Estimated fix: 30m to pre-provision dependencies or stub tool usage in CI.
         pytest.skip(
             "Required tools not available after auto-install attempts: "
             f"{', '.join(sorted(missing))}"
@@ -159,13 +163,21 @@ def require_tools(tools: Iterable[str]) -> None:
 def ensure_root_privileges() -> None:
     """Skip when we cannot create network namespaces due to insufficient privileges."""
 
-    result = subprocess.run(["id", "-u"], capture_output=True, text=True)
-    if result.stdout.strip() == "0":
-        return
-
     probe = subprocess.run(["unshare", "-n", "true"], capture_output=True, text=True)
     if probe.returncode != 0:
         # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
         # Root cause: Creating namespaces requires elevated privileges that may be blocked.
         # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
         pytest.skip("Insufficient privileges for network namespace operations")
+
+    netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
+    probe_netns = subprocess.run(
+        ["ip", "netns", "add", netns_name], capture_output=True, text=True
+    )
+    if probe_netns.returncode != 0:
+        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
+        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
+        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
+        pytest.skip("Insufficient privileges for network namespace operations")
+
+    subprocess.run(["ip", "netns", "delete", netns_name], capture_output=True, text=True)
