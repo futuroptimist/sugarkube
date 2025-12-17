@@ -1,6 +1,6 @@
 """Unit tests for the k3s discover namespace connectivity validation helper."""
 
-from types import SimpleNamespace
+import subprocess
 
 import pytest
 
@@ -18,7 +18,9 @@ def test_verify_namespace_connectivity_prefers_tcp_probe() -> None:
         return True
 
     # noqa rationale: signature mirrors ping_runner for easy injection in tests.
-    def ping_runner(client_ns: str, target_ip: str) -> SimpleNamespace:  # noqa: ANN001
+    def ping_runner(
+        client_ns: str, target_ip: str
+    ) -> subprocess.CompletedProcess[str]:  # noqa: ANN001
         raise AssertionError(
             f"ping should not run when TCP probe succeeds (got {client_ns} -> {target_ip})"
         )
@@ -38,8 +40,10 @@ def test_verify_namespace_connectivity_skips_when_checks_fail() -> None:
         return False
 
     # noqa rationale: signature mirrors ping_runner for easy injection in tests.
-    def ping_runner(client_ns: str, target_ip: str) -> SimpleNamespace:  # noqa: ANN001
-        return SimpleNamespace(returncode=1)
+    def ping_runner(
+        client_ns: str, target_ip: str
+    ) -> subprocess.CompletedProcess[str]:  # noqa: ANN001
+        return subprocess.CompletedProcess([client_ns, target_ip], 1)
 
     with pytest.raises(pytest.skip.Exception):
         _verify_namespace_connectivity(
