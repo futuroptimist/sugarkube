@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Iterable, List
 
@@ -79,11 +80,9 @@ def ensure_just_available() -> Path:
 def _install_missing_tools(missing: Iterable[str]) -> list[str]:
     """Best-effort installer for common CLI dependencies used by the tests.
 
-    Note:
-        Installation attempts via apt-get require elevated privileges (root or sudo).
-        If the tests are run as a non-root user, installation will silently fail,
-        which is the intended behavior. If the required tools remain unavailable
-        after the attempt, the test will be skipped as before.
+    The installer now retries with ``sudo`` when available so non-root environments can
+    still auto-install tools instead of skipping tests.
+    Coverage: ``tests/test_require_tools_installation.py``.
     """
 
     installer = shutil.which("apt-get")
@@ -108,16 +107,36 @@ def _install_missing_tools(missing: Iterable[str]) -> list[str]:
     env = os.environ.copy()
     env.setdefault("DEBIAN_FRONTEND", "noninteractive")
 
-    update_result = subprocess.run(
-        [installer, "update"], capture_output=True, text=True, env=env
-    )
+    def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+    def _run_with_sudo(cmd: list[str]) -> subprocess.CompletedProcess[str] | None:
+        sudo = shutil.which("sudo")
+        if not sudo:
+            return None
+        sudo_cmd = [sudo, *cmd]
+        return _run(sudo_cmd)
+
+    update_cmd = [installer, "update"]
+    used_sudo = False
+    update_result = _run(update_cmd)
     if update_result.returncode != 0:
-        return []
+        sudo_result = _run_with_sudo(update_cmd)
+        if sudo_result is None or sudo_result.returncode != 0:
+            return []
+        used_sudo = True
 
     install_cmd = [installer, "install", "--no-install-recommends", "-y", *packages]
-    install_result = subprocess.run(install_cmd, capture_output=True, text=True, env=env)
-    if install_result.returncode != 0:
-        return []
+    if used_sudo:
+        install_result = _run_with_sudo(install_cmd)
+        if install_result is None or install_result.returncode != 0:
+            return []
+    else:
+        install_result = _run(install_cmd)
+        if install_result.returncode != 0:
+            sudo_result = _run_with_sudo(install_cmd)
+            if sudo_result is None or sudo_result.returncode != 0:
+                return []
 
     return packages
 
@@ -132,20 +151,17 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        # TODO: Ensure required system tools are available for tests.
-        # Root cause: Tools remain unavailable after attempted auto-installation.
-        # This may be due to running on a non-Debian-based system, insufficient privileges,
-        # or installation failures.
-        # Estimated fix: 1h to install tools manually or adjust CI environment to provide them.
-        pytest.skip(f"Required tools not available: {', '.join(sorted(missing))}")
+        # TODO: Ensure required CLI tools are preinstalled or provide per-suite fallbacks.
+        # Root cause: Tools remain unavailable after automated installation attempts.
+        # Estimated fix: 30m to pre-provision dependencies or stub tool usage in CI.
+        pytest.skip(
+            "Required tools not available after auto-install attempts: "
+            f"{', '.join(sorted(missing))}"
+        )
 
 
 def ensure_root_privileges() -> None:
     """Skip when we cannot create network namespaces due to insufficient privileges."""
-
-    result = subprocess.run(["id", "-u"], capture_output=True, text=True)
-    if result.stdout.strip() == "0":
-        return
 
     probe = subprocess.run(["unshare", "-n", "true"], capture_output=True, text=True)
     if probe.returncode != 0:
@@ -153,3 +169,15 @@ def ensure_root_privileges() -> None:
         # Root cause: Creating namespaces requires elevated privileges that may be blocked.
         # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
         pytest.skip("Insufficient privileges for network namespace operations")
+
+    netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
+    probe_netns = subprocess.run(
+        ["ip", "netns", "add", netns_name], capture_output=True, text=True
+    )
+    if probe_netns.returncode != 0:
+        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
+        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
+        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
+        pytest.skip("Insufficient privileges for network namespace operations")
+
+    subprocess.run(["ip", "netns", "delete", netns_name], capture_output=True, text=True)

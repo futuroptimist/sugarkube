@@ -317,6 +317,8 @@ exit 1
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{os.environ['PATH']}"
     env["AVAHI_DBUS_TIMEOUT_MS"] = "500"
+    env["SUGARKUBE_MDNS_DBUS"] = "0"
+    env["AVAHI_DBUS_WAIT_MS"] = "0"
 
     result = subprocess.run(
         [str(retry_script)],
@@ -392,6 +394,8 @@ fi
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{os.environ['PATH']}"
     env["AVAHI_DBUS_TIMEOUT_MS"] = "500"
+    env["SUGARKUBE_MDNS_DBUS"] = "0"
+    env["AVAHI_DBUS_WAIT_MS"] = "0"
 
     # Phase 1: Service unavailable
     result = subprocess.run(
