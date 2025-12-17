@@ -87,6 +87,9 @@ def _verify_namespace_connectivity(
     if ping_result.returncode == 0:
         return
 
+    # TODO: Diagnose netns connectivity failures when both TCP and ICMP paths fail.
+    # Root cause: CI runners may lack veth or namespace capabilities required for probes.
+    # Estimated fix: 1h to provision privileged runners or fall back to a fully mocked probe path.
     pytest.skip("Network namespace connectivity test failed")
 
 
