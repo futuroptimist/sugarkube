@@ -99,6 +99,36 @@ import tests.conftest as conftest
                 ["/usr/bin/sudo", "/usr/bin/apt-get", "install", "--no-install-recommends", "-y", "iproute2"],
             ],
         },
+        {
+            "name": "sudo_only_needed_for_install",
+            "update_code": 0,
+            "install_code": 100,
+            "sudo_update_code": 1,
+            "sudo_install_code": 0,
+            "sudo_available": True,
+            "expected_packages": ["iproute2"],
+            "expected_commands": [
+                ["/usr/bin/apt-get", "update"],
+                [
+                    "/usr/bin/apt-get",
+                    "install",
+                    "--no-install-recommends",
+                    "-y",
+                    "iproute2",
+                ],
+                [
+                    "/usr/bin/sudo",
+                    "/usr/bin/apt-get",
+                    "install",
+                    "--no-install-recommends",
+                    "-y",
+                    "iproute2",
+                ],
+            ],
+            "absent_commands": [
+                ["/usr/bin/sudo", "/usr/bin/apt-get", "update"],
+            ],
+        },
     ],
     ids=lambda scenario: scenario["name"],
 )
