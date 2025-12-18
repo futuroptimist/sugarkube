@@ -1,6 +1,7 @@
 # Testing Infrastructure
 
-Sugarkube uses a comprehensive testing strategy combining unit tests, integration tests, and end-to-end validation to ensure reliability across the Pi cluster deployment pipeline.
+Sugarkube uses a comprehensive testing strategy combining unit tests, integration tests, and
+end-to-end validation to ensure reliability across the Pi cluster deployment pipeline.
 
 ## Test Frameworks
 
@@ -100,6 +101,9 @@ The GitHub Actions workflow `.github/workflows/tests.yml` runs:
 - Ensure required tools are installed (`bats`, `avahi-utils`, `shellcheck`)
 - Check environment variables (`AVAHI_AVAILABLE`, `LOG_LEVEL`)
 - Verify network connectivity for integration tests
+- Network namespace suites retry TCP probes before skipping and include the last failure reason in
+  the skip message. Use that context to determine whether the runner lacks kernel support or
+  needs additional privileges.
 
 ### Test-Specific Debugging
 - Use `LOG_LEVEL=debug` for verbose discovery test output
