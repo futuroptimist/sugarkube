@@ -234,6 +234,7 @@ def test_probe_retries_before_succeeding() -> None:
 
     assert result, "Probe should retry and succeed on a subsequent attempt"
     assert result.attempts == 2
+    assert len(proc_holder) == 2, "Each attempt should spawn a new server"
     assert proc_holder and proc_holder[0].terminated, "First server should be cleaned up"
     assert result.errors and "client attempt 1" in result.errors[0]
 
