@@ -62,3 +62,44 @@ def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(pytest.skip.Exception):
         conftest.require_tools(["unshare", "ip"])
+
+
+def test_preinstall_test_cli_tools_installs_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Preinstall helper should request all known CLI dependencies when missing."""
+
+    recorded: list[list[str]] = []
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        ordered = sorted(missing)
+        recorded.append(ordered)
+        return ordered
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        if tool == "apt-get":
+            return "/usr/bin/apt-get"
+        return None
+
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    installed = conftest.preinstall_test_cli_tools()
+
+    assert recorded == [sorted(conftest.TEST_CLI_TOOLS)]
+    assert installed == sorted(conftest.TEST_CLI_TOOLS)
+
+
+def test_preinstall_test_cli_tools_noops_when_tools_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preinstall helper should skip work when dependencies already exist."""
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        return f"/usr/bin/{tool}"
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        raise AssertionError(f"Unexpected install attempt for: {missing}")
+
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+
+    assert conftest.preinstall_test_cli_tools() == []
