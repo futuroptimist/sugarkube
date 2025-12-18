@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from types import SimpleNamespace
 
-from tests.helpers.netns_probe import probe_namespace_connectivity
+from tests.helpers.netns_probe import NamespaceProbeResult, probe_namespace_connectivity
 
 
 class _DummyProc:
@@ -48,6 +48,8 @@ def test_probe_uses_python_tcp_handshake() -> None:
     )
 
     assert result, "TCP connectivity probe should succeed when both commands return 0"
+    assert isinstance(result, NamespaceProbeResult)
+    assert result.attempts == 1
     assert proc_holder, "Server process should be spawned"
     server_cmd = proc_holder[0].cmd
     assert server_cmd[:4] == ["ip", "netns", "exec", "ns-server"]
@@ -200,3 +202,60 @@ def test_probe_uses_configurable_start_delay() -> None:
 
     assert result, "Probe should still succeed with a custom delay"
     assert sleep_calls == [1.5], "Sleep should be invoked with the configured delay"
+
+
+def test_probe_retries_before_succeeding() -> None:
+    """Transient client failures should retry with diagnostic breadcrumbs."""
+
+    commands: list[list[str]] = []
+
+    def runner(cmd, **_: object):  # noqa: ANN001 - subprocess.run signature
+        commands.append(cmd)
+        code = 1 if len(commands) == 1 else 0
+        return SimpleNamespace(returncode=code, stderr="probe failed" if code else "")
+
+    proc_holder: list[_DummyProc] = []
+
+    def spawner(cmd, **kwargs: object) -> _DummyProc:  # noqa: ANN001 - subprocess signature
+        proc = _DummyProc(cmd, **kwargs)
+        proc_holder.append(proc)
+        return proc
+
+    result = probe_namespace_connectivity(
+        "ns-client",
+        "ns-server",
+        "192.168.50.2",
+        run_cmd=runner,
+        popen_cmd=spawner,
+        sleep_fn=lambda _: None,
+        retry_delay=0,
+        attempts=2,
+    )
+
+    assert result, "Probe should retry and succeed on a subsequent attempt"
+    assert result.attempts == 2
+    assert len(proc_holder) == 2, "Each attempt should spawn a new server"
+    assert proc_holder and proc_holder[0].terminated, "First server should be cleaned up"
+    assert result.errors and "client attempt 1" in result.errors[0]
+
+
+def test_probe_surfaces_reason_on_spawn_failure() -> None:
+    """Spawn failures should include a human-readable reason for skips."""
+
+    def spawner(*_: object, **__: object):  # noqa: ANN001 - subprocess signature
+        raise RuntimeError("netns disabled")
+
+    result = probe_namespace_connectivity(
+        "ns-client",
+        "ns-server",
+        "192.168.50.2",
+        popen_cmd=spawner,
+        sleep_fn=lambda _: None,
+        retry_delay=0,
+        attempts=1,
+    )
+
+    assert not result, "Probe should fail when namespaces cannot be spawned"
+    assert result.attempts == 1
+    assert result.reason and "netns disabled" in result.reason
+    assert result.errors == [result.reason]
