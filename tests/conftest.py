@@ -195,6 +195,9 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
+        # TODO: Ensure required CLI tools are available in CI images or stub their usage.
+        # Root cause: Some test environments lack system packages and installation can fail.
+        # Estimated fix: 1h to preinstall dependencies in CI or mock external tool invocations.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts: "
             f"{', '.join(sorted(missing))}"
