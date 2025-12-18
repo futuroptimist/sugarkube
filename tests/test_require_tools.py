@@ -103,3 +103,18 @@ def test_preinstall_test_cli_tools_noops_when_tools_available(
     monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
 
     assert conftest.preinstall_test_cli_tools() == []
+
+
+def test_ensure_test_cli_tools_preinstalled_respects_skip_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Session fixture should honor opt-out flag to avoid installs in CI."""
+
+    monkeypatch.setenv("SUGARKUBE_SKIP_PREINSTALL_TOOLS", "1")
+
+    def unexpected_preinstall_attempt() -> None:
+        raise AssertionError("Preinstall should be skipped when opt-out is set")
+
+    monkeypatch.setattr(conftest, "preinstall_test_cli_tools", unexpected_preinstall_attempt)
+
+    conftest.ensure_test_cli_tools_preinstalled_if_allowed()

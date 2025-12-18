@@ -10,7 +10,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Mapping
 
 import pytest
 
@@ -161,6 +161,19 @@ def preinstall_test_cli_tools() -> list[str]:
     return _install_missing_tools(missing)
 
 
+def ensure_test_cli_tools_preinstalled_if_allowed(
+    env: Mapping[str, str] | None = None,
+) -> None:
+    """Conditionally preinstall CLI tools when opt-out is not requested."""
+
+    env = os.environ if env is None else env
+
+    if env.get("SUGARKUBE_SKIP_PREINSTALL_TOOLS") == "1":
+        return
+
+    preinstall_test_cli_tools()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def ensure_test_cli_tools_preinstalled() -> None:
     """Best-effort preinstall of CLI dependencies to reduce skip frequency.
@@ -169,10 +182,7 @@ def ensure_test_cli_tools_preinstalled() -> None:
     environments where package installs are undesirable.
     """
 
-    if os.environ.get("SUGARKUBE_SKIP_PREINSTALL_TOOLS") == "1":
-        return
-
-    preinstall_test_cli_tools()
+    ensure_test_cli_tools_preinstalled_if_allowed()
 
 
 def require_tools(tools: Iterable[str]) -> None:
