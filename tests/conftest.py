@@ -10,11 +10,21 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Mapping
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_CLI_TOOLS: tuple[str, ...] = (
+    "ip",
+    "ping",
+    "unshare",
+    "avahi-browse",
+    "avahi-publish",
+    "avahi-daemon",
+    "dbus-daemon",
+    "dbus-launch",
+)
 
 # Ensure the project root is importable so ``sitecustomize`` is discovered by
 # subprocesses spawned in tests.  ``sys.path`` adjustments affect the current
@@ -141,6 +151,40 @@ def _install_missing_tools(missing: Iterable[str]) -> list[str]:
     return packages
 
 
+def preinstall_test_cli_tools() -> list[str]:
+    """Preinstall the CLI tools most tests depend on to avoid late skips."""
+
+    missing = [tool for tool in TEST_CLI_TOOLS if not shutil.which(tool)]
+    if not missing:
+        return []
+
+    return _install_missing_tools(missing)
+
+
+def ensure_test_cli_tools_preinstalled_if_allowed(
+    env: Mapping[str, str] | None = None,
+) -> None:
+    """Conditionally preinstall CLI tools when opt-out is not requested."""
+
+    env = os.environ if env is None else env
+
+    if env.get("SUGARKUBE_SKIP_PREINSTALL_TOOLS") == "1":
+        return
+
+    preinstall_test_cli_tools()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_test_cli_tools_preinstalled() -> None:
+    """Best-effort preinstall of CLI dependencies to reduce skip frequency.
+
+    Set ``SUGARKUBE_SKIP_PREINSTALL_TOOLS=1`` to opt out when running in limited
+    environments where package installs are undesirable.
+    """
+
+    ensure_test_cli_tools_preinstalled_if_allowed()
+
+
 def require_tools(tools: Iterable[str]) -> None:
     """Ensure the current test has access to required system tools."""
 
@@ -151,11 +195,11 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        # TODO: Ensure required CLI tools are preinstalled or provide per-suite fallbacks.
-        # Root cause: Tools remain unavailable after automated installation attempts.
-        # Estimated fix: 30m to pre-provision dependencies or stub tool usage in CI.
+        # TODO: Ensure required CLI tools are available in CI images or stub their usage.
+        # Root cause: Some test environments lack system packages and installation can fail.
+        # Estimated fix: 1h to preinstall dependencies in CI or mock external tool invocations.
         pytest.skip(
-            "Required tools not available after auto-install attempts: "
+            "Required tools not available after preinstall and auto-install attempts: "
             f"{', '.join(sorted(missing))}"
         )
 
