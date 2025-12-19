@@ -204,24 +204,41 @@ def require_tools(tools: Iterable[str]) -> None:
         )
 
 
-def ensure_root_privileges() -> None:
-    """Skip when we cannot create network namespaces due to insufficient privileges."""
+def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a command and retry with sudo when permission errors occur.
 
-    probe = subprocess.run(["unshare", "-n", "true"], capture_output=True, text=True)
+    Coverage: ``tests/test_ensure_root_privileges.py``.
+    """
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        return result
+
+    sudo = shutil.which("sudo")
+    if not sudo:
+        return result
+
+    return subprocess.run([sudo, *cmd], capture_output=True, text=True)
+
+
+def ensure_root_privileges() -> None:
+    """Skip when we cannot create network namespaces due to insufficient privileges.
+
+    Commands are retried with ``sudo`` when available to mirror CI capabilities and avoid
+    unnecessary skips when the caller can run sudo non-interactively.
+    """
+
+    probe = _run_with_sudo_fallback(["unshare", "-n", "true"])
     if probe.returncode != 0:
-        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
-        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
-        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
-        pytest.skip("Insufficient privileges for network namespace operations")
+        reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
+        pytest.skip(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
-    probe_netns = subprocess.run(
-        ["ip", "netns", "add", netns_name], capture_output=True, text=True
-    )
+    probe_netns = _run_with_sudo_fallback(["ip", "netns", "add", netns_name])
     if probe_netns.returncode != 0:
-        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
-        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
-        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
-        pytest.skip("Insufficient privileges for network namespace operations")
+        reason = (
+            probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
+        )
+        pytest.skip(reason)
 
-    subprocess.run(["ip", "netns", "delete", netns_name], capture_output=True, text=True)
+    _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
