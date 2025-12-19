@@ -8,58 +8,63 @@ variation = standoff_mode == "printed" ? "through"
           : standoff_mode == "heatset" ? "blind"
           : standoff_mode;
 
-pi_positions = [[0,0], [1,0], [0,1]]; // layout as [x,y] offsets
-board_len = 85;
-board_wid = 56;
+pi_positions = is_undef(pi_positions) ? [[0,0], [1,0], [0,1]] : pi_positions; // layout as [x,y] offsets
+board_len = is_undef(board_len) ? 85 : board_len;
+board_wid = is_undef(board_wid) ? 56 : board_wid;
 hole_spacing = is_undef(hole_spacing) ? pi_hole_spacing : hole_spacing;
 hole_spacing_x = hole_spacing[0];
 hole_spacing_y = hole_spacing[1];
 
 plate_thickness = is_undef(plate_thickness) ? 2.0 : plate_thickness;
-corner_radius   = 5.0;  // round base corners to avoid sharp edges
-standoff_height = 6.0;
-standoff_diam = 7.0;   // widened to keep a ≥0.4 mm flange around the 5.8 mm countersink
+corner_radius   = is_undef(corner_radius) ? 5.0 : corner_radius;  // round base corners to avoid sharp edges
+standoff_height = is_undef(standoff_height) ? 6.0 : standoff_height;
+standoff_diam = is_undef(standoff_diam) ? 7.0 : standoff_diam;   // widened to keep a ≥0.4 mm flange around the 5.8 mm countersink
 
-insert_od         = 3.5;         // outer Ø for common brass inserts
-insert_length     = 4.0;         // full length of the insert
-lead_chamfer      = 0.5;         // chamfer depth to guide the insert
+insert_od         = is_undef(insert_od) ? 3.5 : insert_od;         // outer Ø for common brass inserts
+insert_length     = is_undef(insert_length) ? 4.0 : insert_length;         // full length of the insert
+lead_chamfer      = is_undef(lead_chamfer) ? 0.5 : lead_chamfer;         // chamfer depth to guide the insert
 insert_pocket_depth = insert_length + lead_chamfer; // pocket allows for chamfer
 assert(insert_pocket_depth <= standoff_height,
        "insert_pocket_depth must be ≤ standoff_height");
-insert_clearance  = 0.2;         // designed undersize for interference fit
+insert_clearance  = is_undef(insert_clearance) ? 0.2 : insert_clearance;         // designed undersize for interference fit
 hole_diam         = insert_od - insert_clearance;
 assert(standoff_diam >= insert_od + 2,
        "standoff_diam must be ≥ insert_od + 2");
 screw_clearance_diam = 3.2; // through-hole clearance, slightly oversize
 
-countersink_diam = 5.8; // widened for improved screw head clearance
-countersink_depth = 1.6;
+countersink_diam = is_undef(countersink_diam) ? 5.8 : countersink_diam; // widened for improved screw head clearance
+countersink_depth = is_undef(countersink_depth) ? 1.6 : countersink_depth;
 
-nut_clearance = 0.5; // extra room for easier nut insertion (was 0.4)
+nut_clearance = is_undef(nut_clearance) ? 0.5 : nut_clearance; // extra room for easier nut insertion (was 0.4)
 nut_flat = 5.0 + nut_clearance; // across flats for M2.5 nut
-nut_thick = 2.0;
+nut_thick = is_undef(nut_thick) ? 2.0 : nut_thick;
 
-board_angle = 0;
-gap_between_boards = 10;
+board_angle = is_undef(board_angle) ? 0 : board_angle;
+gap_between_boards = is_undef(gap_between_boards) ? 10 : gap_between_boards;
 edge_margin = is_undef(edge_margin) ? 5 : edge_margin;
 stack_edge_margin = is_undef(stack_edge_margin) ? 15 : stack_edge_margin;
-port_clearance = 6;
+port_clearance = is_undef(port_clearance) ? 6 : port_clearance;
+stack_mount_positions = is_undef(stack_mount_positions) ? undef : stack_mount_positions;
 
 include_stack_mounts = is_undef(include_stack_mounts) ? false : include_stack_mounts;
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
 stack_pocket_d = is_undef(stack_pocket_d) ? 9 : stack_pocket_d;
-stack_pocket_depth_input = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
-stack_pocket_depth = include_stack_mounts
-    ? min(stack_pocket_depth_input, plate_thickness / 2 - 0.1)
+stack_pocket_depth_input = is_undef(stack_pocket_depth_input)
+    ? (is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth)
     : stack_pocket_depth_input;
+stack_pocket_depth = is_undef(stack_pocket_depth)
+    ? (include_stack_mounts
+        ? min(stack_pocket_depth_input, plate_thickness / 2 - 0.1)
+        : stack_pocket_depth_input)
+    : stack_pocket_depth;
 
 // Optional 1602 LCD module (80x36 mm PCB)
 // Disable by default; set to true to add the LCD mount
-include_lcd = false;
-lcd_len = 80;
-lcd_wid = 36;
-lcd_hole_spacing_x = 75;
-lcd_hole_spacing_y = 31;
+include_lcd = is_undef(include_lcd) ? false : include_lcd;
+lcd_len = is_undef(lcd_len) ? 80 : lcd_len;
+lcd_wid = is_undef(lcd_wid) ? 36 : lcd_wid;
+lcd_hole_spacing_x = is_undef(lcd_hole_spacing_x) ? 75 : lcd_hole_spacing_x;
+lcd_hole_spacing_y = is_undef(lcd_hole_spacing_y) ? 31 : lcd_hole_spacing_y;
 
 assert(
     !include_stack_mounts || 2 * stack_pocket_depth < plate_thickness,

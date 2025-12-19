@@ -80,3 +80,16 @@ def test_stack_carrier_geometry_exceeds_flat_carrier(tmp_path: Path) -> None:
     assert stack.returncode == 0, stack.stderr
 
     assert stack_output.stat().st_size > base_output.stat().st_size
+
+
+def test_stack_wrapper_renders_without_warnings(tmp_path: Path) -> None:
+    """Opening the stack wrapper directly should behave like CI renders."""
+
+    output_path = tmp_path / "pi_carrier_stack_default.stl"
+    result = _render(STACK_SCAD, output_path)
+
+    log = result.stdout + result.stderr
+    assert result.returncode == 0, log
+    assert "ERROR:" not in log
+    assert "WARNING: Ignoring unknown variable" not in log
+    assert output_path.exists()

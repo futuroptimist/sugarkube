@@ -18,11 +18,7 @@ adapter_thickness = is_undef(adapter_thickness) ? 8 : adapter_thickness;
 stack_plate_thickness = is_undef(stack_plate_thickness) ? 3.0 : stack_plate_thickness;
 plate_thickness = is_undef(plate_thickness) ? stack_plate_thickness : plate_thickness;
 stack_pocket_depth = min(stack_pocket_depth_input, plate_thickness / 2 - 0.1);
-
-assert(
-    2 * stack_pocket_depth < plate_thickness,
-    "stack_pocket_depth must be < half of plate_thickness so symmetric pockets do not overlap"
-);
+stack_mount_positions = is_undef(stack_mount_positions) ? undef : stack_mount_positions;
 
 include <./pi_dimensions.scad>;
 // Shared spacing + fan defaults
@@ -87,6 +83,15 @@ if (alignment_guard_enabled) {
             "column_spacing[1] out of tolerance (", column_spacing[1], " mm)"
         )
     );
+}
+
+module _validate_stack_params() {
+    if (include_stack_mounts) {
+        assert(
+            2 * stack_pocket_depth < plate_thickness,
+            "stack_pocket_depth must be < half of plate_thickness so symmetric pockets do not overlap"
+        );
+    }
 }
 
 module _carrier(level = 0) {
@@ -154,6 +159,8 @@ module pi_carrier_stack_assembly() {
     _fan_adapter();
     _fan_wall();
 }
+
+_validate_stack_params();
 
 if (emit_dimension_report) {
     echo(
