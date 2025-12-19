@@ -32,12 +32,12 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 | Item | Qty | Notes |
 | --- | ---: | --- |
-| `pi_carrier.scad` plates | 3 | Print one plate per level; enable `include_stack_mounts` to add the stack pockets and use the `stack_edge_margin` override for extra perimeter. |
-| Stack posts (`pi_stack_post.scad`) | 8 | One per corner per gap (post count = (levels − 1) × 4; default three-level stack → eight posts). Through-hole sized for the stack bolts with a keyed locating boss for the stack pockets. |
+| `pi_carrier.scad` plates | 3 | Print one plate per level; enable `include_stack_mounts` to add the stack clamp through-holes plus top/bottom locating pockets. Use the `stack_edge_margin` override for extra perimeter. |
+| Stack posts (`pi_stack_post.scad`) | 8 | One per corner per gap (post count = (levels − 1) × 4; default three-level stack → eight posts). Through-hole sized for the stack bolts with keyed bosses that sit inside the pockets—no heat-set inserts on the posts. |
 | Fan adapter (`pi_stack_fan_adapter.scad`) | 1 | Clamps onto the two fan-side posts and provides the interface holes for the perpendicular fan wall. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
-| M3 × 60–70 mm screws + nuts | 4 | Clamp the plates and posts together; length depends on chosen post count and nut style. |
+| M3 × 60–70 mm screws + nuts | 4 | Clamp the plates and posts together via the stack clamp holes; length depends on chosen post count and nut style. |
 | M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 36 | Seat into the carrier standoffs for all 9 Pis (4 per Pi). |
 | Brass spacers, M2.5 female–female, 11 mm | 36 | Four per Pi (one per mounting point), for all 9 Pis in the stack. Maintains separation between each Pi and the carrier plate. |
 | PC fan (80/92/120 mm) | 1 | Match the fan size to the selected `fan_size` parameter. |
@@ -50,11 +50,13 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 - Slice the carriers at 0.2 mm layers with ≥15 % infill; match the surface finish guidance in
   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) for consistent tolerances.
 - Stack-ready carrier levels rendered via `pi_carrier_stack.scad` default to a 3.0 mm plate so the
-  1.2 mm symmetric locating pockets key without overlapping; the standalone `pi_carrier.scad`
-  remains a 2.0 mm plate.
+  1.2 mm symmetric locating pockets (top and bottom) key without overlapping. They also add the four
+  M3 clamp through-holes. The standalone `pi_carrier.scad` remains a 2.0 mm plate when you omit
+  stack mounts.
 - Print the stack posts upright with three perimeter walls and 40 % gyroid infill. They use a simple
-  through-hole for the clamp bolt—no heat-set inserts are required on the posts. Install heat-set
-  inserts after printing.
+  through-hole for the clamp bolt with keyed bosses sized for the locating pockets—no heat-set
+  inserts are required on the posts. Install heat-set inserts in the carrier standoffs after
+  printing.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
@@ -90,11 +92,13 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 ## Assembly sequence
 
-1. **Prep the carriers.** Follow the insert installation guidance in
-   [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to seat M2.5 brass inserts or chase printed
-   threads. Install the brass spacers so they are ready for board mounting.
-2. **Stage the stack hardware.** Insert M3 bolts up through the lowest carrier’s stack pockets.
-   Slide a post onto each bolt so the keyed bosses sit inside the pockets.
+1. **Prep the carriers.** Each plate uses **12× M2.5 heat-set inserts** for the Pi standoffs only.
+   Follow the insert installation guidance in [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to
+   seat those inserts or chase printed threads. Install the brass spacers so they are ready for board
+   mounting.
+2. **Stage the stack hardware.** Insert M3 bolts up through the lowest carrier’s stack clamp
+   through-holes. Slide a post onto each bolt so the keyed bosses sit inside the pockets on both
+   faces.
 3. **Stack the carriers.** Drop the middle carrier on top, making sure the lower post bosses seat
    into the bottom pockets and the upper bosses key into the top pockets. Add the next set of posts
    and repeat for the top carrier. Snug the M3 nuts to clamp the stack evenly.

@@ -12,12 +12,12 @@ edge_margin = is_undef(edge_margin) ? stack_edge_margin : edge_margin;
 include_stack_mounts = true;
 
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
-stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
+stack_pocket_d = is_undef(stack_pocket_d) ? 9 : stack_pocket_d;
 stack_pocket_depth_input = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
 adapter_thickness = is_undef(adapter_thickness) ? 8 : adapter_thickness;
 stack_plate_thickness = is_undef(stack_plate_thickness) ? 3.0 : stack_plate_thickness;
 plate_thickness = is_undef(plate_thickness) ? stack_plate_thickness : plate_thickness;
-stack_pocket_depth = min(stack_pocket_depth_input, plate_thickness / 2 - 0.01);
+stack_pocket_depth = min(stack_pocket_depth_input, plate_thickness / 2 - 0.11);
 
 include <./pi_dimensions.scad>;
 // Shared spacing + fan defaults
@@ -64,7 +64,7 @@ if (alignment_guard_enabled) {
 }
 
 module _carrier(level = 0) {
-    translate([-plate_len / 2, -plate_wid / 2, level * level_height])
+    translate([0, 0, level * level_height])
         let(
             include_stack_mounts = true,
             stack_edge_margin = stack_edge_margin,
@@ -142,6 +142,14 @@ if (emit_dimension_report) {
 }
 
 if (export_part == "carrier_level") {
+    echo(
+        "stack_mounts_enabled",
+        include_stack_mounts = include_stack_mounts,
+        stack_mount_positions = carrier_stack_mount_positions,
+        stack_bolt_d = stack_bolt_d,
+        stack_pocket_d = stack_pocket_d,
+        stack_pocket_depth = stack_pocket_depth
+    );
     _carrier(0);
 } else if (export_part == "post") {
     pi_stack_post(
