@@ -181,8 +181,7 @@ if (export_part == "carrier_level") {
         stack_bolt_d = stack_bolt_d,
         stack_pocket_d = stack_pocket_d,
         stack_pocket_depth = stack_pocket_depth,
-        z_gap_clear = z_gap_clear,
-        plate_thickness = plate_thickness
+        z_gap_clear = z_gap_clear
     );
 } else if (export_part == "fan_adapter") {
     _fan_adapter();
