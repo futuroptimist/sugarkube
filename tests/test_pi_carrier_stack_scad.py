@@ -101,7 +101,7 @@ def test_stack_mount_pockets_on_both_faces() -> None:
     source = PI_CARRIER_PATH.read_text(encoding="utf-8")
     assert "plate_thickness - stack_pocket_depth" in source
     assert re.search(
-        r"mount_x, mount_y, -0\.01\]\)\s*cylinder\(h = stack_pocket_depth \+ 0\.02",
+        r"translate\(\[pos\[0\], pos\[1\], -0\.01\]\)\s*cylinder\(h = stack_pocket_depth \+ 0\.02",
         source,
     ), "Bottom pocket should mirror the top pocket when include_stack_mounts=true"
 

@@ -62,13 +62,23 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
             "intro": "Modular plates + posts + fan adapter plus fan-wall matrices.",
             "layout": {
                 "carriers": [
-                    stack_dir / "pi_carrier_stack_carrier_level_printed.stl",
-                    stack_dir / "pi_carrier_stack_carrier_level_heatset.stl",
+                    stack_dir
+                    / "carriers"
+                    / "printed"
+                    / "pi_carrier_stack_carrier_level_printed.stl",
+                    stack_dir
+                    / "carriers"
+                    / "heatset"
+                    / "pi_carrier_stack_carrier_level_heatset.stl",
                 ],
-                "posts": [stack_dir / "pi_carrier_stack_post.stl"],
-                "fan_adapters": [stack_dir / "pi_carrier_stack_fan_adapter.stl"],
-                "fan_walls": sorted(stack_dir.glob("pi_carrier_stack_fan_wall_fan*.stl")),
-                "preview": [stack_dir / "pi_carrier_stack_preview.stl"],
+                "posts": [stack_dir / "posts" / "pi_carrier_stack_post.stl"],
+                "fan_adapters": [
+                    stack_dir / "fan_adapters" / "pi_carrier_stack_fan_adapter.stl"
+                ],
+                "fan_walls": sorted(
+                    (stack_dir / "fan_walls").glob("pi_carrier_stack_fan_wall_fan*.stl")
+                ),
+                "preview": [stack_dir / "preview" / "pi_carrier_stack_preview.stl"],
             },
             "docs": [
                 "docs/pi_cluster_stack.md",

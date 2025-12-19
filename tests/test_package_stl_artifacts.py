@@ -18,11 +18,11 @@ def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> Non
     stack_dir = stl_dir / "pi_cluster"
 
     for name in [
-        stack_dir / "pi_carrier_stack_carrier_level_printed.stl",
-        stack_dir / "pi_carrier_stack_carrier_level_heatset.stl",
-        stack_dir / "pi_carrier_stack_post.stl",
-        stack_dir / "pi_carrier_stack_fan_adapter.stl",
-        stack_dir / "pi_carrier_stack_preview.stl",
+        stack_dir / "carriers" / "printed" / "pi_carrier_stack_carrier_level_printed.stl",
+        stack_dir / "carriers" / "heatset" / "pi_carrier_stack_carrier_level_heatset.stl",
+        stack_dir / "posts" / "pi_carrier_stack_post.stl",
+        stack_dir / "fan_adapters" / "pi_carrier_stack_fan_adapter.stl",
+        stack_dir / "preview" / "pi_carrier_stack_preview.stl",
         "pi_carrier_printed.stl",
         "pi_carrier_heatset.stl",
         "pi5_triple_carrier_rot45_printed.stl",
@@ -38,7 +38,7 @@ def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> Non
 
     if include_variants:
         for fan_size in (80, 92, 120):
-            _touch_stub(stack_dir / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl")
+            _touch_stub(stack_dir / "fan_walls" / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl")
 
 
 def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
