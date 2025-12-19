@@ -78,7 +78,7 @@
         "scripts/k3s-discover.sh install_agent() lines 4331-4436",
         "docs/raspi_cluster_setup.md cluster formation documentation",
         "logs/up/20251118T085352Z_5abacd8_sugarkube1_just-up-dev.log",
-        "logs/debug-mdns_2025-11-19T00:30:02Z.log.sanitized (user-provided diagnostics)"
+        "logs/debug-mdns_2025-11-19T00-30-02Z.log.sanitized (user-provided diagnostics)"
     ],
     "performanceImpact": "Neutral. Using IP addresses may be slightly faster as it avoids name resolution overhead, but the difference is negligible. The main benefit is reliability rather than performance.",
     "documentationChanges": "No documentation changes needed. The user-visible behavior is unchanged - nodes still discover each other by mDNS hostname and join successfully. The fix is an internal implementation detail that makes the system more robust.",
