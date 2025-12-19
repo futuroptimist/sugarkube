@@ -32,13 +32,13 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
 
 | Item | Qty | Notes |
 | --- | ---: | --- |
-| `pi_carrier.scad` plates | 3 | Print one plate per level; enable `include_stack_mounts` to add the stack pockets and use the `stack_edge_margin` override for extra perimeter. |
-| Stack posts (`pi_stack_post.scad`) | 8 | One per corner per gap (post count = (levels − 1) × 4; default three-level stack → eight posts). Through-hole sized for the stack bolts with a keyed locating boss for the stack pockets. |
+| `pi_carrier.scad` plates | 3 | Print one plate per level with `include_stack_mounts=true` to add the four M3 clamp holes and locating pockets. Use `stack_edge_margin` for extra perimeter. |
+| Stack posts (`pi_stack_post.scad`) | 8 | One per corner per gap (post count = (levels − 1) × 4; default three-level stack → eight posts). Through-hole sized for the clamp bolts with keyed bosses that seat into the carrier pockets—no inserts in the posts. |
 | Fan adapter (`pi_stack_fan_adapter.scad`) | 1 | Clamps onto the two fan-side posts and provides the interface holes for the perpendicular fan wall. |
 | Fan wall | 1 | Printed from the `fan_wall` module with bosses sized for M3 heat-set inserts. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
 | M3 × 60–70 mm screws + nuts | 4 | Clamp the plates and posts together; length depends on chosen post count and nut style. |
-| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 36 | Seat into the carrier standoffs for all 9 Pis (4 per Pi). |
+| M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 36 | Seat into the Pi standoffs only (4 per Pi, 12 per carrier). Stack clamp holes stay M3 through-holes. |
 | Brass spacers, M2.5 female–female, 11 mm | 36 | Four per Pi (one per mounting point), for all 9 Pis in the stack. Maintains separation between each Pi and the carrier plate. |
 | PC fan (80/92/120 mm) | 1 | Match the fan size to the selected `fan_size` parameter. |
 | M3 × 16 mm screws | 4 | Secure the fan to the wall bosses. |
@@ -53,21 +53,24 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   1.2 mm symmetric locating pockets key without overlapping; the standalone `pi_carrier.scad`
   remains a 2.0 mm plate.
 - Print the stack posts upright with three perimeter walls and 40 % gyroid infill. They use a simple
-  through-hole for the clamp bolt—no heat-set inserts are required on the posts. Install heat-set
-  inserts after printing.
+  through-hole for the clamp bolt—no heat-set inserts belong in the posts. Install the M2.5
+  heat-set inserts in the Pi standoffs after printing.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
 
   ```bash
   # Generate STL assets
-  openscad -o stl/pi_cluster/pi_carrier_stack_carrier_level_heatset.stl cad/pi_cluster/pi_carrier_stack.scad \
+  openscad -o stl/pi_cluster/carriers/heatset/pi_carrier_stack_carrier_level_heatset.stl \
+    cad/pi_cluster/pi_carrier_stack.scad \
     -D export_part="carrier_level" -D standoff_mode="heatset" -D stack_edge_margin=15
-  openscad -o stl/pi_cluster/pi_carrier_stack_post.stl cad/pi_cluster/pi_carrier_stack.scad \
+  openscad -o stl/pi_cluster/posts/pi_carrier_stack_post.stl cad/pi_cluster/pi_carrier_stack.scad \
     -D export_part="post"
-  openscad -o stl/pi_cluster/pi_carrier_stack_fan_adapter.stl cad/pi_cluster/pi_carrier_stack.scad \
+  openscad -o stl/pi_cluster/fan_adapters/pi_carrier_stack_fan_adapter.stl \
+    cad/pi_cluster/pi_carrier_stack.scad \
     -D export_part="fan_adapter"
-  openscad -o stl/pi_cluster/pi_carrier_stack_fan_wall_fan120.stl cad/pi_cluster/pi_carrier_stack.scad \
+  openscad -o stl/pi_cluster/fan_walls/pi_carrier_stack_fan_wall_fan120.stl \
+    cad/pi_cluster/pi_carrier_stack.scad \
     -D export_part="fan_wall" -D fan_size=120
   ```
 
@@ -76,12 +79,7 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and produce the modular
   carrier level (per standoff mode), stack posts, fan adapter, and fan walls. Grab the grouped
   `stl-pi_cluster_stack-${GITHUB_SHA}` artifact first; it contains stack-specific STLs organised as
-  `carriers/`, `posts/`, `fan_adapters/`, `fan_walls/`, and `preview/`. The standoff-specific
-  variants live under:
-
-  - printed/
-  - heatset/
-  - variants/
+  `carriers/printed/`, `carriers/heatset/`, `posts/`, `fan_adapters/`, `fan_walls/`, and `preview/`.
 
   The all-in-one `stl-${GITHUB_SHA}` artifact still ships for full-repo coverage and backward
   compatibility.

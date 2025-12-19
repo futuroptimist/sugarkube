@@ -96,16 +96,16 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
     assert seen_single_parts == single_render_parts
     assert seen_fans == expected_fans
 
-    generated = {path.name for path in output_dir.glob("*.stl")}
+    generated = {path.relative_to(output_dir).as_posix() for path in output_dir.rglob("*.stl")}
     assert {
-        "pi_carrier_stack_carrier_level_printed.stl",
-        "pi_carrier_stack_carrier_level_heatset.stl",
-        "pi_carrier_stack_post.stl",
-        "pi_carrier_stack_fan_adapter.stl",
-        "pi_carrier_stack_fan_wall_fan80.stl",
-        "pi_carrier_stack_fan_wall_fan92.stl",
-        "pi_carrier_stack_fan_wall_fan120.stl",
-        "pi_carrier_stack_preview.stl",
+        "carriers/printed/pi_carrier_stack_carrier_level_printed.stl",
+        "carriers/heatset/pi_carrier_stack_carrier_level_heatset.stl",
+        "posts/pi_carrier_stack_post.stl",
+        "fan_adapters/pi_carrier_stack_fan_adapter.stl",
+        "fan_walls/pi_carrier_stack_fan_wall_fan80.stl",
+        "fan_walls/pi_carrier_stack_fan_wall_fan92.stl",
+        "fan_walls/pi_carrier_stack_fan_wall_fan120.stl",
+        "preview/pi_carrier_stack_preview.stl",
     }.issubset(generated)
 
 

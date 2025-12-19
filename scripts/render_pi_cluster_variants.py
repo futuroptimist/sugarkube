@@ -22,10 +22,10 @@ def render_variants(
     if not scad_path.exists():
         raise FileNotFoundError(f"SCAD file not found: {scad_path}")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     for mode in standoff_modes:
-        output_path = output_dir / f"pi_carrier_stack_carrier_level_{mode}.stl"
+        carrier_dir = output_dir / "carriers" / mode
+        carrier_dir.mkdir(parents=True, exist_ok=True)
+        output_path = carrier_dir / f"pi_carrier_stack_carrier_level_{mode}.stl"
         command = [
             openscad,
             "-o",
@@ -43,8 +43,12 @@ def render_variants(
         ]
         subprocess.run(command, check=True)
 
+    posts_dir = output_dir / "posts"
+    posts_dir.mkdir(parents=True, exist_ok=True)
     for part in ("post", "fan_adapter"):
-        output_path = output_dir / f"pi_carrier_stack_{part}.stl"
+        output_dir_for_part = posts_dir if part == "post" else output_dir / "fan_adapters"
+        output_dir_for_part.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir_for_part / f"pi_carrier_stack_{part}.stl"
         command = [
             openscad,
             "-o",
@@ -60,8 +64,10 @@ def render_variants(
         ]
         subprocess.run(command, check=True)
 
+    fan_walls_dir = output_dir / "fan_walls"
+    fan_walls_dir.mkdir(parents=True, exist_ok=True)
     for fan_size in fan_sizes:
-        output_path = output_dir / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
+        output_path = fan_walls_dir / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
         command = [
             openscad,
             "-o",
@@ -79,7 +85,9 @@ def render_variants(
         ]
         subprocess.run(command, check=True)
 
-    preview_path = output_dir / "pi_carrier_stack_preview.stl"
+    preview_dir = output_dir / "preview"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / "pi_carrier_stack_preview.stl"
     subprocess.run(
         [
             openscad,
