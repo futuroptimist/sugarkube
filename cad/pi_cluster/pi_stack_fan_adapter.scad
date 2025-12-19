@@ -7,7 +7,7 @@ edge_margin = is_undef(edge_margin) ? stack_edge_margin : edge_margin;
 include <./pi_carrier.scad>;
 
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
-stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
+stack_pocket_d = is_undef(stack_pocket_d) ? 9 : stack_pocket_d;
 stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;

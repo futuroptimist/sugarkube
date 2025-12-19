@@ -12,7 +12,7 @@ edge_margin = is_undef(edge_margin) ? stack_edge_margin : edge_margin;
 include_stack_mounts = true;
 
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
-stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
+stack_pocket_d = is_undef(stack_pocket_d) ? 9 : stack_pocket_d;
 stack_pocket_depth_input = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
 adapter_thickness = is_undef(adapter_thickness) ? 8 : adapter_thickness;
 stack_plate_thickness = is_undef(stack_plate_thickness) ? 3.0 : stack_plate_thickness;
@@ -42,7 +42,10 @@ use <./pi_stack_post.scad>;
 use <./pi_stack_fan_adapter.scad>;
 use <./fan_wall.scad>;
 
-carrier_stack_mount_positions = stack_mount_positions;
+carrier_stack_mount_positions_local = stack_mount_positions;
+carrier_stack_mount_positions_centered = [
+    for (p = stack_mount_positions) [p[0] - plate_len / 2, p[1] - plate_wid / 2]
+];
 level_height = z_gap_clear + plate_thickness;
 stack_height = (levels - 1) * level_height + plate_thickness;
 
@@ -68,7 +71,7 @@ module _carrier(level = 0) {
         let(
             include_stack_mounts = true,
             stack_edge_margin = stack_edge_margin,
-            stack_mount_positions = carrier_stack_mount_positions,
+            stack_mount_positions = carrier_stack_mount_positions_local,
             stack_bolt_d = stack_bolt_d,
             stack_pocket_d = stack_pocket_d,
             stack_pocket_depth = stack_pocket_depth
@@ -77,7 +80,7 @@ module _carrier(level = 0) {
 
 module _posts() {
     for (level = [0 : levels - 2])
-        for (pos = carrier_stack_mount_positions)
+        for (pos = carrier_stack_mount_positions_centered)
             translate([
                 pos[0],
                 pos[1],
@@ -93,7 +96,7 @@ module _posts() {
 }
 
 module _fan_adapter() {
-    fan_side_x = max([for (p = carrier_stack_mount_positions) p[0]]);
+    fan_side_x = max([for (p = carrier_stack_mount_positions_centered) p[0]]);
     translate([fan_side_x - adapter_thickness / 2, 0, 0])
         pi_stack_fan_adapter(
             stack_bolt_d = stack_bolt_d,
@@ -103,12 +106,12 @@ module _fan_adapter() {
             z_gap_clear = z_gap_clear,
             plate_thickness = plate_thickness,
             column_spacing = column_spacing,
-            stack_mount_positions = carrier_stack_mount_positions
+            stack_mount_positions = carrier_stack_mount_positions_centered
         );
 }
 
 module _fan_wall() {
-    fan_side_x = max([for (p = carrier_stack_mount_positions) p[0]]);
+    fan_side_x = max([for (p = carrier_stack_mount_positions_centered) p[0]]);
     translate([fan_side_x + fan_offset_from_stack, 0, 0])
         fan_wall(
             fan_size = fan_size,
@@ -142,6 +145,14 @@ if (emit_dimension_report) {
 }
 
 if (export_part == "carrier_level") {
+    echo(
+        "stack_mounts_enabled",
+        include_stack_mounts = include_stack_mounts,
+        stack_mount_positions = carrier_stack_mount_positions_local,
+        stack_bolt_d = stack_bolt_d,
+        stack_pocket_d = stack_pocket_d,
+        stack_pocket_depth = stack_pocket_depth
+    );
     _carrier(0);
 } else if (export_part == "post") {
     pi_stack_post(

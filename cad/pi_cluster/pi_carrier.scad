@@ -47,11 +47,8 @@ port_clearance = 6;
 
 include_stack_mounts = is_undef(include_stack_mounts) ? false : include_stack_mounts;
 stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
-stack_pocket_d = is_undef(stack_pocket_d) ? 8 : stack_pocket_d;
-stack_pocket_depth = min(
-    is_undef(stack_pocket_depth) ? plate_thickness / 2 - 0.1 : stack_pocket_depth,
-    plate_thickness / 2
-);
+stack_pocket_d = is_undef(stack_pocket_d) ? 9 : stack_pocket_d;
+stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth;
 
 // Optional 1602 LCD module (80x36 mm PCB)
 // Disable by default; set to true to add the LCD mount
@@ -76,20 +73,29 @@ carrier_edge_margin = include_stack_mounts ? stack_edge_margin : edge_margin;
 plate_len = (max_x+1)*rotX + max_x*gap_between_boards + 2*carrier_edge_margin;
 plate_wid = (max_y+1)*rotY + max_y*gap_between_boards + 2*carrier_edge_margin + 2*port_clearance;
 
+stack_mount_inset = max(corner_radius + stack_pocket_d / 2 + 2, 12);
+
 stack_mount_positions = is_undef(stack_mount_positions)
-    ? let(
-        default_offset_x = plate_len / 2 - stack_edge_margin,
-        default_offset_y = plate_wid / 2 - (stack_edge_margin + port_clearance)
-    ) [
-        [-default_offset_x, -default_offset_y],
-        [default_offset_x, -default_offset_y],
-        [-default_offset_x, default_offset_y],
-        [default_offset_x, default_offset_y]
+    ? [
+        [stack_mount_inset, stack_mount_inset],
+        [plate_len - stack_mount_inset, stack_mount_inset],
+        [stack_mount_inset, plate_wid - stack_mount_inset],
+        [plate_len - stack_mount_inset, plate_wid - stack_mount_inset]
     ]
     : stack_mount_positions;
 
-assert(2 * stack_pocket_depth <= plate_thickness,
-    "stack_pocket_depth must be ≤ half of plate_thickness so symmetric pockets do not overlap");
+if (include_stack_mounts) {
+    assert(2 * stack_pocket_depth < plate_thickness,
+        "stack_pocket_depth must be strictly less than half of plate_thickness for symmetric pockets");
+    assert(stack_mount_inset * 2 < plate_len && stack_mount_inset * 2 < plate_wid,
+        "stack_mount_inset must keep mounts inside the plate footprint");
+    for (pos = stack_mount_positions) {
+        assert(pos[0] > stack_mount_inset / 2 && pos[0] < plate_len - stack_mount_inset / 2,
+            "stack mount X position too close to edge");
+        assert(pos[1] > stack_mount_inset / 2 && pos[1] < plate_wid - stack_mount_inset / 2,
+            "stack mount Y position too close to edge");
+    }
+}
 
 // ---------- Helper functions ----------
 function rot2d(v, ang) = [
@@ -158,8 +164,8 @@ module base_plate()
 
         if (include_stack_mounts) {
             for (pos = stack_mount_positions) {
-                mount_x = plate_len / 2 + pos[0];
-                mount_y = plate_wid / 2 + pos[1];
+                mount_x = pos[0];
+                mount_y = pos[1];
 
                 translate([mount_x, mount_y, -0.01])
                     cylinder(h = plate_thickness + 0.02, r = stack_bolt_d / 2, $fn = 60);
