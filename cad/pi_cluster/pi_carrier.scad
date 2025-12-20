@@ -175,7 +175,11 @@ module base_plate(
     hole_spacing_y,
     board_spacing_x,
     board_spacing_y,
-    stack_mount_positions
+    stack_mount_positions,
+    plate_thickness,
+    stack_pocket_depth,
+    stack_pocket_d,
+    stack_bolt_d
 )
 {
     plate_len = carrier_plate_len(carrier_dims);
@@ -264,8 +268,8 @@ module pi_carrier(
         )
         : carrier_dims;
 
-    hole_spacing_x = hole_spacing[0];
-    hole_spacing_y = hole_spacing[1];
+    local_hole_spacing_x = hole_spacing[0];
+    local_hole_spacing_y = hole_spacing[1];
     plate_len = carrier_plate_len(carrier_dims_resolved);
     plate_wid = carrier_plate_wid(carrier_dims_resolved);
     board_spacing_x = carrier_board_spacing_x(carrier_dims_resolved);
@@ -294,18 +298,22 @@ module pi_carrier(
     let(include_stack_mounts = include_stack_mounts_resolved)
         base_plate(
             carrier_dims_resolved,
-            hole_spacing_x,
-            hole_spacing_y,
+            local_hole_spacing_x,
+            local_hole_spacing_y,
             board_spacing_x,
             board_spacing_y,
-            stack_mount_positions_resolved
+            stack_mount_positions_resolved,
+            plate_thickness,
+            stack_pocket_depth,
+            stack_pocket_d,
+            stack_bolt_d
         );
 
     for (pos = pi_positions) {
         pcb_cx = edge_margin + carrier_rotX(carrier_dims_resolved)/2 + pos[0]*board_spacing_x;
         pcb_cy = edge_margin + port_clearance + carrier_rotY(carrier_dims_resolved)/2 + pos[1]*board_spacing_y;
-        for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
-        for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
+        for (dx = [-local_hole_spacing_x/2, local_hole_spacing_x/2])
+        for (dy = [-local_hole_spacing_y/2, local_hole_spacing_y/2]) {
             vec = rot2d([dx,dy], board_angle);
             standoff([pcb_cx+vec[0], pcb_cy+vec[1]]);
         }

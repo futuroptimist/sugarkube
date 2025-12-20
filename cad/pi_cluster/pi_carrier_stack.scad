@@ -104,7 +104,6 @@ module _carrier(level = 0) {
     translate([-plate_len / 2, -plate_wid / 2, level * level_height])
         pi_carrier(
             carrier_dims = carrier_dims,
-            stack_bolt_d = stack_bolt_d,
             stack_pocket_d = stack_pocket_d,
             stack_pocket_depth = stack_pocket_depth
         );

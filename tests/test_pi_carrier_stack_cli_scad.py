@@ -30,7 +30,7 @@ def test_pi_carrier_stack_cli_renders_without_console_errors(tmp_path: Path) -> 
 
     combined_output = (result.stdout or "") + (result.stderr or "")
 
-    assert result.returncode == 0
+    assert result.returncode == 0, f"OpenSCAD render failed with output:\n{combined_output}"
     for term in (
         "undefined operation",
         "Unable to convert translate",
