@@ -11,6 +11,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Iterable, List, Mapping
+import warnings
 
 import pytest
 
@@ -204,21 +205,28 @@ def require_tools(tools: Iterable[str]) -> None:
         )
 
 
+def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
+    message = (result.stderr or "").lower()
+    return "permission denied" in message or "operation not permitted" in message
+
+
 def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a command and retry with sudo when permission errors occur.
+
+    Commands are retried with ``sudo -n`` to avoid blocking on password prompts in CI.
 
     Coverage: ``tests/test_ensure_root_privileges.py``.
     """
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
+    if result.returncode == 0 or not _is_permission_error(result):
         return result
 
     sudo = shutil.which("sudo")
     if not sudo:
         return result
 
-    return subprocess.run([sudo, *cmd], capture_output=True, text=True)
+    return subprocess.run([sudo, "-n", *cmd], capture_output=True, text=True)
 
 
 def ensure_root_privileges() -> None:
@@ -241,4 +249,9 @@ def ensure_root_privileges() -> None:
         )
         pytest.skip(reason)
 
-    _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
+    delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
+    if delete_result.returncode != 0:
+        warnings.warn(
+            "Failed to clean up test network namespace; manual deletion may be required",
+            RuntimeWarning,
+        )
