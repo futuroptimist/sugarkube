@@ -15,6 +15,12 @@ last_updated: 2025-11-12
 This document specifies a stackable Raspberry Pi carrier system that reuses the existing
 `cad/pi_cluster/pi_carrier.scad` module as a building block and adds:
 
+> **Temporary status (January 2025):** the stack wrapper currently renders **only the three
+> carrier plates with stack mounts enabled**. The printed posts, fan adapter, and fan wall are
+> intentionally omitted from the preview while their geometry is refined. Export modes `post`,
+> `fan_adapter`, and `fan_wall` therefore do not emit their expected meshes right now; they will
+> return once the geometry is reintroduced.
+
 1. **Vertical stacking** of carriers (three Raspberry Pis per carrier, three carriers tall by
    default).
 2. Four **stack clamp mounts** per carrier (M3 through-holes + symmetric locating pockets) sized
@@ -61,18 +67,16 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   carrier standoffs.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
-- `openscad` examples:
+- `openscad` examples (stack posts + fan components temporarily disabled—see note above):
 
   ```bash
   # Generate STL assets
   openscad -o stl/pi_cluster/pi_carrier_stack_carrier_level_heatset.stl cad/pi_cluster/pi_carrier_stack.scad \
     -D export_part="carrier_level" -D standoff_mode="heatset" -D stack_edge_margin=15
-  openscad -o stl/pi_cluster/pi_carrier_stack_post.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="post"
-  openscad -o stl/pi_cluster/pi_carrier_stack_fan_adapter.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="fan_adapter"
-  openscad -o stl/pi_cluster/pi_carrier_stack_fan_wall_fan120.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="fan_wall" -D fan_size=120
+  # The following export_part values are temporarily disabled until posts/fan geometry returns:
+  #   -D export_part="post"
+  #   -D export_part="fan_adapter"
+  #   -D export_part="fan_wall"
   ```
 
   CI also renders and publishes STL artifacts via the
@@ -96,18 +100,22 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   [`pi_carrier.scad`](pi_cluster_carrier.md) that locally enables stack mounts without touching
   other parameters. If `include_stack_mounts` is defined (for example when
   `pi_carrier_stack.scad` imports the carrier), that explicit value wins.
-- `emit_geometry_report` surfaces a human-readable `"pi_carrier_geometry"` echo with plate sizing
-  (`plate_len`, `plate_wid`, `plate_outer_bounds_*`) and stack mount placement details (insets,
-  center/margin checks, and the resolved positions). Pair it with `emit_dimension_report` on
-  `pi_carrier_stack.scad` to also emit the top-level stack dimensions.
-- Example commands:
+- Prefer `export_part="carrier_level"` for fast iteration while the stack preview is
+  carriers-only; it renders a single carrier level with stack mounts enabled.
+- `emit_geometry_report=true` surfaces a human-readable `"pi_carrier_geometry"` echo with plate
+  sizing (`plate_len`, `plate_wid`, `plate_outer_bounds_*`) and stack mount placement details
+  (insets, center/margin checks, and the resolved positions). Pair it with
+  `emit_dimension_report=true` on `pi_carrier_stack.scad` to also emit the top-level stack
+  dimensions.
+- Example commands (posts + fan components remain disabled in the stack preview until their
+  geometry is reintroduced):
 
   ```bash
   openscad -o /tmp/pi_carrier.stl -D emit_geometry_report=true cad/pi_cluster/pi_carrier.scad
   openscad -o /tmp/pi_carrier_mounts.stl -D preview_stack_mounts=true -D emit_geometry_report=true \
     cad/pi_cluster/pi_carrier.scad
   openscad -o /tmp/pi_carrier_stack_level.stl -D export_part="carrier_level" \
-    -D emit_geometry_report=true cad/pi_cluster/pi_carrier_stack.scad
+    -D emit_dimension_report=true -D emit_geometry_report=true cad/pi_cluster/pi_carrier_stack.scad
   ```
 
 CI parses these echoes for regression coverage; see

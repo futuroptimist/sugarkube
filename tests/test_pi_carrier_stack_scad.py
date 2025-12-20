@@ -61,9 +61,11 @@ def test_pi_carrier_stack_includes_local_dependencies() -> None:
 
     assert "include <./pi_dimensions.scad>" in source
     assert "include <./pi_carrier.scad>" in source
-    assert "pi_stack_post.scad" in source
-    assert "pi_stack_fan_adapter.scad" in source
-    assert "use <./fan_wall.scad>" in source
+    # The carriers-only preview intentionally omits posts / adapters / fan wall
+    # while those parts are refined; ensure no stale include/use references remain.
+    assert "pi_stack_post.scad" not in source
+    assert "pi_stack_fan_adapter.scad" not in source
+    assert "use <./fan_wall.scad>" not in source
 
 
 def test_stack_mount_hook_present() -> None:
@@ -80,10 +82,11 @@ def test_stack_carrier_uses_thicker_plate_for_pockets() -> None:
 
     source = SCAD_PATH.read_text(encoding="utf-8")
     assert re.search(
-        r"stack_plate_thickness\s*=\s*is_undef\(stack_plate_thickness\)\s*\?\s*3\.0", source
+        r"stack_plate_thickness_cfg\s*=\s*is_undef\(stack_plate_thickness\)\s*\?\s*3\.0",
+        source,
     )
     assert (
-        "plate_thickness = is_undef(plate_thickness) ? stack_plate_thickness : plate_thickness"
+        "plate_thickness_cfg =\n    is_undef(plate_thickness) ? stack_plate_thickness_cfg : plate_thickness"
         in source
     )
 

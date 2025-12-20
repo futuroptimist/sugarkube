@@ -52,6 +52,7 @@ preview_stack_mounts_enabled =
 
 // If pi_carrier_stack.scad (or CLI -D) sets include_stack_mounts explicitly, that wins.
 // Otherwise, the preview toggle above controls it for local preview.
+// NOTE: avoid direct reads of possibly-undefined vars (OpenSCAD warns on that).
 include_stack_mounts =
     is_undef(include_stack_mounts) ? preview_stack_mounts_enabled : include_stack_mounts;
 
@@ -119,7 +120,6 @@ function carrier_dimensions(
         max_x = max([for (p = pi_positions) p[0]]),
         max_y = max([for (p = pi_positions) p[1]]),
 
-        // Invariant plate padding (does NOT depend on include_stack_mounts).
         carrier_edge_margin = edge_margin,
 
         plate_len =
@@ -128,8 +128,6 @@ function carrier_dimensions(
             (max_y + 1) * rotY + max_y * gap_between_boards + 2 * carrier_edge_margin
             + 2 * port_clearance,
 
-        // Uniform inset on all four sides. Uses the same scalar for X and Y.
-        // Also enforces clearance from the rounded corner geometry + pocket radius.
         stack_mount_inset = max(
             corner_radius + stack_pocket_d / 2 + 2,
             carrier_edge_margin
@@ -208,17 +206,13 @@ module base_plate(
     stack_pocket_d,
     stack_bolt_d,
     edge_margin,
-    port_clearance
+    port_clearance,
+    include_stack_mounts_local
 )
 {
     plate_len = carrier_plate_len(carrier_dims);
     plate_wid = carrier_plate_wid(carrier_dims);
 
-    // This translate makes the *outer* plate bounds land at:
-    //   X: [0 .. plate_len], Y: [0 .. plate_wid]
-    // Without it, offset(r=corner_radius) would shift the outer bounds to
-    // [-corner_radius .. plate_len-corner_radius], which is exactly what
-    // causes the apparent “5mm vs 15mm” asymmetry in the preview.
     assert(plate_len > 2 * corner_radius, "plate_len must be > 2*corner_radius");
     assert(plate_wid > 2 * corner_radius, "plate_wid must be > 2*corner_radius");
 
@@ -252,13 +246,11 @@ module base_plate(
             }
         }
 
-        if (include_stack_mounts) {
+        if (include_stack_mounts_local) {
             for (pos = stack_mount_positions) {
                 translate([pos[0], pos[1], -0.01])
                     cylinder(h = plate_thickness + 0.02, r = stack_bolt_d / 2, $fn = 60);
 
-                // Symmetric locating pockets: one on each face so every carrier plate
-                // is interchangeable in the stack.
                 translate([pos[0], pos[1], plate_thickness - stack_pocket_depth])
                     cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
                 translate([pos[0], pos[1], -0.01])
@@ -319,7 +311,6 @@ module pi_carrier(
     stack_mount_inset = carrier_stack_mount_inset(carrier_dims_resolved);
     include_stack_mounts_resolved = len(stack_mount_positions_resolved) > 0;
 
-    // Invariance check: plate dimensions must be identical regardless of stack mounts toggle.
     carrier_dims_stack_off = carrier_dimensions(
         include_stack_mounts = false,
         stack_edge_margin = stack_edge_margin,
@@ -345,7 +336,6 @@ module pi_carrier(
     assert(abs(plate_wid_stack_off - plate_wid) < eps,
            "plate_wid must be invariant to include_stack_mounts");
 
-    // Stack mount uniform margin assertions (only meaningful when enabled).
     stack_mount_margin_center = undef;
     stack_mount_margin_pocket_edge = undef;
     if (include_stack_mounts_resolved) {
@@ -392,21 +382,21 @@ module pi_carrier(
         }
     }
 
-    let(include_stack_mounts = include_stack_mounts_resolved)
-        base_plate(
-            carrier_dims_resolved,
-            local_hole_spacing_x,
-            local_hole_spacing_y,
-            board_spacing_x,
-            board_spacing_y,
-            stack_mount_positions_resolved,
-            plate_thickness,
-            stack_pocket_depth,
-            stack_pocket_d,
-            stack_bolt_d,
-            edge_margin,
-            port_clearance
-        );
+    base_plate(
+        carrier_dims_resolved,
+        local_hole_spacing_x,
+        local_hole_spacing_y,
+        board_spacing_x,
+        board_spacing_y,
+        stack_mount_positions_resolved,
+        plate_thickness,
+        stack_pocket_depth,
+        stack_pocket_d,
+        stack_bolt_d,
+        edge_margin,
+        port_clearance,
+        include_stack_mounts_resolved
+    );
 
     if (emit_geometry_report) {
         echo(
