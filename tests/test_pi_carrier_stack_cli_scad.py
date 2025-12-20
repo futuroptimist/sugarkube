@@ -82,11 +82,15 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
     stack_pocket_d = extract_float("stack_pocket_d")
     stack_pocket_depth = extract_float("stack_pocket_depth")
 
-    positions_match = re.search(
-        r"stack_mount_positions\s*=\s*(\[[^\]]+\])", geometry_line
+    positions_idx = geometry_line.find("stack_mount_positions")
+    assert positions_idx != -1, (
+        f"stack_mount_positions missing from geometry report:\n{geometry_line}"
     )
-    assert positions_match, f"stack_mount_positions missing from geometry report: {geometry_line}"
-    stack_mount_positions = ast.literal_eval(positions_match.group(1))
+
+    positions_tail = geometry_line[positions_idx:]
+    positions_block, *_ = positions_tail.split("stack_mount_inset", 1)
+    _, _, positions_value = positions_block.partition("=")
+    stack_mount_positions = ast.literal_eval(positions_value.rstrip(", "))
 
     assert len(stack_mount_positions) >= 4, "Expected at least four stack mounts"
     xs = sorted({round(pos[0], 3) for pos in stack_mount_positions})
