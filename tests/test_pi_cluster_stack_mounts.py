@@ -92,4 +92,11 @@ def test_stack_wrapper_renders_without_warnings(tmp_path: Path) -> None:
     assert result.returncode == 0, log
     assert "ERROR:" not in log
     assert "WARNING: Ignoring unknown variable" not in log
+    for substring in (
+        "undefined operation",
+        "Unable to convert translate",
+        "max() parameter could not be converted",
+        "min() parameter could not be converted",
+    ):
+        assert substring not in log
     assert output_path.exists()

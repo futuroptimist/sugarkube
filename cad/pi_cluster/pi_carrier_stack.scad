@@ -65,6 +65,11 @@ plate_len = carrier_plate_len(carrier_dims);
 plate_wid = carrier_plate_wid(carrier_dims);
 stack_mount_positions_resolved = carrier_stack_mount_positions(carrier_dims);
 stack_mount_inset = carrier_stack_mount_inset(carrier_dims);
+if (include_stack_mounts)
+    assert(
+        len(stack_mount_positions_resolved) > 0,
+        "stack mount positions must resolve when include_stack_mounts=true"
+    );
 level_height = z_gap_clear + plate_thickness;
 stack_height = (levels - 1) * level_height + plate_thickness;
 
