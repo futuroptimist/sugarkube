@@ -25,7 +25,10 @@ def render_variants(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for mode in standoff_modes:
-        output_path = output_dir / f"pi_carrier_stack_carrier_level_{mode}.stl"
+        output_path = (
+            output_dir / "carriers" / mode / f"pi_carrier_stack_carrier_level_{mode}.stl"
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
             openscad,
             "-o",
@@ -43,8 +46,9 @@ def render_variants(
         ]
         subprocess.run(command, check=True)
 
-    for part in ("post", "fan_adapter"):
-        output_path = output_dir / f"pi_carrier_stack_{part}.stl"
+    for subdir, part in (("posts", "post"), ("fan_adapters", "fan_adapter")):
+        output_path = output_dir / subdir / f"pi_carrier_stack_{part}.stl"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
             openscad,
             "-o",
@@ -61,7 +65,8 @@ def render_variants(
         subprocess.run(command, check=True)
 
     for fan_size in fan_sizes:
-        output_path = output_dir / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
+        output_path = output_dir / "fan_walls" / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
             openscad,
             "-o",
@@ -79,7 +84,8 @@ def render_variants(
         ]
         subprocess.run(command, check=True)
 
-    preview_path = output_dir / "pi_carrier_stack_preview.stl"
+    preview_path = output_dir / "preview" / "pi_carrier_stack_preview.stl"
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             openscad,
