@@ -258,6 +258,9 @@ def ensure_root_privileges() -> None:
     probe = _run_with_sudo_fallback(["unshare", "-n", "true"])
     if probe.returncode != 0:
         reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
+        # TODO: Pre-provision non-interactive sudo or grant netns capabilities in CI images.
+        # Root cause: Some environments cannot create network namespaces even after sudo fallback.
+        # Estimated fix: 1h to adjust CI images or relax test requirements when namespaces are unavailable.
         pytest.skip(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
@@ -266,6 +269,9 @@ def ensure_root_privileges() -> None:
         reason = (
             probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
         )
+        # TODO: Ensure the iproute2 tooling and privileges for netns creation are available in CI.
+        # Root cause: Network namespace creation can fail when permissions or tooling are missing.
+        # Estimated fix: 1h to preinstall iproute2 and configure sudoers to allow netns operations.
         pytest.skip(reason)
 
     delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
