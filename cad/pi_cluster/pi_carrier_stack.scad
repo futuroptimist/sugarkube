@@ -37,6 +37,7 @@ expected_column_spacing = pi_hole_spacing;
 
 export_part = is_undef(export_part) ? "assembly" : export_part;
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
+emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
 include <./pi_carrier.scad>;
 use <./pi_stack_post.scad>;
@@ -105,7 +106,8 @@ module _carrier(level = 0) {
         pi_carrier(
             carrier_dims = carrier_dims,
             stack_pocket_d = stack_pocket_d,
-            stack_pocket_depth = stack_pocket_depth
+            stack_pocket_depth = stack_pocket_depth,
+            emit_geometry_report = emit_geometry_report
         );
 }
 

@@ -245,7 +245,8 @@ module pi_carrier(
     board_len = board_len,
     board_wid = board_wid,
     corner_radius = corner_radius,
-    port_clearance = port_clearance
+    port_clearance = port_clearance,
+    emit_geometry_report = false
 )
 {
     carrier_dims_resolved = is_undef(carrier_dims)
@@ -308,6 +309,19 @@ module pi_carrier(
             stack_pocket_d,
             stack_bolt_d
         );
+
+    if (emit_geometry_report) {
+        echo(
+            "pi_carrier_geometry",
+            plate_len = plate_len,
+            plate_wid = plate_wid,
+            plate_thickness = plate_thickness,
+            stack_mount_positions = stack_mount_positions_resolved,
+            stack_mount_inset = stack_mount_inset,
+            stack_pocket_d = stack_pocket_d,
+            stack_pocket_depth = stack_pocket_depth
+        );
+    }
 
     for (pos = pi_positions) {
         pcb_cx = edge_margin + carrier_rotX(carrier_dims_resolved)/2 + pos[0]*board_spacing_x;
