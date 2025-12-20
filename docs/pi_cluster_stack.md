@@ -90,6 +90,30 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   The all-in-one `stl-${GITHUB_SHA}` artifact still ships for full-repo coverage and backward
   compatibility.
 
+## Debugging / Diagnostics
+
+- `preview_stack_mounts` is a single-line toggle in
+  [`pi_carrier.scad`](pi_cluster_carrier.md) that locally enables stack mounts without touching
+  other parameters. If `include_stack_mounts` is defined (for example when
+  `pi_carrier_stack.scad` imports the carrier), that explicit value wins.
+- `emit_geometry_report` surfaces a human-readable `"pi_carrier_geometry"` echo with plate sizing
+  (`plate_len`, `plate_wid`, `plate_outer_bounds_*`) and stack mount placement details (insets,
+  center/margin checks, and the resolved positions). Pair it with `emit_dimension_report` on
+  `pi_carrier_stack.scad` to also emit the top-level stack dimensions.
+- Example commands:
+
+  ```bash
+  openscad -o /tmp/pi_carrier.stl -D emit_geometry_report=true cad/pi_cluster/pi_carrier.scad
+  openscad -o /tmp/pi_carrier_mounts.stl -D preview_stack_mounts=true -D emit_geometry_report=true \
+    cad/pi_cluster/pi_carrier.scad
+  openscad -o /tmp/pi_carrier_stack_level.stl -D export_part="carrier_level" \
+    -D emit_geometry_report=true cad/pi_cluster/pi_carrier_stack.scad
+  ```
+
+CI parses these echoes for regression coverage; see
+`tests/test_pi_carrier_geometry_report.py` and `tests/test_pi_carrier_stack_geometry_report.py` for
+the enforced invariants.
+
 ---
 
 ## Assembly sequence
