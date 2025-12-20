@@ -10,6 +10,25 @@ from typing import Iterable, Mapping
 
 
 def _format_value(value: object) -> str:
+    """Format a Python value for an OpenSCAD `-D` definition.
+
+    Parameters
+    ----------
+    value: object
+        The value to format. Supported types are ``bool``, ``int``, ``float``,
+        and ``str`` (pre-quoted strings are preserved).
+
+    Returns
+    -------
+    str
+        The value converted into an OpenSCAD-compatible literal.
+
+    Raises
+    ------
+    TypeError
+        If ``value`` is not one of the supported types.
+    """
+
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
@@ -21,6 +40,21 @@ def _format_value(value: object) -> str:
 
 
 def _format_definitions(definitions: Mapping[str, object] | Iterable[str]) -> list[str]:
+    """Normalize OpenSCAD ``-D`` definitions into ``key=value`` strings.
+
+    Parameters
+    ----------
+    definitions: Mapping[str, object] | Iterable[str]
+        Either a mapping of definition names to values (formatted via
+        :func:`_format_value`) or an iterable of preformatted definition
+        strings.
+
+    Returns
+    -------
+    list[str]
+        A list of strings suitable for passing to OpenSCAD via ``-D`` flags.
+    """
+
     if isinstance(definitions, Mapping):
         return [f"{key}={_format_value(value)}" for key, value in definitions.items()]
 
@@ -60,6 +94,27 @@ def find_last_echo(echo_lines: list[str], label: str) -> str:
 
 
 def _split_fields(raw: str) -> list[str]:
+    """Split comma-separated fields while respecting nested brackets.
+
+    Parameters
+    ----------
+    raw: str
+        The substring following an echo label containing comma-delimited
+        ``key=value`` fields. Array values may include nested brackets.
+
+    Returns
+    -------
+    list[str]
+        Individual ``key=value`` fields with surrounding whitespace trimmed.
+
+    Raises
+    ------
+    ValueError
+        If unmatched closing brackets are encountered or brackets remain
+        unbalanced at the end of parsing. OpenSCAD payloads are expected to be
+        well-formed, so mismatches are treated as errors.
+    """
+
     fields: list[str] = []
     depth = 0
     current: list[str] = []
@@ -72,9 +127,14 @@ def _split_fields(raw: str) -> list[str]:
             continue
         if char == "[":
             depth += 1
-        elif char == "]" and depth > 0:
+        elif char == "]":
+            if depth == 0:
+                raise ValueError(f"Unmatched closing bracket in echo payload: {raw!r}")
             depth -= 1
         current.append(char)
+
+    if depth != 0:
+        raise ValueError(f"Unbalanced brackets in echo payload: {raw!r}")
 
     if current:
         fields.append("".join(current).strip())
@@ -83,6 +143,22 @@ def _split_fields(raw: str) -> list[str]:
 
 
 def _parse_value(raw_value: str) -> object:
+    """Parse an OpenSCAD value string into a Python type.
+
+    Parameters
+    ----------
+    raw_value: str
+        The value portion of a ``key=value`` pair from an echo payload.
+
+    Returns
+    -------
+    object
+        A Python representation of the value (``bool``, ``str``, ``list``,
+        ``int``, or ``float``). If parsing fails for an array literal, a
+        ``ValueError`` is raised; otherwise the original string is returned as
+        a fallback.
+    """
+
     value = raw_value.strip()
     if value.lower() in {"true", "false"}:
         return value.lower() == "true"
@@ -118,7 +194,10 @@ def parse_echo_line(echo_line: str) -> tuple[str, dict[str, object]]:
         raise ValueError("Echo label missing closing quote")
     label = remainder[1:end_label]
 
-    rest = remainder[end_label + 1 :].lstrip(" ,")
+    rest = remainder[end_label + 1 :]
+    rest = rest.lstrip(" ,")
+    if rest.startswith(":"):
+        rest = rest[1:].lstrip()
     if not rest:
         return label, {}
 
