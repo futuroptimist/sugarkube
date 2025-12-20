@@ -15,6 +15,12 @@ last_updated: 2025-11-12
 This document specifies a stackable Raspberry Pi carrier system that reuses the existing
 `cad/pi_cluster/pi_carrier.scad` module as a building block and adds:
 
+> **Temporary status (January 2025):** the stack wrapper currently renders **only the three
+> carrier plates**. The printed posts, fan adapter, and fan wall are intentionally omitted from the
+> preview while their geometry is refined. Export modes `post`, `fan_adapter`, and `fan_wall`
+> therefore do not emit their expected meshes right now; they will return once the geometry is
+> reintroduced.
+
 1. **Vertical stacking** of carriers (three Raspberry Pis per carrier, three carriers tall by
    default).
 2. Four **stack clamp mounts** per carrier (M3 through-holes + symmetric locating pockets) sized
@@ -61,18 +67,16 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   carrier standoffs.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
-- `openscad` examples:
+- `openscad` examples (stack posts + fan components temporarily disabled—see note above):
 
   ```bash
   # Generate STL assets
   openscad -o stl/pi_cluster/pi_carrier_stack_carrier_level_heatset.stl cad/pi_cluster/pi_carrier_stack.scad \
     -D export_part="carrier_level" -D standoff_mode="heatset" -D stack_edge_margin=15
-  openscad -o stl/pi_cluster/pi_carrier_stack_post.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="post"
-  openscad -o stl/pi_cluster/pi_carrier_stack_fan_adapter.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="fan_adapter"
-  openscad -o stl/pi_cluster/pi_carrier_stack_fan_wall_fan120.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="fan_wall" -D fan_size=120
+  # The following export_part values are temporarily disabled until posts/fan geometry returns:
+  #   -D export_part="post"
+  #   -D export_part="fan_adapter"
+  #   -D export_part="fan_wall"
   ```
 
   CI also renders and publishes STL artifacts via the
