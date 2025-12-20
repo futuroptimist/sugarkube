@@ -72,6 +72,19 @@ def run_openscad(
     A temporary STL is written to satisfy OpenSCAD's CLI requirements.
     """
 
+    _, stderr = run_openscad_with_output(scad_path, definitions, openscad_path=openscad_path)
+
+    return [line for line in stderr.splitlines() if "ECHO:" in line]
+
+
+def run_openscad_with_output(
+    scad_path: Path,
+    definitions: Mapping[str, object] | Iterable[str],
+    *,
+    openscad_path: str,
+) -> tuple[str, str]:
+    """Run OpenSCAD and return the full stdout/stderr payloads."""
+
     with tempfile.TemporaryDirectory(prefix="sugarkube-openscad-") as tmpdir:
         out_file = Path(tmpdir) / "out.stl"
         cmd = [openscad_path, "-o", str(out_file)]
@@ -81,7 +94,7 @@ def run_openscad(
 
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
-    return [line for line in result.stderr.splitlines() if "ECHO:" in line]
+    return result.stdout, result.stderr
 
 
 def find_last_echo(echo_lines: list[str], label: str) -> str:
