@@ -463,7 +463,36 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
 
 ---
 
-## 11. Safety and references
+## 11. Debugging / diagnostics
+
+- Base carrier knobs live in [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md); this section
+  calls out the stack-specific toggles to avoid repeating that document.
+- To preview stack clamp pockets locally without changing exported geometry, flip the
+  single-line `preview_stack_mounts` toggle in `pi_carrier.scad` (or pass
+  `-D preview_stack_mounts=true`). `include_stack_mounts` still wins when supplied explicitly
+  (e.g., by `pi_carrier_stack.scad`).
+- `emit_geometry_report` emits a `"pi_carrier_geometry"` echo that captures the outer bounds,
+  invariant checks (`plate_len_stack_off`/`plate_wid_stack_off`), and stack mount placement plus
+  inset margins when enabled. `pi_carrier_stack.scad` forwards this echo when
+  `emit_geometry_report=true`, alongside its `"pi_carrier_stack"` dimension report and a
+  `"stack_mounts_enabled"` echo describing the resolved stack mount positions.
+
+Example invocations:
+
+```bash
+openscad -o /tmp/pi_carrier.stl -D emit_geometry_report=true cad/pi_cluster/pi_carrier.scad
+openscad -o /tmp/pi_carrier_mounts.stl -D preview_stack_mounts=true -D emit_geometry_report=true \
+  cad/pi_cluster/pi_carrier.scad
+openscad -o /tmp/pi_carrier_stack_level.stl -D export_part="carrier_level" \
+  -D emit_geometry_report=true cad/pi_cluster/pi_carrier_stack.scad
+```
+
+CI parses these echoes for regression coverage (`tests/test_pi_carrier_geometry_report.py`,
+`tests/test_pi_carrier_stack_geometry_report.py`).
+
+---
+
+## 12. Safety and references
 
 - Do not block PoE HAT fans; maintain airflow clearance.
 - Use official Raspberry Pi mechanical drawings for board geometry when modifying clearances.
@@ -472,7 +501,7 @@ module pi_carrier_stack(levels = 3, zgap = 32, fan_size = 120) {
 
 ---
 
-## 12. Deliverables checklist
+## 13. Deliverables checklist
 
 All deliverables below now ship with the repository; treat the list as a quick
 regression checklist when refreshing the stacked carrier design.

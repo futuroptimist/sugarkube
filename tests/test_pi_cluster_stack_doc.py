@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 DOC_PATH = Path(__file__).resolve().parents[1] / "docs" / "pi_cluster_stack.md"
@@ -32,9 +33,9 @@ def test_stack_doc_deliverables_marked_shipped() -> None:
     assert (
         "## 12. deliverables checklist (for future implementation)" not in lowered
     ), "Stack doc still frames deliverables as future implementation"
-    assert (
-        "## 12. Deliverables checklist" in text
-    ), "Stack doc should keep the deliverables checklist header"
+    assert re.search(r"## \d+\. Deliverables checklist", text), (
+        "Stack doc should keep the deliverables checklist header"
+    )
 
 
 def test_stack_doc_prefers_grouped_artifact() -> None:
@@ -48,7 +49,7 @@ def test_stack_doc_prefers_grouped_artifact() -> None:
 
 
 def test_stack_doc_heatset_guidance_is_post_print() -> None:
-    """Verify that the outdated pause-to-insert recommendation for heat-set inserts has been removed."""
+    """Outdated pause-to-insert guidance should be removed."""
 
     text = DOC_PATH.read_text(encoding="utf-8")
     assert "Pause after the first 2 mm to insert heat-set brass hardware" not in text
