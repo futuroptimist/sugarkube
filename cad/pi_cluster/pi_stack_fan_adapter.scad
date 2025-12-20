@@ -21,6 +21,10 @@ assert(!is_undef(stack_mount_positions), "stack_mount_positions must align with 
 
 level_height = z_gap_clear + plate_thickness;
 stack_height = (levels - 1) * level_height + plate_thickness;
+assert(
+    len(stack_mount_positions) > 0,
+    "stack_mount_positions must be provided for fan adapter"
+);
 fan_side_x = max([for (p = stack_mount_positions) p[0]]);
 fan_side_positions = [for (p = stack_mount_positions) if (p[0] >= fan_side_x - 0.01) p];
 assert(len(fan_side_positions) == 2, "expected exactly two fan-side posts");

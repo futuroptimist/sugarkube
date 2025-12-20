@@ -226,38 +226,60 @@ module base_plate(
 
 // ---------- Assembly ----------
 module pi_carrier(
-    carrier_dims = carrier_dimensions(
-        stack_mount_positions_input = stack_mount_positions,
-        include_stack_mounts = include_stack_mounts,
-        plate_thickness = plate_thickness,
-        stack_pocket_depth = stack_pocket_depth,
-        edge_margin = edge_margin,
-        stack_edge_margin = stack_edge_margin,
-        hole_spacing = hole_spacing,
-        board_angle = board_angle,
-        gap_between_boards = gap_between_boards,
-        pi_positions = pi_positions,
-        board_len = board_len,
-        board_wid = board_wid,
-        corner_radius = corner_radius,
-        port_clearance = port_clearance,
-        stack_pocket_d = stack_pocket_d
-    )
+    carrier_dims = undef,
+    include_stack_mounts = include_stack_mounts,
+    stack_edge_margin = stack_edge_margin,
+    edge_margin = edge_margin,
+    plate_thickness = plate_thickness,
+    stack_pocket_depth = stack_pocket_depth,
+    stack_pocket_d = stack_pocket_d,
+    stack_mount_positions_input = stack_mount_positions,
+    hole_spacing = hole_spacing,
+    board_angle = board_angle,
+    gap_between_boards = gap_between_boards,
+    pi_positions = pi_positions,
+    board_len = board_len,
+    board_wid = board_wid,
+    corner_radius = corner_radius,
+    port_clearance = port_clearance
 )
 {
-    plate_len = carrier_plate_len(carrier_dims);
-    plate_wid = carrier_plate_wid(carrier_dims);
-    board_spacing_x = carrier_board_spacing_x(carrier_dims);
-    board_spacing_y = carrier_board_spacing_y(carrier_dims);
-    stack_mount_positions = carrier_stack_mount_positions(carrier_dims);
-    stack_mount_inset = carrier_stack_mount_inset(carrier_dims);
+    carrier_dims_resolved = is_undef(carrier_dims)
+        ? carrier_dimensions(
+            stack_mount_positions_input = stack_mount_positions_input,
+            include_stack_mounts = include_stack_mounts,
+            plate_thickness = plate_thickness,
+            stack_pocket_depth = stack_pocket_depth,
+            edge_margin = edge_margin,
+            stack_edge_margin = stack_edge_margin,
+            hole_spacing = hole_spacing,
+            board_angle = board_angle,
+            gap_between_boards = gap_between_boards,
+            pi_positions = pi_positions,
+            board_len = board_len,
+            board_wid = board_wid,
+            corner_radius = corner_radius,
+            port_clearance = port_clearance,
+            stack_pocket_d = stack_pocket_d
+        )
+        : carrier_dims;
 
-    if (include_stack_mounts) {
+    hole_spacing_x = hole_spacing[0];
+    hole_spacing_y = hole_spacing[1];
+    plate_len = carrier_plate_len(carrier_dims_resolved);
+    plate_wid = carrier_plate_wid(carrier_dims_resolved);
+    board_spacing_x = carrier_board_spacing_x(carrier_dims_resolved);
+    board_spacing_y = carrier_board_spacing_y(carrier_dims_resolved);
+    stack_mount_positions_resolved = carrier_stack_mount_positions(carrier_dims_resolved);
+    stack_mount_inset = carrier_stack_mount_inset(carrier_dims_resolved);
+    include_stack_mounts_resolved = len(stack_mount_positions_resolved) > 0;
+
+    if (include_stack_mounts_resolved) {
         assert(
             stack_mount_inset * 2 < plate_len && stack_mount_inset * 2 < plate_wid,
             "stack mount inset must keep pockets inside the plate bounds"
         );
-        for (pos = stack_mount_positions) {
+        for (pos = stack_mount_positions_resolved) {
             assert(
                 pos[0] > stack_mount_inset / 2 && pos[0] < plate_len - stack_mount_inset / 2,
                 "stack mount X coordinate too close to plate edge"
@@ -269,18 +291,19 @@ module pi_carrier(
         }
     }
 
-    base_plate(
-        carrier_dims,
-        hole_spacing_x,
-        hole_spacing_y,
-        board_spacing_x,
-        board_spacing_y,
-        stack_mount_positions
-    );
+    let(include_stack_mounts = include_stack_mounts_resolved)
+        base_plate(
+            carrier_dims_resolved,
+            hole_spacing_x,
+            hole_spacing_y,
+            board_spacing_x,
+            board_spacing_y,
+            stack_mount_positions_resolved
+        );
 
     for (pos = pi_positions) {
-        pcb_cx = edge_margin + carrier_rotX(carrier_dims)/2 + pos[0]*board_spacing_x;
-        pcb_cy = edge_margin + port_clearance + carrier_rotY(carrier_dims)/2 + pos[1]*board_spacing_y;
+        pcb_cx = edge_margin + carrier_rotX(carrier_dims_resolved)/2 + pos[0]*board_spacing_x;
+        pcb_cy = edge_margin + port_clearance + carrier_rotY(carrier_dims_resolved)/2 + pos[1]*board_spacing_y;
         for (dx = [-hole_spacing_x/2, hole_spacing_x/2])
         for (dy = [-hole_spacing_y/2, hole_spacing_y/2]) {
             vec = rot2d([dx,dy], board_angle);
@@ -289,8 +312,8 @@ module pi_carrier(
     }
 
     if (include_lcd) {
-        lcd_cx = edge_margin + carrier_rotX(carrier_dims)/2 + board_spacing_x;
-        lcd_cy = edge_margin + port_clearance + carrier_rotY(carrier_dims)/2 + board_spacing_y;
+        lcd_cx = edge_margin + carrier_rotX(carrier_dims_resolved)/2 + board_spacing_x;
+        lcd_cy = edge_margin + port_clearance + carrier_rotY(carrier_dims_resolved)/2 + board_spacing_y;
         for (dx = [-lcd_hole_spacing_x/2, lcd_hole_spacing_x/2])
         for (dy = [-lcd_hole_spacing_y/2, lcd_hole_spacing_y/2])
             standoff([lcd_cx+dx, lcd_cy+dy]);
