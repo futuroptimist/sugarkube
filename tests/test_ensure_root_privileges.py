@@ -101,11 +101,12 @@ def test_ensure_root_privileges_skips_when_sudo_unavailable(
     monkeypatch.setattr(conftest.shutil, "which", lambda tool: None)
     monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="stubbed"))
 
-    with pytest.raises(pytest.skip.Exception):
+    with pytest.raises(pytest.skip.Exception) as excinfo:
         conftest.ensure_root_privileges()
 
     assert ["unshare", "-n", "true"] in fake_run.commands
     assert all(cmd[0] != "/usr/bin/sudo" for cmd in fake_run.commands)
+    assert "sudo not available for retry" in str(excinfo.value)
 
 
 def test_ensure_root_privileges_warns_when_cleanup_fails(
@@ -124,5 +125,5 @@ def test_ensure_root_privileges_warns_when_cleanup_fails(
     monkeypatch.setattr(conftest.shutil, "which", lambda tool: "/usr/bin/sudo")
     monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="stubbed"))
 
-    with pytest.warns(RuntimeWarning):
+    with pytest.warns(RuntimeWarning, match="permission denied"):
         conftest.ensure_root_privileges()

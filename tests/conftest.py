@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import errno
 import os
 import shutil
 import subprocess
@@ -207,7 +208,20 @@ def require_tools(tools: Iterable[str]) -> None:
 
 def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
     message = (result.stderr or "").lower()
-    return "permission denied" in message or "operation not permitted" in message
+    permission_markers = (
+        "permission denied",
+        "operation not permitted",
+        "must be run as root",
+        "must be root",
+        "are you root",
+        "requires root",
+        "root privileges required",
+    )
+
+    if any(marker in message for marker in permission_markers):
+        return True
+
+    return result.returncode in {errno.EPERM, errno.EACCES}
 
 
 def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -224,7 +238,12 @@ def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
     sudo = shutil.which("sudo")
     if not sudo:
-        return result
+        return subprocess.CompletedProcess(
+            cmd,
+            result.returncode,
+            result.stdout,
+            "\n".join(filter(None, [result.stderr, "sudo not available for retry"])),
+        )
 
     return subprocess.run([sudo, "-n", *cmd], capture_output=True, text=True)
 
@@ -251,7 +270,9 @@ def ensure_root_privileges() -> None:
 
     delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
     if delete_result.returncode != 0:
+        details = delete_result.stderr.strip()
         warnings.warn(
-            "Failed to clean up test network namespace; manual deletion may be required",
+            "Failed to clean up test network namespace; manual deletion may be required"
+            + (f": {details}" if details else ""),
             RuntimeWarning,
         )
