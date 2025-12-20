@@ -90,6 +90,34 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   The all-in-one `stl-${GITHUB_SHA}` artifact still ships for full-repo coverage and backward
   compatibility.
 
+### Debugging / diagnostics
+
+- **Local stack-mount preview.** `cad/pi_cluster/pi_carrier.scad` exposes a single-line toggle
+  `preview_stack_mounts` for local renders. When set (or passed via `-D preview_stack_mounts=true`),
+  the base carrier enables the stack clamp holes even if `include_stack_mounts` was not set
+  explicitly. `pi_carrier_stack.scad` sets `include_stack_mounts=true` internally so its carrier
+  levels always render the pockets.
+- **Geometry report.** Pass `-D emit_geometry_report=true` to emit a `"pi_carrier_geometry"` echo
+  containing the resolved plate dimensions, outer bounds, stack mount insets/margins, and
+  invariant-check values (`plate_len_stack_off` / `plate_wid_stack_off`, etc.). These values stay
+  stable whether stack mounts are enabled or not; CI parses them for regression coverage in
+  `tests/test_pi_carrier_geometry_report.py` and `tests/test_pi_carrier_stack_geometry_report.py`.
+- **Dimension report.** `pi_carrier_stack.scad` continues to emit `"pi_carrier_stack"` dimension
+  echoes when `emit_dimension_report=true`, alongside stack-mount diagnostics from the embedded
+  carrier.
+
+Example commands:
+
+```bash
+openscad -o /tmp/pi_carrier.stl -D emit_geometry_report=true cad/pi_cluster/pi_carrier.scad
+openscad -o /tmp/pi_carrier_mounts.stl -D preview_stack_mounts=true -D emit_geometry_report=true \
+  cad/pi_cluster/pi_carrier.scad
+openscad -o /tmp/pi_carrier_stack_level.stl -D export_part="carrier_level" -D emit_geometry_report=true \
+  cad/pi_cluster/pi_carrier_stack.scad
+```
+
+For more background on the base carrier, see [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md).
+
 ---
 
 ## Assembly sequence
