@@ -37,6 +37,7 @@ expected_column_spacing = pi_hole_spacing;
 
 export_part = is_undef(export_part) ? "assembly" : export_part;
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
+emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
 include <./pi_carrier.scad>;
 use <./pi_stack_post.scad>;
@@ -64,6 +65,12 @@ carrier_dims = carrier_dimensions(
 plate_len = carrier_plate_len(carrier_dims);
 plate_wid = carrier_plate_wid(carrier_dims);
 stack_mount_positions_resolved = carrier_stack_mount_positions(carrier_dims);
+if (include_stack_mounts) {
+    assert(
+        len(stack_mount_positions_resolved) > 0,
+        "stack mount positions must resolve when include_stack_mounts=true"
+    );
+}
 stack_mount_inset = carrier_stack_mount_inset(carrier_dims);
 level_height = z_gap_clear + plate_thickness;
 stack_height = (levels - 1) * level_height + plate_thickness;
@@ -96,14 +103,12 @@ module _validate_stack_params() {
 
 module _carrier(level = 0) {
     translate([-plate_len / 2, -plate_wid / 2, level * level_height])
-        let(
-            include_stack_mounts = true,
-            stack_edge_margin = stack_edge_margin,
-            stack_mount_positions = stack_mount_positions_resolved,
-            stack_bolt_d = stack_bolt_d,
+        pi_carrier(
+            carrier_dims = carrier_dims,
             stack_pocket_d = stack_pocket_d,
-            stack_pocket_depth = stack_pocket_depth
-        ) pi_carrier();
+            stack_pocket_depth = stack_pocket_depth,
+            emit_geometry_report = emit_geometry_report
+        );
 }
 
 module _posts() {

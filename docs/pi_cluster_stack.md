@@ -57,7 +57,8 @@ referencing side-channel notes. The base triple-Pi carrier already exists as
   2.0 mm plate for non-stacked builds.
 - Print the stack posts upright with three perimeter walls and 40 % gyroid infill. They use a simple
   through-hole for the clamp bolt and keyed bosses on both ends—no heat-set inserts are required on
-  the posts. Install the M2.5 heat-set inserts in the carrier standoffs after printing.
+  the posts. Install heat-set inserts after printing. Install the M2.5 heat-set inserts in the
+  carrier standoffs.
 - Print the fan wall on its edge to maximise strength across the insert bosses. Enable tree
   supports or paint-on supports for the boss overhangs if your slicer requires it.
 - `openscad` examples:
