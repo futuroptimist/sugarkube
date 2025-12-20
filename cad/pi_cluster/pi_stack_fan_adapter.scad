@@ -18,6 +18,7 @@ interface_extension = is_undef(interface_extension) ? 10 : interface_extension;
 interface_hole_d = is_undef(interface_hole_d) ? 3.2 : interface_hole_d;
 
 assert(!is_undef(stack_mount_positions), "stack_mount_positions must align with carrier stack pockets");
+assert(len(stack_mount_positions) > 0, "stack_mount_positions must be provided for fan adapter");
 
 level_height = z_gap_clear + plate_thickness;
 stack_height = (levels - 1) * level_height + plate_thickness;
