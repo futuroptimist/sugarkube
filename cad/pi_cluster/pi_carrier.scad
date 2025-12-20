@@ -214,12 +214,21 @@ module base_plate(
     plate_len = carrier_plate_len(carrier_dims);
     plate_wid = carrier_plate_wid(carrier_dims);
 
+    // This translate makes the *outer* plate bounds land at:
+    //   X: [0 .. plate_len], Y: [0 .. plate_wid]
+    // Without it, offset(r=corner_radius) would shift the outer bounds to
+    // [-corner_radius .. plate_len-corner_radius], which is exactly what
+    // causes the apparent “5mm vs 15mm” asymmetry in the preview.
+    assert(plate_len > 2 * corner_radius, "plate_len must be > 2*corner_radius");
+    assert(plate_wid > 2 * corner_radius, "plate_wid must be > 2*corner_radius");
+
     difference()
     {
         linear_extrude(height=plate_thickness)
             offset(r=corner_radius)
-                square([plate_len - 2*corner_radius,
-                        plate_wid - 2*corner_radius]);
+                translate([corner_radius, corner_radius])
+                    square([plate_len - 2*corner_radius,
+                            plate_wid - 2*corner_radius]);
 
         if (variation != "blind") {
             for (pos = pi_positions) {
@@ -405,6 +414,9 @@ module pi_carrier(
             plate_len = plate_len,
             plate_wid = plate_wid,
             plate_thickness = plate_thickness,
+            corner_radius = corner_radius,
+            plate_outer_bounds_min = [0, 0],
+            plate_outer_bounds_max = [plate_len, plate_wid],
             edge_margin = edge_margin,
             port_clearance = port_clearance,
             include_stack_mounts = include_stack_mounts_resolved,
