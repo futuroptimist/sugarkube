@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import errno
 import os
 import shutil
 import subprocess
@@ -11,6 +12,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Iterable, List, Mapping
+import warnings
 
 import pytest
 
@@ -204,24 +206,79 @@ def require_tools(tools: Iterable[str]) -> None:
         )
 
 
-def ensure_root_privileges() -> None:
-    """Skip when we cannot create network namespaces due to insufficient privileges."""
+def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
+    message = (result.stderr or "").lower()
+    permission_markers = (
+        "permission denied",
+        "operation not permitted",
+        "must be run as root",
+        "must be root",
+        "are you root",
+        "requires root",
+        "root privileges required",
+    )
 
-    probe = subprocess.run(["unshare", "-n", "true"], capture_output=True, text=True)
+    if any(marker in message for marker in permission_markers):
+        return True
+
+    return result.returncode in {errno.EPERM, errno.EACCES}
+
+
+def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a command and retry with sudo when permission errors occur.
+
+    Commands are retried with ``sudo -n`` to avoid blocking on password prompts in CI.
+
+    Coverage: ``tests/test_ensure_root_privileges.py``.
+    """
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0 or not _is_permission_error(result):
+        return result
+
+    sudo = shutil.which("sudo")
+    if not sudo:
+        return subprocess.CompletedProcess(
+            cmd,
+            result.returncode,
+            result.stdout,
+            "\n".join(filter(None, [result.stderr, "sudo not available for retry"])),
+        )
+
+    return subprocess.run([sudo, "-n", *cmd], capture_output=True, text=True)
+
+
+def ensure_root_privileges() -> None:
+    """Skip when we cannot create network namespaces due to insufficient privileges.
+
+    Commands are retried with ``sudo`` when available to mirror CI capabilities and avoid
+    unnecessary skips when the caller can run sudo non-interactively.
+    """
+
+    probe = _run_with_sudo_fallback(["unshare", "-n", "true"])
     if probe.returncode != 0:
-        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
-        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
-        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
-        pytest.skip("Insufficient privileges for network namespace operations")
+        reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
+        # TODO: Pre-provision non-interactive sudo or grant netns capabilities in CI images.
+        # Root cause: Some environments cannot create network namespaces even after sudo fallback.
+        # Estimated fix: 1h to adjust CI images or relax test requirements when namespaces are unavailable.
+        pytest.skip(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
-    probe_netns = subprocess.run(
-        ["ip", "netns", "add", netns_name], capture_output=True, text=True
-    )
+    probe_netns = _run_with_sudo_fallback(["ip", "netns", "add", netns_name])
     if probe_netns.returncode != 0:
-        # TODO: Grant network namespace capabilities in CI or provide a stub harness for tests.
-        # Root cause: Creating namespaces requires elevated privileges that may be blocked.
-        # Estimated fix: 1h to run tests with the needed capabilities or mock namespace usage.
-        pytest.skip("Insufficient privileges for network namespace operations")
+        reason = (
+            probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
+        )
+        # TODO: Ensure the iproute2 tooling and privileges for netns creation are available in CI.
+        # Root cause: Network namespace creation can fail when permissions or tooling are missing.
+        # Estimated fix: 1h to preinstall iproute2 and configure sudoers to allow netns operations.
+        pytest.skip(reason)
 
-    subprocess.run(["ip", "netns", "delete", netns_name], capture_output=True, text=True)
+    delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
+    if delete_result.returncode != 0:
+        details = delete_result.stderr.strip()
+        warnings.warn(
+            "Failed to clean up test network namespace; manual deletion may be required"
+            + (f": {details}" if details else ""),
+            RuntimeWarning,
+        )
