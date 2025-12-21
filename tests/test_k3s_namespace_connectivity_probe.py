@@ -36,6 +36,8 @@ def test_verify_namespace_connectivity_uses_tcp_probe_when_ping_fails() -> None:
 
     assert commands
     assert "ping" in commands[0]
+    assert commands[0][:4] == ["ip", "netns", "exec", "leader"]
+    assert commands[0][-1] == "192.0.2.10"
     assert probe_calls
     assert probe_calls[0][:3] == ("leader", "follower", "192.0.2.10")
     assert probe_calls[0][3] == {"attempts": 3, "retry_delay": 0.5}
