@@ -247,3 +247,6 @@ wslconfig
 yaml
 yml
 yourorg
+
+executables
+pytest
