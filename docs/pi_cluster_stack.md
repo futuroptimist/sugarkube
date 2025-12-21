@@ -297,12 +297,13 @@ Export modes:
 
 ## 12. Deliverables checklist
 
-- `cad/pi_cluster/pi_carrier_stack.scad` and `cad/pi_cluster/pi_stack_post.scad` generate carrier
+- [x] Create user-facing assembly/BOM documentation (see `docs/pi_cluster_stack_assembly.md`).
+- [x] `cad/pi_cluster/pi_carrier_stack.scad` and `cad/pi_cluster/pi_stack_post.scad` generate carrier
   levels, single posts, and full-stack previews via `export_part`.
-- CI publishes grouped stack STL artifacts (`stl-pi_cluster_stack-${GITHUB_SHA}`) with
+- [x] CI publishes grouped stack STL artifacts (`stl-pi_cluster_stack-${GITHUB_SHA}`) with
   `printed/`, `heatset/`, and `variants/` layouts for direct download.
-- This document and `docs/pi_cluster_carrier.md` describe assembly and cross-link the carrier field
-  guide for tolerances and insert guidance.
+- [x] This document and `docs/pi_cluster_carrier.md` describe assembly and cross-link the carrier
+  field guide for tolerances and insert guidance.
 
 ---
 
