@@ -72,6 +72,7 @@ def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_
 
     monkeypatch.setenv("SUGARKUBE_ALLOW_TOOL_SHIMS", "1")
     monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
 
     real_which = shutil.which
 
@@ -98,6 +99,10 @@ def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_
         shimmed = tmp_path / tool
         assert shimmed.exists()
         assert os.access(shimmed, os.X_OK)
+
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    assert str(tmp_path) in path_parts
+    assert path_parts.count(str(tmp_path)) == 1
 
 
 def test_preinstall_test_cli_tools_installs_missing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -154,7 +154,14 @@ def _install_missing_tools(missing: Iterable[str]) -> list[str]:
 
 
 def _create_tool_shims(missing: Iterable[str]) -> Path:
-    """Create stub executables so tests can proceed without system packages."""
+    """Create stub executables so tests can proceed without system packages.
+
+    The generated shims unconditionally exit with status ``0`` because they are
+    intended only to unblock tests that need the presence of specific CLIs, not
+    to emulate their behaviour. The shim directory is prepended to ``PATH`` and
+    reused across calls, so callers should ensure any broader test session resets
+    environment state afterwards.
+    """
 
     global _TOOL_SHIM_DIR
 
@@ -170,13 +177,22 @@ def _create_tool_shims(missing: Iterable[str]) -> Path:
         shim_path = _TOOL_SHIM_DIR
 
     for tool in missing:
+        if os.sep in tool or (os.path.altsep and os.path.altsep in tool):
+            raise ValueError(f"Unsafe tool name for shim creation: {tool!r}")
+
         tool_path = shim_path / tool
         if tool_path.exists():
             continue
         tool_path.write_text("#!/bin/sh\nexit 0\n")
         tool_path.chmod(0o755)
 
-    os.environ["PATH"] = f"{shim_path}{os.pathsep}" + os.environ.get("PATH", "")
+    current_path = os.environ.get("PATH", "")
+    path_parts = current_path.split(os.pathsep) if current_path else []
+    shim_str = str(shim_path)
+    if shim_str not in path_parts:
+        os.environ["PATH"] = (
+            f"{shim_str}{os.pathsep}{current_path}" if current_path else shim_str
+        )
     return shim_path
 
 
