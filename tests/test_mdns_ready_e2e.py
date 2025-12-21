@@ -134,6 +134,11 @@ def netns_setup():
             reason = probe_result.reason or "network namespace TCP probe failed"
             # Connectivity probe retries now include backoff for slower hosts; skip only after
             # exhausting the attempts so CI logs capture the last observed failure.
+            # TODO: Stabilize mDNS namespace connectivity on CI runners.
+            # Root cause: Some hosts block or drop traffic over veth pairs and network namespaces,
+            #   preventing the TCP probe from confirming readiness before the test proceeds.
+            # Estimated fix: Investigate runner kernel/network settings to allow veth namespaces or
+            #   gate the test behind an environment flag when namespaces are unsupported.
             pytest.skip(f"Network namespace connectivity unavailable: {reason}")
 
         yield {
