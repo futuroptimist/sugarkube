@@ -6,7 +6,7 @@ import os
 from typing import TypedDict
 
 
-class NetnsStub(TypedDict):
+class NetnsStub(TypedDict, total=False):
     ns1: str
     ns2: str
     veth1: str

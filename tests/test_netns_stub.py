@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Iterable
-
 import pytest
 
 import tests.test_mdns_ready_e2e as mdns_ready
@@ -15,7 +13,7 @@ def test_netns_stub_flag_enables_stubbed_environment(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setenv("SUGARKUBE_ALLOW_NETNS_STUBS", "1")
 
-    called: list[Iterable[str]] = []
+    called: list[list[str]] = []
 
     def fail_if_called(cmd: list[str]) -> None:  # pragma: no cover - explicit failure path
         called.append(cmd)
