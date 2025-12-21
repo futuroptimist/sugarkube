@@ -86,8 +86,10 @@ than reimplementing its details.
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and produce stack STLs.
-  Grab the grouped stack artifact first; it contains stack-specific STLs organised as `carriers/`,
-  `posts/`, and `preview/`.
+  Download the grouped stack bundle named `stl-pi_cluster_stack-${GITHUB_SHA}`; it contains
+  stack-specific STLs organised as `printed/`, `heatset/`, `variants/`, plus `carriers/`, `posts/`,
+  and `preview/`. The legacy monorepo bundle `stl-${GITHUB_SHA}` remains available but the grouped
+  stack artifact is preferred.
 
 ## Debugging / Diagnostics
 
@@ -266,6 +268,7 @@ Export modes:
 - Orient the fan to blow across PoE-HAT intakes without creating recirculation; maintain at least
   8–10 mm clearance from obstructions (enforced via `intake_margin`).
 - Prefer 120 mm fans for best CFM/dBA; 92 mm and 80 mm remain options for tighter envelopes.
+- Fan plate mounting holes target M3 clearance (Ø3.2–3.4 mm) for the future perpendicular wall.
 
 ---
 
@@ -289,6 +292,17 @@ Export modes:
 
 - 4 corner posts + 3 carrier plates assemble without forcing.
 - Nuts seat cleanly in the post nut traps.
+
+---
+
+## 12. Deliverables checklist
+
+- `cad/pi_cluster/pi_carrier_stack.scad` and `cad/pi_cluster/pi_stack_post.scad` generate carrier
+  levels, single posts, and full-stack previews via `export_part`.
+- CI publishes grouped stack STL artifacts (`stl-pi_cluster_stack-${GITHUB_SHA}`) with
+  `printed/`, `heatset/`, and `variants/` layouts for direct download.
+- This document and `docs/pi_cluster_carrier.md` describe assembly and cross-link the carrier field
+  guide for tolerances and insert guidance.
 
 ---
 

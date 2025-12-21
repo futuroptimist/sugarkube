@@ -145,13 +145,18 @@ module pi_stack_post(
     emit_post_report = is_undef(emit_post_report) ? false : emit_post_report
 ) {
     // Resolve quality from (module param) -> (CLI global) -> default.
+    quality_default =
+        is_undef(post_quality) ? "draft" : post_quality;
+
     quality_resolved =
-        !is_undef(quality) ? quality :
-        (is_undef(post_quality) ? "draft" : post_quality);
+        is_undef(quality) ? quality_default : quality;
+
+    // Resolve facet count from (module param) -> (CLI global) -> derived from quality.
+    fn_default =
+        is_undef(post_fn) ? _quality_fn(quality_resolved) : post_fn;
 
     fn_resolved =
-        !is_undef(facet_fn) ? facet_fn :
-        (is_undef(post_fn) ? _quality_fn(quality_resolved) : post_fn);
+        is_undef(facet_fn) ? fn_default : facet_fn;
 
     // Anti-z-fighting / robust booleans (small, non-functional).
     z_fudge = 0.08;
@@ -204,7 +209,7 @@ module pi_stack_post(
     wall_eps = 0.03;
     allowed_center_dist = post_r - bolt_r - post_wall_min - wall_eps;
     assert(allowed_center_dist > 0,
-        "post_body_d too small to preserve post_wall_min around bolt; increase post_body_d or reduce post_wall_min/stack_bolt_d");
+        "post_body_d too small to preserve post_wall_min around bolt; increase post_body_d or reduce post_wall_min or stack_bolt_d");
 
     center_dist_raw =
         sqrt(post_center_raw[0]*post_center_raw[0] + post_center_raw[1]*post_center_raw[1]);
@@ -238,7 +243,8 @@ module pi_stack_post(
     // Guards
     assert(fit_clearance > 0, "fit_clearance must be > 0 to avoid binding on real prints");
     assert(post_body_d > stack_bolt_d + 2 * post_wall_min, "post_body_d too small for stack_bolt_d + post_wall_min");
-    assert(min_radial_wall + 0.001 >= post_wall_min,
+    tolerance_eps = 0.001;
+    assert(min_radial_wall + tolerance_eps >= post_wall_min,
         str("post too offset even after clamping: need ≥", post_wall_min,
             "mm wall around bolt; have ", min_radial_wall,
             "mm. Increase post_body_d or reduce post_overhang."));
