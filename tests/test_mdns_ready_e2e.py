@@ -136,9 +136,13 @@ def netns_setup():
         )
         if not probe_result:
             reason = probe_result.reason or "network namespace TCP probe failed"
-            # TODO: Allow network namespace connectivity probes to pass in CI.
-            # Root cause: TCP handshake across the mdns_ready test namespaces failed during setup.
-            # Estimated fix: 1h to provision veth connectivity or grant the required capabilities.
+            # Connectivity probe retries now include backoff for slower hosts; skip only after
+            # exhausting the attempts so CI logs capture the last observed failure.
+            # TODO: Stabilize mDNS namespace connectivity on CI runners.
+            # Root cause: Some hosts block or drop traffic over veth pairs and network namespaces,
+            #   preventing the TCP probe from confirming readiness before the test proceeds.
+            # Estimated fix: Investigate runner kernel/network settings to allow veth namespaces or
+            #   gate the test behind an environment flag when namespaces are unsupported.
             pytest.skip(f"Network namespace connectivity unavailable: {reason}")
 
         yield {
