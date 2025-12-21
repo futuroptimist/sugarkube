@@ -19,7 +19,12 @@ def test_stl_generation(mode: str, tmp_path):
     Ensure we get a non-empty STL output.
     """
 
-    scad_files = list(Path("cad").rglob("*.scad"))
+    scad_files = [
+        scad
+        for scad in Path("cad").rglob("*.scad")
+        # Skip helper-only libraries with no top-level geometry.
+        if scad.name not in {"pi_dimensions.scad"}
+    ]
     assert scad_files, "no scad files found"
 
     runner = subprocess.run if _OPENSCAD else _fake_run

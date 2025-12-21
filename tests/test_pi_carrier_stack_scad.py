@@ -61,10 +61,9 @@ def test_pi_carrier_stack_includes_local_dependencies() -> None:
 
     assert "include <./pi_dimensions.scad>" in source
     assert "include <./pi_carrier.scad>" in source
-    # The carriers-only preview intentionally omits posts / adapters / fan wall
-    # while those parts are refined; ensure no stale include/use references remain.
-    assert "pi_stack_post.scad" not in source
-    assert "pi_stack_fan_adapter.scad" not in source
+    assert "use <./pi_stack_post.scad>" in source
+    # Fan adapter / fan wall remain optional until re-enabled in the stack wrapper.
+    assert "use <./pi_stack_fan_adapter.scad>" not in source
     assert "use <./fan_wall.scad>" not in source
 
 
@@ -109,12 +108,13 @@ def test_stack_mount_pockets_on_both_faces() -> None:
     ), "Bottom pocket should mirror the top pocket when include_stack_mounts=true"
 
 
-def test_stack_post_boss_clearance() -> None:
-    """Posts should key into pockets with a documented clearance."""
+def test_stack_post_slot_clearance_and_leadin() -> None:
+    """Posts should key into carrier slots with documented clearance + lead-in."""
 
     source = STACK_POST_PATH.read_text(encoding="utf-8")
-    assert "boss_fit_clearance" in source
-    assert "boss_d = stack_pocket_d - boss_fit_clearance" in source
+    assert "fit_clearance" in source
+    assert "leadin_depth" in source
+    assert "leadin_extra_clearance" in source
 
 
 def test_fan_adapter_interfaces_align_with_stack_mounts() -> None:

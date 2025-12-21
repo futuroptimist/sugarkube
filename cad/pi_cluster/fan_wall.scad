@@ -1,4 +1,4 @@
-include <./fan_patterns.scad>;
+use <./fan_patterns.scad>;
 include <./pi_dimensions.scad>;
 
 fan_size = is_undef(fan_size) ? 120 : fan_size;
