@@ -45,6 +45,14 @@ function _quality_fn(q) =
     q == "ultra_draft"? 12 :
     20;
 
+function _resolve_quality(quality_param, post_quality_cli, fallback = "draft") =
+    !is_undef(quality_param) ? quality_param
+    : (!is_undef(post_quality_cli) ? post_quality_cli : fallback);
+
+function _resolve_fn(facet_fn_param, post_fn_cli, quality_resolved) =
+    !is_undef(facet_fn_param) ? facet_fn_param
+    : (!is_undef(post_fn_cli) ? post_fn_cli : _quality_fn(quality_resolved));
+
 // ---------- Helpers ----------
 module _slot_cutout_rect(
     plate_len,
@@ -145,18 +153,10 @@ module pi_stack_post(
     emit_post_report = is_undef(emit_post_report) ? false : emit_post_report
 ) {
     // Resolve quality from (module param) -> (CLI global) -> default.
-    quality_default =
-        is_undef(post_quality) ? "draft" : post_quality;
-
-    quality_resolved =
-        is_undef(quality) ? quality_default : quality;
+    quality_resolved = _resolve_quality(quality, post_quality, "draft");
 
     // Resolve facet count from (module param) -> (CLI global) -> derived from quality.
-    fn_default =
-        is_undef(post_fn) ? _quality_fn(quality_resolved) : post_fn;
-
-    fn_resolved =
-        is_undef(facet_fn) ? fn_default : facet_fn;
+    fn_resolved = _resolve_fn(facet_fn, post_fn, quality_resolved);
 
     // Anti-z-fighting / robust booleans (small, non-functional).
     z_fudge = 0.08;
