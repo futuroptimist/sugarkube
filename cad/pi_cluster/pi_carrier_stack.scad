@@ -67,7 +67,7 @@ post_leadin_extra_clearance_cfg =
 // Import base carrier module / helpers.
 include <./pi_carrier.scad>;
 
-// Import the post module.
+// Import the post module WITHOUT executing its top-level auto-render block.
 use <./pi_stack_post.scad>;
 
 // Compute carrier dimensions for centering and stack-mount placement.
@@ -152,6 +152,7 @@ module _post_at_mount(mount_pos) {
             leadin_depth = post_leadin_depth_cfg,
             leadin_extra_clearance = post_leadin_extra_clearance_cfg,
 
+            // Never emit post report from the stack wrapper.
             emit_post_report = false
         );
 }

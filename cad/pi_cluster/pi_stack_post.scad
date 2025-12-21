@@ -8,11 +8,12 @@
 //   dimensions at each level (fast rectangular profile by default). A tighter carrier outline can
 //   be reintroduced later if needed.
 //
-// PERFORMANCE NOTES (why this is fast now):
-// - The slow part was the rounded-outline + offset + intersections per level.
-// - Default cutouts now use simple rectangular prisms derived from carrier plate_len/plate_wid,
-//   which is dramatically cheaper in OpenCSG preview.
-// - Cylinder tessellation is also aggressively reduced by default (low $fn).
+// PERFORMANCE NOTES (fast path):
+// - Slot cutouts are rectangular prisms derived from carrier plate_len/plate_wid.
+// - We do NOT add extra intersections around the subtractors by default.
+//   In a difference(), OpenSCAD already only cares about subtractor volume that intersects the post.
+//   Adding bounding intersections increases CSG complexity and can tank preview FPS.
+// - Cylinder tessellation is reduced by default (low $fn).
 //
 // QUALITY / TUNING:
 // - Default is optimized for *interactive preview*.
@@ -36,14 +37,14 @@
 // - In pi_carrier_stack.scad, each post is placed by translating to the global stack-mount XY.
 
 _pi_carrier_auto_render = false;
-include <./pi_carrier.scad>; // imports carrier_dimensions() + corner_radius defaults
+include <./pi_carrier.scad>; // imports carrier_dimensions() helpers
 
 // ---------- Quality controls ----------
 function _quality_fn(q) =
-    q == "high"       ? 96 :
-    q == "print"      ? 48 :
-    q == "draft"      ? 20 :
-    q == "ultra_draft"? 12 :
+    q == "high"        ? 96 :
+    q == "print"       ? 48 :
+    q == "draft"       ? 20 :
+    q == "ultra_draft" ? 12 :
     20;
 
 function _resolve_quality(quality_param, post_quality_cli, fallback = "draft") =
@@ -55,14 +56,6 @@ function _resolve_fn(facet_fn_param, post_fn_cli, quality_resolved) =
     : (!is_undef(post_fn_cli) ? post_fn_cli : _quality_fn(quality_resolved));
 
 // ---------- Helpers ----------
-module _bounded_subtractor(post_center, bound_r, z0, h) {
-    intersection() {
-        translate([post_center[0], post_center[1], z0])
-            cylinder(h = h, r = bound_r);
-        children();
-    }
-}
-
 module _slot_cutout_rect(
     plate_len,
     plate_wid,
@@ -72,10 +65,7 @@ module _slot_cutout_rect(
     fit_clearance,
     leadin_depth,
     leadin_extra_clearance,
-    z_fudge,
-    post_center,
-    post_r,
-    bound_margin = 0.6
+    z_fudge
 ) {
     // Plate region in local coordinates (after translating carrier by -mount_pos).
     // Expand by fit_clearance so prints don’t bind.
@@ -85,15 +75,10 @@ module _slot_cutout_rect(
     sy = plate_wid + 2 * fit_clearance;
 
     // Main slot (overshoot in Z to avoid coplanar faces)
-    bound_r = post_r + bound_margin;
-    bound_z = z_plate - z_fudge;
-    bound_h = plate_thickness + 2 * z_fudge;
+    translate([x0, y0, z_plate - z_fudge])
+        cube([sx, sy, plate_thickness + 2 * z_fudge], center = false);
 
-    _bounded_subtractor(post_center, bound_r, bound_z, bound_h)
-        translate([x0, y0, bound_z])
-            cube([sx, sy, bound_h], center = false);
-
-    // Lead-in relief: a slightly larger clearance near the bottom/top faces of each slot.
+    // Lead-in relief: slightly larger clearance near the bottom/top faces of each slot.
     if (leadin_depth > 0 && leadin_extra_clearance > 0) {
         lead = min(leadin_depth, plate_thickness);
 
@@ -103,16 +88,12 @@ module _slot_cutout_rect(
         sy1 = plate_wid + 2 * (fit_clearance + leadin_extra_clearance);
 
         // Bottom lead-in: extend slightly below the plate slot start
-        lead_h = lead + z_fudge;
-        _bounded_subtractor(post_center, bound_r, bound_z, lead_h)
-            translate([x1, y1, bound_z])
-                cube([sx1, sy1, lead_h], center = false);
+        translate([x1, y1, z_plate - z_fudge])
+            cube([sx1, sy1, lead + z_fudge], center = false);
 
         // Top lead-in: extend slightly above the plate slot end
-        lead_top_z = z_plate + plate_thickness - lead;
-        _bounded_subtractor(post_center, bound_r, lead_top_z, lead_h)
-            translate([x1, y1, lead_top_z])
-                cube([sx1, sy1, lead_h], center = false);
+        translate([x1, y1, z_plate + plate_thickness - lead])
+            cube([sx1, sy1, lead + z_fudge], center = false);
     }
 }
 
@@ -173,11 +154,16 @@ module pi_stack_post(
     // Debug
     emit_post_report = is_undef(emit_post_report) ? false : emit_post_report
 ) {
+    // Avoid warnings from referencing unknown globals:
+    // OpenSCAD warns if you pass an *unknown* variable into a function call.
+    post_quality_cli = is_undef(post_quality) ? undef : post_quality;
+    post_fn_cli = is_undef(post_fn) ? undef : post_fn;
+
     // Resolve quality from (module param) -> (CLI global) -> default.
-    quality_resolved = _resolve_quality(quality, post_quality, "draft");
+    quality_resolved = _resolve_quality(quality, post_quality_cli, "draft");
 
     // Resolve facet count from (module param) -> (CLI global) -> derived from quality.
-    fn_resolved = _resolve_fn(facet_fn, post_fn, quality_resolved);
+    fn_resolved = _resolve_fn(facet_fn, post_fn_cli, quality_resolved);
 
     // Anti-z-fighting / robust booleans (small, non-functional).
     z_fudge = 0.08;
@@ -326,7 +312,6 @@ module pi_stack_post(
                 z_plate = lvl * level_height;
 
                 // Fast default: rectangular plate region (uses plate_len/plate_wid from carrier_dimensions).
-                // This still tracks carrier size changes, but avoids the expensive rounded outline math.
                 if (slot_profile == "rect") {
                     _slot_cutout_rect(
                         plate_len = plate_len_resolved,
@@ -337,9 +322,7 @@ module pi_stack_post(
                         fit_clearance = fit_clearance,
                         leadin_depth = leadin_depth,
                         leadin_extra_clearance = leadin_extra_clearance,
-                        z_fudge = z_fudge,
-                        post_center = post_center,
-                        post_r = post_r
+                        z_fudge = z_fudge
                     );
                 } else {
                     // Fallback: treat unknown profiles as rect to stay fast/stable.
@@ -352,9 +335,7 @@ module pi_stack_post(
                         fit_clearance = fit_clearance,
                         leadin_depth = leadin_depth,
                         leadin_extra_clearance = leadin_extra_clearance,
-                        z_fudge = z_fudge,
-                        post_center = post_center,
-                        post_r = post_r
+                        z_fudge = z_fudge
                     );
                 }
             }
