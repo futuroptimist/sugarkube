@@ -219,6 +219,13 @@ isolated test environments (such as disposable containers or dedicated
 virtualenvs) instead of your daily shell. Regression coverage:
 `tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
 
+For mDNS end-to-end coverage that depends on network namespaces, set
+`SUGARKUBE_ALLOW_NETNS_STUBS=1` when your environment lacks `CAP_NET_ADMIN` or
+non-interactive `sudo`. The stub yields deterministic namespace metadata and
+lets the suite skip only the multicast-dependent assertions instead of failing
+when namespace setup is unavailable. Regression coverage:
+`tests/test_netns_stub.py::test_netns_stub_flag_enables_stubbed_environment`.
+
 [hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
 [pi-smoke-test-doc]: docs/pi_smoke_test.md
 
