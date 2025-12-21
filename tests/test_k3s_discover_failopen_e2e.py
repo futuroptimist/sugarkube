@@ -10,9 +10,10 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from tests.conftest import ensure_root_privileges, require_tools
+from tests.helpers.netns_probe import NamespaceProbeResult, probe_namespace_connectivity
 
 import pytest
 
@@ -36,6 +37,60 @@ pytestmark = pytest.mark.skipif(
 def _unique_name(prefix: str) -> str:
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
     return f"{prefix}-{suffix}"
+
+
+def _verify_namespace_connectivity(
+    leader_ns: str,
+    follower_ns: str,
+    follower_ip: str,
+    *,
+    run_cmd=subprocess.run,
+    probe: Callable[..., NamespaceProbeResult] = probe_namespace_connectivity,
+) -> None:
+    """Confirm namespaces can reach each other, falling back to TCP probes.
+
+    The original ICMP ping check flaked in CI when namespaces were available but ICMP
+    was filtered. We now try a TCP handshake via :func:`probe_namespace_connectivity`
+    before skipping so the end-to-end coverage still runs in constrained kernels.
+    """
+
+    ping = run_cmd(
+        [
+            "ip",
+            "netns",
+            "exec",
+            leader_ns,
+            "ping",
+            "-c",
+            "1",
+            "-W",
+            "2",
+            follower_ip,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if ping.returncode == 0:
+        return
+
+    probe_result: NamespaceProbeResult = probe(
+        leader_ns, follower_ns, follower_ip, attempts=3, retry_delay=0.5
+    )
+    if probe_result.ok:
+        return
+
+    details = probe_result.reason or "namespace connectivity probe failed"
+    if probe_result.errors:
+        details = f"{details}; errors: {'; '.join(probe_result.errors)}"
+
+    # TODO: Remove the skip once namespace connectivity is reliable in CI.
+    # Root cause: Ephemeral network namespaces sometimes fail both ICMP and TCP
+    #   probes on shared CI hosts, leaving the bootstrap fixture without a
+    #   functioning veth pair.
+    # Estimated fix: Investigate CI kernel/networking restrictions (e.g.
+    #   CAP_NET_ADMIN, veth binding) and ensure the probe can succeed or be
+    #   safely simulated.
+    pytest.skip(f"Network namespace connectivity test failed: {details}")
 
 
 @dataclass
@@ -137,28 +192,7 @@ def _setup_namespace_pair() -> Tuple[Dict[str, str], List[List[str]]]:
         capture_output=True,
     )
 
-    ping = subprocess.run(
-        [
-            "ip",
-            "netns",
-            "exec",
-            leader_ns,
-            "ping",
-            "-c",
-            "1",
-            "-W",
-            "2",
-            follower_ip,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if ping.returncode != 0:
-        # TODO: Stabilize the network namespace ping path in CI to avoid spurious skips.
-        # Root cause: Kernel or container limitations sometimes prevent namespace-to-namespace
-        #   pings, so the harness bails out instead of exercising fail-open behavior.
-        # Estimated fix: 2h to mock the connectivity check or provision CAP_NET_ADMIN reliably.
-        pytest.skip("Network namespace connectivity test failed")
+    _verify_namespace_connectivity(leader_ns, follower_ns, follower_ip)
 
     return (
         {
