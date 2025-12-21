@@ -245,6 +245,13 @@ def require_tools(tools: Iterable[str]) -> None:
             missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
+        # TODO: Provision required CLI tools in CI or adjust tests to tolerate their
+        # absence via shims when explicitly enabled.
+        # Root cause: The test environment lacks the requested utilities and
+        # auto-installation failed or was skipped.
+        # Estimated fix: Preinstall the tools in the test image or enable tool shim
+        # support with ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` for callers that can rely on
+        # happy-path stubs.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts: "
             f"{', '.join(sorted(missing))}"
