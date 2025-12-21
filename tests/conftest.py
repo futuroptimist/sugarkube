@@ -28,6 +28,8 @@ TEST_CLI_TOOLS: tuple[str, ...] = (
     "dbus-launch",
 )
 
+_TOOL_SHIM_DIR: Path | None = None
+
 # Ensure the project root is importable so ``sitecustomize`` is discovered by
 # subprocesses spawned in tests.  ``sys.path`` adjustments affect the current
 # interpreter while the ``PYTHONPATH`` export keeps child interpreters aligned.
@@ -153,6 +155,49 @@ def _install_missing_tools(missing: Iterable[str]) -> list[str]:
     return packages
 
 
+def _create_tool_shims(missing: Iterable[str]) -> Path:
+    """Create stub executables so tests can proceed without system packages.
+
+    The generated shims unconditionally exit with status ``0`` because they are
+    intended only to unblock tests that need the presence of specific CLIs, not
+    to emulate their behaviour. The shim directory is prepended to ``PATH`` and
+    reused across calls, so callers should ensure any broader test session resets
+    environment state afterwards.
+    """
+
+    global _TOOL_SHIM_DIR
+
+    shim_dir = os.environ.get("SUGARKUBE_TOOL_SHIM_DIR")
+    if shim_dir:
+        shim_path = Path(shim_dir)
+        shim_path.mkdir(parents=True, exist_ok=True)
+    elif _TOOL_SHIM_DIR is None:
+        shim_path = Path(tempfile.mkdtemp(prefix="sugarkube-tool-shims-"))
+        _TOOL_SHIM_DIR = shim_path
+        atexit.register(lambda: shutil.rmtree(shim_path, ignore_errors=True))
+    else:
+        shim_path = _TOOL_SHIM_DIR
+
+    for tool in missing:
+        if os.sep in tool or (os.path.altsep and os.path.altsep in tool):
+            raise ValueError(f"Unsafe tool name for shim creation: {tool!r}")
+
+        tool_path = shim_path / tool
+        if tool_path.exists():
+            continue
+        tool_path.write_text("#!/bin/sh\nexit 0\n")
+        tool_path.chmod(0o755)
+
+    current_path = os.environ.get("PATH", "")
+    path_parts = current_path.split(os.pathsep) if current_path else []
+    shim_str = str(shim_path)
+    if shim_str not in path_parts:
+        os.environ["PATH"] = (
+            f"{shim_str}{os.pathsep}{current_path}" if current_path else shim_str
+        )
+    return shim_path
+
+
 def preinstall_test_cli_tools() -> list[str]:
     """Preinstall the CLI tools most tests depend on to avoid late skips."""
 
@@ -197,9 +242,18 @@ def require_tools(tools: Iterable[str]) -> None:
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        # TODO: Ensure required CLI tools are available in CI images or stub their usage.
-        # Root cause: Some test environments lack system packages and installation can fail.
-        # Estimated fix: 1h to preinstall dependencies in CI or mock external tool invocations.
+        if os.environ.get("SUGARKUBE_ALLOW_TOOL_SHIMS") == "1":
+            _create_tool_shims(missing)
+            missing = [tool for tool in missing if not shutil.which(tool)]
+
+    if missing:
+        # TODO: Provision required CLI tools in CI or adjust tests to tolerate their
+        # absence via shims when explicitly enabled.
+        # Root cause: The test environment lacks the requested utilities and
+        # auto-installation failed or was skipped.
+        # Estimated fix: Preinstall the tools in the test image or enable tool shim
+        # support with ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` for callers that can rely on
+        # happy-path stubs.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts: "
             f"{', '.join(sorted(missing))}"

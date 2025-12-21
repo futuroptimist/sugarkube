@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Iterable
 
 import pytest
@@ -62,6 +65,50 @@ def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(pytest.skip.Exception):
         conftest.require_tools(["unshare", "ip"])
+
+
+def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """When allowed, missing tools are shimmed instead of skipped."""
+
+    monkeypatch.setenv("SUGARKUBE_ALLOW_TOOL_SHIMS", "1")
+    monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
+
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", original_path)
+
+    real_which = shutil.which
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        if tool in {"ip", "ping"}:
+            candidate = tmp_path / tool
+            return str(candidate) if candidate.exists() else None
+        if tool == "apt-get":
+            return None
+        return real_which(tool, path=path)
+
+    def failing_run(cmd: Iterable[str], *args, **kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 1, "", "failed")
+
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+    monkeypatch.setattr(conftest.subprocess, "run", failing_run)
+
+    try:
+        conftest.require_tools(["ip", "ping"])
+
+        for tool in ("ip", "ping"):
+            shimmed = tmp_path / tool
+            assert shimmed.exists()
+            assert os.access(shimmed, os.X_OK)
+
+        path_parts = os.environ.get("PATH", "").split(os.pathsep)
+        assert str(tmp_path) in path_parts
+        assert path_parts.count(str(tmp_path)) == 1
+    except pytest.skip.Exception as exc:  # pragma: no cover - explicit failure path
+        pytest.fail(f"require_tools unexpectedly skipped: {exc.msg}")
+    finally:
+        os.environ["PATH"] = original_path
+
+    assert os.environ.get("PATH", "") == original_path
 
 
 def test_preinstall_test_cli_tools_installs_missing(monkeypatch: pytest.MonkeyPatch) -> None:
