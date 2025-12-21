@@ -1,4 +1,4 @@
-"""Coverage for the k3s discover namespace connectivity fallback."""
+"""Coverage for the k3s discover namespace connectivity fallback and flaky skips."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from tests.test_k3s_discover_failopen_e2e import _verify_namespace_connectivity
 
 
 def test_verify_namespace_connectivity_uses_tcp_probe_when_ping_fails() -> None:
-    """Fallback TCP probe should avoid skips when ICMP is blocked."""
+    """Fallback TCP probe should avoid flaky skips when ICMP is blocked."""
 
     commands: list[list[str]] = []
 
@@ -31,11 +31,14 @@ def test_verify_namespace_connectivity_uses_tcp_probe_when_ping_fails() -> None:
         _verify_namespace_connectivity(
             "leader", "follower", "192.0.2.10", run_cmd=failing_ping, probe=successful_probe
         )
-    except pytest.skip.Exception as exc:  # pragma: no cover - explicit failure path
+    except pytest.skip.Exception as exc:
         pytest.fail(f"Connectivity verification unexpectedly skipped: {exc}")
 
-    assert commands and "ping" in commands[0]
+    assert commands
+    assert "ping" in commands[0]
     assert probe_calls
+    assert probe_calls[0][:3] == ("leader", "follower", "192.0.2.10")
+    assert probe_calls[0][3] == {"attempts": 3, "retry_delay": 0.5}
 
 
 def test_verify_namespace_connectivity_surfaces_probe_errors() -> None:
