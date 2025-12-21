@@ -4,8 +4,9 @@
 // - 4 posts total (one per carrier corner stack-mount).
 // - A long bolt passes through the post and the carrier stack-mount holes,
 //   clamping all carrier levels together.
-// - The post is "keyed" to the carriers by subtracting carrier-derived geometry at each level,
-//   so if the carrier outline/pockets change later, the post cutouts track automatically.
+// - The post is "keyed" to the carriers by subtracting slot cutouts derived from carrier plate
+//   dimensions at each level (fast rectangular profile by default). A tighter carrier outline can
+//   be reintroduced later if needed.
 //
 // PERFORMANCE NOTES (why this is fast now):
 // - The slow part was the rounded-outline + offset + intersections per level.
@@ -54,6 +55,14 @@ function _resolve_fn(facet_fn_param, post_fn_cli, quality_resolved) =
     : (!is_undef(post_fn_cli) ? post_fn_cli : _quality_fn(quality_resolved));
 
 // ---------- Helpers ----------
+module _bounded_subtractor(post_center, bound_r, z0, h) {
+    intersection() {
+        translate([post_center[0], post_center[1], z0])
+            cylinder(h = h, r = bound_r);
+        children();
+    }
+}
+
 module _slot_cutout_rect(
     plate_len,
     plate_wid,
@@ -63,7 +72,10 @@ module _slot_cutout_rect(
     fit_clearance,
     leadin_depth,
     leadin_extra_clearance,
-    z_fudge
+    z_fudge,
+    post_center,
+    post_r,
+    bound_margin = 0.6
 ) {
     // Plate region in local coordinates (after translating carrier by -mount_pos).
     // Expand by fit_clearance so prints don’t bind.
@@ -73,8 +85,13 @@ module _slot_cutout_rect(
     sy = plate_wid + 2 * fit_clearance;
 
     // Main slot (overshoot in Z to avoid coplanar faces)
-    translate([x0, y0, z_plate - z_fudge])
-        cube([sx, sy, plate_thickness + 2 * z_fudge], center = false);
+    bound_r = post_r + bound_margin;
+    bound_z = z_plate - z_fudge;
+    bound_h = plate_thickness + 2 * z_fudge;
+
+    _bounded_subtractor(post_center, bound_r, bound_z, bound_h)
+        translate([x0, y0, bound_z])
+            cube([sx, sy, bound_h], center = false);
 
     // Lead-in relief: a slightly larger clearance near the bottom/top faces of each slot.
     if (leadin_depth > 0 && leadin_extra_clearance > 0) {
@@ -86,12 +103,16 @@ module _slot_cutout_rect(
         sy1 = plate_wid + 2 * (fit_clearance + leadin_extra_clearance);
 
         // Bottom lead-in: extend slightly below the plate slot start
-        translate([x1, y1, z_plate - z_fudge])
-            cube([sx1, sy1, lead + z_fudge], center = false);
+        lead_h = lead + z_fudge;
+        _bounded_subtractor(post_center, bound_r, bound_z, lead_h)
+            translate([x1, y1, bound_z])
+                cube([sx1, sy1, lead_h], center = false);
 
         // Top lead-in: extend slightly above the plate slot end
-        translate([x1, y1, z_plate + plate_thickness - lead])
-            cube([sx1, sy1, lead + z_fudge], center = false);
+        lead_top_z = z_plate + plate_thickness - lead;
+        _bounded_subtractor(post_center, bound_r, lead_top_z, lead_h)
+            translate([x1, y1, lead_top_z])
+                cube([sx1, sy1, lead_h], center = false);
     }
 }
 
@@ -316,7 +337,9 @@ module pi_stack_post(
                         fit_clearance = fit_clearance,
                         leadin_depth = leadin_depth,
                         leadin_extra_clearance = leadin_extra_clearance,
-                        z_fudge = z_fudge
+                        z_fudge = z_fudge,
+                        post_center = post_center,
+                        post_r = post_r
                     );
                 } else {
                     // Fallback: treat unknown profiles as rect to stay fast/stable.
@@ -329,7 +352,9 @@ module pi_stack_post(
                         fit_clearance = fit_clearance,
                         leadin_depth = leadin_depth,
                         leadin_extra_clearance = leadin_extra_clearance,
-                        z_fudge = z_fudge
+                        z_fudge = z_fudge,
+                        post_center = post_center,
+                        post_r = post_r
                     );
                 }
             }

@@ -40,7 +40,7 @@ than reimplementing its details.
 | Item | Qty | Notes |
 | --- | ---: | --- |
 | `pi_carrier.scad` plates | 3 | Print one plate per level; stack renders (`pi_carrier_stack.scad` with `export_part="carrier_level"`) add the stack clamp through-holes plus symmetric locating pockets on both faces. |
-| Full-height corner posts (`pi_stack_post.scad`) | 4 | One per corner. Each post spans the entire stack height (derived from `levels`, `z_gap_clear`, and `plate_thickness`) and includes carrier-shaped cutouts at each level so carrier geometry changes propagate automatically. |
+| Full-height corner posts (`pi_stack_post.scad`) | 4 | One per corner. Each post spans the entire stack height (derived from `levels`, `z_gap_clear`, and `plate_thickness`) and includes slot cutouts derived from the carrier plate dimensions (fast rectangular profile by default) so carrier geometry changes propagate automatically. |
 | M2.5 × 90–110 mm screws + nuts | 4 | Clamp the plates and posts together. Length depends on `levels`, `z_gap_clear`, plate thickness, and how much nut-trap depth you use on the post. |
 | M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 36 | Seat into the carrier standoffs for all 9 Pis (4 per Pi). |
 | Brass spacers, M2.5 female–female, 11 mm | 36 | Four per Pi (one per mounting point), for all 9 Pis in the stack. Maintains separation between each Pi and the carrier plate. |
@@ -60,7 +60,7 @@ than reimplementing its details.
   2.0 mm plate for non-stacked builds.
 - Print the corner posts upright with three perimeter walls and 30–40 % infill. The posts:
   - include a bottom nut-trap by default,
-  - include carrier-shaped cutouts at each level,
+- include carrier-derived rectangular slot cutouts at each level,
   - include a small lead-in relief on the slot edges to reduce elephant-foot frustration during
     assembly,
   - expose a `fit_clearance` / `post_fit_clearance` tolerance knob (default ~0.2 mm).
@@ -205,7 +205,7 @@ All dimensions are in millimetres unless otherwise noted.
 | `stack_bolt_d` | 2.9 | Through-hole diameter for the stack clamp bolts (M2.5 clearance). |
 | `post_body_d` | 26 | Corner post cylinder diameter. |
 | `post_overhang` | 5 | How far the post body extends beyond the carrier outer edge. |
-| `post_fit_clearance` | 0.2 | Extra XY clearance applied to the carrier-shaped cutouts in the post. |
+| `post_fit_clearance` | 0.2 | Extra XY clearance applied to the carrier-derived rectangular slot cutouts in the post. |
 | `post_leadin_depth` | 0.8 | Z-depth of the lead-in relief at each slot edge inside the post cutout. |
 
 Notes:
