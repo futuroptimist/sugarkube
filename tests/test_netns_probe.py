@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from tests.helpers.netns_probe import NamespaceProbeResult, probe_namespace_connectivity
 
 
@@ -237,6 +239,46 @@ def test_probe_retries_before_succeeding() -> None:
     assert len(proc_holder) == 2, "Each attempt should spawn a new server"
     assert proc_holder and proc_holder[0].terminated, "First server should be cleaned up"
     assert result.errors and "client attempt 1" in result.errors[0]
+
+
+def test_probe_backoffs_between_retries() -> None:
+    """Each retry should wait longer before attempting a reconnection."""
+
+    commands: list[list[str]] = []
+
+    def runner(cmd, **_: object):  # noqa: ANN001 - subprocess.run signature
+        commands.append(cmd)
+        code = 1 if len(commands) == 1 else 0
+        return SimpleNamespace(returncode=code)
+
+    proc_holder: list[_DummyProc] = []
+
+    def spawner(cmd, **kwargs: object) -> _DummyProc:  # noqa: ANN001 - subprocess signature
+        proc = _DummyProc(cmd, **kwargs)
+        proc_holder.append(proc)
+        return proc
+
+    sleeps: list[float] = []
+
+    def sleeper(duration: float) -> None:
+        sleeps.append(duration)
+
+    result = probe_namespace_connectivity(
+        "ns-client",
+        "ns-server",
+        "192.168.50.2",
+        run_cmd=runner,
+        popen_cmd=spawner,
+        sleep_fn=sleeper,
+        server_start_delay=0.1,
+        start_delay_increment=0.5,
+        retry_delay=0,
+        attempts=2,
+    )
+
+    assert result, "Probe should succeed after retrying with a longer wait"
+    assert result.attempts == 2
+    assert sleeps == pytest.approx([0.1, 0.0, 0.6])
 
 
 def test_probe_surfaces_reason_on_spawn_failure() -> None:

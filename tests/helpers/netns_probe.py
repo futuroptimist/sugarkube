@@ -38,6 +38,7 @@ def probe_namespace_connectivity(
     *,
     port: int = DEFAULT_TCP_PROBE_PORT,
     server_start_delay: float = DEFAULT_SERVER_START_DELAY,
+    start_delay_increment: float = 0.0,
     retry_delay: float = DEFAULT_RETRY_DELAY,
     attempts: int = 2,
     run_cmd: ProbeRunner = subprocess.run,
@@ -51,8 +52,10 @@ def probe_namespace_connectivity(
     the fixture can clean up deterministically.  ``ok`` is set to ``True`` when the client
     command succeeds and the server process exits with ``0``.  ``server_start_delay`` configures
     how long to wait before attempting the client connection so the listener can bind and listen
-    reliably on slower systems.  Retries provide resilience on hosts with slower namespace setup,
-    and diagnostic reasons capture the last failure mode to aid skips in CI.
+    reliably on slower systems.  ``start_delay_increment`` increases the wait for each retry to
+    improve stability on slower or shared CI hosts.  Retries provide resilience on hosts with
+    slower namespace setup, and diagnostic reasons capture the last failure mode to aid skips in
+    CI.
     """
 
     server_script = textwrap.dedent(
@@ -115,7 +118,8 @@ def probe_namespace_connectivity(
             )
 
         try:
-            sleep_fn(server_start_delay)
+            delay = server_start_delay + start_delay_increment * (attempt - 1)
+            sleep_fn(delay)
             client_result = run_cmd(
                 ["ip", "netns", "exec", client_namespace, "python3", "-c", client_script],
                 capture_output=True,
