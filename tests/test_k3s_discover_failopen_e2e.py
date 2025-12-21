@@ -83,6 +83,13 @@ def _verify_namespace_connectivity(
     if probe_result.errors:
         details = f"{details}; errors: {'; '.join(probe_result.errors)}"
 
+    # TODO: Remove the skip once namespace connectivity is reliable in CI.
+    # Root cause: Ephemeral network namespaces sometimes fail both ICMP and TCP
+    #   probes on shared CI hosts, leaving the bootstrap fixture without a
+    #   functioning veth pair.
+    # Estimated fix: Investigate CI kernel/networking restrictions (e.g.
+    #   CAP_NET_ADMIN, veth binding) and ensure the probe can succeed or be
+    #   safely simulated.
     pytest.skip(f"Network namespace connectivity test failed: {details}")
 
 
