@@ -70,6 +70,11 @@ def netns_setup():
         result = _run_with_sudo_fallback(cmd)
         if result.returncode != 0:
             reason = result.stderr.strip() or "network namespace setup unavailable"
+            # TODO: Allow network namespace setup to proceed without sudo fallbacks.
+            # Root cause: Some CI hosts cannot create or configure network namespaces even after
+            #             non-interactive sudo retries, causing setup commands to fail.
+            # Estimated fix: 1h to grant CAP_NET_ADMIN / CAP_SYS_ADMIN to CI runners or stub netns
+            #                operations when privileges are unavailable.
             pytest.skip(f"{context}: {reason}")
 
     try:
