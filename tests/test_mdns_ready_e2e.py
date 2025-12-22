@@ -70,6 +70,11 @@ def iter_netns_setup():
         result = _run_with_sudo_fallback(cmd)
         if result.returncode != 0:
             reason = result.stderr.strip() or "network namespace setup unavailable"
+            # TODO: Avoid skipping when privileged namespace setup fails unexpectedly.
+            # Root cause: Hosts without CAP_NET_ADMIN or sudo deny the ip/netns commands,
+            #   preventing the test from creating namespaces for multicast coverage.
+            # Estimated fix: Detect missing privileges earlier and fall back to stubbed
+            #   namespaces or skip the multicast portion before attempting setup.
             pytest.skip(f"{context}: {reason}")
 
     try:
@@ -173,6 +178,11 @@ def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
     if mDNS multicast doesn't cross namespace boundaries.
     """
     if netns_setup.get("stubbed"):
+        # TODO: Provide multicast simulation coverage when namespaces are stubbed.
+        # Root cause: The stubbed namespace path disables mDNS multicast assertions
+        #   because no real network namespace exists to carry the traffic.
+        # Estimated fix: Add an Avahi stub that can emulate cross-namespace multicast
+        #   responses so the discovery workflow remains covered without sudo.
         pytest.skip("Network namespace setup stubbed; multicast coverage unavailable")
 
     ns1 = netns_setup["ns1"]
