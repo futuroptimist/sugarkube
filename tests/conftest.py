@@ -314,6 +314,9 @@ def ensure_root_privileges() -> None:
     probe = _run_with_sudo_fallback(["unshare", "-n", "true"])
     if probe.returncode != 0:
         reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
+        # TODO: Replace this runtime skip with a cached capability probe that marks
+        # Root cause: Some hosts (notably unprivileged containers) cannot run `unshare -n`
+        # Estimated fix: Add a session-scoped fixture that records the probe outcome and gates tests with a marker
         pytest.skip(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
@@ -322,6 +325,9 @@ def ensure_root_privileges() -> None:
         reason = (
             probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
         )
+        # TODO: Avoid mid-test skips by providing a mock netns helper when namespace creation is unavailable
+        # Root cause: Systems without network namespace support (or CAP_SYS_ADMIN) cannot add namespaces even after sudo fallback
+        # Estimated fix: Detect the limitation once and replace netns helpers with a no-op shim during tests
         pytest.skip(reason)
 
     delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
