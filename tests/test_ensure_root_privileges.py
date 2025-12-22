@@ -23,7 +23,11 @@ def _build_fake_run(
 
     def fake_run(cmd: list[str], capture_output: bool, text: bool) -> SimpleNamespace:
         commands.append(cmd)
-        sudo_cmds = [[sudo_path, "-n", *pattern] for pattern in permission_failures] if sudo_path else []
+        sudo_cmds = (
+            [[sudo_path, "-n", *pattern] for pattern in permission_failures]
+            if sudo_path
+            else []
+        )
         if _matches(cmd, permission_failures):
             return SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
         if _matches(cmd, sudo_cmds):
@@ -43,11 +47,20 @@ def test_ensure_root_privileges_retries_with_sudo(monkeypatch: pytest.MonkeyPatc
 
     fake_run = _build_fake_run(
         sudo_path="/usr/bin/sudo",
-        permission_failures=[["unshare", "-n", "true"], ["ip", "netns", "add"], ["ip", "netns", "delete"]],
-        sudo_successes=[["/usr/bin/sudo", "-n", "unshare", "-n", "true"], ["/usr/bin/sudo", "-n", "ip", "netns", "add"], ["/usr/bin/sudo", "-n", "ip", "netns", "delete"]],
+        permission_failures=[
+            ["unshare", "-n", "true"],
+            ["ip", "netns", "add"],
+            ["ip", "netns", "delete"],
+        ],
+        sudo_successes=[
+            ["/usr/bin/sudo", "-n", "unshare", "-n", "true"],
+            ["/usr/bin/sudo", "-n", "ip", "netns", "add"],
+            ["/usr/bin/sudo", "-n", "ip", "netns", "delete"],
+        ],
     )
 
     monkeypatch.setattr(conftest.subprocess, "run", fake_run)
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
     monkeypatch.setattr(
         conftest.shutil,
         "which",
@@ -66,16 +79,50 @@ def test_ensure_root_privileges_retries_with_sudo(monkeypatch: pytest.MonkeyPatc
     assert ["/usr/bin/sudo", "-n", "ip", "netns", "delete", expected_netns] in fake_run.commands
 
 
+def test_ensure_root_privileges_installs_netns_tools_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure netns probes request required CLIs before executing commands."""
+
+    required: list[tuple[str, ...]] = []
+
+    def fake_require_tools(tools: Iterable[str]) -> None:
+        required.append(tuple(sorted(tools)))
+
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str]) -> SimpleNamespace:
+        commands.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(conftest, "require_tools", fake_require_tools)
+    monkeypatch.setattr(conftest, "_run_with_sudo_fallback", fake_run)
+    monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="stubbed"))
+
+    conftest.ensure_root_privileges()
+
+    assert required == [("ip", "unshare")]
+    assert commands[:2] == [
+        ["unshare", "-n", "true"],
+        ["ip", "netns", "add", "sugarkube-netns-probe-stubbed"],
+    ]
+
+
 def test_ensure_root_privileges_skips_when_sudo_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip when both direct and sudo attempts cannot set up network namespaces."""
 
     fake_run = _build_fake_run(
         sudo_path="/usr/bin/sudo",
-        permission_failures=[["unshare", "-n", "true"], ["ip", "netns", "add"], ["ip", "netns", "delete"]],
+        permission_failures=[
+            ["unshare", "-n", "true"],
+            ["ip", "netns", "add"],
+            ["ip", "netns", "delete"],
+        ],
         sudo_successes=[],
     )
 
     monkeypatch.setattr(conftest.subprocess, "run", fake_run)
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
     monkeypatch.setattr(conftest.shutil, "which", lambda tool: "/usr/bin/sudo")
     monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="stubbed"))
 
@@ -98,6 +145,7 @@ def test_ensure_root_privileges_skips_when_sudo_unavailable(
     )
 
     monkeypatch.setattr(conftest.subprocess, "run", fake_run)
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
     monkeypatch.setattr(conftest.shutil, "which", lambda tool: None)
     monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="stubbed"))
 
@@ -122,6 +170,7 @@ def test_ensure_root_privileges_warns_when_cleanup_fails(
     )
 
     monkeypatch.setattr(conftest.subprocess, "run", fake_run)
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
     monkeypatch.setattr(conftest.shutil, "which", lambda tool: "/usr/bin/sudo")
     monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="stubbed"))
 

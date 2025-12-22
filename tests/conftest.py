@@ -309,12 +309,14 @@ def ensure_root_privileges() -> None:
     unnecessary skips when the caller can run sudo non-interactively.
     """
 
+    require_tools(["unshare", "ip"])
+
     probe = _run_with_sudo_fallback(["unshare", "-n", "true"])
     if probe.returncode != 0:
         reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
-        # TODO: Pre-provision non-interactive sudo or grant netns capabilities in CI images.
-        # Root cause: Some environments cannot create network namespaces even after sudo fallback.
-        # Estimated fix: 1h to adjust CI images or relax test requirements when namespaces are unavailable.
+        # TODO: Replace this runtime skip with a cached capability probe that marks
+        # Root cause: Some hosts (notably unprivileged containers) cannot run `unshare -n`
+        # Estimated fix: Add a session-scoped fixture that records the probe outcome and gates tests with a marker
         pytest.skip(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
@@ -323,9 +325,9 @@ def ensure_root_privileges() -> None:
         reason = (
             probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
         )
-        # TODO: Ensure the iproute2 tooling and privileges for netns creation are available in CI.
-        # Root cause: Network namespace creation can fail when permissions or tooling are missing.
-        # Estimated fix: 1h to preinstall iproute2 and configure sudoers to allow netns operations.
+        # TODO: Avoid mid-test skips by providing a mock netns helper when namespace creation is unavailable
+        # Root cause: Systems without network namespace support (or CAP_SYS_ADMIN) cannot add namespaces even after sudo fallback
+        # Estimated fix: Detect the limitation once and replace netns helpers with a no-op shim during tests
         pytest.skip(reason)
 
     delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])

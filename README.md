@@ -218,6 +218,10 @@ shim directory is prepended to ``PATH`` while enabled, so prefer using them in
 isolated test environments (such as disposable containers or dedicated
 virtualenvs) instead of your daily shell. Regression coverage:
 `tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
+Network namespace probes now request the `ip` and `unshare` utilities up front,
+falling back to the same tooling installer before retrying with sudo so CI and
+local runs converge. Regression coverage:
+`tests/test_ensure_root_privileges.py::test_ensure_root_privileges_installs_netns_tools_first`.
 
 [hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
 [pi-smoke-test-doc]: docs/pi_smoke_test.md
