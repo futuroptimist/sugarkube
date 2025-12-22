@@ -169,6 +169,7 @@ mDNS
 macOS
 md
 microSD
+multicast
 multimeter
 namespace
 namespaces

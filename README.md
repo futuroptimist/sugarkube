@@ -223,6 +223,13 @@ falling back to the same tooling installer before retrying with sudo so CI and
 local runs converge. Regression coverage:
 `tests/test_ensure_root_privileges.py::test_ensure_root_privileges_installs_netns_tools_first`.
 
+For mDNS end-to-end coverage that depends on network namespaces, set
+`SUGARKUBE_ALLOW_NETNS_STUBS=1` when your environment lacks `CAP_NET_ADMIN` or
+non-interactive `sudo`. The stub yields deterministic namespace metadata and
+lets the suite skip only the multicast-dependent assertions instead of failing
+when namespace setup is unavailable. Regression coverage:
+`tests/test_netns_stub.py::test_netns_stub_flag_enables_stubbed_environment`.
+
 [hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
 [pi-smoke-test-doc]: docs/pi_smoke_test.md
 
