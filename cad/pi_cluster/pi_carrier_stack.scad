@@ -29,23 +29,26 @@ levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
 
 // Part selectors are string-based to keep CLI quoting predictable across shells.
-// Provide matching globals so `-D export_part=carrier_level` (PowerShell-escaped) resolves to
-// the intended string instead of an undefined identifier.
+// Provide matching globals so CLI arguments like `-D export_part=carrier_level` (without quotes)
+// can still resolve to the intended string token instead of remaining as undefined identifiers.
 export_part_carrier_level = "carrier_level";
 export_part_post = "post";
 export_part_assembly = "assembly";
 
-carrier_level = export_part_carrier_level;
-post = export_part_post;
-assembly = export_part_assembly;
+_cli_alias_carrier_level = export_part_carrier_level;
+_cli_alias_post = export_part_post;
+_cli_alias_assembly = export_part_assembly;
+
+// Keep bare identifiers available for CLI compatibility while namespaced aliases document intent.
+carrier_level = _cli_alias_carrier_level;
+post = _cli_alias_post;
+assembly = _cli_alias_assembly;
 
 export_part_raw = export_part;
-export_part_resolved_default =
-    is_undef(export_part_raw) ? export_part_assembly : export_part_raw;
 export_part_resolved =
-    is_string(export_part_resolved_default)
-        ? export_part_resolved_default
-        : str(export_part_resolved_default);
+    is_undef(export_part_raw)
+        ? export_part_assembly
+        : (is_string(export_part_raw) ? export_part_raw : str(export_part_raw));
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 

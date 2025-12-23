@@ -16,14 +16,14 @@ PowerShell rendered the full three-level stack instead of a single carrier and p
 
 `export_part` relied on shell-provided quoting. On PowerShell, the `-D export_part="carrier_level"`
 flag arrived as the bare identifier `carrier_level`, which OpenSCAD treated as an undefined variable
-and preserved as `undef`. The stack wrapper compared `export_part` directly without normalising or
+and preserved as `undef`. The stack wrapper compared `export_part` directly without normalizing or
 providing string-backed tokens, so the requested part was ignored and the fallback assembly rendered.
 `pi_stack_post.scad` echoed the same warning when imported because the undefined identifier leaked
 into its scope.
 
 ## Resolution
 
-- Added string-backed part selectors (`carrier_level`, `post`, `assembly`) and normalised
+- Added string-backed part selectors (`carrier_level`, `post`, `assembly`) and normalized
   `export_part` to a string before branching so CLI overrides survive shell quoting differences.
 - Declared a `carrier_level` string in `pi_stack_post.scad` to prevent undefined-identifier warnings
   when it is rendered directly.
@@ -88,4 +88,4 @@ into its scope.
 ## Follow-ups
 
 - Keep a static test in place to block future regressions to bare identifier comparisons.
-- Prefer quoting `export_part` values in docs to minimise cross-shell surprises.
+- Prefer quoting `export_part` values in docs to minimize cross-shell surprises.
