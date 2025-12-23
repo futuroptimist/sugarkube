@@ -1,0 +1,13 @@
+{
+  "id": "pi-carrier-stack-export-part-cli",
+  "date": "2025-12-23",
+  "component": "cad/pi_cluster/pi_carrier_stack.scad",
+  "longForm": "outages/2025-12-23-pi-carrier-stack-export-part-cli.md",
+  "rootCause": "PowerShell stripped quotes from -D export_part, leaving a bare carrier_level identifier that was treated as undef and triggered OpenSCAD warnings.",
+  "resolution": "Coerce export_part into a string, match only known part selectors, and document cross-platform CLI usage with a static guard test to prevent bare identifiers.",
+  "references": [
+    "cad/pi_cluster/pi_carrier_stack.scad",
+    "tests/test_export_part_static_guard.py",
+    "docs/pi_cluster_stack.md"
+  ]
+}

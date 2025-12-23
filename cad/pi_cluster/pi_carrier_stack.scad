@@ -12,7 +12,16 @@ include <./pi_dimensions.scad>;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
 
-export_part = is_undef(export_part) ? "assembly" : export_part;
+// Export selector is driven by `-D export_part="carrier_level"` (or "post" / "assembly").
+// PowerShell users should prefer double quotes (e.g. "export_part=\"carrier_level\"") to keep
+// the string literal intact.
+export_part_defaulted = is_undef(export_part) ? "assembly" : export_part;
+export_part_strict =
+    is_string(export_part_defaulted) ? export_part_defaulted : str(export_part_defaulted);
+export_part =
+    export_part_strict == "carrier_level" ? "carrier_level" :
+    export_part_strict == "post" ? "post" :
+    "assembly";
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
