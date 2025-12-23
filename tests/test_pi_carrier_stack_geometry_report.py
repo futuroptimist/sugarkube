@@ -35,6 +35,7 @@ def test_pi_carrier_stack_reports_geometry() -> None:
     _, stack_dimensions = parse_echo_line(stack_line)
     for key in ["levels", "fan_size", "column_spacing", "stack_height", "export_part"]:
         assert key in stack_dimensions
+    assert stack_dimensions["stack_bolt_d"] == pytest.approx(3.4, abs=EPSILON)
 
     stack_mounts_line = find_last_echo(echoes, "stack_mounts_enabled")
     _, stack_mounts = parse_echo_line(stack_mounts_line)
@@ -46,6 +47,7 @@ def test_pi_carrier_stack_reports_geometry() -> None:
 
     assert geometry["include_stack_mounts"] is True
     assert len(geometry["stack_mount_positions"]) == 4
+    assert geometry["stack_bolt_d"] == pytest.approx(stack_dimensions["stack_bolt_d"], abs=EPSILON)
 
     carrier_echoes = run_openscad(
         CARRIER_SCAD,

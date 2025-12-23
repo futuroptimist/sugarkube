@@ -128,10 +128,13 @@ function carrier_dimensions(
             (max_y + 1) * rotY + max_y * gap_between_boards + 2 * carrier_edge_margin
             + 2 * port_clearance,
 
-        stack_mount_inset = max(
-            corner_radius + stack_pocket_d / 2 + 2,
-            carrier_edge_margin
-        ),
+        // Bring stack mounts ~3 mm closer to the plate edges while keeping pockets inside the
+        // rounded corners and the carrier outline. The corner clearance term protects the pocket
+        // against the fillet; the edge term pulls inwards from the edge margin to move mounts
+        // outward without changing the overall plate dimensions.
+        stack_mount_corner_clearance = corner_radius + stack_pocket_d / 2 + 0.5,
+        stack_mount_edge_target = carrier_edge_margin - 3,
+        stack_mount_inset = max(stack_mount_corner_clearance, stack_mount_edge_target),
 
         stack_mount_positions_default = [
             [stack_mount_inset, stack_mount_inset],
@@ -410,6 +413,7 @@ module pi_carrier(
             edge_margin = edge_margin,
             port_clearance = port_clearance,
             include_stack_mounts = include_stack_mounts_resolved,
+            stack_bolt_d = stack_bolt_d,
             stack_mount_positions = stack_mount_positions_resolved,
             stack_mount_inset = stack_mount_inset,
             stack_mount_margin_center = stack_mount_margin_center,
