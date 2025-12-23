@@ -39,6 +39,12 @@
 _pi_carrier_auto_render = false;
 include <./pi_carrier.scad>; // imports carrier_dimensions() helpers
 
+// Keep stack part selectors defined so CLI overrides like -D export_part=carrier_level resolve
+// to a string literal even when only this file is rendered.
+carrier_level = "carrier_level";
+post = "post";
+assembly = "assembly";
+
 // ---------- Quality controls ----------
 function _quality_fn(q) =
     q == "high"        ? 96 :

@@ -71,16 +71,22 @@ than reimplementing its details.
 
   ```bash
   # Generate a single carrier level (print 3x)
-  openscad -o stl/pi_cluster/pi_carrier_stack_carrier_level_heatset.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="carrier_level" -D standoff_mode="heatset" -D stack_edge_margin=15
+  openscad -o stl/pi_cluster/pi_carrier_stack_carrier_level_heatset.stl \
+    -D export_part="carrier_level" \
+    -D standoff_mode="heatset" \
+    -D stack_edge_margin=15 \
+    -- cad/pi_cluster/pi_carrier_stack.scad
 
   # Generate a single corner post STL (print 4x)
-  openscad -o stl/pi_cluster/pi_carrier_stack_post.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="post" -D stack_bolt_d=3.4
+  openscad -o stl/pi_cluster/pi_carrier_stack_post.stl \
+    -D export_part="post" \
+    -D stack_bolt_d=3.4 \
+    -- cad/pi_cluster/pi_carrier_stack.scad
 
   # Full assembly preview (carriers + 4 posts)
-  openscad -o /tmp/pi_carrier_stack_preview.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="assembly"
+  openscad -o /tmp/pi_carrier_stack_preview.stl \
+    -D export_part="assembly" \
+    -- cad/pi_cluster/pi_carrier_stack.scad
   ```
 
   CI also renders and publishes STL artifacts via the
@@ -108,18 +114,46 @@ than reimplementing its details.
 - Example commands:
 
   ```bash
-  openscad -o /tmp/pi_carrier.stl -D emit_geometry_report=true cad/pi_cluster/pi_carrier.scad
+  openscad -o /tmp/pi_carrier.stl -D emit_geometry_report=true -- cad/pi_cluster/pi_carrier.scad
   openscad -o /tmp/pi_carrier_mounts.stl -D preview_stack_mounts=true -D emit_geometry_report=true \
-    cad/pi_cluster/pi_carrier.scad
+    -- cad/pi_cluster/pi_carrier.scad
 
   # Stack wrapper (single carrier level)
   openscad -o /tmp/pi_carrier_stack_level.stl -D export_part="carrier_level" \
-    -D emit_dimension_report=true -D emit_geometry_report=true cad/pi_cluster/pi_carrier_stack.scad
+    -D emit_dimension_report=true -D emit_geometry_report=true \
+    -- cad/pi_cluster/pi_carrier_stack.scad
 
   # Stack wrapper (single post)
   openscad -o /tmp/pi_carrier_stack_post.stl -D export_part="post" \
-    -D emit_dimension_report=true cad/pi_cluster/pi_carrier_stack.scad
+    -D emit_dimension_report=true \
+    -- cad/pi_cluster/pi_carrier_stack.scad
   ```
+
+### Cross-platform CLI invocations
+
+- **Bash / zsh (Linux, macOS):**
+
+  ```bash
+  openscad -o /tmp/pi_carrier_stack_level.stl \
+    -D export_part="carrier_level" \
+    -D emit_dimension_report=true \
+    -D emit_geometry_report=true \
+    -- cad/pi_cluster/pi_carrier_stack.scad
+  ```
+
+- **PowerShell (Windows):**
+
+  ```powershell
+  openscad `
+    -o "$env:TEMP\pi_carrier_stack_level.stl" `
+    -D 'export_part="carrier_level"' `
+    -D 'emit_dimension_report=true' `
+    -D 'emit_geometry_report=true' `
+    -- cad/pi_cluster/pi_carrier_stack.scad
+  ```
+
+The echo output should include `export_part = carrier_level` without `Ignoring unknown variable
+'carrier_level'` warnings, and only the requested part should render.
 
 CI parses selected echoes for regression coverage; see
 `tests/test_pi_carrier_geometry_report.py` and `tests/test_pi_carrier_stack_geometry_report.py` for
