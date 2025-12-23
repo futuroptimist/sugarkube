@@ -83,6 +83,30 @@ than reimplementing its details.
     -D export_part="assembly"
   ```
 
+  Cross-platform quoting for part selection:
+
+  - Bash / zsh (single carrier level + dimension echo):
+
+    ```bash
+    openscad -o /tmp/pi_carrier_stack_level.stl \
+      -D export_part="carrier_level" \
+      -D emit_dimension_report=true \
+      cad/pi_cluster/pi_carrier_stack.scad
+    ```
+
+  - PowerShell (same invocation; emits `export_part = carrier_level` without warnings):
+
+    ```powershell
+    openscad `
+      -o "$env:TEMP\pi_carrier_stack_level.stl" `
+      -D 'export_part="carrier_level"' `
+      -D 'emit_dimension_report=true' `
+      -- cad/pi_cluster/pi_carrier_stack.scad
+    ```
+
+  Both commands should echo `pi_carrier_stack` with `export_part = carrier_level` and avoid
+  "Ignoring unknown variable" warnings.
+
   CI also renders and publishes STL artifacts via the
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and produce stack STLs.

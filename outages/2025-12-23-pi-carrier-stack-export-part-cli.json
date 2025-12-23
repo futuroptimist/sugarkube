@@ -1,0 +1,14 @@
+{
+  "id": "2025-12-23-pi-carrier-stack-export-part-cli",
+  "date": "2025-12-23",
+  "component": "pi_carrier_stack OpenSCAD export selector",
+  "longForm": "outages/2025-12-23-pi-carrier-stack-export-part-cli.md",
+  "rootCause": "PowerShell passed carrier_level as an unquoted token; OpenSCAD treated it as undefined, warned, and left export_part unset so the assembly rendered instead of the carrier level.",
+  "resolution": "Normalize export_part to strings, branch on the normalized value, document Bash/PowerShell quoting, and add a static guard against bare token comparisons.",
+  "references": [
+    "cad/pi_cluster/pi_carrier_stack.scad",
+    "docs/pi_cluster_stack.md",
+    "tests/test_pi_carrier_stack_export_part_literals.py",
+    "outages/2025-12-23-pi-carrier-stack-export-part-cli.md"
+  ]
+}

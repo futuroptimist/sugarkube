@@ -12,7 +12,19 @@ include <./pi_dimensions.scad>;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
 
-export_part = is_undef(export_part) ? "assembly" : export_part;
+// NOTE: Pass export_part as a STRING to avoid platform-specific quoting surprises.
+// Examples:
+// - Bash: openscad -o /tmp/out.stl -D export_part="carrier_level" \
+//         -- cad/pi_cluster/pi_carrier_stack.scad
+// - PowerShell: openscad -o $env:TEMP/out.stl -D export_part=\"carrier_level\" \
+//               -- cad/pi_cluster/pi_carrier_stack.scad
+// The helper below keeps CLI-provided values intact (no default override) while
+// coercing non-string inputs to strings for reliable comparisons/logging.
+function _normalize_export_part(part_raw, default_part = "assembly") =
+    is_undef(part_raw) ? default_part
+    : (is_string(part_raw) ? part_raw : str(part_raw));
+
+export_part_resolved = _normalize_export_part(export_part);
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
@@ -180,7 +192,7 @@ if (emit_dimension_report) {
         fan_size = fan_size,
         column_spacing = column_spacing,
         stack_height = stack_height,
-        export_part = export_part,
+        export_part = export_part_resolved,
 
         // Useful in logs:
         stack_bolt_d = stack_bolt_d_cfg
@@ -191,9 +203,9 @@ if (emit_dimension_report) {
 // - carrier_level: a single carrier plate with stack mounts enabled
 // - post: a single post (export one STL; print 4 copies)
 // - assembly: full preview (carriers + 4 posts)
-if (export_part == "carrier_level") {
+if (export_part_resolved == "carrier_level") {
     _carrier(0);
-} else if (export_part == "post") {
+} else if (export_part_resolved == "post") {
     // Export a single post at the bottom-left mount position, centered around the global origin.
     // (Convenient for printing: slice once, print 4 copies.)
     p0 = stack_mount_positions_resolved[0];
