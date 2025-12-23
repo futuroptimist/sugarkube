@@ -12,7 +12,26 @@ include <./pi_dimensions.scad>;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
 
-export_part = is_undef(export_part) ? "assembly" : export_part;
+// Keep export_part stringly typed so -D export_part="carrier_level" (bash/zsh) and
+// -D export_part="carrier_level" (PowerShell) both resolve to the same literal.
+_export_part_default = "assembly";
+_export_part_carrier_level = "carrier_level";
+_export_part_post = "post";
+
+// PowerShell can drop quotes when using -D export_part=carrier_level. Define the token
+// explicitly so the CLI identifier still resolves to the intended string literal and
+// never triggers "Ignoring unknown variable" warnings.
+carrier_level = _export_part_carrier_level;
+
+export_part_input = is_undef(export_part) ? _export_part_default : export_part;
+export_part =
+    export_part_input == carrier_level
+        ? _export_part_carrier_level
+    : export_part_input == _export_part_post
+        ? _export_part_post
+    : export_part_input == _export_part_default
+        ? _export_part_default
+        : export_part_input;
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
@@ -191,9 +210,9 @@ if (emit_dimension_report) {
 // - carrier_level: a single carrier plate with stack mounts enabled
 // - post: a single post (export one STL; print 4 copies)
 // - assembly: full preview (carriers + 4 posts)
-if (export_part == "carrier_level") {
+if (export_part == _export_part_carrier_level) {
     _carrier(0);
-} else if (export_part == "post") {
+} else if (export_part == _export_part_post) {
     // Export a single post at the bottom-left mount position, centered around the global origin.
     // (Convenient for printing: slice once, print 4 copies.)
     p0 = stack_mount_positions_resolved[0];

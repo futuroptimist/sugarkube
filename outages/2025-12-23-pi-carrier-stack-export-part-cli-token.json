@@ -1,0 +1,12 @@
+{
+  "id": "pi-carrier-stack-export-part-cli-token",
+  "date": "2025-12-23",
+  "component": "pi carrier stack OpenSCAD wrapper",
+  "rootCause": "The export_part selector compared bare identifiers; PowerShell dropped quotes so export_part=carrier_level evaluated the undefined symbol carrier_level, leaving export_part unset and triggering OpenSCAD warnings.",
+  "resolution": "String-backed export_part tokens now include a carrier_level alias to keep CLI overrides stringly typed, regression tests guard the token handling, and the docs show PowerShell and bash quoting that avoid the warning.",
+  "references": [
+    "cad/pi_cluster/pi_carrier_stack.scad",
+    "docs/pi_cluster_stack.md"
+  ],
+  "longForm": "Symptom: OpenSCAD renders the full three-level assembly when -D export_part=\"carrier_level\" is passed from PowerShell, the dimension report prints export_part = undef, and the console logs 'Ignoring unknown variable \"carrier_level\"'. Root cause: the wrapper compared export_part to unquoted tokens, so a PowerShell CLI without preserved quotes left export_part pointing at an undefined identifier. Fix: define export_part string tokens (plus a carrier_level alias) before resolving the selector, add a CLI regression test, and document cross-platform quoting. Repro: (PowerShell) openscad -o $env:TEMP\\pi_carrier_stack_carrier_level.stl -D 'export_part=\"carrier_level\"' cad/pi_cluster/pi_carrier_stack.scad; (bash) openscad -o /tmp/pi_carrier_stack_carrier_level.stl -D export_part=\"carrier_level\" cad/pi_cluster/pi_carrier_stack.scad. Expect export_part = carrier_level in the dimension report and no 'Ignoring unknown variable' warnings."
+}

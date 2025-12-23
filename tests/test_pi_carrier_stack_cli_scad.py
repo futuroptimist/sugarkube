@@ -118,3 +118,33 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
         abs=1e-6,
     )
     assert stack_mount_margin_pocket_edge > 0
+
+
+@pytest.mark.skipif(OPENSCAD is None, reason="openscad binary not available")
+def test_export_part_token_handles_unquoted_cli(tmp_path: Path) -> None:
+    """PowerShell can drop quotes; ensure the CLI token still resolves cleanly."""
+
+    output = tmp_path / "pi_carrier_stack_carrier_level.stl"
+    result = subprocess.run(
+        [
+            "openscad",
+            "-D",
+            "emit_dimension_report=true",
+            "-D",
+            "emit_geometry_report=true",
+            "-D",
+            "export_part=carrier_level",
+            "-o",
+            str(output),
+            str(SCAD_PATH),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    combined_output = (result.stdout or "") + (result.stderr or "")
+
+    assert result.returncode == 0, f"OpenSCAD render failed with output:\n{combined_output}"
+    assert "Ignoring unknown variable 'carrier_level'" not in combined_output
+    assert "export_part = carrier_level" in combined_output

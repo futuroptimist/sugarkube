@@ -121,6 +121,27 @@ than reimplementing its details.
     -D emit_dimension_report=true cad/pi_cluster/pi_carrier_stack.scad
   ```
 
+  Cross-platform CLI examples for carrier-only exports (avoids `carrier_level` warnings):
+
+  - PowerShell
+
+    ```powershell
+    openscad `
+      -o "$env:TEMP\pi_carrier_stack_carrier_level.stl" `
+      -D 'export_part="carrier_level"' `
+      -D 'emit_dimension_report=true' `
+      cad/pi_cluster/pi_carrier_stack.scad
+    ```
+
+  - bash / zsh
+
+    ```bash
+    openscad -o /tmp/pi_carrier_stack_carrier_level.stl \
+      -D export_part="carrier_level" \
+      -D emit_dimension_report=true \
+      cad/pi_cluster/pi_carrier_stack.scad
+    ```
+
 CI parses selected echoes for regression coverage; see
 `tests/test_pi_carrier_geometry_report.py` and `tests/test_pi_carrier_stack_geometry_report.py` for
 the enforced invariants.

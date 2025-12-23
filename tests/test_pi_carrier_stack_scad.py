@@ -38,6 +38,16 @@ def test_pi_carrier_stack_column_spacing_uses_shared_constant() -> None:
     assert "[58, 49]" not in source, "column_spacing literals drift from the shared constant"
 
 
+def test_export_part_tokens_are_string_literals() -> None:
+    """export_part comparisons should use explicit string tokens to avoid CLI drift."""
+
+    source = SCAD_PATH.read_text(encoding="utf-8")
+
+    assert "_export_part_carrier_level = \"carrier_level\";" in source
+    assert "carrier_level = _export_part_carrier_level;" in source
+    assert "export_part == carrier_level" not in source
+
+
 def test_fan_wall_column_spacing_uses_shared_constant() -> None:
     """fan_wall.scad column tabs must align with the shared Pi hole spacing."""
 
