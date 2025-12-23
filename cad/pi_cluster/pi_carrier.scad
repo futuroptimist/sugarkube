@@ -133,6 +133,9 @@ function carrier_dimensions(
         // mount center to sit a few millimetres inside the general edge margin so the clamp sits
         // closer to the perimeter without crossing the plate edge.
         stack_mount_corner_clearance = corner_radius + stack_pocket_d / 2 + 0.5,
+        // Reduce the edge-margin-based inset by 3 mm to move mount centers outward relative to
+        // the prior edge-margin-driven position (this is not setting pocket-edge clearance to
+        // 3 mm).
         stack_mount_edge_target = max(0, carrier_edge_margin - 3),
         stack_mount_inset = max(
             stack_mount_corner_clearance,
