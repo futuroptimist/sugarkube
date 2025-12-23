@@ -5,9 +5,11 @@
 //
 // CLI examples (Linux/macOS / bash):
 //   openscad -o /tmp/pi_carrier_stack_level.stl \
-//     -D export_part=\"carrier_level\" cad/pi_cluster/pi_carrier_stack.scad
+//     -D export_part="carrier_level" \
+//     -- cad/pi_cluster/pi_carrier_stack.scad
 //   openscad -o /tmp/pi_carrier_stack_post.stl \
-//     -D export_part=\"post\" cad/pi_cluster/pi_carrier_stack.scad
+//     -D export_part="post" \
+//     -- cad/pi_cluster/pi_carrier_stack.scad
 //
 // CLI examples (Windows PowerShell):
 //   openscad `

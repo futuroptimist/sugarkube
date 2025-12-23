@@ -2,7 +2,7 @@
 
 ## Summary
 
-`openscad -D export_part="carrier_level" cad/pi_cluster/pi_carrier_stack.scad` on Windows
+`openscad -D export_part="carrier_level" -- cad/pi_cluster/pi_carrier_stack.scad` on Windows
 PowerShell rendered the full three-level stack instead of a single carrier and printed
 `export_part = undef` alongside warnings about an unknown variable `carrier_level`.
 
@@ -49,7 +49,8 @@ into its scope.
 
   ```bash
   openscad -o /tmp/ignore.stl -D export_part="carrier_level" \
-    -D emit_dimension_report=true cad/pi_cluster/pi_carrier_stack.scad
+    -D emit_dimension_report=true \
+    -- cad/pi_cluster/pi_carrier_stack.scad
   ```
 
   The same warning appeared and the assembly rendered instead of a single carrier level.
@@ -80,7 +81,7 @@ into its scope.
   ```bash
   openscad -o /tmp/pi_carrier_stack_level.stl -D export_part="carrier_level" \
     -D emit_dimension_report=true -D emit_geometry_report=true \
-    cad/pi_cluster/pi_carrier_stack.scad
+    -- cad/pi_cluster/pi_carrier_stack.scad
   ```
 
   The echo payload matches the PowerShell output and renders just the carrier level.
