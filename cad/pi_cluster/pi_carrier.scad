@@ -128,9 +128,18 @@ function carrier_dimensions(
             (max_y + 1) * rotY + max_y * gap_between_boards + 2 * carrier_edge_margin
             + 2 * port_clearance,
 
+        // Keep stack mounts symmetric while nudging them closer to the edges. The inset must
+        // clear both the rounded corner and the locating pocket; we intentionally allow the
+        // mount center to sit a few millimetres inside the general edge margin so the clamp sits
+        // closer to the perimeter without crossing the plate edge.
+        stack_mount_corner_clearance = corner_radius + stack_pocket_d / 2 + 0.5,
+        // Reduce the edge-margin-based inset by 3 mm to move mount centers outward relative to
+        // the prior edge-margin-driven position (this is not setting pocket-edge clearance to
+        // 3 mm).
+        stack_mount_edge_target = max(0, carrier_edge_margin - 3),
         stack_mount_inset = max(
-            corner_radius + stack_pocket_d / 2 + 2,
-            carrier_edge_margin
+            stack_mount_corner_clearance,
+            stack_mount_edge_target
         ),
 
         stack_mount_positions_default = [
@@ -417,7 +426,8 @@ module pi_carrier(
             plate_len_stack_off = plate_len_stack_off,
             plate_wid_stack_off = plate_wid_stack_off,
             stack_pocket_d = stack_pocket_d,
-            stack_pocket_depth = stack_pocket_depth
+            stack_pocket_depth = stack_pocket_depth,
+            stack_bolt_d = stack_bolt_d
         );
     }
 
