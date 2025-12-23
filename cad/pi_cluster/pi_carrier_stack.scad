@@ -2,6 +2,22 @@
 // - Spec: docs/pi_cluster_stack.md
 // - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
 // - Artifact: stl-${GITHUB_SHA} (contains stl/pi_cluster/pi_carrier_stack_* modular parts)
+//
+// CLI examples (Linux/macOS / bash):
+//   openscad -o /tmp/pi_carrier_stack_level.stl \
+//     -D export_part=\"carrier_level\" cad/pi_cluster/pi_carrier_stack.scad
+//   openscad -o /tmp/pi_carrier_stack_post.stl \
+//     -D export_part=\"post\" cad/pi_cluster/pi_carrier_stack.scad
+//
+// CLI examples (Windows PowerShell):
+//   openscad `
+//     -o "$env:TEMP\pi_carrier_stack_level.stl" `
+//     -D 'export_part="carrier_level"' `
+//     -- cad/pi_cluster/pi_carrier_stack.scad
+//   openscad `
+//     -o "$env:TEMP\pi_carrier_stack_post.stl" `
+//     -D 'export_part="post"' `
+//     -- cad/pi_cluster/pi_carrier_stack.scad
 
 // Force imports to avoid auto-rendering the base carrier from within this wrapper.
 _pi_carrier_auto_render = false;
@@ -12,7 +28,24 @@ include <./pi_dimensions.scad>;
 levels = is_undef(levels) ? 3 : levels;
 z_gap_clear = is_undef(z_gap_clear) ? 32 : z_gap_clear;
 
-export_part = is_undef(export_part) ? "assembly" : export_part;
+// Part selectors are string-based to keep CLI quoting predictable across shells.
+// Provide matching globals so `-D export_part=carrier_level` (PowerShell-escaped) resolves to
+// the intended string instead of an undefined identifier.
+export_part_carrier_level = "carrier_level";
+export_part_post = "post";
+export_part_assembly = "assembly";
+
+carrier_level = export_part_carrier_level;
+post = export_part_post;
+assembly = export_part_assembly;
+
+export_part_raw = export_part;
+export_part_resolved_default =
+    is_undef(export_part_raw) ? export_part_assembly : export_part_raw;
+export_part_resolved =
+    is_string(export_part_resolved_default)
+        ? export_part_resolved_default
+        : str(export_part_resolved_default);
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
@@ -180,7 +213,7 @@ if (emit_dimension_report) {
         fan_size = fan_size,
         column_spacing = column_spacing,
         stack_height = stack_height,
-        export_part = export_part,
+        export_part = export_part_resolved,
 
         // Useful in logs:
         stack_bolt_d = stack_bolt_d_cfg
@@ -191,9 +224,9 @@ if (emit_dimension_report) {
 // - carrier_level: a single carrier plate with stack mounts enabled
 // - post: a single post (export one STL; print 4 copies)
 // - assembly: full preview (carriers + 4 posts)
-if (export_part == "carrier_level") {
+if (export_part_resolved == export_part_carrier_level) {
     _carrier(0);
-} else if (export_part == "post") {
+} else if (export_part_resolved == export_part_post) {
     // Export a single post at the bottom-left mount position, centered around the global origin.
     // (Convenient for printing: slice once, print 4 copies.)
     p0 = stack_mount_positions_resolved[0];

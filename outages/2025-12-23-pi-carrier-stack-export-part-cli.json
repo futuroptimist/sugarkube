@@ -1,0 +1,15 @@
+{
+  "id": "pi-carrier-stack-export-part-cli",
+  "date": "2025-12-23",
+  "component": "cad/pi_cluster/pi_carrier_stack.scad",
+  "longForm": "outages/2025-12-23-pi-carrier-stack-export-part-cli.md",
+  "rootCause": "Unquoted export_part tokens (e.g. carrier_level) evaluated to undef, forcing assembly renders",
+  "resolution": "Declare string-backed selectors, normalise export_part, guard pi_stack_post, document CLI usage, and add a static regression test",
+  "references": [
+    "cad/pi_cluster/pi_carrier_stack.scad",
+    "cad/pi_cluster/pi_stack_post.scad",
+    "docs/pi_cluster_stack.md",
+    "tests/test_pi_carrier_stack_cli_scad.py",
+    "tests/test_pi_carrier_stack_export_part_static.py"
+  ]
+}

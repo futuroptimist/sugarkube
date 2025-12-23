@@ -121,6 +121,32 @@ than reimplementing its details.
     -D emit_dimension_report=true cad/pi_cluster/pi_carrier_stack.scad
   ```
 
+### Cross-platform CLI invocations
+
+- **Bash / zsh (Linux, macOS):**
+
+  ```bash
+  openscad -o /tmp/pi_carrier_stack_level.stl \
+    -D export_part="carrier_level" \
+    -D emit_dimension_report=true \
+    -D emit_geometry_report=true \
+    cad/pi_cluster/pi_carrier_stack.scad
+  ```
+
+- **PowerShell (Windows):**
+
+  ```powershell
+  openscad `
+    -o "$env:TEMP\pi_carrier_stack_level.stl" `
+    -D 'export_part="carrier_level"' `
+    -D 'emit_dimension_report=true' `
+    -D 'emit_geometry_report=true' `
+    -- cad/pi_cluster/pi_carrier_stack.scad
+  ```
+
+The echo output should include `export_part = carrier_level` without `Ignoring unknown variable
+'carrier_level'` warnings, and only the requested part should render.
+
 CI parses selected echoes for regression coverage; see
 `tests/test_pi_carrier_geometry_report.py` and `tests/test_pi_carrier_stack_geometry_report.py` for
 the enforced invariants.
