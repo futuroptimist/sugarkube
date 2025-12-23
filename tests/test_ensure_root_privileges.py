@@ -10,6 +10,13 @@ import pytest
 import tests.conftest as conftest
 
 
+@pytest.fixture(autouse=True)
+def reset_netns_probe_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure each test starts with a clean probe cache."""
+
+    monkeypatch.setattr(conftest, "_netns_probe_result", None)
+
+
 def _build_fake_run(
     sudo_path: str | None,
     permission_failures: Iterable[list[str]],
@@ -176,3 +183,31 @@ def test_ensure_root_privileges_warns_when_cleanup_fails(
 
     with pytest.warns(RuntimeWarning, match="permission denied"):
         conftest.ensure_root_privileges()
+
+
+def test_ensure_root_privileges_caches_skip_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record the first failure to avoid re-running privileged probes."""
+
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str]) -> SimpleNamespace:
+        commands.append(cmd)
+        return SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
+
+    monkeypatch.setattr(conftest, "_netns_probe_result", None)
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
+    monkeypatch.setattr(conftest, "_run_with_sudo_fallback", fake_run)
+    monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="cached"))
+
+    with pytest.raises(pytest.skip.Exception):
+        conftest.ensure_root_privileges()
+
+    first_probe_count = len(commands)
+
+    with pytest.raises(pytest.skip.Exception):
+        conftest.ensure_root_privileges()
+
+    assert len(commands) == first_probe_count
+    assert commands == [["unshare", "-n", "true"]]

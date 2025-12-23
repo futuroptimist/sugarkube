@@ -29,6 +29,7 @@ TEST_CLI_TOOLS: tuple[str, ...] = (
 )
 
 _TOOL_SHIM_DIR: Path | None = None
+_netns_probe_result: tuple[bool, str | None] | None = None
 
 # Ensure the project root is importable so ``sitecustomize`` is discovered by
 # subprocesses spawned in tests.  ``sys.path`` adjustments affect the current
@@ -306,17 +307,26 @@ def ensure_root_privileges() -> None:
     """Skip when we cannot create network namespaces due to insufficient privileges.
 
     Commands are retried with ``sudo`` when available to mirror CI capabilities and avoid
-    unnecessary skips when the caller can run sudo non-interactively.
+    unnecessary skips when the caller can run sudo non-interactively. Probe results are
+    cached to avoid repeatedly issuing privileged calls once a host is known to lack
+    the required capabilities.
     """
+
+    global _netns_probe_result
+
+    if _netns_probe_result is not None:
+        allowed, reason = _netns_probe_result
+        if allowed:
+            return
+
+        pytest.skip(reason)
 
     require_tools(["unshare", "ip"])
 
     probe = _run_with_sudo_fallback(["unshare", "-n", "true"])
     if probe.returncode != 0:
         reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
-        # TODO: Replace this runtime skip with a cached capability probe that marks
-        # Root cause: Some hosts (notably unprivileged containers) cannot run `unshare -n`
-        # Estimated fix: Add a session-scoped fixture that records the probe outcome and gates tests with a marker
+        _netns_probe_result = (False, reason)
         pytest.skip(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
@@ -325,9 +335,7 @@ def ensure_root_privileges() -> None:
         reason = (
             probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
         )
-        # TODO: Avoid mid-test skips by providing a mock netns helper when namespace creation is unavailable
-        # Root cause: Systems without network namespace support (or CAP_SYS_ADMIN) cannot add namespaces even after sudo fallback
-        # Estimated fix: Detect the limitation once and replace netns helpers with a no-op shim during tests
+        _netns_probe_result = (False, reason)
         pytest.skip(reason)
 
     delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
@@ -338,3 +346,5 @@ def ensure_root_privileges() -> None:
             + (f": {details}" if details else ""),
             RuntimeWarning,
         )
+
+    _netns_probe_result = (True, None)
