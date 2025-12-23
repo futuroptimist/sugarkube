@@ -81,6 +81,7 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
     stack_mount_inset = extract_float("stack_mount_inset")
     stack_pocket_d = extract_float("stack_pocket_d")
     stack_pocket_depth = extract_float("stack_pocket_depth")
+    stack_bolt_d = extract_float("stack_bolt_d")
 
     positions_idx = geometry_line.find("stack_mount_positions")
     assert positions_idx != -1, (
@@ -102,6 +103,7 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
     min_clearance_y = min(min(ys), plate_wid - max(ys))
     assert min_clearance_x > stack_mount_inset / 2
     assert min_clearance_y > stack_mount_inset / 2
+    assert stack_mount_inset == pytest.approx(min_clearance_x, abs=1e-3)
 
     for x, y in stack_mount_positions:
         assert 0 < x < plate_len
@@ -109,3 +111,4 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
 
     assert stack_pocket_depth < plate_thickness / 2
     assert stack_mount_inset > stack_pocket_d
+    assert stack_bolt_d == pytest.approx(3.4, abs=1e-6)

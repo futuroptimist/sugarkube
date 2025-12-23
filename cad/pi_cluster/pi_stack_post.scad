@@ -119,7 +119,7 @@ module pi_stack_post(
     stack_pocket_depth = is_undef(stack_pocket_depth) ? 1.2 : stack_pocket_depth,
 
     // Bolt path
-    stack_bolt_d = is_undef(stack_bolt_d) ? 2.9 : stack_bolt_d, // M2.5 clearance (print-friendly)
+    stack_bolt_d = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d, // M3 clearance (print-friendly)
 
     // Post shape
     post_body_d = is_undef(post_body_d) ? 26 : post_body_d,
@@ -133,8 +133,8 @@ module pi_stack_post(
 
     // Nut trap (bottom)
     include_nut_trap = is_undef(include_nut_trap) ? true : include_nut_trap,
-    nut_flat = is_undef(nut_flat) ? 5.0 : nut_flat,        // M2.5 nut across flats (nominal)
-    nut_thick = is_undef(nut_thick) ? 2.0 : nut_thick,
+    nut_flat = is_undef(nut_flat) ? 5.8 : nut_flat,        // M3 nut across flats + clearance
+    nut_thick = is_undef(nut_thick) ? 2.4 : nut_thick,
     nut_clearance = is_undef(nut_clearance) ? 0.5 : nut_clearance,
     nut_trap_extra = is_undef(nut_trap_extra) ? 0.3 : nut_trap_extra,
 

@@ -25,6 +25,7 @@ def test_pi_carrier_geometry_report_invariants() -> None:
 
     assert geometry_off["include_stack_mounts"] is False
     assert geometry_off["plate_outer_bounds_min"] == [0, 0]
+    assert geometry_off["stack_bolt_d"] == pytest.approx(3.4, abs=EPSILON)
 
     plate_len_off = geometry_off["plate_len"]
     plate_wid_off = geometry_off["plate_wid"]
@@ -43,6 +44,7 @@ def test_pi_carrier_geometry_report_invariants() -> None:
     _, geometry_on = parse_echo_line(on_line)
 
     assert geometry_on["include_stack_mounts"] is True
+    assert geometry_on["stack_bolt_d"] == pytest.approx(3.4, abs=EPSILON)
 
     positions = geometry_on["stack_mount_positions"]
     assert len(positions) == 4
@@ -71,6 +73,8 @@ def test_pi_carrier_geometry_report_invariants() -> None:
 
     assert plate_len_on == pytest.approx(plate_len_off, abs=EPSILON)
     assert plate_wid_on == pytest.approx(plate_wid_off, abs=EPSILON)
+
+    assert geometry_on["stack_mount_margin_pocket_edge"] > 0
 
     assert geometry_on["plate_len_stack_off"] == pytest.approx(plate_len_on, abs=EPSILON)
     assert geometry_on["plate_wid_stack_off"] == pytest.approx(plate_wid_on, abs=EPSILON)
