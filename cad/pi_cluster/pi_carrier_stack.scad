@@ -20,11 +20,11 @@ emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_re
 column_spacing = is_undef(column_spacing) ? pi_hole_spacing : column_spacing;
 fan_size = is_undef(fan_size) ? 120 : fan_size;
 
-// ---- stack clamp bolt diameter (now M2.5 by default) ----
+// ---- stack clamp bolt diameter (now M3 by default) ----
 // IMPORTANT: do NOT assign `stack_bolt_d` globally here; pi_carrier.scad defines it too,
 // and OpenSCAD warns on "overwritten" even when the value is effectively the same.
 // We instead inject stack_bolt_d via `let(stack_bolt_d=...)` at the call site.
-stack_bolt_d_cfg = is_undef(stack_bolt_d) ? 2.9 : stack_bolt_d;
+stack_bolt_d_cfg = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
 
 // Stack-specific defaults (wrapper-local config).
 // IMPORTANT: Do not "capture" possibly-undefined vars by reading them; that triggers warnings.

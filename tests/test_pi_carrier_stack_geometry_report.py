@@ -46,6 +46,8 @@ def test_pi_carrier_stack_reports_geometry() -> None:
 
     assert geometry["include_stack_mounts"] is True
     assert len(geometry["stack_mount_positions"]) == 4
+    assert geometry["stack_bolt_d"] == pytest.approx(3.4, abs=EPSILON)
+    assert geometry["stack_mount_margin_pocket_edge"] > 0
 
     carrier_echoes = run_openscad(
         CARRIER_SCAD,
