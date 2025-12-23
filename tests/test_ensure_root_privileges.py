@@ -196,7 +196,6 @@ def test_ensure_root_privileges_caches_skip_reason(
         commands.append(cmd)
         return SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
 
-    monkeypatch.setattr(conftest, "_netns_probe_result", None)
     monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
     monkeypatch.setattr(conftest, "_run_with_sudo_fallback", fake_run)
     monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="cached"))
@@ -211,3 +210,33 @@ def test_ensure_root_privileges_caches_skip_reason(
 
     assert len(commands) == first_probe_count
     assert commands == [["unshare", "-n", "true"]]
+
+
+def test_ensure_root_privileges_caches_successful_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Avoid rerunning privileged probes after a successful run."""
+
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str]) -> SimpleNamespace:
+        commands.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
+    monkeypatch.setattr(conftest, "_run_with_sudo_fallback", fake_run)
+    monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="cached-success"))
+
+    conftest.ensure_root_privileges()
+
+    first_probe_count = len(commands)
+
+    conftest.ensure_root_privileges()
+
+    expected_netns = "sugarkube-netns-probe-cached-success"
+    assert len(commands) == first_probe_count
+    assert commands == [
+        ["unshare", "-n", "true"],
+        ["ip", "netns", "add", expected_netns],
+        ["ip", "netns", "delete", expected_netns],
+    ]
