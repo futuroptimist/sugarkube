@@ -23,7 +23,7 @@ This document specifies a stackable Raspberry Pi carrier system that reuses the 
 
 1. **Vertical stacking** of carriers (three Raspberry Pis per carrier, three carriers tall by
    default).
-2. Four **stack clamp mounts** per carrier (M2.5 through-holes + symmetric locating pockets) sized
+2. Four **stack clamp mounts** per carrier (M3 through-holes + symmetric locating pockets) sized
    for four **full-height corner posts** that key into each carrier level and maintain the gap.
 3. A future **perpendicular fan wall** that accepts standard PC fans (80/92/120 mm) via heat-set
    inserts oriented perpendicular to the carrier plates.
@@ -41,7 +41,7 @@ than reimplementing its details.
 | --- | ---: | --- |
 | `pi_carrier.scad` plates | 3 | Print one plate per level; stack renders (`pi_carrier_stack.scad` with `export_part="carrier_level"`) add the stack clamp through-holes plus symmetric locating pockets on both faces. |
 | Full-height corner posts (`pi_stack_post.scad`) | 4 | One per corner. Each post spans the entire stack height (derived from `levels`, `z_gap_clear`, and `plate_thickness`) and includes slot cutouts derived from the carrier plate dimensions (fast rectangular profile by default) so carrier geometry changes propagate automatically. |
-| M2.5 × 90–110 mm screws + nuts | 4 | Clamp the plates and posts together. Length depends on `levels`, `z_gap_clear`, plate thickness, and how much nut-trap depth you use on the post. |
+| M3 × 90–110 mm bolts + M3-0.5 nuts + M3 washers | 4 | Clamp the plates and posts together. Length depends on `levels`, `z_gap_clear`, plate thickness, and how much nut-trap depth you use on the post. Start with 90 mm for the default 3-level stack and include washers under the bolt head/nut for smoother rotation. |
 | M2.5 heat-set inserts (3.5 mm OD × 4 mm) | 36 | Seat into the carrier standoffs for all 9 Pis (4 per Pi). |
 | Brass spacers, M2.5 female–female, 11 mm | 36 | Four per Pi (one per mounting point), for all 9 Pis in the stack. Maintains separation between each Pi and the carrier plate. |
 | Raspberry Pi 5 boards | 9 | Three per level. |
@@ -59,7 +59,7 @@ than reimplementing its details.
   clamp through-holes clear of the Pi keep-out zones; the standalone `pi_carrier.scad` remains a
   2.0 mm plate for non-stacked builds.
 - Print the corner posts upright with three perimeter walls and 30–40 % infill. The posts:
-  - include a bottom nut-trap by default,
+- include a bottom nut-trap sized for an M3-0.5 nut by default,
 - include carrier-derived rectangular slot cutouts at each level,
   - include a small lead-in relief on the slot edges to reduce elephant-foot frustration during
     assembly,
@@ -76,7 +76,7 @@ than reimplementing its details.
 
   # Generate a single corner post STL (print 4x)
   openscad -o stl/pi_cluster/pi_carrier_stack_post.stl cad/pi_cluster/pi_carrier_stack.scad \
-    -D export_part="post" -D stack_bolt_d=2.9
+    -D export_part="post" -D stack_bolt_d=3.4
 
   # Full assembly preview (carriers + 4 posts)
   openscad -o /tmp/pi_carrier_stack_preview.stl cad/pi_cluster/pi_carrier_stack.scad \
@@ -133,16 +133,16 @@ the enforced invariants.
    [`docs/pi_cluster_carrier.md`](pi_cluster_carrier.md) to seat M2.5 brass inserts (or chase printed
    threads if you are using `standoff_mode="printed"`). Install the brass spacers so they are ready
    for board mounting.
-2. **Prep the posts.** Press an M2.5 nut into the nut trap on the bottom of each corner post (or
+2. **Prep the posts.** Press an M3-0.5 nut into the nut trap on the bottom of each corner post (or
    plan to use a washer + nut on the outside if you disabled nut traps).
 3. **Stage the stack.** Arrange the four posts around the footprint so their carrier cutouts face
    inward. Slide the bottom carrier plate into the lowest cutouts on all four posts.
 4. **Add the remaining carriers.** Slide the middle carrier into the next cutouts, then slide the
    top carrier into the top cutouts. The post cutouts are located at fixed Z intervals derived from
    `z_gap_clear` and plate thickness, so the carrier spacing is automatic.
-5. **Clamp with bolts.** Insert four long M2.5 bolts through the top carrier stack-mount holes and
-   down through the post bores. Tighten into the captured nuts (or onto bottom nuts) to clamp the
-   entire stack.
+5. **Clamp with bolts.** Insert four long M3 bolts through the top carrier stack-mount holes and
+   down through the post bores. Add washers under the bolt heads and under the nuts, then tighten
+   into the captured nuts (or onto bottom nuts) to clamp the entire stack.
 6. **Mount boards and cable.** Mount each Pi to its carrier using the existing standoff + spacer
    hardware. Route power and Ethernet harnesses along the stack perimeter; add cable ties for strain
    relief.
@@ -202,7 +202,7 @@ All dimensions are in millimetres unless otherwise noted.
 | `stack_edge_margin` | 15 | Carrier plate edge padding in stack mode (keeps pockets clear). |
 | `stack_pocket_d` | 9 | Locating pocket diameter (carrier). |
 | `stack_pocket_depth` | 1.2 | Pocket depth on each face (carrier). |
-| `stack_bolt_d` | 2.9 | Through-hole diameter for the stack clamp bolts (M2.5 clearance). |
+| `stack_bolt_d` | 3.4 | Through-hole diameter for the stack clamp bolts (M3 clearance). |
 | `post_body_d` | 26 | Corner post cylinder diameter. |
 | `post_overhang` | 5 | How far the post body extends beyond the carrier outer edge. |
 | `post_fit_clearance` | 0.2 | Extra XY clearance applied to the carrier-derived rectangular slot cutouts in the post. |
@@ -258,7 +258,7 @@ Export modes:
 ## 6. Hardware (per 3×3 stack)
 
 - **Per Raspberry Pi (×9):** M2.5 × 22 pan-head screw + M2.5 11 mm brass spacer.
-- **Stack clamp:** four long M2.5 bolts + nuts (or nut traps in the posts).
+- **Stack clamp:** four long M3 bolts + nuts (or nut traps in the posts).
 - **Future fan wall:** M3 heat-set inserts + M3 screws (pending reintroduction).
 
 ---

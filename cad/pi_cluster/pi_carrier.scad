@@ -129,8 +129,10 @@ function carrier_dimensions(
             + 2 * port_clearance,
 
         stack_mount_inset = max(
-            corner_radius + stack_pocket_d / 2 + 2,
-            carrier_edge_margin
+            corner_radius + stack_pocket_d / 2,
+            // Move mounts ~2 mm outward relative to the prior cushion while preserving
+            // corner clearance and staying inside the carrier perimeter.
+            carrier_edge_margin - 2
         ),
 
         stack_mount_positions_default = [
@@ -417,7 +419,8 @@ module pi_carrier(
             plate_len_stack_off = plate_len_stack_off,
             plate_wid_stack_off = plate_wid_stack_off,
             stack_pocket_d = stack_pocket_d,
-            stack_pocket_depth = stack_pocket_depth
+            stack_pocket_depth = stack_pocket_depth,
+            stack_bolt_d = stack_bolt_d
         );
     }
 

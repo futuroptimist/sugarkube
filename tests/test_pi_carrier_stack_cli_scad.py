@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import re
 import shutil
 import subprocess
@@ -81,6 +82,9 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
     stack_mount_inset = extract_float("stack_mount_inset")
     stack_pocket_d = extract_float("stack_pocket_d")
     stack_pocket_depth = extract_float("stack_pocket_depth")
+    stack_mount_margin_center = extract_float("stack_mount_margin_center")
+    stack_mount_margin_pocket_edge = extract_float("stack_mount_margin_pocket_edge")
+    stack_bolt_d = extract_float("stack_bolt_d")
 
     positions_idx = geometry_line.find("stack_mount_positions")
     assert positions_idx != -1, (
@@ -97,6 +101,16 @@ def test_pi_carrier_stack_emits_geometry_report(tmp_path: Path) -> None:
     ys = sorted({round(pos[1], 3) for pos in stack_mount_positions})
 
     assert len(xs) == 2 and len(ys) == 2, "Stack mounts should form a rectangular grid"
+
+    assert math.isclose(stack_mount_margin_center, stack_mount_inset, rel_tol=0, abs_tol=1e-6)
+    assert math.isclose(
+        stack_mount_margin_pocket_edge,
+        stack_mount_margin_center - stack_pocket_d / 2,
+        rel_tol=0,
+        abs_tol=1e-6,
+    )
+    assert stack_mount_margin_pocket_edge > 0
+    assert stack_bolt_d == pytest.approx(3.4)
 
     min_clearance_x = min(min(xs), plate_len - max(xs))
     min_clearance_y = min(min(ys), plate_wid - max(ys))
