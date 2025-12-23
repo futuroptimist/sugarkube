@@ -71,8 +71,10 @@ def test_pi_carrier_geometry_report_invariants() -> None:
     assert pocket_edge > 0
 
     expected_inset = max(
-        geometry_on["corner_radius"] + geometry_on["stack_pocket_d"] / 2,
-        geometry_on["edge_margin"] - 3,
+        geometry_on["corner_radius"]
+        + geometry_on["stack_pocket_d"] / 2
+        + 0.5,
+        max(0, geometry_on["edge_margin"] - 3),
     )
     assert geometry_on["stack_mount_inset"] == pytest.approx(expected_inset, abs=EPSILON)
     assert geometry_on["stack_bolt_d"] == pytest.approx(3.4, abs=EPSILON)
