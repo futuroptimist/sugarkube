@@ -233,7 +233,6 @@ module pi_stack_post(
     level_height = z_gap_clear + plate_thickness;
     stack_height = (levels - 1) * level_height + plate_thickness;
 
-    // Keep the legacy thicker base (3.1mm from the old nut-trap path) so print behavior stays unchanged.
     default_bottom_extra = 3.1;
     bottom_extra_resolved =
         is_undef(bottom_extra) ? default_bottom_extra : bottom_extra;
