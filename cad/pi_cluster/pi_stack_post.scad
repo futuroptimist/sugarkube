@@ -137,13 +137,6 @@ module pi_stack_post(
     leadin_depth = is_undef(leadin_depth) ? 0.8 : leadin_depth,
     leadin_extra_clearance = is_undef(leadin_extra_clearance) ? 0.4 : leadin_extra_clearance,
 
-    // Nut trap (bottom)
-    include_nut_trap = is_undef(include_nut_trap) ? true : include_nut_trap,
-    nut_flat = is_undef(nut_flat) ? 5.5 : nut_flat,        // M3 nut across flats (nominal)
-    nut_thick = is_undef(nut_thick) ? 2.4 : nut_thick,
-    nut_clearance = is_undef(nut_clearance) ? 0.5 : nut_clearance,
-    nut_trap_extra = is_undef(nut_trap_extra) ? 0.3 : nut_trap_extra,
-
     // Z extensions
     bottom_extra = is_undef(bottom_extra) ? undef : bottom_extra,
     top_extra = is_undef(top_extra) ? 0 : top_extra,
@@ -240,11 +233,10 @@ module pi_stack_post(
     level_height = z_gap_clear + plate_thickness;
     stack_height = (levels - 1) * level_height + plate_thickness;
 
-    nut_trap_depth = nut_thick + nut_trap_extra;
+    // Keep the legacy thicker base (3.1mm from the old nut-trap path) so print behavior stays unchanged.
+    default_bottom_extra = 3.1;
     bottom_extra_resolved =
-        is_undef(bottom_extra)
-            ? (include_nut_trap ? max(nut_trap_depth + 0.8, 3.0) : 1.0)
-            : bottom_extra;
+        is_undef(bottom_extra) ? default_bottom_extra : bottom_extra;
 
     post_h = stack_height + bottom_extra_resolved + top_extra;
     z_post0 = -bottom_extra_resolved;
@@ -306,8 +298,9 @@ module pi_stack_post(
                 cylinder(h = post_h + 0.6, r = bolt_r);
 
             // Nut trap recess REMOVED:
-            // We keep only the single bolt hole (above) so the bottom face doesn't create
-            // a support-attracting pocket. Everything else stays unchanged.
+            // We keep only the single bolt hole (above) so the bottom face doesn't create a
+            // support-attracting pocket. Captive-nut geometry was dropped to avoid trapped
+            // supports and brittle post-processing; a future accessory can reintroduce it.
 
             // Plate slots at each level
             for (lvl = [0 : levels - 1]) {
@@ -390,7 +383,6 @@ if (is_undef(_pi_stack_post_auto_render) ? true : _pi_stack_post_auto_render) {
         fit_clearance = 0.2,
         leadin_depth = 0.8,
         leadin_extra_clearance = 0.4,
-        include_nut_trap = true,
         slot_profile = "rect",
         emit_post_report = true
     );
