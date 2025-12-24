@@ -305,13 +305,9 @@ module pi_stack_post(
             translate([0, 0, z_post0 - 0.3])
                 cylinder(h = post_h + 0.6, r = bolt_r);
 
-            // Bottom nut trap (optional)
-            if (include_nut_trap) {
-                nut_flat_eff = nut_flat + nut_clearance;
-                nut_r = nut_flat_eff / (2 * cos(30));
-                translate([0, 0, z_post0 - 0.15])
-                    cylinder(h = nut_trap_depth + 0.3, r = nut_r, $fn = 6);
-            }
+            // Nut trap recess REMOVED:
+            // We keep only the single bolt hole (above) so the bottom face doesn't create
+            // a support-attracting pocket. Everything else stays unchanged.
 
             // Plate slots at each level
             for (lvl = [0 : levels - 1]) {
