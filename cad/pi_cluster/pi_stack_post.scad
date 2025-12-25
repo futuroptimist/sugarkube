@@ -46,20 +46,27 @@ assembly = "assembly";
 // ============================================================================
 // ---- Wedge tuning parameters (dialed-in; do not change without re-tuning) ----
 // WEDGE_TUNE_KNOBS
-// 1) WORLD +Y offset (converted to local XY via the 45° wrapper) to align the
-//    wedge roof with the carrier slot ceiling after the outer rotate([0,0,45]).
-//    Tuned to fully clip the ceiling and remove residual cantilever without
-//    breaking into surrounding walls.
 wedge_tune_world_y_mm = 12.274;   // mm (world Y, applied after rotate([0,0,45]))
-// 2) WORLD +Z offset to place the wedge roof just above the slot ceiling while
-//    still covering the subtractor's z_fudge overshoot. Tuned to avoid z-fight
-//    with the slot ceiling yet remove the horizontal overhang.
 wedge_tune_world_z_mm = 0.15;     // mm (world Z)
-// 3) Uniform wedge scale that lengthens the 45° roof plane so it eliminates the
-//    remaining horizontal shelf. Tuned empirically for supportless FDM without
-//    colliding with other geometry.
 wedge_tune_scale = 2.5;           // unitless (isotropic scale about wedge origin)
+
+// DEBUG_TETRA: comment/uncomment THIS ONE LINE to toggle BOTH tetra debug previews.
+// debug_show_tetra = true;
+debug_show_tetra = false;
+
+// ---- Micro-tetra tuning knobs (anchor at RIGHT-ANGLE vertex) ----
+// TETRA_TUNE_KNOBS
+micro_tet_anchor_scale = 7.0;     // unitless (isotropic)
+micro_tet_tune_y_mm = -47.82;     // mm (WORLD Y tuning)
+micro_tet_tune_z_mm = 3.08;       // mm (WORLD Z tuning)
+
+// ---- Micro-ceiling tetrahedron shaver (other constants) ----
+micro_tet_leg_mm   = 6.0;         // mm
+micro_tet_tune_x_mm = 0.0;        // mm (reserved)
+micro_tet_inset_mm  = 0.8;        // mm (reserved)
+micro_tet_base_z_mm = 0.12;       // mm (reserved)
 // ============================================================================
+
 
 // ---------- Quality controls ----------
 function _quality_fn(q) =
@@ -76,6 +83,7 @@ function _resolve_quality(quality_param, post_quality_cli, fallback = "draft") =
 function _resolve_fn(facet_fn_param, post_fn_cli, quality_resolved) =
     !is_undef(facet_fn_param) ? facet_fn_param
     : (!is_undef(post_fn_cli) ? post_fn_cli : _quality_fn(quality_resolved));
+
 
 // ---------- Helpers ----------
 module _slot_cutout_rect(
@@ -180,6 +188,43 @@ module _simple_roof_wedge(
                         [-wedge_h, wedge_h]
                     ]);
 }
+
+
+// --- Micro-ceiling tetrahedron: 45° tetra (anchor at right-angle vertex) ---
+// Anchor vertex A=(0,0,0). Scaling about origin keeps A fixed.
+module _tetra_45_axis_anchorA(L) {
+    pts = [
+        [0,   0,   0],      // A (ANCHOR: right angle)
+        [L,   0,   0],      // B
+        [0,   L,   0],      // C
+        [L/2, L/2, L/2]     // D
+    ];
+    fcs = [
+        [0, 2, 1],  // base
+        [0, 1, 3],
+        [0, 3, 2],
+        [1, 2, 3]
+    ];
+    polyhedron(points = pts, faces = fcs, convexity = 10);
+}
+
+// Subtractor placement for the tuned tetrahedron.
+// Called INSIDE rotate([0,0,45]) wrapper.
+// z_world_extra_mm clones the tetra upward by exactly one carrier level height.
+module _micro_tetra_subtractor_worldanchored(z_world_extra_mm = 0) {
+    // Anchor in WORLD coords (matched to the debug marker workflow).
+    y_world = 30 + micro_tet_tune_y_mm;
+    z_world = 0 + micro_tet_tune_z_mm + z_world_extra_mm;
+
+    // Under the outer rotate([0,0,45]) wrapper:
+    // world +Y corresponds to local [+off, +off].
+    off = _world_y_to_local_xy_offset(y_world);
+
+    translate([off, off, z_world])
+        scale([micro_tet_anchor_scale, micro_tet_anchor_scale, micro_tet_anchor_scale])
+            _tetra_45_axis_anchorA(micro_tet_leg_mm);
+}
+
 
 // ---------- Main module ----------
 module pi_stack_post(
@@ -289,14 +334,12 @@ module pi_stack_post(
     // Clamp offset to preserve wall around bolt.
     wall_eps = 0.03;
     allowed_center_dist = post_r - bolt_r - post_wall_min - wall_eps;
-    assert(allowed_center_dist > 0,
-        "post_body_d too small to preserve post_wall_min around bolt; increase post_body_d or reduce post_wall_min or stack_bolt_d");
 
     center_dist_raw =
         sqrt(post_center_raw[0]*post_center_raw[0] + post_center_raw[1]*post_center_raw[1]);
 
     center_scale =
-        (center_dist_raw > allowed_center_dist && center_dist_raw > 0)
+        (allowed_center_dist > 0 && center_dist_raw > allowed_center_dist && center_dist_raw > 0)
             ? (allowed_center_dist / center_dist_raw)
             : 1;
 
@@ -318,7 +361,24 @@ module pi_stack_post(
     center_dist = sqrt(post_center[0]*post_center[0] + post_center[1]*post_center[1]);
     min_radial_wall = (post_r - center_dist) - bolt_r;
 
+    // Always emit a lightweight line whenever this module is instantiated/generated.
+    echo(
+        "pi_stack_post_generated",
+        mount_pos = mount_pos_resolved,
+        corner_sign = [sx, sy],
+        levels = levels,
+        z_gap_clear = z_gap_clear,
+        plate_thickness = plate_thickness,
+        level_height = level_height,
+        post_center = post_center,
+        stack_bolt_d = stack_bolt_d,
+        post_body_d = post_body_d,
+        debug_show_tetra = debug_show_tetra
+    );
+
     // Guards
+    assert(allowed_center_dist > 0,
+        "post_body_d too small to preserve post_wall_min around bolt; increase post_body_d or reduce post_wall_min or stack_bolt_d");
     assert(fit_clearance > 0, "fit_clearance must be > 0 to avoid binding on real prints");
     assert(post_body_d > stack_bolt_d + 2 * post_wall_min, "post_body_d too small for stack_bolt_d + post_wall_min");
     tolerance_eps = 0.001;
@@ -332,6 +392,7 @@ module pi_stack_post(
     assert(2 * stack_pocket_depth < plate_thickness,
         "stack_pocket_depth must be < half of plate_thickness so symmetric pockets do not overlap");
 
+    // Keep the existing detailed report behind the flag.
     if (emit_post_report) {
         echo(
             "pi_stack_post",
@@ -361,10 +422,20 @@ module pi_stack_post(
         );
     }
 
-    // Carrier slots are oriented at 45° relative to the global X/Y axes. Rotate the
-    // entire model so world +Y aligns with the slot frame's diagonal, simplifying the
-    // wedge placement math. This modeling convenience is intentional—keep the rotation
-    // unless refactoring with an invariance proof.
+    // DEBUG MARKERS (visual only; subtraction is always applied below)
+    // When enabled, show BOTH tetrahedra (bottom + one-level-up) with # highlights.
+    if (!is_undef(debug_show_tetra) && debug_show_tetra) {
+        #translate([0, 30 + micro_tet_tune_y_mm, 0 + micro_tet_tune_z_mm])
+            rotate([0, 0, 45])
+                scale([micro_tet_anchor_scale, micro_tet_anchor_scale, micro_tet_anchor_scale])
+                    _tetra_45_axis_anchorA(micro_tet_leg_mm);
+
+        #translate([0, 30 + micro_tet_tune_y_mm, level_height + micro_tet_tune_z_mm])
+            rotate([0, 0, 45])
+                scale([micro_tet_anchor_scale, micro_tet_anchor_scale, micro_tet_anchor_scale])
+                    _tetra_45_axis_anchorA(micro_tet_leg_mm);
+    }
+
     // Apply +45° Z rotation around origin (kept as-is; geometry is already dialed in).
     rotate([0, 0, 45]) {
 
@@ -380,6 +451,10 @@ module pi_stack_post(
                 // Bolt clearance bore
                 translate([0, 0, z_post0 - 0.3])
                     cylinder(h = post_h + 0.6, r = bolt_r);
+
+                // Micro-ceiling tetra subtractors (ALWAYS ON):
+                _micro_tetra_subtractor_worldanchored(0);
+                _micro_tetra_subtractor_worldanchored(level_height);
 
                 // Plate slots at each level
                 for (lvl = [0 : levels - 1]) {
