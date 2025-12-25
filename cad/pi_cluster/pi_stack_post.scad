@@ -23,6 +23,13 @@
 // - We translate plate region by -mount_pos so stack-mount center lands on the bolt axis.
 // - In pi_carrier_stack.scad, each post is placed by translating to the global stack-mount XY.
 //
+// Geometry invariance harness:
+// - Validate refactors with:
+//   openscad -o /tmp/ignore.stl cad/pi_cluster/pi_stack_post.scad -D emit_post_report=true > /tmp/post_report.before.txt 2>&1
+//   openscad -o /tmp/ignore.stl cad/pi_cluster/pi_stack_post.scad -D emit_post_report=true > /tmp/post_report.after.txt 2>&1
+//   diff -u /tmp/post_report.before.txt /tmp/post_report.after.txt
+//   The echoed pi_stack_post values must be identical (geometry-preserving refactor).
+
 // Note:
 // - This module applies rotate([0,0,45]) around the origin to simplify wedge math during development.
 //   The geometry is preserved exactly as currently dialed in.
@@ -37,15 +44,21 @@ post = "post";
 assembly = "assembly";
 
 // ============================================================================
-// !!! WEDGE TUNING KNOBS (SEARCH: WEDGE_TUNE_KNOBS) !!!
-// Dialed-in values (do not change unless re-tuning wedge placement).
-// ----------------------------------------------------------------------------
-// 1) Move wedges along WORLD +Y (decrease to shift back on Y)
-wedge_tune_world_y_mm = 12.274;   // mm
-// 2) Move wedges along WORLD +Z (positive = up, negative = down)
-wedge_tune_world_z_mm = 0.15;     // mm
-// 3) Scale wedges up/down (increase to remove any remaining cantilever)
-wedge_tune_scale = 2.5;           // unitless
+// ---- Wedge tuning parameters (dialed-in; do not change without re-tuning) ----
+// WEDGE_TUNE_KNOBS
+// 1) WORLD +Y offset (converted to local XY via the 45° wrapper) to align the
+//    wedge roof with the carrier slot ceiling after the outer rotate([0,0,45]).
+//    Tuned to fully clip the ceiling and remove residual cantilever without
+//    breaking into surrounding walls.
+wedge_tune_world_y_mm = 12.274;   // mm (world Y, applied after rotate([0,0,45]))
+// 2) WORLD +Z offset to place the wedge roof just above the slot ceiling while
+//    still covering the subtractor's z_fudge overshoot. Tuned to avoid z-fight
+//    with the slot ceiling yet remove the horizontal overhang.
+wedge_tune_world_z_mm = 0.15;     // mm (world Z)
+// 3) Uniform wedge scale that lengthens the 45° roof plane so it eliminates the
+//    remaining horizontal shelf. Tuned empirically for supportless FDM without
+//    colliding with other geometry.
+wedge_tune_scale = 2.5;           // unitless (isotropic scale about wedge origin)
 // ============================================================================
 
 // ---------- Quality controls ----------
@@ -89,7 +102,8 @@ module _slot_cutout_rect(
     //
     // IMPORTANT (printability):
     // The bottom lead-in creates an internal horizontal ceiling (a tiny “spacer”)
-    // that can still want supports / string. Keep only the TOP lead-in.
+    // that can still want supports / string. In this supportless-print tuning we
+    // deliberately remove the bottom lead-in and keep only the TOP lead-in.
     if (leadin_depth > 0 && leadin_extra_clearance > 0) {
         lead = min(leadin_depth, plate_thickness);
 
@@ -107,6 +121,25 @@ module _slot_cutout_rect(
 }
 
 // 45° roof wedge: triangular prism used as a subtractor above the slot roof.
+function _world_y_to_local_xy_offset(y_mm) = y_mm / sqrt(2);
+
+// Goal: produce a 45° roof plane facing into the slot cavity; keep the wedge
+// anchored at the outer slot corner; flips ensure the ramp slopes downward into
+// the cavity after the global 45° alignment.
+module _wedge_orient_for_slot(theta) {
+    // WORLD Z flip (commutes with the outer rotate([0,0,45])).
+    rotate([0, 0, 180])
+        // WORLD X flip expressed in local coords under the 45° wrapper.
+        rotate([0, 0, -45])
+            rotate([180, 0, 0])
+                rotate([0, 0, 45])
+                    // Slot-corner alignment around WORLD/slot Z.
+                    rotate([0, 0, theta])
+                        // Triangle plane mapped to the XY plane for extrusion.
+                        rotate([-90, 0, 0])
+                            children();
+}
+
 module _simple_roof_wedge(
     plate_len,
     plate_wid,
@@ -131,30 +164,21 @@ module _simple_roof_wedge(
 
     theta = atan2(sy_corner, sx_corner);
 
-    // WORLD +Y offset expressed in LOCAL coords under the outer rotate([0,0,45]) wrapper:
-    // local = Rz(-45) * [0, Y, 0] = [Y/sqrt(2), Y/sqrt(2), 0]
-    nudge = wedge_tune_world_y_mm / sqrt(2);
+    world_y_to_local_xy_offset = _world_y_to_local_xy_offset(wedge_tune_world_y_mm);
 
     // WORLD +Z offset is unchanged by the outer Z rotation.
-    z_off = wedge_tune_world_z_mm;
+    world_z_offset = wedge_tune_world_z_mm;
 
-    translate([x_edge + nudge, y_edge + nudge, (z_roof - z_fudge) + z_off])
+    translate([x_edge + world_y_to_local_xy_offset, y_edge + world_y_to_local_xy_offset, (z_roof - z_fudge) + world_z_offset])
         // Scale after anchoring translate (keeps the anchor corner fixed while growing/shrinking).
         scale([wedge_tune_scale, wedge_tune_scale, wedge_tune_scale])
-            // Rotate 180° about WORLD Z (commutes with the outer Z-rotation).
-            rotate([0, 0, 180])
-                // Rotate 180° about WORLD X via conjugation under the outer rotate([0,0,45]).
-                rotate([0, 0, -45])
-                    rotate([180, 0, 0])
-                        rotate([0, 0, 45])
-                            rotate([0, 0, theta])
-                                rotate([-90, 0, 0])
-                                    linear_extrude(height = wedge_width, center = true)
-                                        polygon(points = [
-                                            [0, 0],
-                                            [-wedge_h, 0],
-                                            [-wedge_h, wedge_h]
-                                        ]);
+            _wedge_orient_for_slot(theta)
+                linear_extrude(height = wedge_width, center = true)
+                    polygon(points = [
+                        [0, 0],
+                        [-wedge_h, 0],
+                        [-wedge_h, wedge_h]
+                    ]);
 }
 
 // ---------- Main module ----------
@@ -337,6 +361,10 @@ module pi_stack_post(
         );
     }
 
+    // Carrier slots are oriented at 45° relative to the global X/Y axes. Rotate the
+    // entire model so world +Y aligns with the slot frame's diagonal, simplifying the
+    // wedge placement math. This modeling convenience is intentional—keep the rotation
+    // unless refactoring with an invariance proof.
     // Apply +45° Z rotation around origin (kept as-is; geometry is already dialed in).
     rotate([0, 0, 45]) {
 
@@ -369,7 +397,7 @@ module pi_stack_post(
                         z_fudge = z_fudge
                     );
 
-                    // Bottom two slots only (top slot has no ceiling)
+                    // Apply wedge to all slots except the top (top slot has no ceiling).
                     if (lvl < levels - 1) {
                         _simple_roof_wedge(
                             plate_len = plate_len_resolved,
