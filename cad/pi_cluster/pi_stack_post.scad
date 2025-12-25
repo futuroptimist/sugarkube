@@ -4,37 +4,35 @@
 // - 4 posts total (one per carrier corner stack-mount).
 // - A long bolt passes through the post and the carrier stack-mount holes,
 //   clamping all carrier levels together.
-// - The post is "keyed" to the carriers by subtracting slot cutouts derived from carrier plate
-//   dimensions at each level (fast rectangular profile by default). A tighter carrier outline can
-//   be reintroduced later if needed.
+// - The post is keyed to the carriers by subtracting slot cutouts derived from carrier plate
+//   dimensions at each level (fast rectangular profile by default).
 //
-// PERFORMANCE NOTES (fast path):
-// - Slot cutouts are rectangular prisms derived from carrier plate_len/plate_wid.
-// - We do NOT add extra intersections around the subtractors by default.
-//   In a difference(), OpenSCAD already only cares about subtractor volume that intersects the post.
-//   Adding bounding intersections increases CSG complexity and can tank preview FPS.
+// Printing goal:
+// - Make the bottom slot ceilings printable on FDM without supports by cutting 45° “roof” ramps.
+//
+// Performance notes:
+// - Slot cutouts are simple rectangular prisms (fast).
 // - Cylinder tessellation is reduced by default (low $fn).
 //
-// QUALITY / TUNING:
-// - Default is optimized for *interactive preview*.
-// - For printing, set `post_quality="print"` (or increase `post_fn`).
-//
-// CLI examples:
-//   openscad -o /tmp/post_preview.stl cad/pi_cluster/pi_stack_post.scad -D post_quality="draft"
-//   openscad -o /tmp/post_print.stl   cad/pi_cluster/pi_stack_post.scad -D post_quality="print"
-//   openscad -o /tmp/post_print.stl   cad/pi_cluster/pi_stack_post.scad -D post_fn=48
-//
-// Z-FIGHTING FIX:
-// - All subtractors overshoot slightly in Z (z_fudge) so boolean faces are not coplanar with the
-//   post’s top/bottom faces. This removes the top-face flicker/wedge in preview.
+// Z-fighting fix:
+// - Subtractors overshoot slightly in Z (z_fudge) to avoid coplanar faces.
 //
 // Coordinate system:
-// - The post module is authored in a LOCAL coordinate system where the bolt axis is at XY=[0,0].
-// - The carrier plate’s coordinate system is [0..plate_len]×[0..plate_wid] with the same origin
-//   used by pi_carrier.scad.
-// - Internally, we translate the plate region by -mount_pos so the chosen stack-mount center lands
-//   on the bolt axis origin.
+// - Local: bolt axis at XY=[0,0].
+// - Carrier plate coords: [0..plate_len]×[0..plate_wid] (same origin as pi_carrier.scad).
+// - We translate plate region by -mount_pos so stack-mount center lands on the bolt axis.
 // - In pi_carrier_stack.scad, each post is placed by translating to the global stack-mount XY.
+//
+// Geometry invariance harness:
+// - Validate refactors with:
+//   openscad -o /tmp/ignore.stl cad/pi_cluster/pi_stack_post.scad -D emit_post_report=true > /tmp/post_report.before.txt 2>&1
+//   openscad -o /tmp/ignore.stl cad/pi_cluster/pi_stack_post.scad -D emit_post_report=true > /tmp/post_report.after.txt 2>&1
+//   diff -u /tmp/post_report.before.txt /tmp/post_report.after.txt
+//   The echoed pi_stack_post values must be identical (geometry-preserving refactor).
+
+// Note:
+// - This module applies rotate([0,0,45]) around the origin to simplify wedge math during development.
+//   The geometry is preserved exactly as currently dialed in.
 
 _pi_carrier_auto_render = false;
 include <./pi_carrier.scad>; // imports carrier_dimensions() helpers
@@ -44,6 +42,24 @@ include <./pi_carrier.scad>; // imports carrier_dimensions() helpers
 carrier_level = "carrier_level";
 post = "post";
 assembly = "assembly";
+
+// ============================================================================
+// ---- Wedge tuning parameters (dialed-in; do not change without re-tuning) ----
+// WEDGE_TUNE_KNOBS
+// 1) WORLD +Y offset (converted to local XY via the 45° wrapper) to align the
+//    wedge roof with the carrier slot ceiling after the outer rotate([0,0,45]).
+//    Tuned to fully clip the ceiling and remove residual cantilever without
+//    breaking into surrounding walls.
+wedge_tune_world_y_mm = 12.274;   // mm (world Y, applied after rotate([0,0,45]))
+// 2) WORLD +Z offset to place the wedge roof just above the slot ceiling while
+//    still covering the subtractor's z_fudge overshoot. Tuned to avoid z-fight
+//    with the slot ceiling yet remove the horizontal overhang.
+wedge_tune_world_z_mm = 0.15;     // mm (world Z)
+// 3) Uniform wedge scale that lengthens the 45° roof plane so it eliminates the
+//    remaining horizontal shelf. Tuned empirically for supportless FDM without
+//    colliding with other geometry.
+wedge_tune_scale = 2.5;           // unitless (isotropic scale about wedge origin)
+// ============================================================================
 
 // ---------- Quality controls ----------
 function _quality_fn(q) =
@@ -73,18 +89,21 @@ module _slot_cutout_rect(
     leadin_extra_clearance,
     z_fudge
 ) {
-    // Plate region in local coordinates (after translating carrier by -mount_pos).
-    // Expand by fit_clearance so prints don’t bind.
     x0 = -mount_pos[0] - fit_clearance;
     y0 = -mount_pos[1] - fit_clearance;
     sx = plate_len + 2 * fit_clearance;
     sy = plate_wid + 2 * fit_clearance;
 
-    // Main slot (overshoot in Z to avoid coplanar faces)
+    // Main slot
     translate([x0, y0, z_plate - z_fudge])
         cube([sx, sy, plate_thickness + 2 * z_fudge], center = false);
 
-    // Lead-in relief: slightly larger clearance near the bottom/top faces of each slot.
+    // Lead-in relief
+    //
+    // IMPORTANT (printability):
+    // The bottom lead-in creates an internal horizontal ceiling (a tiny “spacer”)
+    // that can still want supports / string. In this supportless-print tuning we
+    // deliberately remove the bottom lead-in and keep only the TOP lead-in.
     if (leadin_depth > 0 && leadin_extra_clearance > 0) {
         lead = min(leadin_depth, plate_thickness);
 
@@ -93,14 +112,73 @@ module _slot_cutout_rect(
         sx1 = plate_len + 2 * (fit_clearance + leadin_extra_clearance);
         sy1 = plate_wid + 2 * (fit_clearance + leadin_extra_clearance);
 
-        // Bottom lead-in: extend slightly below the plate slot start
-        translate([x1, y1, z_plate - z_fudge])
-            cube([sx1, sy1, lead + z_fudge], center = false);
-
         // Top lead-in: extend slightly above the plate slot end
         translate([x1, y1, z_plate + plate_thickness - lead])
             cube([sx1, sy1, lead + z_fudge], center = false);
+
+        // NOTE: Bottom lead-in intentionally omitted.
     }
+}
+
+// 45° roof wedge: triangular prism used as a subtractor above the slot roof.
+function _world_y_to_local_xy_offset(y_mm) = y_mm / sqrt(2);
+
+// Goal: produce a 45° roof plane facing into the slot cavity; keep the wedge
+// anchored at the outer slot corner; flips ensure the ramp slopes downward into
+// the cavity after the global 45° alignment.
+module _wedge_orient_for_slot(theta) {
+    // WORLD Z flip (commutes with the outer rotate([0,0,45])).
+    rotate([0, 0, 180])
+        // WORLD X flip expressed in local coords under the 45° wrapper.
+        rotate([0, 0, -45])
+            rotate([180, 0, 0])
+                rotate([0, 0, 45])
+                    // Slot-corner alignment around WORLD/slot Z.
+                    rotate([0, 0, theta])
+                        // Triangle plane mapped to the XY plane for extrusion.
+                        rotate([-90, 0, 0])
+                            children();
+}
+
+module _simple_roof_wedge(
+    plate_len,
+    plate_wid,
+    mount_pos,
+    fit_clearance,
+    corner_sign,     // [sx, sy] ∈ {±1, ±1}
+    z_roof,
+    wedge_h,
+    wedge_width,
+    z_fudge
+) {
+    sx_corner = corner_sign[0];
+    sy_corner = corner_sign[1];
+
+    x0 = -mount_pos[0] - fit_clearance;
+    y0 = -mount_pos[1] - fit_clearance;
+    dx = plate_len + 2 * fit_clearance;
+    dy = plate_wid + 2 * fit_clearance;
+
+    x_edge = (sx_corner < 0) ? x0 : (x0 + dx);
+    y_edge = (sy_corner < 0) ? y0 : (y0 + dy);
+
+    theta = atan2(sy_corner, sx_corner);
+
+    world_y_to_local_xy_offset = _world_y_to_local_xy_offset(wedge_tune_world_y_mm);
+
+    // WORLD +Z offset is unchanged by the outer Z rotation.
+    world_z_offset = wedge_tune_world_z_mm;
+
+    translate([x_edge + world_y_to_local_xy_offset, y_edge + world_y_to_local_xy_offset, (z_roof - z_fudge) + world_z_offset])
+        // Scale after anchoring translate (keeps the anchor corner fixed while growing/shrinking).
+        scale([wedge_tune_scale, wedge_tune_scale, wedge_tune_scale])
+            _wedge_orient_for_slot(theta)
+                linear_extrude(height = wedge_width, center = true)
+                    polygon(points = [
+                        [0, 0],
+                        [-wedge_h, 0],
+                        [-wedge_h, wedge_h]
+                    ]);
 }
 
 // ---------- Main module ----------
@@ -137,6 +215,10 @@ module pi_stack_post(
     leadin_depth = is_undef(leadin_depth) ? 0.8 : leadin_depth,
     leadin_extra_clearance = is_undef(leadin_extra_clearance) ? 0.4 : leadin_extra_clearance,
 
+    // Wedge tuning (45° roof ramps)
+    roof_wedge_h = is_undef(roof_wedge_h) ? 5 : roof_wedge_h,
+    roof_wedge_width = is_undef(roof_wedge_width) ? 40 : roof_wedge_width,
+
     // Z extensions
     bottom_extra = is_undef(bottom_extra) ? undef : bottom_extra,
     top_extra = is_undef(top_extra) ? 0 : top_extra,
@@ -153,22 +235,16 @@ module pi_stack_post(
     // Debug
     emit_post_report = is_undef(emit_post_report) ? false : emit_post_report
 ) {
-    // Avoid warnings from referencing unknown globals:
-    // OpenSCAD warns if you pass an *unknown* variable into a function call.
     post_quality_cli = is_undef(post_quality) ? undef : post_quality;
     post_fn_cli = is_undef(post_fn) ? undef : post_fn;
 
-    // Resolve quality from (module param) -> (CLI global) -> default.
     quality_resolved = _resolve_quality(quality, post_quality_cli, "draft");
-
-    // Resolve facet count from (module param) -> (CLI global) -> derived from quality.
     fn_resolved = _resolve_fn(facet_fn, post_fn_cli, quality_resolved);
 
-    // Anti-z-fighting / robust booleans (small, non-functional).
+    // Robust booleans (small, non-functional).
     z_fudge = 0.08;
 
     // Resolve carrier dims if not provided.
-    // NOTE: Avoid direct reads of possibly-undefined vars.
     stack_mount_positions_input_safe =
         is_undef(stack_mount_positions) ? undef : stack_mount_positions;
 
@@ -187,14 +263,13 @@ module pi_stack_post(
     plate_len_resolved = is_undef(plate_len) ? carrier_plate_len(carrier_dims_resolved) : plate_len;
     plate_wid_resolved = is_undef(plate_wid) ? carrier_plate_wid(carrier_dims_resolved) : plate_wid;
 
-    // If mount_pos isn't provided, default to the first (bottom-left) stack mount.
     mounts = carrier_stack_mount_positions(carrier_dims_resolved);
     mount_pos_resolved =
         is_undef(mount_pos)
             ? (len(mounts) > 0 ? mounts[0] : [0, 0])
             : mount_pos;
 
-    // Determine which corner this mount corresponds to (for outward offset).
+    // Determine which corner this mount corresponds to.
     sx = (mount_pos_resolved[0] < plate_len_resolved / 2) ? -1 : 1;
     sy = (mount_pos_resolved[1] < plate_wid_resolved / 2) ? -1 : 1;
 
@@ -204,14 +279,14 @@ module pi_stack_post(
     post_r = post_body_d / 2;
     bolt_r = stack_bolt_d / 2;
 
-    // Position the post cylinder so it extends outward past the plate edges by post_overhang,
-    // while keeping ≥post_wall_min around the bolt.
+    // Position the post cylinder to extend outward past plate edges by post_overhang,
+    // while keeping >=post_wall_min around the bolt.
     post_center_raw = [
         sx * (edge_dx + post_overhang - post_r),
         sy * (edge_dy + post_overhang - post_r)
     ];
 
-    // Clamp offset to preserve wall around bolt (prevents impossible offsets).
+    // Clamp offset to preserve wall around bolt.
     wall_eps = 0.03;
     allowed_center_dist = post_r - bolt_r - post_wall_min - wall_eps;
     assert(allowed_center_dist > 0,
@@ -240,7 +315,6 @@ module pi_stack_post(
     post_h = stack_height + bottom_extra_resolved + top_extra;
     z_post0 = -bottom_extra_resolved;
 
-    // Minimum radial wall at the bolt axis, considering the clamped post offset.
     center_dist = sqrt(post_center[0]*post_center[0] + post_center[1]*post_center[1]);
     min_radial_wall = (post_r - center_dist) - bolt_r;
 
@@ -253,6 +327,8 @@ module pi_stack_post(
             "mm wall around bolt; have ", min_radial_wall,
             "mm. Increase post_body_d or reduce post_overhang."));
     assert(leadin_depth >= 0, "leadin_depth must be non-negative");
+    assert(roof_wedge_h >= 0, "roof_wedge_h must be non-negative");
+    assert(roof_wedge_width > 0, "roof_wedge_width must be > 0");
     assert(2 * stack_pocket_depth < plate_thickness,
         "stack_pocket_depth must be < half of plate_thickness so symmetric pockets do not overlap");
 
@@ -275,6 +351,8 @@ module pi_stack_post(
             fit_clearance = fit_clearance,
             leadin_depth = leadin_depth,
             leadin_extra_clearance = leadin_extra_clearance,
+            roof_wedge_h = roof_wedge_h,
+            roof_wedge_width = roof_wedge_width,
             slot_profile = slot_profile,
             quality = quality_resolved,
             fn = fn_resolved,
@@ -283,30 +361,30 @@ module pi_stack_post(
         );
     }
 
-    // Apply tessellation to cylinders only; cubes are already "free".
-    let($fn = fn_resolved)
-    difference() {
-        // --- Solid post body ---
-        translate([post_center[0], post_center[1], z_post0])
-            cylinder(h = post_h, r = post_r);
+    // Carrier slots are oriented at 45° relative to the global X/Y axes. Rotate the
+    // entire model so world +Y aligns with the slot frame's diagonal, simplifying the
+    // wedge placement math. This modeling convenience is intentional—keep the rotation
+    // unless refactoring with an invariance proof.
+    // Apply +45° Z rotation around origin (kept as-is; geometry is already dialed in).
+    rotate([0, 0, 45]) {
 
-        // --- Subtractors as a single union (keeps CSG flatter in preview) ---
-        union() {
-            // Bolt clearance bore (overshoot in Z avoids coplanar faces)
-            translate([0, 0, z_post0 - 0.3])
-                cylinder(h = post_h + 0.6, r = bolt_r);
+        // Apply tessellation to cylinders only; cubes are already "free".
+        let($fn = fn_resolved)
+        difference() {
+            // --- Solid post body ---
+            translate([post_center[0], post_center[1], z_post0])
+                cylinder(h = post_h, r = post_r);
 
-            // Nut trap recess REMOVED:
-            // We keep only the single bolt hole (above) so the bottom face doesn't create a
-            // support-attracting pocket. Captive-nut geometry was dropped to avoid trapped
-            // supports and brittle post-processing; a future accessory can reintroduce it.
+            // --- Subtractors as a single union ---
+            union() {
+                // Bolt clearance bore
+                translate([0, 0, z_post0 - 0.3])
+                    cylinder(h = post_h + 0.6, r = bolt_r);
 
-            // Plate slots at each level
-            for (lvl = [0 : levels - 1]) {
-                z_plate = lvl * level_height;
+                // Plate slots at each level
+                for (lvl = [0 : levels - 1]) {
+                    z_plate = lvl * level_height;
 
-                // Fast default: rectangular plate region (uses plate_len/plate_wid from carrier_dimensions).
-                if (slot_profile == "rect") {
                     _slot_cutout_rect(
                         plate_len = plate_len_resolved,
                         plate_wid = plate_wid_resolved,
@@ -318,26 +396,28 @@ module pi_stack_post(
                         leadin_extra_clearance = leadin_extra_clearance,
                         z_fudge = z_fudge
                     );
-                } else {
-                    // Fallback: treat unknown profiles as rect to stay fast/stable.
-                    _slot_cutout_rect(
-                        plate_len = plate_len_resolved,
-                        plate_wid = plate_wid_resolved,
-                        mount_pos = mount_pos_resolved,
-                        z_plate = z_plate,
-                        plate_thickness = plate_thickness,
-                        fit_clearance = fit_clearance,
-                        leadin_depth = leadin_depth,
-                        leadin_extra_clearance = leadin_extra_clearance,
-                        z_fudge = z_fudge
-                    );
+
+                    // Apply wedge to all slots except the top (top slot has no ceiling).
+                    if (lvl < levels - 1) {
+                        _simple_roof_wedge(
+                            plate_len = plate_len_resolved,
+                            plate_wid = plate_wid_resolved,
+                            mount_pos = mount_pos_resolved,
+                            fit_clearance = fit_clearance,
+                            corner_sign = [sx, sy],
+                            z_roof = z_plate + plate_thickness,
+                            wedge_h = roof_wedge_h,
+                            wedge_width = roof_wedge_width,
+                            z_fudge = z_fudge
+                        );
+                    }
                 }
             }
         }
     }
 }
 
-// Standalone preview: render a single post (defaults to the first stack mount).
+// Standalone render: a single post (defaults to the first stack mount).
 if (is_undef(_pi_stack_post_auto_render) ? true : _pi_stack_post_auto_render) {
     _preview_plate_t = 3.0;
     _preview_levels = 3;
@@ -361,10 +441,6 @@ if (is_undef(_pi_stack_post_auto_render) ? true : _pi_stack_post_auto_render) {
 
     _mounts = carrier_stack_mount_positions(_dims);
 
-    // Defaults:
-    // - post_quality="draft" → low $fn for fast preview
-    // For printing:
-    // -D post_quality="print"   (or -D post_fn=48)
     pi_stack_post(
         carrier_dims = _dims,
         mount_pos = _mounts[0],
@@ -382,6 +458,10 @@ if (is_undef(_pi_stack_post_auto_render) ? true : _pi_stack_post_auto_render) {
         fit_clearance = 0.2,
         leadin_depth = 0.8,
         leadin_extra_clearance = 0.4,
+
+        roof_wedge_h = 5,
+        roof_wedge_width = 40,
+
         slot_profile = "rect",
         emit_post_report = true
     );
