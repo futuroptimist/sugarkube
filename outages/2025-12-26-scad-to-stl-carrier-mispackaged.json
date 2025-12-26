@@ -1,0 +1,12 @@
+{
+  "id": "scad-to-stl-missing-carrier-stack",
+  "date": "2025-12-26",
+  "component": "Build STL Artifacts workflow",
+  "rootCause": "The pi_cluster stack artifact packaged carrier-level preview STLs instead of the printable carrier plates rendered from pi_carrier.scad with stack mounts enabled, so the carriers directory lacked the expected stack-ready carrier file and only contained preview meshes.",
+  "resolution": "Render carrier stack-mount plates directly from pi_carrier.scad, keep preview-only carrier_level exports in the preview folder, and update artifact packaging/doc references so the stack bundle ships the printable carriers in carriers/ alongside existing posts and preview outputs.",
+  "references": [
+    ".github/workflows/scad-to-stl.yml",
+    "scripts/render_pi_cluster_variants.py",
+    "scripts/package_stl_artifacts.py"
+  ]
+}
