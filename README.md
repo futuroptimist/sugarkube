@@ -222,6 +222,10 @@ Network namespace probes now request the `ip` and `unshare` utilities up front,
 falling back to the same tooling installer before retrying with sudo so CI and
 local runs converge. Regression coverage:
 `tests/test_ensure_root_privileges.py::test_ensure_root_privileges_installs_netns_tools_first`.
+Set `SUGARKUBE_NETNS_FALLBACK=xfail` when you want missing network namespace
+privileges to be recorded as expected failures instead of skips so the suite
+highlights the capability gap without hiding it. Regression coverage:
+`tests/test_ensure_root_privileges.py::test_ensure_root_privileges_xfails_when_requested`.
 
 For mDNS end-to-end coverage that depends on network namespaces, set
 `SUGARKUBE_ALLOW_NETNS_STUBS=1` when your environment lacks `CAP_NET_ADMIN` or

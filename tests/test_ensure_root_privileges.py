@@ -140,6 +140,34 @@ def test_ensure_root_privileges_skips_when_sudo_fails(monkeypatch: pytest.Monkey
     assert ["/usr/bin/sudo", "-n", "unshare", "-n", "true"] in fake_run.commands
 
 
+def test_ensure_root_privileges_xfails_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mark privilege gaps as xfail when the caller opts into that behaviour."""
+
+    fake_run = _build_fake_run(
+        sudo_path="/usr/bin/sudo",
+        permission_failures=[
+            ["unshare", "-n", "true"],
+            ["ip", "netns", "add"],
+        ],
+        sudo_successes=[],
+    )
+
+    monkeypatch.setenv("SUGARKUBE_NETNS_FALLBACK", "xfail")
+    monkeypatch.setattr(conftest.subprocess, "run", fake_run)
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
+    monkeypatch.setattr(conftest.shutil, "which", lambda tool: "/usr/bin/sudo")
+    monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="xfail"))
+
+    with pytest.raises(pytest.xfail.Exception) as excinfo:
+        conftest.ensure_root_privileges()
+
+    assert "permission denied" in str(excinfo.value)
+    assert ["unshare", "-n", "true"] in fake_run.commands
+    assert ["/usr/bin/sudo", "-n", "unshare", "-n", "true"] in fake_run.commands
+
+
 def test_ensure_root_privileges_skips_when_sudo_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
