@@ -8,13 +8,17 @@ import sys
 from pathlib import Path
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PI_CLUSTER_CAD_DIR = REPO_ROOT / "cad" / "pi_cluster"
+
+
 class PackagingError(RuntimeError):
     """Raised when expected STL inputs are missing."""
 
 
 def _ensure_exists(path: Path) -> Path:
     if not path.exists():
-        raise PackagingError(f"Missing required STL: {path}")
+        raise PackagingError(f"Missing required artifact input: {path}")
     return path
 
 
@@ -62,6 +66,11 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
             "intro": "Modular plates + posts + fan adapter plus fan-wall matrices.",
             "layout": {
                 "carriers": [
+                    PI_CLUSTER_CAD_DIR / "pi_carrier_stack.scad",
+                    PI_CLUSTER_CAD_DIR / "pi_carrier.scad",
+                    PI_CLUSTER_CAD_DIR / "pi_dimensions.scad",
+                ],
+                "preview": [
                     stack_dir
                     / "carriers"
                     / "printed"
@@ -70,6 +79,7 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
                     / "carriers"
                     / "heatset"
                     / "pi_carrier_stack_carrier_level_heatset.stl",
+                    stack_dir / "preview" / "pi_carrier_stack_preview.stl",
                 ],
                 "posts": [stack_dir / "posts" / "pi_carrier_stack_post.stl"],
                 "fan_adapters": [
@@ -78,7 +88,6 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
                 "fan_walls": sorted(
                     (stack_dir / "fan_walls").glob("pi_carrier_stack_fan_wall_fan*.stl")
                 ),
-                "preview": [stack_dir / "preview" / "pi_carrier_stack_preview.stl"],
             },
             "docs": [
                 "docs/pi_cluster_stack.md",
@@ -163,7 +172,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--out-dir",
         type=Path,
         default=Path("dist/stl_artifacts"),
-        help="Output directory where grouped artifacts will be staged (default: dist/stl_artifacts).",
+        help=(
+            "Output directory where grouped artifacts will be staged "
+            "(default: dist/stl_artifacts)."
+        ),
     )
     return parser
 

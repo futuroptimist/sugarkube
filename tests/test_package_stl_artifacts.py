@@ -53,8 +53,9 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
 
     stack_root = out_dir / "pi_cluster_stack"
     assert {path.name for path in (stack_root / "carriers").iterdir()} == {
-        "pi_carrier_stack_carrier_level_printed.stl",
-        "pi_carrier_stack_carrier_level_heatset.stl",
+        "pi_carrier_stack.scad",
+        "pi_carrier.scad",
+        "pi_dimensions.scad",
     }
     assert {path.name for path in (stack_root / "posts").iterdir()} == {
         "pi_carrier_stack_post.stl",
@@ -68,6 +69,8 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
         "pi_carrier_stack_fan_wall_fan120.stl",
     }
     assert {path.name for path in (stack_root / "preview").iterdir()} == {
+        "pi_carrier_stack_carrier_level_printed.stl",
+        "pi_carrier_stack_carrier_level_heatset.stl",
         "pi_carrier_stack_preview.stl",
     }
 
@@ -95,7 +98,8 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
 
     readme = (stack_root / "README.txt").read_text(encoding="utf-8")
     assert "Pi cluster stack STLs" in readme
-    assert "- carriers/\n  - pi_carrier_stack_carrier_level_printed.stl" in readme
+    assert "- carriers/\n  - pi_carrier_stack.scad" in readme
+    assert "- preview/\n  - pi_carrier_stack_carrier_level_printed.stl" in readme
     assert "Docs:\n- docs/pi_cluster_stack.md" in readme
     assert ".github/workflows/scad-to-stl.yml" in readme
 
@@ -114,7 +118,7 @@ def test_package_stl_artifacts_requires_expected_files(tmp_path: Path) -> None:
     stack_dir = stl_dir / "pi_cluster"
     _touch_stub(stack_dir / "pi_carrier_stack_stub.stl")
 
-    with pytest.raises(PackagingError, match="Missing required STL"):
+    with pytest.raises(PackagingError, match="Missing required artifact input"):
         package_stl_artifacts(stl_dir=stl_dir, out_dir=tmp_path / "dist")
 
 
@@ -153,8 +157,9 @@ def test_main_invocation_cleans_previous_outputs(tmp_path: Path) -> None:
     rebuilt_files = {path.name for path in (out_dir / "pi_cluster_stack" / "carriers").iterdir()}
     assert "old.stl" not in rebuilt_files
     assert rebuilt_files == {
-        "pi_carrier_stack_carrier_level_printed.stl",
-        "pi_carrier_stack_carrier_level_heatset.stl",
+        "pi_carrier_stack.scad",
+        "pi_carrier.scad",
+        "pi_dimensions.scad",
     }
 
 
