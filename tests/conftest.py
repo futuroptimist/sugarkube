@@ -292,6 +292,9 @@ def _handle_netns_unavailable(reason: str) -> None:
     if fallback_mode == "xfail":
         pytest.xfail(reason)
 
+    # TODO: Avoid skips by provisioning netns capabilities in test environments.
+    # Root cause: Hosts without CAP_NET_ADMIN (and without sudo) cannot exercise network namespace flows.
+    # Estimated fix: Add CAP_NET_ADMIN or allow sudo with ``SUGARKUBE_NETNS_FALLBACK=xfail`` when upgrades are impractical.
     pytest.skip(reason)
 
 
