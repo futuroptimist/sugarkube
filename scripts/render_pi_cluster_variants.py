@@ -10,6 +10,9 @@ from pathlib import Path
 DEFAULT_STANDOFF_MODES = ("printed", "heatset")
 DEFAULT_FAN_SIZES = (80, 92, 120)
 
+DEFAULT_STACK_EDGE_MARGIN = 15
+DEFAULT_PLATE_THICKNESS = 3.0
+
 
 def render_variants(
     *,
@@ -23,66 +26,112 @@ def render_variants(
         raise FileNotFoundError(f"SCAD file not found: {scad_path}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    scad_dir = scad_path.parent
 
     for mode in standoff_modes:
-        output_path = (
-            output_dir / "carriers" / mode / f"pi_carrier_stack_carrier_level_{mode}.stl"
+        carrier_output = output_dir / "carriers" / f"pi_carrier_stack_{mode}.stl"
+        carrier_output.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                openscad,
+                "-o",
+                str(carrier_output),
+                "--export-format",
+                "binstl",
+                "-D",
+                f'standoff_mode="{mode}"',
+                "-D",
+                "include_stack_mounts=true",
+                "-D",
+                f"stack_edge_margin={DEFAULT_STACK_EDGE_MARGIN}",
+                "-D",
+                f"plate_thickness={DEFAULT_PLATE_THICKNESS}",
+                "--",
+                str(scad_dir / "pi_carrier.scad"),
+            ],
+            check=True,
         )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        command = [
-            openscad,
-            "-o",
-            str(output_path),
-            "--export-format",
-            "binstl",
-            "-D",
-            'export_part="carrier_level"',
-            "-D",
-            f'standoff_mode="{mode}"',
-            "-D",
-            "stack_edge_margin=15",
-            "--",
-            str(scad_path),
-        ]
-        subprocess.run(command, check=True)
 
-    for subdir, part in (("posts", "post"), ("fan_adapters", "fan_adapter")):
-        output_path = output_dir / subdir / f"pi_carrier_stack_{part}.stl"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        command = [
+        preview_output = (
+            output_dir / "preview" / f"pi_carrier_stack_carrier_level_{mode}.stl"
+        )
+        preview_output.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                openscad,
+                "-o",
+                str(preview_output),
+                "--export-format",
+                "binstl",
+                "-D",
+                'export_part="carrier_level"',
+                "-D",
+                f'standoff_mode="{mode}"',
+                "-D",
+                f"stack_edge_margin={DEFAULT_STACK_EDGE_MARGIN}",
+                "--",
+                str(scad_path),
+            ],
+            check=True,
+        )
+
+    post_output = output_dir / "posts" / "pi_carrier_stack_post.stl"
+    post_output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
             openscad,
             "-o",
-            str(output_path),
+            str(post_output),
             "--export-format",
             "binstl",
             "-D",
-            f'export_part="{part}"',
+            'export_part="post"',
             "-D",
-            "stack_edge_margin=15",
+            f"stack_edge_margin={DEFAULT_STACK_EDGE_MARGIN}",
             "--",
             str(scad_path),
-        ]
-        subprocess.run(command, check=True)
+        ],
+        check=True,
+    )
+
+    adapter_output = output_dir / "fan_adapters" / "pi_carrier_stack_fan_adapter.stl"
+    adapter_output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            openscad,
+            "-o",
+            str(adapter_output),
+            "--export-format",
+            "binstl",
+            "-D",
+            f"stack_edge_margin={DEFAULT_STACK_EDGE_MARGIN}",
+            "-D",
+            f"plate_thickness={DEFAULT_PLATE_THICKNESS}",
+            "--",
+            str(scad_dir / "pi_stack_fan_adapter.scad"),
+        ],
+        check=True,
+    )
 
     for fan_size in fan_sizes:
-        output_path = output_dir / "fan_walls" / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
+        output_path = (
+            output_dir / "fan_walls" / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        command = [
-            openscad,
-            "-o",
-            str(output_path),
-            "--export-format",
-            "binstl",
-            "-D",
-            "export_part=\"fan_wall\"",
-            "-D",
-            f"fan_size={fan_size}",
-            "-D",
-            "stack_edge_margin=15",
-            "--",
-            str(scad_path),
-        ]
-        subprocess.run(command, check=True)
+        subprocess.run(
+            [
+                openscad,
+                "-o",
+                str(output_path),
+                "--export-format",
+                "binstl",
+                "-D",
+                f"fan_size={fan_size}",
+                "--",
+                str(scad_dir / "fan_wall.scad"),
+            ],
+            check=True,
+        )
 
     preview_path = output_dir / "preview" / "pi_carrier_stack_preview.stl"
     preview_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +145,7 @@ def render_variants(
             "-D",
             "export_part=\"assembly\"",
             "-D",
-            "stack_edge_margin=15",
+            f"stack_edge_margin={DEFAULT_STACK_EDGE_MARGIN}",
             "--",
             str(scad_path),
         ],

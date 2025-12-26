@@ -1,0 +1,12 @@
+{
+  "id": "pi-cluster-stack-carriers-mispackaged",
+  "date": "2025-12-26",
+  "component": ".github/workflows/scad-to-stl.yml",
+  "rootCause": "The render helper reused pi_carrier_stack.scad for non-existent export_part targets, yielding assembly previews named like carrier STLs and never exporting the stack-ready pi_carrier.scad plates. Packaging then shipped the preview carrier_level files in carriers/ and omitted the real stack-mount carriers entirely.",
+  "resolution": "Render pi_carrier.scad with stack mounts for carriers, move carrier_level outputs to preview, and render fan adapters and walls from their dedicated SCAD sources so the stack artifact ships print-ready plates plus correctly placed previews.",
+  "references": [
+    "scripts/render_pi_cluster_variants.py",
+    "scripts/package_stl_artifacts.py",
+    ".github/workflows/scad-to-stl.yml"
+  ]
+}
