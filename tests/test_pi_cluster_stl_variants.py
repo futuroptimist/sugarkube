@@ -28,6 +28,8 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
 
     scad_stub = tmp_path / "pi_carrier_stack.scad"
     scad_stub.write_text("// stub scad", encoding="utf-8")
+    carrier_stub = scad_stub.parent / "pi_carrier.scad"
+    carrier_stub.write_text("// stub carrier", encoding="utf-8")
 
     output_dir = tmp_path / "stl" / "pi_cluster"
     calls: list[list[str]] = []
@@ -59,13 +61,14 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
 
     assert (
         len(calls)
-        == len(expected_modes)  # carriers per standoff mode
+        == 2 * len(expected_modes)  # stack carriers + carrier_level previews per standoff mode
         + len(single_render_parts)  # mode-agnostic parts
         + len(expected_fans)  # fan walls
-        + 1  # preview
+        + 1  # assembly preview
     )
 
     seen_carrier_parts: set[tuple[str, str]] = set()
+    seen_stack_carriers: set[str] = set()
     seen_single_parts: set[str] = set()
     seen_fans: set[str] = set()
     for args in calls:
@@ -78,11 +81,16 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
             continue
         if 'export_part="assembly"' in args:
             continue
+        mode_fragment = next((part for part in args if part.startswith('standoff_mode="')), None)
+        if mode_fragment and "include_stack_mounts=true" in args:
+            mode_name = mode_fragment.split("=")[1].strip('"')
+            seen_stack_carriers.add(mode_name)
+            continue
+
         part_fragment = next((part for part in args if part.startswith('export_part="')), None)
         assert part_fragment is not None
         part_name = part_fragment.split("=")[1].strip('"')
         if part_name == expected_carrier_part:
-            mode_fragment = next((part for part in args if part.startswith('standoff_mode="')), None)
             assert mode_fragment is not None
             mode_name = mode_fragment.split("=")[1].strip('"')
             assert mode_name in expected_modes
@@ -92,21 +100,22 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
             assert 'standoff_mode="' not in args
             seen_single_parts.add(part_name)
 
+    assert seen_stack_carriers == expected_modes
     assert seen_carrier_parts == {(expected_carrier_part, mode) for mode in expected_modes}
     assert seen_single_parts == single_render_parts
     assert seen_fans == expected_fans
 
-    generated = {
-        path.relative_to(output_dir).as_posix() for path in output_dir.rglob("*.stl")
-    }
+    generated = {path.relative_to(output_dir).as_posix() for path in output_dir.rglob("*.stl")}
     assert {
-        "carriers/printed/pi_carrier_stack_carrier_level_printed.stl",
-        "carriers/heatset/pi_carrier_stack_carrier_level_heatset.stl",
+        "carriers/printed/pi_carrier_stack_printed.stl",
+        "carriers/heatset/pi_carrier_stack_heatset.stl",
         "posts/pi_carrier_stack_post.stl",
         "fan_adapters/pi_carrier_stack_fan_adapter.stl",
         "fan_walls/pi_carrier_stack_fan_wall_fan80.stl",
         "fan_walls/pi_carrier_stack_fan_wall_fan92.stl",
         "fan_walls/pi_carrier_stack_fan_wall_fan120.stl",
+        "preview/pi_carrier_stack_carrier_level_printed.stl",
+        "preview/pi_carrier_stack_carrier_level_heatset.stl",
         "preview/pi_carrier_stack_preview.stl",
     }.issubset(generated)
 

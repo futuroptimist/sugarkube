@@ -59,27 +59,20 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
         raise PackagingError(f"STL directory not found: {stl_dir}")
 
     stack_dir = stl_dir / "pi_cluster"
+    preview_dir = stack_dir / "preview"
 
     artifacts = {
         "pi_cluster_stack": {
             "title": "Pi cluster stack STLs",
-            "intro": "Modular plates + posts + fan adapter plus fan-wall matrices.",
+            "intro": (
+                "Modular stack-ready carriers + posts + fan adapter plus "
+                "preview-level carrier slices."
+            ),
             "layout": {
                 "carriers": [
                     PI_CLUSTER_CAD_DIR / "pi_carrier_stack.scad",
                     PI_CLUSTER_CAD_DIR / "pi_carrier.scad",
                     PI_CLUSTER_CAD_DIR / "pi_dimensions.scad",
-                ],
-                "preview": [
-                    stack_dir
-                    / "carriers"
-                    / "printed"
-                    / "pi_carrier_stack_carrier_level_printed.stl",
-                    stack_dir
-                    / "carriers"
-                    / "heatset"
-                    / "pi_carrier_stack_carrier_level_heatset.stl",
-                    stack_dir / "preview" / "pi_carrier_stack_preview.stl",
                 ],
                 "posts": [stack_dir / "posts" / "pi_carrier_stack_post.stl"],
                 "fan_adapters": [
@@ -88,6 +81,11 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
                 "fan_walls": sorted(
                     (stack_dir / "fan_walls").glob("pi_carrier_stack_fan_wall_fan*.stl")
                 ),
+                "preview": [
+                    preview_dir / "pi_carrier_stack_preview.stl",
+                    preview_dir / "pi_carrier_stack_carrier_level_printed.stl",
+                    preview_dir / "pi_carrier_stack_carrier_level_heatset.stl",
+                ],
             },
             "docs": [
                 "docs/pi_cluster_stack.md",

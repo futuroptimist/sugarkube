@@ -93,8 +93,9 @@ than reimplementing its details.
   [`Build STL Artifacts` workflow](../.github/workflows/scad-to-stl.yml), which calls
   `scripts/render_pi_cluster_variants.py` to sweep the documented fan sizes and produce stack STLs.
   Download the grouped stack bundle named `stl-pi_cluster_stack-${GITHUB_SHA}`; it contains
-  stack-specific STLs organised as `printed/`, `heatset/`, `variants/`, plus `carriers/`, `posts/`,
-  and `preview/`. The legacy monorepo bundle `stl-${GITHUB_SHA}` remains available but the grouped
+  stack-specific STLs organised as `printed/`, `heatset/`, `variants/`, plus `carriers/` (real,
+  stack-ready carriers with mounts baked in), `posts/`, and `preview/` (carrier-level slices and the
+  full assembly). The legacy monorepo bundle `stl-${GITHUB_SHA}` remains available but the grouped
   stack artifact is preferred.
 
 ## Debugging / Diagnostics

@@ -1,0 +1,13 @@
+{
+  "id": "pi-cluster-stack-carrier-regression",
+  "date": "2025-12-26",
+  "component": "scad-to-stl workflow",
+  "rootCause": "pi_carrier_stack artifacts reused carrier_level previews as the only carrier outputs, so the stack bundle lacked the stack-mount-ready pi_carrier.scad outputs and mislabeled previews under carriers/",
+  "resolution": "Render stack-ready carriers directly from pi_carrier.scad with stack mounts enabled, relocate carrier_level slices into the preview folder, and update artifact packaging/tests to ship the corrected layout",
+  "references": [
+    ".github/workflows/scad-to-stl.yml",
+    "scripts/render_pi_cluster_variants.py",
+    "scripts/package_stl_artifacts.py",
+    "tests/test_pi_cluster_stl_variants.py"
+  ]
+}
