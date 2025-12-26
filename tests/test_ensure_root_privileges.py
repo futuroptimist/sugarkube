@@ -143,7 +143,7 @@ def test_ensure_root_privileges_skips_when_sudo_fails(monkeypatch: pytest.Monkey
 def test_ensure_root_privileges_xfails_when_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mark privilege gaps as xfail when the caller opts into that behaviour."""
+    """Mark privilege gaps as xfail when the caller opts into that behavior."""
 
     fake_run = _build_fake_run(
         sudo_path="/usr/bin/sudo",
@@ -166,6 +166,37 @@ def test_ensure_root_privileges_xfails_when_requested(
     assert "permission denied" in str(excinfo.value)
     assert ["unshare", "-n", "true"] in fake_run.commands
     assert ["/usr/bin/sudo", "-n", "unshare", "-n", "true"] in fake_run.commands
+
+
+def test_ensure_root_privileges_cached_failures_respect_xfail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reuse cached failure reasons while honoring xfail preference."""
+
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str]) -> SimpleNamespace:
+        commands.append(cmd)
+        return SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
+
+    monkeypatch.setenv("SUGARKUBE_NETNS_FALLBACK", "xfail")
+    monkeypatch.setattr(conftest, "require_tools", lambda tools: None)
+    monkeypatch.setattr(conftest, "_run_with_sudo_fallback", fake_run)
+    monkeypatch.setattr(conftest.uuid, "uuid4", lambda: SimpleNamespace(hex="cached-xfail"))
+
+    with pytest.raises(pytest.xfail.Exception) as first_excinfo:
+        conftest.ensure_root_privileges()
+
+    first_probe_count = len(commands)
+    commands.clear()
+
+    with pytest.raises(pytest.xfail.Exception) as cached_excinfo:
+        conftest.ensure_root_privileges()
+
+    assert "permission denied" in str(first_excinfo.value)
+    assert "permission denied" in str(cached_excinfo.value)
+    assert first_probe_count == 1
+    assert commands == []
 
 
 def test_ensure_root_privileges_skips_when_sudo_unavailable(

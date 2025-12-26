@@ -280,7 +280,7 @@ def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
 
 
 def _netns_fallback_mode() -> str:
-    """Return the configured fallback behaviour for missing netns privileges."""
+    """Return the configured fallback behavior for missing netns privileges."""
 
     return os.environ.get("SUGARKUBE_NETNS_FALLBACK", "").strip().lower()
 
