@@ -206,7 +206,7 @@ module _simple_roof_wedge(
             translate([x_edge + dx_in, y_edge + dy_in, (z_roof - z_fudge) + world_z_offset])
                 scale([wedge_tune_scale(), wedge_tune_scale(), wedge_tune_scale()])
                     _wedge_orient_for_slot(theta)
-                        // NOTE: linear_extrude(..., center=true) is symmetric about its mid-plane. 
+                        // NOTE: linear_extrude(..., center=true) is symmetric about its mid-plane.
                         linear_extrude(height = wedge_width, center = true)
                             polygon(points = [
                                 [0, 0],
