@@ -125,7 +125,7 @@ module _slot_cutout_rect(
 
 // NEW: slot-footprint prism (infinite-ish Z) used to CLIP twisted cutters.
 // This prevents “feature_twist” cutters from biting through the post’s OUTER wall.
-// intersection() keeps only overlapping volume. 
+// intersection() keeps only overlapping volume.
 module _slot_xy_guard_prism(
     plate_len,
     plate_wid,
