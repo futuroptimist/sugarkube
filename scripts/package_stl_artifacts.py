@@ -8,13 +8,17 @@ import sys
 from pathlib import Path
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PI_CLUSTER_CAD_DIR = REPO_ROOT / "cad" / "pi_cluster"
+
+
 class PackagingError(RuntimeError):
     """Raised when expected STL inputs are missing."""
 
 
 def _ensure_exists(path: Path) -> Path:
     if not path.exists():
-        raise PackagingError(f"Missing required STL: {path}")
+        raise PackagingError(f"Missing required artifact input: {path}")
     return path
 
 
@@ -66,8 +70,9 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
             ),
             "layout": {
                 "carriers": [
-                    stack_dir / "carriers" / "printed" / "pi_carrier_stack_printed.stl",
-                    stack_dir / "carriers" / "heatset" / "pi_carrier_stack_heatset.stl",
+                    PI_CLUSTER_CAD_DIR / "pi_carrier_stack.scad",
+                    PI_CLUSTER_CAD_DIR / "pi_carrier.scad",
+                    PI_CLUSTER_CAD_DIR / "pi_dimensions.scad",
                 ],
                 "posts": [stack_dir / "posts" / "pi_carrier_stack_post.stl"],
                 "fan_adapters": [

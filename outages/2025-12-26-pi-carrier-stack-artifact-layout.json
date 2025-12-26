@@ -1,0 +1,12 @@
+{
+  "id": "pi-carrier-stack-artifact-layout",
+  "date": "2025-12-26",
+  "component": "scripts/package_stl_artifacts.py",
+  "rootCause": "The STL packaging step copied carrier-level STLs into carriers/ and never staged the stack-enabled pi_carrier SCAD source, so the pi_cluster_stack artifact shipped preview-only meshes where the carrier source was expected.",
+  "resolution": "Ship the stack SCAD sources in carriers/, move carrier-level STLs into preview/, and update the packaging tests/README generation to enforce the corrected layout.",
+  "references": [
+    "scripts/package_stl_artifacts.py",
+    "tests/test_package_stl_artifacts.py",
+    ".github/workflows/scad-to-stl.yml"
+  ]
+}
