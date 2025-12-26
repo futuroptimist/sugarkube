@@ -11,17 +11,19 @@ FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "avahi_stub"
 
 
 def ensure_avahi_stub(tmp_path: Path, *, base_env: dict[str, str] | None = None) -> dict[str, str]:
-    """Expose the bundled Avahi stub when the real CLI tools are absent.
+    """Expose the bundled Avahi stub when the real CLI tools are absent or forced.
 
-    The mdns_ready end-to-end suite documents a future plan to "provide an Avahi stub or fixture
-    that guarantees local discovery succeeds." This helper activates the existing stub binaries
-    so tests no longer skip when the host lacks Avahi utilities.
+    The mdns_ready end-to-end suite asserts discovery even when namespaces are simulated.
+    This helper activates the stub binaries when the host lacks Avahi utilities, lacks
+    network namespace privileges, or when the stubs are explicitly requested via
+    SUGARKUBE_FORCE_AVAHI_STUBS.
     """
 
     tools = ("avahi-browse", "avahi-publish", "avahi-resolve", "avahi-resolve-host-name")
     env = base_env or os.environ
+    force_stub = env.get("SUGARKUBE_FORCE_AVAHI_STUBS") == "1"
 
-    if all(shutil.which(tool, path=env.get("PATH")) for tool in tools):
+    if not force_stub and all(shutil.which(tool, path=env.get("PATH")) for tool in tools):
         # Nothing to do when the real tools are already available.
         return {}
 
