@@ -68,14 +68,22 @@ def test_stack_carrier_geometry_exceeds_flat_carrier(tmp_path: Path) -> None:
     )
     assert base.returncode == 0, base.stderr
 
-    stack_output = tmp_path / "pi_carrier_stack_carrier_level_heatset.stl"
+    stack_output = tmp_path / "pi_carrier_stack_mounts_heatset.stl"
     stack = _render(
-        STACK_SCAD,
+        BASE_SCAD,
         stack_output,
         "-D",
-        'export_part="carrier_level"',
+        "include_stack_mounts=true",
         "-D",
         'standoff_mode="heatset"',
+        "-D",
+        "plate_thickness=3",
+        "-D",
+        "stack_edge_margin=15",
+        "-D",
+        "stack_pocket_d=9",
+        "-D",
+        "stack_pocket_depth=1.2",
     )
     assert stack.returncode == 0, stack.stderr
 
