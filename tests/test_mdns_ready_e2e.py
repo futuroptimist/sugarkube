@@ -165,32 +165,82 @@ def netns_setup():
     yield from iter_netns_setup()
 
 
-def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
-    """Test publishing mDNS service in one namespace and browsing from another.
+@pytest.fixture
+def stubbed_netns_setup(monkeypatch, tmp_path_factory):
+    monkeypatch.setenv("SUGARKUBE_ALLOW_NETNS_STUBS", "1")
+    monkeypatch.setenv("SUGARKUBE_FORCE_AVAHI_STUBS", "1")
 
-    This test:
-    1. Publishes _k3s-sugar-dev._tcp in namespace 1
-    2. Browses for the service from namespace 2
-    3. Verifies the service is discoverable
+    env_updates = ensure_avahi_stub(tmp_path_factory.mktemp("avahi_stub_force"))
+    for key, value in env_updates.items():
+        monkeypatch.setenv(key, value)
 
-    Note: This test requires multicast routing between namespaces,
-    which may not work in all environments. The test will be skipped
-    if mDNS multicast doesn't cross namespace boundaries.
-    """
-    if netns_setup.get("stubbed"):
-        # TODO: Provide multicast simulation coverage when namespaces are stubbed.
-        # Root cause: The stubbed namespace path disables mDNS multicast assertions
-        #   because no real network namespace exists to carry the traffic.
-        # Estimated fix: Add an Avahi stub that can emulate cross-namespace multicast
-        #   responses so the discovery workflow remains covered without sudo.
-        pytest.skip("Network namespace setup stubbed; multicast coverage unavailable")
+    yield from iter_netns_setup()
 
-    ns1 = netns_setup["ns1"]
-    # Cross-namespace discovery is tested within the same namespace due to multicast limitations
 
+def _publish_and_browse_mdns_service(netns_setup):
     service_name = "k3s-test-e2e"
     service_type = "_k3s-sugar-dev._tcp"
     service_port = 6443
+
+    if netns_setup.get("stubbed"):
+        # Use the bundled Avahi stub to guarantee discovery succeeds without namespaces.
+        env = os.environ.copy()
+        service_file = None
+
+        if env.get("AVAHI_STUB_DIR"):
+            services_dir = Path(env["AVAHI_STUB_DIR"]) / "services"
+            services_dir.mkdir(parents=True, exist_ok=True)
+            service_file = services_dir / f"{service_name}.service"
+
+        publish_proc = subprocess.Popen(
+            [
+                "avahi-publish",
+                "-s",
+                service_name,
+                service_type,
+                str(service_port),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+
+        try:
+            time.sleep(1)
+
+            browse_result = subprocess.run(
+                [
+                    "avahi-browse",
+                    "-t",
+                    "-r",
+                    service_type,
+                    "-p",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=env,
+            )
+
+            assert browse_result.returncode == 0, browse_result.stderr
+            assert service_name in browse_result.stdout, browse_result.stdout
+            assert service_type in browse_result.stdout, browse_result.stdout
+        finally:
+            publish_proc.terminate()
+            try:
+                publish_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                publish_proc.kill()
+                publish_proc.wait(timeout=1)
+
+            if service_file and service_file.exists():
+                service_file.unlink()
+
+        return
+
+    ns1 = netns_setup["ns1"]
+    # Cross-namespace discovery is tested within the same namespace due to multicast limitations
 
     # Start avahi-publish in namespace 1
     publish_proc = subprocess.Popen(
@@ -257,6 +307,29 @@ def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
         except subprocess.TimeoutExpired:
             publish_proc.kill()
             publish_proc.wait(timeout=1)
+
+
+def test_mdns_publish_and_browse_across_namespaces(netns_setup, tmp_path):
+    """Test publishing mDNS service in one namespace and browsing from another.
+
+    This test:
+    1. Publishes _k3s-sugar-dev._tcp in namespace 1
+    2. Browses for the service from namespace 2
+    3. Verifies the service is discoverable
+
+    Note: This test requires multicast routing between namespaces,
+    which may not work in all environments. The test will be skipped
+    if mDNS multicast doesn't cross namespace boundaries.
+    """
+    _publish_and_browse_mdns_service(netns_setup)
+
+
+def test_mdns_publish_and_browse_with_stubbed_namespaces(stubbed_netns_setup):
+    """Ensure the Avahi stub provides coverage when namespaces are simulated."""
+
+    assert stubbed_netns_setup.get("stubbed"), "Stubbed namespace setup not activated"
+
+    _publish_and_browse_mdns_service(stubbed_netns_setup)
 
 
 def test_mdns_ready_with_avahi_restart_simulation(tmp_path):
