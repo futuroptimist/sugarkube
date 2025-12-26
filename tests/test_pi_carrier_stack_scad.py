@@ -68,7 +68,7 @@ def test_pi_carrier_stack_includes_local_dependencies() -> None:
 
 
 def test_stack_mount_hook_present() -> None:
-    """Stack carriers should expose the locating pocket hooks."""
+    """Stack carriers should expose the stack mount hook variables."""
 
     source = PI_CARRIER_PATH.read_text(encoding="utf-8")
     assert "include_stack_mounts" in source
@@ -98,14 +98,27 @@ def test_stack_components_exist() -> None:
 
 
 def test_stack_mount_pockets_on_both_faces() -> None:
-    """Carrier pockets should be cut from the top and bottom faces for symmetry."""
+    """Stack mounts should be simple through-holes (no locating pockets / recesses)."""
 
     source = PI_CARRIER_PATH.read_text(encoding="utf-8")
-    assert "plate_thickness - stack_pocket_depth" in source
-    assert re.search(
-        r"translate\(\[pos\[0\], pos\[1\], -0\.01\]\)\s*cylinder\(h = stack_pocket_depth \+ 0\.02",
+
+    # Pockets were intentionally removed; ensure the old pocket cut patterns are absent.
+    assert "plate_thickness - stack_pocket_depth" not in source
+    assert not re.search(
+        r"cylinder\(h\s*=\s*stack_pocket_depth\s*\+\s*0\.02",
         source,
-    ), "Bottom pocket should mirror the top pocket when include_stack_mounts=true"
+    ), "stack_pocket_depth pocket cylinders should not be emitted"
+    assert not re.search(
+        r"r\s*=\s*stack_pocket_d\s*/\s*2",
+        source,
+    ), "stack_pocket_d pocket radii should not be used for emitted geometry"
+
+    # Ensure we still cut the clamp through-holes when stack mounts are enabled.
+    assert re.search(
+        r"if\s*\(\s*include_stack_mounts_local\s*\)\s*\{.*?r\s*=\s*stack_bolt_d\s*/\s*2.*?\}",
+        source,
+        flags=re.DOTALL,
+    ), "stack mount clamp holes should be emitted (stack_bolt_d / 2)"
 
 
 def test_stack_post_slot_clearance_and_leadin() -> None:

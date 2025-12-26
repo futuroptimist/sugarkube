@@ -84,10 +84,16 @@ port_clearance = is_undef(port_clearance) ? 6 : port_clearance;
 // and defaults to stack_edge_margin for both modes.
 edge_margin = is_undef(edge_margin) ? stack_edge_margin : edge_margin;
 
+// (Pocket-depth overlap assertion kept even though pockets are no longer emitted;
+// leaving it avoids changing the variable contract / echo schema.)
 assert(
     !include_stack_mounts || 2 * stack_pocket_depth < plate_thickness,
     "stack_pocket_depth must be < half of plate_thickness so symmetric pockets do not overlap"
 );
+
+// Small epsilon to avoid coplanar faces (preview z-fighting).
+// General OpenSCAD convention: slightly extend subtractors past the surface.
+z_fight_eps = 0.02;
 
 // ---------- Helper functions ----------
 function rot2d(v, ang) = [
@@ -182,20 +188,24 @@ module standoff(pos=[0,0])
         cylinder(h=standoff_height, r=standoff_diam/2, $fn=60);
 
         if (variation == "blind") {
-            translate([0,0, standoff_height - insert_pocket_depth])
-                cylinder(h=insert_pocket_depth, r=hole_diam/2, $fn=32);
-            translate([0,0, standoff_height - insert_pocket_depth])
-                cylinder(h=lead_chamfer,
+            // Extend the pocket slightly past the top face to avoid coplanar faces (preview z-fighting).
+            translate([0,0, standoff_height - insert_pocket_depth - z_fight_eps])
+                cylinder(h=insert_pocket_depth + 2*z_fight_eps, r=hole_diam/2, $fn=32);
+
+            // Also extend the chamfer a touch to avoid coincident boundaries in preview.
+            translate([0,0, standoff_height - insert_pocket_depth - z_fight_eps])
+                cylinder(h=lead_chamfer + z_fight_eps,
                          r1=hole_diam/2 + lead_chamfer,
                          r2=hole_diam/2, $fn=32);
         }
         else if (variation == "through") {
-            translate([0,0,-0.01])
-                cylinder(h=standoff_height + 0.02, r=screw_clearance_diam/2, $fn=30);
+            translate([0,0,-z_fight_eps])
+                cylinder(h=standoff_height + 2*z_fight_eps, r=screw_clearance_diam/2, $fn=30);
         }
         else if (variation == "nut") {
-            translate([0,0,-0.01])
-                cylinder(h=standoff_height + 0.02, r=screw_clearance_diam/2, $fn=30);
+            translate([0,0,-z_fight_eps])
+                cylinder(h=standoff_height + 2*z_fight_eps, r=screw_clearance_diam/2, $fn=30);
+
             translate([0,0,-nut_thick])
                 cylinder(h=nut_thick, r=nut_flat/(2*cos(30)), $fn=6);
         }
@@ -256,14 +266,10 @@ module base_plate(
         }
 
         if (include_stack_mounts_local) {
+            // Stack clamp holes ONLY (no locating pockets / recesses).
             for (pos = stack_mount_positions) {
                 translate([pos[0], pos[1], -0.01])
                     cylinder(h = plate_thickness + 0.02, r = stack_bolt_d / 2, $fn = 60);
-
-                translate([pos[0], pos[1], plate_thickness - stack_pocket_depth])
-                    cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
-                translate([pos[0], pos[1], -0.01])
-                    cylinder(h = stack_pocket_depth + 0.02, r = stack_pocket_d / 2, $fn = 70);
             }
         }
     }

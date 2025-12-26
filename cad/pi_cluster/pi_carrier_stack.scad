@@ -1,3 +1,4 @@
+// cad/pi_cluster/pi_carrier_stack.scad
 // STL artifacts + build docs:
 // - Spec: docs/pi_cluster_stack.md
 // - CI workflow: https://github.com/futuroptimist/sugarkube/actions/workflows/scad-to-stl.yml
@@ -21,7 +22,12 @@
 //     -D 'export_part="post"' `
 //     -- cad/pi_cluster/pi_carrier_stack.scad
 
-// Force imports to avoid auto-rendering the base carrier from within this wrapper.
+// Thin wrapper only:
+// - This file must not introduce any novel geometry.
+// - It must only arrange geometry from:
+//   - pi_carrier.scad (carrier plates)
+//   - pi_stack_post.scad (corner posts)
+
 _pi_carrier_auto_render = false;
 
 include <./pi_dimensions.scad>;
@@ -46,11 +52,11 @@ carrier_level = _cli_alias_carrier_level;
 post = _cli_alias_post;
 assembly = _cli_alias_assembly;
 
-export_part_raw = export_part;
 export_part_resolved =
-    is_undef(export_part_raw)
+    is_undef(export_part)
         ? export_part_assembly
-        : (is_string(export_part_raw) ? export_part_raw : str(export_part_raw));
+        : (is_string(export_part) ? export_part : str(export_part));
+
 emit_dimension_report = is_undef(emit_dimension_report) ? false : emit_dimension_report;
 emit_geometry_report = is_undef(emit_geometry_report) ? false : emit_geometry_report;
 
@@ -65,8 +71,6 @@ fan_size = is_undef(fan_size) ? 120 : fan_size;
 stack_bolt_d_cfg = is_undef(stack_bolt_d) ? 3.4 : stack_bolt_d;
 
 // Stack-specific defaults (wrapper-local config).
-// IMPORTANT: Do not "capture" possibly-undefined vars by reading them; that triggers warnings.
-// Use the standard is_undef(var) ? default : var pattern instead.
 stack_plate_thickness_cfg =
     is_undef(stack_plate_thickness) ? 3.0 : stack_plate_thickness;
 plate_thickness_cfg =
@@ -77,6 +81,7 @@ stack_edge_margin_cfg =
 edge_margin_cfg =
     is_undef(edge_margin) ? stack_edge_margin_cfg : edge_margin;
 
+// Must match pi_stack_post / carrier stack-mount geometry
 stack_pocket_d_cfg =
     is_undef(stack_pocket_d) ? 9 : stack_pocket_d;
 
@@ -102,11 +107,39 @@ post_leadin_depth_cfg =
 post_leadin_extra_clearance_cfg =
     is_undef(post_leadin_extra_clearance) ? 0.4 : post_leadin_extra_clearance;
 
+// Mixed-corner feature orientation override.
+// Default: 180° (flip wedge/tetra "opening" direction) ONLY for mixed-sign corners.
+mixed_corner_feature_twist_deg_cfg =
+    is_undef(mixed_corner_feature_twist_deg) ? 180 : mixed_corner_feature_twist_deg;
+
 // Import base carrier module / helpers.
 include <./pi_carrier.scad>;
 
-// Import the post module WITHOUT executing its top-level auto-render block.
+// Import the post module as a library.
+// `use` imports modules + functions but does NOT execute top-level assignments.
 use <./pi_stack_post.scad>;
+
+// -----------------------------------------------------------------------------
+// Preview stabilization:
+//
+// Some OpenSCAD view modes (and deep difference() trees) can display internal CSG
+// cutters/subtractions in a way that looks like "duplicate/corrupted" geometry.
+// Force CGAL mesh generation for interactive preview only.
+//
+// - In preview (F5): $preview is true → optional render() runs.
+// - In render/export (F6): $preview is false → render() is skipped (no perf hit).
+//
+// You can disable this by setting `preview_cgal=false` (CLI -D or customizer).
+preview_cgal = is_undef(preview_cgal) ? true : preview_cgal;
+
+module _maybe_render(convexity = 10) {
+    if ($preview && preview_cgal)
+        render(convexity = convexity) children();
+    else
+        children();
+}
+// -----------------------------------------------------------------------------
+
 
 // Compute carrier dimensions for centering and stack-mount placement.
 // Plate dims are invariant to stack mounts, so one call with include_stack_mounts=true is fine.
@@ -138,61 +171,76 @@ stack_mount_positions_resolved = carrier_stack_mount_positions(carrier_dims_layo
 level_height = z_gap_clear + plate_thickness_cfg;
 stack_height = (levels - 1) * level_height + plate_thickness_cfg;
 
-module _carrier(level = 0) {
-    // Preserve existing centering + spacing:
-    translate([-plate_len / 2, -plate_wid / 2, level * level_height])
-        // Inject bolt diameter into pi_carrier without touching global stack_bolt_d.
-        let(stack_bolt_d = stack_bolt_d_cfg)
-            pi_carrier(
-                // Force stack mounts ON
-                include_stack_mounts = true,
+// pi_stack_post currently wraps its geometry in rotate([0,0,45]) for internal math.
+// Cancel that *at the call site* so the assembled stack stays in the carrier frame.
+// This is a pure transform of imported geometry (no new geometry).
+_post_cancel_z_rot = -45;
 
-                // Ensure stack-ready plate + pockets
+module _carrier(level = 0) {
+    translate([-plate_len / 2, -plate_wid / 2, level * level_height])
+        let(stack_bolt_d = stack_bolt_d_cfg)
+            _maybe_render(convexity = 10)
+                pi_carrier(
+                    include_stack_mounts = true,
+                    plate_thickness = plate_thickness_cfg,
+                    stack_edge_margin = stack_edge_margin_cfg,
+                    edge_margin = edge_margin_cfg,
+                    stack_pocket_d = stack_pocket_d_cfg,
+                    stack_pocket_depth = stack_pocket_depth_cfg,
+                    emit_geometry_report = emit_geometry_report
+                );
+}
+
+module _post_core(mount_pos) {
+    // Decide per-corner feature twist:
+    // - same-sign corners (++, --): leave at 0°
+    // - mixed-sign corners (+-, -+): apply mixed_corner_feature_twist_deg_cfg (default 180°)
+    sx = (mount_pos[0] < plate_len / 2) ? -1 : 1;
+    sy = (mount_pos[1] < plate_wid / 2) ? -1 : 1;
+    post_feature_twist_deg = (sx != sy) ? mixed_corner_feature_twist_deg_cfg : 0;
+
+    // Pure import + transform of pi_stack_post geometry.
+    _maybe_render(convexity = 20)
+        rotate([0, 0, _post_cancel_z_rot])
+            pi_stack_post(
+                carrier_dims = carrier_dims_layout,
+                mount_pos = mount_pos,
+                plate_len = plate_len,
+                plate_wid = plate_wid,
+
+                levels = levels,
+                z_gap_clear = z_gap_clear,
                 plate_thickness = plate_thickness_cfg,
-                stack_edge_margin = stack_edge_margin_cfg,
+
                 edge_margin = edge_margin_cfg,
+                stack_edge_margin = stack_edge_margin_cfg,
                 stack_pocket_d = stack_pocket_d_cfg,
                 stack_pocket_depth = stack_pocket_depth_cfg,
 
-                emit_geometry_report = emit_geometry_report
+                stack_bolt_d = stack_bolt_d_cfg,
+
+                post_body_d = post_body_d_cfg,
+                post_overhang = post_overhang_cfg,
+                fit_clearance = post_fit_clearance_cfg,
+                leadin_depth = post_leadin_depth_cfg,
+                leadin_extra_clearance = post_leadin_extra_clearance_cfg,
+
+                // per-instance feature orientation control
+                feature_twist_deg = post_feature_twist_deg,
+
+                // Never emit post report from the stack wrapper.
+                emit_post_report = false
             );
 }
 
 module _post_at_mount(mount_pos) {
     // Place the post so its bolt axis lands on the carrier's stack-mount center.
-    // Posts are authored in local space with bolt axis at [0,0], so this is just a translation.
     translate([
         -plate_len / 2 + mount_pos[0],
         -plate_wid / 2 + mount_pos[1],
         0
     ])
-        pi_stack_post(
-            carrier_dims = carrier_dims_layout,
-            mount_pos = mount_pos,
-            plate_len = plate_len,
-            plate_wid = plate_wid,
-
-            levels = levels,
-            z_gap_clear = z_gap_clear,
-            plate_thickness = plate_thickness_cfg,
-
-            edge_margin = edge_margin_cfg,
-            stack_edge_margin = stack_edge_margin_cfg,
-            stack_pocket_d = stack_pocket_d_cfg,
-            stack_pocket_depth = stack_pocket_depth_cfg,
-
-            // Must match the carrier stack mount through-holes
-            stack_bolt_d = stack_bolt_d_cfg,
-
-            post_body_d = post_body_d_cfg,
-            post_overhang = post_overhang_cfg,
-            fit_clearance = post_fit_clearance_cfg,
-            leadin_depth = post_leadin_depth_cfg,
-            leadin_extra_clearance = post_leadin_extra_clearance_cfg,
-
-            // Never emit post report from the stack wrapper.
-            emit_post_report = false
-        );
+        _post_core(mount_pos);
 }
 
 module _posts() {
@@ -203,7 +251,7 @@ module _posts() {
 }
 
 module pi_carrier_stack_preview_only() {
-    // 4 full-height posts clamp the full stack.
+    // Posts first (clamp the full stack).
     _posts();
 
     // Carriers per level.
@@ -219,8 +267,6 @@ if (emit_dimension_report) {
         column_spacing = column_spacing,
         stack_height = stack_height,
         export_part = export_part_resolved,
-
-        // Useful in logs:
         stack_bolt_d = stack_bolt_d_cfg
     );
 }
@@ -232,35 +278,11 @@ if (emit_dimension_report) {
 if (export_part_resolved == export_part_carrier_level) {
     _carrier(0);
 } else if (export_part_resolved == export_part_post) {
-    // Export a single post at the bottom-left mount position, centered around the global origin.
-    // (Convenient for printing: slice once, print 4 copies.)
+    // Export a single post at the bottom-left mount position.
+    // Keep consistent with historical behavior: center near origin for slicing convenience.
     p0 = stack_mount_positions_resolved[0];
     translate([-p0[0], -p0[1], 0])
-        pi_stack_post(
-            carrier_dims = carrier_dims_layout,
-            mount_pos = p0,
-            plate_len = plate_len,
-            plate_wid = plate_wid,
-
-            levels = levels,
-            z_gap_clear = z_gap_clear,
-            plate_thickness = plate_thickness_cfg,
-
-            edge_margin = edge_margin_cfg,
-            stack_edge_margin = stack_edge_margin_cfg,
-            stack_pocket_d = stack_pocket_d_cfg,
-            stack_pocket_depth = stack_pocket_depth_cfg,
-
-            stack_bolt_d = stack_bolt_d_cfg,
-
-            post_body_d = post_body_d_cfg,
-            post_overhang = post_overhang_cfg,
-            fit_clearance = post_fit_clearance_cfg,
-            leadin_depth = post_leadin_depth_cfg,
-            leadin_extra_clearance = post_leadin_extra_clearance_cfg,
-
-            emit_post_report = emit_geometry_report
-        );
+        _post_core(p0);
 } else {
     pi_carrier_stack_preview_only();
 }
