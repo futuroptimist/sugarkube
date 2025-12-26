@@ -26,8 +26,12 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
         SCRIPT_PATH.exists()
     ), "Add scripts/render_pi_cluster_variants.py so CI can render the documented STL matrix"
 
-    scad_stub = tmp_path / "pi_carrier_stack.scad"
-    scad_stub.write_text("// stub scad", encoding="utf-8")
+    scad_dir = tmp_path / "cad" / "pi_cluster"
+    scad_dir.mkdir(parents=True)
+    scad_stub = scad_dir / "pi_carrier_stack.scad"
+    scad_stub.write_text("// stack stub", encoding="utf-8")
+    for name in ("pi_carrier.scad", "pi_stack_fan_adapter.scad", "fan_wall.scad"):
+        (scad_dir / name).write_text(f"// {name}", encoding="utf-8")
 
     output_dir = tmp_path / "stl" / "pi_cluster"
     calls: list[list[str]] = []
@@ -53,55 +57,85 @@ def test_render_pi_cluster_variants_matrix(tmp_path: Path, monkeypatch: pytest.M
     )
 
     expected_modes = {"printed", "heatset"}
-    single_render_parts = {"post", "fan_adapter"}
-    expected_carrier_part = "carrier_level"
     expected_fans = {"80", "92", "120"}
 
     assert (
         len(calls)
-        == len(expected_modes)  # carriers per standoff mode
-        + len(single_render_parts)  # mode-agnostic parts
+        == 2 * len(expected_modes)  # carriers + carrier preview per mode
+        + 1  # posts
+        + 1  # fan adapter
         + len(expected_fans)  # fan walls
-        + 1  # preview
+        + 1  # assembly preview
     )
 
-    seen_carrier_parts: set[tuple[str, str]] = set()
-    seen_single_parts: set[str] = set()
+    seen_carriers: set[str] = set()
+    seen_previews: set[str] = set()
     seen_fans: set[str] = set()
+    saw_post = False
+    saw_adapter = False
+    saw_preview = False
     for args in calls:
         assert "--export-format" in args
         assert "binstl" in args
-        if 'export_part="fan_wall"' in args:
-            fan_fragment = next((part for part in args if part.startswith("fan_size=")), None)
+        target_scad = Path(args[-1])
+        if target_scad.name == "pi_carrier.scad":
+            mode_fragment = next(
+                (part for part in args if part.startswith('standoff_mode="')),
+                None,
+            )
+            assert mode_fragment is not None
+            seen_carriers.add(mode_fragment.split("=")[1].strip('"'))
+            assert "include_stack_mounts=true" in args
+            continue
+        if target_scad.name == "pi_carrier_stack.scad":
+            part_fragment = next(
+                (part for part in args if part.startswith('export_part="')),
+                None,
+            )
+            assert part_fragment is not None
+            part_name = part_fragment.split("=")[1].strip('"')
+            if part_name == "carrier_level":
+                mode_fragment = next(
+                    (part for part in args if part.startswith('standoff_mode="')),
+                    None,
+                )
+                assert mode_fragment is not None
+                seen_previews.add(mode_fragment.split("=")[1].strip('"'))
+            else:
+                assert part_name == "post" or part_name == "assembly"
+                if part_name == "post":
+                    saw_post = True
+                if part_name == "assembly":
+                    saw_preview = True
+            continue
+        if target_scad.name == "pi_stack_fan_adapter.scad":
+            saw_adapter = True
+            continue
+        if target_scad.name == "fan_wall.scad":
+            fan_fragment = next(
+                (part for part in args if part.startswith("fan_size=")),
+                None,
+            )
             assert fan_fragment is not None
             seen_fans.add(fan_fragment.split("=")[1])
             continue
-        if 'export_part="assembly"' in args:
-            continue
-        part_fragment = next((part for part in args if part.startswith('export_part="')), None)
-        assert part_fragment is not None
-        part_name = part_fragment.split("=")[1].strip('"')
-        if part_name == expected_carrier_part:
-            mode_fragment = next((part for part in args if part.startswith('standoff_mode="')), None)
-            assert mode_fragment is not None
-            mode_name = mode_fragment.split("=")[1].strip('"')
-            assert mode_name in expected_modes
-            seen_carrier_parts.add((part_name, mode_name))
-        else:
-            assert part_name in single_render_parts
-            assert 'standoff_mode="' not in args
-            seen_single_parts.add(part_name)
+        pytest.fail(f"Unexpected render command: {args}")
 
-    assert seen_carrier_parts == {(expected_carrier_part, mode) for mode in expected_modes}
-    assert seen_single_parts == single_render_parts
+    assert seen_carriers == expected_modes
+    assert seen_previews == expected_modes
+    assert saw_post
+    assert saw_adapter
+    assert saw_preview
     assert seen_fans == expected_fans
 
     generated = {
         path.relative_to(output_dir).as_posix() for path in output_dir.rglob("*.stl")
     }
     assert {
-        "carriers/printed/pi_carrier_stack_carrier_level_printed.stl",
-        "carriers/heatset/pi_carrier_stack_carrier_level_heatset.stl",
+        "carriers/pi_carrier_stack_printed.stl",
+        "carriers/pi_carrier_stack_heatset.stl",
+        "preview/pi_carrier_stack_carrier_level_printed.stl",
+        "preview/pi_carrier_stack_carrier_level_heatset.stl",
         "posts/pi_carrier_stack_post.stl",
         "fan_adapters/pi_carrier_stack_fan_adapter.stl",
         "fan_walls/pi_carrier_stack_fan_wall_fan80.stl",

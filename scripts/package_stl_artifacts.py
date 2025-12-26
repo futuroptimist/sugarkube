@@ -62,14 +62,8 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
             "intro": "Modular plates + posts + fan adapter plus fan-wall matrices.",
             "layout": {
                 "carriers": [
-                    stack_dir
-                    / "carriers"
-                    / "printed"
-                    / "pi_carrier_stack_carrier_level_printed.stl",
-                    stack_dir
-                    / "carriers"
-                    / "heatset"
-                    / "pi_carrier_stack_carrier_level_heatset.stl",
+                    stack_dir / "carriers" / "pi_carrier_stack_printed.stl",
+                    stack_dir / "carriers" / "pi_carrier_stack_heatset.stl",
                 ],
                 "posts": [stack_dir / "posts" / "pi_carrier_stack_post.stl"],
                 "fan_adapters": [
@@ -78,7 +72,15 @@ def package_stl_artifacts(*, stl_dir: Path, out_dir: Path) -> None:
                 "fan_walls": sorted(
                     (stack_dir / "fan_walls").glob("pi_carrier_stack_fan_wall_fan*.stl")
                 ),
-                "preview": [stack_dir / "preview" / "pi_carrier_stack_preview.stl"],
+                "preview": [
+                    stack_dir
+                    / "preview"
+                    / "pi_carrier_stack_carrier_level_printed.stl",
+                    stack_dir
+                    / "preview"
+                    / "pi_carrier_stack_carrier_level_heatset.stl",
+                    stack_dir / "preview" / "pi_carrier_stack_preview.stl",
+                ],
             },
             "docs": [
                 "docs/pi_cluster_stack.md",
@@ -163,7 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--out-dir",
         type=Path,
         default=Path("dist/stl_artifacts"),
-        help="Output directory where grouped artifacts will be staged (default: dist/stl_artifacts).",
+        help=(
+            "Output directory where grouped artifacts will be staged "
+            "(default: dist/stl_artifacts)."
+        ),
     )
     return parser
 
