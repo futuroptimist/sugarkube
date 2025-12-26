@@ -92,7 +92,7 @@ assert(
 );
 
 // Small epsilon to avoid coplanar faces (preview z-fighting).
-// General OpenSCAD convention: slightly extend subtractors past the surface. :contentReference[oaicite:1]{index=1}
+// General OpenSCAD convention: slightly extend subtractors past the surface.
 z_fight_eps = 0.02;
 
 // ---------- Helper functions ----------

@@ -36,7 +36,7 @@
 //   The geometry is preserved exactly as currently dialed in.
 
 // IMPORTANT (library use):
-// `use` imports modules + functions but does NOT import global variables. :contentReference[oaicite:0]{index=0}
+// `use` imports modules + functions but does NOT import global variables.
 _pi_carrier_auto_render = false;
 include <./pi_carrier.scad>; // imports carrier_dimensions() helpers
 
