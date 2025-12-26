@@ -18,8 +18,6 @@ def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> Non
     stack_dir = stl_dir / "pi_cluster"
 
     for name in [
-        stack_dir / "carriers" / "printed" / "pi_carrier_stack_printed.stl",
-        stack_dir / "carriers" / "heatset" / "pi_carrier_stack_heatset.stl",
         stack_dir / "posts" / "pi_carrier_stack_post.stl",
         stack_dir / "fan_adapters" / "pi_carrier_stack_fan_adapter.stl",
         stack_dir / "preview" / "pi_carrier_stack_preview.stl",
@@ -40,7 +38,9 @@ def _write_required_stls(stl_dir: Path, *, include_variants: bool = True) -> Non
 
     if include_variants:
         for fan_size in (80, 92, 120):
-            _touch_stub(stack_dir / "fan_walls" / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl")
+            _touch_stub(
+                stack_dir / "fan_walls" / f"pi_carrier_stack_fan_wall_fan{fan_size}.stl"
+            )
 
 
 def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
@@ -74,8 +74,6 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
         "pi_carrier_stack_carrier_level_printed.stl",
         "pi_carrier_stack_carrier_level_heatset.stl",
         "pi_carrier_stack_preview.stl",
-        "pi_carrier_stack_carrier_level_printed.stl",
-        "pi_carrier_stack_carrier_level_heatset.stl",
     }
 
     carriers_root = out_dir / "pi_cluster_carriers"
@@ -103,7 +101,9 @@ def test_package_stl_artifacts_groups_files(tmp_path: Path) -> None:
     readme = (stack_root / "README.txt").read_text(encoding="utf-8")
     assert "Pi cluster stack STLs" in readme
     assert "- carriers/\n  - pi_carrier_stack.scad" in readme
-    assert "- preview/\n  - pi_carrier_stack_carrier_level_printed.stl" in readme
+    assert "- preview/\n  - pi_carrier_stack_preview.stl" in readme
+    assert "pi_carrier_stack_carrier_level_printed.stl" in readme
+    assert "pi_carrier_stack_carrier_level_heatset.stl" in readme
     assert "Docs:\n- docs/pi_cluster_stack.md" in readme
     assert ".github/workflows/scad-to-stl.yml" in readme
 
@@ -151,14 +151,18 @@ def test_main_invocation_cleans_previous_outputs(tmp_path: Path) -> None:
 
     from scripts.package_stl_artifacts import main
 
-    assert main([
-        "--stl-dir",
-        str(stl_dir),
-        "--out-dir",
-        str(out_dir),
-    ]) == 0
+    assert main(
+        [
+            "--stl-dir",
+            str(stl_dir),
+            "--out-dir",
+            str(out_dir),
+        ]
+    ) == 0
 
-    rebuilt_files = {path.name for path in (out_dir / "pi_cluster_stack" / "carriers").iterdir()}
+    rebuilt_files = {
+        path.name for path in (out_dir / "pi_cluster_stack" / "carriers").iterdir()
+    }
     assert "old.stl" not in rebuilt_files
     assert rebuilt_files == {
         "pi_carrier_stack.scad",
