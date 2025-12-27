@@ -112,22 +112,26 @@ def _assert_tag_exists_upstream(
     fixture_path: Path | None = Path(fixture_env) if fixture_env else None
 
     if fixture_path:
-        path = fixture_path
-        if not path.is_file():
-            raise AssertionError(f"ls-remote fixture not found: {path}")
+        if not fixture_path.is_file():
+            raise AssertionError(f"ls-remote fixture not found: {fixture_path}")
 
         try:
-            fixture = json.loads(path.read_text())
+            fixture = json.loads(fixture_path.read_text())
         except json.JSONDecodeError as exc:
-            raise AssertionError(f"Invalid ls-remote fixture JSON: {path}") from exc
+            raise AssertionError(
+                f"Invalid ls-remote fixture JSON: {fixture_path}"
+            ) from exc
 
         if not isinstance(fixture, dict):
-            raise AssertionError(f"ls-remote fixture must be an object: {path}")
+            raise AssertionError(
+                f"ls-remote fixture must be an object: {fixture_path}"
+            )
 
         tags = fixture.get(repo, [])
         if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
             raise AssertionError(
-                f"ls-remote fixture entries must be lists of strings: {path}"
+                "ls-remote fixture entries must be lists of strings: "
+                f"{fixture_path}"
             )
 
         if ref in tags:
@@ -135,7 +139,7 @@ def _assert_tag_exists_upstream(
 
         if tags:
             raise AssertionError(
-                f"{repo} tag {ref} missing from ls-remote fixture {path}"
+                f"{repo} tag {ref} missing from ls-remote fixture {fixture_path}"
             )
 
     url = f"https://github.com/{repo}.git"
@@ -283,6 +287,75 @@ def test_assert_tag_exists_prefers_fixture(monkeypatch, ls_remote_fixture):
     monkeypatch.setattr(subprocess, "run", raising_run)
 
     _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_fixture_missing(monkeypatch, tmp_path):
+    missing_path = tmp_path / "absent.json"
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(missing_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is missing")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="ls-remote fixture not found"):
+        _assert_tag_exists_upstream("actions/cache", "v4.3.0")
+
+
+def test_assert_tag_exists_rejects_invalid_json_fixture(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "bad.json"
+    fixture_path.write_text("{not-json: true")
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is invalid")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="Invalid ls-remote fixture JSON"):
+        _assert_tag_exists_upstream("actions/cache", "v4.3.0")
+
+
+def test_assert_tag_exists_rejects_invalid_fixture_structure(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "structure.json"
+    fixture_path.write_text('["v5"]')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is invalid")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="fixture must be an object"):
+        _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_rejects_non_string_fixture_entries(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "entries.json"
+    fixture_path.write_text('{"actions/checkout": [5]}')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is invalid")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="entries must be lists of strings"):
+        _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_raises_when_fixture_missing_tag(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "tags.json"
+    fixture_path.write_text('{"actions/cache": ["v4.2.0"]}')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is provided")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="missing from ls-remote fixture"):
+        _assert_tag_exists_upstream("actions/cache", "v4.3.0")
 
 
 def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
