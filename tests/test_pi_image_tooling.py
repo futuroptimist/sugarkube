@@ -106,6 +106,14 @@ def _assert_tag_exists_upstream(
                 text=True,
                 timeout=30,
             )
+        except subprocess.TimeoutExpired as exc:
+            if attempt < retries:
+                sleep(delay_seconds)
+                continue
+
+            pytest.skip(
+                f"git ls-remote timed out for {repo} tag {ref}: {exc}"
+            )
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").lower()
             if any(marker in stderr for marker in _TRANSIENT_LS_REMOTE_ERRORS):
@@ -126,8 +134,6 @@ def _assert_tag_exists_upstream(
             raise AssertionError(f"{repo} tag {ref} missing upstream")
 
         return
-
-    raise AssertionError(f"{repo} tag {ref} missing upstream after {retries} attempts")
 
 
 def test_assert_tag_exists_retries_transient_errors(monkeypatch):
@@ -170,6 +176,68 @@ def test_assert_tag_exists_skips_after_retries(monkeypatch):
             "actions/cache",
             "v4.3.0",
             retries=2,
+            delay_seconds=0,
+            sleep_fn=lambda _: None,
+        )
+
+
+def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
+    attempts: list[int] = []
+
+    def fake_run(*_, **__):
+        attempts.append(1)
+        raise subprocess.TimeoutExpired(cmd=["git", "ls-remote"], timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(pytest.skip.Exception):
+        _assert_tag_exists_upstream(
+            "actions/cache",
+            "v4.3.0",
+            retries=2,
+            delay_seconds=0,
+            sleep_fn=lambda _: None,
+        )
+
+    assert len(attempts) == 2
+
+
+def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
+    attempts: list[int] = []
+
+    def fake_run(*_, **__):
+        attempts.append(1)
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "ls-remote"],
+            stderr="fatal: repository not found",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(AssertionError):
+        _assert_tag_exists_upstream(
+            "actions/cache",
+            "v4.3.0",
+            retries=3,
+            delay_seconds=0,
+            sleep_fn=lambda _: None,
+        )
+
+    assert len(attempts) == 1
+
+
+def test_assert_tag_exists_raises_when_tag_missing(monkeypatch):
+    def fake_run(*_, **__):
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(AssertionError):
+        _assert_tag_exists_upstream(
+            "actions/cache",
+            "v4.3.0",
+            retries=1,
             delay_seconds=0,
             sleep_fn=lambda _: None,
         )
