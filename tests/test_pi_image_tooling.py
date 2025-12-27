@@ -111,6 +111,11 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
+            # TODO: Reduce reliance on live ls-remote checks in tests.
+            # Root cause: GitHub ls-remote requests can time out in CI, causing flaky
+            #   tag validation even though the action references are correct.
+            # Estimated fix: Provide a recorded ls-remote response fixture or inject a
+            #   mock subprocess runner so tests never depend on external network calls.
             pytest.skip(
                 f"git ls-remote timed out for {repo} tag {ref}: {exc}"
             )
@@ -121,6 +126,12 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
+                # TODO: Reduce reliance on live ls-remote checks in tests.
+                # Root cause: GitHub ls-remote transiently fails in CI due to network
+                #   blips, leading to flaky tag validation despite valid upstream
+                #   references.
+                # Estimated fix: Inject a mocked subprocess runner or cached ls-remote
+                #   output so tests avoid external network requests.
                 pytest.skip(
                     "git ls-remote transiently failed for "
                     f"{repo} tag {ref}: {exc.stderr}"
