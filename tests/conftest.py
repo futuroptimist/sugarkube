@@ -279,6 +279,25 @@ def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
     return result.returncode in {errno.EPERM, errno.EACCES}
 
 
+def _netns_fallback_mode() -> str:
+    """Return the configured fallback behavior for missing netns privileges."""
+
+    return os.environ.get("SUGARKUBE_NETNS_FALLBACK", "").strip().lower()
+
+
+def _handle_netns_unavailable(reason: str) -> None:
+    """Respect caller preferences when network namespace support is missing."""
+
+    fallback_mode = _netns_fallback_mode()
+    if fallback_mode == "xfail":
+        pytest.xfail(reason)
+
+    # TODO: Avoid skips by provisioning netns capabilities in test environments.
+    # Root cause: Hosts without CAP_NET_ADMIN (and without sudo) cannot exercise network namespace flows.
+    # Estimated fix: Add CAP_NET_ADMIN or allow sudo with ``SUGARKUBE_NETNS_FALLBACK=xfail`` when upgrades are impractical.
+    pytest.skip(reason)
+
+
 def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a command and retry with sudo when permission errors occur.
 
@@ -304,12 +323,13 @@ def _run_with_sudo_fallback(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def ensure_root_privileges() -> None:
-    """Skip when we cannot create network namespaces due to insufficient privileges.
+    """Skip or xfail when we cannot create network namespaces.
 
     Commands are retried with ``sudo`` when available to mirror CI capabilities and avoid
     unnecessary skips when the caller can run sudo non-interactively. Probe results are
     cached to avoid repeatedly issuing privileged calls once a host is known to lack
-    the required capabilities.
+    the required capabilities. Set ``SUGARKUBE_NETNS_FALLBACK=xfail`` to record missing
+    privileges as expected failures instead of skips.
     """
 
     global _netns_probe_result
@@ -319,14 +339,7 @@ def ensure_root_privileges() -> None:
         if allowed:
             return
 
-        # TODO: Allow callers to opt into non-privileged netns shims or mark tests that
-        # rely on real netns support as xfail when capabilities are unavailable.
-        # Root cause: A previous probe detected insufficient privileges to create and
-        # manage network namespaces on this host.
-        # Estimated fix: Run tests with root or CAP_NET_ADMIN (and CAP_SYS_ADMIN for
-        # unshare) available, or configure CI to grant sudo access for the required
-        # commands.
-        pytest.skip(reason)
+        _handle_netns_unavailable(reason or "network namespace setup unavailable")
 
     require_tools(["unshare", "ip"])
 
@@ -334,14 +347,7 @@ def ensure_root_privileges() -> None:
     if probe.returncode != 0:
         reason = probe.stderr.strip() or "Insufficient privileges for network namespace operations"
         _netns_probe_result = (False, reason)
-        # TODO: Allow callers to opt into non-privileged netns shims or mark tests that
-        # rely on real netns support as xfail when capabilities are unavailable.
-        # Root cause: Creating a network namespace with unshare failed due to missing
-        # privileges on this host.
-        # Estimated fix: Run tests with root or CAP_NET_ADMIN (and CAP_SYS_ADMIN for
-        # unshare) available, or configure CI to grant sudo access for the required
-        # commands.
-        pytest.skip(reason)
+        _handle_netns_unavailable(reason)
 
     netns_name = f"sugarkube-netns-probe-{uuid.uuid4().hex}"
     probe_netns = _run_with_sudo_fallback(["ip", "netns", "add", netns_name])
@@ -350,13 +356,7 @@ def ensure_root_privileges() -> None:
             probe_netns.stderr.strip() or "Insufficient privileges for network namespace operations"
         )
         _netns_probe_result = (False, reason)
-        # TODO: Allow callers to opt into non-privileged netns shims or mark tests that
-        # rely on real netns support as xfail when capabilities are unavailable.
-        # Root cause: Creating a probe network namespace with ``ip netns add`` failed
-        # due to insufficient privileges.
-        # Estimated fix: Run tests with root or CAP_NET_ADMIN available, or configure CI
-        # to grant sudo access for the required commands.
-        pytest.skip(reason)
+        _handle_netns_unavailable(reason)
 
     delete_result = _run_with_sudo_fallback(["ip", "netns", "delete", netns_name])
     if delete_result.returncode != 0:

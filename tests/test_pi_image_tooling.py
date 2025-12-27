@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tests import build_pi_image_test as build_test
 
 
@@ -205,6 +207,48 @@ def _collect_action_refs(workflow_text: str, action: str) -> list[str]:
     return pattern.findall(workflow_text)
 
 
+_TRANSIENT_LS_REMOTE_ERRORS = (
+    "connection timed out",
+    "connection timeout",
+    "timed out",
+    "temporary failure in name resolution",
+    "could not resolve host",
+    "upstream connect error",
+    "reset reason",
+    "connection reset",
+    "returned error: 503",
+)
+
+
+def _assert_tag_exists_upstream(repo: str, ref: str) -> None:
+    """Ensure the expected upstream tag exists, skipping on transient failures."""
+
+    url = f"https://github.com/{repo}.git"
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", url, f"refs/tags/{ref}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").lower()
+        if any(marker in stderr for marker in _TRANSIENT_LS_REMOTE_ERRORS):
+            # TODO: Retry upstream tag validation once GitHub connectivity stabilizes.
+            # Root cause: actions/* tag lookups can fail when GitHub returns transient 5xx or connection resets.
+            # Estimated fix: Re-run once the outage clears or mirror required tags locally for offline CI.
+            pytest.skip(
+                f"git ls-remote transiently failed for {repo} tag {ref}: {exc.stderr}"
+            )
+
+        raise AssertionError(
+            f"git ls-remote failed for {repo} tag {ref}: {exc.stderr}"
+        ) from exc
+
+    assert result.stdout.strip(), f"{repo} tag {ref} missing upstream"
+
+
 def test_pi_image_workflow_pins_checkout_version():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
@@ -222,26 +266,7 @@ def test_pi_image_workflow_checkout_refs_exist_upstream():
     assert refs, "No actions/checkout references found in pi-image workflow"
 
     for ref in refs:
-        try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "ls-remote",
-                    "--tags",
-                    "https://github.com/actions/checkout.git",
-                    f"refs/tags/{ref}",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - defensive
-            raise AssertionError(
-                f"git ls-remote failed for actions/checkout tag {ref}: {exc.stderr}"
-            ) from exc
-
-        assert result.stdout.strip(), f"actions/checkout tag {ref} missing upstream"
+        _assert_tag_exists_upstream("actions/checkout", ref)
 
 
 def test_pi_image_workflow_pins_cache_action_version():
@@ -259,20 +284,7 @@ def test_pi_image_workflow_cache_refs_exist_upstream():
     assert refs, "actions/cache reference missing from pi-image workflow"
 
     for ref in refs:
-        result = subprocess.run(
-            [
-                "git",
-                "ls-remote",
-                "--tags",
-                "https://github.com/actions/cache.git",
-                f"refs/tags/{ref}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert result.stdout.strip(), f"actions/cache tag {ref} missing upstream"
+        _assert_tag_exists_upstream("actions/cache", ref)
 
 
 def test_pi_image_workflow_pins_upload_artifact_version():
@@ -290,20 +302,7 @@ def test_pi_image_workflow_upload_artifact_refs_exist_upstream():
     assert refs, "actions/upload-artifact reference missing from pi-image workflow"
 
     for ref in refs:
-        result = subprocess.run(
-            [
-                "git",
-                "ls-remote",
-                "--tags",
-                "https://github.com/actions/upload-artifact.git",
-                f"refs/tags/{ref}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert result.stdout.strip(), f"actions/upload-artifact tag {ref} missing upstream"
+        _assert_tag_exists_upstream("actions/upload-artifact", ref)
 
 
 def test_pi_image_workflow_uses_cache_key_script():
