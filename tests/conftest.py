@@ -234,27 +234,37 @@ def ensure_test_cli_tools_preinstalled() -> None:
 
 
 def require_tools(tools: Iterable[str]) -> None:
-    """Ensure the current test has access to required system tools."""
+    """Ensure the current test has access to required system tools.
 
+    When ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` is set, missing binaries are shimmed
+    before attempting installation to keep offline and sandboxed runs from
+    skipping unnecessarily. Coverage: ``tests/test_require_tools.py``.
+    """
+
+    allow_shims = os.environ.get("SUGARKUBE_ALLOW_TOOL_SHIMS", "").strip() == "1"
     missing: List[str] = [tool for tool in tools if not shutil.which(tool)]
 
     if missing:
+        if allow_shims:
+            _create_tool_shims(missing)
+            missing = [tool for tool in missing if not shutil.which(tool)]
+            if not missing:
+                return
+
         _install_missing_tools(missing)
         missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        if os.environ.get("SUGARKUBE_ALLOW_TOOL_SHIMS") == "1":
+        if allow_shims:
             _create_tool_shims(missing)
             missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        # TODO: Provision required CLI tools in CI or adjust tests to tolerate their
-        # absence via shims when explicitly enabled.
-        # Root cause: The test environment lacks the requested utilities and
-        # auto-installation failed or was skipped.
-        # Estimated fix: Preinstall the tools in the test image or enable tool shim
-        # support with ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` for callers that can rely on
-        # happy-path stubs.
+        # TODO: Provision test CLI dependencies ahead of runtime.
+        # Root cause: Some hosts block installs (no sudo) or do not opt into shims,
+        # leaving required binaries unavailable for integration-focused tests.
+        # Estimated fix: Preinstall the dependencies on the host or enable shims
+        # via ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` when installs are impossible.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts: "
             f"{', '.join(sorted(missing))}"
