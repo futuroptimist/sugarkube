@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 import re
 import subprocess
@@ -84,6 +85,19 @@ _TRANSIENT_LS_REMOTE_ERRORS = (
 )
 
 
+def _ls_remote_fixture_path(
+    repo: str, ref: str, fixture_dir: str | Path | None = None
+) -> Path:
+    """Return the fixture path that mirrors ``git ls-remote`` output for a ref."""
+
+    base = Path(
+        fixture_dir
+        or os.environ.get("SUGARKUBE_LS_REMOTE_FIXTURE_DIR")
+        or Path(__file__).resolve().parents[1] / "fixtures" / "ls-remote"
+    )
+    return base.joinpath(*repo.split("/"), f"{ref}.txt")
+
+
 def _assert_tag_exists_upstream(
     repo: str,
     ref: str,
@@ -91,11 +105,26 @@ def _assert_tag_exists_upstream(
     retries: int = 3,
     delay_seconds: float = 1.0,
     sleep_fn: Callable[[float], None] | None = None,
+    fixture_dir: str | Path | None = None,
 ) -> None:
-    """Ensure the expected upstream tag exists, retrying transient failures before skipping."""
+    """Assert the tag exists using recorded ls-remote fixtures before live lookups.
+
+    Falls back to retrying live ``git ls-remote`` calls only when no fixture is present,
+    skipping after transient failures to avoid flakiness (coverage:
+    ``test_assert_tag_exists_uses_fixture_before_live_lookup``).
+    """
 
     url = f"https://github.com/{repo}.git"
     sleep = sleep_fn or time.sleep
+    fixture_path = _ls_remote_fixture_path(repo, ref, fixture_dir=fixture_dir)
+
+    if fixture_path.exists():
+        stdout = fixture_path.read_text(encoding="utf-8")
+        if not stdout.strip():
+            raise AssertionError(
+                f"Fixture {fixture_path} empty for {repo} tag {ref}"
+            )
+        return
 
     for attempt in range(1, retries + 1):
         try:
@@ -111,13 +140,9 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # TODO: Reduce reliance on live ls-remote checks in tests.
-            # Root cause: GitHub ls-remote requests can time out in CI, causing flaky
-            #   tag validation even though the action references are correct.
-            # Estimated fix: Provide a recorded ls-remote response fixture or inject a
-            #   mock subprocess runner so tests never depend on external network calls.
             pytest.skip(
-                f"git ls-remote timed out for {repo} tag {ref}: {exc}"
+                "git ls-remote timed out for "
+                f"{repo} tag {ref} (no fixture at {fixture_path}): {exc}"
             )
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").lower()
@@ -126,15 +151,9 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # TODO: Reduce reliance on live ls-remote checks in tests.
-                # Root cause: GitHub ls-remote transiently fails in CI due to network
-                #   blips, leading to flaky tag validation despite valid upstream
-                #   references.
-                # Estimated fix: Inject a mocked subprocess runner or cached ls-remote
-                #   output so tests avoid external network requests.
                 pytest.skip(
                     "git ls-remote transiently failed for "
-                    f"{repo} tag {ref}: {exc.stderr}"
+                    f"{repo} tag {ref} (no fixture at {fixture_path}): {exc.stderr}"
                 )
 
             raise AssertionError(
@@ -236,6 +255,31 @@ def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
 
     assert len(attempts) == 2
     assert sleeps == [0.25]
+
+
+def test_assert_tag_exists_uses_fixture_before_live_lookup(monkeypatch, tmp_path):
+    fixture_root = tmp_path / "ls-remote"
+    fixture_path = fixture_root / "actions" / "checkout"
+    fixture_path.mkdir(parents=True)
+    (fixture_path / "v5.txt").write_text(
+        "deadbeef\trefs/tags/v5\n", encoding="utf-8"
+    )
+
+    called: list[int] = []
+
+    def fail_run(*_, **__):
+        called.append(1)
+        raise AssertionError("git ls-remote should not run when a fixture is present")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+
+    _assert_tag_exists_upstream(
+        "actions/checkout",
+        "v5",
+        fixture_dir=fixture_root,
+    )
+
+    assert not called
 
 
 def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
