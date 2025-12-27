@@ -202,6 +202,31 @@ def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
     assert len(attempts) == 2
 
 
+def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
+    attempts: list[int] = []
+    sleeps: list[float] = []
+
+    def fake_run(*_, **__):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise subprocess.TimeoutExpired(cmd=["git", "ls-remote"], timeout=30)
+
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="ref\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _assert_tag_exists_upstream(
+        "actions/cache",
+        "v4.3.0",
+        retries=2,
+        delay_seconds=0.25,
+        sleep_fn=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert len(attempts) == 2
+    assert sleeps == [0.25]
+
+
 def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
     attempts: list[int] = []
 
