@@ -260,6 +260,11 @@ def require_tools(tools: Iterable[str]) -> None:
             missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
+        # TODO: Provision test CLI dependencies ahead of runtime.
+        # Root cause: Some hosts block installs (no sudo) or do not opt into shims,
+        # leaving required binaries unavailable for integration-focused tests.
+        # Estimated fix: Preinstall the dependencies on the host or enable shims
+        # via ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` when installs are impossible.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts: "
             f"{', '.join(sorted(missing))}"
