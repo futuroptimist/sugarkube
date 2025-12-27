@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -67,6 +69,110 @@ def _extract_work_dir(stdout: str) -> Path:
     match = re.search(r"leaving work dir: (?P<path>\S+)", stdout)
     assert match, stdout
     return Path(match.group("path"))
+
+
+_TRANSIENT_LS_REMOTE_ERRORS = (
+    "connection timed out",
+    "connection timeout",
+    "timed out",
+    "temporary failure in name resolution",
+    "could not resolve host",
+    "upstream connect error",
+    "reset reason",
+    "connection reset",
+    "returned error: 503",
+)
+
+
+def _assert_tag_exists_upstream(
+    repo: str,
+    ref: str,
+    *,
+    retries: int = 3,
+    delay_seconds: float = 1.0,
+    sleep_fn: Callable[[float], None] | None = None,
+) -> None:
+    """Ensure the expected upstream tag exists, retrying transient failures before skipping."""
+
+    url = f"https://github.com/{repo}.git"
+    sleep = sleep_fn or time.sleep
+
+    for attempt in range(1, retries + 1):
+        try:
+            result = subprocess.run(
+                ["git", "ls-remote", "--tags", url, f"refs/tags/{ref}"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").lower()
+            if any(marker in stderr for marker in _TRANSIENT_LS_REMOTE_ERRORS):
+                if attempt < retries:
+                    sleep(delay_seconds)
+                    continue
+
+                pytest.skip(
+                    "git ls-remote transiently failed for "
+                    f"{repo} tag {ref}: {exc.stderr}"
+                )
+
+            raise AssertionError(
+                f"git ls-remote failed for {repo} tag {ref}: {exc.stderr}"
+            ) from exc
+
+        if not result.stdout.strip():
+            raise AssertionError(f"{repo} tag {ref} missing upstream")
+
+        return
+
+    raise AssertionError(f"{repo} tag {ref} missing upstream after {retries} attempts")
+
+
+def test_assert_tag_exists_retries_transient_errors(monkeypatch):
+    attempts: list[int] = []
+
+    def fake_run(*_, **__):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise subprocess.CalledProcessError(
+                returncode=1, cmd=["git", "ls-remote"], stderr="connection reset"
+            )
+
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="ref\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _assert_tag_exists_upstream(
+        "actions/checkout",
+        "v5",
+        retries=3,
+        delay_seconds=0,
+        sleep_fn=lambda _: None,
+    )
+
+    assert len(attempts) == 3
+
+
+def test_assert_tag_exists_skips_after_retries(monkeypatch):
+    def fake_run(*_, **__):
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["git", "ls-remote"],
+            stderr="temporary failure in name resolution",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(pytest.skip.Exception):
+        _assert_tag_exists_upstream(
+            "actions/cache",
+            "v4.3.0",
+            retries=2,
+            delay_seconds=0,
+            sleep_fn=lambda _: None,
+        )
 
 
 def test_just_installation_script_includes_fallback(tmp_path):
@@ -205,48 +311,6 @@ def _collect_checkout_refs(workflow_text: str) -> list[str]:
 def _collect_action_refs(workflow_text: str, action: str) -> list[str]:
     pattern = re.compile(rf"uses:\s*{re.escape(action)}@(?P<ref>[^\s]+)")
     return pattern.findall(workflow_text)
-
-
-_TRANSIENT_LS_REMOTE_ERRORS = (
-    "connection timed out",
-    "connection timeout",
-    "timed out",
-    "temporary failure in name resolution",
-    "could not resolve host",
-    "upstream connect error",
-    "reset reason",
-    "connection reset",
-    "returned error: 503",
-)
-
-
-def _assert_tag_exists_upstream(repo: str, ref: str) -> None:
-    """Ensure the expected upstream tag exists, skipping on transient failures."""
-
-    url = f"https://github.com/{repo}.git"
-    try:
-        result = subprocess.run(
-            ["git", "ls-remote", "--tags", url, f"refs/tags/{ref}"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except subprocess.CalledProcessError as exc:
-        stderr = (exc.stderr or "").lower()
-        if any(marker in stderr for marker in _TRANSIENT_LS_REMOTE_ERRORS):
-            # TODO: Retry upstream tag validation once GitHub connectivity stabilizes.
-            # Root cause: actions/* tag lookups can fail when GitHub returns transient 5xx or connection resets.
-            # Estimated fix: Re-run once the outage clears or mirror required tags locally for offline CI.
-            pytest.skip(
-                f"git ls-remote transiently failed for {repo} tag {ref}: {exc.stderr}"
-            )
-
-        raise AssertionError(
-            f"git ls-remote failed for {repo} tag {ref}: {exc.stderr}"
-        ) from exc
-
-    assert result.stdout.strip(), f"{repo} tag {ref} missing upstream"
 
 
 def test_pi_image_workflow_pins_checkout_version():
