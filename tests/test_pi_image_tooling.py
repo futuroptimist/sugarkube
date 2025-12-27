@@ -6,11 +6,15 @@ from collections.abc import Callable
 import re
 import subprocess
 import time
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests import build_pi_image_test as build_test
+
+# Cached ls-remote outputs so CI avoids external network calls when validating action tags.
+LS_REMOTE_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "ls_remote"
 
 
 def _extract_pull_request_paths(workflow_text: str) -> list[str]:
@@ -91,11 +95,21 @@ def _assert_tag_exists_upstream(
     retries: int = 3,
     delay_seconds: float = 1.0,
     sleep_fn: Callable[[float], None] | None = None,
+    fixtures_dir: Path | None = None,
 ) -> None:
     """Ensure the expected upstream tag exists, retrying transient failures before skipping."""
 
     url = f"https://github.com/{repo}.git"
     sleep = sleep_fn or time.sleep
+    fixtures_root = fixtures_dir or LS_REMOTE_FIXTURES_DIR
+    fixture_path = fixtures_root / f"{repo.replace('/', '__')}_{ref}.txt"
+
+    if fixture_path.exists():
+        fixture_contents = fixture_path.read_text(encoding="utf-8").strip()
+        if not fixture_contents:
+            raise AssertionError(f"Fixture {fixture_path} is empty")
+
+        return
 
     for attempt in range(1, retries + 1):
         try:
@@ -111,11 +125,6 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # TODO: Reduce reliance on live ls-remote checks in tests.
-            # Root cause: GitHub ls-remote requests can time out in CI, causing flaky
-            #   tag validation even though the action references are correct.
-            # Estimated fix: Provide a recorded ls-remote response fixture or inject a
-            #   mock subprocess runner so tests never depend on external network calls.
             pytest.skip(
                 f"git ls-remote timed out for {repo} tag {ref}: {exc}"
             )
@@ -126,12 +135,6 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # TODO: Reduce reliance on live ls-remote checks in tests.
-                # Root cause: GitHub ls-remote transiently fails in CI due to network
-                #   blips, leading to flaky tag validation despite valid upstream
-                #   references.
-                # Estimated fix: Inject a mocked subprocess runner or cached ls-remote
-                #   output so tests avoid external network requests.
                 pytest.skip(
                     "git ls-remote transiently failed for "
                     f"{repo} tag {ref}: {exc.stderr}"
@@ -147,7 +150,7 @@ def _assert_tag_exists_upstream(
         return
 
 
-def test_assert_tag_exists_retries_transient_errors(monkeypatch):
+def test_assert_tag_exists_retries_transient_errors(monkeypatch, tmp_path):
     attempts: list[int] = []
 
     def fake_run(*_, **__):
@@ -167,12 +170,27 @@ def test_assert_tag_exists_retries_transient_errors(monkeypatch):
         retries=3,
         delay_seconds=0,
         sleep_fn=lambda _: None,
+        fixtures_dir=tmp_path / "no-fixtures",
     )
 
     assert len(attempts) == 3
 
 
-def test_assert_tag_exists_skips_after_retries(monkeypatch):
+def test_assert_tag_uses_fixture_over_network(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "actions__checkout_v5.txt"
+    fixture_path.write_text("ref\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys.modules[__name__], "LS_REMOTE_FIXTURES_DIR", tmp_path)
+
+    def _run_git(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture exists")
+
+    monkeypatch.setattr(subprocess, "run", _run_git)
+
+    _assert_tag_exists_upstream("actions/checkout", "v5", fixtures_dir=tmp_path)
+
+
+def test_assert_tag_exists_skips_after_retries(monkeypatch, tmp_path):
     def fake_run(*_, **__):
         raise subprocess.CalledProcessError(
             returncode=1,
@@ -189,10 +207,11 @@ def test_assert_tag_exists_skips_after_retries(monkeypatch):
             retries=2,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            fixtures_dir=tmp_path / "no-fixtures",
         )
 
 
-def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
+def test_assert_tag_exists_skips_after_timeouts(monkeypatch, tmp_path):
     attempts: list[int] = []
 
     def fake_run(*_, **__):
@@ -208,12 +227,13 @@ def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
             retries=2,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            fixtures_dir=tmp_path / "no-fixtures",
         )
 
     assert len(attempts) == 2
 
 
-def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
+def test_assert_tag_exists_recovers_after_timeout(monkeypatch, tmp_path):
     attempts: list[int] = []
     sleeps: list[float] = []
 
@@ -232,13 +252,14 @@ def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
         retries=2,
         delay_seconds=0.25,
         sleep_fn=lambda seconds: sleeps.append(seconds),
+        fixtures_dir=tmp_path / "no-fixtures",
     )
 
     assert len(attempts) == 2
     assert sleeps == [0.25]
 
 
-def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
+def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch, tmp_path):
     attempts: list[int] = []
 
     def fake_run(*_, **__):
@@ -258,12 +279,13 @@ def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
             retries=3,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            fixtures_dir=tmp_path / "no-fixtures",
         )
 
     assert len(attempts) == 1
 
 
-def test_assert_tag_exists_raises_when_tag_missing(monkeypatch):
+def test_assert_tag_exists_raises_when_tag_missing(monkeypatch, tmp_path):
     def fake_run(*_, **__):
         return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="")
 
@@ -276,6 +298,7 @@ def test_assert_tag_exists_raises_when_tag_missing(monkeypatch):
             retries=1,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            fixtures_dir=tmp_path / "no-fixtures",
         )
 
 
