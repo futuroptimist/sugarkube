@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 import re
 import subprocess
 import time
@@ -11,6 +12,31 @@ from pathlib import Path
 import pytest
 
 from tests import build_pi_image_test as build_test
+
+
+# Recorded ls-remote outputs keep tag validation offline and deterministic.
+_LS_REMOTE_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "git_ls_remote_tags.json"
+
+
+def _load_ls_remote_fixtures(path: Path) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    fixtures: dict[str, dict[str, str]] = {}
+
+    for repo, refs in data.items():
+        if not isinstance(refs, dict):
+            continue
+
+        repo_refs = {ref: output for ref, output in refs.items() if isinstance(output, str)}
+        if repo_refs:
+            fixtures[repo] = repo_refs
+
+    return fixtures
+
+
+_LS_REMOTE_FIXTURES = _load_ls_remote_fixtures(_LS_REMOTE_FIXTURE_PATH)
 
 
 def _extract_pull_request_paths(workflow_text: str) -> list[str]:
@@ -91,8 +117,15 @@ def _assert_tag_exists_upstream(
     retries: int = 3,
     delay_seconds: float = 1.0,
     sleep_fn: Callable[[float], None] | None = None,
+    prefer_fixtures: bool = True,
 ) -> None:
     """Ensure the expected upstream tag exists, retrying transient failures before skipping."""
+
+    if prefer_fixtures:
+        fixture_repo = _LS_REMOTE_FIXTURES.get(repo, {})
+        if ref in fixture_repo:
+            assert fixture_repo[ref].strip(), f"{repo} tag {ref} missing from ls-remote fixtures"
+            return
 
     url = f"https://github.com/{repo}.git"
     sleep = sleep_fn or time.sleep
@@ -111,11 +144,6 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # TODO: Reduce reliance on live ls-remote checks in tests.
-            # Root cause: GitHub ls-remote requests can time out in CI, causing flaky
-            #   tag validation even though the action references are correct.
-            # Estimated fix: Provide a recorded ls-remote response fixture or inject a
-            #   mock subprocess runner so tests never depend on external network calls.
             pytest.skip(
                 f"git ls-remote timed out for {repo} tag {ref}: {exc}"
             )
@@ -126,12 +154,6 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # TODO: Reduce reliance on live ls-remote checks in tests.
-                # Root cause: GitHub ls-remote transiently fails in CI due to network
-                #   blips, leading to flaky tag validation despite valid upstream
-                #   references.
-                # Estimated fix: Inject a mocked subprocess runner or cached ls-remote
-                #   output so tests avoid external network requests.
                 pytest.skip(
                     "git ls-remote transiently failed for "
                     f"{repo} tag {ref}: {exc.stderr}"
@@ -167,6 +189,7 @@ def test_assert_tag_exists_retries_transient_errors(monkeypatch):
         retries=3,
         delay_seconds=0,
         sleep_fn=lambda _: None,
+        prefer_fixtures=False,
     )
 
     assert len(attempts) == 3
@@ -189,6 +212,7 @@ def test_assert_tag_exists_skips_after_retries(monkeypatch):
             retries=2,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            prefer_fixtures=False,
         )
 
 
@@ -208,6 +232,7 @@ def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
             retries=2,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            prefer_fixtures=False,
         )
 
     assert len(attempts) == 2
@@ -232,6 +257,7 @@ def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
         retries=2,
         delay_seconds=0.25,
         sleep_fn=lambda seconds: sleeps.append(seconds),
+        prefer_fixtures=False,
     )
 
     assert len(attempts) == 2
@@ -258,6 +284,7 @@ def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
             retries=3,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            prefer_fixtures=False,
         )
 
     assert len(attempts) == 1
@@ -276,7 +303,22 @@ def test_assert_tag_exists_raises_when_tag_missing(monkeypatch):
             retries=1,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            prefer_fixtures=False,
         )
+
+
+def test_assert_tag_exists_prefers_fixtures(monkeypatch):
+    calls: list[str] = []
+
+    def fake_run(*_, **__):
+        calls.append("run")
+        raise AssertionError("ls-remote should not run when fixtures cover the tag")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _assert_tag_exists_upstream("actions/checkout", "v5")
+
+    assert not calls
 
 
 def test_just_installation_script_includes_fallback(tmp_path):
