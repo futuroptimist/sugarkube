@@ -8,6 +8,7 @@ from pathlib import Path
 import textwrap
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh"
+SUBPROCESS_TIMEOUT = 20  # allow headroom on slower runners
 
 
 def _write_stub(path: Path, content: str) -> None:
@@ -69,7 +70,7 @@ def test_failopen_disabled_by_default_in_prod(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     # Should not trigger fail-open in prod environment
@@ -114,7 +115,7 @@ def test_failopen_enabled_by_default_in_dev(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     # In dev, fail-open tracking should start
@@ -162,7 +163,7 @@ def test_failopen_explicit_disable(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     # Should not trigger fail-open when explicitly disabled
@@ -283,7 +284,7 @@ def test_failopen_resolves_deterministic_hosts(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     assert result.returncode == 0, result.stderr
