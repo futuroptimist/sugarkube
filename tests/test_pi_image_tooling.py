@@ -15,6 +15,9 @@ import pytest
 from tests import build_pi_image_test as build_test
 
 
+TESTS_DIR = Path(__file__).resolve().parent
+
+
 def _extract_pull_request_paths(workflow_text: str) -> list[str]:
     """Return the string globs under the pull_request.paths block."""
 
@@ -73,6 +76,8 @@ def _extract_work_dir(stdout: str) -> Path:
     return Path(match.group("path"))
 
 
+DEFAULT_LS_REMOTE_FIXTURE = TESTS_DIR / "fixtures" / "ls_remote_tags.json"
+DISABLE_FIXTURE_SENTINELS = {"0", "false", "none", "off", "disable"}
 _TRANSIENT_LS_REMOTE_ERRORS = (
     "connection timed out",
     "connection timeout",
@@ -88,7 +93,7 @@ _TRANSIENT_LS_REMOTE_ERRORS = (
 
 @pytest.fixture
 def ls_remote_fixture(monkeypatch) -> Path:
-    fixture_path = Path("tests/fixtures/ls_remote_tags.json")
+    fixture_path = DEFAULT_LS_REMOTE_FIXTURE
     monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
     return fixture_path
 
@@ -100,16 +105,26 @@ def _assert_tag_exists_upstream(
     retries: int = 3,
     delay_seconds: float = 1.0,
     sleep_fn: Callable[[float], None] | None = None,
+    allow_fixture: bool = True,
 ) -> None:
     """Ensure the expected upstream tag exists, retrying transient failures before skipping.
 
-    When ``SUGARKUBE_LS_REMOTE_FIXTURES`` is set to a JSON mapping repositories to tags,
-    fixtures are used instead of hitting the network (coverage:
-    ``test_assert_tag_exists_prefers_fixture``).
+    Fixtures are preferred to keep the suite offline. When the environment variable
+    ``SUGARKUBE_LS_REMOTE_FIXTURES`` points to a JSON mapping repositories to tags, or when
+    the default ``tests/fixtures/ls_remote_tags.json`` file exists, the fixture is treated as
+    authoritative and network calls are skipped. Set ``allow_fixture=False`` or
+    ``SUGARKUBE_LS_REMOTE_FIXTURES=0`` to exercise the network fallback in tests.
+    Coverage: ``test_assert_tag_exists_prefers_fixture`` and
+    ``test_assert_tag_exists_defaults_to_builtin_fixture``.
     """
 
     fixture_env = os.environ.get("SUGARKUBE_LS_REMOTE_FIXTURES", "").strip()
-    fixture_path: Path | None = Path(fixture_env) if fixture_env else None
+    if fixture_env.lower() in DISABLE_FIXTURE_SENTINELS:
+        fixture_path: Path | None = None
+    elif allow_fixture:
+        fixture_path = Path(fixture_env) if fixture_env else DEFAULT_LS_REMOTE_FIXTURE
+    else:
+        fixture_path = None
 
     if fixture_path:
         if not fixture_path.is_file():
@@ -142,10 +157,10 @@ def _assert_tag_exists_upstream(
         if ref in tags:
             return
 
-        if tags:
-            raise AssertionError(
-                f"{repo} tag {ref} missing from ls-remote fixture {fixture_path}"
-            )
+        raise AssertionError(
+            f"{repo} tag {ref} missing from ls-remote fixture {fixture_path}; "
+            "update the fixture to avoid network lookups"
+        )
 
     url = f"https://github.com/{repo}.git"
     sleep = sleep_fn or time.sleep
@@ -164,14 +179,10 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # TODO: Eliminate network-dependent ls-remote skips by keeping fixtures current.
-            # Root cause: When fixtures are missing or outdated, network flakes when calling
-            #   git ls-remote on GitHub Actions repos cause noisy failures on constrained CI
-            #   runners.
-            # Estimated fix: Refresh tests/fixtures/ls_remote_tags.json or mock ls-remote so
-            #   these tests remain fully offline.
             pytest.skip(
-                f"git ls-remote timed out for {repo} tag {ref}: {exc}"
+                "git ls-remote timed out for "
+                f"{repo} tag {ref}: {exc}. "
+                "Provide SUGARKUBE_LS_REMOTE_FIXTURES to stay offline."
             )
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").lower()
@@ -180,15 +191,10 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # TODO: Avoid skipping when upstream git ls-remote transiently fails.
-                # Root cause: Without exhaustive fixtures, transient GitHub connectivity
-                #   issues (rate limits, TLS resets, or DNS flaps) turn validation tests
-                #   flaky.
-                # Estimated fix: Keep ls-remote fixtures authoritative or mock subprocess.run
-                #   to remove live network calls from the test suite.
                 pytest.skip(
                     "git ls-remote transiently failed for "
-                    f"{repo} tag {ref}: {exc.stderr}"
+                    f"{repo} tag {ref}: {exc.stderr}. "
+                    "Provide SUGARKUBE_LS_REMOTE_FIXTURES to stay offline."
                 )
 
             raise AssertionError(
@@ -221,6 +227,7 @@ def test_assert_tag_exists_retries_transient_errors(monkeypatch):
         retries=3,
         delay_seconds=0,
         sleep_fn=lambda _: None,
+        allow_fixture=False,
     )
 
     assert len(attempts) == 3
@@ -243,6 +250,7 @@ def test_assert_tag_exists_skips_after_retries(monkeypatch):
             retries=2,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            allow_fixture=False,
         )
 
 
@@ -262,6 +270,7 @@ def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
             retries=2,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            allow_fixture=False,
         )
 
     assert len(attempts) == 2
@@ -286,6 +295,7 @@ def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
         retries=2,
         delay_seconds=0.25,
         sleep_fn=lambda seconds: sleeps.append(seconds),
+        allow_fixture=False,
     )
 
     assert len(attempts) == 2
@@ -299,6 +309,40 @@ def test_assert_tag_exists_prefers_fixture(monkeypatch, ls_remote_fixture):
     monkeypatch.setattr(subprocess, "run", raising_run)
 
     _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_defaults_to_builtin_fixture(monkeypatch):
+    monkeypatch.delenv("SUGARKUBE_LS_REMOTE_FIXTURES", raising=False)
+
+    def raising_run(*_, **__):
+        raise AssertionError(
+            "git ls-remote should not run when the built-in fixture is present"
+        )
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    _assert_tag_exists_upstream("actions/cache", "v4.3.0")
+
+
+def test_assert_tag_exists_respects_fixture_disable_env(monkeypatch):
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", "0")
+    attempts: list[int] = []
+
+    def fake_run(*_, **__):
+        attempts.append(1)
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="ref\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _assert_tag_exists_upstream(
+        "actions/checkout",
+        "v5",
+        retries=1,
+        delay_seconds=0,
+        sleep_fn=lambda _: None,
+    )
+
+    assert attempts
 
 
 def test_assert_tag_exists_fixture_missing(monkeypatch, tmp_path):
@@ -404,6 +448,7 @@ def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
             retries=3,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            allow_fixture=False,
         )
 
     assert len(attempts) == 1
@@ -422,6 +467,7 @@ def test_assert_tag_exists_raises_when_tag_missing(monkeypatch):
             retries=1,
             delay_seconds=0,
             sleep_fn=lambda _: None,
+            allow_fixture=False,
         )
 
 
