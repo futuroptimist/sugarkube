@@ -1,0 +1,5 @@
+{
+  "actions/checkout": ["v5"],
+  "actions/cache": ["v4.3.0"],
+  "actions/upload-artifact": ["v4.6.2"]
+}

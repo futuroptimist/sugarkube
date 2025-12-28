@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Callable
 import re
 import subprocess
@@ -84,6 +86,13 @@ _TRANSIENT_LS_REMOTE_ERRORS = (
 )
 
 
+@pytest.fixture
+def ls_remote_fixture(monkeypatch) -> Path:
+    fixture_path = Path("tests/fixtures/ls_remote_tags.json")
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+    return fixture_path
+
+
 def _assert_tag_exists_upstream(
     repo: str,
     ref: str,
@@ -92,7 +101,51 @@ def _assert_tag_exists_upstream(
     delay_seconds: float = 1.0,
     sleep_fn: Callable[[float], None] | None = None,
 ) -> None:
-    """Ensure the expected upstream tag exists, retrying transient failures before skipping."""
+    """Ensure the expected upstream tag exists, retrying transient failures before skipping.
+
+    When ``SUGARKUBE_LS_REMOTE_FIXTURES`` is set to a JSON mapping repositories to tags,
+    fixtures are used instead of hitting the network (coverage:
+    ``test_assert_tag_exists_prefers_fixture``).
+    """
+
+    fixture_env = os.environ.get("SUGARKUBE_LS_REMOTE_FIXTURES", "").strip()
+    fixture_path: Path | None = Path(fixture_env) if fixture_env else None
+
+    if fixture_path:
+        if not fixture_path.is_file():
+            raise AssertionError(f"ls-remote fixture not found: {fixture_path}")
+
+        try:
+            fixture = json.loads(fixture_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise AssertionError(
+                f"Invalid ls-remote fixture JSON: {fixture_path}"
+            ) from exc
+
+        if not isinstance(fixture, dict):
+            raise AssertionError(
+                f"ls-remote fixture must be an object: {fixture_path}"
+            )
+
+        if repo not in fixture:
+            raise AssertionError(
+                f"{repo} missing from ls-remote fixture {fixture_path}"
+            )
+
+        tags = fixture[repo]
+        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+            raise AssertionError(
+                "ls-remote fixture entries must be lists of strings: "
+                f"{fixture_path}"
+            )
+
+        if ref in tags:
+            return
+
+        if tags:
+            raise AssertionError(
+                f"{repo} tag {ref} missing from ls-remote fixture {fixture_path}"
+            )
 
     url = f"https://github.com/{repo}.git"
     sleep = sleep_fn or time.sleep
@@ -111,11 +164,12 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # TODO: Reduce reliance on live ls-remote checks in tests.
-            # Root cause: GitHub ls-remote requests can time out in CI, causing flaky
-            #   tag validation even though the action references are correct.
-            # Estimated fix: Provide a recorded ls-remote response fixture or inject a
-            #   mock subprocess runner so tests never depend on external network calls.
+            # TODO: Eliminate network-dependent ls-remote skips by keeping fixtures current.
+            # Root cause: When fixtures are missing or outdated, network flakes when calling
+            #   git ls-remote on GitHub Actions repos cause noisy failures on constrained CI
+            #   runners.
+            # Estimated fix: Refresh tests/fixtures/ls_remote_tags.json or mock ls-remote so
+            #   these tests remain fully offline.
             pytest.skip(
                 f"git ls-remote timed out for {repo} tag {ref}: {exc}"
             )
@@ -126,12 +180,12 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # TODO: Reduce reliance on live ls-remote checks in tests.
-                # Root cause: GitHub ls-remote transiently fails in CI due to network
-                #   blips, leading to flaky tag validation despite valid upstream
-                #   references.
-                # Estimated fix: Inject a mocked subprocess runner or cached ls-remote
-                #   output so tests avoid external network requests.
+                # TODO: Avoid skipping when upstream git ls-remote transiently fails.
+                # Root cause: Without exhaustive fixtures, transient GitHub connectivity
+                #   issues (rate limits, TLS resets, or DNS flaps) turn validation tests
+                #   flaky.
+                # Estimated fix: Keep ls-remote fixtures authoritative or mock subprocess.run
+                #   to remove live network calls from the test suite.
                 pytest.skip(
                     "git ls-remote transiently failed for "
                     f"{repo} tag {ref}: {exc.stderr}"
@@ -236,6 +290,98 @@ def test_assert_tag_exists_recovers_after_timeout(monkeypatch):
 
     assert len(attempts) == 2
     assert sleeps == [0.25]
+
+
+def test_assert_tag_exists_prefers_fixture(monkeypatch, ls_remote_fixture):
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is provided")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_fixture_missing(monkeypatch, tmp_path):
+    missing_path = tmp_path / "absent.json"
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(missing_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is missing")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="ls-remote fixture not found"):
+        _assert_tag_exists_upstream("actions/cache", "v4.3.0")
+
+
+def test_assert_tag_exists_rejects_invalid_json_fixture(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "bad.json"
+    fixture_path.write_text("{not-json: true")
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is invalid")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="Invalid ls-remote fixture JSON"):
+        _assert_tag_exists_upstream("actions/cache", "v4.3.0")
+
+
+def test_assert_tag_exists_rejects_invalid_fixture_structure(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "structure.json"
+    fixture_path.write_text('["v5"]')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is invalid")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="fixture must be an object"):
+        _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_fixture_missing_repo_raises(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "missing_repo.json"
+    fixture_path.write_text('{"actions/cache": ["v4.3.0"]}')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is provided")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="missing from ls-remote fixture"):
+        _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_rejects_non_string_fixture_entries(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "entries.json"
+    fixture_path.write_text('{"actions/checkout": [5]}')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is invalid")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="entries must be lists of strings"):
+        _assert_tag_exists_upstream("actions/checkout", "v5")
+
+
+def test_assert_tag_exists_raises_when_fixture_missing_tag(monkeypatch, tmp_path):
+    fixture_path = tmp_path / "tags.json"
+    fixture_path.write_text('{"actions/cache": ["v4.2.0"]}')
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", str(fixture_path))
+
+    def raising_run(*_, **__):
+        raise AssertionError("git ls-remote should not run when fixture is provided")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    with pytest.raises(AssertionError, match="missing from ls-remote fixture"):
+        _assert_tag_exists_upstream("actions/cache", "v4.3.0")
 
 
 def test_assert_tag_exists_raises_on_non_transient_error(monkeypatch):
@@ -427,7 +573,7 @@ def test_pi_image_workflow_pins_checkout_version():
         assert ref == "v5", f"Expected actions/checkout@v5, found {ref}"
 
 
-def test_pi_image_workflow_checkout_refs_exist_upstream():
+def test_pi_image_workflow_checkout_refs_exist_upstream(ls_remote_fixture):
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     refs = _collect_checkout_refs(content)
@@ -445,7 +591,7 @@ def test_pi_image_workflow_pins_cache_action_version():
     assert all(ref == "v4.3.0" for ref in refs), refs
 
 
-def test_pi_image_workflow_cache_refs_exist_upstream():
+def test_pi_image_workflow_cache_refs_exist_upstream(ls_remote_fixture):
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     refs = _collect_action_refs(content, "actions/cache")
@@ -463,7 +609,7 @@ def test_pi_image_workflow_pins_upload_artifact_version():
     assert all(ref == "v4.6.2" for ref in refs), refs
 
 
-def test_pi_image_workflow_upload_artifact_refs_exist_upstream():
+def test_pi_image_workflow_upload_artifact_refs_exist_upstream(ls_remote_fixture):
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
     refs = _collect_action_refs(content, "actions/upload-artifact")
