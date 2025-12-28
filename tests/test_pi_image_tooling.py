@@ -173,6 +173,11 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
+            # TODO: Avoid skips by keeping ls-remote checks fully fixture-driven.
+            # Root cause: Fixture opt-out tests still rely on live git traffic, which can time out
+            # in constrained or offline environments even after retries.
+            # Estimated fix: Extend coverage so opt-out scenarios inject local git refs instead
+            # of depending on upstream network availability.
             pytest.skip(
                 "git ls-remote timed out after fixture opt-out "
                 f"for {repo} tag {ref}: {exc}"
@@ -184,6 +189,11 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
+                # TODO: Avoid skips by keeping ls-remote checks fully fixture-driven.
+                # Root cause: Fixture opt-out tests still rely on live git traffic, which can
+                # hit transient network failures even after retries.
+                # Estimated fix: Extend coverage so opt-out scenarios inject local git refs
+                # instead of depending on upstream network availability.
                 pytest.skip(
                     "git ls-remote transiently failed after fixture opt-out for "
                     f"{repo} tag {ref}: {exc.stderr}"
