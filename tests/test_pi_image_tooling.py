@@ -164,9 +164,12 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # Fixture support (``SUGARKUBE_LS_REMOTE_FIXTURES``) keeps most runs offline;
-            # when explicitly hitting the network, transient timeouts still skip tests
-            # instead of failing unexpectedly.
+            # TODO: Eliminate network-dependent ls-remote skips by keeping fixtures current.
+            # Root cause: When fixtures are missing or outdated, network flakes when calling
+            #   git ls-remote on GitHub Actions repos cause noisy failures on constrained CI
+            #   runners.
+            # Estimated fix: Refresh tests/fixtures/ls_remote_tags.json or mock ls-remote so
+            #   these tests remain fully offline.
             pytest.skip(
                 f"git ls-remote timed out for {repo} tag {ref}: {exc}"
             )
@@ -177,8 +180,12 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # Fixture support keeps CI offline; when we are forced to touch upstream
-                # and transiently fail, skip to preserve stability.
+                # TODO: Avoid skipping when upstream git ls-remote transiently fails.
+                # Root cause: Without exhaustive fixtures, transient GitHub connectivity
+                #   issues (rate limits, TLS resets, or DNS flaps) turn validation tests
+                #   flaky.
+                # Estimated fix: Keep ls-remote fixtures authoritative or mock subprocess.run
+                #   to remove live network calls from the test suite.
                 pytest.skip(
                     "git ls-remote transiently failed for "
                     f"{repo} tag {ref}: {exc.stderr}"
