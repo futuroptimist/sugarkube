@@ -1,0 +1,14 @@
+# Base values for deploying the token.place relay via Helm (see
+# apps/tokenplace-relay/values.dev.yaml for the operator defaults).
+image:
+  repository: ghcr.io/democratizedspace/tokenplace-relay
+  tag: main
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+
+env:
+  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015

@@ -1,0 +1,87 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+containerPort: 5010
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: null
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  host: staging.token.place
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: staging-tokenplace-relay-tls
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 300m
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+env:
+  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015
+extraEnv: []
+envFrom: []
+
+probes:
+  port: http
+  liveness:
+    path: /livez
+    initialDelaySeconds: 20
+    periodSeconds: 20
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 6

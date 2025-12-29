@@ -1,0 +1,11 @@
+# Staging ingress overlay (see apps/tokenplace-relay/values.staging.yaml for the
+# operator defaults).
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  host: staging.token.place
+  tls:
+    enabled: true
+    secretName: staging-tokenplace-relay-tls

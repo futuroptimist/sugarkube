@@ -1,0 +1,15 @@
+# Base values for deploying the token.place relay via Helm.
+# These defaults mirror the dspace staging pattern and are consumed by helper
+# commands in the justfile.
+image:
+  repository: ghcr.io/democratizedspace/tokenplace-relay
+  tag: main
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+
+env:
+  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015
