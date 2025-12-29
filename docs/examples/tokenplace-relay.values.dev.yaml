@@ -1,0 +1,30 @@
+# Example defaults for deploying the token.place relay to a development cluster.
+
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  hosts:
+    - host: relay.dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: relay-dev-tls
+      hosts:
+        - relay.dev.example.com
+
+gpuExternalName:
+  useHeadless: true
+  headless:
+    enabled: true
+    addresses: []
+
+networkPolicy:
+  traefik:
+    namespace: kube-system

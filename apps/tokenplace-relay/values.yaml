@@ -1,0 +1,128 @@
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: ""        # defaults to chart appVersion when digest is unset
+  digest: ""     # immutable digest preferred in prod
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+containerPort: 5010
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: http
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  hosts:
+    - host: relay.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: tokenplace-relay-tls
+      hosts:
+        - relay.example.com
+
+gpuExternalName:
+  useHeadless: true
+  port: 5015
+  headless:
+    enabled: true
+    addresses: []
+
+upstream:
+  url: http://gpu-server:5015
+
+env:
+  - name: TOKEN_PLACE_ENV
+    value: production
+
+envFrom: []
+
+serviceMonitor:
+  enabled: false
+  labels:
+    release: kube-prometheus-stack
+  namespaceSelector:
+    any: true
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  port: http
+
+alerts:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  allowDNS: true
+  dnsNamespace: kube-system
+  kubeDNSSelector:
+    matchLabels:
+      k8s-app: kube-dns
+  traefik:
+    namespace: kube-system
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+  externalNameCIDR: 192.0.2.42/32
+  extraIngress: []
+  extraEgress: []
+
+extraVolumes: []
+extraVolumeMounts: []
+
+tolerations: []
+affinity: {}
+nodeSelector: {}
+topologySpreadConstraints: []
