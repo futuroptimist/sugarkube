@@ -1106,9 +1106,9 @@ tokenplace-oci-redeploy tag='':
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='tokenplace-relay' namespace='tokenplace' \
       chart='./apps/tokenplace-relay' \
-      values='docs/examples/tokenplace-relay.values.dev.yaml,docs/examples/tokenplace-relay.values.staging.yaml' \
+      values='apps/tokenplace-relay/values.dev.yaml,apps/tokenplace-relay/values.staging.yaml' \
       version_file='' \
-      tag='{{ tag }}' default_tag='sha-19b332e'
+      tag='{{ tag }}' default_tag='main'
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then

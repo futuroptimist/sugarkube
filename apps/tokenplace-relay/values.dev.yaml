@@ -1,5 +1,6 @@
-# Base values for deploying the token.place relay via Helm (see
-# apps/tokenplace-relay/values.dev.yaml for the operator defaults).
+# Base values for deploying the token.place relay via Helm.
+# These defaults mirror the dspace staging pattern and are consumed by helper
+# commands in the justfile.
 image:
   repository: ghcr.io/democratizedspace/tokenplace-relay
   tag: main

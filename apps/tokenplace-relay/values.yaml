@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/futuroptimist/tokenplace-relay
+  repository: ""
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent
@@ -39,7 +39,7 @@ containerPort: 5010
 service:
   type: ClusterIP
   port: 80
-  targetPort: 5010
+  targetPort: null
   annotations: {}
 
 ingress:
@@ -70,3 +70,18 @@ env:
   TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015
 extraEnv: []
 envFrom: []
+
+probes:
+  port: http
+  liveness:
+    path: /livez
+    initialDelaySeconds: 20
+    periodSeconds: 20
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 6
