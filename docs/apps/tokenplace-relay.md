@@ -1,7 +1,7 @@
 # token.place relay on Sugarkube
 
 Deploy the `token.place` relay (`relay.py`) to the Sugarkube k3s cluster with a Helm chart that
-matches the existing dspace staging patterns. The public staging host is
+matches the existing dspace staging patterns. The public staging host for the relay service is
 `staging.token.place`, fronted by Traefik and Cloudflare Tunnel.
 
 Values are split so you can reuse base settings across environments and layer staging-only ingress
@@ -23,7 +23,7 @@ The Helm release runs in the `tokenplace` namespace with release name `tokenplac
 
 - Image repository: `ghcr.io/futuroptimist/tokenplace-relay`
   - Tags: `sha-<shortsha>` from `main` pushes, or semver tags when releases are cut.
-  - Default staging tag: `sha-19b332e` (current `main` short SHA); override with `tag=<sha-tag>`.
+  - Default staging tag: `sha-19b332e` (current `main` short SHA, pinned to the latest validated build); override with `tag=<sha-tag>`.
 - Helm chart: `./apps/tokenplace-relay`
   - Release: `tokenplace-relay`
   - Namespace: `tokenplace`
@@ -48,17 +48,13 @@ env:
 ## Quickstart (staging)
 
 ```bash
-# Install or upgrade the relay with staging ingress + TLS
-just helm-oci-install \
-  release=tokenplace-relay namespace=tokenplace \
-  chart=./apps/tokenplace-relay \
-  values=docs/examples/tokenplace-relay.values.dev.yaml,docs/examples/tokenplace-relay.values.staging.yaml \
-  default_tag=sha-19b332e
+# Install or upgrade the relay with staging ingress + TLS (wraps helm upgrade --install)
+just tokenplace-oci-redeploy tag=sha-19b332e
 
 # Print ingress + pod status
 just tokenplace-status
 
-# Redeploy a new image tag (sha-<shortsha> from GHCR)
+# Redeploy a new image tag (sha-<shortsha> from GHCR) after validating a build
 just tokenplace-oci-redeploy tag=sha-<shortsha>
 ```
 

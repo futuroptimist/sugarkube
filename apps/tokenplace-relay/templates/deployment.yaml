@@ -13,6 +13,7 @@ spec:
     metadata:
       labels:
         {{- include "tokenplace-relay.selectorLabels" . | nindent 8 }}
+        {{- include "tokenplace-relay.podLabels" . | nindent 8 }}
       {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
@@ -46,10 +47,8 @@ spec:
             - name: RELAY_PORT
               value: "{{ .Values.containerPort }}"
             {{- range $name, $value := .Values.env }}
-            {{- if $value }}
             - name: {{ $name }}
               value: {{ $value | quote }}
-            {{- end }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

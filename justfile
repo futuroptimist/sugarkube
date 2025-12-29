@@ -1097,6 +1097,8 @@ dspace-debug-logs namespace='dspace':
     }
 
 # Fast redeploy of token.place relay from GHCR.
+# The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
+# after promoting a fresh image.
 tokenplace-oci-redeploy tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1111,12 +1113,6 @@ tokenplace-oci-redeploy tag='':
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
-    fi
-
-    echo "Forcing rollout restart for tokenplace-relay deployment..."
-    if ! kubectl -n tokenplace rollout restart deploy/tokenplace-relay; then
-      echo "ERROR: Failed to trigger rollout restart for tokenplace-relay." >&2
-      exit 1
     fi
 
     echo "Waiting for tokenplace-relay rollout to complete (timeout: 120s)..."

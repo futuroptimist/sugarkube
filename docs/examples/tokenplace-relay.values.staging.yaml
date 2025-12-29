@@ -5,6 +5,3 @@ ingress:
   tls:
     enabled: true
     secretName: staging-tokenplace-relay-tls
-
-env:
-  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015

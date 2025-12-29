@@ -68,7 +68,5 @@ affinity: {}
 
 env:
   TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015
-  TOKENPLACE_GPU_HOST: ""
-  TOKENPLACE_GPU_PORT: ""
 extraEnv: []
 envFrom: []

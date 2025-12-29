@@ -23,14 +23,17 @@
 helm.sh/chart: {{ include "tokenplace-relay.chart" . }}
 {{ include "tokenplace-relay.selectorLabels" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- with .Values.podLabels }}
-{{ toYaml . }}
-{{- end }}
 {{- end -}}
 
 {{- define "tokenplace-relay.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "tokenplace-relay.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "tokenplace-relay.podLabels" -}}
+{{- with .Values.podLabels }}
+{{ toYaml . }}
+{{- end }}
 {{- end -}}
 
 {{- define "tokenplace-relay.serviceAccountName" -}}
