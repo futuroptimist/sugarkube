@@ -43,6 +43,7 @@ Review the safety notes before working with power components.
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
   verification steps
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare
+- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — operate the token.place relay on Sugarkube
 - [token_place_sample_datasets.md](token_place_sample_datasets.md) — replay bundled
   token.place health and chat samples
 - [pi_image_builder_design.md](pi_image_builder_design.md) — design and reliability features of the image builder

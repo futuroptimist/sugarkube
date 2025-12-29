@@ -1,0 +1,30 @@
+# Staging overrides for the token.place relay deployment on Sugarkube.
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  host: staging.token.place
+  tls:
+    enabled: true
+    secretName: staging-token-place-tls
+
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: sha-19b332e
+
+env:
+  TOKEN_PLACE_ENV: staging
+  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:3000
+
+nodeSelector:
+  kubernetes.io/arch: arm64
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
