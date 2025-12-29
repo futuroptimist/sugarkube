@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tokenplace-relay
+description: Helm chart for the token.place relay service on Sugarkube
+type: application
+version: 0.1.0
+appVersion: "sha-19b332e"

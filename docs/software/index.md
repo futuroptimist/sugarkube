@@ -40,6 +40,8 @@ and supporting services stay healthy.
   Docker Compose.
 - [pi_token_dspace.md](../pi_token_dspace.md) — expose token.place/dspace through
   Cloudflare tunnels.
+- [apps/tokenplace-relay.md](../apps/tokenplace-relay.md) — operate token.place relay staging via
+  Helm.
 
 ## Developer Workflow
 - [contributor_script_map.md](../contributor_script_map.md) — keep automation docs

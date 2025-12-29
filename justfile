@@ -1059,6 +1059,37 @@ dspace-oci-redeploy:
       exit 1
     fi
 
+# Fast redeploy of token.place relay from GHCR.
+tokenplace-oci-redeploy tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release='tokenplace-relay' namespace='tokenplace' \
+      chart='apps/tokenplace-relay' \
+      values='docs/examples/tokenplace-relay.values.dev.yaml,docs/examples/tokenplace-relay.values.staging.yaml' \
+      tag='{{ tag }}' default_tag='sha-19b332e'
+
+    scripts/ensure_user_kubeconfig.sh || true
+    if [ -z "${KUBECONFIG:-}" ]; then
+      export KUBECONFIG="${HOME}/.kube/config"
+    fi
+
+    echo "Forcing rollout restart for token.place relay deployment..."
+    if ! kubectl -n tokenplace rollout restart deploy/tokenplace-relay; then
+      echo "ERROR: Failed to trigger rollout restart for token.place relay." >&2
+      exit 1
+    fi
+
+    echo "Waiting for token.place relay rollout to complete (timeout: 120s)..."
+    if ! kubectl -n tokenplace rollout status deploy/tokenplace-relay --timeout=120s; then
+      echo "ERROR: token.place relay rollout did not complete successfully." >&2
+      exit 1
+    fi
+
+    echo "Public URL: https://staging.token.place"
+    echo "Health check: curl -fsS https://staging.token.place/healthz"
+
 # Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':
     #!/usr/bin/env bash
@@ -1095,6 +1126,50 @@ dspace-debug-logs namespace='dspace':
     kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
       echo "Failed to fetch Traefik logs" >&2
     }
+
+tokenplace-logs namespace='tokenplace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    ns="{{ namespace }}"
+
+    echo "=== token.place relay pods in namespace ${ns} ==="
+    kubectl get pods -n "${ns}" -l app.kubernetes.io/name=tokenplace-relay -o wide || {
+      echo "Failed to list token.place relay pods in namespace ${ns}" >&2
+    }
+
+    echo
+    echo "=== token.place relay logs (last 200 lines per pod) ==="
+    relay_pods=$(kubectl get pods -n "${ns}" -l app.kubernetes.io/name=tokenplace-relay -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+    if [ -z "${relay_pods}" ]; then
+      echo "No pods found with label app.kubernetes.io/name=tokenplace-relay in namespace ${ns}" >&2
+    else
+      for pod in ${relay_pods}; do
+        echo
+        echo "--- token.place relay pod: ${pod} ---"
+        kubectl logs -n "${ns}" "${pod}" --tail=200 || {
+          echo "Failed to fetch logs for pod ${pod}" >&2
+        }
+      done
+    fi
+
+    echo
+    echo "=== Traefik logs (last 200 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
+      echo "Failed to fetch Traefik logs" >&2
+    }
+
+tokenplace-status namespace='tokenplace' release='tokenplace-relay':
+    @just app-status namespace="{{ namespace }}" release="{{ release }}"
+
+tokenplace-port-forward namespace='tokenplace' local_port='5010':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    kubectl -n "{{ namespace }}" port-forward svc/tokenplace-relay {{ local_port }}:80
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash

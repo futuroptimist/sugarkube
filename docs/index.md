@@ -48,6 +48,7 @@ Review the safety notes before working with power components.
 - [pi_image_builder_design.md](pi_image_builder_design.md) — design and reliability features of the image builder
 - [hardware/index.md](hardware/index.md) — curated hub for safety notes and hardware build guides
 - [software/index.md](software/index.md) — single stop for automation, playbooks, and contributor tooling
+- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — Helm-managed token.place relay on Sugarkube
 
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work

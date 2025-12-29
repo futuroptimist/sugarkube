@@ -1,0 +1,12 @@
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: sha-19b332e
+
+ingress:
+  host: staging.token.place
+  tls:
+    secretName: staging-token-place-tls
+
+# Provide a secret with TOKEN_PLACE_RELAY_SERVER_TOKEN when protecting server registrations.
+envFromSecrets:
+  - tokenplace-relay-secrets

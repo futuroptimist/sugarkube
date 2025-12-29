@@ -1,0 +1,87 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: sha-19b332e
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  host: ""
+  tls:
+    enabled: true
+    secretName: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 5010
+
+env:
+  RELAY_HOST: "0.0.0.0"
+  RELAY_PORT: "5010"
+  TOKENPLACE_RELAY_UPSTREAM_URL: "http://gpu-server:3000"
+extraEnv: []
+envFromSecrets: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  capabilities:
+    drop:
+      - ALL
+
+livenessProbe:
+  path: /livez
+  initialDelaySeconds: 20
+  periodSeconds: 20
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+readinessProbe:
+  path: /healthz
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+terminationGracePeriodSeconds: 30

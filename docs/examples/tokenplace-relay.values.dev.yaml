@@ -1,0 +1,32 @@
+# Base values for token.place relay deployments.
+replicaCount: 1
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  host: ""
+  tls:
+    enabled: true
+    secretName: ""
+
+service:
+  port: 80
+  targetPort: 5010
+
+env:
+  RELAY_HOST: "0.0.0.0"
+  RELAY_PORT: "5010"
+  TOKENPLACE_RELAY_UPSTREAM_URL: "http://gpu-server:3000"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+imagePullSecrets:
+  - name: ghcr-pull-secret
