@@ -1098,6 +1098,7 @@ dspace-debug-logs namespace='dspace':
 
 # Fast redeploy of token.place relay from GHCR.
 # The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
+
 # after promoting a fresh image.
 tokenplace-oci-redeploy tag='':
     #!/usr/bin/env bash
