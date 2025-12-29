@@ -1,0 +1,12 @@
+# Common Helm ignores
+.DS_Store
+# Git
+.git/
+.gitignore
+# Editors
+*.swp
+*.bak
+*.tmp
+*.orig
+# Charts
+*.tgz

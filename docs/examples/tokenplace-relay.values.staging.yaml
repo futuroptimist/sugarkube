@@ -1,0 +1,10 @@
+ingress:
+  enabled: true
+  className: traefik
+  host: staging.token.place
+  tls:
+    enabled: true
+    secretName: staging-tokenplace-relay-tls
+
+env:
+  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015
