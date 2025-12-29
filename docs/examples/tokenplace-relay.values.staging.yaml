@@ -1,0 +1,31 @@
+# Staging configuration for the token.place relay on Sugarkube.
+
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: sha-19b332e
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  hosts:
+    - host: staging.token.place
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: staging-token-place-tls
+      hosts:
+        - staging.token.place
+
+gpuExternalName:
+  useHeadless: true
+  headless:
+    enabled: true
+    addresses: []
+
+networkPolicy:
+  traefik:
+    namespace: kube-system

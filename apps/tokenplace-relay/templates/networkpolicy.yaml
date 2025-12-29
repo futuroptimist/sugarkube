@@ -1,0 +1,86 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $gpu := .Values.gpuExternalName }}
+{{- $headless := $gpu.headless }}
+{{- $useHeadless := or $gpu.useHeadless $headless.enabled }}
+{{- $hasExternal := and (not $useHeadless) (ne (default "" $gpu.host) "") }}
+{{- $dnsSelector := coalesce $np.kubeDNSSelector (dict "matchLabels" (dict "k8s-app" "kube-dns")) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "tokenplace-relay.fullname" . }}
+  labels:
+    {{- include "tokenplace-relay.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "tokenplace-relay.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+  {{- $ingressState := dict "has" false }}
+  {{- if $np.traefik.namespace }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.traefik.namespace }}
+          {{- with $np.traefik.podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+    {{- $_ := set $ingressState "has" true }}
+  {{- end }}
+  {{- range $np.extraIngress }}
+    - {{- toYaml . | nindent 6 }}
+    {{- $_ := set $ingressState "has" true }}
+  {{- end }}
+  {{- if not $ingressState.has }}
+    []
+  {{- end }}
+  egress:
+  {{- $egressState := dict "has" false }}
+  {{- if $np.allowDNS }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.dnsNamespace }}
+          podSelector:
+            {{- toYaml $dnsSelector | nindent 12 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- $_ := set $egressState "has" true }}
+  {{- end }}
+  {{- if and $useHeadless (gt (len $headless.addresses) 0) }}
+    {{- range $headless.addresses }}
+    - to:
+        - ipBlock:
+            cidr: {{ printf "%s/32" . }}
+      ports:
+        - protocol: TCP
+          port: {{ $gpu.port }}
+    {{- $_ := set $egressState "has" true }}
+    {{- end }}
+  {{- else if $hasExternal }}
+    - to:
+        - ipBlock:
+            cidr: {{ $np.externalNameCIDR }}
+      ports:
+        - protocol: TCP
+          port: {{ $gpu.port }}
+    {{- $_ := set $egressState "has" true }}
+  {{- end }}
+  {{- range $np.extraEgress }}
+    - {{- toYaml . | nindent 6 }}
+    {{- $_ := set $egressState "has" true }}
+  {{- end }}
+  {{- if not $egressState.has }}
+    []
+  {{- end }}
+{{- end }}

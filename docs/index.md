@@ -40,6 +40,7 @@ Review the safety notes before working with power components.
 - [raspi_cluster_operations.md](raspi_cluster_operations.md) — **next step** to install Helm, Traefik ingress, and roll out workloads
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
+- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — deploy the token.place relay to Sugarkube
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
   verification steps
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare
