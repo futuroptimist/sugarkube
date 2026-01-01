@@ -469,7 +469,17 @@ def _render_wifi_block(config: WifiConfig) -> list[str]:
     return lines
 
 
-def build_install_command(config: ClusterConfig) -> list[str]:
+def _append_workflow_run_arg(args: list[str], workflow_run_id: str | None) -> list[str]:
+    if not workflow_run_id:
+        return args
+    if any(part == "--workflow-run" for part in args):
+        return args
+    return [*args, "--workflow-run", workflow_run_id]
+
+
+def build_install_command(
+    config: ClusterConfig, *, workflow_run_id: str | None = None
+) -> list[str]:
     command: list[str] = [
         "bash",
         str(INSTALL_SCRIPT),
@@ -478,7 +488,7 @@ def build_install_command(config: ClusterConfig) -> list[str]:
         "--image",
         str(config.image_path),
     ]
-    command.extend(config.download_args)
+    command.extend(_append_workflow_run_arg(config.download_args, workflow_run_id))
     return command
 
 
@@ -618,11 +628,11 @@ def _wait_for_workflow_completion(
         time.sleep(max(workflow.poll_interval, 1))
 
 
-def _dispatch_workflow(config: WorkflowConfig, runner: CommandRunner) -> None:
+def _dispatch_workflow(config: WorkflowConfig, runner: CommandRunner) -> str | None:
     if runner.dry_run:
         runner.run(build_workflow_dispatch_command(config))
         runner.capture(_build_workflow_list_command(config.ref))
-        return
+        return None
 
     _ensure_gh_available()
     runner.run(build_workflow_dispatch_command(config))
@@ -639,6 +649,7 @@ def _dispatch_workflow(config: WorkflowConfig, runner: CommandRunner) -> None:
     run_id = str(run_data["databaseId"])
     _log(f"Waiting for pi-image workflow run {run_id} to complete.")
     _wait_for_workflow_completion(run_id, config, runner)
+    return run_id
 
 
 def run_bootstrap(
@@ -651,14 +662,15 @@ def run_bootstrap(
     _ensure_scripts_exist()
     runner = CommandRunner(repo_root=REPO_ROOT, dry_run=dry_run)
 
+    workflow_run_id: str | None = None
     if config.workflow and config.workflow.trigger:
         if skip_download:
             _log("Skipping workflow trigger because --skip-download was supplied.")
         else:
-            _dispatch_workflow(config.workflow, runner)
+            workflow_run_id = _dispatch_workflow(config.workflow, runner)
 
     if not skip_download:
-        install_command = build_install_command(config)
+        install_command = build_install_command(config, workflow_run_id=workflow_run_id)
         runner.run(install_command)
     else:
         _log("Skipping image download (--skip-download supplied).")
