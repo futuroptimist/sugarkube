@@ -157,15 +157,19 @@ def test_preinstall_test_cli_tools_installs_missing(monkeypatch: pytest.MonkeyPa
     """Preinstall helper should request all known CLI dependencies when missing."""
 
     recorded: list[list[str]] = []
+    installed: set[str] = set()
 
     def fake_install(missing: Iterable[str]) -> list[str]:
         ordered = sorted(missing)
         recorded.append(ordered)
+        installed.update(ordered)
         return ordered
 
     def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
         if tool == "apt-get":
             return "/usr/bin/apt-get"
+        if tool in installed:
+            return f"/usr/bin/{tool}"
         return None
 
     monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
@@ -192,6 +196,67 @@ def test_preinstall_test_cli_tools_noops_when_tools_available(
     monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
 
     assert conftest.preinstall_test_cli_tools() == []
+
+
+def test_preinstall_test_cli_tools_shims_when_installs_blocked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Preinstall helper should fall back to shims when installers are unavailable."""
+
+    monkeypatch.setattr(conftest, "_TOOL_SHIM_DIR", None)
+    monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
+    monkeypatch.delenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", raising=False)
+
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", original_path)
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        return []
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        candidate = tmp_path / tool
+        if candidate.exists():
+            return str(candidate)
+        return None
+
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    shimmed = conftest.preinstall_test_cli_tools()
+
+    assert shimmed == sorted(conftest.TEST_CLI_TOOLS)
+    for tool in conftest.TEST_CLI_TOOLS:
+        shimmed_path = tmp_path / tool
+        assert shimmed_path.exists()
+        assert os.access(shimmed_path, os.X_OK)
+
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    assert str(tmp_path) in path_parts
+    assert path_parts.count(str(tmp_path)) == 1
+
+
+def test_preinstall_test_cli_tools_shim_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shim fallback should be disabled when explicitly requested."""
+
+    shim_attempts: list[Iterable[str]] = []
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        return []
+
+    def record_shim_attempt(missing: Iterable[str]) -> Path:
+        shim_attempts.append(list(missing))
+        return Path("ignored")
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        return None
+
+    monkeypatch.setenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", "0")
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+    monkeypatch.setattr(conftest, "_create_tool_shims", record_shim_attempt)
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    assert conftest.preinstall_test_cli_tools() == []
+    assert shim_attempts == []
 
 
 def test_ensure_test_cli_tools_preinstalled_respects_skip_env(

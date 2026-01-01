@@ -200,13 +200,38 @@ def _create_tool_shims(missing: Iterable[str]) -> Path:
 
 
 def preinstall_test_cli_tools() -> list[str]:
-    """Preinstall the CLI tools most tests depend on to avoid late skips."""
+    """Preinstall the CLI tools most tests depend on to avoid late skips.
+
+    When package installation is unavailable, this helper falls back to creating shims ahead
+    of the test session so integration flows are less likely to skip due to missing binaries.
+    """
 
     missing = [tool for tool in TEST_CLI_TOOLS if not shutil.which(tool)]
     if not missing:
         return []
 
-    return _install_missing_tools(missing)
+    # Attempt to install any missing tools via the system package manager.
+    # The return value from _install_missing_tools is a list of package names,
+    # which we intentionally ignore here so that this function can consistently
+    # report tool names.
+    _install_missing_tools(missing)
+
+    remaining = [tool for tool in missing if not shutil.which(tool)]
+    if remaining and _preinstall_shims_enabled():
+        _create_tool_shims(remaining)
+
+    # Report which tools from the original missing set are now available,
+    # regardless of whether they were provided by package installation or shims.
+    available_tools = [tool for tool in missing if shutil.which(tool)]
+    return sorted(available_tools)
+
+
+def _preinstall_shims_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when preinstall shim creation is enabled."""
+
+    env = os.environ if env is None else env
+    value = env.get("SUGARKUBE_PREINSTALL_TOOL_SHIMS", "1").strip().lower()
+    return value not in {"0", "false", "off", "no"}
 
 
 def ensure_test_cli_tools_preinstalled_if_allowed(
@@ -260,14 +285,16 @@ def require_tools(tools: Iterable[str]) -> None:
             missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
-        # TODO: Provision test CLI dependencies ahead of runtime.
-        # Root cause: Some hosts block installs (no sudo) or do not opt into shims,
-        # leaving required binaries unavailable for integration-focused tests.
-        # Estimated fix: Preinstall the dependencies on the host or enable shims
-        # via ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` when installs are impossible.
+        missing_str = ", ".join(sorted(missing))
+        # TODO: Avoid skipping when dependencies are missing in constrained test environments.
+        # Root cause: Required system tools are unavailable and neither shims nor package installs
+        # can provision them within the current session.
+        # Estimated fix: Preinstall the tools in test images or enable shim support for CI runs.
         pytest.skip(
-            "Required tools not available after preinstall and auto-install attempts: "
-            f"{', '.join(sorted(missing))}"
+            "Required tools not available after preinstall and auto-install attempts "
+            f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 to provision stand-ins "
+            "for this session, or set SUGARKUBE_PREINSTALL_TOOL_SHIMS=1 before the next "
+            "test session to shim tools during preinstall when installs are blocked."
         )
 
 
@@ -303,8 +330,10 @@ def _handle_netns_unavailable(reason: str) -> None:
         pytest.xfail(reason)
 
     # TODO: Avoid skips by provisioning netns capabilities in test environments.
-    # Root cause: Hosts without CAP_NET_ADMIN (and without sudo) cannot exercise network namespace flows.
-    # Estimated fix: Add CAP_NET_ADMIN or allow sudo with ``SUGARKUBE_NETNS_FALLBACK=xfail`` when upgrades are impractical.
+    # Root cause: Hosts without CAP_NET_ADMIN (and without sudo) cannot exercise
+    # network namespace flows.
+    # Estimated fix: Add CAP_NET_ADMIN or allow sudo with
+    # ``SUGARKUBE_NETNS_FALLBACK=xfail`` when upgrades are impractical.
     pytest.skip(reason)
 
 
