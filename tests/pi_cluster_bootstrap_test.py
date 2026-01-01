@@ -106,10 +106,11 @@ def test_dispatch_workflow_dry_run_invokes_list(monkeypatch: pytest.MonkeyPatch)
     runner = _StubRunner(dry_run=True)
     workflow = core.WorkflowConfig(trigger=True, ref="dev")
 
-    core._dispatch_workflow(workflow, runner)
+    result = core._dispatch_workflow(workflow, runner)
 
     assert runner.run_calls[0][:3] == ["gh", "workflow", "run"]
     assert runner.capture_calls == [core._build_workflow_list_command("dev")]
+    assert result is None
 
 
 def test_dispatch_workflow_requires_run_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,9 +139,10 @@ def test_dispatch_workflow_handles_object_response(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(core, "_wait_for_workflow_completion", fake_wait)
 
-    core._dispatch_workflow(workflow, runner)
+    result = core._dispatch_workflow(workflow, runner)
 
     assert captured["run_id"] == "321"
+    assert result == "321"
 
 
 def test_wait_for_workflow_completion_skips_for_dry_run() -> None:
@@ -239,9 +241,10 @@ def test_run_bootstrap_invokes_workflow_and_join(
 
     monkeypatch.setattr(core, "_ensure_scripts_exist", lambda: None)
 
-    def fake_dispatch(workflow_cfg: core.WorkflowConfig, runner_obj: _StubRunner) -> None:
+    def fake_dispatch(workflow_cfg: core.WorkflowConfig, runner_obj: _StubRunner) -> str:
         dispatched["config"] = workflow_cfg
         runner_obj.run(["workflow-dispatched"])
+        return "999"
 
     monkeypatch.setattr(core, "_dispatch_workflow", fake_dispatch)
 
@@ -259,7 +262,16 @@ def test_run_bootstrap_invokes_workflow_and_join(
     assert dispatched["config"] is workflow
     runner = created[0]
     assert any("workflow-dispatched" in cmd for cmd in runner.run_calls)
-    assert any(str(image_path) in cmd for cmd in runner.run_calls if isinstance(cmd, list))
+    assert any(
+        str(core.INSTALL_SCRIPT) in cmd and "--workflow-run" in cmd and "999" in cmd
+        for cmd in runner.run_calls
+        if isinstance(cmd, list)
+    )
+    assert any(
+        str(image_path) in cmd
+        for cmd in runner.run_calls
+        if isinstance(cmd, list)
+    )
 
 
 def test_run_bootstrap_respects_skip_flags(
@@ -504,6 +516,39 @@ hostname = "controller"
     assert "workflow" in config.download_args
     assert config.workflow is not None
     assert config.workflow.clone_token_place is True
+
+
+def test_build_install_command_appends_workflow_run_id(tmp_path: Path) -> None:
+    config = bootstrap.ClusterConfig(
+        image_dir=tmp_path,
+        image_name="sugarkube.img",
+        download_args=["--mode", "workflow"],
+        nodes=[],
+        join=None,
+        defaults=bootstrap.NodeDefaults(),
+    )
+
+    command = bootstrap.build_install_command(config, workflow_run_id="12345")
+
+    assert command.count("--workflow-run") == 1
+    assert command[-2:] == ["--workflow-run", "12345"]
+    assert str(tmp_path / "sugarkube.img") in command
+
+
+def test_build_install_command_respects_existing_workflow_run_id(tmp_path: Path) -> None:
+    config = bootstrap.ClusterConfig(
+        image_dir=tmp_path,
+        image_name="custom.img",
+        download_args=["--workflow-run", "abc", "--mode", "workflow"],
+        nodes=[],
+        join=None,
+        defaults=bootstrap.NodeDefaults(),
+    )
+
+    command = bootstrap.build_install_command(config, workflow_run_id="xyz")
+
+    assert command.count("--workflow-run") == 1
+    assert command[-4:-2] == ["--workflow-run", "abc"]
 
 
 def test_build_workflow_dispatch_command_sets_inputs() -> None:

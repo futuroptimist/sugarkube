@@ -113,6 +113,8 @@ sync without modifying the host.
     before flashing media. The helper records the workflow run ID it triggered and forwards it to
     `install_sugarkube_image.sh`, so both the compressed archive and the expanded `.img` gain a
     `.run` marker pointing to the exact build that was flashed.
+    Regression coverage: `tests/pi_cluster_bootstrap_test.py::test_run_bootstrap_invokes_workflow_and_join`
+    verifies the workflow run ID flows into the installer so those markers stay accurate.
    - **Manual:** open **Actions → pi-image → Run workflow**, tick **token.place** and **dspace** to
      bake those repos into `/opt/projects`, then download `sugarkube.img.xz` once the run succeeds.
      Need a guided path? Launch the [Sugarkube Flash Helper](./flash-helper/) and paste the workflow
