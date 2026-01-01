@@ -22,4 +22,6 @@ git ls-remote https://github.com/actions/upload-artifact.git v4.6.2
 
 When `SUGARKUBE_LS_REMOTE_FIXTURES` is set in CI or locally, fixture mode is
 strict: missing repositories or tags raise immediately instead of falling back
-to the network.
+to the network. Even when `SUGARKUBE_LS_REMOTE_FIXTURES=0` is used to force
+live requests, the default fixture acts as a fallback so tests do not skip when
+networks are slow or offline.

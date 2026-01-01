@@ -93,6 +93,31 @@ def ls_remote_fixture(monkeypatch) -> Path:
     return fixture_path
 
 
+def _assert_fixture_ref_exists(repo: str, ref: str, fixture_path: Path) -> None:
+    if not fixture_path.is_file():
+        raise AssertionError(f"ls-remote fixture not found: {fixture_path}")
+
+    try:
+        fixture = json.loads(fixture_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"Invalid ls-remote fixture JSON: {fixture_path}") from exc
+
+    if not isinstance(fixture, dict):
+        raise AssertionError(f"ls-remote fixture must be an object: {fixture_path}")
+
+    if repo not in fixture:
+        raise AssertionError(f"{repo} missing from ls-remote fixture {fixture_path}")
+
+    tags = fixture[repo]
+    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+        raise AssertionError(
+            "ls-remote fixture entries must be lists of strings: " f"{fixture_path}"
+        )
+
+    if ref not in tags:
+        raise AssertionError(f"{repo} tag {ref} missing from ls-remote fixture {fixture_path}")
+
+
 def _assert_tag_exists_upstream(
     repo: str,
     ref: str,
@@ -108,56 +133,35 @@ def _assert_tag_exists_upstream(
     ``test_assert_tag_exists_prefers_fixture``). When unset, the default fixture under
     ``tests/fixtures/ls_remote_tags.json`` is loaded automatically so the suite remains
     offline. Set ``SUGARKUBE_LS_REMOTE_FIXTURES=0`` to force live checks in debugging
-    scenarios.
+    scenarios; if those checks fail due to transient issues, the default fixture is used
+    as a fallback to avoid skips.
     """
 
     fixture_env = os.environ.get("SUGARKUBE_LS_REMOTE_FIXTURES", "").strip()
+    default_fixture = Path(__file__).parent / "fixtures" / "ls_remote_tags.json"
+    fallback_fixture: Path | None = None
     if fixture_env.lower() in {"0", "off", "none"}:
         fixture_path: Path | None = None
+        if default_fixture.exists():
+            fallback_fixture = default_fixture
     elif fixture_env:
         fixture_path = Path(fixture_env)
     else:
-        fixture_path = Path(__file__).parent / "fixtures" / "ls_remote_tags.json"
-        if not fixture_path.exists():
-            fixture_path = None
+        fixture_path = default_fixture if default_fixture.exists() else None
 
     if fixture_path:
-        if not fixture_path.is_file():
-            raise AssertionError(f"ls-remote fixture not found: {fixture_path}")
-
-        try:
-            fixture = json.loads(fixture_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise AssertionError(
-                f"Invalid ls-remote fixture JSON: {fixture_path}"
-            ) from exc
-
-        if not isinstance(fixture, dict):
-            raise AssertionError(
-                f"ls-remote fixture must be an object: {fixture_path}"
-            )
-
-        if repo not in fixture:
-            raise AssertionError(
-                f"{repo} missing from ls-remote fixture {fixture_path}"
-            )
-
-        tags = fixture[repo]
-        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
-            raise AssertionError(
-                "ls-remote fixture entries must be lists of strings: "
-                f"{fixture_path}"
-            )
-
-        if ref not in tags:
-            raise AssertionError(
-                f"{repo} tag {ref} missing from ls-remote fixture {fixture_path}"
-            )
-
+        _assert_fixture_ref_exists(repo, ref, fixture_path)
         return
 
     url = f"https://github.com/{repo}.git"
     sleep = sleep_fn or time.sleep
+
+    def _fallback_to_fixture(reason: str) -> None:
+        if fallback_fixture:
+            _assert_fixture_ref_exists(repo, ref, fallback_fixture)
+            return
+
+        pytest.skip(reason)
 
     for attempt in range(1, retries + 1):
         try:
@@ -173,15 +177,11 @@ def _assert_tag_exists_upstream(
                 sleep(delay_seconds)
                 continue
 
-            # TODO: Avoid skips by keeping ls-remote checks fully fixture-driven.
-            # Root cause: Fixture opt-out tests still rely on live git traffic, which can time out
-            # in constrained or offline environments even after retries.
-            # Estimated fix: Extend coverage so opt-out scenarios inject local git refs instead
-            # of depending on upstream network availability.
-            pytest.skip(
+            _fallback_to_fixture(
                 "git ls-remote timed out after fixture opt-out "
                 f"for {repo} tag {ref}: {exc}"
             )
+            return
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").lower()
             if any(marker in stderr for marker in _TRANSIENT_LS_REMOTE_ERRORS):
@@ -189,15 +189,11 @@ def _assert_tag_exists_upstream(
                     sleep(delay_seconds)
                     continue
 
-                # TODO: Avoid skips by keeping ls-remote checks fully fixture-driven.
-                # Root cause: Fixture opt-out tests still rely on live git traffic, which can
-                # hit transient network failures even after retries.
-                # Estimated fix: Extend coverage so opt-out scenarios inject local git refs
-                # instead of depending on upstream network availability.
-                pytest.skip(
+                _fallback_to_fixture(
                     "git ls-remote transiently failed after fixture opt-out for "
                     f"{repo} tag {ref}: {exc.stderr}"
                 )
+                return
 
             raise AssertionError(
                 f"git ls-remote failed for {repo} tag {ref}: {exc.stderr}"
@@ -235,10 +231,12 @@ def test_assert_tag_exists_retries_transient_errors(monkeypatch):
     assert len(attempts) == 3
 
 
-def test_assert_tag_exists_skips_after_retries(monkeypatch):
+def test_assert_tag_exists_falls_back_after_retries(monkeypatch):
     monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", "0")
+    attempts: list[int] = []
 
     def fake_run(*_, **__):
+        attempts.append(1)
         raise subprocess.CalledProcessError(
             returncode=1,
             cmd=["git", "ls-remote"],
@@ -247,7 +245,7 @@ def test_assert_tag_exists_skips_after_retries(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    with pytest.raises(pytest.skip.Exception):
+    try:
         _assert_tag_exists_upstream(
             "actions/cache",
             "v4.3.0",
@@ -255,9 +253,13 @@ def test_assert_tag_exists_skips_after_retries(monkeypatch):
             delay_seconds=0,
             sleep_fn=lambda _: None,
         )
+    except pytest.skip.Exception as exc:  # pragma: no cover - enforced failure path
+        pytest.fail(f"Fallback fixture should prevent skips: {exc.msg}")
+
+    assert len(attempts) == 2
 
 
-def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
+def test_assert_tag_exists_falls_back_after_timeouts(monkeypatch):
     monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", "0")
     attempts: list[int] = []
 
@@ -267,7 +269,7 @@ def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    with pytest.raises(pytest.skip.Exception):
+    try:
         _assert_tag_exists_upstream(
             "actions/cache",
             "v4.3.0",
@@ -275,6 +277,8 @@ def test_assert_tag_exists_skips_after_timeouts(monkeypatch):
             delay_seconds=0,
             sleep_fn=lambda _: None,
         )
+    except pytest.skip.Exception as exc:  # pragma: no cover - enforced failure path
+        pytest.fail(f"Fallback fixture should prevent skips: {exc.msg}")
 
     assert len(attempts) == 2
 
