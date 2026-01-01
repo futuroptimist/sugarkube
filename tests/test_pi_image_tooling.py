@@ -162,6 +162,11 @@ def _assert_tag_exists_upstream(
             _assert_fixture_ref_exists(repo, ref, fallback_fixture)
             return
 
+        # TODO: Avoid skipping when both live git checks and fallback fixtures are unavailable.
+        # Root cause: SUGARKUBE_LS_REMOTE_FIXTURES=0 disables fixtures and the default
+        #   ls-remote fixture is missing, leaving no offline reference after retries or timeouts.
+        # Estimated fix: Bundle the default fixture with the test assets or surface a stricter
+        #   assertion so missing fixtures fail fast instead of skipping.
         pytest.skip(reason)
 
     for attempt in range(1, retries + 1):
