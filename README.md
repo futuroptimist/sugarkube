@@ -218,6 +218,13 @@ shim directory is prepended to ``PATH`` while enabled, so prefer using them in
 isolated test environments (such as disposable containers or dedicated
 virtualenvs) instead of your daily shell. Regression coverage:
 `tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
+When `apt-get` is unavailable, the session-level pre-install hook now shims the
+core CLI dependencies ahead of time so integration tests see the expected tools
+without waiting for per-test skip handling. Set
+`SUGARKUBE_PREINSTALL_TOOL_SHIMS=0` to opt out when you need to exercise real
+installations instead of stubs. Regression coverage:
+`tests/test_require_tools.py::test_preinstall_test_cli_tools_shims_when_installs_blocked`
+and `tests/test_require_tools.py::test_preinstall_test_cli_tools_shim_opt_out`.
 Network namespace probes now request the `ip` and `unshare` utilities up front,
 falling back to the same tooling installer before retrying with sudo so CI and
 local runs converge. Regression coverage:
