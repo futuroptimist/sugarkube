@@ -210,14 +210,20 @@ def preinstall_test_cli_tools() -> list[str]:
     if not missing:
         return []
 
-    installed = _install_missing_tools(missing)
+    # Attempt to install any missing tools via the system package manager.
+    # The return value from _install_missing_tools is a list of package names,
+    # which we intentionally ignore here so that this function can consistently
+    # report tool names.
+    _install_missing_tools(missing)
 
     remaining = [tool for tool in missing if not shutil.which(tool)]
     if remaining and _preinstall_shims_enabled():
         _create_tool_shims(remaining)
 
-    shimmed = [tool for tool in remaining if shutil.which(tool)]
-    return sorted({*installed, *shimmed})
+    # Report which tools from the original missing set are now available,
+    # regardless of whether they were provided by package installation or shims.
+    available_tools = [tool for tool in missing if shutil.which(tool)]
+    return sorted(available_tools)
 
 
 def _preinstall_shims_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -282,9 +288,9 @@ def require_tools(tools: Iterable[str]) -> None:
         missing_str = ", ".join(sorted(missing))
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts "
-            f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 or "
-            "SUGARKUBE_PREINSTALL_TOOL_SHIMS=1 to provision stand-ins when installs are "
-            "blocked."
+            f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 to provision stand-ins "
+            "for this session, or set SUGARKUBE_PREINSTALL_TOOL_SHIMS=1 before the next "
+            "test session to shim tools during preinstall when installs are blocked."
         )
 
 

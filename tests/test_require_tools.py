@@ -157,15 +157,19 @@ def test_preinstall_test_cli_tools_installs_missing(monkeypatch: pytest.MonkeyPa
     """Preinstall helper should request all known CLI dependencies when missing."""
 
     recorded: list[list[str]] = []
+    installed: set[str] = set()
 
     def fake_install(missing: Iterable[str]) -> list[str]:
         ordered = sorted(missing)
         recorded.append(ordered)
+        installed.update(ordered)
         return ordered
 
     def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
         if tool == "apt-get":
             return "/usr/bin/apt-get"
+        if tool in installed:
+            return f"/usr/bin/{tool}"
         return None
 
     monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
@@ -199,7 +203,7 @@ def test_preinstall_test_cli_tools_shims_when_installs_blocked(
 ) -> None:
     """Preinstall helper should fall back to shims when installers are unavailable."""
 
-    conftest._TOOL_SHIM_DIR = None
+    monkeypatch.setattr(conftest, "_TOOL_SHIM_DIR", None)
     monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
     monkeypatch.delenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", raising=False)
 
