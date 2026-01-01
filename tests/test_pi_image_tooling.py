@@ -7,6 +7,7 @@ import os
 from collections.abc import Callable
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -234,6 +235,14 @@ def test_assert_tag_exists_retries_transient_errors(monkeypatch):
 def test_assert_tag_exists_falls_back_after_retries(monkeypatch):
     monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", "0")
     attempts: list[int] = []
+    fallback_calls: list[Path] = []
+
+    original_assert = _assert_fixture_ref_exists
+    expected_fallback = Path(__file__).parent / "fixtures" / "ls_remote_tags.json"
+
+    def spy_assert_fixture_ref_exists(repo: str, ref: str, fixture_path: Path) -> None:
+        fallback_calls.append(fixture_path)
+        original_assert(repo, ref, fixture_path)
 
     def fake_run(*_, **__):
         attempts.append(1)
@@ -244,6 +253,9 @@ def test_assert_tag_exists_falls_back_after_retries(monkeypatch):
         )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        sys.modules[__name__], "_assert_fixture_ref_exists", spy_assert_fixture_ref_exists
+    )
 
     try:
         _assert_tag_exists_upstream(
@@ -256,18 +268,30 @@ def test_assert_tag_exists_falls_back_after_retries(monkeypatch):
     except pytest.skip.Exception as exc:  # pragma: no cover - enforced failure path
         pytest.fail(f"Fallback fixture should prevent skips: {exc.msg}")
 
+    assert fallback_calls == [expected_fallback]
     assert len(attempts) == 2
 
 
 def test_assert_tag_exists_falls_back_after_timeouts(monkeypatch):
     monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", "0")
     attempts: list[int] = []
+    fallback_calls: list[Path] = []
+
+    original_assert = _assert_fixture_ref_exists
+    expected_fallback = Path(__file__).parent / "fixtures" / "ls_remote_tags.json"
+
+    def spy_assert_fixture_ref_exists(repo: str, ref: str, fixture_path: Path) -> None:
+        fallback_calls.append(fixture_path)
+        original_assert(repo, ref, fixture_path)
 
     def fake_run(*_, **__):
         attempts.append(1)
         raise subprocess.TimeoutExpired(cmd=["git", "ls-remote"], timeout=30)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        sys.modules[__name__], "_assert_fixture_ref_exists", spy_assert_fixture_ref_exists
+    )
 
     try:
         _assert_tag_exists_upstream(
@@ -280,6 +304,7 @@ def test_assert_tag_exists_falls_back_after_timeouts(monkeypatch):
     except pytest.skip.Exception as exc:  # pragma: no cover - enforced failure path
         pytest.fail(f"Fallback fixture should prevent skips: {exc.msg}")
 
+    assert fallback_calls == [expected_fallback]
     assert len(attempts) == 2
 
 
