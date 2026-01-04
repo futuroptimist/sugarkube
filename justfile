@@ -1116,6 +1116,8 @@ dspace-oci-redeploy env='staging' tag='':
       env_name="staging"
     fi
 
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+
     overlay="docs/examples/dspace.values.${env_name}.yaml"
     if [ ! -f "${overlay}" ]; then
       echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
@@ -1130,7 +1132,7 @@ dspace-oci-redeploy env='staging' tag='':
     default_tag_value=""
     if [ "${env_name}" = "prod" ]; then
       if [ -z "${deploy_tag}" ] && [ -f "docs/apps/dspace.prod.tag" ]; then
-        deploy_tag="$(tr -d '\r' < docs/apps/dspace.prod.tag | head -n1)"
+        deploy_tag="$(read_prod_tag)"
       fi
       if [ -z "${deploy_tag}" ]; then
         echo "Set tag=<immutable-tag> for prod or populate docs/apps/dspace.prod.tag." >&2

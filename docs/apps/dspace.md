@@ -57,13 +57,16 @@ just helm-oci-install \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
 
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+prod_tag="$(read_prod_tag)"
+
 # Install production with prod ingress overrides and a pinned tag
 just helm-oci-install \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
   version_file=docs/apps/dspace.version \
-  tag=$(cat docs/apps/dspace.prod.tag)
+  tag="${prod_tag}"
 
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
@@ -124,13 +127,16 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
      version_file=docs/apps/dspace.version \
      default_tag=v3-latest
 
+   read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+   prod_tag="$(read_prod_tag)"
+
    # Production example (pinned tag)
    just helm-oci-install \
      release=dspace namespace=dspace \
      chart=oci://ghcr.io/democratizedspace/charts/dspace \
      values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
      version_file=docs/apps/dspace.version \
-     tag=$(cat docs/apps/dspace.prod.tag)
+     tag="${prod_tag}"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:

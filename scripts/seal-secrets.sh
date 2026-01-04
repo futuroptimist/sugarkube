@@ -14,6 +14,11 @@ if [[ -z "${ENVIRONMENT}" ]]; then
   exit 1
 fi
 
+if [ "${ENVIRONMENT}" = "int" ]; then
+  echo "WARNING: environment 'int' is deprecated; using 'staging'." >&2
+  ENVIRONMENT="staging"
+fi
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SECRET_DIR="${REPO_ROOT}/clusters/${ENVIRONMENT}/secrets"
 

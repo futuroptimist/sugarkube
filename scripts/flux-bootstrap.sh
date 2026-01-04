@@ -11,6 +11,11 @@ else
   : "${CLUSTER_ENV:=prod}"
 fi
 
+if [ "${CLUSTER_ENV}" = "int" ]; then
+  echo "WARNING: environment 'int' is deprecated; using 'staging'." >&2
+  CLUSTER_ENV="staging"
+fi
+
 if ! command -v flux >/dev/null 2>&1; then
   echo "flux CLI is required. Install from https://fluxcd.io/flux/ before running." >&2
   exit 1

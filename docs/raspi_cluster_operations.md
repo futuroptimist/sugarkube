@@ -695,12 +695,15 @@ For production, swap in the prod values file and pin to an immutable tag (for ex
 stored in `docs/apps/dspace.prod.tag`):
 
 ```bash
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+prod_tag="$(read_prod_tag)"
+
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
   version_file=docs/apps/dspace.version \
-  tag=$(cat docs/apps/dspace.prod.tag)
+  tag="${prod_tag}"
 ```
 
 The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
@@ -715,7 +718,8 @@ recipe (defaults to staging):
 ```bash
 just dspace-oci-redeploy
 # or explicitly select an environment:
-just dspace-oci-redeploy env=prod tag=$(cat docs/apps/dspace.prod.tag)
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
