@@ -361,6 +361,9 @@ mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 
 mdns-selfcheck env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
     env_input="{{ env }}"
     env_name="${env_input}"
     if [ "${env_input}" = "int" ]; then
@@ -1678,6 +1681,9 @@ support-bundle:
 
 # Bootstrap Flux controllers and sync manifests for an environment
 flux-bootstrap env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
     env_input="{{ env }}"
     env_name="${env_input}"
     if [ "${env_input}" = "int" ]; then
@@ -1688,6 +1694,9 @@ flux-bootstrap env='dev':
 
 # Reconcile the platform Kustomization via Flux
 platform-apply env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
     env_input="{{ env }}"
     env_name="${env_input}"
     if [ "${env_input}" = "int" ]; then
@@ -1700,6 +1709,9 @@ platform-apply env='dev':
 
 # Reseal SOPS secrets for an environment
 seal-secrets env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
     env_input="{{ env }}"
     env_name="${env_input}"
     if [ "${env_input}" = "int" ]; then
@@ -1710,6 +1722,9 @@ seal-secrets env='dev':
 
 # Backwards-compatible alias that calls flux-bootstrap
 platform-bootstrap env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
     env_input="{{ env }}"
     env_name="${env_input}"
     if [ "${env_input}" = "int" ]; then
