@@ -4,16 +4,21 @@ Use the packaged Helm chart from GHCR to install the dspace v3 stack into your c
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
 changing the arguments.
 
-Values files are split so you can layer staging-specific ingress settings on top of the default
+Values files are split so you can layer environment-specific ingress settings on top of the default
 development values:
 
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
 - `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
   `staging.democratized.space`.
+- `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
+  `democratized.space` (override as needed for your Cloudflare Tunnel and DNS).
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
-hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
-configured accordingly.
+hostname. Production defaults to `democratized.space`. Substitute different hostnames if your
+Cloudflare Tunnel and DNS are configured accordingly.
+
+Production deploys should avoid mutable tags. The pinned image tag lives in
+`docs/apps/dspace.prod-tag`; update it deliberately when promoting a release.
 
 ## Prerequisites
 
@@ -54,6 +59,14 @@ just helm-oci-install \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
 
+# Production example (pins to the prod tag file unless you pass tag=<immutable> explicitly)
+just helm-oci-install \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  default_tag=$(cat docs/apps/dspace.prod-tag)
+
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
 
@@ -68,8 +81,8 @@ just helm-oci-upgrade \
 
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
-- The image tag defaults to `default_tag` (`v3-latest`); pass `tag=<imageTag>` to target a
-  specific build.
+- The image tag defaults to `default_tag` (`v3-latest` for dev/staging, the pinned value in
+  `docs/apps/dspace.prod-tag` for prod); pass `tag=<imageTag>` to target a specific build.
 
 ## First deployment walkthrough
 

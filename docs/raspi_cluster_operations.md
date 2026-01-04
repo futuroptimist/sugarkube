@@ -599,7 +599,7 @@ companion application for your cluster.
 >   dspace repo (recommended once Helm and GHCR login are working).
 >
 > For the sugarkube-centric path, see:
-> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-dev.md
+> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
 
 ### Why deploy dspace?
 
@@ -684,18 +684,29 @@ just helm-oci-upgrade \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
+
+# Production example (pins to the prod tag file unless you pass tag=<immutable> explicitly)
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  default_tag=$(cat docs/apps/dspace.prod-tag)
 ```
 
 The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
 `environment` value in the dspace values file). In this repo, `docs/examples/dspace.values.dev.yaml`
-sets `environment: dev` and `docs/examples/dspace.values.staging.yaml` sets `environment: staging`,
-which show up in `/healthz` and the homepage build badge.
+sets `environment: dev`, `docs/examples/dspace.values.staging.yaml` sets `environment: staging`,
+and `docs/examples/dspace.values.prod.yaml` sets `environment: prod`, which show up in `/healthz`
+and the homepage build badge.
 
 If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
 recipe:
 
 ```bash
-just dspace-oci-redeploy
+just dspace-oci-redeploy env=staging
+# or
+just dspace-oci-redeploy env=prod
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
@@ -707,7 +718,8 @@ finish and exits non-zero if Kubernetes reports a failure.
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
 each redeploy. For production, prefer immutable tags (for example, `v3-<sha>`) if you want
-to pin a specific image.
+to pin a specific image. The prod helper defaults to the pinned tag in `docs/apps/dspace.prod-tag`
+if you omit `tag=`.
 
 **Emergency redeploy checklist:**
 

@@ -1,0 +1,8 @@
+# Example values for deploying democratized.space via Helm in production.
+# The ingress host can be overridden to match your Cloudflare Tunnel and DNS.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: democratized.space

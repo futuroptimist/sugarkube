@@ -1,0 +1,3 @@
+# Default immutable image tag for production dspace deployments.
+# Override by passing tag=<image-tag> to the just recipe.
+v3.0.0

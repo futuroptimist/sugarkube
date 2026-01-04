@@ -9,6 +9,19 @@ PROC_CMDLINE_PATH="${SUGARKUBE_PROC_CMDLINE_PATH:-/proc/cmdline}"
 
 log() { printf '[sugarkube] %s\n' "$*"; }
 
+normalize_env() {
+  if [ -z "${SUGARKUBE_ENV:-}" ]; then
+    SUGARKUBE_ENV="dev"
+    return
+  fi
+
+  if [ "${SUGARKUBE_ENV}" = "int" ]; then
+    log "WARNING: SUGARKUBE_ENV set to legacy int alias; using staging." >&2
+    SUGARKUBE_ENV="staging"
+  fi
+  export SUGARKUBE_ENV
+}
+
 if [ "$(uname -s)" != "Linux" ]; then
   log "Non-Linux host detected; skipping memory cgroup configuration."
   exit 0
@@ -193,7 +206,7 @@ persist_env() {
   chown root:root "$ENV_FILE"
 
   # Persist the variables most likely needed by the bootstrap
-  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_INT SUGARKUBE_TOKEN_PROD; do
+  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_STAGING SUGARKUBE_TOKEN_PROD; do
     if [ -n "${!n-}" ]; then
       printf '%s=%q\n' "$n" "${!n}" >>"$ENV_FILE"
     fi
@@ -203,7 +216,7 @@ persist_env() {
   if [ -z "${SUGARKUBE_TOKEN-}" ] && [ -n "${SUGARKUBE_ENV-}" ]; then
     case "${SUGARKUBE_ENV}" in
       dev)  [ -n "${SUGARKUBE_TOKEN_DEV-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_DEV}"  >>"$ENV_FILE" ;;
-      int)  [ -n "${SUGARKUBE_TOKEN_INT-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_INT}"  >>"$ENV_FILE" ;;
+      staging) [ -n "${SUGARKUBE_TOKEN_STAGING-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_STAGING}"  >>"$ENV_FILE" ;;
       prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_PROD}" >>"$ENV_FILE" ;;
     esac
   fi
@@ -240,7 +253,7 @@ Group={user}
 Environment=HOME={home}
 EnvironmentFile={env_file}
 WorkingDirectory={working_dir}
-ExecStart=/usr/bin/just up dev
+ExecStart=/bin/sh -c '/usr/bin/just up "${SUGARKUBE_ENV:-dev}"'
 ExecStartPost=/bin/systemctl disable --now {service_name}
 
 [Install]
@@ -260,6 +273,7 @@ PY
 
 main() {
   ensure_root "$@"
+  normalize_env
 
   if memctrl_active; then
     log "Memory cgroup controller is active; nothing to do."
