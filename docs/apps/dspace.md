@@ -4,12 +4,14 @@ Use the packaged Helm chart from GHCR to install the dspace v3 stack into your c
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
 changing the arguments.
 
-Values files are split so you can layer staging-specific ingress settings on top of the default
+Values files are split so you can layer environment-specific ingress settings on top of the default
 development values:
 
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
-- `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
+- `docs/examples/dspace.values.staging.yaml`: staging ingress host and class targeting
   `staging.democratized.space`.
+- `docs/examples/dspace.values.prod.yaml`: production ingress host targeting
+  `democratized.space`.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
@@ -27,6 +29,8 @@ configured accordingly.
 - Image repository: `ghcr.io/democratizedspace/dspace`
   - Example tag: `ghcr.io/democratizedspace/dspace:v3-latest`
   - Additional tags such as `v3-<short-sha>` or `v<semver>` can be used for specific builds.
+- Production deployments should pin immutable tags. The file `docs/apps/dspace.image.prod`
+  stores the default prod image tag; update it before promoting a new release.
 - Helm chart: `oci://ghcr.io/democratizedspace/charts/dspace:<chartVersion>`
   - Example: `oci://ghcr.io/democratizedspace/charts/dspace:3.0.0` (chartVersion comes from
     `Chart.yaml`).
@@ -46,7 +50,7 @@ charts:
 ## Quickstart
 
 ```bash
-# Install or upgrade the release with staging ingress overrides (defaults to v3-latest image tag)
+# Install or upgrade staging (defaults to v3-latest image tag)
 just helm-oci-install \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
@@ -54,10 +58,18 @@ just helm-oci-install \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
 
+# Install or upgrade prod with immutable tag (pulls the tag from docs/apps/dspace.image.prod)
+just helm-oci-install \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.image.prod | head -n1)
+
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
 
-# Bump the image tag and roll the release (optionally override chart version)
+# Bump the image tag and roll the staging release (optionally override chart version)
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
@@ -68,13 +80,14 @@ just helm-oci-upgrade \
 
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
-- The image tag defaults to `default_tag` (`v3-latest`); pass `tag=<imageTag>` to target a
-  specific build.
+- The staging image tag defaults to `default_tag` (`v3-latest`); prod must use an immutable tag
+  either via `tag=<imageTag>` or the `docs/apps/dspace.image.prod` pin.
 
 ## First deployment walkthrough
 
 Follow this numbered tutorial for a fresh dspace v3 rollout behind Traefik. It
-assumes your `env=dev` cluster is online and reachable with kubectl.
+assumes your `env=staging` cluster is online and reachable with kubectl; swap the
+environment for dev or prod as needed.
 
 1. Confirm Traefik is present:
 
@@ -82,10 +95,11 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
    kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
    ```
 
-2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](../cloudflare_tunnel.md)):
+2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](../cloudflare_tunnel.md)) and set
+   `CF_TUNNEL_TOKEN` from the Cloudflare dashboard before running:
 
    ```bash
-   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install env=staging
    ```
 
 3. Create a Tunnel route in the Cloudflare dashboard from your FQDN to
@@ -121,6 +135,10 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
      version_file=docs/apps/dspace.version \
      tag=v3-<shortsha>
    ```
+
+For production, swap in `docs/examples/dspace.values.prod.yaml` for the overlay and either pass
+`tag=<immutable-tag>` or populate `docs/apps/dspace.image.prod` with the pinned image tag before
+running `helm-oci-install`, `helm-oci-upgrade`, or `dspace-oci-redeploy env=prod`.
 
 ## Networking via Cloudflare Tunnel
 

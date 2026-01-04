@@ -187,13 +187,17 @@ ensure_kernel_params() {
 }
 
 persist_env() {
+  if [ "${SUGARKUBE_ENV:-}" = "int" ]; then
+    SUGARKUBE_ENV="staging"
+  fi
+
   install -d -m 0755 -o root -g root "$STATE_DIR"
   : >"$ENV_FILE"
   chmod 0640 "$ENV_FILE"
   chown root:root "$ENV_FILE"
 
   # Persist the variables most likely needed by the bootstrap
-  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_INT SUGARKUBE_TOKEN_PROD; do
+  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_STAGING SUGARKUBE_TOKEN_PROD; do
     if [ -n "${!n-}" ]; then
       printf '%s=%q\n' "$n" "${!n}" >>"$ENV_FILE"
     fi
@@ -202,9 +206,11 @@ persist_env() {
   # If SUGARKUBE_TOKEN not set but an env-specific token is, derive it now
   if [ -z "${SUGARKUBE_TOKEN-}" ] && [ -n "${SUGARKUBE_ENV-}" ]; then
     case "${SUGARKUBE_ENV}" in
-      dev)  [ -n "${SUGARKUBE_TOKEN_DEV-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_DEV}"  >>"$ENV_FILE" ;;
-      int)  [ -n "${SUGARKUBE_TOKEN_INT-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_INT}"  >>"$ENV_FILE" ;;
-      prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_PROD}" >>"$ENV_FILE" ;;
+      dev) [ -n "${SUGARKUBE_TOKEN_DEV-}" ] && printf 'SUGARKUBE_TOKEN=%q\n' "${SUGARKUBE_TOKEN_DEV}" >>"$ENV_FILE" ;;
+      int|staging)
+        [ -n "${SUGARKUBE_TOKEN_STAGING-}" ] && printf 'SUGARKUBE_TOKEN=%q\n' "${SUGARKUBE_TOKEN_STAGING}" >>"$ENV_FILE"
+        ;;
+      prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n' "${SUGARKUBE_TOKEN_PROD}" >>"$ENV_FILE" ;;
     esac
   fi
 }
@@ -240,7 +246,7 @@ Group={user}
 Environment=HOME={home}
 EnvironmentFile={env_file}
 WorkingDirectory={working_dir}
-ExecStart=/usr/bin/just up dev
+ExecStart=/bin/bash -c '/usr/bin/just up "${SUGARKUBE_ENV:-dev}"'
 ExecStartPost=/bin/systemctl disable --now {service_name}
 
 [Install]

@@ -186,7 +186,7 @@ DNS or hostnames can reflect tiering; each tier runs its own Cloudflare Tunnel r
 
 ```
 prod.example.tld        -> cloudflared (Region A, Tier A)
-int.example.tld         -> cloudflared (Region A, Tier B)
+staging.example.tld     -> cloudflared (Region A, Tier B)
 dev.example.tld         -> cloudflared (Region A, Tier C)
 continuity.example.tld  -> cloudflared (Region B)
 remote.example.tld      -> cloudflared (Region C)

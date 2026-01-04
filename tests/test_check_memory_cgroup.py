@@ -158,7 +158,7 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
     service_contents = service.read_text(encoding="utf-8")
     assert "EnvironmentFile=" + str(env_file) in service_contents
     assert "WorkingDirectory=/home/pi/sugarkube" in service_contents
-    assert "ExecStart=/usr/bin/just up dev" in service_contents
+    assert "ExecStart=/bin/bash -c '/usr/bin/just up \"${SUGARKUBE_ENV:-dev}\"'" in service_contents
 
     calls = call_log.read_text(encoding="utf-8").strip().splitlines()
     assert calls == [

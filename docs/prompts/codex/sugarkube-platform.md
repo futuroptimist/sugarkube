@@ -1,4 +1,4 @@
-# One-click repo task: bootstrap a Pi5-backed k3s HA platform (prod/int/dev) with GitOps
+# One-click repo task: bootstrap a Pi5-backed k3s HA platform (prod/staging/dev) with GitOps
 
 You are a senior platform engineer. Implement the following in this repo **in one atomic PR**.
 
@@ -22,7 +22,7 @@ You are a senior platform engineer. Implement the following in this repo **in on
 ## Deliverables
 1. **Repo layout (kustomize + Flux)**
    - Create:
-     - `clusters/prod/`, `clusters/int/`, `clusters/dev/`
+     - `clusters/prod/`, `clusters/staging/`, `clusters/dev/`
      - `platform/` (shared stack: kube-vip, traefik config, cloudflared, cert-manager, issuers,
        external-dns [optional], storage, monitoring)
      - `apps/` (left empty here; app repos own their charts)
@@ -87,12 +87,12 @@ You are a senior platform engineer. Implement the following in this repo **in on
 - [ ] NetworkPolicies applied (default deny + platform allow).
 - [ ] `docs/runbook.md` covers bootstrap, upgrades, backup/restore, and promotion (see Flux notes
       below).
-- [ ] `clusters/{dev,int,prod}` overlays differ only where needed (hostnames, VIPs, tunnel name,
-      issuers).
+- [ ] `clusters/{dev,staging,prod}` overlays differ only where needed (hostnames, VIPs, tunnel
+      name, issuers).
 
 ## Notes
 - Promotion model: pin container images by immutable digest, then **promote** by merging the pinned
-  digest from `int` → `prod` (Flux will reconcile).
+  digest from `staging` → `prod` (Flux will reconcile).
 - Leave Traefik enabled in k3s unless there’s a hard requirement to swap to NGINX; if you later adopt
   MetalLB, ensure `--disable=servicelb` on **all** k3s servers.
 

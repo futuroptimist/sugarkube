@@ -1,0 +1,8 @@
+# Example production values for deploying democratized.space via Helm.
+# Pair with an immutable image tag (for example, v3-<sha>) when promoting to prod.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: democratized.space

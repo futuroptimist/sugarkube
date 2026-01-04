@@ -14,16 +14,31 @@ export SUGARKUBE_MDNS_ABSENCE_DBUS := env('SUGARKUBE_MDNS_ABSENCE_DBUS', '1')
 default: up
     @true
 
+up-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" up env='dev'
+
+up-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" up env='staging'
+
+up-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" up env='prod'
+
 up env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    # Select per-environment token if available
-    if [ "{{ env }}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
-    if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
-    if [ "{{ env }}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_PROD"; fi
+    env_param="{{ env }}"
+    if [ "${env_param}" = "int" ]; then
+        printf 'DEPRECATION: env value "int" is treated as env=staging; switch to env=staging.\n' >&2
+        env_param="staging"
+    fi
 
-    export SUGARKUBE_ENV="{{ env }}"
+    # Select per-environment token if available
+    if [ "${env_param}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
+    if [ "${env_param}" = "staging" ] && [ -n "${SUGARKUBE_TOKEN_STAGING:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_STAGING"; fi
+    if [ "${env_param}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_PROD"; fi
+
+    export SUGARKUBE_ENV="${env_param}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
@@ -229,6 +244,15 @@ cluster-status:
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+ha3-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env='dev'
+
+ha3-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env='staging'
+
+ha3-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env='prod'
+
 # Remove the control-plane NoSchedule taint from all nodes so they can run workloads.
 # This is intended for the homelab topology where all three HA control-plane nodes
 
@@ -310,6 +334,15 @@ ha3-untaint-control-plane:
 save-logs env='dev':
     SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+save-logs-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" save-logs env='dev'
+
+save-logs-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" save-logs env='staging'
+
+save-logs-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" save-logs env='prod'
+
 # Display the k3s node token needed for additional nodes to join the cluster.
 cat-node-token:
     sudo cat /var/lib/rancher/k3s/server/node-token
@@ -352,6 +385,15 @@ kubeconfig env='dev':
     scope_name="sugar-${env_name#env=}"
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
 
+kubeconfig-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env='dev'
+
+kubeconfig-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env='staging'
+
+kubeconfig-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env='prod'
+
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
   This happens when the connector token is invalid for remote-managed mode or the tunnel itself is not set to
@@ -368,7 +410,7 @@ origin_cert_guidance := """
     - After correcting the token/tunnel, run:
 
         just cf-tunnel-reset
-        just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+        just cf-tunnel-install env=staging token="$CF_TUNNEL_TOKEN"
 """
 
 cf-tunnel-install env='dev' token='':
@@ -538,7 +580,7 @@ cf-tunnel-reset:
         helm -n cloudflare uninstall cloudflare-tunnel || true
     fi
 
-    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=dev token=\"${CF_TUNNEL_TOKEN:-<your-token>}\"' to reinstall."
+    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=<env> token=\"${CF_TUNNEL_TOKEN:-<your-token>}\"' to reinstall for your target environment."
 
 # Show Cloudflare Tunnel status and recent logs (for debugging rollout failures).
 cf-tunnel-debug:
@@ -1031,16 +1073,64 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 # Fast redeploy of dspace v3 from GHCR (emergency push).
-dspace-oci-redeploy:
+dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    env_param="{{ env }}"
+    if [ "${env_param}" = "int" ]; then
+      echo "DEPRECATION: env value 'int' maps to env=staging for dspace; use env=staging instead." >&2
+      env_param="staging"
+    fi
+
+    case "${env_param}" in
+      dev|staging|prod) ;;
+      *)
+        echo "Set env to dev, staging, or prod for dspace redeploys." >&2
+        exit 1
+        ;;
+    esac
+
+    base_values="docs/examples/dspace.values.dev.yaml"
+    overlay_values="docs/examples/dspace.values.${env_param}.yaml"
+    if [ "${env_param}" = "dev" ]; then
+      values_arg="${base_values}"
+    else
+      values_arg="${base_values},${overlay_values}"
+    fi
+
+    for values_file in ${base_values} ${overlay_values}; do
+      if [ ! -f "${values_file}" ]; then
+        echo "Missing values file: ${values_file}" >&2
+        exit 1
+      fi
+    done
+
+    default_tag="v3-latest"
+    prod_tag_file="docs/apps/dspace.image.prod"
+    if [ "${env_param}" = "prod" ]; then
+      default_tag=""
+      if [ -f "${prod_tag_file}" ]; then
+        prod_tag="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${prod_tag_file}" | head -n1 | tr -d '[:space:]' || true)"
+        if [ -n "${prod_tag}" ]; then
+          default_tag="${prod_tag}"
+        fi
+      fi
+      if [ -z "${default_tag}" ]; then
+        echo "Provide tag=<immutable-image-tag> or populate ${prod_tag_file} for prod redeploys." >&2
+        exit 1
+      fi
+      if [ "${default_tag}" = "v3-latest" ]; then
+        echo "WARNING: Prod is configured to use mutable tag 'v3-latest'; pin an immutable tag in ${prod_tag_file}." >&2
+      fi
+    fi
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values='docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml' \
+      values="${values_arg}" \
       version_file='docs/apps/dspace.version' \
-      tag='' default_tag='v3-latest'
+      tag='{{ tag }}' default_tag="${default_tag}"
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then

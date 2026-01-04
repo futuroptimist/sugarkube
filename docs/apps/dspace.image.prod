@@ -1,0 +1,3 @@
+# Default production image tag for dspace.
+# Replace with an immutable tag (for example, v3-<sha>) before promoting to prod.
+v3-latest

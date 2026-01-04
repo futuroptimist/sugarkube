@@ -599,7 +599,7 @@ companion application for your cluster.
 >   dspace repo (recommended once Helm and GHCR login are working).
 >
 > For the sugarkube-centric path, see:
-> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-dev.md
+> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
 
 ### Why deploy dspace?
 
@@ -689,13 +689,17 @@ just helm-oci-upgrade \
 The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
 `environment` value in the dspace values file). In this repo, `docs/examples/dspace.values.dev.yaml`
 sets `environment: dev` and `docs/examples/dspace.values.staging.yaml` sets `environment: staging`,
-which show up in `/healthz` and the homepage build badge.
+which show up in `/healthz` and the homepage build badge. For production, swap the overlay to
+`docs/examples/dspace.values.prod.yaml` and provide an immutable image tag (for example,
+`tag=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.image.prod | head -n1)`).
 
 If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
 recipe:
 
 ```bash
-just dspace-oci-redeploy
+just dspace-oci-redeploy env=staging
+# Production requires a pinned tag:
+just dspace-oci-redeploy env=prod tag=v3-<sha>
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via

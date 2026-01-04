@@ -204,6 +204,10 @@ fi
 
 CLUSTER="${SUGARKUBE_CLUSTER:-sugar}"
 ENVIRONMENT="${SUGARKUBE_ENV:-dev}"
+if [ "${ENVIRONMENT}" = "int" ]; then
+  printf 'DEPRECATION: env value "int" is treated as env=staging; switch to env=staging.\n' >&2
+  ENVIRONMENT="staging"
+fi
 SERVERS_DESIRED="${SUGARKUBE_SERVERS:-1}"
 # Phase 3: Simple Discovery Control
 # SUGARKUBE_SIMPLE_DISCOVERY=1 uses mDNS service browsing without leader election
@@ -350,7 +354,7 @@ if command -v summary::init >/dev/null 2>&1 && summary_enabled; then
   if [ -n "${API_REGADDR}" ]; then
     summary::kv "API regaddr" "${API_REGADDR}"
   fi
-  
+
   # Display cluster join banner if token is set
   if [ -n "${TOKEN:-}" ]; then
     printf '\n'
@@ -514,11 +518,11 @@ case "${ENVIRONMENT}" in
       TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
     fi
     ;;
-  int)
-    if [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then
-      TOKEN="${SUGARKUBE_TOKEN_INT}"
+  staging)
+    if [ -n "${SUGARKUBE_TOKEN_STAGING:-}" ]; then
+      TOKEN="${SUGARKUBE_TOKEN_STAGING}"
       TOKEN_SOURCE_KIND="env"
-      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_INT"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_STAGING"
     elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
       TOKEN="${SUGARKUBE_TOKEN}"
       TOKEN_SOURCE_KIND="env"
@@ -1462,7 +1466,7 @@ ensure_avahi_liveness_signal() {
         AVAHI_DBUS_WAIT_MS="${dbus_wait_limit}" "${SCRIPT_DIR}/mdns_ready.sh" 2>&1
       )" || ready_status=$?
     fi
-    
+
     if [ -n "${ready_output}" ]; then
       printf '%s\n' "${ready_output}" >&2
     fi
@@ -1478,7 +1482,7 @@ ensure_avahi_liveness_signal() {
         dbus_note=""
         dbus_reason=""
       fi
-      
+
       # Verify avahi-browse returns actual service listings
       # This is important even if D-Bus is working, to confirm services are advertised
       local browse_output=""
@@ -1490,7 +1494,7 @@ ensure_avahi_liveness_signal() {
       fi
       local lines
       lines="$(printf '%s\n' "${browse_output}" | sed '/^$/d' | wc -l | tr -d ' ')"
-      
+
       if [ "${browse_status}" -ne 0 ] || [ -z "${lines}" ] || [ "${lines}" -eq 0 ]; then
         # No service output yet, retry on first attempt
         if [ "${attempt}" -eq 1 ]; then
@@ -1499,7 +1503,7 @@ ensure_avahi_liveness_signal() {
           continue
         fi
       fi
-      
+
       # mdns_ready confirmed Avahi is working and services are advertised
       local -a liveness_fields=(event=avahi_liveness outcome=ok method=mdns_ready "attempt=${attempt}")
       if [ -n "${dbus_reason}" ]; then
@@ -2151,7 +2155,7 @@ ensure_mdns_absence_gate() {
 
   if restart_avahi_daemon_service; then
     log_info discover event=mdns_absence_gate action=restart_avahi outcome=ok >&2
-    
+
     # Add stabilization delay to allow avahi-daemon to fully initialize
     # after restart before querying it with avahi-browse or D-Bus calls
     # Increased from 2s to 5s to prevent querying daemon before it's ready
@@ -3398,7 +3402,7 @@ publish_avahi_service() {
     confirm_bucket=""
     if [ -n "${confirm_latency_ms}" ]; then
       case "${confirm_latency_ms}" in
-        ''|*[!0-9]*) ;; 
+        ''|*[!0-9]*) ;;
         *) confirm_bucket="$(publish_latency_bucket "${confirm_latency_ms}")" ;;
       esac
     fi
@@ -3576,14 +3580,14 @@ publish_api_service() {
     log_info mdns_publish event=service_advertisement_skipped reason="SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1" role=server >&2
     return 0
   fi
-  
+
   publish_avahi_service server 6443 "leader=${MDNS_HOST_RAW}" "phase=server"
 
   if ensure_self_mdns_advertisement server; then
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log_info mdns_selfcheck outcome=confirmed role=server host="${MDNS_HOST_RAW}" observed="${observed}" phase=server check=initial >&2
-    
+
     # Verify the service is browsable via avahi-browse (not just resolvable)
     if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
       local browse_verification
@@ -3596,7 +3600,7 @@ publish_api_service() {
         log_warn_msg mdns_publish "service not found via avahi-browse after publish" "host=${MDNS_HOST_RAW}" "role=server"
       fi
     fi
-    
+
     return 0
   fi
 
@@ -3625,7 +3629,7 @@ publish_bootstrap_service() {
     log_info mdns_publish event=service_advertisement_skipped reason="SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=1" role=bootstrap >&2
     return 0
   fi
-  
+
   log_info mdns_publish phase=bootstrap_attempt cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" >&2
   publish_avahi_service bootstrap 6443 "leader=${MDNS_HOST_RAW}" "phase=bootstrap"
   maybe_sleep 1
@@ -3633,7 +3637,7 @@ publish_bootstrap_service() {
     local observed
     observed="${MDNS_LAST_OBSERVED:-${MDNS_HOST_RAW}}"
     log_info mdns_selfcheck outcome=confirmed role=bootstrap host="${MDNS_HOST_RAW}" observed="${observed}" phase=bootstrap check=initial >&2
-    
+
     # Verify the service is browsable via avahi-browse (not just resolvable)
     if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
       local browse_verification
@@ -3646,7 +3650,7 @@ publish_bootstrap_service() {
         log_warn_msg mdns_publish "service not found via avahi-browse after publish" "host=${MDNS_HOST_RAW}" "role=bootstrap"
       fi
     fi
-    
+
     return 0
   fi
 
@@ -3892,24 +3896,24 @@ detect_node_primary_ipv4() {
   # Used for adding IP address to TLS SANs during k3s installation
   local iface="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
   local ip_cmd="${IP_CMD:-ip}"
-  
+
   if ! command -v "${ip_cmd}" >/dev/null 2>&1; then
     return 1
   fi
-  
+
   local output
   output="$(${ip_cmd} -4 -o addr show "${iface}" 2>/dev/null || true)"
   if [ -z "${output}" ]; then
     return 1
   fi
-  
+
   # Parse the IPv4 address from the output
   local ip
   ip="$(printf '%s\n' "${output}" | awk '$3 == "inet" { split($4, addr, "/"); if (addr[1] != "") { print addr[1]; exit 0 } }')"
   if [ -z "${ip}" ]; then
     return 1
   fi
-  
+
   printf '%s' "${ip}"
   return 0
 }
@@ -3989,13 +3993,13 @@ wait_for_node_token() {
   local timeout="${SUGARKUBE_NODE_TOKEN_TIMEOUT:-30}"
   local poll_interval="${SUGARKUBE_NODE_TOKEN_POLL_INTERVAL:-1}"
   local node_token_path="${NODE_TOKEN_PATH:-/var/lib/rancher/k3s/server/node-token}"
-  
+
   local elapsed=0
   local start_time
   start_time="$(date +%s)"
-  
+
   log_info discover event=node_token_wait phase="${phase}" path="${node_token_path}" timeout="${timeout}" >&2
-  
+
   while [ "${elapsed}" -lt "${timeout}" ]; do
     if [ -f "${node_token_path}" ] && [ -r "${node_token_path}" ]; then
       # Verify file has content (not empty)
@@ -4009,13 +4013,13 @@ wait_for_node_token() {
         fi
       fi
     fi
-    
+
     sleep "${poll_interval}"
     local now
     now="$(date +%s)"
     elapsed=$((now - start_time))
   done
-  
+
   log_error_msg discover "Node token file not created within timeout" \
     "phase=${phase}" "path=${node_token_path}" "timeout=${timeout}"
   return 1
@@ -4165,7 +4169,7 @@ install_server_single() {
   fi
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
-  
+
   # Detect node IP for TLS SAN
   local node_ip=""
   if node_ip="$(detect_node_primary_ipv4)"; then
@@ -4173,7 +4177,7 @@ install_server_single() {
   else
     log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_single
   fi
-  
+
   local env_assignments
   build_install_env env_assignments
   (
@@ -4247,7 +4251,7 @@ install_server_cluster_init() {
   fi
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
-  
+
   # Detect node IP for TLS SAN
   local node_ip=""
   if node_ip="$(detect_node_primary_ipv4)"; then
@@ -4255,7 +4259,7 @@ install_server_cluster_init() {
   else
     log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_cluster_init
   fi
-  
+
   local env_assignments
   build_install_env env_assignments
   (
@@ -4488,7 +4492,7 @@ install_server_join() {
   else
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
-  
+
   # Detect node IP for TLS SAN
   local node_ip=""
   if node_ip="$(detect_node_primary_ipv4)"; then
@@ -4496,7 +4500,7 @@ install_server_join() {
   else
     log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_join
   fi
-  
+
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
@@ -4674,17 +4678,17 @@ run_mdns_diagnostic() {
   if [ "${DISCOVERY_DIAG_RAN}" -eq 1 ]; then
     return 0
   fi
-  
+
   if [ ! -x "${MDNS_DIAG_BIN}" ]; then
     log_warn_msg discover "mDNS diagnostic script not found or not executable" \
       "script=${MDNS_DIAG_BIN}" "event=mdns_diag_skip"
     return 0
   fi
-  
+
   log_info discover event=mdns_diag_start \
     "failure_count=${DISCOVERY_FAILURE_COUNT}" \
     "threshold=${DISCOVERY_DIAG_THRESHOLD}" >&2
-  
+
   local diag_output=""
   local diag_status=0
   local expected_host="${MDNS_HOST:-$(hostname -s 2>/dev/null || hostname)}"
@@ -4692,26 +4696,26 @@ run_mdns_diagnostic() {
     *.local) ;;
     *) expected_host="${expected_host}.local" ;;
   esac
-  
+
   diag_output="$(
     MDNS_DIAG_HOSTNAME="${expected_host}" \
     SUGARKUBE_CLUSTER="${CLUSTER}" \
     SUGARKUBE_ENV="${ENVIRONMENT}" \
     "${MDNS_DIAG_BIN}" 2>&1
   )" || diag_status=$?
-  
+
   DISCOVERY_DIAG_RAN=1
-  
+
   if [ -n "${diag_output}" ]; then
     echo "=== mDNS Diagnostic Output ===" >&2
     printf '%s\n' "${diag_output}" >&2
     echo "=============================" >&2
   fi
-  
+
   log_info discover event=mdns_diag_complete \
     "status=${diag_status}" \
     "failure_count=${DISCOVERY_FAILURE_COUNT}" >&2
-  
+
   return 0
 }
 
@@ -4719,11 +4723,11 @@ try_discovery_failopen() {
   if [ "${DISCOVERY_FAILOPEN}" != "1" ]; then
     return 1
   fi
-  
+
   if [ "${DISCOVERY_FAILOPEN_USED}" -eq 1 ]; then
     return 1
   fi
-  
+
   # Check if we've been failing for long enough
   if [ "${DISCOVERY_FAILOPEN_STARTED}" -eq 0 ]; then
     DISCOVERY_FAILOPEN_STARTED=1
@@ -4731,31 +4735,31 @@ try_discovery_failopen() {
     log_info discover event=discovery_failopen_tracking_started timeout_secs="${DISCOVERY_FAILOPEN_TIMEOUT_SECS}" >&2
     return 1
   fi
-  
+
   local now
   now="$(date +%s)"
   local elapsed=$((now - DISCOVERY_FAILOPEN_START_TIME))
-  
+
   if [ "${elapsed}" -lt "${DISCOVERY_FAILOPEN_TIMEOUT_SECS}" ]; then
     return 1
   fi
-  
+
   # We've exceeded the timeout, try fail-open
   DISCOVERY_FAILOPEN_USED=1
-  
+
   log_info_msg discover "mDNS discovery failed for ${elapsed}s; switching to fail-open direct join" \
     "elapsed_secs=${elapsed}" "timeout_secs=${DISCOVERY_FAILOPEN_TIMEOUT_SECS}"
-  
+
   # Try to get server token for direct join
   local failopen_token=""
   local resolver="${SCRIPT_DIR}/resolve_server_token.sh"
-  
+
   if [ ! -x "${resolver}" ]; then
     log_warn_msg discover "resolve_server_token.sh not found; cannot attempt fail-open join" \
       "script=${resolver}"
     return 1
   fi
-  
+
   local -a resolver_env=()
   if [ -n "${INITIAL_TOKEN:-}" ]; then
     resolver_env+=("SUGARKUBE_TOKEN=${INITIAL_TOKEN}")
@@ -4769,7 +4773,7 @@ try_discovery_failopen() {
   if [ -n "${SERVER_TOKEN_PATH:-}" ]; then
     resolver_env+=("SUGARKUBE_K3S_SERVER_TOKEN_PATH=${SERVER_TOKEN_PATH}")
   fi
-  
+
   local resolver_status=0
   local resolved_output=""
   if [ "${#resolver_env[@]}" -gt 0 ]; then
@@ -4793,7 +4797,7 @@ try_discovery_failopen() {
     log_warn_msg discover "No token available for fail-open join"
     return 1
   fi
-  
+
   local server_total="${SERVERS_DESIRED}"
   if ! [[ "${server_total}" =~ ^[0-9]+$ ]] || [ "${server_total}" -lt 1 ]; then
     server_total=1
@@ -4929,14 +4933,14 @@ iptables_preflight
 # Trust systemd to keep Avahi running instead of restarting it
 if [ "${SKIP_ABSENCE_GATE}" != "1" ]; then
   ensure_mdns_absence_gate
-  
+
   # Support test mode: exit after absence gate for testing absence detection without k3s installation
   if [ "${SUGARKUBE_EXIT_AFTER_ABSENCE_GATE:-0}" = "1" ]; then
     exit 0
   fi
 else
   log_info discover event=absence_gate_skipped reason="SUGARKUBE_SKIP_ABSENCE_GATE=1" >&2
-  
+
   # Optional systemd health check as safety net
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl is-active --quiet avahi-daemon; then
@@ -4951,23 +4955,23 @@ fi
 # When SUGARKUBE_SIMPLE_DISCOVERY=1, skip leader election but still use proper mDNS service browsing
 discover_via_nss_and_api() {
   log_info discover event=simple_discovery_start phase=discover_via_service_browse >&2
-  
+
   # For simple discovery, we want avahi-browse to wait for network responses
   # instead of just checking the cache. This is critical for initial cluster
   # formation when services may not be cached yet.
   export SUGARKUBE_MDNS_NO_TERMINATE=1
-  
+
   # Increase timeout for initial discovery to allow time for service propagation
   # across the network (default is 10s, we use 30s for simple discovery)
   if [ -z "${SUGARKUBE_MDNS_QUERY_TIMEOUT:-}" ]; then
     export SUGARKUBE_MDNS_QUERY_TIMEOUT=30
   fi
-  
+
   # Enable debug logging for mDNS queries during simple discovery
   if [ "${SAVE_DEBUG_LOGS:-0}" = "1" ]; then
     export SUGARKUBE_DEBUG=1
   fi
-  
+
   # Log discovery configuration for debugging
   log_info discover event=simple_discovery_config \
     no_terminate="${SUGARKUBE_MDNS_NO_TERMINATE}" \
@@ -4976,13 +4980,13 @@ discover_via_nss_and_api() {
     cluster="${CLUSTER}" \
     environment="${ENVIRONMENT}" \
     debug_enabled="${SUGARKUBE_DEBUG:-0}" >&2
-  
+
   # Use existing service browsing infrastructure to discover any advertised k3s nodes
   # This properly scans the network for mDNS services instead of assuming hostnames
   if select_server_candidate; then
     local server="${MDNS_SELECTED_HOST}"
     log_info discover event=simple_discovery_found server="${server}" >&2
-    
+
     # Verify API is alive (accepts 401)
     if wait_for_remote_api_ready "${server}" "${MDNS_SELECTED_IP:-}" "${MDNS_SELECTED_PORT:-6443}"; then
       log_info discover event=simple_discovery_api_ok server="${server}" >&2
@@ -4992,16 +4996,16 @@ discover_via_nss_and_api() {
       return 1
     fi
   fi
-  
+
   # No servers found via service browsing - check if we should become bootstrap
   log_info discover event=simple_discovery_no_servers token_present="${TOKEN_PRESENT}" >&2
-  
+
   if [ "${TOKEN_PRESENT}" -eq 0 ]; then
     # No token means we can bootstrap if allowed
     log_info discover event=simple_discovery_bootstrap reason="no_token" >&2
     return 1  # Signal to caller that bootstrap is needed
   fi
-  
+
   # Token present but no servers found
   log_error_msg discover "No joinable servers found via mDNS service browsing" "event=simple_discovery_fail"
   return 1
@@ -5014,12 +5018,12 @@ bootstrap_selected="false"
 # Phase 3: Use simplified discovery if enabled
 if [ "${SIMPLE_DISCOVERY}" = "1" ]; then
   log_info discover event=simple_discovery_enabled >&2
-  
+
   if discover_via_nss_and_api; then
     # Found a server via simple discovery
     server_host="${MDNS_SELECTED_HOST}"
     log_info discover event=simple_discovery_success server="${server_host}" >&2
-    
+
     # Display discovery success banner
     if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
       printf '\n'
@@ -5047,7 +5051,7 @@ if [ "${SIMPLE_DISCOVERY}" = "1" ]; then
       exit 1
     fi
   fi
-  
+
   # Skip the complex discovery loop below
   if [ "${bootstrap_selected}" = "true" ]; then
     if publish_bootstrap_service; then
@@ -5100,7 +5104,7 @@ while :; do
 
       # Increment failure count
       DISCOVERY_FAILURE_COUNT=$((DISCOVERY_FAILURE_COUNT + 1))
-      
+
       # Run diagnostic after threshold failures
       if [ "${DISCOVERY_FAILURE_COUNT}" -ge "${DISCOVERY_DIAG_THRESHOLD}" ]; then
         if [ "${DISCOVERY_DIAG_RAN}" -eq 0 ]; then
@@ -5246,13 +5250,13 @@ fi
 if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
   # Cache server count to avoid multiple expensive mDNS queries
   servers_count="$(count_servers)"
-  
+
   printf '\n'
   printf '═══════════════════════════════════════════════════════════════\n'
   printf '  CLUSTER FORMATION COMPLETE\n'
   printf '═══════════════════════════════════════════════════════════════\n'
   printf '\n'
-  
+
   # Try to get cluster status if kubectl is available
   if command -v kubectl >/dev/null 2>&1; then
     printf '🎉 Current cluster nodes:\n\n'
@@ -5262,21 +5266,21 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
       printf '   (kubectl get nodes failed - k3s may still be starting)\n\n'
     fi
   fi
-  
+
   printf 'Node hostname: %s\n' "${MDNS_HOST_RAW}"
   printf 'Cluster: %s\n' "${CLUSTER}"
   printf 'Environment: %s\n' "${ENVIRONMENT}"
   printf 'Servers desired: %s\n' "${SERVERS_DESIRED}"
-  
+
   if [ -n "${TOKEN:-}" ]; then
     printf 'Join mode: %s\n' "$([ "${SERVERS_DESIRED}" -gt 1 ] && [ "${servers_count}" -lt "${SERVERS_DESIRED}" ] && echo "HA server" || echo "agent/complete")"
   else
     printf 'Bootstrap mode: %s\n' "$([ "${SERVERS_DESIRED}" -eq 1 ] && echo "single server" || echo "HA cluster initialized")"
   fi
   printf '\n'
-  
+
   printf '📋 Next steps:\n\n'
-  
+
   # Show different instructions based on whether this is bootstrap or join
   if [ -z "${TOKEN:-}" ] && [ "${SERVERS_DESIRED}" -gt 1 ] && [ "${servers_count}" -lt "${SERVERS_DESIRED}" ]; then
     # Bootstrap node in HA mode - need to add more servers
@@ -5325,7 +5329,7 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
     printf '   just up %s\n' "${ENVIRONMENT}"
   fi
   printf '\n'
-  
+
   printf '📚 Documentation:\n'
   printf '   • Cluster setup: docs/raspi_cluster_setup.md\n'
   printf '   • Operations: docs/runbook.md\n'
