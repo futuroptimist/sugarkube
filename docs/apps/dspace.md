@@ -4,16 +4,18 @@ Use the packaged Helm chart from GHCR to install the dspace v3 stack into your c
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
 changing the arguments.
 
-Values files are split so you can layer staging-specific ingress settings on top of the default
+Values files are split so you can layer environment-specific ingress settings on top of the default
 development values:
 
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
 - `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
   `staging.democratized.space`.
+- `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
+  `democratized.space`.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
-hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
-configured accordingly.
+hostname and the production environment defaults to `democratized.space`. You can substitute
+different hostnames if your Cloudflare Tunnel and DNS are configured accordingly.
 
 ## Prerequisites
 
@@ -45,6 +47,8 @@ charts:
 
 ## Quickstart
 
+### Staging
+
 ```bash
 # Install or upgrade the release with staging ingress overrides (defaults to v3-latest image tag)
 just helm-oci-install \
@@ -66,10 +70,33 @@ just helm-oci-upgrade \
   tag=v3-<shortsha>
 ```
 
+### Production (immutable tag recommended)
+
+```bash
+# Install or upgrade the release with production ingress overrides (pass an immutable tag)
+just helm-oci-install \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=v3-<shortsha>
+
+# Check pods and ingress status with the public URL
+just app-status namespace=dspace release=dspace
+
+# Bump the image tag and roll the release with the same overrides
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=v3-<shortsha>
+```
+
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
-- The image tag defaults to `default_tag` (`v3-latest`); pass `tag=<imageTag>` to target a
-  specific build.
+- The image tag defaults to `default_tag` (`v3-latest`) for dev/staging; pass `tag=<imageTag>` to
+  target a specific build (strongly recommended for production).
 
 ## First deployment walkthrough
 
@@ -92,18 +119,32 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
    `http://traefik.kube-system.svc.cluster.local:80`. Cluster DNS makes the
    `traefik.kube-system.svc.cluster.local` hostname resolvable from every node,
    so the tunnel can reach Traefik reliably. The default public FQDN for the
-   staging environment is `staging.democratized.space`.
+   staging environment is `staging.democratized.space` and for production is
+   `democratized.space`.
 
 4. Install the app:
 
-   ```bash
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     default_tag=v3-latest
-   ```
+   - Staging:
+
+     ```bash
+     just helm-oci-install \
+       release=dspace namespace=dspace \
+       chart=oci://ghcr.io/democratizedspace/charts/dspace \
+       values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+       version_file=docs/apps/dspace.version \
+       default_tag=v3-latest
+     ```
+
+   - Production (explicit tag recommended):
+
+     ```bash
+     just helm-oci-install \
+       release=dspace namespace=dspace \
+       chart=oci://ghcr.io/democratizedspace/charts/dspace \
+       values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+       version_file=docs/apps/dspace.version \
+       tag=v3-<shortsha>
+     ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
 
@@ -113,19 +154,33 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
 
 6. Iterate new builds from v3:
 
-   ```bash
-   just helm-oci-upgrade \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     tag=v3-<shortsha>
-   ```
+   - Staging:
+
+     ```bash
+     just helm-oci-upgrade \
+       release=dspace namespace=dspace \
+       chart=oci://ghcr.io/democratizedspace/charts/dspace \
+       values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+       version_file=docs/apps/dspace.version \
+       tag=v3-<shortsha>
+     ```
+
+   - Production:
+
+     ```bash
+     just helm-oci-upgrade \
+       release=dspace namespace=dspace \
+       chart=oci://ghcr.io/democratizedspace/charts/dspace \
+       values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+       version_file=docs/apps/dspace.version \
+       tag=v3-<shortsha>
+     ```
 
 ## Networking via Cloudflare Tunnel
 
 This guide assumes you expose the cluster through a persistent Cloudflare Tunnel. The expected
-public hostname is `https://staging.democratized.space`.
+public hostname is `https://staging.democratized.space` for staging or `https://democratized.space`
+for production.
 
 For detailed instructions on creating the Cloudflare Tunnel and DNS records, see:
 ../cloudflare_tunnel.md

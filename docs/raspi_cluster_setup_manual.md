@@ -197,7 +197,7 @@ Follow the steps above for each node so every Pi boots from its own SSD.
    ```
 
 ## 8. Create environments
-Use k3s namespaces `dev`, `int`, and `prod` to separate deployments.
+Use k3s namespaces `dev`, `staging`, and `prod` to separate deployments. The legacy `int` alias is treated as deprecated and maps to `staging` with a warning.
 CI can promote images between namespaces after validation.
 
 ## 9. Promote to production
@@ -216,7 +216,7 @@ Practice what you've learned with these hands-on tasks:
 
 4. **Clone validation:** After completing an SSD clone in §2, run `sudo ./scripts/ssd_clone.py --target /dev/sda --dry-run` again (replace `/dev/sda` with your target) and observe that the script reports the clone is already complete.
 
-5. **Environment separation:** Create a second environment by exporting `SUGARKUBE_TOKEN_INT` with a new token and running `just up int` on a separate Pi. Verify that `dev` and `int` clusters can coexist on the same LAN with `kubectl get nodes` showing different members.
+5. **Environment separation:** Create a second environment by exporting `SUGARKUBE_TOKEN_STAGING` with a new token and running `just up staging` on a separate Pi. Verify that `dev` and `staging` clusters can coexist on the same LAN with `kubectl get nodes` showing different members. If you mistakenly use the legacy `int` alias, Sugarkube will warn and treat it as staging.
 
 ## Next steps
 Explore [network_setup.md](network_setup.md) for networking tips and

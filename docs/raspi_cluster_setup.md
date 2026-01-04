@@ -234,12 +234,12 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 **Service Advertisement:**
 - Bootstrap nodes publish an Avahi service file to `/etc/avahi/services/`
-- Service type: `_k3s-<cluster>-<environment>._tcp` (e.g., `_k3s-sugar-dev._tcp`)
+- Service type: `_k3s-<cluster>-<environment>._tcp` (e.g., `_k3s-sugar-dev._tcp` or `_k3s-sugar-staging._tcp`)
 - Includes TXT records: cluster name, environment, role (server/agent), and phase info
 - Avahi daemon multicasts this on UDP port 5353 to `224.0.0.251` (IPv4) or `ff02::fb` (IPv6)
 
 **Service Discovery:**
-- Joining nodes run `avahi-browse --parsable --resolve _k3s-sugar-dev._tcp`
+- Joining nodes run `avahi-browse --parsable --resolve _k3s-sugar-dev._tcp` (swap `dev` for `staging` or `prod` as needed)
 - By default, avahi-browse waits for actual multicast responses (not just cached entries)
 - This is essential: on first boot, the cache is empty, so waiting for network responses is required
 - Discovery timeout: 10 seconds by default (configurable via `SUGARKUBE_MDNS_QUERY_TIMEOUT`)
@@ -274,7 +274,7 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
   just up dev  # Joins existing cluster using provided token
   ```
 
-> **Key principle:** The presence or absence of `SUGARKUBE_TOKEN_DEV` (or `SUGARKUBE_TOKEN_INT`, `SUGARKUBE_TOKEN_PROD`) is how you signal your intent. Without a token, `just up dev` creates a new cluster. With a token, it joins an existing one.
+> **Key principle:** The presence or absence of `SUGARKUBE_TOKEN_DEV` (or `SUGARKUBE_TOKEN_STAGING`, `SUGARKUBE_TOKEN_PROD`) is how you signal your intent. Without a token, `just up dev` creates a new cluster. With a token, it joins an existing one.
 
 > **HA shorthand behaves the same.** Export `SUGARKUBE_TOKEN_DEV` (or the env-specific
 > token) before running `just ha3 env=dev` and it will join, exactly as `just up dev`
@@ -379,9 +379,10 @@ timestamped copy under `logs/up/` so you can attach the file to bug reports.
 
 ### Switch environments as needed
 
-`just up <env>` works for `int`, `prod`, or other environments—you simply provide the
-matching token (for example `SUGARKUBE_TOKEN_INT`). Multiple environments can coexist on the
-same LAN as long as they advertise distinct tokens.
+`just up <env>` works for `staging`, `prod`, or other environments—you simply provide the
+matching token (for example `SUGARKUBE_TOKEN_STAGING`). Multiple environments can coexist on the
+same LAN as long as they advertise distinct tokens. If you still use the legacy `int` alias,
+Sugarkube treats it as a deprecated mapping to `staging` and emits a warning.
 
 Need deeper operational playbooks? Continue with [docs/runbook.md](./runbook.md). When the
 control plane is steady, bootstrap GitOps with [`scripts/flux-bootstrap.sh`](../scripts/flux-bootstrap.sh)
@@ -461,7 +462,7 @@ to port 6443 opens, ensuring the join path is viable—not just advertised.
 ## Conceptual Overview
 
 K3s, the lightweight Kubernetes used by Sugarkube, organizes nodes into **servers** (control-plane) and **agents** (workers).
-Each cluster environment (like `dev`, `int`, or `prod`) needs a **join token** that authorizes new nodes to join its control-plane.
+Each cluster environment (like `dev`, `staging`, or `prod`) needs a **join token** that authorizes new nodes to join its control-plane. The legacy `int` alias remains supported as a deprecated map to `staging` and will emit a warning.
 
 When the first node starts `k3s` as a server, it automatically creates a secret file at:
 
@@ -476,7 +477,7 @@ The pattern is:
 | Environment | Env var read by `just up` | Example |
 |--------------|---------------------------|----------|
 | dev | `SUGARKUBE_TOKEN_DEV` | export SUGARKUBE_TOKEN_DEV="K10abcdef…" |
-| int | `SUGARKUBE_TOKEN_INT` | export SUGARKUBE_TOKEN_INT="K10ghijk…" |
+| staging | `SUGARKUBE_TOKEN_STAGING` | export SUGARKUBE_TOKEN_STAGING="K10ghijk…" |
 | prod | `SUGARKUBE_TOKEN_PROD` | export SUGARKUBE_TOKEN_PROD="K10lmno…" |
 | fallback | `SUGARKUBE_TOKEN` | used if no env-specific token is set |
 
@@ -504,14 +505,14 @@ The pattern is:
 
 4. **Switch environments easily**
 
-   Each environment (`dev`, `int`, `prod`) maintains its own token and mDNS advertisement:
+Each environment (`dev`, `staging`, `prod`) maintains its own token and mDNS advertisement:
 
   ```bash
-   just up int
+   just up staging
    just up prod
-   ```
+  ```
 
-   You can even run multiple environments on the same LAN simultaneously as long as they use different tokens.
+  You can even run multiple environments on the same LAN simultaneously as long as they use different tokens.
 
    Discovery timing is captured in `ms_elapsed` log fields. Expect values under
    200 ms on a quiet LAN; higher numbers typically point to multicast flooding
@@ -537,7 +538,7 @@ You can override defaults inline (e.g. `SUGARKUBE_SERVERS=3 just up prod`) or ex
 | `SUGARKUBE_CLUSTER` | `sugar` | Logical cluster prefix advertised via mDNS |
 | `SUGARKUBE_SERVERS` | `1` | Desired control-plane count per environment |
 | `K3S_CHANNEL` | `stable` | Channel for the official k3s install script |
-| `SUGARKUBE_TOKEN_DEV` / `INT` / `PROD` | _none_ | Environment-specific join tokens (see above) |
+| `SUGARKUBE_TOKEN_DEV` / `SUGARKUBE_TOKEN_STAGING` / `SUGARKUBE_TOKEN_PROD` | _none_ | Environment-specific join tokens (see above) |
 | `SUGARKUBE_TOKEN` | _none_ | Fallback token if no per-env variant is set |
 | `SUGARKUBE_SKIP_ABSENCE_GATE` | `1` | Skip Avahi restart at discovery time (Phase 2: enabled by default) |
 | `SUGARKUBE_SIMPLE_DISCOVERY` | `1` | Use mDNS service browsing for discovery (Phase 3: enabled by default) |
@@ -596,7 +597,7 @@ just up dev
 **By default, nodes advertise their k3s API via mDNS service records.** This allows Phase 3 simplified discovery to find servers using `avahi-browse`.
 
 When service advertisement is enabled (default), bootstrap nodes publish service records to `/etc/avahi/services/` that include:
-- Service type: `_k3s-{cluster}-{environment}._tcp` (e.g., `_k3s-sugar-dev._tcp`)
+- Service type: `_k3s-{cluster}-{environment}._tcp` (e.g., `_k3s-sugar-dev._tcp` or `_k3s-sugar-staging._tcp`)
 - Port: 6443 (k3s API)
 - TXT records: cluster name, environment, role, and phase information
 

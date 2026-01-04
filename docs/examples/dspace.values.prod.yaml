@@ -1,0 +1,7 @@
+# Example values for deploying democratized.space via Helm in production.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: democratized.space

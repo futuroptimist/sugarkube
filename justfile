@@ -18,12 +18,18 @@ up env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    # Select per-environment token if available
-    if [ "{{ env }}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
-    if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
-    if [ "{{ env }}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_PROD"; fi
+    env_name="{{ env }}"
+    if [ "${env_name}" = "int" ]; then
+        printf "WARNING: legacy 'int' alias is deprecated; using staging.\n" >&2
+        env_name="staging"
+    fi
 
-    export SUGARKUBE_ENV="{{ env }}"
+    # Select per-environment token if available
+    if [ "${env_name}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
+    if [ "${env_name}" = "staging" ] && [ -n "${SUGARKUBE_TOKEN_STAGING:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_STAGING"; fi
+    if [ "${env_name}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_PROD"; fi
+
+    export SUGARKUBE_ENV="${env_name}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
@@ -229,6 +235,24 @@ cluster-status:
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+ha3-dev:
+    just ha3 env=dev
+
+ha3-staging:
+    just ha3 env=staging
+
+ha3-prod:
+    just ha3 env=prod
+
+up-dev:
+    just up env=dev
+
+up-staging:
+    just up env=staging
+
+up-prod:
+    just up env=prod
+
 # Remove the control-plane NoSchedule taint from all nodes so they can run workloads.
 # This is intended for the homelab topology where all three HA control-plane nodes
 
@@ -310,6 +334,15 @@ ha3-untaint-control-plane:
 save-logs env='dev':
     SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+save-logs-dev:
+    just save-logs env=dev
+
+save-logs-staging:
+    just save-logs env=staging
+
+save-logs-prod:
+    just save-logs env=prod
+
 # Display the k3s node token needed for additional nodes to join the cluster.
 cat-node-token:
     sudo cat /var/lib/rancher/k3s/server/node-token
@@ -318,7 +351,12 @@ mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 
 mdns-selfcheck env='dev':
-    export SUGARKUBE_ENV="{{ env }}"
+    env_name="{{ env }}"
+    if [ "${env_name}" = "int" ]; then
+        printf "WARNING: legacy 'int' alias is deprecated; using staging.\n" >&2
+        env_name="staging"
+    fi
+    export SUGARKUBE_ENV="${env_name}"
     env \
     SUGARKUBE_EXPECTED_HOST="$(hostname).local" \
     SUGARKUBE_SELFCHK_ATTEMPTS=10 \
@@ -342,15 +380,28 @@ mdns-reset:
 kubeconfig env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
+    env_name="{{ env }}"
+    if [ "${env_name}" = "int" ]; then
+        printf "WARNING: legacy 'int' alias is deprecated; using staging.\n" >&2
+        env_name="staging"
+    fi
     user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
     sudo chown -R "$user":"$user" ~/.kube
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
-    env_name="{{ env }}"
     scope_name="sugar-${env_name#env=}"
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+
+kubeconfig-dev:
+    just kubeconfig env=dev
+
+kubeconfig-staging:
+    just kubeconfig env=staging
+
+kubeconfig-prod:
+    just kubeconfig env=prod
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
@@ -1031,16 +1082,48 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 # Fast redeploy of dspace v3 from GHCR (emergency push).
-dspace-oci-redeploy:
+dspace-oci-redeploy env='staging' tag='' default_tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    env_name="{{ env }}"
+    if [ "${env_name}" = "int" ]; then
+      echo "WARNING: legacy 'int' alias is deprecated; using staging." >&2
+      env_name="staging"
+    fi
+
+    values="docs/examples/dspace.values.dev.yaml"
+    case "${env_name}" in
+      dev) values="${values}" ;;
+      staging) values="${values},docs/examples/dspace.values.staging.yaml" ;;
+      prod) values="${values},docs/examples/dspace.values.prod.yaml" ;;
+      *) echo "Unsupported env: ${env_name}. Use dev, staging, or prod." >&2; exit 1 ;;
+    esac
+
+    prod_tag_file="docs/apps/dspace.prod.tag"
+    tag_value="{{ tag }}"
+    default_tag_value="{{ default_tag }}"
+
+    if [ "${env_name}" = "prod" ] && [ -z "${tag_value}" ] && [ -z "${default_tag_value}" ]; then
+      if [ -f "${prod_tag_file}" ]; then
+        default_tag_value="$(grep -Ev '^(#|$)' "${prod_tag_file}" | head -n1 | tr -d '[:space:]')"
+      fi
+      if [ -z "${default_tag_value}" ]; then
+        echo "ERROR: For prod, set tag=<immutable> or populate ${prod_tag_file} with a default tag." >&2
+        exit 1
+      fi
+    fi
+
+    if [ -z "${default_tag_value}" ]; then
+      default_tag_value="v3-latest"
+    fi
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values='docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml' \
+      values="${values}" \
       version_file='docs/apps/dspace.version' \
-      tag='' default_tag='v3-latest'
+      tag="${tag_value}" default_tag="${default_tag_value}"
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then
@@ -1576,7 +1659,14 @@ support-bundle:
 
 # Bootstrap Flux controllers and sync manifests for an environment
 flux-bootstrap env='dev':
-    "{{ scripts_dir }}/flux-bootstrap.sh" "{{ env }}"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env_name="{{ env }}"
+    if [ "${env_name}" = "int" ]; then
+        printf "WARNING: legacy 'int' alias is deprecated; using staging.\n" >&2
+        env_name="staging"
+    fi
+    "{{ scripts_dir }}/flux-bootstrap.sh" "${env_name}"
 
 # Reconcile the platform Kustomization via Flux
 platform-apply env='dev':
@@ -1586,7 +1676,14 @@ platform-apply env='dev':
 
 # Reseal SOPS secrets for an environment
 seal-secrets env='dev':
-    "{{ scripts_dir }}/seal-secrets.sh" "{{ env }}"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env_name="{{ env }}"
+    if [ "${env_name}" = "int" ]; then
+        printf "WARNING: legacy 'int' alias is deprecated; using staging.\n" >&2
+        env_name="staging"
+    fi
+    "{{ scripts_dir }}/seal-secrets.sh" "${env_name}"
 
 # Backwards-compatible alias that calls flux-bootstrap
 platform-bootstrap env='dev':

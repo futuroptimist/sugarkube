@@ -179,14 +179,14 @@ react to Sugarkube events in the wider Fediverse.
 Suggested logical mapping for the initial stack:
 
 - **Tier A — prod** (two nodes for high availability plus one maintenance spare)
-- **Tier B — integration**
+- **Tier B — staging**
 - **Tier C — dev/ephemeral agents**
 
 DNS or hostnames can reflect tiering; each tier runs its own Cloudflare Tunnel route:
 
 ```
 prod.example.tld        -> cloudflared (Region A, Tier A)
-int.example.tld         -> cloudflared (Region A, Tier B)
+staging.example.tld     -> cloudflared (Region A, Tier B)
 dev.example.tld         -> cloudflared (Region A, Tier C)
 continuity.example.tld  -> cloudflared (Region B)
 remote.example.tld      -> cloudflared (Region C)

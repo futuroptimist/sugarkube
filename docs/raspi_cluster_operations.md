@@ -599,7 +599,7 @@ companion application for your cluster.
 >   dspace repo (recommended once Helm and GHCR login are working).
 >
 > For the sugarkube-centric path, see:
-> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-dev.md
+> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
 
 ### Why deploy dspace?
 
@@ -678,25 +678,38 @@ deployment's defaults.
 
 ```bash
 # From the sugarkube repo root on a cluster node:
+# Staging (defaults to v3-latest image tag)
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
+
+# Production (explicit immutable tag required)
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=v3-<shortsha>
 ```
 
 The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
 `environment` value in the dspace values file). In this repo, `docs/examples/dspace.values.dev.yaml`
-sets `environment: dev` and `docs/examples/dspace.values.staging.yaml` sets `environment: staging`,
-which show up in `/healthz` and the homepage build badge.
+sets `environment: dev`, `docs/examples/dspace.values.staging.yaml` sets `environment: staging`,
+and `docs/examples/dspace.values.prod.yaml` sets `environment: prod`, which show up in `/healthz`
+and the homepage build badge.
 
 If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
-recipe:
+recipe (and set `env=staging|prod` as needed; `env=dev` works too):
 
 ```bash
-just dspace-oci-redeploy
+just dspace-oci-redeploy env=staging
 ```
+
+For production, pass an immutable tag (for example `tag=v3-<shortsha>`) or populate
+`docs/apps/dspace.prod.tag` with a default tag before running `env=prod`.
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 `helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release

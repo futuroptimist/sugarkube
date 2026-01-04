@@ -8,6 +8,12 @@ SYSTEMD_DIR="${SUGARKUBE_SYSTEMD_DIR:-/etc/systemd/system}"
 PROC_CMDLINE_PATH="${SUGARKUBE_PROC_CMDLINE_PATH:-/proc/cmdline}"
 
 log() { printf '[sugarkube] %s\n' "$*"; }
+warn_env_alias() {
+  if [ "${SUGARKUBE_ENV:-}" = "int" ]; then
+    log "WARNING: legacy 'int' alias is deprecated; using staging."
+    SUGARKUBE_ENV="staging"
+  fi
+}
 
 if [ "$(uname -s)" != "Linux" ]; then
   log "Non-Linux host detected; skipping memory cgroup configuration."
@@ -193,7 +199,7 @@ persist_env() {
   chown root:root "$ENV_FILE"
 
   # Persist the variables most likely needed by the bootstrap
-  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_INT SUGARKUBE_TOKEN_PROD; do
+  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_STAGING SUGARKUBE_TOKEN_PROD; do
     if [ -n "${!n-}" ]; then
       printf '%s=%q\n' "$n" "${!n}" >>"$ENV_FILE"
     fi
@@ -203,7 +209,7 @@ persist_env() {
   if [ -z "${SUGARKUBE_TOKEN-}" ] && [ -n "${SUGARKUBE_ENV-}" ]; then
     case "${SUGARKUBE_ENV}" in
       dev)  [ -n "${SUGARKUBE_TOKEN_DEV-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_DEV}"  >>"$ENV_FILE" ;;
-      int)  [ -n "${SUGARKUBE_TOKEN_INT-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_INT}"  >>"$ENV_FILE" ;;
+      staging)  [ -n "${SUGARKUBE_TOKEN_STAGING-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_STAGING}"  >>"$ENV_FILE" ;;
       prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_PROD}" >>"$ENV_FILE" ;;
     esac
   fi
@@ -214,10 +220,11 @@ install_resume_service() {
   local user="${SUDO_USER:-$(/usr/bin/logname 2>/dev/null || echo pi)}"
   local home="/home/$user"
   local wd="$home/sugarkube"
+  local env_name="${SUGARKUBE_ENV:-dev}"
 
   install -d -m 0755 -o root -g root "$SYSTEMD_DIR"
 
-  python3 - <<'PY' "$SYSTEMD_DIR" "$svc" "$user" "$home" "$ENV_FILE" "$wd"
+  python3 - <<'PY' "$SYSTEMD_DIR" "$svc" "$user" "$home" "$ENV_FILE" "$wd" "$env_name"
 from __future__ import annotations
 
 import pathlib
@@ -225,7 +232,7 @@ import sys
 
 
 def main() -> None:
-    systemd_dir, service_name, user, home, env_file, working_dir = sys.argv[1:]
+    systemd_dir, service_name, user, home, env_file, working_dir, env_name = sys.argv[1:]
     path = pathlib.Path(systemd_dir) / service_name
     path.write_text(
         f"""[Unit]
@@ -240,7 +247,7 @@ Group={user}
 Environment=HOME={home}
 EnvironmentFile={env_file}
 WorkingDirectory={working_dir}
-ExecStart=/usr/bin/just up dev
+ExecStart=/usr/bin/just up {env_name}
 ExecStartPost=/bin/systemctl disable --now {service_name}
 
 [Install]
@@ -260,6 +267,7 @@ PY
 
 main() {
   ensure_root "$@"
+  warn_env_alias
 
   if memctrl_active; then
     log "Memory cgroup controller is active; nothing to do."
