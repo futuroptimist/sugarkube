@@ -521,10 +521,14 @@ case "${ENVIRONMENT}" in
     fi
     ;;
   staging)
-    if [ -n "${SUGARKUBE_TOKEN_STAGING-}" ]; then
+    if [ -n "${SUGARKUBE_TOKEN_STAGING:-}" ]; then
       printf -v TOKEN '%s' "${SUGARKUBE_TOKEN_STAGING}"
       TOKEN_SOURCE_KIND="env"
       TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_STAGING"
+    elif [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then
+      printf -v TOKEN '%s' "${SUGARKUBE_TOKEN_INT}"
+      TOKEN_SOURCE_KIND="env"
+      TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_INT (deprecated)"
     elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
       TOKEN="${SUGARKUBE_TOKEN}"
       TOKEN_SOURCE_KIND="env"
