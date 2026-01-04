@@ -134,7 +134,7 @@ just flux-bootstrap env=dev
 just platform-apply env=dev
 ```
 
-Replace `dev` with `int` or `prod` for the target environment. `flux-bootstrap` wraps
+Replace `dev` with `staging` or `prod` for the target environment (`int` remains a deprecated alias for staging). `flux-bootstrap` wraps
 `scripts/flux-bootstrap.sh` (safe to run multiple times) and patches the Flux `Kustomization`
 path to the selected environment after installing the controllers. `platform-apply` requests an
 immediate Flux reconciliation of the platform stack.
@@ -301,7 +301,7 @@ policies.
 
 ## 7. Promotion flow
 
-1. Pin container images in the `clusters/int` overlay with immutable digests.
+1. Pin container images in the `clusters/staging` overlay with immutable digests.
 2. After validation, cherry-pick or merge the digest updates into `clusters/prod`.
 3. Flux automatically reconciles the changes in production; monitor Grafana dashboards and Loki logs
    to confirm stability.
