@@ -530,18 +530,18 @@ case "${ENVIRONMENT}" in
       TOKEN_SOURCE_KIND="env"
       TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_INT (deprecated)"
     elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
-      TOKEN="${SUGARKUBE_TOKEN}"
+      printf -v TOKEN '%s' "${SUGARKUBE_TOKEN}"
       TOKEN_SOURCE_KIND="env"
       TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
     fi
     ;;
   prod)
     if [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then
-      TOKEN="${SUGARKUBE_TOKEN_PROD}"
+      printf -v TOKEN '%s' "${SUGARKUBE_TOKEN_PROD}"
       TOKEN_SOURCE_KIND="env"
       TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN_PROD"
     elif [ -n "${SUGARKUBE_TOKEN:-}" ]; then
-      TOKEN="${SUGARKUBE_TOKEN}"
+      printf -v TOKEN '%s' "${SUGARKUBE_TOKEN}"
       TOKEN_SOURCE_KIND="env"
       TOKEN_SOURCE_DETAIL="SUGARKUBE_TOKEN"
     fi
