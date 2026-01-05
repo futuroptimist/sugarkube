@@ -14,16 +14,41 @@ export SUGARKUBE_MDNS_ABSENCE_DBUS := env('SUGARKUBE_MDNS_ABSENCE_DBUS', '1')
 default: up
     @true
 
+up-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" up env=dev
+
+up-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" up env=staging
+
+up-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" up env=prod
+
 up env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    # Select per-environment token if available
-    if [ "{{ env }}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_DEV"; fi
-    if [ "{{ env }}" = "int" ] && [ -n "${SUGARKUBE_TOKEN_INT:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_INT"; fi
-    if [ "{{ env }}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD:-}" ]; then export SUGARKUBE_TOKEN="$SUGARKUBE_TOKEN_PROD"; fi
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
 
-    export SUGARKUBE_ENV="{{ env }}"
+    # Select per-environment token if available
+    if [ "${env_name}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV-}" ]; then
+        printf -v SUGARKUBE_TOKEN '%s' "${SUGARKUBE_TOKEN_DEV}"
+        export SUGARKUBE_TOKEN
+    fi
+    if [ "${env_name}" = "staging" ] && [ -n "${SUGARKUBE_TOKEN_STAGING-}" ]; then
+        printf -v SUGARKUBE_TOKEN '%s' "${SUGARKUBE_TOKEN_STAGING}"
+        export SUGARKUBE_TOKEN
+    fi
+    if [ "${env_name}" = "prod" ] && [ -n "${SUGARKUBE_TOKEN_PROD-}" ]; then
+        printf -v SUGARKUBE_TOKEN '%s' "${SUGARKUBE_TOKEN_PROD}"
+        export SUGARKUBE_TOKEN
+    fi
+
+    export SUGARKUBE_ENV="${env_name}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
@@ -229,6 +254,15 @@ cluster-status:
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+ha3-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env=dev
+
+ha3-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env=staging
+
+ha3-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env=prod
+
 # Remove the control-plane NoSchedule taint from all nodes so they can run workloads.
 # This is intended for the homelab topology where all three HA control-plane nodes
 
@@ -310,6 +344,15 @@ ha3-untaint-control-plane:
 save-logs env='dev':
     SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+save-logs-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" save-logs env=dev
+
+save-logs-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" save-logs env=staging
+
+save-logs-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" save-logs env=prod
+
 # Display the k3s node token needed for additional nodes to join the cluster.
 cat-node-token:
     sudo cat /var/lib/rancher/k3s/server/node-token
@@ -318,7 +361,17 @@ mdns-harden:
     sudo -E bash scripts/configure_avahi.sh
 
 mdns-selfcheck env='dev':
-    export SUGARKUBE_ENV="{{ env }}"
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
+
+    export SUGARKUBE_ENV="${env_name}"
     env \
     SUGARKUBE_EXPECTED_HOST="$(hostname).local" \
     SUGARKUBE_SELFCHK_ATTEMPTS=10 \
@@ -342,15 +395,29 @@ mdns-reset:
 kubeconfig env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
     user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
     sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
     sudo chown -R "$user":"$user" ~/.kube
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
-    env_name="{{ env }}"
     scope_name="sugar-${env_name#env=}"
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+
+kubeconfig-dev:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=dev
+
+kubeconfig-staging:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=staging
+
+kubeconfig-prod:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=prod
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
@@ -374,6 +441,13 @@ origin_cert_guidance := """
 cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
 
     export KUBECONFIG="${HOME}/.kube/config"
 
@@ -424,7 +498,7 @@ cf-tunnel-install env='dev' token='':
     values_yaml=$(printf '%s\n' \
     'fullnameOverride: cloudflare-tunnel' \
     'cloudflare:' \
-    "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-{{ env }}}\"" \
+    "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-${env_name}}\"" \
     "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
     '  secretName: tunnel-token' \
     '  ingress: []'
@@ -514,7 +588,7 @@ cf-tunnel-install env='dev' token='':
     printf '%s\n' \
     'Cloudflare Tunnel chart deployed in token mode.' \
     '- Secret: cloudflare/tunnel-token (key: token)' \
-    "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-{{ env }}}" \
+    "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
     '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
     '- Readiness endpoint: /ready must return 200'
 
@@ -538,7 +612,7 @@ cf-tunnel-reset:
         helm -n cloudflare uninstall cloudflare-tunnel || true
     fi
 
-    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=dev token=\"${CF_TUNNEL_TOKEN:-<your-token>}\"' to reinstall."
+    echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=<env>' after exporting CF_TUNNEL_TOKEN to reinstall."
 
 # Show Cloudflare Tunnel status and recent logs (for debugging rollout failures).
 cf-tunnel-debug:
@@ -1031,16 +1105,49 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 # Fast redeploy of dspace v3 from GHCR (emergency push).
-dspace-oci-redeploy:
+dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+      env_name="staging"
+    fi
+
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+
+    overlay="docs/examples/dspace.values.${env_name}.yaml"
+    if [ ! -f "${overlay}" ]; then
+      echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
+      exit 1
+    fi
+    values_chain="docs/examples/dspace.values.dev.yaml"
+    if [ "${env_name}" != "dev" ]; then
+      values_chain="${values_chain},${overlay}"
+    fi
+
+    deploy_tag="{{ tag }}"
+    default_tag_value=""
+    if [ "${env_name}" = "prod" ]; then
+      if [ -z "${deploy_tag}" ] && [ -f "docs/apps/dspace.prod.tag" ]; then
+        deploy_tag="$(read_prod_tag)"
+      fi
+      if [ -z "${deploy_tag}" ]; then
+        echo "Set tag=<immutable-tag> for prod or populate docs/apps/dspace.prod.tag." >&2
+        exit 1
+      fi
+    else
+      default_tag_value="v3-latest"
+    fi
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values='docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml' \
+      values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
-      tag='' default_tag='v3-latest'
+      tag="${deploy_tag}" default_tag="${default_tag_value}"
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then
@@ -1576,18 +1683,54 @@ support-bundle:
 
 # Bootstrap Flux controllers and sync manifests for an environment
 flux-bootstrap env='dev':
-    "{{ scripts_dir }}/flux-bootstrap.sh" "{{ env }}"
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
+    "{{ scripts_dir }}/flux-bootstrap.sh" "${env_name}"
 
 # Reconcile the platform Kustomization via Flux
 platform-apply env='dev':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
     flux reconcile kustomization platform \
     --namespace flux-system \
     --with-source
 
 # Reseal SOPS secrets for an environment
 seal-secrets env='dev':
-    "{{ scripts_dir }}/seal-secrets.sh" "{{ env }}"
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
+    "{{ scripts_dir }}/seal-secrets.sh" "${env_name}"
 
 # Backwards-compatible alias that calls flux-bootstrap
 platform-bootstrap env='dev':
-    just flux-bootstrap env={{ env }}
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
+    just flux-bootstrap env=${env_name}

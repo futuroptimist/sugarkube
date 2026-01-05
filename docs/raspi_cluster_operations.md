@@ -599,7 +599,7 @@ companion application for your cluster.
 >   dspace repo (recommended once Helm and GHCR login are working).
 >
 > For the sugarkube-centric path, see:
-> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-dev.md
+> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
 
 ### Why deploy dspace?
 
@@ -676,8 +676,13 @@ deployment's defaults.
 
 **Quick redeploy for dspace v3 (OCI chart):**
 
+Pick the values overlay for your target environment and prefer immutable image tags for production:
+
+- Staging: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`
+- Production: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
+
 ```bash
-# From the sugarkube repo root on a cluster node:
+# From the sugarkube repo root on a cluster node (staging):
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
@@ -686,16 +691,35 @@ just helm-oci-upgrade \
   default_tag=v3-latest
 ```
 
+For production, swap in the prod values file and pin to an immutable tag (for example the value
+stored in `docs/apps/dspace.prod.tag`):
+
+```bash
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+prod_tag="$(read_prod_tag)"
+
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag="${prod_tag}"
+```
+
 The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
 `environment` value in the dspace values file). In this repo, `docs/examples/dspace.values.dev.yaml`
-sets `environment: dev` and `docs/examples/dspace.values.staging.yaml` sets `environment: staging`,
-which show up in `/healthz` and the homepage build badge.
+sets `environment: dev`, `docs/examples/dspace.values.staging.yaml` sets `environment: staging`, and
+`docs/examples/dspace.values.prod.yaml` sets `environment: prod`, which show up in `/healthz` and
+the homepage build badge.
 
 If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
-recipe:
+recipe (defaults to staging):
 
 ```bash
 just dspace-oci-redeploy
+# or explicitly select an environment:
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via

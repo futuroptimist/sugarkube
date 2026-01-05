@@ -10,10 +10,13 @@ development values:
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
 - `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
   `staging.democratized.space`.
+- `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
+  `democratized.space`.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
-configured accordingly.
+configured accordingly. For production, use the prod values file and your production hostname
+(defaults to `democratized.space` in this repo).
 
 ## Prerequisites
 
@@ -54,6 +57,17 @@ just helm-oci-install \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
 
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+prod_tag="$(read_prod_tag)"
+
+# Install production with prod ingress overrides and a pinned tag
+just helm-oci-install \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag="${prod_tag}"
+
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
 
@@ -64,17 +78,25 @@ just helm-oci-upgrade \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
   tag=v3-<shortsha>
+
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=v3-<immutable-tag>
 ```
 
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
-- The image tag defaults to `default_tag` (`v3-latest`); pass `tag=<imageTag>` to target a
-  specific build.
+- The image tag defaults to `default_tag` (`v3-latest`) for dev/staging; pass `tag=<imageTag>` to
+  target a specific build. Production deployments should use pinned tags (for example, the value in
+  `docs/apps/dspace.prod.tag` or a `v3-<immutable>` build).
 
 ## First deployment walkthrough
 
 Follow this numbered tutorial for a fresh dspace v3 rollout behind Traefik. It
-assumes your `env=dev` cluster is online and reachable with kubectl.
+assumes your target cluster (for example `env=staging`) is online and reachable with kubectl.
 
 1. Confirm Traefik is present:
 
@@ -82,10 +104,11 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
    kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
    ```
 
-2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](../cloudflare_tunnel.md)):
+2. Install Cloudflare Tunnel (see [Cloudflare Tunnel docs](../cloudflare_tunnel.md)). Ensure
+   `CF_TUNNEL_TOKEN` is exported from the Cloudflare connector snippet, then run:
 
    ```bash
-   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install env=staging  # swap env=prod or env=dev as needed
    ```
 
 3. Create a Tunnel route in the Cloudflare dashboard from your FQDN to
@@ -103,6 +126,17 @@ assumes your `env=dev` cluster is online and reachable with kubectl.
      values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
      version_file=docs/apps/dspace.version \
      default_tag=v3-latest
+
+   read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+   prod_tag="$(read_prod_tag)"
+
+   # Production example (pinned tag)
+   just helm-oci-install \
+     release=dspace namespace=dspace \
+     chart=oci://ghcr.io/democratizedspace/charts/dspace \
+     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
+     version_file=docs/apps/dspace.version \
+     tag="${prod_tag}"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:

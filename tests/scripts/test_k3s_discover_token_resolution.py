@@ -88,3 +88,57 @@ def test_server_join_without_token_fails(tmp_path):
 
     assert result.returncode == 1
     assert "failed to resolve secure k3s server join token" in result.stderr
+
+
+def test_staging_prefers_environment_token_over_generic():
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": os.environ["PATH"],
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "staging",
+            "SUGARKUBE_SERVERS": "1",
+            "SUGARKUBE_TOKEN_STAGING": "staging-env-token",
+            "SUGARKUBE_TOKEN": "generic-token",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--print-resolved-token"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "staging-env-token"
+    assert "token-source=env:SUGARKUBE_TOKEN_STAGING" in result.stderr
+
+
+def test_int_alias_falls_back_to_deprecated_token_when_staging_empty():
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": os.environ["PATH"],
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "int",
+            "SUGARKUBE_SERVERS": "1",
+            "SUGARKUBE_TOKEN_STAGING": "",
+            "SUGARKUBE_TOKEN_INT": "deprecated-int-token",
+            "SUGARKUBE_TOKEN": "generic-token",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", SCRIPT, "--print-resolved-token"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "deprecated-int-token"
+    assert "event=discover_env_alias" in result.stderr
+    assert "SUGARKUBE_TOKEN_INT (deprecated)" in result.stderr

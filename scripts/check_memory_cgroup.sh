@@ -14,6 +14,11 @@ if [ "$(uname -s)" != "Linux" ]; then
   exit 0
 fi
 
+if [ "${SUGARKUBE_ENV:-}" = "int" ]; then
+  log "WARNING: SUGARKUBE_ENV=int is deprecated; normalizing to staging."
+  SUGARKUBE_ENV="staging"
+fi
+
 ensure_root() {
   # Allow tests to skip root elevation to avoid infinite loops with stubbed sudo.
   if [ "${ALLOW_NON_ROOT:-0}" = "1" ]; then
@@ -193,7 +198,7 @@ persist_env() {
   chown root:root "$ENV_FILE"
 
   # Persist the variables most likely needed by the bootstrap
-  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_INT SUGARKUBE_TOKEN_PROD; do
+  for n in SUGARKUBE_ENV SUGARKUBE_SERVERS SUGARKUBE_TOKEN SUGARKUBE_TOKEN_DEV SUGARKUBE_TOKEN_STAGING SUGARKUBE_TOKEN_PROD; do
     if [ -n "${!n-}" ]; then
       printf '%s=%q\n' "$n" "${!n}" >>"$ENV_FILE"
     fi
@@ -202,9 +207,9 @@ persist_env() {
   # If SUGARKUBE_TOKEN not set but an env-specific token is, derive it now
   if [ -z "${SUGARKUBE_TOKEN-}" ] && [ -n "${SUGARKUBE_ENV-}" ]; then
     case "${SUGARKUBE_ENV}" in
-      dev)  [ -n "${SUGARKUBE_TOKEN_DEV-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_DEV}"  >>"$ENV_FILE" ;;
-      int)  [ -n "${SUGARKUBE_TOKEN_INT-}"  ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_INT}"  >>"$ENV_FILE" ;;
-      prod) [ -n "${SUGARKUBE_TOKEN_PROD-}" ] && printf 'SUGARKUBE_TOKEN=%q\n'  "${SUGARKUBE_TOKEN_PROD}" >>"$ENV_FILE" ;;
+      dev)     [ -n "${SUGARKUBE_TOKEN_DEV-}"     ] && printf '%s=%q\n' "SUGARKUBE_TOKEN" "${SUGARKUBE_TOKEN_DEV}"     >>"$ENV_FILE" ;;
+      staging) [ -n "${SUGARKUBE_TOKEN_STAGING-}" ] && printf '%s=%q\n' "SUGARKUBE_TOKEN" "${SUGARKUBE_TOKEN_STAGING}" >>"$ENV_FILE" ;;
+      prod)    [ -n "${SUGARKUBE_TOKEN_PROD-}"    ] && printf '%s=%q\n' "SUGARKUBE_TOKEN" "${SUGARKUBE_TOKEN_PROD}"    >>"$ENV_FILE" ;;
     esac
   fi
 }
@@ -221,11 +226,43 @@ install_resume_service() {
 from __future__ import annotations
 
 import pathlib
+import shlex
 import sys
+
+
+def load_env(env_file: str) -> str:
+    env_value = "dev"
+    try:
+        contents = pathlib.Path(env_file).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        contents = []
+
+    for raw in contents:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.startswith("SUGARKUBE_ENV="):
+            continue
+        try:
+            parsed = shlex.split(line, posix=True)
+        except ValueError:
+            continue
+        if not parsed:
+            continue
+        key, _, value = parsed[0].partition("=")
+        if key == "SUGARKUBE_ENV" and value:
+            env_value = value
+            break
+
+    if env_value == "int":
+        env_value = "staging"
+
+    return env_value
 
 
 def main() -> None:
     systemd_dir, service_name, user, home, env_file, working_dir = sys.argv[1:]
+    env_value = load_env(env_file)
     path = pathlib.Path(systemd_dir) / service_name
     path.write_text(
         f"""[Unit]
@@ -240,7 +277,7 @@ Group={user}
 Environment=HOME={home}
 EnvironmentFile={env_file}
 WorkingDirectory={working_dir}
-ExecStart=/usr/bin/just up dev
+ExecStart=/usr/bin/just up {env_value}
 ExecStartPost=/bin/systemctl disable --now {service_name}
 
 [Install]

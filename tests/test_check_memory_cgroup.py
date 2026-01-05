@@ -15,6 +15,82 @@ def _make_executable(path: Path, content: str) -> None:
     path.chmod(stat.S_IRWXU)
 
 
+def _run_script_for_env(tmp_path: Path, env_value: str) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    base = tmp_path / env_value
+    bin_dir = base / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    call_log = base / "calls.log"
+    call_log.write_text("", encoding="utf-8")
+
+    def make_stub(name: str, body: str) -> None:
+        _make_executable(
+            bin_dir / name,
+            textwrap.dedent(
+                f"""
+                #!/usr/bin/env bash
+                {body}
+                """
+            ),
+        )
+
+    make_stub("uname", "echo Linux")
+    make_stub("systemctl", 'echo "systemctl:$*" >>"${CALL_LOG}"')
+    make_stub("sleep", 'echo "sleep:$*" >>"${CALL_LOG}"')
+    make_stub("sync", 'echo sync >>"${CALL_LOG}"')
+
+    state_dir = base / "state"
+    systemd_dir = base / "systemd"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+
+    cmdline = base / "boot" / "firmware" / "cmdline.txt"
+    cmdline.parent.mkdir(parents=True, exist_ok=True)
+    cmdline.write_text(
+        (
+            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
+            "fsck.repair=yes rootwait cgroup_disable=memory\n"
+        ),
+        encoding="utf-8",
+    )
+
+    proc_cmdline = base / "proc" / "cmdline"
+    proc_cmdline.parent.mkdir(parents=True, exist_ok=True)
+    proc_cmdline.write_text(
+        (
+            "console=serial0,115200 console=tty1 root=LABEL=w00t rootfstype=ext4 "
+            "fsck.repair=yes rootwait cgroup_disable=memory"
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "CALL_LOG": str(call_log),
+            "EUID": "0",
+            "SUGARKUBE_MEMCTRL_FORCE": "inactive",
+            "SUGARKUBE_CMDLINE_PATH": str(cmdline),
+            "SUGARKUBE_PROC_CMDLINE_PATH": str(proc_cmdline),
+            "SUGARKUBE_STATE_DIR": str(state_dir),
+            "SUGARKUBE_SYSTEMD_DIR": str(systemd_dir),
+            "SUDO_USER": "pi",
+            "SUGARKUBE_ENV": env_value,
+        }
+    )
+
+    completed = subprocess.run(
+        [str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    service = systemd_dir / "sugarkube-post-reboot.service"
+    return completed, service, state_dir / "env"
+
+
 def test_skip_on_non_linux_host(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -170,6 +246,26 @@ def test_happy_path_updates_cmdline_and_reboots(tmp_path: Path) -> None:
     ]
 
     assert "removed: cgroup_disable=memory" in completed.stderr
+
+
+def test_resume_service_uses_env_and_aliases(tmp_path: Path) -> None:
+    scenarios = [
+        ("staging", "staging"),
+        ("int", "staging"),
+        ("prod", "prod"),
+    ]
+
+    for env_value, expected in scenarios:
+        completed, service, env_file = _run_script_for_env(tmp_path, env_value)
+        assert completed.returncode == 0, completed.stderr
+        assert service.exists()
+
+        service_contents = service.read_text(encoding="utf-8")
+        assert f"ExecStart=/usr/bin/just up {expected}" in service_contents
+        assert "ExecStart=/usr/bin/just up dev" not in service_contents
+
+        env_contents = env_file.read_text(encoding="utf-8")
+        assert f"SUGARKUBE_ENV={expected}" in env_contents
 
 
 def test_handles_cmdline_with_crlf_line_endings(tmp_path: Path) -> None:
