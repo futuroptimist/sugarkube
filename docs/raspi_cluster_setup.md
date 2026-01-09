@@ -16,46 +16,71 @@ personas:
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, ingress (Traefik), and other day-two workflows.
 
-## Golden path: SD card → 3-node HA cluster → ingress ready
+## Happy path: 3-server HA cluster (dev/staging/prod) in two runs
 
-This is the single happy path for new operators. Each step links to deeper sections below or in the
-operations guide:
+This is the single happy path for new operators. Follow these steps in order to go from a fresh
+image to a working 3-node HA cluster. Each step links to deeper sections below or in the
+operations guide.
 
-1. **Flash and boot the Pis:** Follow [pi_image_quickstart.md](./pi_image_quickstart.md) to flash the
-   SD cards, boot each Pi, and complete the initial network configuration covered later in this
-   guide.
-2. **Bring up the 3-node HA dev cluster:** Run the automated bring-up twice per node (first pass
-   applies system tweaks, second pass joins/bootstraps):
+1. **Grab the latest Pi image artifact:** Use the latest run in
+   [`pi-image.yml`](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml)
+   and download the `sugarkube-img` artifact (the `.zip` contains `sugarkube.img.xz`). See
+   [pi_image_quickstart.md](./pi_image_quickstart.md) if you want the scripted download helper or
+   checksum verification.
+2. **Flash the SD card with Raspberry Pi Imager:** Select the `sugarkube.img.xz` file, set the
+   hostname in the Imager settings (so each Pi boots with a unique `*.local` name), and image the
+   SD card.
+3. **Boot with NVMe/SSD attached:** Power on the Pi with the NVMe SSD connected (for example, via
+   a PoE+ HAT) and confirm it boots from the SD card.
+4. **Clone SD → SSD:** On the Pi, use `lsblk` to identify the SSD device and run the helper:
 
    ```bash
-   just ha3 env=dev
+   lsblk
+   sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
+   ```
+
+   Follow the [Clone SD to SSD (happy path)](#clone-sd-to-ssd-happy-path) section for more detail.
+5. **Boot from SSD:** Shut down the Pi, remove the SD card, and boot from the SSD.
+6. **Bootstrap the first server (two runs):** Choose your environment and run the HA helper twice
+   on the first node. The first pass applies system tweaks and reboots; the second pass
+   bootstraps k3s.
+
+   ```bash
+   just ha3 env=staging
+   just ha3 env=staging
+   ```
+
+   Use `env=dev` or `env=prod` as needed. `just ha3 env=…` wraps
+   `SUGARKUBE_SERVERS=3 just up …` so you do not need to export the variable yourself.
+7. **Copy the join credential:** On the first node, capture the join value for the other servers:
+
+   ```bash
+   sudo cat /var/lib/rancher/k3s/server/node-token
+   ```
+
+8. **Join the second server (two runs):** Boot the second Pi from SSD, export the token for the
+   selected environment, and run the HA helper twice:
+
+   ```bash
+   export SUGARKUBE_TOKEN_STAGING="K10..."
+   just ha3 env=staging
+   just ha3 env=staging
+   ```
+
+   Replace `SUGARKUBE_TOKEN_STAGING` with `SUGARKUBE_TOKEN_DEV` or `SUGARKUBE_TOKEN_PROD` for other
+   environments.
+9. **Repeat for the third server:** Boot the third Pi from SSD and run the same token + two-run
+   sequence.
+10. **Verify the cluster:** On any node (or your workstation) confirm the control plane is healthy:
+
+   ```bash
+   kubectl get nodes
    just cluster-status
    ```
 
-3. **Install Helm (prerequisite for Traefik and workloads):**
-
-   ```bash
-   just helm-install
-   just helm-status
-   ```
-
-4. **Check Gateway API CRDs:** The Traefik doctor validates CRD ownership and suggests fixes. Missing
-   CRDs are fine—Traefik can create them; fully healthy CRDs are also fine.
-
-   ```bash
-   just traefik-crd-doctor
-   ```
-
-5. **Install and verify Traefik ingress:**
-
-   ```bash
-   just traefik-install
-   just traefik-status
-   ```
-
-6. **Deploy workloads:** Continue with
-   [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress) to
-   publish services through Traefik and install apps like token.place and dspace.
+11. **Install Helm + Traefik:** Continue with
+    [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress)
+    to install Helm, check CRDs, and deploy Traefik.
 
 ## Clone SD to SSD (happy path)
 

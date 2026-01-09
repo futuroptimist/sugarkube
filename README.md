@@ -16,6 +16,16 @@ small computers. It doubles as a living trellis—climbing plants weave through 
 extrusions, while shade-loving herbs thrive beneath the panels. Hanging baskets can clip onto the
 frame so the installation is surrounded by greenery.
 
+## Start here: build a 3-node HA k3s cluster
+
+New operator? Start with the streamlined 3-server cluster walkthrough:
+[Happy path: 3-server HA cluster (dev/staging/prod) in two runs][ha3-happy-path].
+It walks through downloading the latest Pi image artifact, flashing SD cards with hostnames,
+cloning to SSD, and bringing up a 3-node HA cluster with the `just ha3 env=…` helper.
+
+[ha3-happy-path]:
+docs/raspi_cluster_setup.md#happy-path-3-server-ha-cluster-dev-staging-prod-in-two-runs
+
 ### What's in a name?
 
 "Sugarkube" refers to both the aluminium cube covered in solar panels **and**
