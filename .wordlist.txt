@@ -81,6 +81,7 @@ Shift
 Sugarkube
 TUNNEL_TOKEN
 Taskfile
+Traefik
 UFW
 Victron
 WSL

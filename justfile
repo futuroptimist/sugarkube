@@ -254,6 +254,9 @@ cluster-status:
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
 
+3ha env='dev':
+    just --justfile "{{ justfile_directory() }}/justfile" ha3 env={{ env }}
+
 ha3-dev:
     just --justfile "{{ justfile_directory() }}/justfile" ha3 env=dev
 

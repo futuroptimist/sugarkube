@@ -18,44 +18,18 @@ personas:
 
 ## Golden path: SD card → 3-node HA cluster → ingress ready
 
-This is the single happy path for new operators. Each step links to deeper sections below or in the
-operations guide:
+Need a quick sequence to get a 3-node HA cluster online? Start with the
+[Happy Path](#happy-path-3-server-dev-cluster-in-two-runs) checklist, then
+continue in [raspi_cluster_operations.md](./raspi_cluster_operations.md) for Helm, Traefik, and
+workloads.
 
-1. **Flash and boot the Pis:** Follow [pi_image_quickstart.md](./pi_image_quickstart.md) to flash the
-   SD cards, boot each Pi, and complete the initial network configuration covered later in this
-   guide.
-2. **Bring up the 3-node HA dev cluster:** Run the automated bring-up twice per node (first pass
-   applies system tweaks, second pass joins/bootstraps):
+If you want a high-level overview:
 
-   ```bash
-   just ha3 env=dev
-   just cluster-status
-   ```
-
-3. **Install Helm (prerequisite for Traefik and workloads):**
-
-   ```bash
-   just helm-install
-   just helm-status
-   ```
-
-4. **Check Gateway API CRDs:** The Traefik doctor validates CRD ownership and suggests fixes. Missing
-   CRDs are fine—Traefik can create them; fully healthy CRDs are also fine.
-
-   ```bash
-   just traefik-crd-doctor
-   ```
-
-5. **Install and verify Traefik ingress:**
-
-   ```bash
-   just traefik-install
-   just traefik-status
-   ```
-
-6. **Deploy workloads:** Continue with
-   [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress) to
-   publish services through Traefik and install apps like token.place and dspace.
+1. [Flash and boot the Pi image](./pi_image_quickstart.md).
+2. Follow the [Happy Path](#happy-path-3-server-dev-cluster-in-two-runs) to form the HA control
+   plane for `dev`, `staging`, or `prod`.
+3. Install Helm and Traefik using
+   [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
 
 ## Clone SD to SSD (happy path)
 
@@ -167,8 +141,11 @@ You should now be able to push without retyping your username and password each 
 
 Quick reference for the most common recipes when bringing up a 3-node HA dev cluster:
 
-- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev cluster
-  _When to use:_ Run this twice per server during initial bring-up (first run patches memory cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an existing cluster.
+- **`just ha3 env=dev`** (alias: `just 3ha env=dev`) — main path to bring up or re-run the
+  3-node dev cluster
+  _When to use:_ Run this twice per server during initial bring-up (first run patches memory
+  cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an
+  existing cluster.
 
 - **`just save-logs env=dev`** — run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/`
   _When to use:_ Capture sanitized logs during the second run for troubleshooting or documentation. The logs are automatically filtered to remove sensitive data.
@@ -258,6 +235,64 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 ---
 
 ## Happy Path: 3-server `dev` cluster in two runs
+
+This is the step-by-step "happy path" for a 3-node HA cluster. It uses the `dev` environment
+in examples, but the same flow works for `staging` and `prod` by swapping the
+environment-specific token variables (`SUGARKUBE_TOKEN_STAGING`,
+`SUGARKUBE_TOKEN_PROD`) and recipes (`just ha3 env=staging`, `just ha3 env=prod`).
+
+1. **Grab the latest Pi image artifact** from the
+   [pi-image workflow](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml).
+   Download the `sugarkube-img` artifact from the latest successful run, then extract the zip to
+   get `sugarkube.img.xz`. (If you prefer the release path, see
+   [pi_image_quickstart.md](./pi_image_quickstart.md).)
+2. **Flash an SD card** with Raspberry Pi Imager and set the `.local` hostname in the advanced
+   settings before imaging.
+3. **Boot the Pi** with the NVMe SSD connected via the PoE+ HAT (or your SSD adapter of choice).
+4. **Clone SD → SSD** after determining the target device with `lsblk`:
+
+   ```bash
+   lsblk
+   sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
+   ```
+
+5. **Shutdown, remove SD, and reboot** so the Pi boots from SSD.
+6. **Bootstrap the first node** for the target environment:
+
+   ```bash
+   export SUGARKUBE_SERVERS=3
+   just up dev
+   # or: just up staging / just up prod
+   ```
+
+   Prefer the HA shorthand? Use `just ha3 env=dev`, `just ha3 env=staging`, or
+   `just ha3 env=prod` (alias: `just 3ha env=dev`, `just 3ha env=staging`,
+   `just 3ha env=prod`).
+7. **Grab the join token** from the first node:
+
+   ```bash
+   sudo cat /var/lib/rancher/k3s/server/node-token
+   ```
+
+8. **Join the second node** with the token (repeat for the third):
+
+   ```bash
+   export SUGARKUBE_SERVERS=3
+   export SUGARKUBE_TOKEN_DEV="K10abc123..."  # or SUGARKUBE_TOKEN_STAGING/PROD
+   just ha3 env=dev
+   ```
+
+9. **Repeat the join** on the third Pi with the same token.
+10. **Verify cluster health** from any node:
+
+   ```bash
+   kubectl get nodes
+   just cluster-status
+   ```
+
+11. **Install Helm + Traefik** once the control plane is steady. Continue with
+    [raspi_cluster_operations.md](./raspi_cluster_operations.md) for Helm, Traefik, and
+    workloads.
 
 ### Bootstrap vs Join: Token Behavior
 
