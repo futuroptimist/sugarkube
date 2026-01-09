@@ -340,6 +340,10 @@ ha3-untaint-control-plane:
     echo "Done. Current node taints:"
     kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 
+# Short alias for homelab HA clusters where control-plane nodes also run workloads.
+ha3-untaint:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3-untaint-control-plane
+
 # Capture sanitized logs to logs/up/ during cluster bring-up (useful for troubleshooting and documentation).
 save-logs env='dev':
     SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}

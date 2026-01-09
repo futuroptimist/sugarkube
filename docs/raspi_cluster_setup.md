@@ -580,6 +580,18 @@ the `just wipe` recovery loop—now live in
 for Helm installs, Flux bootstraps, and workstation access. For deeper SRE
 playbooks continue with [docs/runbook.md](./runbook.md).
 
+If you brought up a 3-node HA control plane and do not yet have dedicated worker
+nodes, untaint the control-plane nodes so they can schedule workloads (including
+Traefik):
+
+```bash
+just ha3-untaint
+```
+
+This removes the default `NoSchedule` control-plane taints on all three nodes
+and is required before `just traefik-install` can succeed in the homelab
+topology.
+
 ---
 
 ## Configuration Knobs

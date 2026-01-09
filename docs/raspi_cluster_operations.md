@@ -320,8 +320,10 @@ leads to events like:
 To treat all three nodes as schedulable workers in your homelab cluster, run:
 
 ```bash
-just ha3-untaint-control-plane
+just ha3-untaint
 ```
+
+(`ha3-untaint-control-plane` remains available as a longer alias.)
 
 This command:
 
