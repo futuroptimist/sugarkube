@@ -220,6 +220,11 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
   cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an
   existing cluster.
 
+- **`just ha3-untaint`** — remove the control-plane taints so the three HA nodes can schedule
+  workloads (Traefik, apps, etc.).
+  _When to use:_ After the cluster is ready and before installing Traefik or other workloads on a
+  homelab-style HA cluster.
+
 - **`just save-logs env=dev`** — run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/`
   _When to use:_ Capture sanitized logs during the second run for troubleshooting or documentation. The logs are automatically filtered to remove sensitive data.
 
@@ -235,6 +240,7 @@ and `kubectl get nodes` shows all servers `Ready`, install the ingress controlle
 any apps:
 
 ```bash
+just ha3-untaint
 just traefik-install
 ```
 

@@ -267,6 +267,9 @@ ha3-prod:
 # This is intended for the homelab topology where all three HA control-plane nodes
 
 # also act as workers.
+ha3-untaint:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3-untaint-control-plane
+
 ha3-untaint-control-plane:
     #!/usr/bin/env bash
     set -Eeuo pipefail

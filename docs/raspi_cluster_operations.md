@@ -160,9 +160,13 @@ Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traff
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
 ingress controller. Other controllers can work, but this guide only documents the Traefik path.
 
+If you are running the three-node HA homelab topology, untaint the control-plane nodes first so
+Traefik can schedule:
+
 Run the helper recipe as your normal user (e.g., `pi`), not with `sudo`:
 
 ```bash
+just ha3-untaint
 just traefik-install
 ```
 
