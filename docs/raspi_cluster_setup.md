@@ -38,16 +38,20 @@ and reboots, second pass bootstraps or joins k3s).
 
 5. **Boot from SSD:** Shut down, remove the SD card, and boot from the SSD/NVMe.
 6. **Bootstrap the first node (staging/prod/dev):** Set the server count and run the bring-up
-   command twice:
+   command twice (reconnect after the reboot):
 
    ```bash
    export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot
    just up staging
    ```
 
    Or use the shortcut alias:
 
    ```bash
+   just 3ha env=staging
+   # reconnect after reboot
    just 3ha env=staging
    ```
 
@@ -60,10 +64,12 @@ and reboots, second pass bootstraps or joins k3s).
    ```
 
    (`just cat-node-token` prints the same value.)
-8. **Join node two:** On the second Pi, export the token (before the second run) and run the
-   bring-up command twice:
+8. **Join node two:** On the second Pi, run once, reconnect after reboot, then export the token
+   and run again:
 
    ```bash
+   just 3ha env=staging
+   # reconnect after reboot
    export SUGARKUBE_TOKEN_STAGING=<token-from-node-1>
    just 3ha env=staging
    ```
@@ -73,17 +79,30 @@ and reboots, second pass bootstraps or joins k3s).
 
    ```bash
    export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot
    export SUGARKUBE_TOKEN_STAGING=<token-from-node-1>
    just up staging
    ```
 9. **Join node three:** Repeat the token export and `just 3ha env=staging` on the third Pi.
-10. **Verify the cluster:** `kubectl get nodes` and `just cluster-status` should show three
-    `Ready` servers.
+10. **Verify the cluster:** Run both commands and confirm you see three servers, all `Ready`:
+
+    ```bash
+    kubectl get nodes
+    just cluster-status
+    ```
 11. **Day-two installs:** Continue with
     [raspi_cluster_operations.md](./raspi_cluster_operations.md) for Helm, Traefik ingress, and
     workload deployment.
 
 [pi-image-workflow]: https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml
+
+<a id="happy-path-3-server-dev-cluster-in-two-runs"></a>
+## Happy path: 3-server dev cluster in two runs
+
+Looking for the earlier dev-only flow? The HA happy path above is the canonical guide. If you
+only need a dev cluster, follow the same steps and substitute `dev` where the examples show
+`staging`.
 
 ## Clone SD to SSD (happy path)
 
