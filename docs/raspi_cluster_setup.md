@@ -47,15 +47,15 @@ and reboots, second pass bootstraps or joins k3s).
    just up staging
    ```
 
-   Or use the shortcut alias:
+   Or use the shortcut recipe:
 
    ```bash
-   just 3ha env=staging
+   just ha3 env=staging
    # reconnect after reboot
-   just 3ha env=staging
+   just ha3 env=staging
    ```
 
-   The `3ha` alias sets `SUGARKUBE_SERVERS=3` for you. Substitute `staging` with `prod` or `dev`
+   The `ha3` recipe sets `SUGARKUBE_SERVERS=3` for you. Substitute `staging` with `prod` or `dev`
    as needed.
 7. **Copy the join credential:** On the first node, grab the value needed to join:
 
@@ -68,10 +68,10 @@ and reboots, second pass bootstraps or joins k3s).
    and run again:
 
    ```bash
-   just 3ha env=staging
+   just ha3 env=staging
    # reconnect after reboot
    export SUGARKUBE_TOKEN_STAGING=<token-from-node-1>
-   just 3ha env=staging
+   just ha3 env=staging
    ```
 
    Use `SUGARKUBE_TOKEN_PROD` or `SUGARKUBE_TOKEN_DEV` if you are targeting those environments.
@@ -84,7 +84,7 @@ and reboots, second pass bootstraps or joins k3s).
    export SUGARKUBE_TOKEN_STAGING=<token-from-node-1>
    just up staging
    ```
-9. **Join node three:** Repeat the token export and `just 3ha env=staging` on the third Pi.
+9. **Join node three:** Repeat the token export and `just ha3 env=staging` on the third Pi.
 10. **Verify the cluster:** Run both commands and confirm you see three servers, all `Ready`:
 
     ```bash
@@ -214,7 +214,7 @@ You should now be able to push without retyping your username and password each 
 
 Quick reference for the most common recipes when bringing up a 3-node HA dev cluster:
 
-- **`just ha3 env=dev` / `just 3ha env=dev`** — main path to bring up or re-run the 3-node dev
+- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev
   cluster. Substitute `staging` or `prod` as needed.
   _When to use:_ Run this twice per server during initial bring-up (first run patches memory
   cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an
@@ -230,7 +230,7 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 
 ## Post-bootstrap: install ingress
 
-After `just up dev` (or `just ha3 env=dev` / `just 3ha env=dev` for the three-node flow) finishes
+After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes
 and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying
 any apps:
 
