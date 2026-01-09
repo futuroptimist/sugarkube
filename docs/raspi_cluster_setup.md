@@ -16,46 +16,93 @@ personas:
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, ingress (Traefik), and other day-two workflows.
 
-## Golden path: SD card → 3-node HA cluster → ingress ready
+## Happy path: 3-server HA cluster in two runs
 
-This is the single happy path for new operators. Each step links to deeper sections below or in the
-operations guide:
+This is the single, end-to-end setup sequence. It favors the quickest path and links to deeper
+docs when needed. Run the bring-up command **twice per node** (first pass applies system tweaks
+and reboots, second pass bootstraps or joins k3s).
 
-1. **Flash and boot the Pis:** Follow [pi_image_quickstart.md](./pi_image_quickstart.md) to flash the
-   SD cards, boot each Pi, and complete the initial network configuration covered later in this
-   guide.
-2. **Bring up the 3-node HA dev cluster:** Run the automated bring-up twice per node (first pass
-   applies system tweaks, second pass joins/bootstraps):
-
-   ```bash
-   just ha3 env=dev
-   just cluster-status
-   ```
-
-3. **Install Helm (prerequisite for Traefik and workloads):**
+1. **Grab the latest Pi image artifact:** Download `sugarkube-img` from the
+   [pi-image workflow runs][pi-image-workflow].
+   The artifact contains `sugarkube.img.xz` inside the zip. If you prefer CLI helpers, the
+   [Pi image quickstart](./pi_image_quickstart.md) covers automated download and flashing.
+2. **Flash the SD card:** Use Raspberry Pi Imager, and set the `.local` hostname (for example,
+   `sugarkube-1.local`) in the advanced settings before writing the image.
+3. **Boot with NVMe attached:** Power the Pi with the NVMe/SSD connected via the PoE+ HAT.
+4. **Clone SD → SSD:** SSH in, use `lsblk` to identify the SSD device, then run:
 
    ```bash
-   just helm-install
-   just helm-status
+   lsblk
+   sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
    ```
 
-4. **Check Gateway API CRDs:** The Traefik doctor validates CRD ownership and suggests fixes. Missing
-   CRDs are fine—Traefik can create them; fully healthy CRDs are also fine.
+5. **Boot from SSD:** Shut down, remove the SD card, and boot from the SSD/NVMe.
+6. **Bootstrap the first node (staging/prod/dev):** Set the server count and run the bring-up
+   command twice (reconnect after the reboot):
 
    ```bash
-   just traefik-crd-doctor
+   export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot
+   just up staging
    ```
 
-5. **Install and verify Traefik ingress:**
+   Or use the shortcut recipe:
 
    ```bash
-   just traefik-install
-   just traefik-status
+   just ha3 env=staging
+   # reconnect after reboot
+   just ha3 env=staging
    ```
 
-6. **Deploy workloads:** Continue with
-   [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress) to
-   publish services through Traefik and install apps like token.place and dspace.
+   The `ha3` recipe sets `SUGARKUBE_SERVERS=3` for you. Substitute `staging` with `prod` or `dev`
+   as needed.
+7. **Copy the join credential:** On the first node, grab the value needed to join:
+
+   ```bash
+   sudo cat /var/lib/rancher/k3s/server/node-token
+   ```
+
+   (`just cat-node-token` prints the same value.)
+8. **Join node two:** On the second Pi, run once, reconnect after reboot, then export the token
+   and run again:
+
+   ```bash
+   just ha3 env=staging
+   # reconnect after reboot
+   export SUGARKUBE_TOKEN_STAGING=<token-from-node-1>
+   just ha3 env=staging
+   ```
+
+   Use `SUGARKUBE_TOKEN_PROD` or `SUGARKUBE_TOKEN_DEV` if you are targeting those environments.
+   If you prefer the explicit variables, run:
+
+   ```bash
+   export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot
+   export SUGARKUBE_TOKEN_STAGING=<token-from-node-1>
+   just up staging
+   ```
+9. **Join node three:** Repeat the token export and `just ha3 env=staging` on the third Pi.
+10. **Verify the cluster:** Run both commands and confirm you see three servers, all `Ready`:
+
+    ```bash
+    kubectl get nodes
+    just cluster-status
+    ```
+11. **Day-two installs:** Continue with
+    [raspi_cluster_operations.md](./raspi_cluster_operations.md) for Helm, Traefik ingress, and
+    workload deployment.
+
+[pi-image-workflow]: https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml
+
+<a id="happy-path-3-server-dev-cluster-in-two-runs"></a>
+## Happy path: 3-server dev cluster in two runs
+
+Looking for the earlier dev-only flow? The HA happy path above is the canonical guide. If you
+only need a dev cluster, follow the same steps and substitute `dev` where the examples show
+`staging`.
 
 ## Clone SD to SSD (happy path)
 
@@ -167,8 +214,11 @@ You should now be able to push without retyping your username and password each 
 
 Quick reference for the most common recipes when bringing up a 3-node HA dev cluster:
 
-- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev cluster
-  _When to use:_ Run this twice per server during initial bring-up (first run patches memory cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an existing cluster.
+- **`just ha3 env=dev`** — main path to bring up or re-run the 3-node dev
+  cluster. Substitute `staging` or `prod` as needed.
+  _When to use:_ Run this twice per server during initial bring-up (first run patches memory
+  cgroups and reboots, second run bootstraps or joins k3s). Also use when adding new nodes to an
+  existing cluster.
 
 - **`just save-logs env=dev`** — run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/`
   _When to use:_ Capture sanitized logs during the second run for troubleshooting or documentation. The logs are automatically filtered to remove sensitive data.
@@ -180,13 +230,16 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 
 ## Post-bootstrap: install ingress
 
-After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying any apps:
+After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes
+and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying
+any apps:
 
 ```bash
 just traefik-install
 ```
 
-Verification steps and troubleshooting live in [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
+Verification steps and troubleshooting live in
+[raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
 
 ### Configure kubectl for the `pi` user on the cluster nodes
 
