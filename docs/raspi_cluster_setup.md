@@ -226,6 +226,10 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 - **`just cat-node-token`** — display the k3s node token for joining nodes
   _When to use:_ After bootstrapping the first node, use this to retrieve the token that other nodes need to join the cluster. Copy the output and set it as `SUGARKUBE_TOKEN_DEV` on subsequent nodes.
 
+- **`just ha3-untaint`** — remove the control-plane NoSchedule taints in the 3-node HA homelab
+  _When to use:_ Run after the ha3 bootstrap so the control-plane nodes can schedule workloads
+  (including Traefik) before installing ingress.
+
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
 
 ## Post-bootstrap: install ingress
@@ -235,8 +239,13 @@ and `kubectl get nodes` shows all servers `Ready`, install the ingress controlle
 any apps:
 
 ```bash
+just ha3-untaint
 just traefik-install
 ```
+
+The `ha3-untaint` helper is required for the homelab HA topology because k3s taints
+control-plane nodes by default. It removes those taints so Traefik and other workloads can
+schedule on all three nodes. Skip it if you have dedicated worker nodes.
 
 Verification steps and troubleshooting live in
 [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
