@@ -6,9 +6,9 @@ personas:
 
 # Raspberry Pi Cluster Operations & Helm Workloads
 
-**📚 Part 3 of 3** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
-- **Previous:** [Part 2 - Quick-Start Setup](raspi_cluster_setup.md)
-- **See also:** [Part 1 - Manual Setup](raspi_cluster_setup_manual.md)
+**📚 Part 2 of 2** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
+- **Previous:** [Part 1 - Quick-Start Setup](raspi_cluster_setup.md)
+- **See also:** [Raspberry Pi Cluster Setup (Manual)](raspi_cluster_setup_manual.md)
 - **Manual companion:** [Raspberry Pi Cluster Operations (Manual)](raspi_cluster_operations_manual.md)
 
 `raspi_cluster_setup.md` gets every Raspberry Pi onto the same HA k3s control plane.

@@ -6,56 +6,79 @@ personas:
 
 # Raspberry Pi Cluster Setup (Quick Start)
 
-**📚 Part 2 of 3** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
-- **Previous:** [Part 1 - Manual Setup](raspi_cluster_setup_manual.md)
-- **Next:** [Part 3 - Operations & Helm](raspi_cluster_operations.md)
+**📚 Part 1 of 2** in the [Raspberry Pi cluster series](index.md#raspberry-pi-cluster-series)
+- **Next:** [Part 2 - Operations & Helm](raspi_cluster_operations.md)
+- **Manual companion:** [Raspberry Pi Cluster Setup (Manual)](raspi_cluster_setup_manual.md)
 
-`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
+`sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the
+standard image and share the same LAN, you can create a per-environment k3s cluster with a
+single command per node.
 
 > **Next step:** When the control plane is stable, continue with
 > [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
 > Helm, ingress (Traefik), and other day-two workflows.
 
-## Golden path: SD card → 3-node HA cluster → ingress ready
+## Happy path: 3-server HA cluster in two runs
 
-This is the single happy path for new operators. Each step links to deeper sections below or in the
-operations guide:
+This is the single happy path for new operators. Follow the steps in order and use the environment
+(`dev`, `staging`, or `prod`) that matches your deployment.
 
-1. **Flash and boot the Pis:** Follow [pi_image_quickstart.md](./pi_image_quickstart.md) to flash the
-   SD cards, boot each Pi, and complete the initial network configuration covered later in this
-   guide.
-2. **Bring up the 3-node HA dev cluster:** Run the automated bring-up twice per node (first pass
-   applies system tweaks, second pass joins/bootstraps):
-
-   ```bash
-   just ha3 env=dev
-   just cluster-status
-   ```
-
-3. **Install Helm (prerequisite for Traefik and workloads):**
+1. **Download the latest Pi image artifact:** Grab the latest `sugarkube-img` artifact from the
+   [pi-image workflow runs](https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml).
+   The download contains `sugarkube.img.xz` inside a zip archive. For background on how the image is
+   assembled, see [pi_image_quickstart.md](./pi_image_quickstart.md).
+2. **Flash an SD card:** Use Raspberry Pi Imager to write the `.img.xz` to an SD card and set the
+   `.local` hostname in the advanced settings before flashing.
+3. **Boot with SSD attached:** Insert the SD card, connect the NVMe/SSD through the PoE+ HAT, and
+   boot the Pi.
+4. **Clone SD → SSD:** SSH in, use `lsblk` to identify the SSD, then run the clone helper:
 
    ```bash
-   just helm-install
-   just helm-status
+   lsblk
+   sudo TARGET=/dev/nvme0n1 WIPE=1 just clone-ssd
    ```
 
-4. **Check Gateway API CRDs:** The Traefik doctor validates CRD ownership and suggests fixes. Missing
-   CRDs are fine—Traefik can create them; fully healthy CRDs are also fine.
+   (See [Clone SD to SSD (happy path)](#clone-sd-to-ssd-happy-path) for a detailed walkthrough.)
+5. **Boot from SSD:** Shut down, remove the SD card, and boot again from the SSD.
+6. **Bootstrap the first node (two runs):** Pick your environment and run the HA wrapper twice. The
+   first run patches memory cgroups and reboots; the second run bootstraps k3s.
 
    ```bash
-   just traefik-crd-doctor
+   just 3ha env=staging
+   # reconnect after reboot, then run again:
+   just 3ha env=staging
    ```
 
-5. **Install and verify Traefik ingress:**
+   `just ha3 env=staging` is equivalent if you prefer the original recipe name.
+
+7. **Capture the join credential:** On the first node, copy the node token for the remaining
+   servers:
 
    ```bash
-   just traefik-install
-   just traefik-status
+   sudo cat /var/lib/rancher/k3s/server/node-token
    ```
 
-6. **Deploy workloads:** Continue with
-   [raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress) to
-   publish services through Traefik and install apps like token.place and dspace.
+8. **Join the second node:** Boot the second Pi from its SSD, export the token, and run the HA
+   wrapper twice:
+
+   ```bash
+   export SUGARKUBE_TOKEN_STAGING="K10abc123..."
+   just 3ha env=staging
+   # reconnect after reboot, then run again:
+   just 3ha env=staging
+   ```
+
+   Use `SUGARKUBE_TOKEN_PROD` for prod, or `SUGARKUBE_TOKEN_DEV` for dev.
+9. **Join the third node:** Repeat the previous step on the third Pi.
+10. **Verify the cluster:** Confirm every node is `Ready` and the summary checks pass:
+
+    ```bash
+    kubectl get nodes
+    just cluster-status
+    ```
+
+11. **Install Helm + Traefik:** Continue with the operations guide for day-two tooling and ingress:
+    [raspi_cluster_operations.md](./raspi_cluster_operations.md).
 
 ## Clone SD to SSD (happy path)
 
@@ -257,7 +280,7 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 
 ---
 
-## Happy Path: 3-server `dev` cluster in two runs
+## Two-run HA flow details (dev/staging/prod)
 
 ### Bootstrap vs Join: Token Behavior
 
@@ -277,8 +300,9 @@ Nodes discover each other **automatically** via mDNS (multicast DNS) service bro
 > **Key principle:** The presence or absence of `SUGARKUBE_TOKEN_DEV` (or `SUGARKUBE_TOKEN_STAGING`, `SUGARKUBE_TOKEN_PROD`) is how you signal your intent. Without a token, `just up dev` creates a new cluster. With a token, it joins an existing one.
 
 > **HA shorthand behaves the same.** Export `SUGARKUBE_TOKEN_DEV` (or the env-specific
-> token) before running `just ha3 env=dev` and it will join, exactly as `just up dev`
-> does. If no token is exported, the HA wrapper bootstraps instead of joining.
+> token) before running `just ha3 env=dev` or `just 3ha env=dev` and it will join, exactly
+> as `just up dev` does. If no token is exported, the HA wrapper bootstraps instead of
+> joining.
 
 Every Raspberry Pi follows the same rhythm:
 
@@ -297,8 +321,9 @@ export SUGARKUBE_SERVERS=3
 just up dev              # 2nd run bootstraps or joins k3s
 ```
 
-> Prefer a one-liner? `just ha3 env=dev` wraps `SUGARKUBE_SERVERS=3 just up dev`
-> so you can rerun the HA flow without re-exporting variables.
+> Prefer a one-liner? `just ha3 env=dev` (or `just 3ha env=dev`) wraps
+> `SUGARKUBE_SERVERS=3 just up dev` so you can rerun the HA flow without
+> re-exporting variables.
 
 - **Why twice?** The first invocation runs `scripts/check_memory_cgroup.sh`, which edits the bootline if needed and triggers an automatic reboot. No manual editing of `/boot/cmdline.txt` is required—even on Raspberry Pi 5 hardware.
 - **HA by default.** Exporting `SUGARKUBE_SERVERS=3` before each run tells `just up` to form an embedded-etcd quorum. Keep it at an odd number (3, 5, …) for resilient control planes.

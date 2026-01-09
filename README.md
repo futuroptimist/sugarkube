@@ -27,6 +27,13 @@ fruiting plants such as strawberries thrive in this arrangement and literally
 embed glucose, fructose, and sucrose—the sugars that inspired the name—into the
 structure's living canopy.
 
+## Quick start: 3-node HA k3s cluster
+
+New here? Use the step-by-step happy path to take the latest Pi image artifact, flash
+it, clone to SSD, and bring up a three-server HA k3s cluster for `dev`, `staging`, or
+`prod` in two runs per node:
+[docs/raspi_cluster_setup.md](docs/raspi_cluster_setup.md#happy-path-3-server-ha-cluster-in-two-runs).
+
 ## Repository layout
 
 - `cad/` — OpenSCAD models of structural parts. See

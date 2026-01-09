@@ -68,10 +68,9 @@ Pi hardware:
    standing up the 3-node HA k3s cluster with the `just ha3 env=dev` happy path. Start here.
 2. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including Helm,
    Traefik ingress, workload management (token.place, dspace), and Flux GitOps integration.
-3. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with detailed
-   explanations of each step to understand what the quick-start automates and to troubleshoot when
-   things go wrong.
-4. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual counterpart to
+3. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Manual companion to Part 1 with
+   the fully manual setup steps for when you want the raw commands or need to troubleshoot.
+4. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual companion to
    Part 2 with raw commands for ingress, Cloudflare Tunnel, Helm apps, and Flux.
 
 ## LLM Prompts
