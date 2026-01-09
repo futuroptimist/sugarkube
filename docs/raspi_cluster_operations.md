@@ -160,7 +160,14 @@ Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traff
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
 ingress controller. Other controllers can work, but this guide only documents the Traefik path.
 
-Run the helper recipe as your normal user (e.g., `pi`), not with `sudo`:
+If your HA control-plane nodes are also your workers (the default homelab setup), remove the
+control-plane taints first so Traefik can schedule pods:
+
+```bash
+just ha3-untaint
+```
+
+Then run the helper recipe as your normal user (e.g., `pi`), not with `sudo`:
 
 ```bash
 just traefik-install
@@ -320,7 +327,7 @@ leads to events like:
 To treat all three nodes as schedulable workers in your homelab cluster, run:
 
 ```bash
-just ha3-untaint-control-plane
+just ha3-untaint
 ```
 
 This command:
@@ -331,7 +338,8 @@ This command:
 - Leaves nodes without those taints unchanged and shows the resulting taint state.
 
 Before installing Traefik on the ha3 topology, run this helper so the three control-plane nodes
-can schedule the Traefik pods and the k3s klipper-helm jobs that bootstrap the addon.
+can schedule the Traefik pods and the k3s klipper-helm jobs that bootstrap the addon. (The
+original `just ha3-untaint-control-plane` name still works if you prefer it.)
 
 This command expects kubectl to be configured for the cluster (for example, using
 `~/.kube/config`). If kubectl cannot reach the API server, it prints a clear error and exits

@@ -267,6 +267,9 @@ ha3-prod:
 # This is intended for the homelab topology where all three HA control-plane nodes
 
 # also act as workers.
+ha3-untaint:
+    just --justfile "{{ justfile_directory() }}/justfile" ha3-untaint-control-plane
+
 ha3-untaint-control-plane:
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -813,8 +816,8 @@ traefik-install namespace='kube-system' version='':
         echo "All nodes in this cluster are tainted as control-plane with NoSchedule and there are no" >&2
         echo "worker nodes. Traefik pods (which do not tolerate that taint by default) will remain" >&2
         echo "Pending and Helm will time out. For the dev ha3 topology, run 'just" >&2
-        echo "ha3-untaint-control-plane' first to make the nodes schedulable, then re-run 'just" >&2
-        echo "traefik-install'." >&2
+        echo "ha3-untaint' (or 'just ha3-untaint-control-plane') first to make the nodes" >&2
+        echo "schedulable, then re-run 'just traefik-install'." >&2
         exit 1
     fi
 
