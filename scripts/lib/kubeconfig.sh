@@ -48,7 +48,7 @@ kubeconfig::resolve_home() {
 # properly owned.
 #
 # Behavior:
-#   - If /etc/rancher/k3s/k3s.yaml is not readable, does nothing and returns 0.
+#   - If /etc/rancher/k3s/k3s.yaml is missing, does nothing and returns 0.
 #   - Determines the target user using (in order): SUGARKUBE_KUBECONFIG_USER,
 #     SUDO_USER, or current user.
 #   - Determines the target home directory using SUGARKUBE_KUBECONFIG_HOME, or
@@ -67,7 +67,7 @@ kubeconfig::resolve_home() {
 #   - Always returns 0, even on failure, for graceful degradation.
 #   - This allows scripts to proceed even if kubeconfig setup is incomplete.
 kubeconfig::ensure_user_kubeconfig() {
-  if [ ! -r /etc/rancher/k3s/k3s.yaml ]; then
+  if [ ! -e /etc/rancher/k3s/k3s.yaml ]; then
     return 0
   fi
 
@@ -94,7 +94,7 @@ kubeconfig::ensure_user_kubeconfig() {
   kubeconfig::_with_privilege mkdir -p "${kube_dir}"
   kubeconfig::_with_privilege chown "${uid}:${gid}" "${kube_dir}"
 
-  if [ ! -r "${kubeconfig_path}" ] || ! cmp -s /etc/rancher/k3s/k3s.yaml "${kubeconfig_path}" 2>/dev/null; then
+  if [ ! -r "${kubeconfig_path}" ] || ! kubeconfig::_with_privilege cmp -s /etc/rancher/k3s/k3s.yaml "${kubeconfig_path}" 2>/dev/null; then
     kubeconfig::_with_privilege cp /etc/rancher/k3s/k3s.yaml "${kubeconfig_path}"
   fi
 

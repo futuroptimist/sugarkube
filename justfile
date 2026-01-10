@@ -391,24 +391,43 @@ wlan-up:
 mdns-reset:
     sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
-# Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
-kubeconfig env='dev':
+# Create a user kubeconfig on a Pi node, or pass env=<env> to rename the context.
+kubeconfig env='':
     #!/usr/bin/env bash
     set -euo pipefail
     env_input="{{ env }}"
-    env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
-        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-        env_name="staging"
+    if [ -n "${env_input}" ]; then
+        env_name="${env_input}"
+        if [ "${env_input}" = "int" ]; then
+            printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+            env_name="staging"
+        fi
+        user="${USER:-$(id -un)}"
+        mkdir -p ~/.kube
+        sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+        sudo chown -R "$user":"$user" ~/.kube
+        chmod 700 ~/.kube
+        chmod 600 ~/.kube/config
+        scope_name="sugar-${env_name#env=}"
+        python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+        exit 0
     fi
-    user="${USER:-$(id -un)}"
-    mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
-    chmod 700 ~/.kube
-    chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name#env=}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+
+    target_user="$(id -un)"
+    if command -v sudo >/dev/null 2>&1; then
+        SUGARKUBE_KUBECONFIG_USER="${target_user}" \
+        SUGARKUBE_KUBECONFIG_HOME="${HOME}" \
+        sudo -E scripts/ensure_user_kubeconfig.sh
+    else
+        SUGARKUBE_KUBECONFIG_USER="${target_user}" \
+        SUGARKUBE_KUBECONFIG_HOME="${HOME}" \
+        scripts/ensure_user_kubeconfig.sh
+    fi
+    printf 'User kubeconfig ready at %s.\n' "${HOME}/.kube/config"
+    printf 'Open a new shell or run: source ~/.bashrc\n'
+
+kubeconfig-user:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=dev
