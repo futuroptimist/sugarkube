@@ -22,6 +22,20 @@ logs, preparing Helm, and rolling out real workloads like
 > `KUBECONFIG=$HOME/.kube/config` for the `pi` user (see the setup guide), you can omit `sudo`
 > from the `kubectl` examples in this guide when running them on the Pis.
 
+## Fix kubectl kubeconfig on a Pi
+
+On a fresh k3s install, `/etc/rancher/k3s/k3s.yaml` is typically root-owned. If you run `kubectl`
+as `pi`, it will fall back to `localhost:8080` and fail. Use the helper below on each node once
+after k3s is installed:
+
+```bash
+just kubeconfig
+```
+
+This creates `~/.kube/config`, fixes permissions, and adds
+`export KUBECONFIG=$HOME/.kube/config` to `~/.bashrc`. Start a new shell (or run
+`source ~/.bashrc`) before running `kubectl`.
+
 > **Prerequisite**
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
