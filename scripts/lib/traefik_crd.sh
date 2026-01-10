@@ -183,9 +183,14 @@ traefik_crd::print_report() {
   fi
 
   if [ "${has_problems}" = false ] && [ "${has_present}" = false ]; then
-    echo "Next step: run 'just traefik-install' to install Traefik and let it create the CRDs."
+    echo "Next step: run 'just traefik-status' to verify Traefik is running."
+    echo "k3s installs it by default."
+    echo "If you intentionally manage Traefik yourself, use the advanced override"
+    echo "'just traefik-install'."
   elif [ "${has_problems}" = false ]; then
-    echo "Next step: you can safely run 'just traefik-install' (or re-run it) if you want to upgrade Traefik."
+    echo "Next step: run 'just traefik-status' to verify Traefik is running."
+    echo "If you intentionally manage Traefik yourself, use the advanced override"
+    echo "'just traefik-install'."
   fi
 }
 

@@ -37,7 +37,8 @@ Review the safety notes before working with power components.
 - [archived/pi_image_improvement_checklist.md](archived/pi_image_improvement_checklist.md) — backlog of DX upgrades for the Pi image
 - [ssd_post_clone_validation.md](ssd_post_clone_validation.md) — validate SSD clones post-migration
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — **start here** to image SD cards, boot the Pis, and form the HA k3s cluster
-- [raspi_cluster_operations.md](raspi_cluster_operations.md) — **next step** to install Helm, Traefik ingress, and roll out workloads
+- [raspi_cluster_operations.md](raspi_cluster_operations.md) — **next step** to install Helm,
+  verify Traefik ingress, and roll out workloads
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — operate the token.place relay staging deployment
@@ -67,7 +68,8 @@ Pi hardware:
 1. [raspi_cluster_setup.md](raspi_cluster_setup.md) — Quick-start guide for imaging, booting, and
    standing up the 3-node HA k3s cluster with the `just ha3 env=dev` happy path. Start here.
 2. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including Helm,
-   Traefik ingress, workload management (token.place, dspace), and Flux GitOps integration.
+   Traefik ingress verification, workload management (token.place, dspace), and Flux GitOps
+   integration.
 3. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with detailed
    explanations of each step to understand what the quick-start automates and to troubleshoot when
    things go wrong.
