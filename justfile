@@ -394,21 +394,28 @@ mdns-reset:
 # Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
 kubeconfig env='dev':
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -Eeuo pipefail
     env_input="{{ env }}"
     env_name="${env_input}"
     if [ "${env_input}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
-    user="${USER:-$(id -un)}"
-    mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
-    chmod 700 ~/.kube
-    chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name#env=}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+    kubeconfig_user="$(id -un)"
+    kubeconfig_home="${HOME}"
+    sudo -E env \
+        SUGARKUBE_KUBECONFIG_USER="${kubeconfig_user}" \
+        SUGARKUBE_KUBECONFIG_HOME="${kubeconfig_home}" \
+        scripts/ensure_user_kubeconfig.sh
+    if [ -f "${HOME}/.kube/config" ]; then
+        scope_name="sugar-${env_name#env=}"
+        python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+    fi
+    echo "Kubeconfig ready at ${HOME}/.kube/config."
+    echo "Open a new shell or run 'source ~/.bashrc' to load KUBECONFIG."
+
+kubeconfig-user:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=dev
