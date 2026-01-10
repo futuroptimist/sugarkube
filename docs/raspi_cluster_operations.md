@@ -54,25 +54,18 @@ Follow this sequence after imaging and booting the Pis:
    just helm-status
    ```
 
-3. **Inspect Gateway API CRDs:** Missing CRDs or a fully healthy set are both OK; the Traefik doctor
-   only fails on problematic ownership and prints remediation steps.
+3. **Verify Traefik ingress (already installed by k3s):**
 
    ```bash
+   just traefik-status
    just traefik-crd-doctor
    ```
 
-4. **Install and verify Traefik ingress:**
-
-   ```bash
-   just traefik-install
-   just traefik-status
-   ```
-
-5. **Deploy workloads:** Continue with the workload sections in this guide (for example,
+4. **Deploy workloads:** Continue with the workload sections in this guide (for example,
    [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
    ingress is healthy.
 
-## Install Helm (prerequisite for Traefik and Helm workloads)
+## Install Helm (prerequisite for Helm workloads)
 
 Helm simplifies Kubernetes application deployment by packaging manifests, providing templating, and
 managing releases. Rather than applying dozens of YAML files manually, Helm charts let you install
@@ -152,48 +145,45 @@ Common errors:
 - **`...:3.0.0: not found`:** The requested chart version is absent—check the version documented in
   the dspace repo (for example, `docs/apps/dspace.version`) and pull that version instead.
 
-## Install and verify Traefik ingress
+## Verify Traefik ingress (already installed by k3s)
 
-> This section expands step 4 of the golden path above (installing and validating Traefik).
+> This section expands step 3 of the golden path above (verification and diagnostics).
 
 Sugarkube clusters expect a Kubernetes ingress controller to route HTTP(S) traffic into your
 services. The docs and examples in this repo assume [Traefik](https://traefik.io/) as the default
-ingress controller. Other controllers can work, but this guide only documents the Traefik path.
+ingress controller. k3s installs Traefik by default via `HelmChart` addons in `kube-system`, so the
+normal path is to verify it rather than install it manually.
 
-Run the helper recipe as your normal user (e.g., `pi`), not with `sudo`:
-
-```bash
-just traefik-install
-```
-
-What this does:
-
-- Repairs `$HOME/.kube/config` from `/etc/rancher/k3s/k3s.yaml` when needed so Helm and kubectl use a
-  user-owned kubeconfig.
-- Runs a Gateway API CRD ownership check (via `traefik-crd-doctor`) and fails fast if existing CRDs
-  are owned by something other than Traefik in `kube-system`.
-- Installs or upgrades the Traefik Helm release (`traefik/traefik`) in `kube-system` with
-  `helm upgrade --install ... --wait --timeout=5m`, explicitly enabling Gateway API CRDs.
-- Verifies the `traefik` Service exists and prints quick troubleshooting hints if it does not.
-
-Verify the install with any of the following:
+Verify Traefik is running and its Gateway API CRDs are healthy:
 
 ```bash
 kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik
 kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 just traefik-status
+just traefik-crd-doctor
 ```
 
-Re-run `just traefik-install` any time; it is idempotent and safe to use after fixing kubeconfig,
-taints, or CRD ownership. If Helm is missing, the recipe exits with a pointer to
-`docs/raspi_cluster_operations_manual.md#1-install-helm-manually`.
+If Traefik pods or services are missing, inspect the k3s addon objects and installer pods:
+
+```bash
+kubectl -n kube-system get helmchart,helmchartconfig | grep -i traefik || true
+kubectl -n kube-system get pods -o wide | egrep 'traefik|helm-install-traefik' || true
+```
+
+### Advanced override: manual Traefik install
+
+`just traefik-install` remains available as an escape hatch for advanced users who intentionally
+manage Traefik outside the k3s addon. It installs or upgrades the Traefik Helm release in
+`kube-system` and runs the CRD doctor preflight first. Only use it if you have explicitly disabled
+the k3s Traefik addon or need to override it for troubleshooting.
 
 **Gateway API CRDs and Helm ownership**
 
-Traefik's Gateway API CRDs must be managed by Helm. The recipe uses the CRD doctor to confirm that
+Traefik's Gateway API CRDs must be managed by Helm. The CRD doctor confirms that
 any existing CRDs are owned by a Traefik release in `kube-system`. Missing CRDs are acceptable—the
 main `traefik/traefik` chart will create them—and already healthy, Traefik-owned CRDs are also fine.
-If `just traefik-install` reports ownership problems, run the doctor before retrying the install.
+If the doctor reports ownership problems, follow its remediation steps before retrying any manual
+install.
 
 ### Traefik Gateway API CRD doctor (`just traefik-crd-doctor`)
 
@@ -213,9 +203,9 @@ For non-default namespaces, pass the `namespace` argument:
 just traefik-crd-doctor namespace=my-other-namespace
 ```
 
-If the doctor reports no problematic CRDs with either all CRDs **missing** or all CRDs **healthy**, you
-are good to proceed—Traefik will create missing CRDs during install or already owns the healthy set.
-Only the problematic states require action; follow the recommended commands the doctor prints.
+If the doctor reports no problematic CRDs with either all CRDs **missing** or all CRDs **healthy**,
+you are good to proceed—the k3s Traefik addon will create missing CRDs or already owns the healthy
+set. Only the problematic states require action; follow the recommended commands the doctor prints.
 
 Example outputs:
 
@@ -231,8 +221,10 @@ Example outputs:
   ```text
   ✅ httproutes.gateway.networking.k8s.io: missing (will be created by the Traefik chart if enabled)
 
-  No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can create them when installed.
-  Next step: run 'just traefik-install' to install Traefik and let it create the CRDs.
+  No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can
+  create them when installed.
+  Next step: run 'just traefik-status' to verify Traefik is running (k3s installs it by default).
+  Advanced override: use 'just traefik-install' only if you intentionally manage Traefik via Helm.
   ```
 
 - Unmanaged CRDs (no Helm ownership metadata; Traefik will adopt them):
@@ -240,7 +232,8 @@ Example outputs:
   ```text
   ✅ gateways.gateway.networking.k8s.io: present without Helm ownership metadata (will adopt into Traefik release)
 
-  No problematic Gateway API CRDs detected. Existing CRDs are present without Helm ownership metadata; Traefik can adopt them into its release.
+  No problematic Gateway API CRDs detected. Existing CRDs are present without Helm ownership
+  metadata; Traefik can adopt them into its release.
   Traefik will add Helm labels/annotations and take ownership of these CRDs during install.
   ```
 
@@ -287,7 +280,8 @@ Suggested remediation commands:
   Replace the CRD names with the full list if you prefer patching over deletion.
 
 After deleting or patching the CRDs, re-run `just traefik-crd-doctor` until no problematic CRDs
-remain, then re-run `just traefik-install` to complete the installation.
+remain, then re-verify with `just traefik-status`. If you intentionally manage Traefik via Helm,
+run `just traefik-install` as an advanced override.
 
 > ⚠️ **Dangerous foot-gun: `apply` mode**
 >
