@@ -99,6 +99,12 @@ def iter_netns_setup():
             reason = result.stderr.strip() or "network namespace setup unavailable"
             if stub_mode == "auto" and _is_permission_marker(result):
                 raise _NetnsSetupError(reason)
+            # TODO: Capture non-permission netns setup failures in CI so we can
+            #   avoid silently skipping and instead stabilize the underlying tools.
+            # Root cause: The runner may lack namespace tooling or return transient
+            #   iproute2 errors that are not permission-related.
+            # Estimated fix: Audit CI host networking prerequisites and ensure
+            #   iproute2 returns actionable errors before skipping.
             pytest.skip(f"{context}: {reason}")
 
     def _cleanup() -> None:
@@ -174,6 +180,12 @@ def iter_netns_setup():
             #   gate the test behind an environment flag when namespaces are unsupported.
             if stub_mode == "auto":
                 raise _NetnsSetupError(f"Network namespace connectivity unavailable: {reason}")
+            # TODO: Capture namespace connectivity failures in CI to determine which
+            #   hosts block veth traffic and require explicit skip conditions.
+            # Root cause: Certain runners prevent TCP connectivity across veth pairs
+            #   even though namespaces are created successfully.
+            # Estimated fix: Add a runner capability check or fallback to stubbed
+            #   netns mode when connectivity probes consistently fail.
             pytest.skip(f"Network namespace connectivity unavailable: {reason}")
 
         yield {
