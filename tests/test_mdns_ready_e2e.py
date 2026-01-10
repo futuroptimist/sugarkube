@@ -20,7 +20,6 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import (
-    _is_permission_error,
     _run_with_sudo_fallback,
     ensure_root_privileges,
     require_tools,
@@ -81,11 +80,24 @@ def iter_netns_setup():
     class _NetnsSetupError(RuntimeError):
         """Raised when namespace setup fails but auto stub fallback is permitted."""
 
+    def _is_permission_marker(result: subprocess.CompletedProcess[str]) -> bool:
+        message = (result.stderr or "").lower()
+        permission_markers = (
+            "permission denied",
+            "operation not permitted",
+            "must be run as root",
+            "must be root",
+            "are you root",
+            "requires root",
+            "root privileges required",
+        )
+        return any(marker in message for marker in permission_markers)
+
     def _run_or_skip(cmd: list[str], context: str) -> None:
         result = _run_with_sudo_fallback(cmd)
         if result.returncode != 0:
             reason = result.stderr.strip() or "network namespace setup unavailable"
-            if stub_mode == "auto" and _is_permission_error(result):
+            if stub_mode == "auto" and _is_permission_marker(result):
                 raise _NetnsSetupError(reason)
             pytest.skip(f"{context}: {reason}")
 
@@ -160,6 +172,8 @@ def iter_netns_setup():
             #   preventing the TCP probe from confirming readiness before the test proceeds.
             # Estimated fix: Investigate runner kernel/network settings to allow veth namespaces or
             #   gate the test behind an environment flag when namespaces are unsupported.
+            if stub_mode == "auto":
+                raise _NetnsSetupError(f"Network namespace connectivity unavailable: {reason}")
             pytest.skip(f"Network namespace connectivity unavailable: {reason}")
 
         yield {

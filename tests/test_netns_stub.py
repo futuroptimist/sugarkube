@@ -85,3 +85,64 @@ def test_netns_stub_auto_mode_falls_back_on_permission_errors(
 
     with pytest.raises(StopIteration):
         next(fixture)
+
+
+def test_netns_stub_auto_mode_skips_on_non_permission_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto stub mode should still skip on non-permission setup failures."""
+
+    monkeypatch.setenv("SUGARKUBE_ALLOW_NETNS_STUBS", "auto")
+
+    def no_op_tools(tools: list[str]) -> None:
+        return
+
+    def no_op_privileges() -> None:
+        return
+
+    def file_exists(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 1, "", "File exists")
+
+    monkeypatch.setattr(mdns_ready, "require_tools", no_op_tools)
+    monkeypatch.setattr(mdns_ready, "ensure_root_privileges", no_op_privileges)
+    monkeypatch.setattr(mdns_ready, "_run_with_sudo_fallback", file_exists)
+
+    fixture = mdns_ready.iter_netns_setup()
+    with pytest.raises(pytest.skip.Exception):
+        next(fixture)
+
+
+def test_netns_stub_auto_mode_falls_back_on_probe_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto stub mode should fall back when namespace connectivity probes fail."""
+
+    monkeypatch.setenv("SUGARKUBE_ALLOW_NETNS_STUBS", "auto")
+
+    def no_op_tools(tools: list[str]) -> None:
+        return
+
+    def no_op_privileges() -> None:
+        return
+
+    def run_ok(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    class _ProbeFailure:
+        reason = "probe failed"
+
+        def __bool__(self) -> bool:
+            return False
+
+    monkeypatch.setattr(mdns_ready, "require_tools", no_op_tools)
+    monkeypatch.setattr(mdns_ready, "ensure_root_privileges", no_op_privileges)
+    monkeypatch.setattr(mdns_ready, "_run_with_sudo_fallback", run_ok)
+    monkeypatch.setattr(mdns_ready, "probe_namespace_connectivity", lambda *args, **kwargs: _ProbeFailure())
+
+    fixture = mdns_ready.iter_netns_setup()
+    stubbed = next(fixture)
+
+    assert stubbed["stubbed"] is True
+
+    with pytest.raises(StopIteration):
+        next(fixture)
