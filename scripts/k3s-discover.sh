@@ -5325,7 +5325,7 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
     printf '   # or: sudo kubectl get nodes\n'
     printf '\n'
     printf '2. Export kubeconfig for local access:\n'
-    printf '   just kubeconfig env=%s\n' "${ENVIRONMENT}"
+    printf '   just kubeconfig-env env=%s\n' "${ENVIRONMENT}"
     printf '\n'
     printf '3. To add agent nodes, copy the token:\n'
     printf '   sudo cat /var/lib/rancher/k3s/server/node-token\n'

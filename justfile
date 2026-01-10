@@ -391,8 +391,21 @@ wlan-up:
 mdns-reset:
     sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
+# Copy k3s kubeconfig to ~/.kube/config for the current user and persist KUBECONFIG.
+kubeconfig:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    export SUGARKUBE_KUBECONFIG_USER="$(id -un)"
+    export SUGARKUBE_KUBECONFIG_HOME="${HOME}"
+    sudo -E bash "{{ invocation_directory() }}/scripts/ensure_user_kubeconfig.sh"
+    printf 'Kubeconfig ready at %s\n' "${HOME}/.kube/config"
+    printf 'Reminder: open a new shell or run "source ~/.bashrc".\n'
+
+kubeconfig-user:
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
+
 # Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
-kubeconfig env='dev':
+kubeconfig-env env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
     env_input="{{ env }}"
@@ -411,13 +424,13 @@ kubeconfig env='dev':
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
 
 kubeconfig-dev:
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=dev
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
 
 kubeconfig-staging:
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=staging
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=staging
 
 kubeconfig-prod:
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=prod
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=prod
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
