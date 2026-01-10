@@ -305,7 +305,7 @@ def test_assert_tag_exists_fails_without_fallback_fixture(monkeypatch):
             "v5",
             retries=1,
             delay_seconds=0.0,
-            sleep_fn=lambda *_: None,
+            sleep_fn=lambda _: None,
         )
 
 
