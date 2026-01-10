@@ -135,7 +135,9 @@ def _assert_tag_exists_upstream(
     ``tests/fixtures/ls_remote_tags.json`` is loaded automatically so the suite remains
     offline. Set ``SUGARKUBE_LS_REMOTE_FIXTURES=0`` to force live checks in debugging
     scenarios; if those checks fail due to transient issues, the default fixture is used
-    as a fallback to avoid skips.
+    as a fallback to avoid skips. If fixtures are opt-out and no default fixture is
+    available, this helper raises an assertion instead of skipping (coverage:
+    ``test_assert_tag_exists_fails_without_fallback_fixture``).
     """
 
     fixture_env = os.environ.get("SUGARKUBE_LS_REMOTE_FIXTURES", "").strip()
@@ -162,12 +164,11 @@ def _assert_tag_exists_upstream(
             _assert_fixture_ref_exists(repo, ref, fallback_fixture)
             return
 
-        # TODO: Avoid skipping when both live git checks and fallback fixtures are unavailable.
-        # Root cause: SUGARKUBE_LS_REMOTE_FIXTURES=0 disables fixtures and the default
-        #   ls-remote fixture is missing, leaving no offline reference after retries or timeouts.
-        # Estimated fix: Bundle the default fixture with the test assets or surface a stricter
-        #   assertion so missing fixtures fail fast instead of skipping.
-        pytest.skip(reason)
+        raise AssertionError(
+            "git ls-remote failed after fixture opt-out and no fallback fixture is "
+            f"available for {repo} tag {ref}. Restore tests/fixtures/ls_remote_tags.json "
+            "or set SUGARKUBE_LS_REMOTE_FIXTURES to a valid fixture."
+        ) from None
 
     for attempt in range(1, retries + 1):
         try:
@@ -275,6 +276,37 @@ def test_assert_tag_exists_falls_back_after_retries(monkeypatch):
 
     assert fallback_calls == [expected_fallback]
     assert len(attempts) == 2
+
+
+def test_assert_tag_exists_fails_without_fallback_fixture(monkeypatch):
+    monkeypatch.setenv("SUGARKUBE_LS_REMOTE_FIXTURES", "0")
+    default_fixture = Path(__file__).parent / "fixtures" / "ls_remote_tags.json"
+    original_exists = Path.exists
+
+    def fake_exists(self: Path) -> bool:
+        if self == default_fixture:
+            return False
+        return original_exists(self)
+
+    def fake_run(*_, **__):
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=["git", "ls-remote"], stderr="connection reset"
+        )
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(
+        AssertionError,
+        match="no fallback fixture is available",
+    ):
+        _assert_tag_exists_upstream(
+            "actions/checkout",
+            "v5",
+            retries=1,
+            delay_seconds=0.0,
+            sleep_fn=lambda _: None,
+        )
 
 
 def test_assert_tag_exists_falls_back_after_timeouts(monkeypatch):
