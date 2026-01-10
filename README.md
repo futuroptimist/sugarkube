@@ -246,10 +246,13 @@ highlights the capability gap without hiding it. Regression coverage:
 
 For mDNS end-to-end coverage that depends on network namespaces, set
 `SUGARKUBE_ALLOW_NETNS_STUBS=1` when your environment lacks `CAP_NET_ADMIN` or
-non-interactive `sudo`. The stub yields deterministic namespace metadata and
-lets the suite skip only the multicast-dependent assertions instead of failing
-when namespace setup is unavailable. Regression coverage:
-`tests/test_netns_stub.py::test_netns_stub_flag_enables_stubbed_environment`.
+non-interactive `sudo`. Use `SUGARKUBE_ALLOW_NETNS_STUBS=auto` to attempt real
+namespace setup but fall back to stubs on permission errors. The stub yields
+deterministic namespace metadata and lets the suite skip only the
+multicast-dependent assertions instead of failing when namespace setup is
+unavailable. Regression coverage:
+`tests/test_netns_stub.py::test_netns_stub_flag_enables_stubbed_environment` and
+`tests/test_netns_stub.py::test_netns_stub_auto_mode_falls_back_on_permission_errors`.
 
 [hardware-boot-badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/futuroptimist/sugarkube/main/docs/status/hardware-boot.json
 [pi-smoke-test-doc]: docs/pi_smoke_test.md

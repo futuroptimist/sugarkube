@@ -19,10 +19,18 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _run_with_sudo_fallback, ensure_root_privileges, require_tools
+from tests.conftest import (
+    _run_with_sudo_fallback,
+    ensure_root_privileges,
+    require_tools,
+)
 from tests.helpers.netns_probe import probe_namespace_connectivity
 from tests.helpers.avahi_stub import ensure_avahi_stub
-from tests.helpers.netns_stub import should_stub_netns_setup, stub_netns_environment
+from tests.helpers.netns_stub import (
+    netns_stub_mode,
+    should_stub_netns_setup,
+    stub_netns_environment,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -42,6 +50,8 @@ def avahi_stub_env(monkeypatch, tmp_path_factory) -> None:
 def iter_netns_setup():
     """Yield a fully configured namespace topology or stubbed metadata."""
 
+    stub_mode = netns_stub_mode()
+
     if should_stub_netns_setup():
         yield stub_netns_environment()
         return
@@ -52,7 +62,13 @@ def iter_netns_setup():
         "ip",
         "unshare",
     ])
-    ensure_root_privileges()
+    try:
+        ensure_root_privileges()
+    except pytest.skip.Exception:
+        if stub_mode == "auto":
+            yield stub_netns_environment()
+            return
+        raise
 
     ns1 = "mdns-test-ns1"
     ns2 = "mdns-test-ns2"
@@ -61,16 +77,40 @@ def iter_netns_setup():
 
     cleanup_commands = []
 
+    class _NetnsSetupError(RuntimeError):
+        """Raised when namespace setup fails but auto stub fallback is permitted."""
+
+    def _is_permission_marker(result: subprocess.CompletedProcess[str]) -> bool:
+        message = "\n".join(filter(None, [result.stderr, result.stdout])).lower()
+        permission_markers = (
+            "permission denied",
+            "operation not permitted",
+            "must be run as root",
+            "must be root",
+            "are you root",
+            "requires root",
+            "root privileges required",
+        )
+        return any(marker in message for marker in permission_markers)
+
     def _run_or_skip(cmd: list[str], context: str) -> None:
         result = _run_with_sudo_fallback(cmd)
         if result.returncode != 0:
             reason = result.stderr.strip() or "network namespace setup unavailable"
-            # TODO: Avoid skipping when privileged namespace setup fails unexpectedly.
-            # Root cause: Hosts without CAP_NET_ADMIN or sudo deny the ip/netns commands,
-            #   preventing the test from creating namespaces for multicast coverage.
-            # Estimated fix: Detect missing privileges earlier and fall back to stubbed
-            #   namespaces or skip the multicast portion before attempting setup.
+            if stub_mode == "auto" and _is_permission_marker(result):
+                raise _NetnsSetupError(reason)
+            # TODO: Capture non-permission netns setup failures in CI so we can
+            #   avoid silently skipping and instead stabilize the underlying tools.
+            # Root cause: The runner may lack namespace tooling or return transient
+            #   iproute2 errors that are not permission-related.
+            # Estimated fix: Audit CI host networking prerequisites and ensure
+            #   iproute2 returns actionable errors before skipping.
             pytest.skip(f"{context}: {reason}")
+
+    def _cleanup() -> None:
+        for cmd in reversed(cleanup_commands):
+            _run_with_sudo_fallback(cmd)
+        cleanup_commands.clear()
 
     try:
         # Create network namespaces
@@ -138,6 +178,14 @@ def iter_netns_setup():
             #   preventing the TCP probe from confirming readiness before the test proceeds.
             # Estimated fix: Investigate runner kernel/network settings to allow veth namespaces or
             #   gate the test behind an environment flag when namespaces are unsupported.
+            if stub_mode == "auto":
+                raise _NetnsSetupError(f"Network namespace connectivity unavailable: {reason}")
+            # TODO: Capture namespace connectivity failures in CI to determine which
+            #   hosts block veth traffic and require explicit skip conditions.
+            # Root cause: Certain runners prevent TCP connectivity across veth pairs
+            #   even though namespaces are created successfully.
+            # Estimated fix: Add a runner capability check or fallback to stubbed
+            #   netns mode when connectivity probes consistently fail.
             pytest.skip(f"Network namespace connectivity unavailable: {reason}")
 
         yield {
@@ -149,10 +197,13 @@ def iter_netns_setup():
             "ip2": "192.168.100.2",
         }
 
+    except _NetnsSetupError:
+        _cleanup()
+        yield stub_netns_environment()
+
     finally:
         # Clean up in reverse order
-        for cmd in reversed(cleanup_commands):
-            _run_with_sudo_fallback(cmd)
+        _cleanup()
 
 
 @pytest.fixture

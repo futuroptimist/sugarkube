@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TypedDict
+from typing import Mapping, TypedDict
 
 
 class NetnsStub(TypedDict, total=False):
@@ -16,14 +16,32 @@ class NetnsStub(TypedDict, total=False):
     stubbed: bool
 
 
-def should_stub_netns_setup() -> bool:
+def netns_stub_mode(env: Mapping[str, str] | None = None) -> str:
+    """Return the configured stub mode for network namespaces.
+
+    Supported values:
+    - "force": always use stubbed namespaces
+    - "auto": attempt real namespaces, fall back to stubs on permission errors
+    - "off": require real namespaces
+    """
+
+    env = os.environ if env is None else env
+    value = env.get("SUGARKUBE_ALLOW_NETNS_STUBS", "").strip().lower()
+    if value in {"1", "true", "yes", "force"}:
+        return "force"
+    if value == "auto":
+        return "auto"
+    return "off"
+
+
+def should_stub_netns_setup(env: Mapping[str, str] | None = None) -> bool:
     """Return True when callers request stubbed network namespaces.
 
     Setting ``SUGARKUBE_ALLOW_NETNS_STUBS=1`` opts into a simulated namespace layout
     so tests can exercise higher-level logic even when CAP_NET_ADMIN is unavailable.
     """
 
-    return os.environ.get("SUGARKUBE_ALLOW_NETNS_STUBS") == "1"
+    return netns_stub_mode(env) == "force"
 
 
 def stub_netns_environment() -> NetnsStub:
