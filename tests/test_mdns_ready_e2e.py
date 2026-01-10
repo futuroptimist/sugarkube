@@ -19,10 +19,19 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _run_with_sudo_fallback, ensure_root_privileges, require_tools
+from tests.conftest import (
+    _is_permission_error,
+    _run_with_sudo_fallback,
+    ensure_root_privileges,
+    require_tools,
+)
 from tests.helpers.netns_probe import probe_namespace_connectivity
 from tests.helpers.avahi_stub import ensure_avahi_stub
-from tests.helpers.netns_stub import should_stub_netns_setup, stub_netns_environment
+from tests.helpers.netns_stub import (
+    netns_stub_mode,
+    should_stub_netns_setup,
+    stub_netns_environment,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -42,6 +51,8 @@ def avahi_stub_env(monkeypatch, tmp_path_factory) -> None:
 def iter_netns_setup():
     """Yield a fully configured namespace topology or stubbed metadata."""
 
+    stub_mode = netns_stub_mode()
+
     if should_stub_netns_setup():
         yield stub_netns_environment()
         return
@@ -52,7 +63,13 @@ def iter_netns_setup():
         "ip",
         "unshare",
     ])
-    ensure_root_privileges()
+    try:
+        ensure_root_privileges()
+    except pytest.skip.Exception:
+        if stub_mode == "auto":
+            yield stub_netns_environment()
+            return
+        raise
 
     ns1 = "mdns-test-ns1"
     ns2 = "mdns-test-ns2"
@@ -61,16 +78,21 @@ def iter_netns_setup():
 
     cleanup_commands = []
 
+    class _NetnsSetupError(RuntimeError):
+        """Raised when namespace setup fails but auto stub fallback is permitted."""
+
     def _run_or_skip(cmd: list[str], context: str) -> None:
         result = _run_with_sudo_fallback(cmd)
         if result.returncode != 0:
             reason = result.stderr.strip() or "network namespace setup unavailable"
-            # TODO: Avoid skipping when privileged namespace setup fails unexpectedly.
-            # Root cause: Hosts without CAP_NET_ADMIN or sudo deny the ip/netns commands,
-            #   preventing the test from creating namespaces for multicast coverage.
-            # Estimated fix: Detect missing privileges earlier and fall back to stubbed
-            #   namespaces or skip the multicast portion before attempting setup.
+            if stub_mode == "auto" and _is_permission_error(result):
+                raise _NetnsSetupError(reason)
             pytest.skip(f"{context}: {reason}")
+
+    def _cleanup() -> None:
+        for cmd in reversed(cleanup_commands):
+            _run_with_sudo_fallback(cmd)
+        cleanup_commands.clear()
 
     try:
         # Create network namespaces
@@ -149,10 +171,13 @@ def iter_netns_setup():
             "ip2": "192.168.100.2",
         }
 
+    except _NetnsSetupError:
+        _cleanup()
+        yield stub_netns_environment()
+
     finally:
         # Clean up in reverse order
-        for cmd in reversed(cleanup_commands):
-            _run_with_sudo_fallback(cmd)
+        _cleanup()
 
 
 @pytest.fixture
