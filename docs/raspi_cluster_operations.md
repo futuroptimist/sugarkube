@@ -61,7 +61,7 @@ Follow this sequence after imaging and booting the Pis:
    just traefik-crd-doctor
    ```
 
-5. **Deploy workloads:** Continue with the workload sections in this guide (for example,
+4. **Deploy workloads:** Continue with the workload sections in this guide (for example,
    [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
    ingress is healthy.
 

@@ -216,7 +216,7 @@ def test_doctor_reports_missing_crds(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0
     assert "missing (will be created by the Traefik chart if enabled)" in result.stdout
     assert "All expected CRDs are missing" in result.stdout
-    assert "Next step: run 'just traefik-install'" in result.stdout
+    assert "Next step: run 'just traefik-status'" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
     assert json.loads(state_path.read_text()) == {"crds": {}}
@@ -242,7 +242,7 @@ def test_doctor_reports_healthy_traefik_owned_crds(tmp_path: pathlib.Path) -> No
     assert result.returncode == 0
     assert "owned by release traefik" in result.stdout
     assert "Existing CRDs are already owned by Traefik Helm releases" in result.stdout
-    assert "Next step: you can safely run 'just traefik-install'" in result.stdout
+    assert "Next step: run 'just traefik-status'" in result.stdout
     assert "Recommended actions" not in result.stdout
     assert not log_path.exists() or log_path.read_text() == ""
 
