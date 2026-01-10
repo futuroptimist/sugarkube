@@ -87,6 +87,39 @@ def test_netns_stub_auto_mode_falls_back_on_permission_errors(
         next(fixture)
 
 
+def test_netns_stub_auto_mode_falls_back_on_permission_errors_from_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto stub mode should detect permission markers emitted on stdout."""
+
+    monkeypatch.setenv("SUGARKUBE_ALLOW_NETNS_STUBS", "auto")
+
+    def no_op_tools(tools: list[str]) -> None:
+        return
+
+    def no_op_privileges() -> None:
+        return
+
+    calls: list[list[str]] = []
+
+    def permission_denied(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "Operation not permitted", "")
+
+    monkeypatch.setattr(mdns_ready, "require_tools", no_op_tools)
+    monkeypatch.setattr(mdns_ready, "ensure_root_privileges", no_op_privileges)
+    monkeypatch.setattr(mdns_ready, "_run_with_sudo_fallback", permission_denied)
+
+    fixture = mdns_ready.iter_netns_setup()
+    stubbed = next(fixture)
+
+    assert stubbed["stubbed"] is True
+    assert calls
+
+    with pytest.raises(StopIteration):
+        next(fixture)
+
+
 def test_netns_stub_auto_mode_skips_on_non_permission_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

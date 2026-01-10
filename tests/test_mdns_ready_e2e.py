@@ -81,7 +81,7 @@ def iter_netns_setup():
         """Raised when namespace setup fails but auto stub fallback is permitted."""
 
     def _is_permission_marker(result: subprocess.CompletedProcess[str]) -> bool:
-        message = (result.stderr or "").lower()
+        message = "\n".join(filter(None, [result.stderr, result.stdout])).lower()
         permission_markers = (
             "permission denied",
             "operation not permitted",
