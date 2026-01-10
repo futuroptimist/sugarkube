@@ -170,7 +170,11 @@ def test_netns_stub_auto_mode_falls_back_on_probe_failure(
     monkeypatch.setattr(mdns_ready, "require_tools", no_op_tools)
     monkeypatch.setattr(mdns_ready, "ensure_root_privileges", no_op_privileges)
     monkeypatch.setattr(mdns_ready, "_run_with_sudo_fallback", run_ok)
-    monkeypatch.setattr(mdns_ready, "probe_namespace_connectivity", lambda *args, **kwargs: _ProbeFailure())
+    monkeypatch.setattr(
+        mdns_ready,
+        "probe_namespace_connectivity",
+        lambda *args, **kwargs: _ProbeFailure(),
+    )
 
     fixture = mdns_ready.iter_netns_setup()
     stubbed = next(fixture)
