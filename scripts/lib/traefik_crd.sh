@@ -170,7 +170,7 @@ traefik_crd::print_report() {
   if [ "${has_problems}" = true ]; then
     echo "Detected problematic Gateway API CRDs that block clean Traefik ownership. See the recommended actions below."
   elif [ "${has_present}" = false ]; then
-    echo "No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can create them when installed."
+    echo "No problematic Gateway API CRDs detected. All expected CRDs are missing; the Traefik chart can create them when needed."
   elif [ "${has_unmanaged}" = true ]; then
     echo "No problematic Gateway API CRDs detected. Existing CRDs are present without Helm ownership metadata; Traefik can adopt them into its release."
     echo "Traefik will add Helm labels/annotations and take ownership of these CRDs during install."
@@ -183,9 +183,11 @@ traefik_crd::print_report() {
   fi
 
   if [ "${has_problems}" = false ] && [ "${has_present}" = false ]; then
-    echo "Next step: run 'just traefik-install' to install Traefik and let it create the CRDs."
+    echo "Next step: run 'just traefik-status' to confirm Traefik is running (k3s installs it by default)."
+    echo "If you intentionally manage Traefik yourself, run 'just traefik-install' as an advanced override."
   elif [ "${has_problems}" = false ]; then
-    echo "Next step: you can safely run 'just traefik-install' (or re-run it) if you want to upgrade Traefik."
+    echo "Next step: run 'just traefik-status' to confirm Traefik is running."
+    echo "If you intentionally manage Traefik yourself, you can run 'just traefik-install' as an override."
   fi
 }
 

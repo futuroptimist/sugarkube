@@ -19,12 +19,9 @@ clusters.
 
 ## What the quick start automates
 
-- **Ingress install:** `just traefik-install` adds the Traefik Helm repo,
-  installs the chart into `kube-system`, waits for readiness, and prints the
-  service. The manual equivalent runs the `helm repo add` and
-  `helm upgrade --install` commands shown below.
-- **Ingress checks:** `just traefik-status` lists the Traefik service and pods.
-  Manually, run `sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik`.
+- **Ingress verification:** k3s installs Traefik by default. `just traefik-status`
+  lists the Traefik service and pods, and `just traefik-crd-doctor` checks Gateway
+  API CRD ownership. Manually, run `sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik`.
 - **Cloudflare Tunnel:** Run `just cf-tunnel-install env=dev` with your
   Cloudflare tunnel token to create the namespace, store the secret, and install
   the Helm chart. The manual path mirrors those steps in §3.
@@ -72,22 +69,22 @@ If you prefer to use the high-level Just recipes instead of running these comman
 “Install Helm” section in `docs/raspi_cluster_operations.md` and run `just helm-install` followed by
 `just helm-status`.
 
-## 2. Install and verify Traefik ingress manually
+## 2. Verify and diagnose Traefik ingress manually
 
-The manual commands here are the low-level equivalent of the `just helm-install` / `just traefik-install` sequence described in the golden path.
+The manual commands here are the low-level equivalent of the `just traefik-status` and
+`just traefik-crd-doctor` sequence described in the golden path.
 
 Note that `just traefik-crd-doctor` remains the primary way to validate CRDs in both flows.
 
-Most users should stick with the `just traefik-install` command in
-[raspi_cluster_operations.md](raspi_cluster_operations.md). It creates or repairs
-`~/.kube/config` from `/etc/rancher/k3s/k3s.yaml`, exports `KUBECONFIG=$HOME/.kube/config` for its
-commands, and installs or upgrades the Traefik Helm release automatically. Use the manual path here
-when debugging or applying custom Traefik settings. The automated recipe also performs a Gateway
-API CRD ownership preflight and will stop with a descriptive error if existing CRDs are missing the
-Helm metadata that Traefik expects; the commands below are the underlying delete/patch options
-you can run when that happens. Run `just traefik-crd-doctor` in dry-run mode before or after these
-steps: "all missing" CRDs or "all healthy" CRDs are good outcomes, and only conflicting ownership
-states need remediation.
+Most users should stick with the verification flow in
+[raspi_cluster_operations.md](raspi_cluster_operations.md). Traefik is installed by k3s via addon
+HelmChart objects, so only reach for `just traefik-install` if you intentionally want to manage
+Traefik yourself. Use the manual path here when debugging or applying custom Traefik settings. The
+automated CRD doctor performs a Gateway API CRD ownership preflight and will stop with a
+descriptive error if existing CRDs are missing the Helm metadata that Traefik expects; the commands
+below are the underlying delete/patch options you can run when that happens. Run
+`just traefik-crd-doctor` in dry-run mode before or after these steps: "all missing" CRDs or "all
+healthy" CRDs are good outcomes, and only conflicting ownership states need remediation.
 
 To mirror the automated kubeconfig behavior manually before running kubectl:
 
@@ -108,10 +105,29 @@ sudo kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik
 
 - If the command returns a `traefik` service (ClusterIP or LoadBalancer), keep
   going.
-- If it prints `No resources found in kube-system namespace.`, install Traefik
-  before deploying HTTP applications.
+- If it prints `No resources found in kube-system namespace.`, inspect the k3s
+  addon HelmChart objects and Helm install jobs:
 
-Install Traefik with the official Helm chart:
+  ```bash
+  sudo kubectl -n kube-system get helmchart,helmchartconfig | grep -i traefik || true
+  sudo kubectl -n kube-system get pods -o wide | egrep 'traefik|helm-install-traefik' || true
+  ```
+
+Run the CRD doctor to validate ownership:
+
+```bash
+just traefik-crd-doctor
+```
+
+Re-run the service check and note the ClusterIP or LoadBalancer address:
+
+```bash
+sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik
+```
+
+### Advanced override: install Traefik with Helm manually
+
+If you intend to manage Traefik yourself (non-default for sugarkube), install the official chart:
 
 ```bash
 helm repo add traefik https://traefik.github.io/charts
@@ -127,16 +143,9 @@ helm upgrade --install traefik traefik/traefik \
   --wait
 ```
 
-These values enable Traefik's Kubernetes Gateway controller and associated CRDs so
-that the main `traefik` release owns them. Existing clusters using a legacy
-`traefik-crd` release (from k3s) are still accepted by the CRD doctor; new installs
-will use the main `traefik` release as the CRD owner.
-
-Re-run the service check and note the ClusterIP or LoadBalancer address:
-
-```bash
-sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik
-```
+These values enable Traefik's Kubernetes Gateway controller and associated CRDs so that the main
+`traefik` release owns them. Existing clusters using a legacy `traefik-crd` release (from k3s) are
+still accepted by the CRD doctor; new installs will use the main `traefik` release as the CRD owner.
 
 ## 3. Manual cluster, Helm, and Traefik status checks
 
