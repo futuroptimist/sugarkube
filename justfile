@@ -391,33 +391,31 @@ wlan-up:
 mdns-reset:
     sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
-# Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
-kubeconfig env='dev':
+# Configure kubectl for the current user using the k3s kubeconfig.
+kubeconfig:
     #!/usr/bin/env bash
     set -euo pipefail
-    env_input="{{ env }}"
-    env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
-        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-        env_name="staging"
-    fi
-    user="${USER:-$(id -un)}"
-    mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
-    chmod 700 ~/.kube
-    chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name#env=}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+
+    SUGARKUBE_KUBECONFIG_USER="$(id -un)"
+    SUGARKUBE_KUBECONFIG_HOME="${HOME}"
+    export SUGARKUBE_KUBECONFIG_USER SUGARKUBE_KUBECONFIG_HOME
+
+    sudo --preserve-env=SUGARKUBE_KUBECONFIG_USER,SUGARKUBE_KUBECONFIG_HOME \
+        bash scripts/ensure_user_kubeconfig.sh
+
+    printf 'Kubeconfig ensured at %s\n' "${HOME}/.kube/config"
+    printf 'Open a new shell or run: source ~/.bashrc\n'
+
+kubeconfig-user: kubeconfig
 
 kubeconfig-dev:
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=dev
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
 kubeconfig-staging:
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=staging
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
 kubeconfig-prod:
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig env=prod
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).

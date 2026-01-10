@@ -22,6 +22,20 @@ logs, preparing Helm, and rolling out real workloads like
 > `KUBECONFIG=$HOME/.kube/config` for the `pi` user (see the setup guide), you can omit `sudo`
 > from the `kubectl` examples in this guide when running them on the Pis.
 
+## Configure kubectl for the `pi` user
+
+Fresh k3s installs keep `/etc/rancher/k3s/k3s.yaml` root-owned. When the `pi` user
+cannot read it, `kubectl` falls back to localhost:8080 and fails. Run this once
+per node after k3s is installed:
+
+```bash
+just kubeconfig
+```
+
+This copies the admin kubeconfig into `~/.kube/config`, fixes permissions, and
+persists `KUBECONFIG=$HOME/.kube/config` in `~/.bashrc`. Open a new shell (or run
+`source ~/.bashrc`) before retrying `kubectl get nodes` without sudo.
+
 > **Prerequisite**
 > Complete the 3-server quick-start in [raspi_cluster_setup.md](./raspi_cluster_setup.md)
 > so every Pi already shares the same token and environment.
@@ -425,14 +439,14 @@ For continuous monitoring while waiting for the third HA node to report `Ready`:
 watch -n5 kubectl get nodes
 ```
 
-You can also set up kubectl access from your workstation by copying the kubeconfig:
+You can also set up kubectl access on each Pi by copying the k3s kubeconfig:
 
 ```bash
-just kubeconfig env=dev
+just kubeconfig
 ```
 
-**What you should see:** This creates `~/.kube/config` with the context renamed to
-`sugar-dev`, allowing you to run kubectl commands from your local machine.
+**What you should see:** This creates `~/.kube/config` and persists
+`KUBECONFIG=$HOME/.kube/config`, allowing you to run kubectl commands without sudo.
 
 Verify workloads across all namespaces:
 
@@ -458,7 +472,7 @@ Quick reference for the most common recipes when operating your cluster:
 | Recipe | What it does | When to use |
 |--------|--------------|-------------|
 | `just status` | Display cluster nodes with `kubectl get nodes -o wide` | Check overall cluster health and node readiness. Guards against running before k3s is installed. |
-| `just kubeconfig env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
+| `just kubeconfig` | Copy k3s kubeconfig to `~/.kube/config` and persist `KUBECONFIG` | Set up kubectl access on a node after k3s install or re-imaging. |
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
