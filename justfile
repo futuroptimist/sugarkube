@@ -729,7 +729,8 @@ traefik-crd-doctor apply='0' namespace='kube-system':
     echo
     echo "Planned destructive commands:"
     echo "  kubectl delete crd ${TRAEFIK_CRD_PROBLEMS[*]}"
-    echo "You can re-run 'just traefik-crd-doctor' after apply and then 'just traefik-install' to recreate the CRDs."
+    echo "Re-run 'just traefik-crd-doctor' after apply and verify Traefik with 'just traefik-status'."
+    echo "If you intentionally manage Traefik via Helm, you can then run 'just traefik-install' to recreate CRDs."
     echo
     read -r -p "Proceed with these changes? [y/N]: " reply
     case "${reply}" in
@@ -790,6 +791,12 @@ traefik-install namespace='kube-system' version='':
         echo "kubectl cannot reach the cluster (kubectl get nodes failed)." >&2
         echo "Check KUBECONFIG and k3s server status. Aborting Traefik install." >&2
         exit 1
+    fi
+
+    if kubectl -n kube-system get helmchart traefik >/dev/null 2>&1; then
+        echo "WARNING: k3s already manages Traefik via HelmChart in kube-system." >&2
+        echo "Docs recommend 'just traefik-status' and 'just traefik-crd-doctor' for verification." >&2
+        echo "Continuing with manual Helm override as requested..." >&2
     fi
 
     if ! command -v jq >/dev/null 2>&1; then

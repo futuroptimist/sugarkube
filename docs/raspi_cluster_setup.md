@@ -228,18 +228,28 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
 
-## Post-bootstrap: install ingress
+## Post-bootstrap: verify ingress
 
 After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes
-and `kubectl get nodes` shows all servers `Ready`, install the ingress controller before deploying
-any apps:
+and `kubectl get nodes` shows all servers `Ready`, verify ingress before deploying any apps.
+Traefik ships with k3s by default, and sugarkube relies on the built-in add-on rather than a
+separate install step.
 
 ```bash
-just traefik-install
+just cluster-status
+just traefik-status
+just traefik-crd-doctor
+```
+
+If Traefik pods or services are missing, check the k3s add-on resources in `kube-system`:
+
+```bash
+kubectl -n kube-system get helmchart,helmchartconfig | grep -i traefik || true
+kubectl -n kube-system get pods -o wide | egrep 'traefik|helm-install-traefik' || true
 ```
 
 Verification steps and troubleshooting live in
-[raspi_cluster_operations.md](./raspi_cluster_operations.md#install-and-verify-traefik-ingress).
+[raspi_cluster_operations.md](./raspi_cluster_operations.md#verify-traefik-ingress).
 
 ### Configure kubectl for the `pi` user on the cluster nodes
 
@@ -865,16 +875,13 @@ The following quick tips address the most common issues:
 ---
 
 Once all three default nodes for an environment report `Ready`, proceed to the deployment
-playbooks (`token.place`, `dspace`, etc.) as usual. The base bootstrap does **not** install an
-ingress controller.
+playbooks (`token.place`, `dspace`, etc.) as usual. Traefik ships with k3s by default, so use the
+[Traefik ingress][traefik-ingress] steps to verify ingress before rolling out HTTP applications.
 
-Install Traefik using the [Traefik ingress][traefik-ingress] steps before rolling out HTTP
-applications.
-
-[traefik-ingress]: ./raspi_cluster_operations.md#install-and-verify-traefik-ingress
+[traefik-ingress]: ./raspi_cluster_operations.md#verify-traefik-ingress
 
 > **Next step:** Move to [raspi_cluster_operations.md](./raspi_cluster_operations.md) to install Helm,
-> validate Traefik ingress, and continue with workloads and day-two routines.
+> verify Traefik ingress, and continue with workloads and day-two routines.
 
 > For a step-by-step deep dive, see
 > [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md).
