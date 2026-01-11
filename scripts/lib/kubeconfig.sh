@@ -111,8 +111,9 @@ kubeconfig::ensure_user_kubeconfig() {
 
     if ! grep -qE '^\s*export\s+KUBECONFIG=\$HOME/\.kube/config\s*$' \
       "${bashrc_path}" 2>/dev/null; then
-      kubeconfig::_with_privilege bash -c \
-        "printf '%s\\n' 'export KUBECONFIG=\\$HOME/.kube/config' >>'${bashrc_path}'"
+      kubeconfig::_with_privilege tee -a "${bashrc_path}" >/dev/null <<'EOF'
+export KUBECONFIG=$HOME/.kube/config
+EOF
       kubeconfig::_with_privilege chown "${uid}:${gid}" "${bashrc_path}"
     fi
   fi

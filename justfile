@@ -392,9 +392,14 @@ mdns-reset:
     sudo bash -lc $'set -e\nif [ -f /etc/avahi/avahi-daemon.conf.bak ]; then\n  cp /etc/avahi/avahi-daemon.conf.bak /etc/avahi/avahi-daemon.conf\n  systemctl restart avahi-daemon\nfi\nfor SVC in k3s.service k3s-agent.service; do\n  if systemctl list-unit-files | grep -q "^$SVC"; then\n    rm -rf "/etc/systemd/system/$SVC.d/10-node-ip.conf" || true\n  fi\ndone\nsystemctl daemon-reload\n'
 
 # Copy k3s kubeconfig to ~/.kube/config for the current user and persist KUBECONFIG.
-kubeconfig:
+kubeconfig env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+    env_input="{{ env }}"
+    if [ -n "${env_input}" ]; then
+        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_input}"
+        exit 0
+    fi
     export SUGARKUBE_KUBECONFIG_USER="$(id -un)"
     export SUGARKUBE_KUBECONFIG_HOME="${HOME}"
     sudo -E bash "{{ invocation_directory() }}/scripts/ensure_user_kubeconfig.sh"
