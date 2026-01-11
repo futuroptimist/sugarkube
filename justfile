@@ -397,8 +397,9 @@ kubeconfig env='':
     set -Eeuo pipefail
     env_input="{{ env }}"
     if [ -n "${env_input}" ]; then
-        printf 'WARNING: `just kubeconfig env=...` is deprecated; use `just kubeconfig-env env=%s`.\n' "${env_input}" >&2
-        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_input}"
+        env_name="${env_input#env=}"
+        printf 'WARNING: `just kubeconfig env=...` is deprecated; use `just kubeconfig-env env=%s`.\n' "${env_name}" >&2
+        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
         exit 0
     fi
     export SUGARKUBE_KUBECONFIG_USER="$(id -un)"
@@ -419,8 +420,8 @@ kubeconfig-env env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
     env_input="{{ env }}"
-    env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    env_name="${env_input#env=}"
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
