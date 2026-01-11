@@ -419,6 +419,20 @@ three nodes in the `Ready` state with their IP addresses, OS versions, and kubel
 versions. The `just status` recipe guards against running before k3s exists and
 prints a helpful reminder if the control plane is missing.
 
+### Fix kubectl config on a node
+
+On fresh k3s installs, the admin kubeconfig at `/etc/rancher/k3s/k3s.yaml` is
+root-owned. If you run `kubectl` as `pi`, it falls back to `localhost:8080` and
+fails. Fix that per node with:
+
+```bash
+just kubeconfig
+```
+
+**What you should see:** `~/.kube/config` created for the current user with the
+right permissions, plus a reminder to open a new shell (or `source ~/.bashrc`) so
+`KUBECONFIG` is set. You typically run this once per node after installing k3s.
+
 For continuous monitoring while waiting for the third HA node to report `Ready`:
 
 ```bash
@@ -428,7 +442,7 @@ watch -n5 kubectl get nodes
 You can also set up kubectl access from your workstation by copying the kubeconfig:
 
 ```bash
-just kubeconfig env=dev
+just kubeconfig-env env=dev
 ```
 
 **What you should see:** This creates `~/.kube/config` with the context renamed to
@@ -458,7 +472,7 @@ Quick reference for the most common recipes when operating your cluster:
 | Recipe | What it does | When to use |
 |--------|--------------|-------------|
 | `just status` | Display cluster nodes with `kubectl get nodes -o wide` | Check overall cluster health and node readiness. Guards against running before k3s is installed. |
-| `just kubeconfig env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
+| `just kubeconfig-env env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |

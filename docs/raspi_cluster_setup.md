@@ -274,7 +274,7 @@ kubectl get nodes
 ```
 
 After this, `kubectl` (and `k3s kubectl`) reads `~/.kube/config` for `pi` and no longer needs
-`sudo` on that node. On your workstation, `just kubeconfig env=dev` remains the recommended way
+`sudo` on that node. On your workstation, `just kubeconfig-env env=dev` remains the recommended way
 to download the kubeconfig from the cluster.
 
 ## How Discovery Works
@@ -580,7 +580,7 @@ The pattern is:
 
 ### After bootstrap
 
-Operational commands—`just status`, `just kubeconfig env=<env>`, log capture, and
+Operational commands—`just status`, `just kubeconfig-env env=<env>`, log capture, and
 the `just wipe` recovery loop—now live in
 [raspi_cluster_operations.md](./raspi_cluster_operations.md). Follow that guide
 for Helm installs, Flux bootstraps, and workstation access. For deeper SRE
