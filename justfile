@@ -397,12 +397,17 @@ kubeconfig env='':
     set -Eeuo pipefail
     env_input="{{ env }}"
     if [ -n "${env_input}" ]; then
+        printf 'WARNING: `just kubeconfig env=...` is deprecated; use `just kubeconfig-env env=%s`.\n' "${env_input}" >&2
         just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_input}"
         exit 0
     fi
     export SUGARKUBE_KUBECONFIG_USER="$(id -un)"
     export SUGARKUBE_KUBECONFIG_HOME="${HOME}"
     sudo -E bash "{{ invocation_directory() }}/scripts/ensure_user_kubeconfig.sh"
+    if [ ! -r "${HOME}/.kube/config" ]; then
+        printf 'k3s kubeconfig not found at /etc/rancher/k3s/k3s.yaml yet; install k3s first.\n' >&2
+        exit 0
+    fi
     printf 'Kubeconfig ready at %s\n' "${HOME}/.kube/config"
     printf 'Reminder: open a new shell or run "source ~/.bashrc".\n'
 
