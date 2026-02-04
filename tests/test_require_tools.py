@@ -52,6 +52,8 @@ def test_require_tools_installs_missing_dependencies(monkeypatch: pytest.MonkeyP
 def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip gracefully when dependencies remain unavailable after installation attempts."""
 
+    monkeypatch.setenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", "0")
+
     def always_missing(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
         if tool == "apt-get":
             return "/usr/bin/apt-get"
@@ -65,6 +67,46 @@ def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(pytest.skip.Exception):
         conftest.require_tools(["unshare", "ip"])
+
+
+def test_require_tools_shims_after_install_failure_with_preinstall_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When installers fail, require_tools should reuse the preinstall shim fallback."""
+
+    monkeypatch.setenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", "1")
+    monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
+
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", original_path)
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        return []
+
+    real_which = shutil.which
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        candidate = tmp_path / tool
+        if candidate.exists():
+            return str(candidate)
+        if tool in {"ip", "ping"}:
+            return None
+        return real_which(tool, path=path)
+
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    try:
+        conftest.require_tools(["ip", "ping"])
+    except pytest.skip.Exception as exc:  # pragma: no cover - explicit failure path
+        pytest.fail(f"require_tools unexpectedly skipped: {exc.msg}")
+    finally:
+        os.environ["PATH"] = original_path
+
+    for tool in ("ip", "ping"):
+        shimmed = tmp_path / tool
+        assert shimmed.exists()
+        assert os.access(shimmed, os.X_OK)
 
 
 def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
