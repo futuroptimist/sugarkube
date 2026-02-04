@@ -219,15 +219,18 @@ to be installed. Run it directly with:
 AVAHI_AVAILABLE=1 bats tests/integration/mdns_roundtrip.bats
 ```
 
-When you run the broader pytest suite in minimal containers, set
-`SUGARKUBE_ALLOW_TOOL_SHIMS=1` to let `tests.conftest.require_tools` create
-temporary stand-ins for missing binaries (for example, `ip` and `ping`). Provide
+When you run the broader pytest suite in minimal containers,
+`tests.conftest.require_tools` now falls back to shimmed binaries whenever
+package installs fail and `SUGARKUBE_PREINSTALL_TOOL_SHIMS` remains enabled (the
+default). Use `SUGARKUBE_ALLOW_TOOL_SHIMS=1` to skip installer attempts and go
+straight to shims for missing binaries (for example, `ip` and `ping`). Provide
 `SUGARKUBE_TOOL_SHIM_DIR=/tmp/shims` to control where the executables are
 written. Shims are happy-path stubs that always return exit code ``0`` and the
 shim directory is prepended to ``PATH`` while enabled, so prefer using them in
 isolated test environments (such as disposable containers or dedicated
 virtualenvs) instead of your daily shell. Regression coverage:
-`tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
+`tests/test_require_tools.py::test_require_tools_shims_when_preinstall_enabled`
+and `tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
 When `apt-get` is unavailable, the session-level pre-install hook now shims the
 core CLI dependencies ahead of time so integration tests see the expected tools
 without waiting for per-test skip handling. Set
