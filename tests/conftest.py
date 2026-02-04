@@ -263,7 +263,9 @@ def require_tools(tools: Iterable[str]) -> None:
 
     When ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` is set, missing binaries are shimmed
     before attempting installation to keep offline and sandboxed runs from
-    skipping unnecessarily. Coverage: ``tests/test_require_tools.py``.
+    skipping unnecessarily. Set ``SUGARKUBE_TOOLS_FALLBACK=xfail`` to record
+    missing tools as expected failures instead of skips. Coverage:
+    ``tests/test_require_tools.py``.
     """
 
     allow_shims = os.environ.get("SUGARKUBE_ALLOW_TOOL_SHIMS", "").strip() == "1"
@@ -286,16 +288,15 @@ def require_tools(tools: Iterable[str]) -> None:
 
     if missing:
         missing_str = ", ".join(sorted(missing))
-        # TODO: Avoid skipping when dependencies are missing in constrained test environments.
-        # Root cause: Required system tools are unavailable and neither shims nor package installs
-        # can provision them within the current session.
-        # Estimated fix: Preinstall the tools in test images or enable shim support for CI runs.
-        pytest.skip(
+        message = (
             "Required tools not available after preinstall and auto-install attempts "
             f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 to provision stand-ins "
             "for this session, or set SUGARKUBE_PREINSTALL_TOOL_SHIMS=1 before the next "
             "test session to shim tools during preinstall when installs are blocked."
         )
+        if _tools_fallback_mode() == "xfail":
+            pytest.xfail(message)
+        pytest.skip(message)
 
 
 def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
@@ -314,6 +315,12 @@ def _is_permission_error(result: subprocess.CompletedProcess[str]) -> bool:
         return True
 
     return result.returncode in {errno.EPERM, errno.EACCES}
+
+
+def _tools_fallback_mode() -> str:
+    """Return the configured fallback behavior for missing tools."""
+
+    return os.environ.get("SUGARKUBE_TOOLS_FALLBACK", "").strip().lower()
 
 
 def _netns_fallback_mode() -> str:

@@ -67,6 +67,21 @@ def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyP
         conftest.require_tools(["unshare", "ip"])
 
 
+def test_require_tools_xfails_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing tools should be recorded as xfails when configured."""
+
+    monkeypatch.setenv("SUGARKUBE_TOOLS_FALLBACK", "xfail")
+
+    def always_missing(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        return None
+
+    monkeypatch.setattr(conftest.shutil, "which", always_missing)
+    monkeypatch.setattr(conftest, "_install_missing_tools", lambda missing: [])
+
+    with pytest.raises(pytest.xfail.Exception):
+        conftest.require_tools(["unshare", "ip"])
+
+
 def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When allowed, missing tools are shimmed instead of skipped."""
 

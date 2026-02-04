@@ -235,6 +235,9 @@ without waiting for per-test skip handling. Set
 installations instead of stubs. Regression coverage:
 `tests/test_require_tools.py::test_preinstall_test_cli_tools_shims_when_installs_blocked`
 and `tests/test_require_tools.py::test_preinstall_test_cli_tools_shim_opt_out`.
+Set `SUGARKUBE_TOOLS_FALLBACK=xfail` when you want missing tool requirements to
+be recorded as expected failures instead of skips. Regression coverage:
+`tests/test_require_tools.py::test_require_tools_xfails_when_requested`.
 Network namespace probes now request the `ip` and `unshare` utilities up front,
 falling back to the same tooling installer before retrying with sudo so CI and
 local runs converge. Regression coverage:
