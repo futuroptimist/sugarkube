@@ -228,6 +228,10 @@ shim directory is prepended to ``PATH`` while enabled, so prefer using them in
 isolated test environments (such as disposable containers or dedicated
 virtualenvs) instead of your daily shell. Regression coverage:
 `tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
+When preinstall shims are enabled (the default), `require_tools` also falls back
+to shims after installer attempts fail, reducing skips in constrained runners
+without requiring per-test opt-in. Regression coverage:
+`tests/test_require_tools.py::test_require_tools_shims_when_preinstall_enabled`.
 When `apt-get` is unavailable, the session-level pre-install hook now shims the
 core CLI dependencies ahead of time so integration tests see the expected tools
 without waiting for per-test skip handling. Set
