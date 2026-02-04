@@ -289,8 +289,9 @@ def require_tools(tools: Iterable[str]) -> None:
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts "
             f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 to provision stand-ins "
-            "immediately, or set SUGARKUBE_PREINSTALL_TOOL_SHIMS=1 before the next test "
-            "session to allow shim fallbacks after installation attempts."
+            "immediately, or ensure SUGARKUBE_PREINSTALL_TOOL_SHIMS is not disabled "
+            "(defaults to enabled) before the next test session to allow shim fallbacks "
+            "after installation attempts."
         )
 
 
