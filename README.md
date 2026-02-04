@@ -229,8 +229,8 @@ isolated test environments (such as disposable containers or dedicated
 virtualenvs) instead of your daily shell. Regression coverage:
 `tests/test_require_tools.py::test_require_tools_falls_back_to_shims`.
 When installers are unavailable, `require_tools` now reuses the same shim
-fallback controlled by `SUGARKUBE_PREINSTALL_TOOL_SHIMS` so per-test checks avoid
-skipping in constrained environments. Regression coverage:
+fallback controlled by `SUGARKUBE_PREINSTALL_TOOL_SHIMS` (defaults to `"1"`) so
+per-test checks avoid skipping in constrained environments. Regression coverage:
 `tests/test_require_tools.py::test_require_tools_shims_after_install_failure_with_preinstall_enabled`.
 When `apt-get` is unavailable, the session-level pre-install hook now shims the
 core CLI dependencies ahead of time so integration tests see the expected tools

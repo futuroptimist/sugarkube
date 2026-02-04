@@ -286,10 +286,13 @@ def require_tools(tools: Iterable[str]) -> None:
 
     if missing:
         missing_str = ", ".join(sorted(missing))
+        # TODO: Provision tool dependencies in constrained test environments.
+        # Root cause: Minimal containers lack required binaries and package installs.
+        # Estimated fix: Provide tools (or shims) via test images or CI setup steps.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts "
             f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 to provision stand-ins "
-            "immediately, or ensure SUGARKUBE_PREINSTALL_TOOL_SHIMS is not disabled "
+            "immediately, or ensure SUGARKUBE_PREINSTALL_TOOL_SHIMS is not set to 0 "
             "(defaults to enabled) before the next test session to allow shim fallbacks "
             "after installation attempts."
         )
