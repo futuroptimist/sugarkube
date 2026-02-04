@@ -111,6 +111,56 @@ def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_
     assert os.environ.get("PATH", "") == original_path
 
 
+def test_require_tools_shims_when_preinstall_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Missing tools should shim when preinstall shims are enabled."""
+
+    monkeypatch.setattr(conftest, "_TOOL_SHIM_DIR", None)
+    monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
+    monkeypatch.delenv("SUGARKUBE_ALLOW_TOOL_SHIMS", raising=False)
+    monkeypatch.delenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", raising=False)
+
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", original_path)
+
+    install_calls: list[Iterable[str]] = []
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        install_calls.append(list(missing))
+        return []
+
+    real_which = shutil.which
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        candidate = tmp_path / tool
+        if candidate.exists():
+            return str(candidate)
+        if tool in {"ip", "ping"}:
+            return None
+        return real_which(tool, path=path)
+
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    try:
+        conftest.require_tools(["ip", "ping"])
+    except pytest.skip.Exception as exc:  # pragma: no cover - explicit failure path
+        pytest.fail(f"require_tools unexpectedly skipped: {exc.msg}")
+
+    assert install_calls == [["ip", "ping"]]
+    for tool in ("ip", "ping"):
+        shimmed = tmp_path / tool
+        assert shimmed.exists()
+        assert os.access(shimmed, os.X_OK)
+
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    assert str(tmp_path) in path_parts
+    assert path_parts.count(str(tmp_path)) == 1
+    os.environ["PATH"] = original_path
+    assert os.environ.get("PATH", "") == original_path
+
+
 def test_require_tools_prefers_shims_when_opted_in(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

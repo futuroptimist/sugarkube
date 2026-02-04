@@ -263,7 +263,9 @@ def require_tools(tools: Iterable[str]) -> None:
 
     When ``SUGARKUBE_ALLOW_TOOL_SHIMS=1`` is set, missing binaries are shimmed
     before attempting installation to keep offline and sandboxed runs from
-    skipping unnecessarily. Coverage: ``tests/test_require_tools.py``.
+    skipping unnecessarily. When preinstall shims are enabled, missing tools
+    are shimmed after install attempts fail so constrained test runners can
+    still proceed. Coverage: ``tests/test_require_tools.py``.
     """
 
     allow_shims = os.environ.get("SUGARKUBE_ALLOW_TOOL_SHIMS", "").strip() == "1"
@@ -283,13 +285,12 @@ def require_tools(tools: Iterable[str]) -> None:
         if allow_shims:
             _create_tool_shims(missing)
             missing = [tool for tool in missing if not shutil.which(tool)]
+        elif _preinstall_shims_enabled():
+            _create_tool_shims(missing)
+            missing = [tool for tool in missing if not shutil.which(tool)]
 
     if missing:
         missing_str = ", ".join(sorted(missing))
-        # TODO: Avoid skipping when dependencies are missing in constrained test environments.
-        # Root cause: Required system tools are unavailable and neither shims nor package installs
-        # can provision them within the current session.
-        # Estimated fix: Preinstall the tools in test images or enable shim support for CI runs.
         pytest.skip(
             "Required tools not available after preinstall and auto-install attempts "
             f"({missing_str}). Enable SUGARKUBE_ALLOW_TOOL_SHIMS=1 to provision stand-ins "
