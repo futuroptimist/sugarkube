@@ -67,6 +67,44 @@ def test_require_tools_skips_when_installation_fails(monkeypatch: pytest.MonkeyP
         conftest.require_tools(["unshare", "ip"])
 
 
+def test_require_tools_shims_when_preinstall_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Missing tools should shim after failed installs when preinstall shims are enabled."""
+
+    monkeypatch.delenv("SUGARKUBE_ALLOW_TOOL_SHIMS", raising=False)
+    monkeypatch.delenv("SUGARKUBE_PREINSTALL_TOOL_SHIMS", raising=False)
+    monkeypatch.setenv("SUGARKUBE_TOOL_SHIM_DIR", str(tmp_path))
+
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", original_path)
+
+    def fake_install(missing: Iterable[str]) -> list[str]:
+        return []
+
+    def fake_which(tool: str, path: str | None = None) -> str | None:  # type: ignore[override]
+        candidate = tmp_path / tool
+        if candidate.exists():
+            return str(candidate)
+        return None
+
+    monkeypatch.setattr(conftest, "_install_missing_tools", fake_install)
+    monkeypatch.setattr(conftest.shutil, "which", fake_which)
+
+    try:
+        conftest.require_tools(["ip", "ping"])
+    except pytest.skip.Exception as exc:  # pragma: no cover - explicit failure path
+        pytest.fail(f"require_tools unexpectedly skipped: {exc.msg}")
+
+    for tool in ("ip", "ping"):
+        shimmed = tmp_path / tool
+        assert shimmed.exists()
+        assert os.access(shimmed, os.X_OK)
+
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    assert str(tmp_path) in path_parts
+
+
 def test_require_tools_falls_back_to_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When allowed, missing tools are shimmed instead of skipped."""
 
