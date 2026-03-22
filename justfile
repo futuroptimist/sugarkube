@@ -1201,23 +1201,35 @@ dspace-oci-redeploy env='staging' tag='':
     fi
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.
-dspace-debug-logs namespace='dspace':
+dspace-debug-logs namespace='dspace' context='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
     ns="{{ namespace }}"
+    kube_context="{{ context }}"
+    kubectl_cmd=(kubectl)
+
+    if [ -n "${kube_context}" ]; then
+      kubectl_cmd+=(--context "${kube_context}")
+      if ! kubectl config get-contexts "${kube_context}" >/dev/null 2>&1; then
+        echo "ERROR: kube context '${kube_context}' not found in ${KUBECONFIG}." >&2
+        echo "Run 'just kubeconfig-env env=staging' or 'just kubeconfig-env env=prod' first." >&2
+        exit 1
+      fi
+    fi
 
     echo "=== dspace pods in namespace ${ns} ==="
-    kubectl get pods -n "${ns}" -o wide || {
+    "${kubectl_cmd[@]}" get pods -n "${ns}" -o wide || {
       echo "Failed to list dspace pods in namespace ${ns}" >&2
     }
 
     echo
     echo "=== dspace logs (last 200 lines per pod) ==="
     # Logs for all pods labeled as dspace
-    dspace_pods=$(kubectl get pods -n "${ns}" -l app.kubernetes.io/name=dspace -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    dspace_pods=$("${kubectl_cmd[@]}" get pods -n "${ns}" -l app.kubernetes.io/name=dspace -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
 
     if [ -z "${dspace_pods}" ]; then
       echo "No pods found with label app.kubernetes.io/name=dspace in namespace ${ns}" >&2
@@ -1225,7 +1237,7 @@ dspace-debug-logs namespace='dspace':
       for pod in ${dspace_pods}; do
         echo
         echo "--- dspace pod: ${pod} ---"
-        kubectl logs -n "${ns}" "${pod}" --tail=200 || {
+        "${kubectl_cmd[@]}" logs -n "${ns}" "${pod}" --tail=200 || {
           echo "Failed to fetch logs for pod ${pod}" >&2
         }
       done
@@ -1233,9 +1245,17 @@ dspace-debug-logs namespace='dspace':
 
     echo
     echo "=== Traefik logs (last 200 lines) ==="
-    kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
+    "${kubectl_cmd[@]}" logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
       echo "Failed to fetch Traefik logs" >&2
     }
+
+# Dump dspace+Traefik logs from the staging cluster context (sugar-staging).
+dspace-debug-logs-staging namespace='dspace':
+    @just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace='{{ namespace }}' context='sugar-staging'
+
+# Dump dspace+Traefik logs from the production cluster context (sugar-prod).
+dspace-debug-logs-prod namespace='dspace':
+    @just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace='{{ namespace }}' context='sugar-prod'
 
 # Fast redeploy of token.place relay from GHCR.
 # The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
