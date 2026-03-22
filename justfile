@@ -1208,6 +1208,14 @@ dspace-debug-logs namespace='dspace':
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
     ns="{{ namespace }}"
+    if [ ! -r "${KUBECONFIG}" ]; then
+      echo "ERROR: kubeconfig is not readable at ${KUBECONFIG}" >&2
+      echo "Run: just kubeconfig-env env=staging   (or env=prod)" >&2
+      exit 1
+    fi
+
+    echo "Using KUBECONFIG=${KUBECONFIG}"
+    kubectl config current-context 2>/dev/null || true
 
     echo "=== dspace pods in namespace ${ns} ==="
     kubectl get pods -n "${ns}" -o wide || {
@@ -1236,6 +1244,21 @@ dspace-debug-logs namespace='dspace':
     kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || {
       echo "Failed to fetch Traefik logs" >&2
     }
+
+# Ensure env-scoped kubeconfig first, then print dspace + Traefik logs.
+dspace-debug-logs-env env='staging' namespace='dspace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input#env=}"
+    if [ "${env_name}" = "int" ]; then
+        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
 # Fast redeploy of token.place relay from GHCR.
 # The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
