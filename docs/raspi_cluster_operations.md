@@ -714,21 +714,29 @@ sets `environment: dev`, `docs/examples/dspace.values.staging.yaml` sets `enviro
 `docs/examples/dspace.values.prod.yaml` sets `environment: prod`, which show up in `/healthz` and
 the homepage build badge.
 
-If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
-recipe (defaults to staging):
+If you prefer an opinionated one-liner for immutable-tag RC/stable validation, use:
 
 ```bash
-just dspace-oci-redeploy
-# or explicitly select an environment:
+just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
+# or explicitly select production:
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
+just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 ```
 
-Under the hood, both commands call the shared `_helm-oci-deploy` helper via
-`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release
-and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle even
-when `v3-latest` is republished with the same tag. The helper waits for the rollout to
-finish and exits non-zero if Kubernetes reports a failure.
+`dspace-oci-deploy` calls `helm-oci-install` with the dspace values chain, waits for
+`kubectl rollout status`, then prints the resolved deployment image plus follow-up
+`/config.json`, `/healthz`, and `/livez` checks.
+
+For fast mutable-tag convenience rollouts (for example republished `v3-latest`), keep
+using:
+
+```bash
+just dspace-oci-redeploy env=staging
+```
+
+That recipe performs `helm upgrade --reuse-values` and then forces
+`kubectl rollout restart deploy/dspace` so pods recycle even when the tag string is
+unchanged.
 
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
