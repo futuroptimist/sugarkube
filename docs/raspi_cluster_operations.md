@@ -742,8 +742,9 @@ just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 
 `dspace-oci-deploy` intentionally keeps the same values chain as the generic path
 (`docs/examples/dspace.values.dev.yaml` plus the env-specific overlay), calls
-`scripts/ensure_user_kubeconfig.sh`, runs Helm, waits for `kubectl rollout status`, and
-prints post-deploy verification commands for `config.json`, `/healthz`, and `/livez`.
+`scripts/ensure_user_kubeconfig.sh`, runs `helm-oci-install` (install-or-upgrade), waits for
+`kubectl rollout status`, and prints post-deploy verification commands for `config.json`,
+`/healthz`, and `/livez` using the live ingress host (or `<dspace-host>` when none is discoverable).
 
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on

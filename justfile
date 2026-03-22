@@ -1176,8 +1176,8 @@ dspace-oci-deploy env='staging' tag='':
       echo "Set tag=<immutable-tag> (for example v3-<shortsha>) for dspace immutable deploys." >&2
       exit 1
     fi
-    if [[ "${deploy_tag}" == "v3-latest" || "${deploy_tag}" == *":latest" || \
-      "${deploy_tag}" == "latest" ]]; then
+    tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${tag_lc}" == *"latest"* || "${tag_lc}" == "main" || "${tag_lc}" == *":main" ]]; then
       echo "Refusing mutable tag '${deploy_tag}'. Use an immutable RC/stable image tag." >&2
       exit 1
     fi
@@ -1203,13 +1203,12 @@ dspace-oci-deploy env='staging' tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
-    just --justfile "{{ justfile_directory() }}/justfile" _helm-oci-deploy \
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}" \
-      allow_install='true' reuse_values='true'
+      tag="${deploy_tag}"
 
     echo "Waiting for dspace rollout to complete (timeout: 180s)..."
     if ! kubectl -n dspace rollout status deploy/dspace --timeout=180s; then
@@ -1222,19 +1221,18 @@ dspace-oci-deploy env='staging' tag='':
     kubectl -n dspace get deploy dspace \
       -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
 
-    verify_host="staging.democratized.space"
-    if [ "${env_name}" = "prod" ]; then
-      verify_host="democratized.space"
-    elif [ "${env_name}" = "dev" ]; then
-      verify_host="localhost"
+    verify_host="$(kubectl -n dspace get ingress dspace -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
+    if [ -z "${verify_host}" ]; then
+      verify_host="<dspace-host>"
     fi
 
     echo
     echo "Post-deploy verification commands:"
-    if [ "${verify_host}" = "localhost" ]; then
-      echo "  curl -fsS http://localhost/config.json | jq ."
-      echo "  curl -fsS http://localhost/healthz | jq ."
-      echo "  curl -fsS http://localhost/livez | jq ."
+    if [[ "${verify_host}" == "<"*">" ]]; then
+      echo "  # Replace ${verify_host} with your ingress hostname."
+      echo "  curl -fsS https://${verify_host}/config.json | jq ."
+      echo "  curl -fsS https://${verify_host}/healthz | jq ."
+      echo "  curl -fsS https://${verify_host}/livez | jq ."
     else
       echo "  curl -fsS https://${verify_host}/config.json | jq ."
       echo "  curl -fsS https://${verify_host}/healthz | jq ."

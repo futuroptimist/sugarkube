@@ -92,7 +92,8 @@ just helm-oci-upgrade \
 - The image tag defaults to `default_tag` (`v3-latest`) for dev/staging in the generic helpers.
   Production deployments should use pinned tags (for example, the value in
   `docs/apps/dspace.prod.tag` or a `v3-<immutable>` build).
-- `dspace-oci-deploy` always requires an explicit non-`latest` tag and waits for
+- `dspace-oci-deploy` always requires an explicit immutable tag (rejects mutable forms such as
+  `latest` and `main`), calls `helm-oci-install` so first-time deploys work, and waits for
   `kubectl rollout status` before returning.
 
 ## First deployment walkthrough
