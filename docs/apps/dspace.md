@@ -164,6 +164,41 @@ public hostname is `https://staging.democratized.space`.
 For detailed instructions on creating the Cloudflare Tunnel and DNS records, see:
 ../cloudflare_tunnel.md
 
+## Operational logs (staging + prod)
+
+Use `just dspace-debug-logs` to collect both application logs (`dspace` namespace) and ingress
+logs (Traefik in `kube-system`) in one command.
+
+```bash
+# Staging
+just dspace-debug-logs env=staging
+
+# Production
+just dspace-debug-logs env=prod
+```
+
+The recipe uses `KUBECONFIG` (default: `~/.kube/config`) and warns if your active context does not
+match the expected scope (`sugar-staging` / `sugar-prod`). If needed, switch first:
+
+```bash
+kubectl config use-context sugar-staging
+# or
+kubectl config use-context sugar-prod
+```
+
+By default, the command prints:
+
+- dspace pod inventory in namespace `dspace`
+- last 200 lines from each dspace pod (`app.kubernetes.io/name=dspace`)
+- last 200 lines from Traefik (`app.kubernetes.io/name=traefik`, namespace `kube-system`)
+
+For deeper follow-up after the initial snapshot, use the same kubeconfig/context:
+
+```bash
+kubectl -n dspace logs deploy/dspace --follow
+kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --follow
+```
+
 ## Troubleshooting
 
 - Inspect the release values and history:
