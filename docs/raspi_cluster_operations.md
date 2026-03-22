@@ -676,7 +676,7 @@ serving ingress, and the dspace OCI chart is already published to GHCR. The goal
 roll pods quickly without extra ceremony—Kubernetes handles the rolling update using the
 deployment's defaults.
 
-**Quick redeploy for dspace v3 (OCI chart):**
+**Quick redeploy for dspace v3 (OCI chart, generic helper):**
 
 Pick the values overlay for your target environment and prefer immutable image tags for production:
 
@@ -729,6 +729,21 @@ Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle even
 when `v3-latest` is republished with the same tag. The helper waits for the rollout to
 finish and exits non-zero if Kubernetes reports a failure.
+
+For immutable RC/stable validation (recommended for staging and prod), use the dedicated
+helper instead:
+
+```bash
+just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
+
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+```
+
+`dspace-oci-deploy` intentionally keeps the same values chain as the generic path
+(`docs/examples/dspace.values.dev.yaml` plus the env-specific overlay), calls
+`scripts/ensure_user_kubeconfig.sh`, runs Helm, waits for `kubectl rollout status`, and
+prints post-deploy verification commands for `config.json`, `/healthz`, and `/livez`.
 
 When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
