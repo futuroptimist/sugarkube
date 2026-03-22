@@ -476,7 +476,7 @@ Quick reference for the most common recipes when operating your cluster:
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
-| `just dspace-debug-logs` | Dump dspace and Traefik logs for the last 200 lines each | Investigating 500s or routing issues for dspace. |
+| `just dspace-debug-logs-env env=staging` | Set env-scoped kubeconfig context, then dump dspace and Traefik logs (last 200 lines each) | Staging/prod dspace incident triage when you need app + ingress logs quickly. |
 
 ## Step 2: Capture and commit sanitized bring-up logs
 
