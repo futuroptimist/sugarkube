@@ -1237,6 +1237,28 @@ dspace-debug-logs namespace='dspace':
       echo "Failed to fetch Traefik logs" >&2
     }
 
+# Prepare an env-scoped kubeconfig, then dump dspace and Traefik logs.
+dspace-debug-logs-env env='staging' namespace='dspace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input#env=}"
+    if [ "${env_name}" = "int" ]; then
+      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+      env_name="staging"
+    fi
+    if [ "${env_name}" != "staging" ] && [ "${env_name}" != "prod" ] && [ "${env_name}" != "dev" ]; then
+      echo "ERROR: env must be one of dev, staging, or prod (got: ${env_name})" >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    echo "Using ${KUBECONFIG} (context sugar-${env_name})"
+
+    just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
+
 # Fast redeploy of token.place relay from GHCR.
 # The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
 

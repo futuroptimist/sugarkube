@@ -174,3 +174,30 @@ For detailed instructions on creating the Cloudflare Tunnel and DNS records, see
   - `kubectl -n dspace describe ingress`
 - Validate the Cloudflare Tunnel service and route for the chosen hostname.
 - Review cluster-wide logs for Traefik or networking issues if the ingress is not reachable.
+
+### Operational logs (staging + prod)
+
+Use Sugarkube's dspace log helper to fetch both app logs and ingress logs from one command:
+
+```bash
+# Staging cluster context + logs
+just dspace-debug-logs-env env=staging
+
+# Production cluster context + logs
+just dspace-debug-logs-env env=prod
+```
+
+What this does:
+
+- Runs `just kubeconfig-env env=<env>` so `~/.kube/config` points at the selected environment context
+  (`sugar-staging` or `sugar-prod`).
+- Runs `just dspace-debug-logs`, which prints:
+  - dspace pod inventory in namespace `dspace`
+  - last 200 lines from each dspace pod with label `app.kubernetes.io/name=dspace`
+  - last 200 lines from Traefik in `kube-system`
+
+If your dspace namespace is different, override it:
+
+```bash
+just dspace-debug-logs-env env=staging namespace=<your-namespace>
+```
