@@ -2,7 +2,8 @@
 
 Use the packaged Helm chart from GHCR to install the dspace v3 stack into your cluster. The
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
-changing the arguments.
+changing the arguments. For dspace immutable-tag validation rollouts, prefer the dedicated
+`just dspace-oci-deploy` helper; it waits for rollout readiness and prints verification checks.
 
 Values files are split so you can layer staging-specific ingress settings on top of the default
 development values:
@@ -49,24 +50,14 @@ charts:
 ## Quickstart
 
 ```bash
-# Install or upgrade the release with staging ingress overrides (defaults to v3-latest image tag)
-just helm-oci-install \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-  version_file=docs/apps/dspace.version \
-  default_tag=v3-latest
+# Immutable-tag staging validation deploy (waits for rollout status)
+just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 prod_tag="$(read_prod_tag)"
 
-# Install production with prod ingress overrides and a pinned tag
-just helm-oci-install \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-  version_file=docs/apps/dspace.version \
-  tag="${prod_tag}"
+# Immutable-tag production deploy
+just dspace-oci-deploy env=prod tag="${prod_tag}"
 
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
@@ -89,6 +80,9 @@ just helm-oci-upgrade \
 
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
+- `dspace-oci-deploy` always uses the intentional values chain:
+  - staging: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`
+  - prod: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
 - The image tag defaults to `default_tag` (`v3-latest`) for dev/staging; pass `tag=<imageTag>` to
   target a specific build. Production deployments should use pinned tags (for example, the value in
   `docs/apps/dspace.prod.tag` or a `v3-<immutable>` build).
@@ -120,23 +114,13 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 4. Install the app:
 
    ```bash
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     default_tag=v3-latest
+   just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
    prod_tag="$(read_prod_tag)"
 
    # Production example (pinned tag)
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-     version_file=docs/apps/dspace.version \
-     tag="${prod_tag}"
+   just dspace-oci-deploy env=prod tag="${prod_tag}"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
@@ -148,12 +132,7 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 6. Iterate new builds from v3:
 
    ```bash
-   just helm-oci-upgrade \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     tag=v3-<shortsha>
+   just dspace-oci-deploy env=staging tag=v3-<shortsha>
    ```
 
 ## Networking via Cloudflare Tunnel

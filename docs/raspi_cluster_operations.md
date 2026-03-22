@@ -684,28 +684,19 @@ Pick the values overlay for your target environment and prefer immutable image t
 - Production: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
 
 ```bash
-# From the sugarkube repo root on a cluster node (staging):
-just helm-oci-upgrade \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-  version_file=docs/apps/dspace.version \
-  default_tag=v3-latest
+# Mutable-tag convenience flow (staging default):
+just dspace-oci-redeploy
 ```
 
-For production, swap in the prod values file and pin to an immutable tag (for example the value
-stored in `docs/apps/dspace.prod.tag`):
+For immutable-tag RC/stable validation, use the dedicated deploy helper. It ensures user kubeconfig,
+applies the intentional values chain, waits for rollout readiness, and prints verification commands:
 
 ```bash
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 prod_tag="$(read_prod_tag)"
 
-just helm-oci-upgrade \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-  version_file=docs/apps/dspace.version \
-  tag="${prod_tag}"
+just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
+just dspace-oci-deploy env=prod tag="${prod_tag}"
 ```
 
 The dspace chart also exposes a `DSPACE_ENV` environment variable (set via the top-level
@@ -714,7 +705,7 @@ sets `environment: dev`, `docs/examples/dspace.values.staging.yaml` sets `enviro
 `docs/examples/dspace.values.prod.yaml` sets `environment: prod`, which show up in `/healthz` and
 the homepage build badge.
 
-If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
+If you prefer a one-liner that bakes in mutable-tag redeploy behavior for dspace v3, use the helper
 recipe (defaults to staging):
 
 ```bash
@@ -734,6 +725,12 @@ When you pass an image tag (including the default `v3-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
 each redeploy. For production, prefer immutable tags (for example, `v3-<sha>`) if you want
 to pin a specific image.
+
+Use `dspace-oci-deploy` for immutable-tag rollouts where you want explicit Helm values overlays
+and rollout verification:
+
+- Staging: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`
+- Production: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
 
 **Emergency redeploy checklist:**
 
