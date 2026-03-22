@@ -1201,13 +1201,36 @@ dspace-oci-redeploy env='staging' tag='':
     fi
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.
-dspace-debug-logs namespace='dspace':
+dspace-debug-logs env='' namespace='dspace':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
+    env_input="{{ env }}"
+    env_name="${env_input#env=}"
+    if [ "${env_name}" = "int" ]; then
+      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+      env_name="staging"
+    fi
+
     ns="{{ namespace }}"
+    expected_context=""
+    if [ -n "${env_name}" ]; then
+      expected_context="sugar-${env_name}"
+      current_context="$(kubectl config current-context 2>/dev/null || true)"
+      if [ -n "${current_context}" ] && [ "${current_context}" != "${expected_context}" ]; then
+        echo "WARNING: current kubectl context is '${current_context}', expected '${expected_context}' for env=${env_name}." >&2
+        echo "Use 'kubectl config use-context ${expected_context}' or set KUBECONFIG to the target cluster before collecting logs." >&2
+      fi
+    fi
+
+    if [ -n "${expected_context}" ]; then
+      echo "Collecting logs for env=${env_name} (expected context: ${expected_context}) using KUBECONFIG=${KUBECONFIG}"
+    else
+      echo "Collecting logs using KUBECONFIG=${KUBECONFIG}"
+    fi
 
     echo "=== dspace pods in namespace ${ns} ==="
     kubectl get pods -n "${ns}" -o wide || {
