@@ -1138,6 +1138,73 @@ helm-oci-install release='' namespace='' chart='' values='' host='' version='' v
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
+# Opinionated immutable-tag deploy path for dspace RC/stable validation.
+# Unlike the generic Helm helper recipes, this waits for rollout readiness and
+# prints post-deploy verification commands.
+dspace-oci-deploy env='staging' tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    env_name="${env_input}"
+    if [ "${env_input}" = "int" ]; then
+      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+      env_name="staging"
+    fi
+
+    if [ -z "{{ tag }}" ]; then
+      echo "Set tag=<immutable-tag> (for example: v3-<shortsha>)." >&2
+      exit 1
+    fi
+
+    deploy_tag="{{ tag }}"
+    if [[ "${deploy_tag}" == *latest* ]] || [[ "${deploy_tag}" == "main" ]]; then
+      echo "Tag '${deploy_tag}' looks mutable. Use an immutable dspace image tag." >&2
+      exit 1
+    fi
+
+    overlay="docs/examples/dspace.values.${env_name}.yaml"
+    if [ ! -f "${overlay}" ]; then
+      echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
+      exit 1
+    fi
+
+    values_chain="docs/examples/dspace.values.dev.yaml"
+    if [ "${env_name}" != "dev" ]; then
+      values_chain="${values_chain},${overlay}"
+    fi
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${HOME}/.kube/config"
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release='dspace' namespace='dspace' \
+      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
+      values="${values_chain}" \
+      version_file='docs/apps/dspace.version' \
+      tag="${deploy_tag}"
+
+    echo "Waiting for dspace rollout to complete (timeout: 180s)..."
+    if ! kubectl -n dspace rollout status deploy/dspace --timeout=180s; then
+      echo "ERROR: dspace rollout did not complete successfully." >&2
+      exit 1
+    fi
+
+    resolved_image="$(
+      kubectl -n dspace get deploy/dspace -o jsonpath='{.spec.template.spec.containers[0].image}'
+    )"
+    echo "Resolved deployment image: ${resolved_image}"
+
+    ingress_host="$(kubectl -n dspace get ingress dspace -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
+    if [ -z "${ingress_host}" ]; then
+      ingress_host="<your-dspace-host>"
+    fi
+
+    echo "Post-deploy verification:"
+    echo "  curl -fsS https://${ingress_host}/config.json"
+    echo "  curl -fsS https://${ingress_host}/healthz"
+    echo "  curl -fsS https://${ingress_host}/livez"
+
 # Fast redeploy of dspace v3 from GHCR (emergency push).
 dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash

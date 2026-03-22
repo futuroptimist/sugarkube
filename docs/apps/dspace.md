@@ -2,7 +2,8 @@
 
 Use the packaged Helm chart from GHCR to install the dspace v3 stack into your cluster. The
 `justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
-changing the arguments.
+changing the arguments, plus a dspace-specific immutable-tag deploy helper for RC/stable
+validation.
 
 Values files are split so you can layer staging-specific ingress settings on top of the default
 development values:
@@ -48,6 +49,18 @@ charts:
 
 ## Quickstart
 
+For staging/prod-style immutable deployments, use the opinionated dspace helper. It validates
+the values chain, ensures user kubeconfig, waits for rollout completion, and prints follow-up
+checks:
+
+```bash
+just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
+just dspace-oci-deploy env=prod tag="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]')"
+```
+
+Generic Helm helpers are still available and intentionally stay generic (manifest apply behavior,
+no rollout waiting):
+
 ```bash
 # Install or upgrade the release with staging ingress overrides (defaults to v3-latest image tag)
 just helm-oci-install \
@@ -92,6 +105,9 @@ just helm-oci-upgrade \
 - The image tag defaults to `default_tag` (`v3-latest`) for dev/staging; pass `tag=<imageTag>` to
   target a specific build. Production deployments should use pinned tags (for example, the value in
   `docs/apps/dspace.prod.tag` or a `v3-<immutable>` build).
+- dspace values layering is intentional and consistent: `dev` uses only
+  `docs/examples/dspace.values.dev.yaml`; `staging` and `prod` use
+  `docs/examples/dspace.values.dev.yaml` plus their environment overlay.
 
 ## First deployment walkthrough
 
@@ -120,23 +136,11 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 4. Install the app:
 
    ```bash
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     default_tag=v3-latest
+   # Immutable-tag validation flow (recommended for staging/prod)
+   just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-   prod_tag="$(read_prod_tag)"
-
-   # Production example (pinned tag)
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-     version_file=docs/apps/dspace.version \
-     tag="${prod_tag}"
+   just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
