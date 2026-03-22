@@ -1257,6 +1257,9 @@ dspace-debug-logs-env env='staging' namespace='dspace':
         env_name="staging"
     fi
 
+    # Force the canonical kubeconfig path so this wrapper cannot inherit a
+    # different cluster selection from an existing shell-level KUBECONFIG.
+    export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
