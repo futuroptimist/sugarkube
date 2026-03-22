@@ -973,7 +973,16 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    scripts/ensure_user_kubeconfig.sh || true
+    need_user_kubeconfig=0
+    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
+      need_user_kubeconfig=1
+    elif [ "${KUBECONFIG:-}" = "/etc/rancher/k3s/k3s.yaml" ] && [ ! -r "${KUBECONFIG}" ]; then
+      need_user_kubeconfig=1
+    fi
+
+    if [ "${need_user_kubeconfig}" -eq 1 ]; then
+      scripts/ensure_user_kubeconfig.sh || true
+    fi
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
@@ -1173,31 +1182,41 @@ dspace-oci-deploy env='staging' tag='':
       exit 1
     fi
 
-    overlay="docs/examples/dspace.values.${env_name}.yaml"
-    if [ ! -f "${overlay}" ]; then
-      echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
-      exit 1
+    overlay=""
+    if [ "${env_name}" != "dev" ]; then
+      overlay="docs/examples/dspace.values.${env_name}.yaml"
+      if [ ! -f "${overlay}" ]; then
+        echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
+        exit 1
+      fi
     fi
 
     values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ "${env_name}" != "dev" ]; then
+    if [ -n "${overlay}" ]; then
       values_chain="${values_chain},${overlay}"
     fi
 
-    scripts/ensure_user_kubeconfig.sh || true
+    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
+      scripts/ensure_user_kubeconfig.sh || true
+    fi
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+    just --justfile "{{ justfile_directory() }}/justfile" _helm-oci-deploy \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}"
+      tag="${deploy_tag}" \
+      allow_install='true' reuse_values='true'
 
     echo "Waiting for dspace rollout to complete (timeout: 180s)..."
-    kubectl -n dspace rollout status deploy/dspace --timeout=180s
+    if ! kubectl -n dspace rollout status deploy/dspace --timeout=180s; then
+      echo "ERROR: dspace rollout did not complete within 180s. Check pod events with:" >&2
+      echo "  kubectl -n dspace describe pods" >&2
+      exit 1
+    fi
 
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \
