@@ -1,8 +1,13 @@
 # democratized.space (dspace) on Sugarkube
 
-Use the packaged Helm chart from GHCR to install the dspace v3 stack into your cluster. The
-`justfile` exposes generic Helm helpers so you can reuse the same commands for other apps by
-changing the arguments.
+Use the packaged Helm chart from GHCR to install the dspace v3 stack into your cluster.
+
+- `helm-oci-install` / `helm-oci-upgrade` are generic helpers for many charts.
+- `dspace-oci-deploy` is the opinionated immutable-tag rollout path for dspace RC/stable
+  validation. It ensures user kubeconfig, runs Helm, waits for rollout readiness, prints the
+  deployed image, and prints follow-up verification commands.
+- `dspace-oci-redeploy` remains the fast mutable-tag convenience path (`v3-latest`) that forces a
+  restart when you want quick staging refreshes.
 
 Values files are split so you can layer staging-specific ingress settings on top of the default
 development values:
@@ -49,24 +54,22 @@ charts:
 ## Quickstart
 
 ```bash
-# Install or upgrade the release with staging ingress overrides (defaults to v3-latest image tag)
+# Immutable-tag RC/stable deploy (recommended for staging/prod validation).
+just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
+
+read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+prod_tag="$(read_prod_tag)"
+
+# Production immutable deploy using the tracked pinned tag.
+just dspace-oci-deploy env=prod tag="${prod_tag}"
+
+# Generic helper example (advanced/manual flow; does not wait for rollout).
 just helm-oci-install \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
   default_tag=v3-latest
-
-read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-prod_tag="$(read_prod_tag)"
-
-# Install production with prod ingress overrides and a pinned tag
-just helm-oci-install \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-  version_file=docs/apps/dspace.version \
-  tag="${prod_tag}"
 
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
@@ -89,9 +92,9 @@ just helm-oci-upgrade \
 
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
-- The image tag defaults to `default_tag` (`v3-latest`) for dev/staging; pass `tag=<imageTag>` to
-  target a specific build. Production deployments should use pinned tags (for example, the value in
-  `docs/apps/dspace.prod.tag` or a `v3-<immutable>` build).
+- `dspace-oci-deploy` always requires an explicit immutable `tag=...`, including staging, so rollout
+  intent is clear during RC validation.
+- The generic helpers support `default_tag` (`v3-latest`) for mutable convenience workflows.
 
 ## First deployment walkthrough
 
@@ -120,23 +123,13 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 4. Install the app:
 
    ```bash
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     default_tag=v3-latest
+   just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
    prod_tag="$(read_prod_tag)"
 
    # Production example (pinned tag)
-   just helm-oci-install \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-     version_file=docs/apps/dspace.version \
-     tag="${prod_tag}"
+   just dspace-oci-deploy env=prod tag="${prod_tag}"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
@@ -148,12 +141,11 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 6. Iterate new builds from v3:
 
    ```bash
-   just helm-oci-upgrade \
-     release=dspace namespace=dspace \
-     chart=oci://ghcr.io/democratizedspace/charts/dspace \
-     values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-     version_file=docs/apps/dspace.version \
-     tag=v3-<shortsha>
+   # immutable validation path
+   just dspace-oci-deploy env=staging tag=v3-<shortsha>
+
+   # mutable convenience path (forces rollout restart)
+   just dspace-oci-redeploy env=staging
    ```
 
 ## Networking via Cloudflare Tunnel
