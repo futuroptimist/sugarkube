@@ -160,6 +160,46 @@ For detailed instructions on creating the Cloudflare Tunnel and DNS records, see
 
 ## Troubleshooting
 
+- Retrieve operator logs (staging/prod):
+  1. `just dspace-debug-logs-env env=<staging|prod>` first runs `just kubeconfig-env`
+     and rewrites `~/.kube/config` to the selected `sugar-<env>` context.
+  2. Run the bundled log collector to fetch both app and ingress logs.
+
+  ```bash
+  # Staging
+  just dspace-debug-logs-env env=staging
+
+  # Production
+  just dspace-debug-logs-env env=prod
+  ```
+
+  This prints:
+  - dspace pod inventory in `namespace=dspace`
+  - dspace container logs (`--tail=200` for each dspace pod)
+  - Traefik ingress logs in `kube-system` (`--tail=200`)
+
+  If dspace is not in the default namespace, override it on the helper command:
+
+  ```bash
+  just dspace-debug-logs-env env=staging namespace=my-dspace-namespace
+  ```
+
+  If you already manage `KUBECONFIG` manually, you can run:
+
+  ```bash
+  just dspace-debug-logs namespace=dspace
+  ```
+
+  Common next steps after the bundled snapshot:
+
+  ```bash
+  # Live-tail dspace logs
+  kubectl -n dspace logs deploy/dspace --follow
+
+  # Re-check Traefik logs
+  kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail=200
+  ```
+
 - Inspect the release values and history:
   - `helm -n dspace status dspace`
   - `helm -n dspace get values dspace`
