@@ -171,21 +171,14 @@ For emergency mutable-tag refreshes where you need to force pod recycle on `v3-l
 
 Use this sequence when promoting dspace v3 from staging to production:
 
-1. Ensure production control-plane nodes (`sugarkube0`, `sugarkube1`, `sugarkube2`) are online and
-   healthy:
-
-   ```bash
-   just kubeconfig-env env=prod
-   kubectl get nodes -o wide
-   ```
-
-2. Deploy the v3 build from the `v3` branch to the production preview hostname:
+1. Deploy the immutable v3 build tag from the `v3` branch to
+   `https://prod.democratized.space`:
 
    ```bash
    just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag-from-v3-branch>
    ```
 
-3. Run smoke tests against `https://prod.democratized.space`:
+2. Run smoke tests:
 
    ```bash
    curl -fsS https://prod.democratized.space/config.json | jq .
@@ -193,8 +186,9 @@ Use this sequence when promoting dspace v3 from staging to production:
    curl -fsS https://prod.democratized.space/livez | jq .
    ```
 
-4. Merge dspace `v3` into `main`, build/publish the promoted immutable tag, and redeploy to the
-   same production preview hostname:
+3. Merge `v3` into `main`.
+
+4. Deploy the immutable `main` tag to `https://prod.democratized.space`:
 
    ```bash
    just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag-from-main>

@@ -289,8 +289,7 @@ internal Traefik Service.
    - **Service type**: `HTTP`
    - **Service URL**: `http://traefik.<namespace>.svc.cluster.local:80`
 
-   Replace `<namespace>` with the namespace used by Traefik (commonly `kube-system`) or your chosen
-   ingress controller inside the k3s cluster.
+   Replace `<namespace>` with the namespace used by your ingress controller inside the k3s cluster.
 3. Save the routes. This sends HTTPS traffic for each hostname through the tunnel into the Traefik
    ClusterIP service in your k3s cluster.
 
