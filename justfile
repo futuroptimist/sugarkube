@@ -1258,6 +1258,10 @@ dspace-oci-deploy-prod-subdomain tag='':
     fi
 
     values_chain="docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml"
+    if [ ! -f "docs/examples/dspace.values.prod-subdomain.yaml" ]; then
+      echo "Missing values overlay: docs/examples/dspace.values.prod-subdomain.yaml" >&2
+      exit 1
+    fi
 
     if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
       scripts/ensure_user_kubeconfig.sh || true
