@@ -13,13 +13,17 @@ development values:
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
 - `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
   `staging.democratized.space`.
+- `docs/examples/dspace.values.prod_preview.yaml`: production-cluster preview ingress host and
+  class targeting `prod.democratized.space` before apex cutover.
 - `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
   `democratized.space`.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
-configured accordingly. For production, use the prod values file and your production hostname
-(defaults to `democratized.space` in this repo).
+configured accordingly. For production, this repo supports a two-step rollout:
+
+1. `prod.democratized.space` preview validation (`prod_preview` values).
+2. Apex cutover to `democratized.space` (`prod` values).
 
 ## Prerequisites
 
@@ -57,7 +61,10 @@ just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
-# Immutable-tag production deploy (pinned tag from docs/apps/dspace.prod.tag):
+# Immutable-tag production preview deploy (pinned tag from docs/apps/dspace.prod.tag):
+just dspace-oci-deploy env=prod-preview tag="$(read_prod_tag)"
+
+# Immutable-tag production apex deploy:
 just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 
 # Check pods and ingress status with the public URL
@@ -78,6 +85,13 @@ just helm-oci-upgrade \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
   tag=v3-<shortsha>
+
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod_preview.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=v3-<immutable-tag>
 
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
@@ -147,13 +161,48 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
      tag=v3-<shortsha>
    ```
 
+## v3 production rollout plan (staging → prod preview → apex)
+
+Use this sequence when onboarding dspace v3 to production while keeping staging online.
+
+1. **Provision the prod cluster nodes**: ensure `sugarkube0`, `sugarkube1`, and `sugarkube2`
+   are active for production. Keep `sugarkube3` through `sugarkube5` on
+   `staging.democratized.space`.
+2. **Deploy v3 branch to prod preview host**:
+   ```bash
+   just kubeconfig-env env=prod
+   just dspace-oci-deploy env=prod-preview tag=v3-<immutable-tag>
+   ```
+3. **Run smoke tests against preview**:
+   ```bash
+   curl -fsS https://prod.democratized.space/config.json | jq .
+   curl -fsS https://prod.democratized.space/healthz | jq .
+   curl -fsS https://prod.democratized.space/livez | jq .
+   ```
+4. **Merge dspace v3 into `main`** in the dspace repository.
+5. **Deploy from `main` to prod preview** with a new immutable tag:
+   ```bash
+   just dspace-oci-deploy env=prod-preview tag=v3-<immutable-main-tag>
+   ```
+6. **Switch production ingress to apex**:
+   ```bash
+   just dspace-oci-deploy env=prod tag=v3-<immutable-main-tag>
+   ```
+7. **Cloudflare cutover**:
+   - Keep `democratized.space` pointing to the production Traefik route.
+   - Convert `prod.democratized.space` to a simple redirect to `https://democratized.space`.
+
 For emergency mutable-tag refreshes where you need to force pod recycle on `v3-latest`, keep using
-`just dspace-oci-redeploy env=staging` (or `env=prod tag=...`).
+`just dspace-oci-redeploy env=staging` (or `env=prod-preview|prod tag=...`).
 
 ## Networking via Cloudflare Tunnel
 
-This guide assumes you expose the cluster through a persistent Cloudflare Tunnel. The expected
-public hostname is `https://staging.democratized.space`.
+This guide assumes you expose the cluster through a persistent Cloudflare Tunnel. Expected public
+hostnames:
+
+- staging: `https://staging.democratized.space`
+- prod preview: `https://prod.democratized.space`
+- prod apex: `https://democratized.space`
 
 For detailed instructions on creating the Cloudflare Tunnel and DNS records, see:
 ../cloudflare_tunnel.md
