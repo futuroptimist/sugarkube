@@ -13,13 +13,15 @@ development values:
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
 - `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
   `staging.democratized.space`.
+- `docs/examples/dspace.values.prod-canary.yaml`: production-cluster canary host and class targeting
+  `prod.democratized.space` for cutover smoke tests.
 - `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
   `democratized.space`.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
-configured accordingly. For production, use the prod values file and your production hostname
-(defaults to `democratized.space` in this repo).
+configured accordingly. For production, use `prod-canary` first (`prod.democratized.space`) during
+cutover validation, then switch to the apex `democratized.space` values file.
 
 ## Prerequisites
 
@@ -60,6 +62,9 @@ read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod
 # Immutable-tag production deploy (pinned tag from docs/apps/dspace.prod.tag):
 just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 
+# Immutable-tag production canary deploy (prod cluster, prod. subdomain):
+just dspace-oci-deploy env=prod-canary tag="$(read_prod_tag)"
+
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
 
@@ -95,6 +100,33 @@ just helm-oci-upgrade \
 - `dspace-oci-deploy` always requires an explicit immutable tag (rejects mutable forms such as
   `latest` and `main`), calls `helm-oci-install` so first-time deploys work, and waits for
   `kubectl rollout status` before returning.
+- `env=prod-canary` is an explicit rollout stage that uses
+  `docs/examples/dspace.values.prod-canary.yaml` and the `prod.democratized.space` host.
+
+## DSPACE v3 rollout plan (staging → prod canary → apex)
+
+This matches the production plan documented in the dspace `v3` branch and the Sugarkube rollout
+sequence:
+
+1. Keep `sugarkube3..5` serving `staging.democratized.space`.
+2. Stand up `sugarkube0..2` as the production cluster (`env=prod`).
+3. Deploy dspace v3 from the dspace `v3` branch to the production canary host:
+
+   ```bash
+   read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+   just dspace-oci-deploy env=prod-canary tag="$(read_prod_tag)"
+   ```
+
+4. Run smoke tests against `https://prod.democratized.space`.
+5. Merge dspace `v3` into `main`, publish an immutable `main-*` or semver tag, and deploy that
+   same immutable tag to `env=prod-canary`.
+6. Move the production apex host by deploying with `env=prod`:
+
+   ```bash
+   just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+   ```
+
+7. In Cloudflare, convert `prod.democratized.space` to a redirect once apex traffic is stable.
 
 ## First deployment walkthrough
 
@@ -148,7 +180,7 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
    ```
 
 For emergency mutable-tag refreshes where you need to force pod recycle on `v3-latest`, keep using
-`just dspace-oci-redeploy env=staging` (or `env=prod tag=...`).
+`just dspace-oci-redeploy env=staging` (or `env=prod-canary tag=...` / `env=prod tag=...`).
 
 ## Networking via Cloudflare Tunnel
 
@@ -161,7 +193,7 @@ For detailed instructions on creating the Cloudflare Tunnel and DNS records, see
 ## Troubleshooting
 
 - Retrieve operator logs (staging/prod):
-  1. `just dspace-debug-logs-env env=<staging|prod>` first runs `just kubeconfig-env`
+  1. `just dspace-debug-logs-env env=<dev|staging|prod>` first runs `just kubeconfig-env`
      and rewrites `~/.kube/config` to the selected `sugar-<env>` context.
   2. Run the bundled log collector to fetch both app and ingress logs.
 

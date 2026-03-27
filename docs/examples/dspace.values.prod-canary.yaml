@@ -1,0 +1,8 @@
+# Example values for dspace v3 cutover validation on the production subdomain.
+# Use this before the apex host switch so rollout smoke tests run on prod.democratized.space.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: prod.democratized.space
