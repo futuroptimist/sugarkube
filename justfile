@@ -1240,6 +1240,75 @@ dspace-oci-deploy env='staging' tag='':
       echo "  curl -fsS https://${verify_host}/livez | jq ."
     fi
 
+# Deploy dspace v3 to the production preview subdomain (prod.democratized.space).
+# Use this before apex cutover to validate rollout and run smoke tests.
+dspace-oci-deploy-prod-subdomain tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    deploy_tag="$(echo "{{ tag }}" | xargs)"
+    if [ -z "${deploy_tag}" ]; then
+      echo "Set tag=<immutable-tag> (for example v3-<shortsha>) for prod subdomain deploys." >&2
+      exit 1
+    fi
+    tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${tag_lc}" == *"latest"* || "${tag_lc}" == "main" || "${tag_lc}" == *":main" ]]; then
+      echo "Refusing mutable tag '${deploy_tag}'. Use an immutable RC/stable image tag." >&2
+      exit 1
+    fi
+
+    values_chain="docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml"
+
+    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
+      scripts/ensure_user_kubeconfig.sh || true
+    fi
+    if [ -z "${KUBECONFIG:-}" ]; then
+      export KUBECONFIG="${HOME}/.kube/config"
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release='dspace' namespace='dspace' \
+      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
+      values="${values_chain}" \
+      version_file='docs/apps/dspace.version' \
+      tag="${deploy_tag}"
+
+    echo "Waiting for dspace rollout on prod subdomain to complete (timeout: 180s)..."
+    if ! kubectl -n dspace rollout status deploy/dspace --timeout=180s; then
+      echo "ERROR: dspace rollout on prod subdomain did not complete within 180s." >&2
+      echo "Check pod events: kubectl -n dspace describe pods" >&2
+      exit 1
+    fi
+
+    echo "Resolved deployment image(s):"
+    kubectl -n dspace get deploy dspace \
+      -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
+
+    echo
+    echo "Post-deploy verification commands for the production preview endpoint:"
+    echo "  curl -fsS https://prod.democratized.space/config.json | jq ."
+    echo "  curl -fsS https://prod.democratized.space/healthz | jq ."
+    echo "  curl -fsS https://prod.democratized.space/livez | jq ."
+
+# Promote dspace to production apex (democratized.space) using immutable tags.
+# If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
+dspace-oci-promote-prod tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
+
+    deploy_tag="$(echo "{{ tag }}" | xargs)"
+    if [ -z "${deploy_tag}" ]; then
+      deploy_tag="$(read_prod_tag)"
+    fi
+    if [ -z "${deploy_tag}" ]; then
+      echo "Set tag=<immutable-tag> or populate docs/apps/dspace.prod.tag." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${deploy_tag}"
+
 # Fast redeploy of dspace v3 from GHCR (emergency push).
 dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash

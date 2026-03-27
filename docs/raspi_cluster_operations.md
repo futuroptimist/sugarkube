@@ -602,6 +602,9 @@ companion application for your cluster.
 >
 > For the sugarkube-centric path, see:
 > https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
+>
+> For production rollout/cutover details, also see:
+> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-prod.md
 
 ### Why deploy dspace?
 

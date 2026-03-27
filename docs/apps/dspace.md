@@ -15,11 +15,15 @@ development values:
   `staging.democratized.space`.
 - `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
   `democratized.space`.
+- `docs/examples/dspace.values.prod-subdomain.yaml`: production-preview ingress host and class
+  targeting `prod.democratized.space` for pre-cutover smoke tests.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
-configured accordingly. For production, use the prod values file and your production hostname
-(defaults to `democratized.space` in this repo).
+configured accordingly. For production, this repo supports both:
+
+- `prod.democratized.space` (preview/canary endpoint during rollout); and
+- `democratized.space` (apex cutover target).
 
 ## Prerequisites
 
@@ -55,10 +59,16 @@ charts:
 # Immutable-tag staging deploy (recommended for RC/stable validation):
 just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
+# Immutable-tag production preview deploy (prod subdomain canary):
+just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
+
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
 # Immutable-tag production deploy (pinned tag from docs/apps/dspace.prod.tag):
 just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+
+# Alias helper for apex promotion (same effect as the env=prod command above):
+just dspace-oci-promote-prod tag="$(read_prod_tag)"
 
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
@@ -82,6 +92,13 @@ just helm-oci-upgrade \
 just helm-oci-upgrade \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
+  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml \
+  version_file=docs/apps/dspace.version \
+  tag=v3-<immutable-tag>
+
+just helm-oci-upgrade \
+  release=dspace namespace=dspace \
+  chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
   version_file=docs/apps/dspace.version \
   tag=v3-<immutable-tag>
@@ -90,7 +107,7 @@ just helm-oci-upgrade \
 - `version_file` defaults the Helm chart to the latest tested v3 release stored alongside this
   guide. You can override with `version=<semver>` when pinning a specific chart.
 - The image tag defaults to `default_tag` (`v3-latest`) for dev/staging in the generic helpers.
-  Production deployments should use pinned tags (for example, the value in
+  Production and production-preview deployments should use pinned tags (for example, the value in
   `docs/apps/dspace.prod.tag` or a `v3-<immutable>` build).
 - `dspace-oci-deploy` always requires an explicit immutable tag (rejects mutable forms such as
   `latest` and `main`), calls `helm-oci-install` so first-time deploys work, and waits for
@@ -150,10 +167,53 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 For emergency mutable-tag refreshes where you need to force pod recycle on `v3-latest`, keep using
 `just dspace-oci-redeploy env=staging` (or `env=prod tag=...`).
 
+## Production rollout runbook (v3 cutover)
+
+Use this sequence when promoting dspace v3 from staging to production:
+
+1. Ensure production control-plane nodes (`sugarkube0`, `sugarkube1`, `sugarkube2`) are online and
+   healthy:
+
+   ```bash
+   just kubeconfig-env env=prod
+   kubectl get nodes -o wide
+   ```
+
+2. Deploy the v3 build from the `v3` branch to the production preview hostname:
+
+   ```bash
+   just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag-from-v3-branch>
+   ```
+
+3. Run smoke tests against `https://prod.democratized.space`:
+
+   ```bash
+   curl -fsS https://prod.democratized.space/config.json | jq .
+   curl -fsS https://prod.democratized.space/healthz | jq .
+   curl -fsS https://prod.democratized.space/livez | jq .
+   ```
+
+4. Merge dspace `v3` into `main`, build/publish the promoted immutable tag, and redeploy to the
+   same production preview hostname:
+
+   ```bash
+   just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag-from-main>
+   ```
+
+5. Promote to production apex after smoke tests pass:
+
+   ```bash
+   just dspace-oci-promote-prod tag=v3-<immutable-tag-from-main>
+   ```
+
+6. Update Cloudflare so `prod.democratized.space` becomes a simple redirect to
+   `https://democratized.space` once apex is serving v3 successfully.
+
 ## Networking via Cloudflare Tunnel
 
 This guide assumes you expose the cluster through a persistent Cloudflare Tunnel. The expected
-public hostname is `https://staging.democratized.space`.
+public hostname is typically `https://staging.democratized.space` (staging),
+`https://prod.democratized.space` (production preview), or `https://democratized.space` (apex).
 
 For detailed instructions on creating the Cloudflare Tunnel and DNS records, see:
 ../cloudflare_tunnel.md
