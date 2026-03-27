@@ -1153,7 +1153,7 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
 # Opinionated immutable-tag dspace deploy with rollout verification.
 
 # Use this for RC/stable validation flows where explicit image pinning matters.
-dspace-oci-deploy env='staging' tag='':
+dspace-oci-deploy env='staging' tag='' host='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1182,6 +1182,7 @@ dspace-oci-deploy env='staging' tag='':
       echo "Refusing mutable tag '${deploy_tag}'. Use an immutable RC/stable image tag." >&2
       exit 1
     fi
+    deploy_host="$(echo "{{ host }}" | xargs)"
 
     overlay=""
     if [ "${env_name}" != "dev" ]; then
@@ -1208,6 +1209,7 @@ dspace-oci-deploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
+      host="${deploy_host}" \
       version_file='docs/apps/dspace.version' \
       tag="${deploy_tag}"
 
@@ -1241,7 +1243,7 @@ dspace-oci-deploy env='staging' tag='':
     fi
 
 # Fast redeploy of dspace v3 from GHCR (emergency push).
-dspace-oci-redeploy env='staging' tag='':
+dspace-oci-redeploy env='staging' tag='' host='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1265,6 +1267,7 @@ dspace-oci-redeploy env='staging' tag='':
     fi
 
     deploy_tag="{{ tag }}"
+    deploy_host="$(echo "{{ host }}" | xargs)"
     default_tag_value=""
     if [ "${env_name}" = "prod" ]; then
       if [ -z "${deploy_tag}" ] && [ -f "docs/apps/dspace.prod.tag" ]; then
@@ -1282,6 +1285,7 @@ dspace-oci-redeploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
+      host="${deploy_host}" \
       version_file='docs/apps/dspace.version' \
       tag="${deploy_tag}" default_tag="${default_tag_value}"
 

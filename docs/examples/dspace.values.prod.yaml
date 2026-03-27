@@ -5,4 +5,6 @@ environment: prod
 ingress:
   enabled: true
   className: traefik
-  host: democratized.space
+  # Keep production deploys on a prod subdomain until final apex cutover.
+  # Override with host=democratized.space in just commands during cutover.
+  host: prod.democratized.space
