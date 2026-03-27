@@ -1,4 +1,4 @@
-# Cloudflare Tunnel (cloudflared) for staging
+# Cloudflare Tunnel (cloudflared) for dspace staging + production cutover
 
 We use **Cloudflare Tunnel** to expose the k3s/Sugarkube cluster to the internet without opening
 inbound firewall ports. The canonical staging hostname for dspace is
@@ -7,9 +7,9 @@ inbound firewall ports. The canonical staging hostname for dspace is
 https://staging.democratized.space
 ```
 
-The tunnel routes this hostname to Traefik (or another ingress controller) running inside the k3s
-cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector runs
-inside the cluster.
+The tunnel routes this hostname (and production hosts during cutover) to Traefik running inside the
+k3s cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector
+runs inside the cluster.
 
 > Cloudflare has two big modes for tunnels: **remotely-managed** (token-only, created in the
 > dashboard) and **locally-managed** (requires `cloudflared login` and a `cert.pem`). Sugarkube uses
@@ -24,6 +24,9 @@ inside the cluster.
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure a Public hostname routing `staging.democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
+- During v3 production rollout, also configure:
+  - `prod.democratized.space` → `http://traefik.kube-system.svc.cluster.local:80` (canary)
+  - `democratized.space` → `http://traefik.kube-system.svc.cluster.local:80` (apex cutover)
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
 ## Prerequisites

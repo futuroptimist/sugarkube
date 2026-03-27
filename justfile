@@ -1165,9 +1165,9 @@ dspace-oci-deploy env='staging' tag='':
     fi
 
     case "${env_name}" in
-      dev|staging|prod) ;;
+      dev|staging|prod|prod-canary) ;;
       *)
-        echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2
+        echo "Unsupported env=${env_name}. Use env=dev|staging|prod|prod-canary." >&2
         exit 1
         ;;
     esac
@@ -1184,12 +1184,20 @@ dspace-oci-deploy env='staging' tag='':
     fi
 
     overlay=""
-    if [ "${env_name}" != "dev" ]; then
-      overlay="docs/examples/dspace.values.${env_name}.yaml"
-      if [ ! -f "${overlay}" ]; then
-        echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
-        exit 1
-      fi
+    case "${env_name}" in
+      dev)
+        overlay=""
+        ;;
+      prod-canary)
+        overlay="docs/examples/dspace.values.prod-canary.yaml"
+        ;;
+      *)
+        overlay="docs/examples/dspace.values.${env_name}.yaml"
+        ;;
+    esac
+    if [ -n "${overlay}" ] && [ ! -f "${overlay}" ]; then
+      echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
+      exit 1
     fi
 
     values_chain="docs/examples/dspace.values.dev.yaml"
@@ -1252,9 +1260,20 @@ dspace-oci-redeploy env='staging' tag='':
       env_name="staging"
     fi
 
+    case "${env_name}" in
+      dev|staging|prod|prod-canary) ;;
+      *)
+        echo "Unsupported env=${env_name}. Use env=dev|staging|prod|prod-canary." >&2
+        exit 1
+        ;;
+    esac
+
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     overlay="docs/examples/dspace.values.${env_name}.yaml"
+    if [ "${env_name}" = "prod-canary" ]; then
+      overlay="docs/examples/dspace.values.prod-canary.yaml"
+    fi
     if [ ! -f "${overlay}" ]; then
       echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
       exit 1
@@ -1266,7 +1285,7 @@ dspace-oci-redeploy env='staging' tag='':
 
     deploy_tag="{{ tag }}"
     default_tag_value=""
-    if [ "${env_name}" = "prod" ]; then
+    if [ "${env_name}" = "prod" ] || [ "${env_name}" = "prod-canary" ]; then
       if [ -z "${deploy_tag}" ] && [ -f "docs/apps/dspace.prod.tag" ]; then
         deploy_tag="$(read_prod_tag)"
       fi
