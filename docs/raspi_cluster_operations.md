@@ -602,7 +602,7 @@ companion application for your cluster.
 >
 > For the sugarkube-centric path, see:
 > https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
-
+>
 ### Why deploy dspace?
 
 dspace provides complementary functionality to token.place and demonstrates how to

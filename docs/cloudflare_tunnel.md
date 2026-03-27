@@ -1,15 +1,17 @@
-# Cloudflare Tunnel (cloudflared) for staging
+# Cloudflare Tunnel (cloudflared) for dspace staging + production rollout
 
 We use **Cloudflare Tunnel** to expose the k3s/Sugarkube cluster to the internet without opening
-inbound firewall ports. The canonical staging hostname for dspace is
+inbound firewall ports. Canonical dspace hostnames are:
 
 ```
 https://staging.democratized.space
+https://prod.democratized.space
+https://democratized.space
 ```
 
-The tunnel routes this hostname to Traefik (or another ingress controller) running inside the k3s
-cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector runs
-inside the cluster.
+The tunnel routes these hostnames to Traefik (or another ingress controller) running inside the
+k3s cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector
+runs inside the cluster.
 
 > Cloudflare has two big modes for tunnels: **remotely-managed** (token-only, created in the
 > dashboard) and **locally-managed** (requires `cloudflared login` and a `cert.pem`). Sugarkube uses
@@ -22,7 +24,8 @@ inside the cluster.
 - Copy the tunnel token (`eyJ...`) from the **Install and run a connector** panel.
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
-- In the tunnel UI, configure a Public hostname routing `staging.democratized.space` →
+- In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
+  `prod.democratized.space`, and `democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
@@ -31,7 +34,8 @@ inside the cluster.
 - A Cloudflare account.
 - A domain added as an active zone in Cloudflare and using Cloudflare nameservers (for example,
   `democratized.space`).
-- `staging.democratized.space` (or your staging hostname) is already managed by Cloudflare DNS.
+- `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` (or your
+  preferred rollout hostnames) are managed by Cloudflare DNS.
 - Access to the Cloudflare Zero Trust / Cloudflare One dashboard.
 - A running k3s cluster with Sugarkube and Traefik installed (see the main Sugarkube docs for the
   setup steps).
@@ -239,7 +243,8 @@ To fix:
   flow, then update the token in your cluster.
 
 Once `cloudflared` runs with the correct token, Cloudflare links the named tunnel to the cluster so
-requests to `staging.democratized.space` reach Traefik.
+requests to your mapped hostnames (for example `staging.democratized.space`,
+`prod.democratized.space`, and `democratized.space`) reach Traefik.
 
 ### Recovery and reset
 
@@ -270,34 +275,35 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
-## Step 3 – Publish the staging application (route to Traefik)
+## Step 3 – Publish application routes (staging + prod preview + apex)
 
-Now that the connector is running in the cluster, configure the route from your staging hostname to
-the internal Traefik Service.
+Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
+internal Traefik Service.
 
 1. In the tunnel configuration, open the **Public hostnames**, **Application routes**, or
    **Published applications** section.
-2. Add a new route/application:
+2. Add routes/applications:
    - **Hostname**: `staging.democratized.space`
+   - **Hostname**: `prod.democratized.space`
+   - **Hostname**: `democratized.space`
    - **Service type**: `HTTP`
    - **Service URL**: `http://traefik.<namespace>.svc.cluster.local:80`
 
-   Replace `<namespace>` with the namespace used by Traefik (commonly `kube-system`) or your chosen
-   ingress controller inside the k3s cluster.
-3. Save the route. This sends HTTPS traffic for `staging.democratized.space` through the tunnel into
-   the Traefik ClusterIP service in your k3s cluster.
+   Replace `<namespace>` with the namespace used by your ingress controller inside the k3s cluster.
+3. Save the routes. This sends HTTPS traffic for each hostname through the tunnel into the Traefik
+   ClusterIP service in your k3s cluster.
 
 See Cloudflare’s docs for the latest UI steps:
 [Publish an application through Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/#publish-an-application).
 
-## Step 4 – Verify / create DNS record for the staging subdomain
+## Step 4 – Verify / create DNS records for rollout hostnames
 
-The `staging.democratized.space` hostname is already managed by Cloudflare DNS. When you publish a
-hostname through the tunnel UI, Cloudflare **usually** creates a proxied CNAME automatically that
-points `staging.democratized.space` to your tunnel’s `*.cfargotunnel.com` address.
+The `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` hostnames are
+managed by Cloudflare DNS. When you publish hostnames through the tunnel UI, Cloudflare **usually**
+creates proxied CNAMEs automatically that point each hostname to your tunnel’s
+`*.cfargotunnel.com` address.
 
-If you see a DNS record for `staging.democratized.space` pointing at `<UUID>.cfargotunnel.com`,
-you’re done.
+If you see DNS records for the rollout hostnames pointing at `<UUID>.cfargotunnel.com`, you’re done.
 
 ### Manual creation (fallback)
 
@@ -305,12 +311,21 @@ Only create this manually if the CNAME is missing:
 
 1. Go to **Cloudflare dashboard → DNS → Records** for `democratized.space`.
 2. Click **Add record**.
-3. Configure the record:
+3. Configure records as needed:
    - **Type**: `CNAME`
-   - **Name**: `staging`
+   - **Name**: `staging`, `prod`, or `@` (for apex)
    - **Target**: `<UUID>.cfargotunnel.com` (the tunnel hostname shown in the dashboard)
    - **Proxy status**: **Proxied** (orange cloud)
 4. Save the record.
+
+## Step 5 – Post-cutover redirect for `prod.` (optional finalization)
+
+After dspace v3 is fully promoted on `democratized.space`, convert `prod.democratized.space` to a
+simple redirect (Cloudflare Redirect Rule or Page Rule) to avoid maintaining duplicate origins:
+
+- **Source**: `https://prod.democratized.space/*`
+- **Target**: `https://democratized.space/$1`
+- **Status code**: `301` (permanent) once confident, or `302` during transition.
 
 Helpful references:
 [Create a DNS record for the tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/dns/)
@@ -328,8 +343,10 @@ for temporary local development. See
 
 - A named Cloudflare Tunnel exists (for example, `dspace-staging-v3`) with a saved token.
 - `cloudflared` runs inside the k3s cluster via `just cf-tunnel-install` using that token.
-- A route maps `staging.democratized.space` to
+- Routes map `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` to
   `http://traefik.<namespace>.svc.cluster.local:80` inside the cluster.
-- Cloudflare DNS has (or auto-created) a proxied CNAME pointing `staging.democratized.space` to the
-  tunnel’s `*.cfargotunnel.com` name.
+- Cloudflare DNS has (or auto-created) proxied records pointing rollout hostnames to the tunnel’s
+  `*.cfargotunnel.com` name.
+- After apex cutover, `prod.democratized.space` can be converted to a redirect to
+  `https://democratized.space`.
 - The Sugarkube dspace app expects this persistent tunnel setup to be in place.

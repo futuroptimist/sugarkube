@@ -1,0 +1,8 @@
+# Example values for deploying democratized.space v3 to the production preview subdomain.
+# Use this during rollout validation before apex cutover.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: prod.democratized.space
