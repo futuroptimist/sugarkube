@@ -1241,6 +1241,7 @@ dspace-oci-deploy env='staging' tag='':
     fi
 
 # Deploy dspace v3 to the production preview subdomain (prod.democratized.space).
+
 # Use this before apex cutover to validate rollout and run smoke tests.
 dspace-oci-deploy-prod-subdomain tag='':
     #!/usr/bin/env bash
@@ -1295,6 +1296,7 @@ dspace-oci-deploy-prod-subdomain tag='':
     echo "  curl -fsS https://prod.democratized.space/livez | jq ."
 
 # Promote dspace to production apex (democratized.space) using immutable tags.
+
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
 dspace-oci-promote-prod tag='':
     #!/usr/bin/env bash
