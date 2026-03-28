@@ -676,7 +676,7 @@ serving ingress, and the dspace OCI chart is already published to GHCR. The goal
 roll pods quickly without extra ceremony—Kubernetes handles the rolling update using the
 deployment's defaults.
 
-**Quick redeploy for dspace v3 (OCI chart, generic helper):**
+**Quick redeploy for dspace v3 (generic helper for staging, dspace helpers for production):**
 
 Pick the values overlay for your target environment and prefer immutable image tags for production:
 
@@ -695,14 +695,18 @@ just helm-oci-upgrade \
   default_tag=v3-latest
 ```
 
-For production preview (Phase A), use the prod-subdomain overlay and pin to an immutable tag:
+For production preview (Phase A), this guide intentionally switches from the generic
+`helm-oci-upgrade` example to the dspace-specific helper so rollout verification and
+post-deploy checks are included by default:
 
 ```bash
 just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
 ```
 
-For production apex promotion (Phase B), use the prod overlay with a pinned tag (for example the
-value stored in `docs/apps/dspace.prod.tag`):
+For production apex promotion (Phase B), use `dspace-oci-promote-prod` with a pinned tag (for example the
+value stored in `docs/apps/dspace.prod.tag`). This helper wraps `dspace-oci-deploy env=prod`, which keeps
+the same values chain as the generic path (`docs/examples/dspace.values.dev.yaml` +
+`docs/examples/dspace.values.prod.yaml`) while adding rollout/status checks:
 
 ```bash
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }

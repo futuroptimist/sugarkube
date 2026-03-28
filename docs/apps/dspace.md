@@ -147,6 +147,8 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 4. Install the app:
 
    ```bash
+   # Choose the command that matches your target environment:
+   # Staging:
    just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
    # Production preview (Phase A) example using prod.democratized.space:
