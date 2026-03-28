@@ -25,6 +25,9 @@ Safe two-phase production rollout mapping:
 - **Phase B (apex promotion):** `just dspace-oci-promote-prod tag=v3-<immutable-tag>`
   (uses `docs/examples/dspace.values.prod.yaml` via `dspace-oci-deploy env=prod`).
 
+For safety, do not use `docs/examples/dspace.values.prod.yaml` for Phase A preview deploys and
+do not manually edit values files to switch hosts.
+
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
 configured accordingly. For production, this repo supports both:

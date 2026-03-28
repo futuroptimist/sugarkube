@@ -685,6 +685,9 @@ Pick the values overlay for your target environment and prefer immutable image t
   `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml`
 - Production apex (Phase B): `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
 
+Do not use `docs/examples/dspace.values.prod-subdomain.yaml` for Phase B apex promotion; keep that
+overlay only for Phase A preview deploys at `prod.democratized.space`.
+
 ```bash
 # From the sugarkube repo root on a cluster node (staging):
 just helm-oci-upgrade \
