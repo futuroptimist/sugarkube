@@ -1295,6 +1295,10 @@ dspace-oci-deploy-prod-subdomain tag='':
     echo "  curl -fsS https://prod.democratized.space/healthz | jq ."
     echo "  curl -fsS https://prod.democratized.space/livez | jq ."
 
+# Alias for production preview deploys on prod.democratized.space.
+dspace-oci-deploy-prod-preview tag='':
+    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy-prod-subdomain tag='{{ tag }}'
+
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
