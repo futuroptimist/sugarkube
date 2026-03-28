@@ -7,16 +7,26 @@ The `justfile` exposes both:
 - a dspace-specific immutable deploy helper (`dspace-oci-deploy`) for RC/stable validation with
   rollout status and post-deploy checks.
 
-Values files are split so you can layer staging-specific ingress settings on top of the default
-development values:
+Values files are split so you can layer environment-specific ingress settings on top of the
+default development values:
 
 - `docs/examples/dspace.values.dev.yaml`: shared defaults for local/dev environments.
 - `docs/examples/dspace.values.staging.yaml`: staging-only ingress host and class targeting
   `staging.democratized.space`.
-- `docs/examples/dspace.values.prod.yaml`: production ingress host and class targeting
-  `democratized.space`.
-- `docs/examples/dspace.values.prod-subdomain.yaml`: production-preview ingress host and class
+- `docs/examples/dspace.values.prod-subdomain.yaml`: **Phase A production-preview** host and class
   targeting `prod.democratized.space` for pre-cutover smoke tests.
+- `docs/examples/dspace.values.prod.yaml`: **Phase B production apex** host and class targeting
+  `democratized.space`.
+
+Safe two-phase production rollout mapping:
+
+- **Phase A (preview/canary):** `just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>`
+  (uses `docs/examples/dspace.values.prod-subdomain.yaml`).
+- **Phase B (apex promotion):** `just dspace-oci-promote-prod tag=v3-<immutable-tag>`
+  (uses `docs/examples/dspace.values.prod.yaml` via `dspace-oci-deploy env=prod`).
+
+For safety, do not use `docs/examples/dspace.values.prod.yaml` for Phase A preview deploys and
+do not manually edit values files to switch hosts.
 
 The public staging environment for dspace defaults to the `staging.democratized.space`
 hostname. You can substitute a different hostname if your Cloudflare Tunnel and DNS are
@@ -140,11 +150,16 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
 4. Install the app:
 
    ```bash
+   # Choose the command that matches your target environment:
+   # Staging:
    just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
-   # Production example (pinned tag)
+   # Production preview (Phase A) example using prod.democratized.space:
+   just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
+
+   # Production apex (Phase B) example using democratized.space:
    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-   just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+   just dspace-oci-promote-prod tag="$(read_prod_tag)"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
