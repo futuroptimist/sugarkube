@@ -59,16 +59,16 @@ charts:
 # Immutable-tag staging deploy (recommended for RC/stable validation):
 just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
-# Immutable-tag production preview deploy (prod subdomain canary):
+# Phase A: immutable-tag production preview deploy (prod subdomain canary):
 just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
-# Immutable-tag production deploy (pinned tag from docs/apps/dspace.prod.tag):
-just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
-
-# Alias helper for apex promotion (same effect as the env=prod command above):
+# Phase B: immutable-tag apex promotion (democratized.space) using the pinned production tag:
 just dspace-oci-promote-prod tag="$(read_prod_tag)"
+
+# Equivalent explicit apex command (same effect as the helper above):
+just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
@@ -142,9 +142,14 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
    ```bash
    just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
-   # Production example (pinned tag)
+   # Production rollout examples (pinned tag)
    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-   just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+
+   # Phase A preview endpoint
+   just dspace-oci-deploy-prod-subdomain tag="$(read_prod_tag)"
+
+   # Phase B apex promotion
+   just dspace-oci-promote-prod tag="$(read_prod_tag)"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
