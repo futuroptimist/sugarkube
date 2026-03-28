@@ -64,11 +64,11 @@ just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
-# Immutable-tag production deploy (pinned tag from docs/apps/dspace.prod.tag):
-just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
-
-# Alias helper for apex promotion (same effect as the env=prod command above):
+# Immutable-tag production apex promotion (Phase B):
 just dspace-oci-promote-prod tag="$(read_prod_tag)"
+
+# Equivalent explicit apex command (same as dspace-oci-promote-prod):
+just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
@@ -142,9 +142,12 @@ assumes your target cluster (for example `env=staging`) is online and reachable 
    ```bash
    just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
-   # Production example (pinned tag)
+   # Production rollout Phase A (preview subdomain first)
+   just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
+
+   # Production rollout Phase B (apex promotion after Phase A smoke tests)
    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-   just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+   just dspace-oci-promote-prod tag="$(read_prod_tag)"
    ```
 
 5. Verify everything is healthy, then browse to the FQDN on your phone or laptop:
@@ -171,7 +174,7 @@ For emergency mutable-tag refreshes where you need to force pod recycle on `v3-l
 
 Use this sequence when promoting dspace v3 from staging to production:
 
-1. Deploy the immutable v3 build tag from the `v3` branch to
+1. **Phase A (preview):** Deploy the immutable v3 build tag from the `v3` branch to
    `https://prod.democratized.space`:
 
    ```bash
@@ -194,7 +197,8 @@ Use this sequence when promoting dspace v3 from staging to production:
    just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag-from-main>
    ```
 
-5. Promote to production apex after smoke tests pass:
+5. **Phase B (apex promotion):** Promote to `https://democratized.space` after
+   smoke tests pass:
 
    ```bash
    just dspace-oci-promote-prod tag=v3-<immutable-tag-from-main>
