@@ -681,7 +681,9 @@ deployment's defaults.
 Pick the values overlay for your target environment and prefer immutable image tags for production:
 
 - Staging: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`
-- Production: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
+- Production preview (Phase A):
+  `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml`
+- Production apex (Phase B): `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
 
 ```bash
 # From the sugarkube repo root on a cluster node (staging):
@@ -730,14 +732,19 @@ and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycl
 when `v3-latest` is republished with the same tag. The helper waits for the rollout to
 finish and exits non-zero if Kubernetes reports a failure.
 
-For immutable RC/stable validation (recommended for staging and prod), use the dedicated
-helper instead:
+For immutable RC/stable validation (recommended for staging and production rollout), use the
+dedicated helpers instead:
 
 ```bash
 just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
+
+# Phase A: production preview
+just dspace-oci-deploy-prod-subdomain tag="$(read_prod_tag)"
+
+# Phase B: production apex
+just dspace-oci-promote-prod tag="$(read_prod_tag)"
 ```
 
 `dspace-oci-deploy` intentionally keeps the same values chain as the generic path
