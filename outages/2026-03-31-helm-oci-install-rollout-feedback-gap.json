@@ -1,0 +1,12 @@
+{
+  "id": "2026-03-31-helm-oci-install-rollout-feedback-gap",
+  "date": "2026-03-31",
+  "component": "helm-oci-install / _helm-oci-deploy",
+  "rootCause": "The generic OCI helper stopped after invoking Helm and never observed Kubernetes rollout progress, so operators did not receive blocking feedback that workloads had actually restarted and become ready.",
+  "resolution": "Added rollout-status tracking after Helm operations by discovering Deployments/StatefulSets/DaemonSets for the release label and waiting on each workload before returning; added a regression test that simulates an OCI deploy with a fake registry chart URL and stubbed kubectl rollout responses.",
+  "references": [
+    "justfile",
+    "tests/test_helm_oci_install_rollout_feedback.py",
+    "just helm-oci-install release=demo namespace=demo chart=oci://registry.test.local:5000/charts/demo values=docs/examples/dspace.values.dev.yaml version=1.2.3 default_tag=v3-latest"
+  ]
+}
