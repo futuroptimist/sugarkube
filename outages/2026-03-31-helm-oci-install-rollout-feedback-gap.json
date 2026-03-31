@@ -3,7 +3,7 @@
   "date": "2026-03-31",
   "component": "helm-oci-install",
   "rootCause": "The shared _helm-oci-deploy helper stopped after helm upgrade/install and did not run kubectl rollout status checks, so operators had no live progress output and could not confidently know when workload rollout finished.",
-  "resolution": "Added rollout-status verification and progress logging to _helm-oci-deploy (deploy/statefulset/daemonset targets by Helm release label with deploy-name fallback), plus regression coverage using a fake OCI registry fixture and stubbed helm/kubectl commands.",
+  "resolution": "Added rollout-status verification and progress logging to _helm-oci-deploy with workload discovery fallbacks (app.kubernetes.io/instance=<release>, then release=<release>, then deploy-name), plus regression coverage using a fake OCI registry fixture and stubbed helm/kubectl commands.",
   "references": [
     "justfile",
     "scripts/test-helm-oci-install.sh",

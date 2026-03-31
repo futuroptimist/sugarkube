@@ -1133,7 +1133,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             kubectl -n "${namespace}" get deploy,statefulset,daemonset \
                 -l "app.kubernetes.io/instance=${release}" -o name 2>&1
         )"; then
-            echo "ERROR: failed to query rollout workloads for release '${release}' in namespace '${namespace}':" >&2
+            echo "ERROR: failed to query rollout workloads for release '${release}' in namespace '${namespace}' via label app.kubernetes.io/instance=${release}:" >&2
             echo "       ${kubectl_output}" >&2
             return 1
         fi
@@ -1141,6 +1141,21 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         local -a rollout_targets=()
         if [ -n "${kubectl_output}" ]; then
             mapfile -t rollout_targets <<< "${kubectl_output}"
+        fi
+
+        if [ ${#rollout_targets[@]} -eq 0 ]; then
+            if ! kubectl_output="$(
+                kubectl -n "${namespace}" get deploy,statefulset,daemonset \
+                    -l "release=${release}" -o name 2>&1
+            )"; then
+                echo "ERROR: failed to query rollout workloads for release '${release}' in namespace '${namespace}' via label release=${release}:" >&2
+                echo "       ${kubectl_output}" >&2
+                return 1
+            fi
+
+            if [ -n "${kubectl_output}" ]; then
+                mapfile -t rollout_targets <<< "${kubectl_output}"
+            fi
         fi
 
         if [ ${#rollout_targets[@]} -eq 0 ]; then

@@ -76,7 +76,11 @@ set -euo pipefail
 
 echo "kubectl $*" >> "${KUBECTL_TEST_LOG:-/dev/null}"
 
-if [ "$1" = "-n" ] && [ "$2" = "dspace" ] && [ "$3" = "get" ] && [ "$4" = "deploy,statefulset,daemonset" ]; then
+if [ "$1" = "-n" ] && [ "$2" = "dspace" ] && [ "$3" = "get" ] && [ "$4" = "deploy,statefulset,daemonset" ] && [ "$5" = "-l" ] && [ "$6" = "app.kubernetes.io/instance=dspace" ]; then
+    exit 0
+fi
+
+if [ "$1" = "-n" ] && [ "$2" = "dspace" ] && [ "$3" = "get" ] && [ "$4" = "deploy,statefulset,daemonset" ] && [ "$5" = "-l" ] && [ "$6" = "release=dspace" ]; then
     echo "deployment.apps/dspace"
     exit 0
 fi
@@ -127,6 +131,16 @@ fi
 
 if ! grep -q "Waiting for rollout completion" <<<"${command_output}"; then
     printf 'Expected rollout wait feedback missing.\nOutput:\n%s\n' "${command_output}" >&2
+    exit 1
+fi
+
+if ! grep -q "get deploy,statefulset,daemonset -l app.kubernetes.io/instance=dspace" "${kubectl_log}"; then
+    printf 'Expected app.kubernetes.io/instance selector missing from kubectl calls.\nLog:\n%s\n' "$(cat "${kubectl_log}" 2>/dev/null || true)" >&2
+    exit 1
+fi
+
+if ! grep -q "get deploy,statefulset,daemonset -l release=dspace" "${kubectl_log}"; then
+    printf 'Expected release= selector fallback missing from kubectl calls.\nLog:\n%s\n' "$(cat "${kubectl_log}" 2>/dev/null || true)" >&2
     exit 1
 fi
 
