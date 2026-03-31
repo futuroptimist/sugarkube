@@ -1120,6 +1120,42 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
+    wait_for_rollouts() {
+        local rollout_timeout="${SUGARKUBE_HELM_ROLLOUT_TIMEOUT:-180s}"
+
+        if ! command -v kubectl >/dev/null 2>&1; then
+            echo "WARNING: kubectl is not installed; skipping rollout-status feedback." >&2
+            return 0
+        fi
+
+        local -a rollout_targets=()
+        mapfile -t rollout_targets < <(
+            kubectl -n "${namespace}" get deploy,statefulset,daemonset \
+                -l "app.kubernetes.io/instance=${release}" -o name 2>/dev/null || true
+        )
+
+        if [ ${#rollout_targets[@]} -eq 0 ]; then
+            if kubectl -n "${namespace}" get deploy "${release}" >/dev/null 2>&1; then
+                rollout_targets=("deploy/${release}")
+            fi
+        fi
+
+        if [ ${#rollout_targets[@]} -eq 0 ]; then
+            echo "No rollout-tracked workloads found for release '${release}' in namespace '${namespace}'."
+            return 0
+        fi
+
+        echo "Waiting for rollout completion (timeout: ${rollout_timeout})..."
+        local target
+        for target in "${rollout_targets[@]}"; do
+            echo "  -> ${target}"
+            if ! kubectl -n "${namespace}" rollout status "${target}" --timeout="${rollout_timeout}"; then
+                echo "ERROR: rollout did not complete for ${target}." >&2
+                return 1
+            fi
+        done
+    }
+
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
     if [ "${allow_install}" = "true" ]; then
@@ -1143,6 +1179,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
 
     helm "${helm_args[@]}"
+    wait_for_rollouts
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'
