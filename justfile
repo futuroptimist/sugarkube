@@ -1128,11 +1128,20 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             return 0
         fi
 
-        local -a rollout_targets=()
-        mapfile -t rollout_targets < <(
+        local kubectl_output=""
+        if ! kubectl_output="$(
             kubectl -n "${namespace}" get deploy,statefulset,daemonset \
-                -l "app.kubernetes.io/instance=${release}" -o name 2>/dev/null || true
-        )
+                -l "app.kubernetes.io/instance=${release}" -o name 2>&1
+        )"; then
+            echo "ERROR: failed to query rollout workloads for release '${release}' in namespace '${namespace}':" >&2
+            echo "       ${kubectl_output}" >&2
+            return 1
+        fi
+
+        local -a rollout_targets=()
+        if [ -n "${kubectl_output}" ]; then
+            mapfile -t rollout_targets <<< "${kubectl_output}"
+        fi
 
         if [ ${#rollout_targets[@]} -eq 0 ]; then
             if kubectl -n "${namespace}" get deploy "${release}" >/dev/null 2>&1; then
@@ -1248,13 +1257,6 @@ dspace-oci-deploy env='staging' tag='':
       version_file='docs/apps/dspace.version' \
       tag="${deploy_tag}"
 
-    echo "Waiting for dspace rollout to complete (timeout: 180s)..."
-    if ! kubectl -n dspace rollout status deploy/dspace --timeout=180s; then
-      echo "ERROR: dspace rollout did not complete within 180s. Check pod events with:" >&2
-      echo "  kubectl -n dspace describe pods" >&2
-      exit 1
-    fi
-
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \
       -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
@@ -1314,13 +1316,6 @@ dspace-oci-deploy-prod-subdomain tag='':
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
       tag="${deploy_tag}"
-
-    echo "Waiting for dspace rollout on prod subdomain to complete (timeout: 180s)..."
-    if ! kubectl -n dspace rollout status deploy/dspace --timeout=180s; then
-      echo "ERROR: dspace rollout on prod subdomain did not complete within 180s." >&2
-      echo "Check pod events: kubectl -n dspace describe pods" >&2
-      exit 1
-    fi
 
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \

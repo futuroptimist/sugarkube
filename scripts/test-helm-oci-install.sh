@@ -13,10 +13,42 @@ tmp_bin="$(mktemp -d)"
 trap 'rm -rf "${tmp_bin}"' EXIT
 helm_log="${tmp_bin}/helm.log"
 kubectl_log="${tmp_bin}/kubectl.log"
-fixture_registry="${repo_root}/tests/fixtures/fake_helm_registry/charts/dspace-0.0.0.tgz"
+fixture_registry="${tmp_bin}/dspace-0.0.0.tgz"
 
-if [ ! -f "${fixture_registry}" ]; then
-    echo "Missing fake registry fixture: ${fixture_registry}" >&2
+if ! python3 - "${fixture_registry}" <<'PY'
+import io
+import pathlib
+import sys
+import tarfile
+
+fixture = sys.argv[1]
+chart_files = {
+    "dspace/Chart.yaml": "apiVersion: v2\nname: dspace\nversion: 0.0.0\n",
+    "dspace/values.yaml": (
+        "image:\n"
+        "  repository: ghcr.io/democratizedspace/dspace\n"
+        "  tag: latest\n"
+    ),
+}
+
+path = pathlib.Path(fixture)
+path.parent.mkdir(parents=True, exist_ok=True)
+
+with tarfile.open(path, mode="w:gz") as archive:
+    for name, content in chart_files.items():
+        data = content.encode("utf-8")
+        info = tarfile.TarInfo(name=name)
+        info.size = len(data)
+        info.mtime = 0
+        info.mode = 0o644
+        archive.addfile(info, io.BytesIO(data))
+
+with tarfile.open(fixture, mode="r:gz") as archive:
+    names = archive.getnames()
+    assert "dspace/Chart.yaml" in names, "missing dspace/Chart.yaml"
+PY
+then
+    echo "Failed to generate valid fake registry fixture: ${fixture_registry}" >&2
     exit 1
 fi
 
