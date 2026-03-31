@@ -83,7 +83,7 @@ just dspace-oci-promote-prod tag="$(read_prod_tag)"
 # Check pods and ingress status with the public URL
 just app-status namespace=dspace release=dspace
 
-# Generic helper examples (does not wait for rollout):
+# Generic helper examples (waits for release rollout before returning):
 just helm-oci-install \
   release=dspace namespace=dspace \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \

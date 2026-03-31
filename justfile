@@ -1142,7 +1142,38 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         helm_args+=("${version_args[@]}")
     fi
 
+    echo "Running Helm deploy: helm ${helm_args[*]}"
     helm "${helm_args[@]}"
+
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "WARNING: kubectl not found on PATH; skipping rollout status checks." >&2
+        exit 0
+    fi
+
+    echo "Inspecting workloads for release '${release}' in namespace '${namespace}'..."
+    deployment_names="$(
+        kubectl -n "${namespace}" get deploy \
+            -l "app.kubernetes.io/instance=${release}" \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
+    )"
+
+    if [ -z "${deployment_names}" ]; then
+        echo "No deployments found for release '${release}'. Helm apply finished."
+        exit 0
+    fi
+
+    rollout_timeout="${SUGARKUBE_HELM_ROLLOUT_TIMEOUT:-180s}"
+    echo "Waiting for Helm release '${release}' rollout(s) to complete (timeout: ${rollout_timeout})..."
+    while IFS= read -r deployment_name; do
+        [ -n "${deployment_name}" ] || continue
+        echo "  - deploy/${deployment_name}"
+        if ! kubectl -n "${namespace}" rollout status "deploy/${deployment_name}" --timeout "${rollout_timeout}"; then
+            echo "ERROR: rollout status failed for deploy/${deployment_name} in namespace '${namespace}'." >&2
+            exit 1
+        fi
+    done <<< "${deployment_names}"
+
+    echo "Helm release '${release}' rollout checks passed."
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'

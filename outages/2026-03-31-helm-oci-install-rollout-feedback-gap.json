@@ -1,0 +1,13 @@
+{
+  "id": "2026-03-31-helm-oci-install-rollout-feedback-gap",
+  "date": "2026-03-31",
+  "component": "helm-oci-install / _helm-oci-deploy",
+  "rootCause": "The generic Helm OCI path returned immediately after helm upgrade/install and did not run kubectl rollout status checks, so operators could not tell from command output when workloads were actually ready.",
+  "resolution": "Added release-scoped deployment discovery and rollout status waiting to _helm-oci-deploy, emitted explicit progress logs, and expanded the helm-oci-install regression fixture to simulate an OCI chart deploy with fake helm/kubectl binaries that assert rollout feedback behavior.",
+  "references": [
+    "justfile",
+    "scripts/test-helm-oci-install.sh",
+    "docs/apps/dspace.md",
+    "just helm-oci-install release=dspace namespace=dspace chart=oci://registry.test.local/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version default_tag=v3-latest"
+  ]
+}
