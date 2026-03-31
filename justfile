@@ -1144,6 +1144,44 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     helm "${helm_args[@]}"
 
+    wait_for_rollout_targets() {
+        local -a targets=()
+        local selector=""
+        local -a selectors=(
+            "app.kubernetes.io/instance=${release}"
+            "release=${release}"
+        )
+
+        for selector in "${selectors[@]}"; do
+            mapfile -t targets < <(
+                kubectl -n "${namespace}" get deploy,statefulset,daemonset \
+                    -l "${selector}" -o name 2>/dev/null || true
+            )
+            if [ "${#targets[@]}" -gt 0 ]; then
+                break
+            fi
+        done
+
+        if [ "${#targets[@]}" -eq 0 ]; then
+            echo "No rollout-managed workloads found for release '${release}' in namespace '${namespace}'."
+            return 0
+        fi
+
+        echo "Waiting for rollout completion in namespace '${namespace}' (timeout per workload: 300s)..."
+
+        local rollout_target=""
+        for rollout_target in "${targets[@]}"; do
+            echo "  - ${rollout_target}"
+            kubectl -n "${namespace}" rollout status "${rollout_target}" --timeout=300s
+        done
+    }
+
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "WARNING: kubectl is not available; skipping rollout status checks." >&2
+    else
+        wait_for_rollout_targets
+    fi
+
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'
 
