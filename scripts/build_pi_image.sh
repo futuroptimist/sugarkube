@@ -15,6 +15,8 @@ Environment variables:
   CLOUD_INIT_PATH   Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
   OUTPUT_DIR        Directory to write the image (default repo root)
   IMG_NAME          Name for the output image (default sugarkube)
+  ARM64             Set to 1 for 64-bit userspace (default), 0 for 32-bit userspace
+  ALLOW_ARMHF       Required when ARM64=0 to opt into 32-bit userspace builds
   PI_GEN_SOURCE_DIR Path to an existing pi-gen checkout to copy instead of cloning
   TOKEN_PLACE_BRANCH Branch of token.place to clone (default main)
   DSPACE_BRANCH     Branch of dspace to clone (default v3)
@@ -263,12 +265,24 @@ else
 fi
 
 ARM64="${ARM64:-1}"
+if ! [[ "${ARM64}" =~ ^[01]$ ]]; then
+  echo "ARM64 must be 0 or 1 (got: ${ARM64})" >&2
+  exit 1
+fi
 if [ "$ARM64" -eq 1 ]; then
   ARMHF=0
+  DEFAULT_PI_GEN_BRANCH="arm64"
 else
+  if [ "${ALLOW_ARMHF:-0}" -ne 1 ]; then
+    echo "32-bit build requested (ARM64=0)." >&2
+    echo "Set ALLOW_ARMHF=1 to explicitly opt in to armhf userspace builds." >&2
+    exit 1
+  fi
   ARMHF=1
+  DEFAULT_PI_GEN_BRANCH="bookworm"
 fi
-DEFAULT_PI_GEN_BRANCH="bookworm"
+echo "[sugarkube] Target userspace architecture: $([ "${ARM64}" -eq 1 ] && echo arm64 || echo armhf)"
+echo "[sugarkube] Using pi-gen branch default: ${DEFAULT_PI_GEN_BRANCH}"
 PI_GEN_SOURCE_DIR="${PI_GEN_SOURCE_DIR:-}"
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
