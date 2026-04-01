@@ -19,8 +19,9 @@ so logs survive reboots. After installation, it removes unused packages with
 `apt-get autoremove -y` and cleans the apt cache to keep the image small.
 
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
-`PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
-64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
+`PI_GEN_BRANCH` (default: `bookworm`). The default sugarkube image build uses a
+64-bit userspace (`ARM64=1`, `ARMHF=0`) so modern Pi 4/Pi 5 nodes report
+`dpkg --print-architecture=arm64`. Set `PI_GEN_URL` to use a fork or mirror if the default repository is
 unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
@@ -65,7 +66,9 @@ Set `SKIP_CLOUD_INIT_VALIDATION=1` to bypass cloud-init YAML validation when
 PyYAML isn't available or when speed matters.
 The script rewrites the Cloudflare apt source architecture to `armhf` when
 `ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
-`ARM64=1` to avoid generating both architectures.
+`ARM64=1` to avoid generating both architectures. 32-bit userspace builds are
+still supported, but require explicit opt-in: set both `ARM64=0` and
+`ALLOW_ARMHF=1`.
 
 The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 `token.place` and `democratizedspace/dspace` repositories into

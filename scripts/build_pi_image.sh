@@ -18,6 +18,8 @@ Environment variables:
   PI_GEN_SOURCE_DIR Path to an existing pi-gen checkout to copy instead of cloning
   TOKEN_PLACE_BRANCH Branch of token.place to clone (default main)
   DSPACE_BRANCH     Branch of dspace to clone (default v3)
+  ARM64             Build a 64-bit userspace image when set to 1 (default 1)
+  ALLOW_ARMHF       Required opt-in for 32-bit userspace builds (set to 1 with ARM64=0)
 
 See docs/pi_image_cloudflare.md for details.
 EOF
@@ -263,11 +265,22 @@ else
 fi
 
 ARM64="${ARM64:-1}"
-if [ "$ARM64" -eq 1 ]; then
-  ARMHF=0
-else
-  ARMHF=1
+if ! [[ "${ARM64}" =~ ^[01]$ ]]; then
+  echo "ARM64 must be either 0 (32-bit userspace) or 1 (64-bit userspace)" >&2
+  exit 1
 fi
+if [ "${ARM64}" -eq 1 ]; then
+  ARMHF=0
+  ARCH_USERSPACE="arm64"
+else
+  if [ "${ALLOW_ARMHF:-0}" -ne 1 ]; then
+    echo "Refusing 32-bit userspace build: set ALLOW_ARMHF=1 with ARM64=0 to opt in" >&2
+    exit 1
+  fi
+  ARMHF=1
+  ARCH_USERSPACE="armhf"
+fi
+echo "[sugarkube] Image userspace architecture: ${ARCH_USERSPACE} (ARM64=${ARM64} ARMHF=${ARMHF})"
 DEFAULT_PI_GEN_BRANCH="bookworm"
 PI_GEN_SOURCE_DIR="${PI_GEN_SOURCE_DIR:-}"
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-}"
@@ -1266,6 +1279,7 @@ metadata_args=(
   --runner-arch "${RUNNER_ARCH_VALUE}"
   --option "arm64=${ARM64}"
   --option "armhf=${ARMHF}"
+  --option "userspace_arch=${ARCH_USERSPACE}"
   --option "clone_sugarkube=${CLONE_SUGARKUBE}"
   --option "clone_token_place=${CLONE_TOKEN_PLACE}"
   --option "clone_dspace=${CLONE_DSPACE}"
