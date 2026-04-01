@@ -686,6 +686,7 @@ def _run_build_script(tmp_path, env):
 def test_uses_default_pi_gen_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
+    env["ALLOW_ARMHF"] = "1"
     result, git_args = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert "--branch bookworm" in git_args
@@ -953,16 +954,37 @@ def test_arm64_disables_armhf(tmp_path):
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=1" in config
     assert "ARMHF=0" in config
+    metadata = (tmp_path / "sugarkube.img.xz.metadata.json").read_text()
+    assert '"userspace_arch": "arm64"' in metadata
 
 
 def test_armhf_enabled_for_32_bit(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
+    env["ALLOW_ARMHF"] = "1"
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=0" in config
     assert "ARMHF=1" in config
+    metadata = (tmp_path / "sugarkube.img.xz.metadata.json").read_text()
+    assert '"userspace_arch": "armhf"' in metadata
+
+
+def test_32_bit_build_requires_explicit_opt_in(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "0"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Refusing 32-bit userspace build" in result.stderr
+
+
+def test_invalid_arm64_value_fails_fast(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "true"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "ARM64 must be either 0" in result.stderr
 
 
 def test_build_without_timeout_binary(tmp_path):
