@@ -273,7 +273,7 @@ if [ "$ARM64" -eq 1 ]; then
   ARMHF=0
   DEFAULT_PI_GEN_BRANCH="arm64"
 else
-  if [ "${ALLOW_ARMHF:-0}" -ne 1 ]; then
+  if [ "${ALLOW_ARMHF:-0}" != "1" ]; then
     echo "32-bit build requested (ARM64=0)." >&2
     echo "Set ALLOW_ARMHF=1 to explicitly opt in to armhf userspace builds." >&2
     exit 1
@@ -282,7 +282,7 @@ else
   DEFAULT_PI_GEN_BRANCH="bookworm"
 fi
 echo "[sugarkube] Target userspace architecture: $([ "${ARM64}" -eq 1 ] && echo arm64 || echo armhf)"
-echo "[sugarkube] Using pi-gen branch default: ${DEFAULT_PI_GEN_BRANCH}"
+echo "[sugarkube] Default pi-gen branch for this architecture: ${DEFAULT_PI_GEN_BRANCH}${PI_GEN_BRANCH:+ (overridden by PI_GEN_BRANCH=${PI_GEN_BRANCH})}"
 PI_GEN_SOURCE_DIR="${PI_GEN_SOURCE_DIR:-}"
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-}"
 IMG_NAME="${IMG_NAME:-sugarkube}"

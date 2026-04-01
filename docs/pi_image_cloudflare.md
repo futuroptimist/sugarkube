@@ -20,8 +20,9 @@ so logs survive reboots. After installation, it removes unused packages with
 
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
 `PI_GEN_BRANCH` (default: `arm64`, producing a true 64-bit userspace image for
-modern Pi 4/Pi 5 sugarkube nodes). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
-unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
+modern Pi 4/Pi 5 sugarkube nodes; when using `ARM64=0` + `ALLOW_ARMHF=1`, the
+default branch is `bookworm`). Set `PI_GEN_URL` to use a fork or mirror if the
+default repository is unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
 variables. To avoid accidental overwrites it aborts when the image already

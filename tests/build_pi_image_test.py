@@ -683,7 +683,7 @@ def _run_build_script(tmp_path, env):
     return result, git_args
 
 
-def test_uses_default_pi_gen_branch(tmp_path):
+def test_armhf_build_uses_bookworm_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
     env["ALLOW_ARMHF"] = "1"
@@ -970,6 +970,15 @@ def test_armhf_enabled_for_32_bit(tmp_path):
 def test_armhf_requires_explicit_opt_in(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Set ALLOW_ARMHF=1 to explicitly opt in to armhf userspace builds." in result.stderr
+
+
+def test_armhf_rejects_non_numeric_opt_in_value(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "0"
+    env["ALLOW_ARMHF"] = "yes"
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode != 0
     assert "Set ALLOW_ARMHF=1 to explicitly opt in to armhf userspace builds." in result.stderr
