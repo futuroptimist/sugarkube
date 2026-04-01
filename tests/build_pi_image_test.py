@@ -686,6 +686,7 @@ def _run_build_script(tmp_path, env):
 def test_uses_default_pi_gen_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
+    env["ALLOW_32BIT"] = "1"
     result, git_args = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert "--branch bookworm" in git_args
@@ -950,16 +951,28 @@ def test_arm64_disables_armhf(tmp_path):
     env = _setup_build_env(tmp_path)
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
+    assert "Target userspace architecture: arm64" in result.stdout
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=1" in config
     assert "ARMHF=0" in config
 
 
-def test_armhf_enabled_for_32_bit(tmp_path):
+def test_arm64_zero_requires_explicit_opt_in(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
     result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Refusing 32-bit userspace build (ARM64=0) without ALLOW_32BIT=1" in result.stderr
+
+
+def test_armhf_enabled_for_32_bit(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "0"
+    env["ALLOW_32BIT"] = "1"
+    result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
+    assert "WARNING: building 32-bit userspace image" in result.stdout
+    assert "Target userspace architecture: armhf" in result.stdout
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=0" in config
     assert "ARMHF=1" in config
