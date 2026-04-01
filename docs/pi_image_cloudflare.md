@@ -67,7 +67,8 @@ PyYAML isn't available or when speed matters.
 The script defaults to `ARM64=1`, sets `ARMHF=0`, and logs the selected userspace
 architecture during startup. To intentionally build a 32-bit userspace image,
 set both `ARM64=0` and `ALLOW_ARMHF=1`; this guardrail prevents accidental
-32-bit images. In 32-bit mode it rewrites the Cloudflare apt source
+32-bit images, and the generated build metadata records this as
+`userspace_arch=arm64|armhf`. In 32-bit mode it rewrites the Cloudflare apt source
 architecture to `armhf` so packages install correctly.
 
 The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the

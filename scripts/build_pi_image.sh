@@ -271,6 +271,7 @@ if ! [[ "${ARM64}" =~ ^[01]$ ]]; then
 fi
 if [ "$ARM64" -eq 1 ]; then
   ARMHF=0
+  USERSPACE_ARCH="arm64"
   DEFAULT_PI_GEN_BRANCH="arm64"
 else
   if [ "${ALLOW_ARMHF:-0}" != "1" ]; then
@@ -279,9 +280,10 @@ else
     exit 1
   fi
   ARMHF=1
+  USERSPACE_ARCH="armhf"
   DEFAULT_PI_GEN_BRANCH="bookworm"
 fi
-echo "[sugarkube] Target userspace architecture: $([ "${ARM64}" -eq 1 ] && echo arm64 || echo armhf)"
+echo "[sugarkube] Target userspace architecture: ${USERSPACE_ARCH}"
 echo "[sugarkube] Default pi-gen branch for this architecture: ${DEFAULT_PI_GEN_BRANCH}${PI_GEN_BRANCH:+ (overridden by PI_GEN_BRANCH=${PI_GEN_BRANCH})}"
 PI_GEN_SOURCE_DIR="${PI_GEN_SOURCE_DIR:-}"
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-}"
@@ -1278,6 +1280,7 @@ metadata_args=(
   --duration-seconds "${BUILD_DURATION_SECONDS}"
   --runner-os "${RUNNER_OS_VALUE}"
   --runner-arch "${RUNNER_ARCH_VALUE}"
+  --option "userspace_arch=${USERSPACE_ARCH}"
   --option "arm64=${ARM64}"
   --option "armhf=${ARMHF}"
   --option "clone_sugarkube=${CLONE_SUGARKUBE}"

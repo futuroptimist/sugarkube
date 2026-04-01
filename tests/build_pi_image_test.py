@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -954,6 +955,8 @@ def test_arm64_disables_armhf(tmp_path):
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=1" in config
     assert "ARMHF=0" in config
+    metadata = json.loads((tmp_path / "sugarkube.img.xz.metadata.json").read_text())
+    assert metadata["options"]["userspace_arch"] == "arm64"
 
 
 def test_armhf_enabled_for_32_bit(tmp_path):
@@ -965,6 +968,8 @@ def test_armhf_enabled_for_32_bit(tmp_path):
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=0" in config
     assert "ARMHF=1" in config
+    metadata = json.loads((tmp_path / "sugarkube.img.xz.metadata.json").read_text())
+    assert metadata["options"]["userspace_arch"] == "armhf"
 
 
 def test_armhf_requires_explicit_opt_in(tmp_path):
