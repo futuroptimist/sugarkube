@@ -19,10 +19,13 @@ so logs survive reboots. After installation, it removes unused packages with
 `apt-get autoremove -y` and cleans the apt cache to keep the image small.
 
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
-`PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
-64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
-unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
-where artifacts are written; the script creates the directory if needed. Run
+`PI_GEN_BRANCH` (default: `arm64`, so modern Pi 4/Pi 5 nodes get a true
+64-bit `arm64` userspace by default). Set `ARM64=0 ALLOW_ARMHF=1` to opt in to
+32-bit userspace builds (`armhf`), which switch the default `PI_GEN_BRANCH` to
+`bookworm`. Set `PI_GEN_URL` to use a fork or mirror if the default repository
+is unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR`
+selects where artifacts are written; the script creates the directory if
+needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
 variables. To avoid accidental overwrites it aborts when the image already
 exists unless `FORCE_OVERWRITE=1` is set. Set `FORCE_OVERWRITE=1` when rerunning
