@@ -19,9 +19,10 @@ so logs survive reboots. After installation, it removes unused packages with
 `apt-get autoremove -y` and cleans the apt cache to keep the image small.
 
 The `build_pi_image.sh` script clones [pi-gen](https://github.com/RPi-Distro/pi-gen) using
-`PI_GEN_BRANCH` (default: `bookworm` for 32-bit builds and `arm64` for
-64-bit). Set `PI_GEN_URL` to use a fork or mirror if the default repository is
-unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
+`PI_GEN_BRANCH` (default: `arm64`, producing a true 64-bit userspace image for
+modern Pi 4/Pi 5 sugarkube nodes; when using `ARM64=0` + `ALLOW_ARMHF=1`, the
+default branch is `bookworm`). Set `PI_GEN_URL` to use a fork or mirror if the
+default repository is unavailable. `IMG_NAME` controls the output filename and `OUTPUT_DIR` selects
 where artifacts are written; the script creates the directory if needed. Run
 `scripts/build_pi_image.sh --help` for a summary of configurable environment
 variables. To avoid accidental overwrites it aborts when the image already
@@ -63,9 +64,12 @@ keeps the mirror failover and configuration behavior locked in.
 temporary work directory and the output location.
 Set `SKIP_CLOUD_INIT_VALIDATION=1` to bypass cloud-init YAML validation when
 PyYAML isn't available or when speed matters.
-The script rewrites the Cloudflare apt source architecture to `armhf` when
-`ARM64=0` so 32-bit builds install the correct packages and sets `ARMHF=0` when
-`ARM64=1` to avoid generating both architectures.
+The script defaults to `ARM64=1`, sets `ARMHF=0`, and logs the selected userspace
+architecture during startup. To intentionally build a 32-bit userspace image,
+set both `ARM64=0` and `ALLOW_ARMHF=1`; this guardrail prevents accidental
+32-bit images, and the generated build metadata records this as
+`userspace_arch=arm64|armhf`. In 32-bit mode it rewrites the Cloudflare apt source
+architecture to `armhf` so packages install correctly.
 
 The image embeds `pi_node_verifier.sh` in `/usr/local/sbin` and clones the
 `token.place` and `democratizedspace/dspace` repositories into

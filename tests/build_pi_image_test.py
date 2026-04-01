@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -683,9 +684,10 @@ def _run_build_script(tmp_path, env):
     return result, git_args
 
 
-def test_uses_default_pi_gen_branch(tmp_path):
+def test_armhf_build_uses_bookworm_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
+    env["ALLOW_ARMHF"] = "1"
     result, git_args = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     assert "--branch bookworm" in git_args
@@ -696,7 +698,7 @@ def test_arm64_build_uses_release_branch(tmp_path):
     env = _setup_build_env(tmp_path)
     result, git_args = _run_build_script(tmp_path, env)
     assert result.returncode == 0
-    assert "--branch bookworm" in git_args
+    assert "--branch arm64" in git_args
     assert (tmp_path / "sugarkube.img.xz").exists()
 
 
@@ -953,16 +955,38 @@ def test_arm64_disables_armhf(tmp_path):
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=1" in config
     assert "ARMHF=0" in config
+    metadata = json.loads((tmp_path / "sugarkube.img.xz.metadata.json").read_text())
+    assert metadata["options"]["userspace_arch"] == "arm64"
 
 
 def test_armhf_enabled_for_32_bit(tmp_path):
     env = _setup_build_env(tmp_path)
     env["ARM64"] = "0"
+    env["ALLOW_ARMHF"] = "1"
     result, _ = _run_build_script(tmp_path, env)
     assert result.returncode == 0
     config = (tmp_path / "config.env").read_text()
     assert "ARM64=0" in config
     assert "ARMHF=1" in config
+    metadata = json.loads((tmp_path / "sugarkube.img.xz.metadata.json").read_text())
+    assert metadata["options"]["userspace_arch"] == "armhf"
+
+
+def test_armhf_requires_explicit_opt_in(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "0"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Set ALLOW_ARMHF=1 to explicitly opt in to armhf userspace builds." in result.stderr
+
+
+def test_armhf_rejects_non_numeric_opt_in_value(tmp_path):
+    env = _setup_build_env(tmp_path)
+    env["ARM64"] = "0"
+    env["ALLOW_ARMHF"] = "yes"
+    result, _ = _run_build_script(tmp_path, env)
+    assert result.returncode != 0
+    assert "Set ALLOW_ARMHF=1 to explicitly opt in to armhf userspace builds." in result.stderr
 
 
 def test_build_without_timeout_binary(tmp_path):
