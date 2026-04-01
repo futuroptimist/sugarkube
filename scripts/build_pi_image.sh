@@ -12,6 +12,8 @@ Usage: build_pi_image.sh [--help]
 Build a Raspberry Pi OS image preloaded with cloud-init.
 
 Environment variables:
+  ARM64             Build 64-bit userspace image (default 1). Set ARM64=0 for 32-bit.
+  ALLOW_ARMHF       Required when ARM64=0 (set to 1 to explicitly allow 32-bit builds)
   CLOUD_INIT_PATH   Path to cloud-init user-data (default scripts/cloud-init/user-data.yaml)
   OUTPUT_DIR        Directory to write the image (default repo root)
   IMG_NAME          Name for the output image (default sugarkube)
@@ -263,12 +265,25 @@ else
 fi
 
 ARM64="${ARM64:-1}"
+if [[ "${ARM64}" != "0" && "${ARM64}" != "1" ]]; then
+  echo "ARM64 must be 0 or 1 (got: ${ARM64})" >&2
+  exit 1
+fi
 if [ "$ARM64" -eq 1 ]; then
   ARMHF=0
+  DEFAULT_PI_GEN_BRANCH="arm64"
+  BUILD_ARCH_LABEL="arm64 (64-bit userspace)"
 else
+  if [ "${ALLOW_ARMHF:-0}" -ne 1 ]; then
+    echo "Refusing 32-bit image build: set ALLOW_ARMHF=1 with ARM64=0 to opt in" >&2
+    exit 1
+  fi
   ARMHF=1
+  DEFAULT_PI_GEN_BRANCH="bookworm"
+  BUILD_ARCH_LABEL="armhf (32-bit userspace)"
+  echo "[sugarkube] Warning: explicit 32-bit build requested (ARM64=0, ALLOW_ARMHF=1)"
 fi
-DEFAULT_PI_GEN_BRANCH="bookworm"
+echo "[sugarkube] Image userspace architecture: ${BUILD_ARCH_LABEL}"
 PI_GEN_SOURCE_DIR="${PI_GEN_SOURCE_DIR:-}"
 PI_GEN_BRANCH="${PI_GEN_BRANCH:-}"
 IMG_NAME="${IMG_NAME:-sugarkube}"
