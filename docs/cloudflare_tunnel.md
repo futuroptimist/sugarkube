@@ -9,6 +9,8 @@ https://prod.democratized.space
 https://democratized.space
 ```
 
+`prod.democratized.space` is an optional legacy subdomain that now redirects to the apex domain (`democratized.space`).
+
 The tunnel routes these hostnames to Traefik (or another ingress controller) running inside the
 k3s cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector
 runs inside the cluster.
@@ -25,7 +27,7 @@ runs inside the cluster.
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
-  `prod.democratized.space`, and `democratized.space` →
+  `prod.democratized.space` (optional legacy redirect host), and `democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
@@ -34,8 +36,8 @@ runs inside the cluster.
 - A Cloudflare account.
 - A domain added as an active zone in Cloudflare and using Cloudflare nameservers (for example,
   `democratized.space`).
-- `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` (or your
-  preferred rollout hostnames) are managed by Cloudflare DNS.
+- `staging.democratized.space`, `prod.democratized.space` (optional legacy redirect host), and
+  `democratized.space` (or your preferred rollout hostnames) are managed by Cloudflare DNS.
 - Access to the Cloudflare Zero Trust / Cloudflare One dashboard.
 - A running k3s cluster with Sugarkube and Traefik installed (see the main Sugarkube docs for the
   setup steps).
@@ -244,7 +246,8 @@ To fix:
 
 Once `cloudflared` runs with the correct token, Cloudflare links the named tunnel to the cluster so
 requests to your mapped hostnames (for example `staging.democratized.space`,
-`prod.democratized.space`, and `democratized.space`) reach Traefik.
+optional `prod.democratized.space` redirect host, and `democratized.space`)
+reach Traefik.
 
 ### Recovery and reset
 
@@ -275,7 +278,7 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
-## Step 3 – Publish application routes (staging + prod preview + apex)
+## Step 3 – Publish application routes (staging + optional prod redirect host + apex)
 
 Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
 internal Traefik Service.
@@ -284,7 +287,7 @@ internal Traefik Service.
    **Published applications** section.
 2. Add routes/applications:
    - **Hostname**: `staging.democratized.space`
-   - **Hostname**: `prod.democratized.space`
+   - **Hostname**: `prod.democratized.space` *(optional legacy redirect host)*
    - **Hostname**: `democratized.space`
    - **Service type**: `HTTP`
    - **Service URL**: `http://traefik.<namespace>.svc.cluster.local:80`
@@ -318,9 +321,9 @@ Only create this manually if the CNAME is missing:
    - **Proxy status**: **Proxied** (orange cloud)
 4. Save the record.
 
-## Step 5 – Optional redirect for `prod.` preview host
+## Step 5 – Keep `prod.` as an optional redirect host
 
-After dspace is fully promoted on `democratized.space`, you can convert `prod.democratized.space` to a
+`prod.democratized.space` is now used as an optional redirect host. Keep (or convert) it as a
 simple redirect (Cloudflare Redirect Rule or Page Rule) to avoid maintaining duplicate origins:
 
 - **Source**: `https://prod.democratized.space/*`

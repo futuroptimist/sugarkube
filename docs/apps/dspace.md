@@ -17,8 +17,8 @@ dspace values are layered so base defaults stay separate from environment routin
   deployments.
 - `docs/examples/dspace.values.staging.yaml`: staging ingress host/class overlay.
 - `docs/examples/dspace.values.prod.yaml`: production apex ingress overlay.
-- `docs/examples/dspace.values.prod-subdomain.yaml`: optional preview/canary overlay for
-  `prod.democratized.space`.
+- `docs/examples/dspace.values.prod-subdomain.yaml`: optional legacy subdomain overlay for
+  `prod.democratized.space` when a pre-apex host is explicitly needed.
 
 Current/target topology:
 
@@ -39,6 +39,8 @@ Use tags by purpose:
   DSPACE-derived image tags (for example `main-<shortsha>`).
 - If the DSPACE repo uses release branches, keep them short-lived stabilization branches,
   not long-lived environment branches.
+- Keep environment routing (`staging`, optional `prod.` subdomain, apex prod) separate from release
+  lineage; this guide stays main-first for steady-state operations.
 
 Environment overlays (`dev`/`staging`/`prod`) decide host/routing. Image tags decide the
 release version. Keep those concerns separate.
@@ -52,7 +54,7 @@ just dspace-oci-deploy env=staging tag=main-<shortsha>
 # Immutable production deploy (reads docs/apps/dspace.prod.tag if tag is omitted)
 just dspace-oci-promote-prod tag=3.1.0
 
-# Optional preview/canary endpoint (prod.democratized.space)
+# Optional prod subdomain endpoint (prod.democratized.space)
 just dspace-oci-deploy-prod-subdomain tag=main-<shortsha>
 
 # Check pods/ingress/status
@@ -139,7 +141,7 @@ Notes:
    just dspace-oci-promote-prod tag=3.1.0
    ```
 
-   Then verify production:
+   Then verify production apex:
 
    ```bash
    curl -fsS https://democratized.space/config.json | jq .
@@ -155,9 +157,10 @@ Notes:
 
 5. Keep rollback simple by redeploying the prior immutable tag.
 
-Optional only: use `dspace-oci-deploy-prod-subdomain` for preview/canary checks at
-`https://prod.democratized.space` when you explicitly want a pre-apex validation endpoint.
-It is not part of the default required deploy/promotion path.
+Optional only: use `dspace-oci-deploy-prod-subdomain` when you explicitly need the
+`https://prod.democratized.space` subdomain before apex promotion. In steady state, this
+subdomain is typically a redirect to `https://democratized.space`, so it is not part of the
+default required deploy/promotion path.
 
 ## Networking via Cloudflare Tunnel
 
@@ -166,7 +169,7 @@ This guide assumes public ingress is exposed via Cloudflare Tunnel.
 Typical hostnames:
 
 - staging: `https://staging.democratized.space`
-- preview/canary (optional): `https://prod.democratized.space`
+- optional `prod.` subdomain (often redirect): `https://prod.democratized.space`
 - production apex: `https://democratized.space`
 
 For tunnel and DNS setup details, see [Cloudflare Tunnel docs](../cloudflare_tunnel.md).
