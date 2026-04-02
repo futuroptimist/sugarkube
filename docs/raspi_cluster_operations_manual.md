@@ -204,7 +204,7 @@ but spells out the underlying commands.
    service name.
 
 4. Deploy your application (for example, follow [apps/dspace.md](apps/dspace.md)
-   to install dspace v3 with a Traefik Ingress host) and verify ingress and
+   to install dspace with a Traefik Ingress host) and verify ingress and
    pod health:
 
    ```bash
