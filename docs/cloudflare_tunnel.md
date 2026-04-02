@@ -318,9 +318,9 @@ Only create this manually if the CNAME is missing:
    - **Proxy status**: **Proxied** (orange cloud)
 4. Save the record.
 
-## Step 5 – Post-cutover redirect for `prod.` (optional finalization)
+## Step 5 – Optional redirect for `prod.` after apex validation
 
-After dspace v3 is fully promoted on `democratized.space`, convert `prod.democratized.space` to a
+After dspace is fully validated on `democratized.space`, convert `prod.democratized.space` to a
 simple redirect (Cloudflare Redirect Rule or Page Rule) to avoid maintaining duplicate origins:
 
 - **Source**: `https://prod.democratized.space/*`
