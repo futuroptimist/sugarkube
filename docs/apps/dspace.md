@@ -35,6 +35,10 @@ Use tags by purpose:
 - **Convenience/mutable tags** for fast iteration in non-prod (for example `main-latest`).
 - **Immutable deploy tags** for sign-off, promotion, and rollback (for example
   `main-<shortsha>`, `3.0.1`, `3.1.0`).
+- In this operational guide, `main` is the normal integration line that produces
+  DSPACE-derived image tags (for example `main-<shortsha>`).
+- If the DSPACE repo uses release branches, keep them short-lived stabilization branches,
+  not long-lived environment branches.
 
 Environment overlays (`dev`/`staging`/`prod`) decide host/routing. Image tags decide the
 release version. Keep those concerns separate.
@@ -114,6 +118,19 @@ Notes:
 
 3. Verify staging (`config.json`, `healthz`, `livez`) at
    `https://staging.democratized.space`.
+
+   ```bash
+   curl -fsS https://staging.democratized.space/config.json | jq .
+   ```
+
+   ```bash
+   curl -fsS https://staging.democratized.space/healthz | jq .
+   ```
+
+   ```bash
+   curl -fsS https://staging.democratized.space/livez | jq .
+   ```
+
 4. Promote the approved immutable tag to production apex:
 
    ```bash
@@ -122,10 +139,25 @@ Notes:
    just dspace-oci-promote-prod tag=3.1.0
    ```
 
+   Then verify production:
+
+   ```bash
+   curl -fsS https://democratized.space/config.json | jq .
+   ```
+
+   ```bash
+   curl -fsS https://democratized.space/healthz | jq .
+   ```
+
+   ```bash
+   curl -fsS https://democratized.space/livez | jq .
+   ```
+
 5. Keep rollback simple by redeploying the prior immutable tag.
 
-Optional: use `dspace-oci-deploy-prod-subdomain` for pre-apex canary checks at
-`https://prod.democratized.space`.
+Optional only: use `dspace-oci-deploy-prod-subdomain` for preview/canary checks at
+`https://prod.democratized.space` when you explicitly want a pre-apex validation endpoint.
+It is not part of the default required deploy/promotion path.
 
 ## Networking via Cloudflare Tunnel
 
