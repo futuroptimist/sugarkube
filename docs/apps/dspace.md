@@ -117,7 +117,7 @@ Notes:
    ```
 
 3. Verify staging (`config.json`, `healthz`, `livez`) at
-   `https://staging.democratized.space`.
+   `https://staging.democratized.space`:
 
    ```bash
    curl -fsS https://staging.democratized.space/config.json | jq .
@@ -139,7 +139,7 @@ Notes:
    just dspace-oci-promote-prod tag=3.1.0
    ```
 
-   Then verify production:
+   Verify production apex (`https://democratized.space`):
 
    ```bash
    curl -fsS https://democratized.space/config.json | jq .
