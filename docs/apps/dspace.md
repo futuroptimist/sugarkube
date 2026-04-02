@@ -39,6 +39,8 @@ Use tags by purpose:
   DSPACE-derived image tags (for example `main-<shortsha>`).
 - If the DSPACE repo uses release branches, keep them short-lived stabilization branches,
   not long-lived environment branches.
+- Keep environment routing (`staging`, optional preview, apex prod) separate from release
+  lineage; this guide stays main-first for steady-state operations.
 
 Environment overlays (`dev`/`staging`/`prod`) decide host/routing. Image tags decide the
 release version. Keep those concerns separate.
@@ -139,7 +141,7 @@ Notes:
    just dspace-oci-promote-prod tag=3.1.0
    ```
 
-   Then verify production:
+   Then verify production apex:
 
    ```bash
    curl -fsS https://democratized.space/config.json | jq .
@@ -157,7 +159,7 @@ Notes:
 
 Optional only: use `dspace-oci-deploy-prod-subdomain` for preview/canary checks at
 `https://prod.democratized.space` when you explicitly want a pre-apex validation endpoint.
-It is not part of the default required deploy/promotion path.
+It is not part of the default required deploy/promotion path to `democratized.space`.
 
 ## Networking via Cloudflare Tunnel
 
