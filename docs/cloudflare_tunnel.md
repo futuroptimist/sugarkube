@@ -275,7 +275,7 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
-## Step 3 – Publish application routes (staging + prod preview + apex)
+## Step 3 – Publish application routes (staging + optional prod preview + apex)
 
 Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
 internal Traefik Service.

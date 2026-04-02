@@ -35,9 +35,9 @@ Use tags by purpose:
 - **Convenience/mutable tags** for fast iteration in non-prod (for example `main-latest`).
 - **Immutable deploy tags** for sign-off, promotion, and rollback (for example
   `main-<shortsha>`, `3.0.1`, `3.1.0`).
-- In this operational guide, `main` is the normal integration line that produces
+- In this operational guide, `main` is the normal steady-state integration line for
   DSPACE-derived image tags (for example `main-<shortsha>`).
-- If the DSPACE repo uses release branches, keep them short-lived stabilization branches,
+- If the DSPACE repo uses release branches, treat them as short-lived stabilization branches,
   not long-lived environment branches.
 
 Environment overlays (`dev`/`staging`/`prod`) decide host/routing. Image tags decide the
@@ -139,7 +139,7 @@ Notes:
    just dspace-oci-promote-prod tag=3.1.0
    ```
 
-   Then verify production:
+   Then verify production apex (`https://democratized.space`):
 
    ```bash
    curl -fsS https://democratized.space/config.json | jq .
@@ -157,7 +157,7 @@ Notes:
 
 Optional only: use `dspace-oci-deploy-prod-subdomain` for preview/canary checks at
 `https://prod.democratized.space` when you explicitly want a pre-apex validation endpoint.
-It is not part of the default required deploy/promotion path.
+It is not part of the default required main → staging → apex promotion path.
 
 ## Networking via Cloudflare Tunnel
 
