@@ -1,5 +1,6 @@
-# Example values for deploying democratized.space via Helm.
-# The ingress host is set by the installer command.
+# Example base values for dspace deployments.
+# This file is shared across dev/staging/prod values chains.
+# For future env=dev, this remains the single-node non-HA base on sugarkube6.
 environment: dev
 
 ingress:

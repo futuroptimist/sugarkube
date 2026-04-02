@@ -383,7 +383,7 @@ Traefik is available per the section above.
    so the tunnel can reach Traefik reliably.
 
 3. Install your app using its Helm or `just` recipe. For example, the
-   [dspace app guide](apps/dspace.md) shows how to deploy dspace v3 with a
+   [dspace app guide](apps/dspace.md) shows how to deploy dspace with a
    Traefik ingress host and tested values.
 
 4. Verify everything is healthy, then browse to the FQDN on your phone or
@@ -394,7 +394,7 @@ Traefik is available per the section above.
    ```
 
 5. Iterate new builds using your app's upgrade instructions (e.g., the dspace
-   guide covers rolling new `v3-<shortsha>` images).
+   guide covers rolling new `main-<shortsha>` images).
 
 ## Step 1: Verify your 3-node control plane is healthy
 
@@ -597,11 +597,11 @@ companion application for your cluster.
 > **Note:** There are two ways to deploy dspace:
 > - **Manual Helm install** (documented below) by cloning the dspace repo and running
 >   `helm upgrade --install ...` directly.
-> - **Sugarkube + OCI Helm chart path** using `helm-oci-install` and the dspace v3 guide in the
+> - **Sugarkube + OCI Helm chart path** using `helm-oci-install` and the dspace guide in the
 >   dspace repo (recommended once Helm and GHCR login are working).
 >
 > For the sugarkube-centric path, see:
-> https://github.com/democratizedspace/dspace/blob/v3/docs/k3s-sugarkube-staging.md
+> https://github.com/democratizedspace/dspace/blob/main/docs/k3s-sugarkube-staging.md
 >
 ### Why deploy dspace?
 
@@ -676,17 +676,17 @@ serving ingress, and the dspace OCI chart is already published to GHCR. The goal
 roll pods quickly without extra ceremony—Kubernetes handles the rolling update using the
 deployment's defaults.
 
-**Quick redeploy for dspace v3 (generic helper for staging, dspace helpers for production):**
+**Quick redeploy for dspace (generic helper for staging, dspace helpers for production):**
 
 Pick the values overlay for your target environment and prefer immutable image tags for production:
 
 - Staging: `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`
-- Production preview (Phase A):
+- Production preview (optional canary):
   `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml`
-- Production apex (Phase B): `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
+- Production apex (steady-state): `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`
 
-Do not use `docs/examples/dspace.values.prod-subdomain.yaml` for Phase B apex promotion; keep that
-overlay only for Phase A preview deploys at `prod.democratized.space`.
+Do not use `docs/examples/dspace.values.prod-subdomain.yaml` for production apex promotion; keep that
+overlay only for preview deploys at `prod.democratized.space`.
 
 ```bash
 # From the sugarkube repo root on a cluster node (staging):
@@ -695,18 +695,18 @@ just helm-oci-upgrade \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
-  default_tag=v3-latest
+  default_tag=main-latest
 ```
 
-For production preview (Phase A), this guide intentionally switches from the generic
+For production preview (optional canary), this guide intentionally switches from the generic
 `helm-oci-upgrade` example to the dspace-specific helper so rollout verification and
 post-deploy checks are included by default:
 
 ```bash
-just dspace-oci-deploy-prod-subdomain tag=v3-<immutable-tag>
+just dspace-oci-deploy-prod-subdomain tag=main-<immutable-tag>
 ```
 
-For production apex promotion (Phase B), use `dspace-oci-promote-prod` with a pinned tag (for example the
+For production apex promotion, use `dspace-oci-promote-prod` with a pinned tag (for example the
 value stored in `docs/apps/dspace.prod.tag`). This helper wraps `dspace-oci-deploy env=prod`, which keeps
 the same values chain as the generic path (`docs/examples/dspace.values.dev.yaml` +
 `docs/examples/dspace.values.prod.yaml`) while adding rollout/status checks:
@@ -722,7 +722,7 @@ sets `environment: dev`, `docs/examples/dspace.values.staging.yaml` sets `enviro
 `docs/examples/dspace.values.prod.yaml` sets `environment: prod`, which show up in `/healthz` and
 the homepage build badge.
 
-If you prefer a one-liner that bakes in those arguments for dspace v3, use the helper
+If you prefer a one-liner that bakes in those arguments for dspace, use the helper
 recipe (defaults to staging):
 
 ```bash
@@ -735,14 +735,14 @@ just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 `helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release
 and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle even
-when `v3-latest` is republished with the same tag. The helper waits for the rollout to
+when `main-latest` is republished with the same tag. The helper waits for the rollout to
 finish and exits non-zero if Kubernetes reports a failure.
 
 For immutable RC/stable validation (recommended for staging and prod), use the dedicated
 helper instead:
 
 ```bash
-just dspace-oci-deploy env=staging tag=v3-<immutable-tag>
+just dspace-oci-deploy env=staging tag=main-<immutable-tag>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
@@ -754,9 +754,9 @@ just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 `kubectl rollout status`, and prints post-deploy verification commands for `config.json`,
 `/healthz`, and `/livez` using the live ingress host (or `<dspace-host>` when none is discoverable).
 
-When you pass an image tag (including the default `v3-latest`), the helper sets
+When you pass an image tag (including the default `main-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
-each redeploy. For production, prefer immutable tags (for example, `v3-<sha>`) if you want
+each redeploy. For production, prefer immutable tags (for example, `main-<sha>`) if you want
 to pin a specific image.
 
 **Emergency redeploy checklist:**
@@ -767,7 +767,7 @@ to pin a specific image.
     just cluster-status
     ```
 
-2. Ensure your new image is pushed and `v3-latest` (or the tag you pass via `tag=`)
+2. Ensure your new image is pushed and `main-latest` (or the tag you pass via `tag=`)
    points at the desired build (see the dspace repo docs for image build/publish steps).
 3. Run the redeploy command (`just helm-oci-upgrade ...` or `just dspace-oci-redeploy`).
 4. Verify pods and logs:
@@ -899,8 +899,8 @@ As you continue operating your cluster, these recipes will be helpful:
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
 
 - **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to pull the latest
-  dspace v3 chart from GHCR and force a rollout restart so pods refresh to the newest
-  `v3-latest` image digest without retyping chart arguments.
+  dspace chart from GHCR and force a rollout restart so pods refresh to the newest
+  `main-latest` image digest without retyping chart arguments.
 
 ### Document outages and incidents
 

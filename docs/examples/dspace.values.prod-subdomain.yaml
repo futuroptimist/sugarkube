@@ -1,5 +1,5 @@
-# Example values for deploying democratized.space v3 to the production preview subdomain.
-# Use this during rollout validation before apex cutover.
+# Example values for optional production preview/canary deploys.
+# Use this when validating at prod.democratized.space before/alongside apex promotion.
 environment: prod
 
 ingress:

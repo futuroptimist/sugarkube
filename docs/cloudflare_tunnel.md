@@ -318,9 +318,9 @@ Only create this manually if the CNAME is missing:
    - **Proxy status**: **Proxied** (orange cloud)
 4. Save the record.
 
-## Step 5 – Post-cutover redirect for `prod.` (optional finalization)
+## Step 5 – Optional redirect for `prod.` preview host
 
-After dspace v3 is fully promoted on `democratized.space`, convert `prod.democratized.space` to a
+After dspace is fully promoted on `democratized.space`, you can convert `prod.democratized.space` to a
 simple redirect (Cloudflare Redirect Rule or Page Rule) to avoid maintaining duplicate origins:
 
 - **Source**: `https://prod.democratized.space/*`
@@ -347,6 +347,6 @@ for temporary local development. See
   `http://traefik.<namespace>.svc.cluster.local:80` inside the cluster.
 - Cloudflare DNS has (or auto-created) proxied records pointing rollout hostnames to the tunnel’s
   `*.cfargotunnel.com` name.
-- After apex cutover, `prod.democratized.space` can be converted to a redirect to
+- After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
 - The Sugarkube dspace app expects this persistent tunnel setup to be in place.
