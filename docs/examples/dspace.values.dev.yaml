@@ -1,5 +1,5 @@
-# Example values for deploying democratized.space via Helm.
-# The ingress host is set by the installer command.
+# Base/shared dspace values (dev profile) layered into all environments.
+# Keep this file host-agnostic; environment overlays set public hostnames.
 environment: dev
 
 ingress:

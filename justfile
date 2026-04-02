@@ -1212,8 +1212,8 @@ helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' v
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
 # Opinionated immutable-tag dspace deploy with rollout verification.
-
-# Use this for RC/stable validation flows where explicit image pinning matters.
+#
+# Use this for routine staging/prod releases where explicit image pinning matters.
 dspace-oci-deploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1235,7 +1235,7 @@ dspace-oci-deploy env='staging' tag='':
 
     deploy_tag="$(echo "{{ tag }}" | xargs)"
     if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> (for example v3-<shortsha>) for dspace immutable deploys." >&2
+      echo "Set tag=<immutable-tag> (for example main-<shortsha> or v<semver>) for dspace immutable deploys." >&2
       exit 1
     fi
     tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
@@ -1294,16 +1294,16 @@ dspace-oci-deploy env='staging' tag='':
       echo "  curl -fsS https://${verify_host}/livez | jq ."
     fi
 
-# Deploy dspace v3 to the production preview subdomain (prod.democratized.space).
-
-# Use this before apex cutover to validate rollout and run smoke tests.
+# Optional: deploy dspace to the production preview subdomain (prod.democratized.space).
+#
+# Use this for canary/smoke testing before or alongside normal apex deploys.
 dspace-oci-deploy-prod-subdomain tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     deploy_tag="$(echo "{{ tag }}" | xargs)"
     if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> (for example v3-<shortsha>) for prod subdomain deploys." >&2
+      echo "Set tag=<immutable-tag> (for example main-<shortsha> or v<semver>) for prod subdomain deploys." >&2
       exit 1
     fi
     tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
@@ -1362,7 +1362,7 @@ dspace-oci-promote-prod tag='':
 
     just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${deploy_tag}"
 
-# Fast redeploy of dspace v3 from GHCR (emergency push).
+# Fast redeploy of dspace from GHCR (emergency push).
 dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1397,7 +1397,7 @@ dspace-oci-redeploy env='staging' tag='':
         exit 1
       fi
     else
-      default_tag_value="v3-latest"
+      default_tag_value="main-latest"
     fi
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
