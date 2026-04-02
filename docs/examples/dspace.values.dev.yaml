@@ -1,5 +1,7 @@
-# Example values for deploying democratized.space via Helm.
-# The ingress host is set by the installer command.
+# Example base values for dspace deployments.
+# This file is shared across dev/staging/prod values chains.
+# Environment/topology details (for example node placement and HA) live in
+# docs/apps/dspace.md and are applied via overlays, not encoded here.
 environment: dev
 
 ingress:
