@@ -36,7 +36,7 @@ runs inside the cluster.
 - A Cloudflare account.
 - A domain added as an active zone in Cloudflare and using Cloudflare nameservers (for example,
   `democratized.space`).
-- `staging.democratized.space`, optional `prod.democratized.space` (preview/canary), and
+- `staging.democratized.space`, `prod.democratized.space` (optional preview/canary), and
   `democratized.space` (or your preferred rollout hostnames) are managed by Cloudflare DNS.
 - Access to the Cloudflare Zero Trust / Cloudflare One dashboard.
 - A running k3s cluster with Sugarkube and Traefik installed (see the main Sugarkube docs for the
@@ -246,7 +246,8 @@ To fix:
 
 Once `cloudflared` runs with the correct token, Cloudflare links the named tunnel to the cluster so
 requests to your mapped hostnames (for example `staging.democratized.space`,
-`prod.democratized.space`, and `democratized.space`) reach Traefik.
+`prod.democratized.space` for optional preview/canary checks, and `democratized.space`)
+reach Traefik.
 
 ### Recovery and reset
 
