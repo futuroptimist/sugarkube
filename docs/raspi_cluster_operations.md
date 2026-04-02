@@ -703,7 +703,7 @@ For production preview (optional canary), this guide intentionally switches from
 post-deploy checks are included by default:
 
 ```bash
-just dspace-oci-deploy-prod-subdomain tag=main-<immutable-tag>
+just dspace-oci-deploy-prod-subdomain tag=main-<shortsha>
 ```
 
 For production apex promotion, use `dspace-oci-promote-prod` with a pinned tag (for example the
@@ -742,7 +742,7 @@ For immutable RC/stable validation (recommended for staging and prod), use the d
 helper instead:
 
 ```bash
-just dspace-oci-deploy env=staging tag=main-<immutable-tag>
+just dspace-oci-deploy env=staging tag=main-<shortsha>
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
@@ -756,7 +756,7 @@ just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 
 When you pass an image tag (including the default `main-latest`), the helper sets
 `image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
-each redeploy. For production, prefer immutable tags (for example, `main-<sha>`) if you want
+each redeploy. For production, prefer immutable tags (for example, `main-<shortsha>`) if you want
 to pin a specific image.
 
 **Emergency redeploy checklist:**

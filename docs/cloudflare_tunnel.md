@@ -341,7 +341,7 @@ for temporary local development. See
 
 ## Summary
 
-- A named Cloudflare Tunnel exists (for example, `dspace-staging-v3`) with a saved token.
+- A named Cloudflare Tunnel exists (for example, `dspace-staging`) with a saved token.
 - `cloudflared` runs inside the k3s cluster via `just cf-tunnel-install` using that token.
 - Routes map `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` to
   `http://traefik.<namespace>.svc.cluster.local:80` inside the cluster.
