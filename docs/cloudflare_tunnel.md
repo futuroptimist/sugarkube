@@ -5,9 +5,11 @@ inbound firewall ports. Canonical dspace hostnames are:
 
 ```
 https://staging.democratized.space
-https://prod.democratized.space (optional preview/canary host)
+https://prod.democratized.space
 https://democratized.space
 ```
+
+`prod.democratized.space` is an optional preview/canary host.
 
 The tunnel routes these hostnames to Traefik (or another ingress controller) running inside the
 k3s cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector
@@ -25,7 +27,7 @@ runs inside the cluster.
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
-  optional `prod.democratized.space` preview, and `democratized.space` →
+  `prod.democratized.space` (optional preview/canary host), and `democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
@@ -34,8 +36,8 @@ runs inside the cluster.
 - A Cloudflare account.
 - A domain added as an active zone in Cloudflare and using Cloudflare nameservers (for example,
   `democratized.space`).
-- `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` (or your
-  preferred rollout hostnames) are managed by Cloudflare DNS.
+- `staging.democratized.space`, optional `prod.democratized.space` (preview/canary), and
+  `democratized.space` (or your preferred rollout hostnames) are managed by Cloudflare DNS.
 - Access to the Cloudflare Zero Trust / Cloudflare One dashboard.
 - A running k3s cluster with Sugarkube and Traefik installed (see the main Sugarkube docs for the
   setup steps).
@@ -284,7 +286,7 @@ internal Traefik Service.
    **Published applications** section.
 2. Add routes/applications:
    - **Hostname**: `staging.democratized.space`
-   - **Hostname**: `prod.democratized.space`
+   - **Hostname**: `prod.democratized.space` *(optional preview/canary host)*
    - **Hostname**: `democratized.space`
    - **Service type**: `HTTP`
    - **Service URL**: `http://traefik.<namespace>.svc.cluster.local:80`
