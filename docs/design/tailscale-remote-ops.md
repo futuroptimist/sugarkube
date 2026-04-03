@@ -114,11 +114,21 @@ bootstrap behavior, or LAN discovery already used by `sugarkube`.
 Follow the existing setup sequence first (for example, `just up <env>` or `just ha3 env=<env>`),
 then validate with `just status` and `just cluster-status`.
 
-### 2) Add Tailscale on each node as a manual post-provisioning step
+### 2) Add Tailscale on each node as a post-provisioning step
 
-At the time of writing, this repo does not define a dedicated Tailscale helper recipe in
-`justfile`. Treat Tailscale installation/join as a manual step per node, using upstream vendor
-instructions and your own auth process.
+This repository now includes helper recipes for the node-local Tailscale setup flow:
+
+- `just tailscale-install` installs the upstream Tailscale package.
+- `just tailscale-up` brings the node online with your local auth flow.
+- `just tailscale-status` verifies enrollment state.
+
+Example (placeholder-only) usage:
+
+```bash
+just tailscale-install
+just tailscale-up
+just tailscale-status
+```
 
 ### 3) Continue using repo `just` commands as primary cluster interface
 
