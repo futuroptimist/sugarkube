@@ -56,7 +56,8 @@ kubeconfig::resolve_home() {
 #   - Creates ~/.kube directory if missing, copies k3s.yaml to ~/.kube/config if
 #     missing or stale.
 #   - Sets ownership and permissions on ~/.kube/config and ~/.kube.
-#   - Adds 'export KUBECONFIG=$HOME/.kube/config' to ~/.bashrc if not present.
+#   - Adds 'export KUBECONFIG=$HOME/.kube/config' to common shell init files
+#     (for example ~/.bashrc and ~/.profile) if not present.
 #
 # Supported environment variables:
 #   - SUGARKUBE_KUBECONFIG_USER: Username to own the kubeconfig.
@@ -71,7 +72,7 @@ kubeconfig::ensure_user_kubeconfig() {
     return 0
   fi
 
-  local target_user target_home kubeconfig_path kube_dir bashrc_path uid gid
+  local target_user target_home kubeconfig_path kube_dir uid gid
 
   target_user="${SUGARKUBE_KUBECONFIG_USER:-${SUDO_USER:-$(id -un)}}"
   target_home="$(kubeconfig::resolve_home "${target_user}")"
@@ -82,7 +83,6 @@ kubeconfig::ensure_user_kubeconfig() {
 
   kube_dir="${target_home%/}/.kube"
   kubeconfig_path="${kube_dir}/config"
-  bashrc_path="${target_home%/}/.bashrc"
 
   if ! uid="$(id -u "${target_user}" 2>/dev/null)"; then
     return 0
@@ -103,20 +103,21 @@ kubeconfig::ensure_user_kubeconfig() {
   kubeconfig::_with_privilege chmod 600 "${kubeconfig_path}"
   kubeconfig::_with_privilege chmod 700 "${kube_dir}"
 
-  if [ -n "${bashrc_path}" ]; then
-    if [ ! -e "${bashrc_path}" ]; then
-      kubeconfig::_with_privilege touch "${bashrc_path}"
-      kubeconfig::_with_privilege chown "${uid}:${gid}" "${bashrc_path}"
+  local shell_init_path
+  for shell_init_path in "${target_home%/}/.bashrc" "${target_home%/}/.profile"; do
+    if [ ! -e "${shell_init_path}" ]; then
+      kubeconfig::_with_privilege touch "${shell_init_path}"
+      kubeconfig::_with_privilege chown "${uid}:${gid}" "${shell_init_path}"
     fi
 
     if ! grep -qE '^\s*export\s+KUBECONFIG=\$HOME/\.kube/config\s*$' \
-      "${bashrc_path}" 2>/dev/null; then
-      kubeconfig::_with_privilege tee -a "${bashrc_path}" >/dev/null <<'EOF'
+      "${shell_init_path}" 2>/dev/null; then
+      kubeconfig::_with_privilege tee -a "${shell_init_path}" >/dev/null <<'EOF'
 export KUBECONFIG=$HOME/.kube/config
 EOF
-      kubeconfig::_with_privilege chown "${uid}:${gid}" "${bashrc_path}"
+      kubeconfig::_with_privilege chown "${uid}:${gid}" "${shell_init_path}"
     fi
-  fi
+  done
 
   return 0
 }

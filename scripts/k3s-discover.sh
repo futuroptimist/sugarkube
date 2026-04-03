@@ -3819,7 +3819,10 @@ ensure_time_sync() {
 
 build_install_env() {
   local -n _target=$1
-  _target=("INSTALL_K3S_CHANNEL=${K3S_CHANNEL:-stable}")
+  _target=(
+    "INSTALL_K3S_CHANNEL=${K3S_CHANNEL:-stable}"
+    "K3S_KUBECONFIG_MODE=${SUGARKUBE_K3S_KUBECONFIG_MODE:-644}"
+  )
   if [ -n "${TOKEN:-}" ]; then
     _target+=("K3S_TOKEN=${TOKEN}")
   fi

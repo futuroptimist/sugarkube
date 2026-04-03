@@ -249,7 +249,26 @@ Verification steps and troubleshooting live in
 
 ### Configure kubectl for the `pi` user on the cluster nodes
 
-`k3s` writes its kubeconfig to `/etc/rancher/k3s/k3s.yaml` as `root`, so `kubectl` defaults to requiring `sudo` on the Pis. Copy the kubeconfig into the `pi` home directory, fix ownership, and lock down permissions to use `kubectl` without `sudo` on each node:
+`just up <env>` now configures rootless `kubectl` automatically by:
+
+- installing k3s with `K3S_KUBECONFIG_MODE=644` (so `/etc/rancher/k3s/k3s.yaml` is readable), and
+- copying kubeconfig to `~/.kube/config` for the invoking user while persisting
+  `export KUBECONFIG=$HOME/.kube/config` in shell init files.
+
+On a freshly provisioned Pi, this means you can usually run `kubectl` directly
+right after install (or after opening a new shell):
+
+```bash
+kubectl get nodes
+```
+
+If you need to re-apply kubeconfig setup manually on an existing node, run:
+
+```bash
+just kubeconfig
+```
+
+Equivalent manual commands are:
 
 ```bash
 # As root or via sudo on the node:
@@ -258,19 +277,9 @@ sudo cp /etc/rancher/k3s/k3s.yaml /home/pi/.kube/config
 sudo chown pi:pi /home/pi/.kube/config
 sudo chmod 600 /home/pi/.kube/config
 
-# Then as pi:
-kubectl get nodes
-```
-
-By default, `k3s kubectl` looks at `/etc/rancher/k3s/k3s.yaml`. To tell `kubectl` to use the
-copy in your home directory, set `KUBECONFIG` for the `pi` user:
-
-```bash
-# As pi:
+# Persist kubeconfig for new shells:
 echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc
-source ~/.bashrc
-
-kubectl get nodes
+echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.profile
 ```
 
 After this, `kubectl` (and `k3s kubectl`) reads `~/.kube/config` for `pi` and no longer needs
