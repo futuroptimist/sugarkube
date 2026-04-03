@@ -249,33 +249,27 @@ Verification steps and troubleshooting live in
 
 ### Configure kubectl for the `pi` user on the cluster nodes
 
-`k3s` writes its kubeconfig to `/etc/rancher/k3s/k3s.yaml` as `root`, so `kubectl` defaults to requiring `sudo` on the Pis. Copy the kubeconfig into the `pi` home directory, fix ownership, and lock down permissions to use `kubectl` without `sudo` on each node:
+`just up <env>` now auto-configures a user kubeconfig for both the invoking user
+and the default `pi` account whenever `/etc/rancher/k3s/k3s.yaml` is present.
+That means `kubectl` should work without `sudo` by default after bootstrap:
 
 ```bash
-# As root or via sudo on the node:
-sudo mkdir -p /home/pi/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml /home/pi/.kube/config
-sudo chown pi:pi /home/pi/.kube/config
-sudo chmod 600 /home/pi/.kube/config
-
-# Then as pi:
+# As pi (or the user that ran just up):
 kubectl get nodes
 ```
 
-By default, `k3s kubectl` looks at `/etc/rancher/k3s/k3s.yaml`. To tell `kubectl` to use the
-copy in your home directory, set `KUBECONFIG` for the `pi` user:
+If a node was installed before this automation landed, run:
 
 ```bash
-# As pi:
-echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc
-source ~/.bashrc
-
-kubectl get nodes
+just kubeconfig
 ```
 
-After this, `kubectl` (and `k3s kubectl`) reads `~/.kube/config` for `pi` and no longer needs
-`sudo` on that node. On your workstation, `just kubeconfig-env env=dev` remains the recommended way
-to download the kubeconfig from the cluster.
+This syncs `/etc/rancher/k3s/k3s.yaml` into `~/.kube/config`, ensures file ownership and
+permissions are correct, and appends `export KUBECONFIG=$HOME/.kube/config` to `~/.bashrc`
+when missing.
+
+On your workstation, `just kubeconfig-env env=dev` remains the recommended way to download
+the kubeconfig from the cluster.
 
 ## How Discovery Works
 
