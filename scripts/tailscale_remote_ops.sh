@@ -68,7 +68,7 @@ install_tailscale() {
   local tmp_script
   validate_install_url "$install_url"
   tmp_script="$(mktemp)"
-  trap "rm -f '$tmp_script'" RETURN
+  trap 'rm -f "${tmp_script:-}"' RETURN
 
   log "installing tailscale from ${install_url}"
   curl -fsSL --output "$tmp_script" "$install_url"
