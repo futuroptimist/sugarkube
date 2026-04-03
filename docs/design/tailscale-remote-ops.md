@@ -135,6 +135,49 @@ just tailscale-status
 Use `just` recipes for cluster lifecycle and diagnostics. Use tailnet connectivity as the secure
 transport path for remote operator access.
 
+
+### Implementation status in this repository
+
+The design is implemented with a dedicated helper script and `just` wrappers:
+
+- `scripts/tailscale_remote_ops.sh` provides the operational entrypoints:
+  - `install` (idempotent install path with command checks),
+  - `up` (supports auth key via environment variable or file), and
+  - `status` (for enrollment/state verification).
+- `just tailscale-install` delegates to `scripts/tailscale_remote_ops.sh install`.
+- `just tailscale-up` delegates to `scripts/tailscale_remote_ops.sh up` and forwards optional
+  auth-key + extra args.
+- `just tailscale-status` delegates to `scripts/tailscale_remote_ops.sh status` and forwards
+  optional status args.
+
+This keeps Tailscale-specific logic centralized in one script while preserving a simple operator UX.
+
+### Testing and validation coverage
+
+This feature now has both unit-level and end-to-end regression coverage:
+
+- `tests/test_tailscale_remote_ops.py::test_tailscale_install_dry_run_reports_install_url`
+  validates the install flow and dry-run behavior.
+- `tests/test_tailscale_remote_ops.py::test_tailscale_up_uses_auth_key_file_and_redacts_in_dry_run`
+  verifies auth-key file support and output redaction.
+- `tests/test_tailscale_remote_ops.py::test_tailscale_status_recipe_e2e_with_stubs`
+  exercises `just tailscale-status` end-to-end with command stubs.
+- `tests/test_tailscale_remote_ops.py::test_tailscale_up_recipe_e2e_invokes_sudo_and_up`
+  exercises `just tailscale-up` end-to-end with `sudo` + `tailscale` stubs.
+
+These tests are designed to run in CI without real network enrollment while still asserting
+command wiring and safety behavior.
+
+### Troubleshooting
+
+- If `tailscale` is already installed, `just tailscale-install` exits successfully without reinstall.
+- If `sudo`, `curl`, `bash`, or `tailscale` are missing, helper commands fail fast with explicit
+  error messages.
+- For non-interactive testing, set `TAILSCALE_DRY_RUN=1` to print the effective commands without
+  making system changes.
+- To avoid shell-history leaks, prefer `TAILSCALE_AUTH_KEY_FILE` over inline key arguments whenever
+  possible.
+
 ## Security and privacy considerations
 
 - Never commit auth keys, tokens, or private tailnet metadata.

@@ -196,19 +196,13 @@ deps:
     sudo -E scripts/install_deps.sh
 
 tailscale-install:
-    curl -fsSL https://tailscale.com/install.sh | sh
+    "{{ scripts_dir }}/tailscale_remote_ops.sh" install
 
 tailscale-up auth_key='' extra_args='':
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -n "{{ auth_key }}" ]; then
-        sudo tailscale up --auth-key "{{ auth_key }}" {{ extra_args }}
-    else
-        sudo tailscale up {{ extra_args }}
-    fi
+    TAILSCALE_AUTH_KEY="{{ auth_key }}" "{{ scripts_dir }}/tailscale_remote_ops.sh" up {{ extra_args }}
 
-tailscale-status:
-    tailscale status
+tailscale-status extra_args='':
+    "{{ scripts_dir }}/tailscale_remote_ops.sh" status {{ extra_args }}
 
 prereqs:
     @echo "[deprecated] Use 'just deps' instead of 'just prereqs'." >&2
