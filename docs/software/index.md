@@ -42,6 +42,8 @@ and supporting services stay healthy.
   Cloudflare tunnels.
 - [apps/tokenplace-relay.md](../apps/tokenplace-relay.md) — Helm ingress/TLS guide for
   token.place staging.
+- [design/tailscale-remote-ops.md](../design/tailscale-remote-ops.md) — additive remote-ops
+  topology for secure off-LAN node access.
 
 ## Developer Workflow
 - [contributor_script_map.md](../contributor_script_map.md) — keep automation docs
