@@ -109,3 +109,6 @@ users:
     assert "sugar-dev" in contents
     assert "current-context: sugar-dev" in contents
     assert "PLACEHOLDER" not in contents
+
+    profile_contents = (home / ".profile").read_text(encoding="utf-8")
+    assert "export KUBECONFIG=$HOME/.kube/config" in profile_contents
