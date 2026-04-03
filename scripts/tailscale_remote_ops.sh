@@ -62,12 +62,17 @@ validate_install_url() {
 install_tailscale() {
   require_cmd curl
   require_cmd sh
+  require_cmd mktemp
 
   local install_url="${SUGARKUBE_TAILSCALE_INSTALL_URL:-https://tailscale.com/install.sh}"
+  local tmp_script
   validate_install_url "$install_url"
+  tmp_script="$(mktemp)"
+  trap "rm -f '$tmp_script'" RETURN
 
   log "installing tailscale from ${install_url}"
-  run_as_root sh -c 'curl -fsSL "$1" | sh' -- "$install_url"
+  curl -fsSL --output "$tmp_script" "$install_url"
+  run_as_root sh "$tmp_script"
   log 'install complete'
 }
 

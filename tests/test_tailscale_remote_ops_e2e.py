@@ -37,7 +37,14 @@ exec "$@"
         "curl",
         """#!/usr/bin/env bash
 set -euo pipefail
-printf '#!/usr/bin/env bash\nexit 0\n'
+if [ "$1" = "-fsSL" ] && [ "${2:-}" = "--output" ]; then
+  cat > "$3" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  exit 0
+fi
+exit 1
 """,
     )
     write_stub(
@@ -98,5 +105,6 @@ printf 'tailscale %s\n' "$*" >> "{calls}"
     assert "BackendState=Running" in status.stdout
 
     logged = calls.read_text(encoding="utf-8")
-    assert "install -c curl -fsSL" in logged
+    assert "install -c" not in logged
+    assert "install /" in logged
     assert "tailscale up --auth-key tskey-test" in logged
