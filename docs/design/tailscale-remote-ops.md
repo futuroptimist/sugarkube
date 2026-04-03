@@ -116,11 +116,20 @@ then validate with `just status` and `just cluster-status`.
 
 ### 2) Add Tailscale on each node as a post-provisioning step
 
-This repository now includes helper recipes for the node-local Tailscale setup flow:
+This repository includes a dedicated helper wrapper (`scripts/tailscale_remote_ops.sh`) and
+`just` recipes for the node-local setup flow:
 
 - `just tailscale-install` installs the upstream Tailscale package.
 - `just tailscale-up` brings the node online with your local auth flow.
 - `just tailscale-status` verifies enrollment state.
+
+To avoid putting keys directly in shell history, use environment variables for non-interactive runs:
+
+```bash
+TS_AUTHKEY_FILE=~/.config/sugarkube/tailscale-authkey just tailscale-up extra_args='--ssh'
+```
+
+If no auth key is provided, `just tailscale-up` uses interactive `tailscale up` login.
 
 Example (placeholder-only) usage:
 
@@ -185,6 +194,15 @@ Adopt incrementally to avoid disruption:
 4. Repeat for the next node.
 
 Do not rewire existing cluster networking during rollout.
+
+## Test coverage in this repository
+
+The Tailscale remote-ops helpers are now covered by both unit and e2e-style tests:
+
+- `tests/test_tailscale_remote_ops.py` validates argument handling, auth-key sourcing, and
+  justfile wiring.
+- `tests/bats/tailscale_remote_ops.bats` validates end-to-end shell execution with stubbed
+  `sudo`/`tailscale` commands, matching CI's Bats execution model.
 
 ## Verification checklist
 

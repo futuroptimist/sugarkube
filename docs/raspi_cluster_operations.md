@@ -477,6 +477,25 @@ Quick reference for the most common recipes when operating your cluster:
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
 | `just dspace-debug-logs` | Dump dspace and Traefik logs for the last 200 lines each | Investigating 500s or routing issues for dspace. |
+| `just tailscale-install` / `just tailscale-up` / `just tailscale-status` | Install, enroll, and inspect per-node Tailscale remote access | Enabling secure off-LAN SSH and operator maintenance without exposing services publicly. |
+
+
+### Optional: Tailscale remote operations
+
+If you operate the cluster from outside your LAN, follow the
+[Tailscale Remote Operations Design](design/tailscale-remote-ops.md) to add Tailscale as an
+additive management plane.
+
+Use these helper recipes on each node:
+
+```bash
+just tailscale-install
+TS_AUTHKEY_FILE=~/.config/sugarkube/tailscale-authkey just tailscale-up extra_args='--ssh'
+just tailscale-status extra_args='--json'
+```
+
+This keeps your day-two workflow (`just status`, `just cluster-status`, `just kubeconfig-env`) the
+same while adding secure remote operator transport.
 
 ## Step 2: Capture and commit sanitized bring-up logs
 
