@@ -196,19 +196,48 @@ deps:
     sudo -E scripts/install_deps.sh
 
 tailscale-install:
-    curl -fsSL https://tailscale.com/install.sh | sh
+    scripts/tailscale_remote_ops.sh install
 
-tailscale-up auth_key='' extra_args='':
+tailscale-up auth_key='' auth_key_file='' extra_args='':
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -n "{{ auth_key }}" ]; then
-        sudo tailscale up --auth-key "{{ auth_key }}" {{ extra_args }}
-    else
-        sudo tailscale up {{ extra_args }}
+
+    auth_key_input="{{ auth_key }}"
+    auth_key_file_input="{{ auth_key_file }}"
+    extra_args_input="{{ extra_args }}"
+
+    # Compatibility shim for invocation forms like:
+    #   just tailscale-up auth_key_file=/path/to/file
+    if [[ "${auth_key_input}" == auth_key_file=* ]] && [ -z "${auth_key_file_input}" ]; then
+        auth_key_file_input="${auth_key_input#auth_key_file=}"
+        auth_key_input=''
+    fi
+    if [[ "${auth_key_input}" == extra_args=* ]] && [ -z "${extra_args_input}" ]; then
+        extra_args_input="${auth_key_input#extra_args=}"
+        auth_key_input=''
+    fi
+    if [[ "${auth_key_file_input}" == extra_args=* ]] && [ -z "${extra_args_input}" ]; then
+        extra_args_input="${auth_key_file_input#extra_args=}"
+        auth_key_file_input=''
     fi
 
-tailscale-status:
-    tailscale status
+    if [ -n "${auth_key_input}" ]; then
+        printf 'WARNING: auth_key=... is deprecated; prefer auth_key_file=... or env vars.\n' >&2
+        TS_AUTHKEY="${auth_key_input}" scripts/tailscale_remote_ops.sh up --auth-key-env TS_AUTHKEY -- ${extra_args_input}
+    elif [ -n "${auth_key_file_input}" ]; then
+        scripts/tailscale_remote_ops.sh up --auth-key-file "${auth_key_file_input}" -- ${extra_args_input}
+    else
+        scripts/tailscale_remote_ops.sh up -- ${extra_args_input}
+    fi
+
+tailscale-status json='0':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{ json }}" = '1' ]; then
+        scripts/tailscale_remote_ops.sh status --json
+    else
+        scripts/tailscale_remote_ops.sh status
+    fi
 
 prereqs:
     @echo "[deprecated] Use 'just deps' instead of 'just prereqs'." >&2

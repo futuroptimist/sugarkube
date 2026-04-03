@@ -194,3 +194,55 @@ Do not rewire existing cluster networking during rollout.
 - [ ] Local LAN/mDNS workflows still work as before.
 - [ ] No private values are present in docs (IPs, domains, tailnet names, usernames, tokens,
       copied private outputs).
+
+
+## Implementation status in this repository
+
+The remote-operations design is now implemented with an explicit helper script and
+`just` wrappers:
+
+- `scripts/tailscale_remote_ops.sh install` downloads and runs the upstream installer with
+  a temporary file lifecycle.
+- `scripts/tailscale_remote_ops.sh up` provides guarded argument parsing, preflight checks,
+  and safer auth-key sourcing (`--auth-key-file` or `--auth-key-env`).
+- `scripts/tailscale_remote_ops.sh status` supports both human output and `--json` output for
+  automation.
+- `just tailscale-install`, `just tailscale-up`, and `just tailscale-status` now delegate to
+  the helper script so local and CI behavior stay consistent.
+
+### Recommended auth-key handling
+
+Prefer one of these flows:
+
+```bash
+# Option A: env var (ephemeral shell)
+export TS_AUTHKEY='tskey-...'
+just tailscale-up extra_args='--ssh --accept-routes'
+
+# Option B: key file (root-readable and private)
+printf '%s' 'tskey-...' > ~/.config/sugarkube/tailscale.auth
+chmod 600 ~/.config/sugarkube/tailscale.auth
+just tailscale-up auth_key_file="$HOME/.config/sugarkube/tailscale.auth"   extra_args='--ssh --accept-routes'
+```
+
+The legacy `auth_key=...` recipe argument is still supported for compatibility, but is
+considered deprecated because it is easier to leak in shell history.
+
+## Test and verification plan
+
+Use these checks when changing tailscale remote-ops logic:
+
+```bash
+# Unit + integration-style script coverage
+pytest tests/scripts/test_tailscale_remote_ops.py
+
+# E2E recipe-level flow through `just`
+pytest tests/test_tailscale_remote_ops_e2e.py
+```
+
+These tests validate:
+
+- key-file and env-var auth key handling,
+- `tailscale up` argument forwarding,
+- JSON status output behavior, and
+- end-to-end integration between `just` recipes and the helper script.

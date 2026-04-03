@@ -36,6 +36,8 @@ and supporting services stay healthy.
   debugging.
 - [operations/security-checklist.md](../operations/security-checklist.md) — record
   credential rotations and post-maintenance evidence.
+- [design/tailscale-remote-ops.md](../design/tailscale-remote-ops.md) — secure remote
+  operations topology plus `just tailscale-*` workflow details.
 - [projects-compose.md](../projects-compose.md) — run token.place and dspace via
   Docker Compose.
 - [pi_token_dspace.md](../pi_token_dspace.md) — expose token.place/dspace through
