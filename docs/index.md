@@ -44,6 +44,7 @@ Review the safety notes before working with power components.
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — operate the token.place relay staging deployment
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
   verification steps
+- [design/tailscale-remote-ops.md](design/tailscale-remote-ops.md) — public design for privacy-preserving per-node Tailscale remote operations
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare
 - [token_place_sample_datasets.md](token_place_sample_datasets.md) — replay bundled
   token.place health and chat samples
