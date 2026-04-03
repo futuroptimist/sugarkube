@@ -34,6 +34,7 @@ logs, preparing Helm, and rolling out real workloads like
 - Deploy the democratized.space (dspace) application
 - Hook your cluster into Flux for GitOps-managed releases
 - Learn operational recipes for day-to-day cluster management
+- Add secure remote access with the Tailscale remote-ops flow
 
 ## Golden path: HA dev cluster → Helm → Traefik → workloads
 
@@ -64,6 +65,21 @@ Follow this sequence after imaging and booting the Pis:
 4. **Deploy workloads:** Continue with the workload sections in this guide (for example,
    [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
    ingress is healthy.
+
+
+## Remote operations over Tailscale (recommended)
+
+After the HA cluster is healthy, add per-node tailnet access using the design in
+[design/tailscale-remote-ops.md](./design/tailscale-remote-ops.md).
+
+```bash
+just tailscale-install
+just tailscale-up extra_args='--ssh --accept-routes'
+just tailscale-status
+```
+
+For production hygiene, prefer `auth_key_file=...` over inline keys so credentials are
+less likely to leak into shell history.
 
 ## Install Helm (prerequisite for Helm workloads)
 
