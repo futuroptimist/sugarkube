@@ -196,19 +196,22 @@ deps:
     sudo -E scripts/install_deps.sh
 
 tailscale-install:
-    curl -fsSL https://tailscale.com/install.sh | sh
+    scripts/tailscale_remote_ops.sh install
 
 tailscale-up auth_key='' extra_args='':
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "{{ auth_key }}" ]; then
-        sudo tailscale up --auth-key "{{ auth_key }}" {{ extra_args }}
+        SUGARKUBE_TAILSCALE_AUTH_KEY="{{ auth_key }}" scripts/tailscale_remote_ops.sh up {{ extra_args }}
     else
-        sudo tailscale up {{ extra_args }}
+        scripts/tailscale_remote_ops.sh up {{ extra_args }}
     fi
 
 tailscale-status:
-    tailscale status
+    scripts/tailscale_remote_ops.sh status
+
+tailscale-ssh-check target:
+    scripts/tailscale_remote_ops.sh ssh-check "{{ target }}"
 
 prereqs:
     @echo "[deprecated] Use 'just deps' instead of 'just prereqs'." >&2

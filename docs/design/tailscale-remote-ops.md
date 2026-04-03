@@ -130,6 +130,12 @@ just tailscale-up
 just tailscale-status
 ```
 
+Optional remote SSH probe:
+
+```bash
+just tailscale-ssh-check target='<operator>@sugarkube0'
+```
+
 ### 3) Continue using repo `just` commands as primary cluster interface
 
 Use `just` recipes for cluster lifecycle and diagnostics. Use tailnet connectivity as the secure
@@ -194,3 +200,59 @@ Do not rewire existing cluster networking during rollout.
 - [ ] Local LAN/mDNS workflows still work as before.
 - [ ] No private values are present in docs (IPs, domains, tailnet names, usernames, tokens,
       copied private outputs).
+
+## Implementation status in this repository
+
+The Tailscale remote-operations design is now implemented with dedicated automation in:
+
+- `scripts/tailscale_remote_ops.sh` for install/up/status/SSH probes.
+- `just tailscale-install`
+- `just tailscale-up`
+- `just tailscale-status`
+- `just tailscale-ssh-check`
+
+The automation is designed to be safe for public repos:
+
+- auth keys are supplied through environment variables, not hard-coded values.
+- status checks require a healthy `BackendState=Running`.
+- SSH verification is explicit and opt-in per host.
+
+## Operator quick reference
+
+Use this sequence on each `sugarkube<n>` node after base cluster setup:
+
+```bash
+# 1) Install Tailscale
+just tailscale-install
+
+# 2) Bring node online (interactive auth)
+just tailscale-up
+
+# 3) Verify node health in tailnet
+just tailscale-status
+
+# 4) (From operator workstation) validate SSH path
+just tailscale-ssh-check target='<operator>@sugarkube0'
+```
+
+If you use an ephemeral auth key, provide it only at runtime and avoid shell history capture:
+
+```bash
+read -r -s TS_AUTH_KEY
+just tailscale-up auth_key="$TS_AUTH_KEY"
+unset TS_AUTH_KEY
+```
+
+## Failure modes and remediation
+
+### `tailscale-status` reports backend not running
+
+1. Check service state: `sudo systemctl status tailscaled`.
+2. Restart service if needed: `sudo systemctl restart tailscaled`.
+3. Re-run `just tailscale-status`.
+
+### `tailscale-up` succeeds but remote SSH fails
+
+1. Confirm target uses tailnet identity (`<operator>@sugarkube<n>`).
+2. Confirm node-level SSH policy in your ACLs.
+3. Run `just tailscale-ssh-check target='<operator>@sugarkube<n>'` for an explicit probe.
