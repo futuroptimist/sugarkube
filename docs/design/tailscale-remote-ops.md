@@ -239,9 +239,13 @@ If you use an ephemeral auth key, provide it only at runtime and avoid shell his
 
 ```bash
 read -r -s TS_AUTH_KEY
-just tailscale-up auth_key="$TS_AUTH_KEY"
+SUGARKUBE_TAILSCALE_AUTH_KEY="$TS_AUTH_KEY" just tailscale-up
 unset TS_AUTH_KEY
 ```
+
+`just tailscale-ssh-check` uses SSH `StrictHostKeyChecking=accept-new` for first-connection
+convenience. This is a trust-on-first-use trade-off: run the first probe from a trusted network and
+prefer pre-provisioned host keys if your environment requires strict anti-MITM guarantees.
 
 ## Failure modes and remediation
 

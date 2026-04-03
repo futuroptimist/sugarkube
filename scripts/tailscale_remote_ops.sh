@@ -39,13 +39,35 @@ run_as_root() {
   sudo "$@"
 }
 
+validate_install_url() {
+  local install_url="$1"
+
+  case "$install_url" in
+    https://*)
+      ;;
+    *)
+      printf 'invalid tailscale install URL (must use https): %s\n' "$install_url" >&2
+      exit 1
+      ;;
+  esac
+
+  case "$install_url" in
+    *[[:space:]\'\"\\\`\$\;\&\|\<\>\(\)\{\}\[\]\!\#\*\?~]*)
+      printf 'invalid tailscale install URL (contains unsafe characters): %s\n' "$install_url" >&2
+      exit 1
+      ;;
+  esac
+}
+
 install_tailscale() {
   require_cmd curl
   require_cmd sh
 
   local install_url="${SUGARKUBE_TAILSCALE_INSTALL_URL:-https://tailscale.com/install.sh}"
+  validate_install_url "$install_url"
+
   log "installing tailscale from ${install_url}"
-  run_as_root sh -c "curl -fsSL '${install_url}' | sh"
+  run_as_root sh -c 'curl -fsSL "$1" | sh' -- "$install_url"
   log 'install complete'
 }
 
@@ -67,15 +89,13 @@ up_tailscale() {
 
 status_tailscale() {
   require_cmd tailscale
+  require_cmd python3
 
-  local raw
-  raw="$(tailscale status --json)"
-
-  python3 - <<'PY' "$raw"
+  tailscale status --json | python3 -c '
 import json
 import sys
 
-payload = json.loads(sys.argv[1])
+payload = json.load(sys.stdin)
 backend_state = payload.get("BackendState", "")
 self_info = payload.get("Self") or {}
 hostname = self_info.get("HostName", "unknown")
@@ -87,7 +107,7 @@ print(f"TailscaleIPs={tail_addr}")
 
 if backend_state.lower() != "running":
     raise SystemExit("tailscale backend is not running")
-PY
+'
 }
 
 ssh_check() {

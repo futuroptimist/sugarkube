@@ -198,14 +198,14 @@ deps:
 tailscale-install:
     scripts/tailscale_remote_ops.sh install
 
-tailscale-up auth_key='' extra_args='':
+tailscale-up auth_key='':
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -n "{{ auth_key }}" ]; then
-        SUGARKUBE_TAILSCALE_AUTH_KEY="{{ auth_key }}" scripts/tailscale_remote_ops.sh up {{ extra_args }}
-    else
-        scripts/tailscale_remote_ops.sh up {{ extra_args }}
+    # Auth keys should be passed via env to avoid shell-interpolating secret values.
+    if [ -n '{{ auth_key }}' ]; then
+        export SUGARKUBE_TAILSCALE_AUTH_KEY='{{ auth_key }}'
     fi
+    scripts/tailscale_remote_ops.sh up
 
 tailscale-status:
     scripts/tailscale_remote_ops.sh status

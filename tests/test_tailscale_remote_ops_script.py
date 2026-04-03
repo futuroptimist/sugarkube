@@ -112,3 +112,38 @@ printf '%s\n' "$*" >> "{calls}"
     assert result.returncode == 0, result.stderr
     logged = calls.read_text(encoding="utf-8")
     assert "up --auth-key tskey-auth-kid --ssh" in logged
+
+
+def test_install_rejects_unsafe_override_url(tmp_path: Path) -> None:
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+
+    _write_executable(
+        fakebin / "curl",
+        """#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+""",
+    )
+    _write_executable(
+        fakebin / "sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+""",
+    )
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fakebin}:{env.get('PATH', '')}"
+    env["SUGARKUBE_TAILSCALE_INSTALL_URL"] = "https://example.test/'; touch /tmp/pwn #"
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "install"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "contains unsafe characters" in result.stderr

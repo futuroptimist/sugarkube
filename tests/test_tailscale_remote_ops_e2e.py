@@ -64,6 +64,7 @@ printf 'tailscale %s\n' "$*" >> "{calls}"
 
     env = os.environ.copy()
     env["PATH"] = f"{fakebin}:{env.get('PATH', '')}"
+    env["SUGARKUBE_TAILSCALE_AUTH_KEY"] = "tskey-test"
 
     install = subprocess.run(
         [just_bin, "tailscale-install"],
@@ -76,7 +77,7 @@ printf 'tailscale %s\n' "$*" >> "{calls}"
     assert install.returncode == 0, install.stderr
 
     up = subprocess.run(
-        [just_bin, "tailscale-up", "tskey-test", "--ssh"],
+        [just_bin, "tailscale-up"],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -98,4 +99,4 @@ printf 'tailscale %s\n' "$*" >> "{calls}"
 
     logged = calls.read_text(encoding="utf-8")
     assert "install -c curl -fsSL" in logged
-    assert "tailscale up --auth-key tskey-test --ssh" in logged
+    assert "tailscale up --auth-key tskey-test" in logged
