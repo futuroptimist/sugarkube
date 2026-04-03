@@ -65,6 +65,23 @@ Follow this sequence after imaging and booting the Pis:
    [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
    ingress is healthy.
 
+### Optional (recommended): Tailscale remote-ops access
+
+If you operate the cluster remotely, follow the dedicated Tailscale design guide:
+[`./design/tailscale-remote-ops.md`](./design/tailscale-remote-ops.md).
+
+High-level operator flow (canonical commands):
+
+```bash
+just tailscale-install
+just tailscale-up
+just tailscale-status
+just tailscale-ssh-check target='<operator>@sugarkube0'
+```
+
+Use this section as the discoverability bridge; keep full setup details and
+security guidance in the design doc above.
+
 ## Install Helm (prerequisite for Helm workloads)
 
 Helm simplifies Kubernetes application deployment by packaging manifests, providing templating, and
