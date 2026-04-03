@@ -195,6 +195,21 @@ up env='dev':
 deps:
     sudo -E scripts/install_deps.sh
 
+tailscale-install:
+    curl -fsSL https://tailscale.com/install.sh | sh
+
+tailscale-up auth_key='' extra_args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{ auth_key }}" ]; then
+        sudo tailscale up --auth-key "{{ auth_key }}" {{ extra_args }}
+    else
+        sudo tailscale up {{ extra_args }}
+    fi
+
+tailscale-status:
+    tailscale status
+
 prereqs:
     @echo "[deprecated] Use 'just deps' instead of 'just prereqs'." >&2
     sudo -E scripts/install_deps.sh
