@@ -65,6 +65,22 @@ Follow this sequence after imaging and booting the Pis:
    [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
    ingress is healthy.
 
+## Remote operations over Tailscale (optional but recommended)
+
+For remote day-two administration without exposing cluster services publicly, follow the
+[Tailscale Remote Operations Design](./design/tailscale-remote-ops.md).
+
+At a high level:
+
+```bash
+just tailscale-install
+just tailscale-up
+just tailscale-status
+```
+
+Use this as an additive management plane: keep `just` recipes as the primary cluster interface and
+use Tailscale transport for secure remote SSH and operator access.
+
 ## Install Helm (prerequisite for Helm workloads)
 
 Helm simplifies Kubernetes application deployment by packaging manifests, providing templating, and
