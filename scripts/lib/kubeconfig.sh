@@ -31,7 +31,9 @@ kubeconfig::resolve_home() {
   local target_user
   target_user="$1"
 
-  if [ -n "${SUGARKUBE_KUBECONFIG_HOME:-}" ]; then
+  if [ -n "${SUGARKUBE_KUBECONFIG_HOME:-}" ] && \
+    { [ -z "${SUGARKUBE_KUBECONFIG_USER:-}" ] || \
+      [ "${target_user}" = "${SUGARKUBE_KUBECONFIG_USER:-}" ]; }; then
     printf '%s' "${SUGARKUBE_KUBECONFIG_HOME}"
     return 0
   fi
@@ -61,20 +63,25 @@ kubeconfig::resolve_home() {
 # Supported environment variables:
 #   - SUGARKUBE_KUBECONFIG_USER: Username to own the kubeconfig.
 #   - SUGARKUBE_KUBECONFIG_HOME: Home directory to use for kubeconfig.
+#   - SUGARKUBE_KUBECONFIG_ADDITIONAL_USERS: Space-delimited users that should
+#     also receive kubeconfig copies. Defaults to "pi".
 #   - SUDO_USER: Used as fallback for target user if running under sudo.
 #
 # Return behavior:
 #   - Always returns 0, even on failure, for graceful degradation.
 #   - This allows scripts to proceed even if kubeconfig setup is incomplete.
-kubeconfig::ensure_user_kubeconfig() {
-  if ! kubeconfig::_with_privilege test -e /etc/rancher/k3s/k3s.yaml; then
+kubeconfig::_ensure_for_target() {
+  local target_user="$1"
+  local target_home="${2:-}"
+  local kubeconfig_path kube_dir bashrc_path uid gid
+
+  if [ -z "${target_user}" ]; then
     return 0
   fi
 
-  local target_user target_home kubeconfig_path kube_dir bashrc_path uid gid
-
-  target_user="${SUGARKUBE_KUBECONFIG_USER:-${SUDO_USER:-$(id -un)}}"
-  target_home="$(kubeconfig::resolve_home "${target_user}")"
+  if [ -z "${target_home}" ]; then
+    target_home="$(kubeconfig::resolve_home "${target_user}")"
+  fi
 
   if [ -z "${target_home}" ]; then
     return 0
@@ -117,6 +124,31 @@ EOF
       kubeconfig::_with_privilege chown "${uid}:${gid}" "${bashrc_path}"
     fi
   fi
+
+  return 0
+}
+
+kubeconfig::ensure_user_kubeconfig() {
+  if ! kubeconfig::_with_privilege test -e /etc/rancher/k3s/k3s.yaml; then
+    return 0
+  fi
+
+  local target_user target_home additional_users extra_user
+  target_user="${SUGARKUBE_KUBECONFIG_USER:-${SUDO_USER:-$(id -un)}}"
+  target_home="${SUGARKUBE_KUBECONFIG_HOME:-}"
+  additional_users="${SUGARKUBE_KUBECONFIG_ADDITIONAL_USERS:-pi}"
+
+  kubeconfig::_ensure_for_target "${target_user}" "${target_home}"
+
+  for extra_user in ${additional_users}; do
+    if [ -z "${extra_user}" ] || [ "${extra_user}" = "${target_user}" ]; then
+      continue
+    fi
+    if ! id -u "${extra_user}" >/dev/null 2>&1; then
+      continue
+    fi
+    kubeconfig::_ensure_for_target "${extra_user}"
+  done
 
   return 0
 }
