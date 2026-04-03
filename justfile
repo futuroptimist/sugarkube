@@ -195,7 +195,9 @@ prereqs:
 # Check cluster health by displaying all nodes (guards against running before k3s is installed).
 status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
-    sudo k3s kubectl get nodes -o wide
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    kubectl get nodes -o wide
 
 # Show a summarized status of the HA cluster, Helm CLI, and Traefik ingress.
 
