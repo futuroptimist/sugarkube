@@ -50,6 +50,13 @@ up env='dev':
 
     export SUGARKUBE_ENV="${env_name}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
+    # Default kubeconfig ownership/path to the sudo caller first, then current user, unless overridden.
+    export SUGARKUBE_KUBECONFIG_USER="${SUGARKUBE_KUBECONFIG_USER:-${SUDO_USER:-$(id -un)}}"
+    if [ -z "${SUGARKUBE_KUBECONFIG_HOME:-}" ] && [ "${SUGARKUBE_KUBECONFIG_USER}" = "$(id -un)" ] && [ -n "${HOME:-}" ]; then
+        export SUGARKUBE_KUBECONFIG_HOME="${HOME}"
+    elif [ -n "${SUGARKUBE_KUBECONFIG_HOME:-}" ]; then
+        export SUGARKUBE_KUBECONFIG_HOME
+    fi
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
 
