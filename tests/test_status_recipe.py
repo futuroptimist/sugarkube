@@ -88,8 +88,8 @@ def test_status_recipe_handles_missing_k3s(tmp_path: Path) -> None:
     assert "sudo should not run" not in result.stderr
 
 
-def test_status_recipe_invokes_k3s_when_available(tmp_path: Path) -> None:
-    """Once k3s is on the PATH the recipe should call through to kubectl."""
+def test_status_recipe_prefers_user_kubectl_when_available(tmp_path: Path) -> None:
+    """Once kubeconfig is prepared, status should use plain kubectl."""
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -106,39 +106,61 @@ def test_status_recipe_invokes_k3s_when_available(tmp_path: Path) -> None:
     )
     sudo.chmod(0o755)
 
-    k3s_log = tmp_path / "k3s.log"
     k3s = bin_dir / "k3s"
     k3s.write_text(
         textwrap.dedent(
             """\
-            #!/usr/bin/env python3
-            import os
-            import sys
-
-
-            def main() -> None:
-                log_path = os.environ["TEST_K3S_LOG"]
-                with open(log_path, "w", encoding="utf-8") as handle:
-                    handle.write(" ".join(sys.argv[1:]))
-                print("fake k3s output")
-
-
-            if __name__ == "__main__":
-                main()
+            #!/usr/bin/env bash
+            exit 0
             """
         ),
         encoding="utf-8",
     )
     k3s.chmod(0o755)
 
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    ensure = scripts_dir / "ensure_user_kubeconfig.sh"
+    ensure.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            mkdir -p "${HOME}/.kube"
+            printf 'apiVersion: v1\\nclusters: []\\ncontexts: []\\nusers: []\\n' > "${HOME}/.kube/config"
+            """
+        ),
+        encoding="utf-8",
+    )
+    ensure.chmod(0o755)
+
+    kubectl_log = tmp_path / "kubectl.log"
+    kubectl = bin_dir / "kubectl"
+    kubectl.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import os
+            import sys
+
+            with open(os.environ["TEST_KUBECTL_LOG"], "w", encoding="utf-8") as handle:
+                handle.write(" ".join(sys.argv[1:]))
+            print("fake kubectl output")
+            """
+        ),
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
+
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
-    env["TEST_K3S_LOG"] = str(k3s_log)
+    env["TEST_KUBECTL_LOG"] = str(kubectl_log)
 
     script = _write_status_script(tmp_path)
 
     result = subprocess.run(
         [str(script)],
+        cwd=tmp_path,
         env=env,
         capture_output=True,
         text=True,
@@ -146,6 +168,6 @@ def test_status_recipe_invokes_k3s_when_available(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "fake k3s output" in result.stdout
+    assert "fake kubectl output" in result.stdout
     assert "raspi_cluster_setup.md" not in result.stdout
-    assert k3s_log.read_text(encoding="utf-8") == "kubectl get nodes -o wide"
+    assert kubectl_log.read_text(encoding="utf-8") == "get nodes -o wide"

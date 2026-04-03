@@ -439,8 +439,11 @@ prints a helpful reminder if the control plane is missing.
 ### Fix kubectl config on a node
 
 On fresh k3s installs, the admin kubeconfig at `/etc/rancher/k3s/k3s.yaml` is
-root-owned. If you run `kubectl` as `pi`, it falls back to `localhost:8080` and
-fails. Fix that per node with:
+root-owned. Sugarkube now auto-copies this file to the default user kubeconfig
+(`~/.kube/config`) during `just up <env>` and when running `just status`, so
+plain `kubectl` should work without `sudo` by default.
+
+If you ever need to repair it manually per node, run:
 
 ```bash
 just kubeconfig

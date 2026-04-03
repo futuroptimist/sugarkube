@@ -44,19 +44,50 @@ kubeconfig::resolve_home() {
   getent passwd "${target_user}" 2>/dev/null | cut -d: -f6 | head -n1
 }
 
+kubeconfig::_user_exists() {
+  local username
+  username="$1"
+  id -u "${username}" >/dev/null 2>&1
+}
+
+kubeconfig::resolve_target_user() {
+  if [ -n "${SUGARKUBE_KUBECONFIG_USER:-}" ]; then
+    printf '%s' "${SUGARKUBE_KUBECONFIG_USER}"
+    return 0
+  fi
+
+  if [ -n "${SUDO_USER:-}" ] && kubeconfig::_user_exists "${SUDO_USER}"; then
+    printf '%s' "${SUDO_USER}"
+    return 0
+  fi
+
+  if [ "$(id -u)" -ne 0 ]; then
+    id -un
+    return 0
+  fi
+
+  if kubeconfig::_user_exists pi; then
+    printf 'pi'
+    return 0
+  fi
+
+  id -un
+}
+
 # Ensures that the target user's kubeconfig file (~/.kube/config) exists and is
 # properly owned.
 #
 # Behavior:
 #   - If /etc/rancher/k3s/k3s.yaml is missing, does nothing and returns 0.
 #   - Determines the target user using (in order): SUGARKUBE_KUBECONFIG_USER,
-#     SUDO_USER, or current user.
+#     SUDO_USER, current user, or "pi" when running as root on Pi images.
 #   - Determines the target home directory using SUGARKUBE_KUBECONFIG_HOME, or
 #     system/user lookup.
 #   - Creates ~/.kube directory if missing, copies k3s.yaml to ~/.kube/config if
 #     missing or stale.
 #   - Sets ownership and permissions on ~/.kube/config and ~/.kube.
-#   - Adds 'export KUBECONFIG=$HOME/.kube/config' to ~/.bashrc if not present.
+#   - Adds 'export KUBECONFIG=$HOME/.kube/config' to ~/.bashrc and ~/.profile
+#     if not present.
 #
 # Supported environment variables:
 #   - SUGARKUBE_KUBECONFIG_USER: Username to own the kubeconfig.
@@ -71,9 +102,9 @@ kubeconfig::ensure_user_kubeconfig() {
     return 0
   fi
 
-  local target_user target_home kubeconfig_path kube_dir bashrc_path uid gid
+  local target_user target_home kubeconfig_path kube_dir bashrc_path profile_path uid gid
 
-  target_user="${SUGARKUBE_KUBECONFIG_USER:-${SUDO_USER:-$(id -un)}}"
+  target_user="$(kubeconfig::resolve_target_user)"
   target_home="$(kubeconfig::resolve_home "${target_user}")"
 
   if [ -z "${target_home}" ]; then
@@ -83,6 +114,7 @@ kubeconfig::ensure_user_kubeconfig() {
   kube_dir="${target_home%/}/.kube"
   kubeconfig_path="${kube_dir}/config"
   bashrc_path="${target_home%/}/.bashrc"
+  profile_path="${target_home%/}/.profile"
 
   if ! uid="$(id -u "${target_user}" 2>/dev/null)"; then
     return 0
@@ -103,20 +135,20 @@ kubeconfig::ensure_user_kubeconfig() {
   kubeconfig::_with_privilege chmod 600 "${kubeconfig_path}"
   kubeconfig::_with_privilege chmod 700 "${kube_dir}"
 
-  if [ -n "${bashrc_path}" ]; then
-    if [ ! -e "${bashrc_path}" ]; then
-      kubeconfig::_with_privilege touch "${bashrc_path}"
-      kubeconfig::_with_privilege chown "${uid}:${gid}" "${bashrc_path}"
+  for shell_file in "${bashrc_path}" "${profile_path}"; do
+    if [ ! -e "${shell_file}" ]; then
+      kubeconfig::_with_privilege touch "${shell_file}"
+      kubeconfig::_with_privilege chown "${uid}:${gid}" "${shell_file}"
     fi
 
     if ! grep -qE '^\s*export\s+KUBECONFIG=\$HOME/\.kube/config\s*$' \
-      "${bashrc_path}" 2>/dev/null; then
-      kubeconfig::_with_privilege tee -a "${bashrc_path}" >/dev/null <<'EOF'
+      "${shell_file}" 2>/dev/null; then
+      kubeconfig::_with_privilege tee -a "${shell_file}" >/dev/null <<'EOF'
 export KUBECONFIG=$HOME/.kube/config
 EOF
-      kubeconfig::_with_privilege chown "${uid}:${gid}" "${bashrc_path}"
+      kubeconfig::_with_privilege chown "${uid}:${gid}" "${shell_file}"
     fi
-  fi
+  done
 
   return 0
 }
