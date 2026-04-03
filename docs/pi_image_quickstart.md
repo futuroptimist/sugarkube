@@ -273,7 +273,7 @@ sync without modifying the host.
 - Insert the card and power on the Pi.
 - k3s installs automatically on first boot. Confirm the node is ready:
   ```bash
-  sudo kubectl get nodes
+  kubectl get nodes
   ```
 - token.place and dspace run under `projects-compose.service`. Check status:
   ```bash

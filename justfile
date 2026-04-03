@@ -50,6 +50,9 @@ up env='dev':
 
     export SUGARKUBE_ENV="${env_name}"
     export SUGARKUBE_SERVERS="{{ SUGARKUBE_SERVERS }}"
+    # Ensure k3s-discover configures kubeconfig for the invoking non-root user.
+    export SUGARKUBE_KUBECONFIG_USER="${SUGARKUBE_KUBECONFIG_USER:-$(id -un)}"
+    export SUGARKUBE_KUBECONFIG_HOME="${SUGARKUBE_KUBECONFIG_HOME:-${HOME}}"
 
     export SUGARKUBE_SUMMARY_FILE="$(mktemp -t sugarkube-summary.XXXXXX)"
 

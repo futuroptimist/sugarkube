@@ -5302,14 +5302,14 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
     printf '\n'
     printf '4. Verify cluster status:\n'
     printf '   just status\n'
-    printf '   # or: sudo kubectl get nodes\n'
+    printf '   # or: kubectl get nodes\n'
   elif [ -n "${TOKEN:-}" ]; then
     # This was a join operation
     printf '1. This node joined an existing cluster\n'
     printf '\n'
     printf '2. Check cluster status from any node:\n'
     printf '   just status\n'
-    printf '   # or: sudo kubectl get nodes\n'
+    printf '   # or: kubectl get nodes\n'
     printf '\n'
     if [ "${servers_count}" -lt "${SERVERS_DESIRED}" ]; then
       printf '3. Add more servers to complete HA setup (%s/%s ready):\n' "${servers_count}" "${SERVERS_DESIRED}"
@@ -5322,7 +5322,7 @@ if command -v summary::section >/dev/null 2>&1 && summary_enabled; then
     # Single server or complete bootstrap
     printf '1. Check cluster status:\n'
     printf '   just status\n'
-    printf '   # or: sudo kubectl get nodes\n'
+    printf '   # or: kubectl get nodes\n'
     printf '\n'
     printf '2. Export kubeconfig for local access:\n'
     printf '   just kubeconfig-env env=%s\n' "${ENVIRONMENT}"

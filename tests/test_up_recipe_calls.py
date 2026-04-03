@@ -20,4 +20,6 @@ def test_up_recipe_runs_checks_and_discovery():
     lines = Path("justfile").read_text(encoding="utf-8").splitlines()
     body = _extract_recipe(lines, "up env='dev':")
     assert any("check_memory_cgroup.sh" in line for line in body)
+    assert any("SUGARKUBE_KUBECONFIG_USER" in line for line in body)
+    assert any("SUGARKUBE_KUBECONFIG_HOME" in line for line in body)
     assert any("sudo -E bash scripts/k3s-discover.sh" in line for line in body)
