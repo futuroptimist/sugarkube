@@ -1,0 +1,11 @@
+{
+  "id": "2026-03-31-helm-oci-install-readiness-gap",
+  "date": "2026-03-31",
+  "component": "justfile helm OCI deploy helpers",
+  "rootCause": "The helm-oci-install wrapper delegated directly to `helm upgrade --install` without readiness flags, so the command returned before workloads were fully ready and gave weaker deploy-complete feedback than dspace-oci-redeploy.",
+  "resolution": "Added readiness gating flags (`--wait --wait-for-jobs --timeout 180s`) and explicit rollout-wait messaging in the shared `_helm-oci-deploy` helper, plus a regression test that simulates an OCI chart deploy from a fake registry artifact.",
+  "references": [
+    "justfile",
+    "tests/test_helm_oci_install_waits.py"
+  ]
+}

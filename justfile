@@ -1227,6 +1227,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         helm_args+=("${version_args[@]}")
     fi
 
+    helm_args+=(--wait --wait-for-jobs --timeout 180s)
+
+    echo "Running Helm deploy with rollout wait (timeout: 180s)..."
     helm "${helm_args[@]}"
     wait_for_rollouts
 
