@@ -1517,6 +1517,7 @@ dspace-debug-logs-env env='staging' namespace='dspace':
 # Fast redeploy of token.place relay from GHCR.
 # The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
 # after promoting a fresh image.
+
 # See docs/apps/tokenplace-relay.md for relay-specific operations.
 tokenplace-oci-redeploy tag='':
     #!/usr/bin/env bash
@@ -1544,11 +1545,13 @@ tokenplace-oci-redeploy tag='':
 
 # token.place app status helper (generic/parameterized defaults, not final release wiring).
 # Override namespace/release/host_key per environment until onboarding locks chart naming.
+
 # See docs/tokenplace_sugarkube_onboarding.md and docs/apps/tokenplace.md.
 tokenplace-status namespace='tokenplace' release='tokenplace-relay' host_key='ingress.host':
     @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
 
 # Install-or-upgrade token.place via configurable Helm OCI wiring.
+
 # Uses helm upgrade --install underneath via the shared helper.
 tokenplace-deploy release='' namespace='' chart='' values='' version_file='' version='' tag='' default_tag='':
     #!/usr/bin/env bash
@@ -1643,6 +1646,7 @@ tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenpla
     fi
 
 # Validation helper keeps generic defaults as placeholders; set selector/release/health_url per deployment.
+
 # Do not treat tokenplace-relay defaults here as final token.place production naming.
 tokenplace-validate namespace='tokenplace' release='tokenplace-relay' health_url='' selector='app.kubernetes.io/name=tokenplace-relay':
     #!/usr/bin/env bash
@@ -1661,6 +1665,7 @@ tokenplace-validate namespace='tokenplace' release='tokenplace-relay' health_url
     fi
 
 # Port-forward helper uses placeholder defaults for convenience; override service/ports for real app components.
+
 # Keep this recipe generic while token.place release/service naming is still being finalized.
 tokenplace-port-forward namespace='tokenplace' service='tokenplace-relay' local_port='5010' remote_port='80':
     #!/usr/bin/env bash
