@@ -41,7 +41,13 @@ Review the safety notes before working with power components.
   verify Traefik ingress, and roll out workloads
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
+- [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding contract,
+  ownership boundaries, and environment mapping for token.place on Sugarkube
+- [apps/tokenplace.md](apps/tokenplace.md) — token.place app topology and operations model on Sugarkube
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — operate the token.place relay staging deployment
+- [k3s-tokenplace-dev.md](k3s-tokenplace-dev.md) — token.place dev runbook
+- [k3s-tokenplace-staging.md](k3s-tokenplace-staging.md) — token.place staging runbook
+- [k3s-tokenplace-prod.md](k3s-tokenplace-prod.md) — token.place production runbook
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
   verification steps
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare

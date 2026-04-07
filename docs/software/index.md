@@ -42,8 +42,16 @@ and supporting services stay healthy.
   Docker Compose.
 - [pi_token_dspace.md](../pi_token_dspace.md) — expose token.place/dspace through
   Cloudflare tunnels.
+- [tokenplace_sugarkube_onboarding.md](../tokenplace_sugarkube_onboarding.md) — onboarding
+  contract for token.place artifacts, ownership, and environment wiring.
+- [apps/tokenplace.md](../apps/tokenplace.md) — primary token.place app operations guide on
+  Sugarkube.
+- [k3s-tokenplace-dev.md](../k3s-tokenplace-dev.md),
+  [k3s-tokenplace-staging.md](../k3s-tokenplace-staging.md), and
+  [k3s-tokenplace-prod.md](../k3s-tokenplace-prod.md) — environment runbooks for day-2
+  operations.
 - [apps/tokenplace-relay.md](../apps/tokenplace-relay.md) — Helm ingress/TLS guide for
-  token.place staging.
+  token.place staging relay operations.
 
 ## Developer Workflow
 - [contributor_script_map.md](../contributor_script_map.md) — keep automation docs
