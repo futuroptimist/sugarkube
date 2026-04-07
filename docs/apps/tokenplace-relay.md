@@ -4,6 +4,9 @@ Deploy the `token.place` relay (`relay.py`) to the Sugarkube k3s cluster with a 
 matches the existing dspace staging patterns. The public staging host for the relay service is
 `staging.token.place`, fronted by Traefik and Cloudflare Tunnel.
 
+For full token.place onboarding and environment runbooks, see
+`docs/tokenplace_sugarkube_onboarding.md` and `docs/apps/tokenplace.md`.
+
 Values are split so you can reuse base settings across environments and layer staging-only ingress
 overrides. Operator defaults live alongside the chart; the docs copies remain as examples for
 cut-and-paste use:

@@ -37,6 +37,15 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 - **[Raspberry Pi cluster series](docs/index.md#raspberry-pi-cluster-series)** — Part 1/Part 2
   quick-starts plus manual walkthroughs when you want the raw commands.
 
+## Application runbooks
+
+- **[token.place onboarding contract](docs/tokenplace_sugarkube_onboarding.md)** — prerequisites,
+  ownership boundaries, and environment mapping for first-class token.place operations.
+- **[token.place app operations](docs/apps/tokenplace.md)** — topology and deployment workflow
+  patterns for token.place on Sugarkube.
+- **[token.place env runbooks](docs/k3s-tokenplace-dev.md)** — environment-specific guides for
+  dev, staging, and production operations.
+
 ## Repository layout
 
 - `cad/` — OpenSCAD models of structural parts. See
