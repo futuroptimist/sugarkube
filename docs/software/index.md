@@ -44,6 +44,12 @@ and supporting services stay healthy.
   Cloudflare tunnels.
 - [apps/tokenplace-relay.md](../apps/tokenplace-relay.md) — Helm ingress/TLS guide for
   token.place staging.
+- [tokenplace_sugarkube_onboarding.md](../tokenplace_sugarkube_onboarding.md) — onboarding contract,
+  release expectations, and ownership split for token.place on Sugarkube.
+- [apps/tokenplace.md](../apps/tokenplace.md) — token.place operating model and lifecycle workflows.
+- [k3s-tokenplace-dev.md](../k3s-tokenplace-dev.md) — environment-specific dev runbook.
+- [k3s-tokenplace-staging.md](../k3s-tokenplace-staging.md) — environment-specific staging runbook.
+- [k3s-tokenplace-prod.md](../k3s-tokenplace-prod.md) — environment-specific production runbook.
 
 ## Developer Workflow
 - [contributor_script_map.md](../contributor_script_map.md) — keep automation docs

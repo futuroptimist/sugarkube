@@ -1542,7 +1542,7 @@ tokenplace-oci-redeploy tag='':
 
     echo "token.place relay available at: https://staging.token.place"
 
-tokenplace-status:
+tokenplace-relay-status:
     @just app-status namespace=tokenplace release=tokenplace-relay host_key='ingress.host'
 
 tokenplace-logs namespace='tokenplace':
@@ -1582,6 +1582,154 @@ tokenplace-port-forward local_port='5010':
 
     echo "Port-forwarding ${svc} to localhost:{{ local_port }} (Ctrl+C to stop)..."
     kubectl -n tokenplace port-forward svc/${svc} {{ local_port }}:80
+
+# Token.place onboarding helpers (parameterized so Sugarkube can onboard finalized
+# release/chart wiring without hard-coding assumptions in this repository).
+#
+# See docs/tokenplace_sugarkube_onboarding.md and docs/k3s-tokenplace-*.md.
+tokenplace-install env='staging' release='' namespace='' chart='' values='' tag='' host='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_name="{{ env }}"
+    case "${env_name}" in dev|staging|prod) ;; *)
+      echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2; exit 1 ;;
+    esac
+
+    release_name="{{ release }}"
+    namespace_name="{{ namespace }}"
+    chart_ref="{{ chart }}"
+    values_chain="{{ values }}"
+    tag_value="{{ tag }}"
+    host_value="{{ host }}"
+
+    if [ -z "${release_name}" ]; then release_name="${TOKENPLACE_RELEASE:-tokenplace}"; fi
+    if [ -z "${namespace_name}" ]; then namespace_name="${TOKENPLACE_NAMESPACE:-tokenplace}"; fi
+    if [ -z "${chart_ref}" ]; then chart_ref="${TOKENPLACE_CHART:-}"; fi
+    if [ -z "${values_chain}" ]; then
+      values_chain_var="TOKENPLACE_VALUES_${env_name^^}"
+      values_chain="${TOKENPLACE_VALUES:-${!values_chain_var:-}}"
+    fi
+    if [ -z "${host_value}" ]; then
+      host_var="TOKENPLACE_HOST_${env_name^^}"
+      host_value="${TOKENPLACE_HOST:-${!host_var:-}}"
+    fi
+    if [ -z "${chart_ref}" ]; then
+      echo "Set chart=<helm-chart-ref> or TOKENPLACE_CHART before install." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release="${release_name}" namespace="${namespace_name}" chart="${chart_ref}" \
+      values="${values_chain}" host="${host_value}" \
+      tag="${tag_value}" default_tag="${TOKENPLACE_DEFAULT_TAG:-}"
+
+tokenplace-upgrade env='staging' release='' namespace='' chart='' values='' tag='' host='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_name="{{ env }}"
+    case "${env_name}" in dev|staging|prod) ;; *)
+      echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2; exit 1 ;;
+    esac
+
+    release_name="{{ release }}"
+    namespace_name="{{ namespace }}"
+    chart_ref="{{ chart }}"
+    values_chain="{{ values }}"
+    tag_value="{{ tag }}"
+    host_value="{{ host }}"
+
+    if [ -z "${release_name}" ]; then release_name="${TOKENPLACE_RELEASE:-tokenplace}"; fi
+    if [ -z "${namespace_name}" ]; then namespace_name="${TOKENPLACE_NAMESPACE:-tokenplace}"; fi
+    if [ -z "${chart_ref}" ]; then chart_ref="${TOKENPLACE_CHART:-}"; fi
+    if [ -z "${values_chain}" ]; then
+      values_chain_var="TOKENPLACE_VALUES_${env_name^^}"
+      values_chain="${TOKENPLACE_VALUES:-${!values_chain_var:-}}"
+    fi
+    if [ -z "${host_value}" ]; then
+      host_var="TOKENPLACE_HOST_${env_name^^}"
+      host_value="${TOKENPLACE_HOST:-${!host_var:-}}"
+    fi
+    if [ -z "${chart_ref}" ]; then
+      echo "Set chart=<helm-chart-ref> or TOKENPLACE_CHART before upgrade." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+      release="${release_name}" namespace="${namespace_name}" chart="${chart_ref}" \
+      values="${values_chain}" host="${host_value}" \
+      tag="${tag_value}" default_tag="${TOKENPLACE_DEFAULT_TAG:-}"
+
+tokenplace-rollback env='staging' release='' namespace='' revision='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_name="{{ env }}"
+    case "${env_name}" in dev|staging|prod) ;; *)
+      echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2; exit 1 ;;
+    esac
+
+    release_name="{{ release }}"
+    namespace_name="{{ namespace }}"
+    revision_value="$(echo "{{ revision }}" | xargs)"
+    if [ -z "${release_name}" ]; then release_name="${TOKENPLACE_RELEASE:-tokenplace}"; fi
+    if [ -z "${namespace_name}" ]; then namespace_name="${TOKENPLACE_NAMESPACE:-tokenplace}"; fi
+
+    if [ -z "${revision_value}" ]; then
+      echo "Set revision=<helm-revision> (see: helm history ${release_name} -n ${namespace_name})." >&2
+      exit 1
+    fi
+
+    helm -n "${namespace_name}" rollback "${release_name}" "${revision_value}"
+
+tokenplace-validate env='staging' namespace='' release='' health_path='/healthz':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_name="{{ env }}"
+    case "${env_name}" in dev|staging|prod) ;; *)
+      echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2; exit 1 ;;
+    esac
+
+    namespace_name="{{ namespace }}"
+    release_name="{{ release }}"
+    if [ -z "${namespace_name}" ]; then namespace_name="${TOKENPLACE_NAMESPACE:-tokenplace}"; fi
+    if [ -z "${release_name}" ]; then release_name="${TOKENPLACE_RELEASE:-tokenplace}"; fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-status \
+      env="${env_name}" namespace="${namespace_name}" release="${release_name}"
+    echo
+    echo "Optional external health check (set TOKENPLACE_VALIDATE_URL to enable):"
+    if [ -n "${TOKENPLACE_VALIDATE_URL:-}" ]; then
+      curl -fsS "${TOKENPLACE_VALIDATE_URL%/}{{ health_path }}"
+    else
+      echo "  TOKENPLACE_VALIDATE_URL is not set; skipping curl."
+    fi
+
+tokenplace-status env='' namespace='tokenplace' release='tokenplace-relay' host_key='ingress.host':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_name="{{ env }}"
+    if [ -n "${env_name}" ]; then
+      just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" app-status \
+      namespace="{{ namespace }}" release="{{ release }}" host_key="{{ host_key }}"
+
+tokenplace-port-forward-app namespace='' service='' local_port='5010' remote_port='80':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    namespace_name="{{ namespace }}"
+    service_name="{{ service }}"
+    if [ -z "${namespace_name}" ]; then namespace_name="${TOKENPLACE_NAMESPACE:-tokenplace}"; fi
+    if [ -z "${service_name}" ]; then service_name="${TOKENPLACE_SERVICE:-tokenplace-relay}"; fi
+
+    echo "Port-forwarding svc/${service_name} in ${namespace_name} to localhost:{{ local_port }}..."
+    kubectl -n "${namespace_name}" port-forward "svc/${service_name}" {{ local_port }}:{{ remote_port }}
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
