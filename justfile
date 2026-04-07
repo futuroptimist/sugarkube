@@ -1518,7 +1518,7 @@ dspace-debug-logs-env env='staging' namespace='dspace':
 # The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
 
 # after promoting a fresh image.
-tokenplace-oci-redeploy tag='':
+tokenplace-relay-oci-redeploy tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1542,10 +1542,23 @@ tokenplace-oci-redeploy tag='':
 
     echo "token.place relay available at: https://staging.token.place"
 
-tokenplace-status:
+# Backward-compatible aliases for relay-specific recipes.
+tokenplace-oci-redeploy tag='':
+    @just tokenplace-relay-oci-redeploy tag='{{ tag }}'
+
+tokenplace-relay-status-compat:
+    @just tokenplace-relay-status
+
+tokenplace-logs-relay namespace='tokenplace':
+    @just tokenplace-relay-logs namespace='{{ namespace }}'
+
+tokenplace-port-forward-relay local_port='5010':
+    @just tokenplace-relay-port-forward local_port='{{ local_port }}'
+
+tokenplace-relay-status:
     @just app-status namespace=tokenplace release=tokenplace-relay host_key='ingress.host'
 
-tokenplace-logs namespace='tokenplace':
+tokenplace-relay-logs namespace='tokenplace':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1573,7 +1586,109 @@ tokenplace-logs namespace='tokenplace':
       done
     fi
 
-tokenplace-port-forward local_port='5010':
+
+# token.place onboarding recipes (preparation layer).
+# These helpers are intentionally parameterized so operators can wire the final chart/release names
+# without changing the public interface. See docs/tokenplace_sugarkube_onboarding.md.
+tokenplace-status env='staging' namespace='tokenplace' release='tokenplace' selector='app.kubernetes.io/instance={{ release }}':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    echo "token.place status: env={{ env }} namespace={{ namespace }} release={{ release }}"
+    kubectl -n "{{ namespace }}" get pods -l "{{ selector }}" || true
+    kubectl -n "{{ namespace }}" get svc -l "{{ selector }}" || true
+    kubectl -n "{{ namespace }}" get ingress -l "{{ selector }}" || true
+    helm -n "{{ namespace }}" status "{{ release }}" || true
+
+tokenplace-deploy env='staging' namespace='tokenplace' release='tokenplace' chart='' values='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ chart }}" ] || [ -z "{{ values }}" ]; then
+      echo "tokenplace-deploy is intentionally parameterized." >&2
+      echo "Set chart=<chart-ref> and values=<comma-separated-values-files>." >&2
+      echo "See docs/k3s-tokenplace-{{ env }}.md for onboarding guidance." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release='{{ release }}' namespace='{{ namespace }}' \
+      chart='{{ chart }}' values='{{ values }}'
+
+tokenplace-upgrade env='staging' namespace='tokenplace' release='tokenplace' chart='' values='' tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ chart }}" ] || [ -z "{{ values }}" ]; then
+      echo "tokenplace-upgrade is intentionally parameterized." >&2
+      echo "Set chart=<chart-ref> and values=<comma-separated-values-files>." >&2
+      echo "See docs/k3s-tokenplace-{{ env }}.md for onboarding guidance." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+      release='{{ release }}' namespace='{{ namespace }}' \
+      chart='{{ chart }}' values='{{ values }}' tag='{{ tag }}'
+
+tokenplace-rollback revision='' namespace='tokenplace' release='tokenplace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ revision }}" ]; then
+      echo "Usage: just tokenplace-rollback revision=<helm-revision> [namespace=...] [release=...]" >&2
+      exit 1
+    fi
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    helm -n "{{ namespace }}" rollback "{{ release }}" "{{ revision }}" --wait
+
+tokenplace-logs env='staging' namespace='tokenplace' selector='app.kubernetes.io/part-of=tokenplace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    echo "token.place logs: env={{ env }} namespace={{ namespace }} selector={{ selector }}"
+    pods=$(kubectl -n "{{ namespace }}" get pods -l "{{ selector }}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    if [ -z "${pods}" ]; then
+      echo "No pods found for selector '{{ selector }}' in namespace {{ namespace }}." >&2
+      exit 1
+    fi
+
+    for pod in ${pods}; do
+      echo
+      echo "--- ${pod} ---"
+      kubectl -n "{{ namespace }}" logs "${pod}" --tail=200 || true
+    done
+
+tokenplace-validate env='staging' namespace='tokenplace' release='tokenplace' service='tokenplace' path='/healthz':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    echo "token.place validate: env={{ env }} namespace={{ namespace }} release={{ release }}"
+    helm -n "{{ namespace }}" status "{{ release }}"
+    kubectl -n "{{ namespace }}" get deploy,svc,ingress
+    echo "Tip: run 'just tokenplace-port-forward service={{ service }} namespace={{ namespace }}' then curl http://127.0.0.1:8080{{ path }}"
+
+tokenplace-port-forward namespace='tokenplace' service='tokenplace' local_port='8080' remote_port='80':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    echo "Port-forwarding svc/{{ service }} on localhost:{{ local_port }} (Ctrl+C to stop)"
+    kubectl -n "{{ namespace }}" port-forward "svc/{{ service }}" {{ local_port }}:{{ remote_port }}
+
+tokenplace-relay-port-forward local_port='5010':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 

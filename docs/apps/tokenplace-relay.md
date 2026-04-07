@@ -57,13 +57,13 @@ probes:
 
 ```bash
 # Install or upgrade the relay with staging ingress + TLS (wraps helm upgrade --install)
-just tokenplace-oci-redeploy tag=main
+just tokenplace-relay-oci-redeploy tag=main
 
 # Print ingress + pod status
-just tokenplace-status
+just tokenplace-relay-status
 
 # Redeploy a new image tag (sha-<shortsha> from GHCR) after validating a build
-just tokenplace-oci-redeploy tag=sha-<shortsha>
+just tokenplace-relay-oci-redeploy tag=sha-<shortsha>
 ```
 
 - The `default_tag` keeps staging pinned to the latest validated `main` build; pass `tag=sha-<new>`
@@ -100,11 +100,11 @@ just tokenplace-oci-redeploy tag=sha-<shortsha>
 
 ## Operational helpers
 
-- Deploy or roll forward: `just tokenplace-oci-redeploy tag=<main|sha-...>` (release `tokenplace-relay`
+- Deploy or roll forward: `just tokenplace-relay-oci-redeploy tag=<main|sha-...>` (release `tokenplace-relay`
   in namespace `tokenplace`, values from `apps/tokenplace-relay/values.*.yaml`)
-- Check status: `just tokenplace-status` (prints pods/ingress and the public URL)
-- Tail logs: `just tokenplace-logs`
-- Port-forward locally: `just tokenplace-port-forward` then `curl http://127.0.0.1:5010/healthz`
+- Check status: `just tokenplace-relay-status` (prints pods/ingress and the public URL)
+- Tail logs: `just tokenplace-relay-logs`
+- Port-forward locally: `just tokenplace-relay-port-forward` then `curl http://127.0.0.1:5010/healthz`
 
 ## Troubleshooting
 
@@ -114,10 +114,13 @@ just tokenplace-oci-redeploy tag=sha-<shortsha>
   - `kubectl -n tokenplace describe ingress tokenplace-relay`
   - `kubectl -n tokenplace describe certificate staging-tokenplace-relay-tls`
 - Check relay health directly:
-  - `just tokenplace-port-forward`
+  - `just tokenplace-relay-port-forward`
   - `curl -fsS http://127.0.0.1:5010/healthz`
 - Logs:
-  - `just tokenplace-logs`
+  - `just tokenplace-relay-logs`
 - Cloudflare Tunnel:
   - Confirm the tunnel routes `staging.token.place` to Traefik (`http://traefik.kube-system.svc.cluster.local:80`)
   - Validate DNS for `staging.token.place` in Cloudflare.
+
+
+See also the first-class onboarding prep guide: [../tokenplace_sugarkube_onboarding.md](../tokenplace_sugarkube_onboarding.md).
