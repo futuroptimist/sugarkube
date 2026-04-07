@@ -1542,46 +1542,102 @@ tokenplace-oci-redeploy tag='':
 
     echo "token.place relay available at: https://staging.token.place"
 
-tokenplace-status:
-    @just app-status namespace=tokenplace release=tokenplace-relay host_key='ingress.host'
+tokenplace-deploy env='staging' chart='' namespace='' release='' values='' tag='' default_tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
 
-tokenplace-logs namespace='tokenplace':
+    if [ -z "{{ chart }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ release }}" ] || [ -z "{{ values }}" ]; then
+      echo "Usage: just tokenplace-deploy env=<dev|staging|prod> chart=<chart> namespace=<ns> release=<release> values=<file1,file2> [tag=<tag>] [default_tag=<tag>]" >&2
+      echo "See docs/tokenplace_sugarkube_onboarding.md for onboarding expectations." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release='{{ release }}' namespace='{{ namespace }}' \
+      chart='{{ chart }}' values='{{ values }}' \
+      tag='{{ tag }}' default_tag='{{ default_tag }}'
+
+tokenplace-upgrade env='staging' chart='' namespace='' release='' values='' tag='' default_tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ chart }}" ] || [ -z "{{ namespace }}" ] || [ -z "{{ release }}" ] || [ -z "{{ values }}" ]; then
+      echo "Usage: just tokenplace-upgrade env=<dev|staging|prod> chart=<chart> namespace=<ns> release=<release> values=<file1,file2> [tag=<tag>] [default_tag=<tag>]" >&2
+      echo "See docs/tokenplace_sugarkube_onboarding.md for onboarding expectations." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+      release='{{ release }}' namespace='{{ namespace }}' \
+      chart='{{ chart }}' values='{{ values }}' \
+      tag='{{ tag }}' default_tag='{{ default_tag }}'
+
+tokenplace-rollback namespace='' release='' revision='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z "{{ namespace }}" ] || [ -z "{{ release }}" ] || [ -z "{{ revision }}" ]; then
+      echo "Usage: just tokenplace-rollback namespace=<ns> release=<release> revision=<helm-revision>" >&2
+      exit 1
+    fi
+    helm -n "{{ namespace }}" rollback "{{ release }}" "{{ revision }}"
+
+tokenplace-status namespace='tokenplace' release='tokenplace-relay' host_key='ingress.host':
+    @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
+
+tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenplace-relay':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
     ns="{{ namespace }}"
+    selector="{{ selector }}"
 
-    echo "=== token.place relay pods in namespace ${ns} ==="
+    echo "=== token.place pods in namespace ${ns} ==="
     kubectl get pods -n "${ns}" -o wide || {
-      echo "Failed to list tokenplace-relay pods in namespace ${ns}" >&2
+      echo "Failed to list token.place pods in namespace ${ns}" >&2
     }
 
     echo
-    echo "=== token.place relay logs (last 200 lines per pod) ==="
-    relay_pods=$(kubectl get pods -n "${ns}" -l app.kubernetes.io/name=tokenplace-relay -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    echo "=== token.place logs (last 200 lines per pod) ==="
+    relay_pods=$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
 
     if [ -z "${relay_pods}" ]; then
-      echo "No pods found with label app.kubernetes.io/name=tokenplace-relay in namespace ${ns}" >&2
+      echo "No pods found with selector '${selector}' in namespace ${ns}" >&2
     else
       for pod in ${relay_pods}; do
         echo
-        echo "--- tokenplace-relay pod: ${pod} ---"
+        echo "--- token.place pod: ${pod} ---"
         kubectl logs -n "${ns}" "${pod}" --tail=200 || {
           echo "Failed to fetch logs for pod ${pod}" >&2
         }
       done
     fi
 
-tokenplace-port-forward local_port='5010':
+tokenplace-validate namespace='tokenplace' release='tokenplace-relay' host='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    ns="{{ namespace }}"
+    rel="{{ release }}"
+    host="{{ host }}"
+
+    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-status namespace="${ns}" release="${rel}"
+    if [ -n "${host}" ]; then
+      echo "Running host checks against ${host}"
+      curl -fsS "${host}/healthz" >/dev/null
+      curl -fsS "${host}/livez" >/dev/null || true
+    else
+      echo "No host provided. Pass host=https://<tokenplace-host> to include HTTP checks."
+    fi
+
+tokenplace-port-forward namespace='tokenplace' resource='svc/tokenplace-relay' local_port='5010' remote_port='80':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    svc="tokenplace-relay"
-
-    echo "Port-forwarding ${svc} to localhost:{{ local_port }} (Ctrl+C to stop)..."
-    kubectl -n tokenplace port-forward svc/${svc} {{ local_port }}:80
+    echo "Port-forwarding {{ resource }} in namespace {{ namespace }} to localhost:{{ local_port }} (Ctrl+C to stop)..."
+    kubectl -n "{{ namespace }}" port-forward "{{ resource }}" "{{ local_port }}":"{{ remote_port }}"
 
 app-status namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash

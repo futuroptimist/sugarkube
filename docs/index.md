@@ -42,6 +42,11 @@ Review the safety notes before working with power components.
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — operate the token.place relay staging deployment
+- [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding prerequisites and
+  ownership boundaries for first-class token.place hosting
+- [apps/tokenplace.md](apps/tokenplace.md) — token.place topology and operations model on Sugarkube
+- [k3s-tokenplace-dev.md](k3s-tokenplace-dev.md), [k3s-tokenplace-staging.md](k3s-tokenplace-staging.md),
+  [k3s-tokenplace-prod.md](k3s-tokenplace-prod.md) — environment-specific token.place runbooks
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
   verification steps
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare
