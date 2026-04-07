@@ -43,8 +43,9 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
   ownership boundaries, and environment mapping for first-class token.place operations.
 - **[token.place app operations](docs/apps/tokenplace.md)** — topology and deployment workflow
   patterns for token.place on Sugarkube.
-- **[token.place env runbooks](docs/k3s-tokenplace-dev.md)** — environment-specific guides for
-  dev, staging, and production operations.
+- **[token.place env runbooks](docs/index.md)** — environment-specific guides for
+  [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
+  [production](docs/k3s-tokenplace-prod.md) operations.
 
 ## Repository layout
 

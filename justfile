@@ -1587,8 +1587,31 @@ tokenplace-rollback release='' namespace='' revision='':
       echo "Usage: just tokenplace-rollback release=<name> namespace=<ns> revision=<helm_revision>" >&2
       exit 1
     fi
-    helm -n '{{ namespace }}' rollback '{{ release }}' '{{ revision }}'
-    kubectl -n '{{ namespace }}' rollout status deploy/'{{ release }}' --timeout=180s || true
+    ns='{{ namespace }}'
+    release='{{ release }}'
+
+    helm -n "${ns}" rollback "${release}" '{{ revision }}'
+
+    workloads="$(
+      {
+        kubectl -n "${ns}" get deploy,statefulset \
+          -l "app.kubernetes.io/instance=${release}" \
+          -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}'
+        kubectl -n "${ns}" get deploy,statefulset \
+          -l "release=${release}" \
+          -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}'
+      } | sed '/^$/d' | sort -u
+    )"
+
+    if [ -z "${workloads}" ]; then
+      echo "No Deployment or StatefulSet found for Helm release ${release} in namespace ${ns}" >&2
+      exit 1
+    fi
+
+    while IFS= read -r workload; do
+      [ -n "${workload}" ] || continue
+      kubectl -n "${ns}" rollout status "${workload}" --timeout=180s
+    done <<< "${workloads}"
 
 tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenplace-relay' tail='200':
     #!/usr/bin/env bash
@@ -1596,22 +1619,23 @@ tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenpla
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
     ns="{{ namespace }}"
+    selector="{{ selector }}"
 
-    echo "=== token.place relay pods in namespace ${ns} ==="
-    kubectl get pods -n "${ns}" -o wide || {
-      echo "Failed to list tokenplace-relay pods in namespace ${ns}" >&2
+    echo "=== token.place pods in namespace ${ns} matching selector ${selector} ==="
+    kubectl get pods -n "${ns}" -l "${selector}" -o wide || {
+      echo "Failed to list token.place pods with selector ${selector} in namespace ${ns}" >&2
     }
 
     echo
-    echo "=== token.place relay logs (last 200 lines per pod) ==="
-    relay_pods=$(kubectl get pods -n "${ns}" -l '{{ selector }}' -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    echo "=== token.place logs (last {{ tail }} lines per pod, selector: ${selector}) ==="
+    relay_pods=$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
 
     if [ -z "${relay_pods}" ]; then
       echo "No pods found with selector {{ selector }} in namespace ${ns}" >&2
     else
       for pod in ${relay_pods}; do
         echo
-        echo "--- tokenplace-relay pod: ${pod} ---"
+        echo "--- pod: ${pod} ---"
         kubectl logs -n "${ns}" "${pod}" --tail='{{ tail }}' || {
           echo "Failed to fetch logs for pod ${pod}" >&2
         }
@@ -1627,7 +1651,8 @@ tokenplace-validate namespace='tokenplace' release='tokenplace-relay' health_url
 
     kubectl -n '{{ namespace }}' get pods -l '{{ selector }}'
     if [ -n '{{ health_url }}' ]; then
-      curl -fsS '{{ health_url }}' | head -c 400 || true
+      health_response="$(curl -fsS '{{ health_url }}')"
+      printf '%.400s\n' "${health_response}"
       echo
     else
       echo "No health_url provided; skipping HTTP health check."
