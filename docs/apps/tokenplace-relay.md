@@ -5,7 +5,7 @@ matches the existing dspace staging patterns. The public staging host for the re
 `staging.token.place`, fronted by Traefik and Cloudflare Tunnel.
 
 For full token.place onboarding and environment runbooks, see
-`docs/tokenplace_sugarkube_onboarding.md` and `docs/apps/tokenplace.md`.
+[`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md) and [`docs/apps/tokenplace.md`](./tokenplace.md).
 
 Values are split so you can reuse base settings across environments and layer staging-only ingress
 overrides. Operator defaults live alongside the chart; the docs copies remain as examples for

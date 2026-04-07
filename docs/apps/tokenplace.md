@@ -4,7 +4,7 @@ This guide describes the intended token.place deployment model on Sugarkube once
 release artifacts are ready for formal onboarding.
 
 For onboarding sequence and ownership boundaries, start with
-`docs/tokenplace_sugarkube_onboarding.md`.
+[`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md).
 
 ## Intended topology
 
@@ -100,4 +100,4 @@ Use parameterized `just` recipes so unreconciled naming can be supplied at runti
 
 - Do not assume namespace/release/chart naming until token.place onboarding finalizes.
 - Keep recipes parameterized and runbooks explicit about what is fixed vs configurable.
-- Use relay-specific guide (`docs/apps/tokenplace-relay.md`) for current relay-only operations.
+- Use relay-specific guide ([`docs/apps/tokenplace-relay.md`](./tokenplace-relay.md)) for current relay-only operations.
