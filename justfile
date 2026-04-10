@@ -702,6 +702,7 @@ cf-tunnel-debug:
     fi
 
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
+# Downloads a pinned release archive and verifies checksum before install.
 helm-install:
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -712,8 +713,40 @@ helm-install:
         exit 0
     fi
 
-    echo "Helm not found; installing Helm 3 via the official script..."
-    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    helm_version="${HELM_VERSION:-v3.18.0}"
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    case "${arch}" in
+        x86_64) arch="amd64" ;;
+        aarch64 | arm64) arch="arm64" ;;
+        armv7l) arch="arm" ;;
+        *)
+            echo "Unsupported architecture: ${arch}" >&2
+            exit 1
+            ;;
+    esac
+    filename="helm-${helm_version}-${os}-${arch}.tar.gz"
+    base_url="https://get.helm.sh"
+
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "${tmpdir}"' EXIT
+
+    echo "Helm not found; installing ${helm_version} (${os}/${arch})..."
+    curl -fsSL "${base_url}/${filename}" -o "${tmpdir}/${filename}"
+    curl -fsSL "${base_url}/${filename}.sha256sum" -o "${tmpdir}/${filename}.sha256sum"
+    (
+        cd "${tmpdir}"
+        sha256sum -c "${filename}.sha256sum"
+    )
+
+    tar -xzf "${tmpdir}/${filename}" -C "${tmpdir}"
+    install_dir="/usr/local/bin"
+    if [ ! -w "${install_dir}" ]; then
+        install_dir="${HOME}/.local/bin"
+        mkdir -p "${install_dir}"
+    fi
+    install -m 0755 "${tmpdir}/${os}-${arch}/helm" "${install_dir}/helm"
+    export PATH="${install_dir}:${PATH}"
 
     echo "Helm installed:"
     helm version --short

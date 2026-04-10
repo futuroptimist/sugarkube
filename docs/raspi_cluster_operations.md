@@ -97,8 +97,8 @@ working with a minimal OS, use the `just` recipes from the repository root:
    just helm-install
    ```
 
-   This detects whether Helm is already present. If missing, it installs Helm 3 using the official
-   `get-helm-3` script and prints the installed version on success.
+   This detects whether Helm is already present. If missing, it installs a pinned Helm 3 release by
+   downloading the archive from `get.helm.sh` and validating its SHA-256 checksum before installing.
 
 2. Verify Helm is working:
 
