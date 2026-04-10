@@ -65,23 +65,7 @@ def test_failopen_timeout_defaults() -> None:
 
     script_content = SCRIPT.read_text(encoding="utf-8")
 
-    # Check for the environment-specific defaults
+    # Check for secure, environment-agnostic defaults
     assert 'DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT' in script_content
-
-    # Verify dev gets 60 seconds
-    lines = script_content.splitlines()
-    found_dev_60 = False
-    found_prod_300 = False
-
-    for i, line in enumerate(lines):
-        # Look for the dev environment block
-        if 'ENVIRONMENT' in line and 'dev' in line:
-            # Check next few lines for timeout default
-            for j in range(i, min(i+10, len(lines))):
-                if 'DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT=60' in lines[j]:
-                    found_dev_60 = True
-                elif 'DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT=300' in lines[j]:
-                    found_prod_300 = True
-
-    assert found_dev_60, "Dev environment should have 60 second fail-open timeout default"
-    assert found_prod_300, "Prod environment should have 300 second fail-open timeout default"
+    assert 'DISCOVERY_FAILOPEN_DEFAULT=0' in script_content
+    assert 'DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT=300' in script_content

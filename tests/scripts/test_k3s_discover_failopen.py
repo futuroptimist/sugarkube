@@ -94,6 +94,7 @@ def test_failopen_disabled_by_default_in_dev(tmp_path: Path) -> None:
     mdns_fixture = tmp_path / "mdns-empty.json"
     mdns_fixture.write_text('{"servers": [], "bootstrap": []}\n', encoding="utf-8")
 
+    # Configure script to reach discovery loop and run fail-open decision point.
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -102,9 +103,16 @@ def test_failopen_disabled_by_default_in_dev(tmp_path: Path) -> None:
         "SUGARKUBE_SERVERS": "2",
         "SUGARKUBE_TOKEN": "test-token",
         "SUGARKUBE_MDNS_FIXTURE_FILE": str(mdns_fixture),
-        "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "1",
-        "SUGARKUBE_MDNS_ABSENCE_GATE": "0",  # Disable absence gate to avoid blocking
-        "SUGARKUBE_SKIP_ABSENCE_GATE": "0",  # Enable absence gate for this test
+        "SUGARKUBE_EXIT_AFTER_ABSENCE_GATE": "0",
+        "SUGARKUBE_MDNS_ABSENCE_GATE": "0",
+        "SUGARKUBE_SKIP_ABSENCE_GATE": "1",
+        "SUGARKUBE_PUBLISH_TIMEOUT": "0",
+        "SUGARKUBE_DISCOVERY_DIAG_THRESHOLD": "9999",
+        "SUGARKUBE_DISCOVERY_SLEEP_BASE": "0",
+        "SUGARKUBE_DISCOVERY_SLEEP_CAP": "0",
+        "SUGARKUBE_DISCOVERY_SLEEP_JITTER": "0",
+        "SUGARKUBE_DISCOVERY_MIN_ATTEMPTS": "1",
+        "SUGARKUBE_DISCOVERY_MAX_ATTEMPTS": "2",
         "SUGARKUBE_CONFIGURE_AVAHI_BIN": str(bin_dir / "configure_avahi.sh"),
         "ALLOW_NON_ROOT": "1",
         "SUGARKUBE_SKIP_SYSTEMCTL": "1",
@@ -120,7 +128,7 @@ def test_failopen_disabled_by_default_in_dev(tmp_path: Path) -> None:
 
     # In dev, fail-open should still be opt-in only.
     assert "discovery_failopen_tracking_started" not in result.stderr
-    assert result.returncode == 0
+    assert result.returncode != 0
 
 
 def test_failopen_explicit_disable(tmp_path: Path) -> None:
