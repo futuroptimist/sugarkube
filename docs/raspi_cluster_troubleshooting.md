@@ -683,18 +683,21 @@ response status code 403: denied: denied
    helm registry logout ghcr.io || true
    ```
 
-3. **If failures persist, clear stale Helm registry config** (Helm will recreate it on next login):
+3. **If failures persist, clear stale Helm registry config** (Helm will recreate it on next
+   login). **Warning: this removes ALL OCI registry credentials, not just GHCR — re-login to
+   any other registries you use after this step.**
 
    ```bash
    rm -f ~/.config/helm/registry/config.json
    ```
 
-4. **Login again with the fresh PAT:**
+4. **Login again with `--password-stdin`** (matching the auth flow used elsewhere in these
+   docs):
 
    ```bash
    export GHCR_USERNAME="<github-username>"
-   helm registry login ghcr.io --username "${GHCR_USERNAME}"
-   # Paste a PAT with read:packages when prompted.
+   export GHCR_TOKEN="<token-with-read:packages>"
+   printf '%s\n' "${GHCR_TOKEN}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
    ```
 
 5. **Verify direct chart pull before rerunning `just`:**
