@@ -125,6 +125,9 @@ Error: failed to perform "FetchReference" on source:
   response status code 401: unauthorized: authentication required
 ```
 
+If Helm OCI auth fails with either `401` or `403 denied: denied`, see the canonical fix flow in
+[Raspberry Pi Cluster Troubleshooting Guide — Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
+
 Authenticate once per node that will pull OCI charts:
 
 ```bash
@@ -159,6 +162,10 @@ Common errors:
 
 - **401 / `authentication required`:** Run `helm registry login ghcr.io` with a PAT that has the
   `read:packages` scope.
+- **403 / `denied: denied`:** Usually an expired or wrong PAT, missing `read:packages`, stale Helm
+  GHCR login state, or package visibility mismatch. Follow
+  [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied)
+  to clear stale credentials, re-login, and verify with a direct `helm pull`.
 - **`...:3.0.0: not found`:** The requested chart version is absent—check the version documented in
   the dspace repo (for example, `docs/apps/dspace.version`) and pull that version instead.
 

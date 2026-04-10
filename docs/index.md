@@ -39,6 +39,8 @@ Review the safety notes before working with power components.
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — **start here** to image SD cards, boot the Pis, and form the HA k3s cluster
 - [raspi_cluster_operations.md](raspi_cluster_operations.md) — **next step** to install Helm,
   verify Traefik ingress, and roll out workloads
+- [raspi_cluster_troubleshooting.md](raspi_cluster_troubleshooting.md) — diagnose common cluster
+  and Helm OCI issues, including GHCR `401/403` chart pull failures
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding contract,
