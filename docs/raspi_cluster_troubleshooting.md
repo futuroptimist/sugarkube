@@ -640,6 +640,82 @@ Firewall or routing is blocking the connection.
 
 ---
 
+### Scenario 7: Helm OCI pull fails with GHCR `403 denied: denied`
+
+**Symptom:**
+Helm OCI pulls fail even though the chart exists. This commonly appears while running:
+
+- `helm pull oci://ghcr.io/democratizedspace/charts/dspace --version <version>`
+- `just helm-oci-install ...`
+- `just helm-oci-upgrade ...`
+- dspace OCI helpers such as `just dspace-oci-deploy ...`
+
+Typical error shape:
+
+```text
+Error: failed to perform "FetchReference" on source:
+GET "https://ghcr.io/v2/democratizedspace/charts/dspace/manifests/<version>":
+GET "https://ghcr.io/token?scope=repository%3Ademocratizedspace%2Fcharts%2Fdspace%3Apull&service=ghcr.io":
+response status code 403: denied: denied
+```
+
+**What this usually means:**
+
+- Your GitHub PAT is expired.
+- The PAT is wrong for the account being used.
+- The PAT is missing `read:packages` scope.
+- Helm is reusing stale GHCR credentials from a previous login.
+- The package/repo visibility does not allow this account to pull.
+
+**How this differs from nearby failures:**
+
+- `401 unauthorized: authentication required` usually means not logged in or no credential was sent.
+- `...: not found` (manifest/chart/version not found) usually means the chart reference or version is wrong,
+  not an auth token issue.
+
+**Recovery steps (operator sequence):**
+
+1. **Create or reuse a valid PAT** with at least `read:packages` for the account that can access the
+   chart.
+2. **Clear Helm's current GHCR session:**
+
+   ```bash
+   helm registry logout ghcr.io || true
+   ```
+
+3. **If failures persist, clear stale Helm registry config** (Helm will recreate it on next
+   login). **Warning: this removes ALL OCI registry credentials, not just GHCR — re-login to
+   any other registries you use after this step.**
+
+   ```bash
+   rm -f ~/.config/helm/registry/config.json
+   ```
+
+4. **Login again with `--password-stdin`** (matching the auth flow used elsewhere in these
+   docs):
+
+   ```bash
+   export GHCR_USERNAME="<github-username>"
+   export GHCR_PAT="<pat-with-read-packages>"
+   printf '%s\n' "${GHCR_PAT}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+   ```
+
+5. **Verify direct chart pull before rerunning `just`:**
+
+   ```bash
+   helm pull oci://ghcr.io/democratizedspace/charts/dspace --version <version>
+   ```
+
+6. **Rerun the original deploy/upgrade command** (for example `just helm-oci-install ...`).
+
+**Where stale credentials often hide:**
+
+- `~/.config/helm/registry/config.json`
+- shell profile exports (`~/.bashrc`, `~/.profile`, etc.)
+- local operator notes or helper scripts that set outdated `GHCR_PAT` values
+
+---
+
 ## Log Interpretation Quick Reference
 
 ### Structured Log Fields

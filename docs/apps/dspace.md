@@ -76,6 +76,10 @@ just app-status namespace=dspace release=dspace
 
 ## Generic Helm OCI examples
 
+If `helm pull`, `just helm-oci-install`, or `just helm-oci-upgrade` fails with GHCR `401`/`403`
+errors, use the canonical recovery steps in
+[Raspberry Pi Cluster Troubleshooting — Scenario 7](../raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
+
 ```bash
 # Install-or-upgrade staging with mutable convenience tag
 just helm-oci-install \
@@ -176,6 +180,9 @@ For tunnel and DNS setup details, see [Cloudflare Tunnel docs](../cloudflare_tun
 
 ## Troubleshooting
 
+- GHCR/OCI auth errors (`401 authentication required` or `403 denied: denied`) for
+  `helm pull`/`helm-oci-*` helpers:
+  [Raspberry Pi Cluster Troubleshooting — Scenario 7](../raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
 - Collect dspace + ingress logs with environment-aware helper:
 
   ```bash
