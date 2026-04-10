@@ -77,3 +77,46 @@ def test_install_just_rejects_checksum_mismatch(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "Checksum mismatch" in result.stderr
+
+
+def test_install_just_uses_matching_entry_from_checksum_manifest(tmp_path: Path) -> None:
+    installer = Path(__file__).resolve().parents[1] / "scripts" / "install_just.sh"
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    just_stub = tmp_path / "just"
+    just_stub.write_text("#!/usr/bin/env bash\necho installer-$1\n", encoding="utf-8")
+    just_stub.chmod(0o755)
+
+    tarball = tmp_path / "just.tar.gz"
+    with tarfile.open(tarball, "w:gz") as archive:
+        archive.add(just_stub, arcname="just")
+
+    digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+    checksum_file = tmp_path / "SHA256SUMS"
+    checksum_file.write_text(
+        "\n".join(
+            [
+                f"{'0' * 64}  not-the-right-file.tar.gz",
+                f"{digest}  {tarball.name}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["SUGARKUBE_JUST_BIN_DIR"] = str(bin_dir)
+    env["SUGARKUBE_JUST_TARBALL"] = str(tarball)
+    env["SUGARKUBE_JUST_FORCE_INSTALL"] = "1"
+    env["SUGARKUBE_JUST_SHA256_URL"] = checksum_file.as_uri()
+
+    result = subprocess.run(
+        ["/bin/bash", str(installer)],
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (bin_dir / "just").exists()

@@ -51,7 +51,8 @@ download_to_file() {
 
 verify_tarball_checksum() {
   local tarball="$1"
-  local expected="${EXPECTED_SHA256,,}"
+  local expected
+  expected="$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[:lower:]')"
 
   if [ -z "$expected" ]; then
     if [ -n "$SHA256_URL" ]; then
@@ -62,13 +63,31 @@ verify_tarball_checksum() {
         log "Failed to download checksum from $SHA256_URL"
         return 1
       fi
-      expected="$(awk 'NF {print tolower($1); exit}' "$checksum_file")"
+      local tarball_name
+      tarball_name="$(basename "$tarball")"
+      expected="$(
+        awk -v tarball_name="$tarball_name" '
+          NF == 1 {
+            print tolower($1)
+            exit
+          }
+          NF >= 2 {
+            name = $2
+            sub(/^\*/, "", name)
+            sub(/^.\//, "", name)
+            if (name == tarball_name) {
+              print tolower($1)
+              exit
+            }
+          }
+        ' "$checksum_file"
+      )"
       rm -f "$checksum_file"
     fi
   fi
 
   if [ -z "$expected" ]; then
-    log "Missing checksum: set SUGARKUBE_JUST_SHA256 or SUGARKUBE_JUST_SHA256_URL"
+    log "Missing checksum for $tarball: set SUGARKUBE_JUST_SHA256 or SUGARKUBE_JUST_SHA256_URL"
     return 1
   fi
 
@@ -109,7 +128,8 @@ try_apt_install() {
   fi
 
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    if sudo -n apt-get update >/dev/null 2>&1 &&        sudo -n apt-get install -y just >/dev/null 2>&1; then
+    if sudo -n apt-get update >/dev/null 2>&1 && \
+      sudo -n apt-get install -y just >/dev/null 2>&1; then
       return 0
     fi
   fi
@@ -173,7 +193,7 @@ if [ -z "$TARBALL" ]; then
       log "SUGARKUBE_JUST_URL requires SUGARKUBE_JUST_SHA256 or SUGARKUBE_JUST_SHA256_URL"
       exit 1
     fi
-    SHA256_URL="${DOWNLOAD_URL}.sha256"
+    SHA256_URL="${base_url}/SHA256SUMS"
   fi
 
   TARBALL="$(mktemp -t just-XXXXXXXX.tar.gz)"
@@ -191,7 +211,9 @@ if [ ! -f "$TARBALL" ]; then
 fi
 
 if ! verify_tarball_checksum "$TARBALL"; then
-  rm -f "$cleanup_tarball"
+  if [ -n "$cleanup_tarball" ]; then
+    rm -f "$cleanup_tarball"
+  fi
   exit 1
 fi
 
