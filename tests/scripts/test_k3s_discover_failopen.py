@@ -77,8 +77,8 @@ def test_failopen_disabled_by_default_in_prod(tmp_path: Path) -> None:
     assert "discovery_failopen_tracking_started" not in result.stderr
 
 
-def test_failopen_enabled_by_default_in_dev(tmp_path: Path) -> None:
-    """Discovery fail-open should be enabled by default in dev environment."""
+def test_failopen_disabled_by_default_in_dev(tmp_path: Path) -> None:
+    """Discovery fail-open should remain disabled by default in dev environment."""
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -118,9 +118,8 @@ def test_failopen_enabled_by_default_in_dev(tmp_path: Path) -> None:
         timeout=SUBPROCESS_TIMEOUT,
     )
 
-    # In dev, fail-open tracking should start
-    # Note: We exit early with EXIT_AFTER_ABSENCE_GATE, so we won't see the tracking message
-    # This test validates that the default is set correctly
+    # In dev, fail-open should still be opt-in only.
+    assert "discovery_failopen_tracking_started" not in result.stderr
     assert result.returncode == 0
 
 
