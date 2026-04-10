@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -1105,6 +1106,7 @@ def test_bootstraps_just_when_missing(tmp_path: Path, script: Path) -> None:
     env["SUGARKUBE_JUST_TARBALL"] = str(tarball)
     env["SUGARKUBE_JUST_BIN_DIR"] = str(tmp_path / "just-bin")
     env["SUGARKUBE_JUST_FORCE_INSTALL"] = "1"
+    env["SUGARKUBE_JUST_SHA256"] = hashlib.sha256(tarball.read_bytes()).hexdigest()
 
     result = subprocess.run(
         ["/bin/bash", str(script)],

@@ -9,9 +9,82 @@ set -euo pipefail
 INSTALL_DIR="${SUGARKUBE_JUST_BIN_DIR:-${HOME}/.local/bin}"
 TARGET="${SUGARKUBE_JUST_TARGET:-}"
 TARBALL="${SUGARKUBE_JUST_TARBALL:-}"
+JUST_URL="${SUGARKUBE_JUST_URL:-}"
+EXPECTED_SHA256="${SUGARKUBE_JUST_SHA256:-}"
+SHA256_URL="${SUGARKUBE_JUST_SHA256_URL:-}"
 
 log() {
   echo "[sugarkube] $*" >&2
+}
+
+hash_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print tolower($1)}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print tolower($1)}'
+    return 0
+  fi
+  log "sha256sum or shasum is required to verify just downloads"
+  return 1
+}
+
+download_to_file() {
+  local url="$1"
+  local output="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" >"$output"
+    return $?
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO- "$url" >"$output"
+    return $?
+  fi
+
+  log "Neither curl nor wget is available to download $url"
+  return 1
+}
+
+verify_tarball_checksum() {
+  local tarball="$1"
+  local expected="${EXPECTED_SHA256,,}"
+
+  if [ -z "$expected" ]; then
+    if [ -n "$SHA256_URL" ]; then
+      local checksum_file
+      checksum_file="$(mktemp -t just-sha256-XXXXXXXX.txt)"
+      if ! download_to_file "$SHA256_URL" "$checksum_file"; then
+        rm -f "$checksum_file"
+        log "Failed to download checksum from $SHA256_URL"
+        return 1
+      fi
+      expected="$(awk 'NF {print tolower($1); exit}' "$checksum_file")"
+      rm -f "$checksum_file"
+    fi
+  fi
+
+  if [ -z "$expected" ]; then
+    log "Missing checksum: set SUGARKUBE_JUST_SHA256 or SUGARKUBE_JUST_SHA256_URL"
+    return 1
+  fi
+
+  if ! printf '%s' "$expected" | grep -Eq '^[a-f0-9]{64}$'; then
+    log "Checksum '$expected' is not a valid SHA-256 digest"
+    return 1
+  fi
+
+  local actual
+  actual="$(hash_file "$tarball")" || return 1
+  if [ "$actual" != "$expected" ]; then
+    log "Checksum mismatch for $tarball"
+    return 1
+  fi
+
+  return 0
 }
 
 if [ -z "${SUGARKUBE_JUST_FORCE_INSTALL:-}" ] && command -v just >/dev/null 2>&1; then
@@ -36,8 +109,7 @@ try_apt_install() {
   fi
 
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    if sudo -n apt-get update >/dev/null 2>&1 && \
-       sudo -n apt-get install -y just >/dev/null 2>&1; then
+    if sudo -n apt-get update >/dev/null 2>&1 &&        sudo -n apt-get install -y just >/dev/null 2>&1; then
       return 0
     fi
   fi
@@ -94,19 +166,19 @@ if [ -z "$TARBALL" ]; then
   fi
 
   base_url="https://github.com/casey/just/releases/latest/download"
-  DOWNLOAD_URL="${SUGARKUBE_JUST_URL:-${base_url}/just-${TARGET}.tar.gz}"
-  if command -v curl >/dev/null 2>&1; then
-    downloader=(curl -fsSL "$DOWNLOAD_URL")
-  elif command -v wget >/dev/null 2>&1; then
-    downloader=(wget -qO- "$DOWNLOAD_URL")
-  else
-    log "Neither curl nor wget is available to download just"
-    exit 1
+  DOWNLOAD_URL="${JUST_URL:-${base_url}/just-${TARGET}.tar.gz}"
+
+  if [ -z "$SHA256_URL" ]; then
+    if [ -n "$JUST_URL" ] && [ -z "$EXPECTED_SHA256" ]; then
+      log "SUGARKUBE_JUST_URL requires SUGARKUBE_JUST_SHA256 or SUGARKUBE_JUST_SHA256_URL"
+      exit 1
+    fi
+    SHA256_URL="${DOWNLOAD_URL}.sha256"
   fi
 
   TARBALL="$(mktemp -t just-XXXXXXXX.tar.gz)"
   cleanup_tarball="$TARBALL"
-  if ! "${downloader[@]}" >"$TARBALL"; then
+  if ! download_to_file "$DOWNLOAD_URL" "$TARBALL"; then
     log "Failed to download just from $DOWNLOAD_URL"
     rm -f "$TARBALL"
     exit 1
@@ -115,6 +187,11 @@ fi
 
 if [ ! -f "$TARBALL" ]; then
   log "Tarball $TARBALL does not exist"
+  exit 1
+fi
+
+if ! verify_tarball_checksum "$TARBALL"; then
+  rm -f "$cleanup_tarball"
   exit 1
 fi
 
