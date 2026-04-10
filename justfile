@@ -702,6 +702,8 @@ cf-tunnel-debug:
     fi
 
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
+
+# Downloads a pinned release archive and verifies checksum before install.
 helm-install:
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -712,8 +714,62 @@ helm-install:
         exit 0
     fi
 
-    echo "Helm not found; installing Helm 3 via the official script..."
-    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    raw_helm_version="${HELM_VERSION:-v3.18.0}"
+    helm_version="${raw_helm_version#v}"
+    helm_version="v${helm_version}"
+    if [[ ! "${helm_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+        echo "Invalid HELM_VERSION '${raw_helm_version}'. Use formats like '3.18.0' or 'v3.18.0'." >&2
+        exit 1
+    fi
+
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    case "${arch}" in
+        x86_64) arch="amd64" ;;
+        aarch64 | arm64) arch="arm64" ;;
+        armv6l | armv7l) arch="arm" ;;
+        *)
+            echo "Unsupported architecture: ${arch}" >&2
+            exit 1
+            ;;
+    esac
+    filename="helm-${helm_version}-${os}-${arch}.tar.gz"
+    base_url="https://get.helm.sh"
+
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "${tmpdir}"' EXIT
+
+    echo "Helm not found; installing ${helm_version} (${os}/${arch})..."
+    curl -fsSL "${base_url}/${filename}" -o "${tmpdir}/${filename}"
+    curl -fsSL "${base_url}/${filename}.sha256sum" -o "${tmpdir}/${filename}.sha256sum"
+    (
+        cd "${tmpdir}"
+        if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "${filename}.sha256sum"
+        elif command -v shasum >/dev/null 2>&1; then
+            expected_checksum="$(cut -d" " -f1 "${filename}.sha256sum")"
+            actual_checksum="$(shasum -a 256 "${filename}" | awk '{print $1}')"
+            if [ "${actual_checksum}" != "${expected_checksum}" ]; then
+                echo "Checksum verification failed for ${filename}." >&2
+                exit 1
+            fi
+            echo "${filename}: OK"
+        else
+            echo "No checksum tool found (need sha256sum or shasum)." >&2
+            exit 1
+        fi
+    )
+
+    tar -xzf "${tmpdir}/${filename}" -C "${tmpdir}"
+    install_dir="/usr/local/bin"
+    if [ ! -w "${install_dir}" ]; then
+        install_dir="${HOME}/.local/bin"
+        mkdir -p "${install_dir}"
+        echo "Note: /usr/local/bin is not writable; installing Helm to ${install_dir}." >&2
+        echo "Add \"export PATH=\\\"${install_dir}:\\$PATH\\\"\" to your shell profile if Helm is not found in new sessions." >&2
+    fi
+    install -m 0755 "${tmpdir}/${os}-${arch}/helm" "${install_dir}/helm"
+    export PATH="${install_dir}:${PATH}"
 
     echo "Helm installed:"
     helm version --short

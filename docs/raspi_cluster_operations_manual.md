@@ -49,10 +49,24 @@ clusters.
 
 ## 1. Install Helm manually
 
-If Helm is missing, install it with the official script used by the `just` recipe:
+If Helm is missing, install a pinned release archive and verify its checksum:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+HELM_VERSION=v3.18.0
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+case "${ARCH}" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  armv7l) ARCH=arm ;;
+  *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+esac
+FILE="helm-${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
+curl -fsSL "https://get.helm.sh/${FILE}" -o "/tmp/${FILE}"
+curl -fsSL "https://get.helm.sh/${FILE}.sha256sum" -o "/tmp/${FILE}.sha256sum"
+(cd /tmp && sha256sum -c "${FILE}.sha256sum")
+tar -xzf "/tmp/${FILE}" -C /tmp
+sudo install -m 0755 "/tmp/${OS}-${ARCH}/helm" /usr/local/bin/helm
 ```
 
 Verify the binary is available and on your path:
@@ -62,7 +76,7 @@ helm version
 which helm
 ```
 
-**What you should see:** A Helm 3 version string (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`)
+**What you should see:** A Helm 3 version string (e.g., `version.BuildInfo{Version:"v3.18.0", ...}`)
 and a path such as `/usr/local/bin/helm`.
 
 If you prefer to use the high-level Just recipes instead of running these commands manually, see the

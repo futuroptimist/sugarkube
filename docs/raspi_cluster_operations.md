@@ -97,8 +97,8 @@ working with a minimal OS, use the `just` recipes from the repository root:
    just helm-install
    ```
 
-   This detects whether Helm is already present. If missing, it installs Helm 3 using the official
-   `get-helm-3` script and prints the installed version on success.
+   This detects whether Helm is already present. If missing, it installs a pinned Helm 3 release by
+   downloading the archive from `get.helm.sh` and validating its SHA-256 checksum before installing.
 
 2. Verify Helm is working:
 
@@ -375,7 +375,7 @@ Example (abbreviated) output:
 ip-10-0-0-1   Ready    control-plane,etcd   v1.28.7+k3s1   10.0.0.1   ...
 
 === Helm status (CLI on this node) ===
-v3.13.0+gXXXXXXXX
+v3.18.0+gXXXXXXXX
 ```
 
 If `kubectl` cannot reach the cluster (for example, kubeconfig is not set yet), the command
