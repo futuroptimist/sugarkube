@@ -696,8 +696,8 @@ response status code 403: denied: denied
 
    ```bash
    export GHCR_USERNAME="<github-username>"
-   export GHCR_TOKEN="<token-with-read:packages>"
-   printf '%s\n' "${GHCR_TOKEN}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+   export GHCR_PAT="<pat-with-read-packages>"
+   printf '%s\n' "${GHCR_PAT}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
    ```
 
 5. **Verify direct chart pull before rerunning `just`:**
