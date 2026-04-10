@@ -375,7 +375,7 @@ Example (abbreviated) output:
 ip-10-0-0-1   Ready    control-plane,etcd   v1.28.7+k3s1   10.0.0.1   ...
 
 === Helm status (CLI on this node) ===
-v3.13.0+gXXXXXXXX
+v3.18.0+gXXXXXXXX
 ```
 
 If `kubectl` cannot reach the cluster (for example, kubeconfig is not set yet), the command

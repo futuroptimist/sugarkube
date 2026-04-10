@@ -713,13 +713,20 @@ helm-install:
         exit 0
     fi
 
-    helm_version="${HELM_VERSION:-v3.18.0}"
+    raw_helm_version="${HELM_VERSION:-v3.18.0}"
+    helm_version="${raw_helm_version#v}"
+    helm_version="v${helm_version}"
+    if [[ ! "${helm_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+        echo "Invalid HELM_VERSION '${raw_helm_version}'. Use formats like '3.18.0' or 'v3.18.0'." >&2
+        exit 1
+    fi
+
     os="$(uname -s | tr '[:upper:]' '[:lower:]')"
     arch="$(uname -m)"
     case "${arch}" in
         x86_64) arch="amd64" ;;
         aarch64 | arm64) arch="arm64" ;;
-        armv7l) arch="arm" ;;
+        armv6l | armv7l) arch="arm" ;;
         *)
             echo "Unsupported architecture: ${arch}" >&2
             exit 1
@@ -736,7 +743,20 @@ helm-install:
     curl -fsSL "${base_url}/${filename}.sha256sum" -o "${tmpdir}/${filename}.sha256sum"
     (
         cd "${tmpdir}"
-        sha256sum -c "${filename}.sha256sum"
+        if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "${filename}.sha256sum"
+        elif command -v shasum >/dev/null 2>&1; then
+            expected_checksum="$(cut -d" " -f1 "${filename}.sha256sum")"
+            actual_checksum="$(shasum -a 256 "${filename}" | awk '{print $1}')"
+            if [ "${actual_checksum}" != "${expected_checksum}" ]; then
+                echo "Checksum verification failed for ${filename}." >&2
+                exit 1
+            fi
+            echo "${filename}: OK"
+        else
+            echo "No checksum tool found (need sha256sum or shasum)." >&2
+            exit 1
+        fi
     )
 
     tar -xzf "${tmpdir}/${filename}" -C "${tmpdir}"
@@ -744,6 +764,8 @@ helm-install:
     if [ ! -w "${install_dir}" ]; then
         install_dir="${HOME}/.local/bin"
         mkdir -p "${install_dir}"
+        echo "Note: /usr/local/bin is not writable; installing Helm to ${install_dir}." >&2
+        echo "Add \"export PATH=\\\"${install_dir}:\\$PATH\\\"\" to your shell profile if Helm is not found in new sessions." >&2
     fi
     install -m 0755 "${tmpdir}/${os}-${arch}/helm" "${install_dir}/helm"
     export PATH="${install_dir}:${PATH}"

@@ -76,7 +76,7 @@ helm version
 which helm
 ```
 
-**What you should see:** A Helm 3 version string (e.g., `version.BuildInfo{Version:"v3.13.0", ...}`)
+**What you should see:** A Helm 3 version string (e.g., `version.BuildInfo{Version:"v3.18.0", ...}`)
 and a path such as `/usr/local/bin/helm`.
 
 If you prefer to use the high-level Just recipes instead of running these commands manually, see the

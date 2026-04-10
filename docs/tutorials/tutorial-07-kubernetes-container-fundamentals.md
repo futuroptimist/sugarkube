@@ -76,7 +76,21 @@ Store all work under `~/sugarkube-tutorials/tutorial-07/`. Create subdirectories
    sudo mv kubectl /usr/local/bin/
    kubectl version --client --output=yaml
 
-   curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+   HELM_VERSION=v3.18.0
+   HELM_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+   HELM_ARCH="$(uname -m)"
+   case "${HELM_ARCH}" in
+     x86_64) HELM_ARCH=amd64 ;;
+     aarch64|arm64) HELM_ARCH=arm64 ;;
+     armv6l|armv7l) HELM_ARCH=arm ;;
+     *) echo "Unsupported architecture: ${HELM_ARCH}" >&2; exit 1 ;;
+   esac
+   HELM_FILE="helm-${HELM_VERSION}-${HELM_OS}-${HELM_ARCH}.tar.gz"
+   curl -fsSL "https://get.helm.sh/${HELM_FILE}" -o "/tmp/${HELM_FILE}"
+   curl -fsSL "https://get.helm.sh/${HELM_FILE}.sha256sum" -o "/tmp/${HELM_FILE}.sha256sum"
+   (cd /tmp && sha256sum -c "${HELM_FILE}.sha256sum")
+   tar -xzf "/tmp/${HELM_FILE}" -C /tmp
+   sudo install -m 0755 "/tmp/${HELM_OS}-${HELM_ARCH}/helm" /usr/local/bin/helm
    helm version
    ```
 
