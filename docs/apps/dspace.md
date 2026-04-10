@@ -176,6 +176,9 @@ For tunnel and DNS setup details, see [Cloudflare Tunnel docs](../cloudflare_tun
 
 ## Troubleshooting
 
+- GHCR Helm OCI auth failures (`401 authentication required` or `403 denied: denied`) for
+  `helm pull`, `just helm-oci-install`, `just helm-oci-upgrade`, or dspace OCI helpers:
+  [Raspberry Pi Cluster Troubleshooting: GHCR 401/403 OCI pull failures](../raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-on-ghcr-with-403-denied-denied).
 - Collect dspace + ingress logs with environment-aware helper:
 
   ```bash

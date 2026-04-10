@@ -640,6 +640,72 @@ Firewall or routing is blocking the connection.
 
 ---
 
+### Scenario 7: Helm OCI Pull Fails on GHCR with `403 denied: denied`
+
+**Symptom:**
+`helm pull oci://...`, `just helm-oci-install`, `just helm-oci-upgrade`, or dspace OCI wrappers
+fail while fetching from GHCR. You may see errors ending in `403 denied: denied`, often at the
+token endpoint:
+
+```text
+Error: failed to perform "FetchReference" on source:
+  GET "https://ghcr.io/v2/democratizedspace/charts/dspace/manifests/3.0.0":
+  GET "https://ghcr.io/token?scope=repository%3Ademocratizedspace%2Fcharts%2Fdspace%3Apull&service=ghcr.io":
+  response status code 403: denied: denied
+```
+
+**Likely meanings:**
+
+- The GitHub PAT used for `helm registry login ghcr.io` is expired.
+- The PAT is wrong for the intended account.
+- The PAT is missing the `read:packages` scope.
+- Helm is using stale cached login state from a previous credential.
+- The chart/package visibility does not grant this identity pull access.
+
+**How this differs from nearby failures:**
+
+- **401 / `authentication required`:** usually means no valid GHCR login is present yet.
+- **Chart or version not found** (for example `...: not found`): authentication may be fine, but the
+  chart reference or version is wrong.
+
+**Recovery steps (operator sequence):**
+
+1. Create or reuse a valid GitHub PAT with `read:packages`.
+2. Clear stale Helm auth state:
+
+   ```bash
+   helm registry logout ghcr.io || true
+   ```
+
+3. If failures persist, remove stale Helm registry config and re-login:
+
+   ```bash
+   rm -f ~/.config/helm/registry/config.json
+   helm registry login ghcr.io --username "${GHCR_USERNAME}"
+   ```
+
+4. Verify the pull directly before rerunning higher-level helpers:
+
+   ```bash
+   helm pull oci://ghcr.io/democratizedspace/charts/dspace --version <version>
+   ```
+
+5. Re-run your original command:
+   - `just helm-oci-install ...`
+   - `just helm-oci-upgrade ...`
+   - `just dspace-oci-deploy ...`
+
+**Where stale credentials commonly live:**
+
+- `~/.config/helm/registry/config.json`
+- Shell profile exports (`~/.bashrc`, `~/.zshrc`)
+- Local operator notes or scripts that still reference old `GHCR_PAT` values
+
+See also the GHCR auth overview in
+[Raspberry Pi Cluster Operations](raspi_cluster_operations.md#authenticate-helm-with-oci-registries-ghcr-for-dspace).
+
+---
+
 ## Log Interpretation Quick Reference
 
 ### Structured Log Fields
