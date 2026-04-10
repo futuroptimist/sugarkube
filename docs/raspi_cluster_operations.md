@@ -159,8 +159,14 @@ Common errors:
 
 - **401 / `authentication required`:** Run `helm registry login ghcr.io` with a PAT that has the
   `read:packages` scope.
+- **403 / `denied: denied` from `ghcr.io/token`:** Usually an expired/invalid PAT, missing
+  `read:packages`, stale Helm login state, or visibility/access mismatch. See
+  [Troubleshooting Scenario 6: Helm OCI pulls from GHCR fail with `403 denied: denied`](raspi_cluster_troubleshooting.md#scenario-6-helm-oci-pulls-from-ghcr-fail-with-403-denied-denied).
 - **`...:3.0.0: not found`:** The requested chart version is absent—check the version documented in
   the dspace repo (for example, `docs/apps/dspace.version`) and pull that version instead.
+
+For a step-by-step recovery flow covering both **401** and **403** GHCR OCI pull failures, use
+[Raspberry Pi Cluster Troubleshooting](raspi_cluster_troubleshooting.md#scenario-6-helm-oci-pulls-from-ghcr-fail-with-403-denied-denied).
 
 ## Verify Traefik ingress (k3s default)
 

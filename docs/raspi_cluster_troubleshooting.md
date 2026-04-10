@@ -517,7 +517,86 @@ System time: 1.234 seconds slow of NTP time
 
 ---
 
-### Scenario 6: Firewall or Network Policy Blocking Cluster Traffic
+### Scenario 6: Helm OCI pulls from GHCR fail with `403 denied: denied`
+
+**Symptom:**
+Helm OCI commands fail even though the chart reference and version look correct. This can happen with
+direct pulls and with Sugarkube helpers:
+
+- `helm pull oci://ghcr.io/democratizedspace/charts/dspace --version <version>`
+- `just helm-oci-install ...`
+- `just helm-oci-upgrade ...`
+- dspace wrappers built on those helpers (`dspace-oci-deploy`, `dspace-oci-promote-prod`)
+
+Typical error shape:
+
+```text
+Error: failed to perform "FetchReference" on source:
+  GET "https://ghcr.io/v2/.../manifests/<version>":
+  GET "https://ghcr.io/token?...":
+  response status code 403: denied: denied
+```
+
+**What this usually means:**
+
+- The PAT used for Helm registry auth is expired.
+- The PAT is wrong (copied incorrectly, revoked, or from the wrong account).
+- The token is missing `read:packages`.
+- Helm is using stale login state from an old token.
+- Package visibility or account access does not permit pulls.
+
+**How this differs from nearby errors:**
+
+- **`401 authentication required`** usually means you are not logged in (or login never succeeded).
+- **`not found` / manifest unknown / bad version** usually means chart name or version is wrong.
+- **`403 denied: denied`** on `ghcr.io/token` often points to credentials/scope/access issues even if
+  you previously logged in.
+
+**Recovery steps (operator runbook):**
+
+1. Create or rotate a GitHub PAT that includes **`read:packages`**.
+2. Clear stale Helm login state:
+
+   ```bash
+   helm registry logout ghcr.io || true
+   ```
+
+3. If the node still appears to use old credentials, remove cached Helm registry auth and log in
+   again:
+
+   ```bash
+   rm -f ~/.config/helm/registry/config.json
+   ```
+
+4. Log in with the current PAT:
+
+   ```bash
+   export GHCR_USERNAME="your_github_username"
+   export GHCR_PAT="your_pat_with_read_packages"
+   helm registry login ghcr.io --username "${GHCR_USERNAME}"
+   # when prompted, paste the GHCR token value
+   ```
+
+5. Verify pull access directly before re-running higher-level helpers:
+
+   ```bash
+   helm pull oci://ghcr.io/democratizedspace/charts/dspace --version <version>
+   ```
+
+6. Re-run the original command:
+   - `just helm-oci-install ...` or
+   - `just helm-oci-upgrade ...` or
+   - `just dspace-oci-deploy ...`
+
+**Where stale credentials commonly hide:**
+
+- `~/.config/helm/registry/config.json`
+- shell profile exports (`~/.bashrc`, `~/.profile`, local operator notes)
+- local scripts that export an outdated `GHCR_PAT`
+
+---
+
+### Scenario 7: Firewall or Network Policy Blocking Cluster Traffic
 
 **Symptom:**
 Nodes can ping each other and resolve `.local` hostnames, but cluster formation fails. Discovery may succeed, but k3s service timeouts occur with connection refused or timeout errors.

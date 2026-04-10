@@ -107,6 +107,9 @@ Notes:
 - `version_file=docs/apps/dspace.version` keeps chart version pinning centralized.
 - For prod, prefer immutable tags and persist the approved one in `docs/apps/dspace.prod.tag`.
 - `dspace-oci-deploy` rejects mutable tags (`latest`, `main`) by design.
+- If `helm pull`/`helm-oci-*` fails with GHCR `401` or `403 denied: denied`, follow
+  [Raspberry Pi Cluster Troubleshooting Scenario 6](../raspi_cluster_troubleshooting.md#scenario-6-helm-oci-pulls-from-ghcr-fail-with-403-denied-denied)
+  before retrying deploy helpers.
 
 ## Evergreen release/promotion flow
 
@@ -176,6 +179,9 @@ For tunnel and DNS setup details, see [Cloudflare Tunnel docs](../cloudflare_tun
 
 ## Troubleshooting
 
+- GHCR OCI auth failures (`helm pull`, `just helm-oci-install`, `just helm-oci-upgrade`,
+  `dspace-oci-deploy`) with `401` or `403 denied: denied`:
+  [see canonical recovery runbook](../raspi_cluster_troubleshooting.md#scenario-6-helm-oci-pulls-from-ghcr-fail-with-403-denied-denied).
 - Collect dspace + ingress logs with environment-aware helper:
 
   ```bash

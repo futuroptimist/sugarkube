@@ -39,6 +39,8 @@ Review the safety notes before working with power components.
 - [raspi_cluster_setup.md](raspi_cluster_setup.md) — **start here** to image SD cards, boot the Pis, and form the HA k3s cluster
 - [raspi_cluster_operations.md](raspi_cluster_operations.md) — **next step** to install Helm,
   verify Traefik ingress, and roll out workloads
+- [raspi_cluster_troubleshooting.md](raspi_cluster_troubleshooting.md) — diagnose common Pi cluster
+  failures, including GHCR Helm OCI `401`/`403 denied` authentication issues
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding contract,
@@ -77,10 +79,12 @@ Pi hardware:
 2. [raspi_cluster_operations.md](raspi_cluster_operations.md) — Day-two operations including Helm,
    Traefik ingress verification, workload management (token.place, dspace), and Flux GitOps
    integration.
-3. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with detailed
+3. [raspi_cluster_troubleshooting.md](raspi_cluster_troubleshooting.md) — Canonical troubleshooting
+   guide for setup/operations failures, including GHCR OCI pull auth recovery.
+4. [raspi_cluster_setup_manual.md](raspi_cluster_setup_manual.md) — Full manual setup with detailed
    explanations of each step to understand what the quick-start automates and to troubleshoot when
    things go wrong.
-4. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual counterpart to
+5. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual counterpart to
    Part 2 with raw commands for ingress, Cloudflare Tunnel, Helm apps, and Flux.
 
 ## LLM Prompts
