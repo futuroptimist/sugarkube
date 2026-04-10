@@ -82,6 +82,8 @@ Pi hardware:
    things go wrong.
 4. [raspi_cluster_operations_manual.md](raspi_cluster_operations_manual.md) — Manual counterpart to
    Part 2 with raw commands for ingress, Cloudflare Tunnel, Helm apps, and Flux.
+5. [raspi_cluster_troubleshooting.md](raspi_cluster_troubleshooting.md) — Canonical troubleshooting,
+   including GHCR OCI Helm pull auth failures (`401`/`403 denied`) and recovery steps.
 
 ## LLM Prompts
 - [prompts/codex/automation.md](prompts/codex/automation.md) — baseline Codex instructions for maintaining the repo

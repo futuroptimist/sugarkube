@@ -159,6 +159,9 @@ Common errors:
 
 - **401 / `authentication required`:** Run `helm registry login ghcr.io` with a PAT that has the
   `read:packages` scope.
+- **403 / `denied: denied` (including `ghcr.io/token ... 403`):** Usually an expired PAT, wrong PAT,
+  missing `read:packages`, stale Helm login state, or package visibility mismatch. See
+  [Troubleshooting GHCR OCI 401/403 pull failures](raspi_cluster_troubleshooting.md#scenario-7-ghcr-oci-helm-pull-fails-with-401-or-403-denied).
 - **`...:3.0.0: not found`:** The requested chart version is absent—check the version documented in
   the dspace repo (for example, `docs/apps/dspace.version`) and pull that version instead.
 

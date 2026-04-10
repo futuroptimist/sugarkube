@@ -76,6 +76,10 @@ just app-status namespace=dspace release=dspace
 
 ## Generic Helm OCI examples
 
+If GHCR auth fails with `401 authentication required` or
+`ghcr.io/token ... 403 denied: denied`, see the canonical fix in
+[Scenario 7: GHCR OCI Helm Pull Fails with 401 or 403 Denied](../raspi_cluster_troubleshooting.md#scenario-7-ghcr-oci-helm-pull-fails-with-401-or-403-denied).
+
 ```bash
 # Install-or-upgrade staging with mutable convenience tag
 just helm-oci-install \
@@ -183,6 +187,9 @@ For tunnel and DNS setup details, see [Cloudflare Tunnel docs](../cloudflare_tun
   just dspace-debug-logs-env env=prod
   ```
 
+- For GHCR OCI auth failures (`401`/`403 denied`) during `helm pull`, `helm-oci-install`, or
+  `helm-oci-upgrade`, use
+  [Scenario 7: GHCR OCI Helm Pull Fails with 401 or 403 Denied](../raspi_cluster_troubleshooting.md#scenario-7-ghcr-oci-helm-pull-fails-with-401-or-403-denied).
 - Inspect Helm release state:
   - `helm -n dspace status dspace`
   - `helm -n dspace get values dspace`
