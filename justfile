@@ -702,6 +702,7 @@ cf-tunnel-debug:
     fi
 
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
+
 # Downloads a pinned release archive and verifies checksum before install.
 helm-install:
     #!/usr/bin/env bash
