@@ -18,7 +18,7 @@ def test_failopen_timeout_configuration_exists() -> None:
     assert 'DISCOVERY_FAILOPEN_TIMEOUT_SECS' in script_content, \
         "DISCOVERY_FAILOPEN_TIMEOUT_SECS should be defined"
 
-    # Verify the configuration uses environment-specific defaults
+    # Verify the configuration uses secure, environment-agnostic defaults
     lines = script_content.splitlines()
 
     # Find the configuration block
@@ -30,11 +30,14 @@ def test_failopen_timeout_configuration_exists() -> None:
 
     assert config_block_start >= 0, "Should find fail-open configuration block"
 
-    # Check that environment-specific logic exists within next 20 lines
+    # Check that secure defaults exist in the config section
     config_section = '\n'.join(lines[config_block_start:config_block_start+30])
-
-    assert 'ENVIRONMENT' in config_section, "Should check ENVIRONMENT variable"
-    assert 'dev' in config_section.lower(), "Should have dev environment handling"
+    assert 'DISCOVERY_FAILOPEN_DEFAULT=0' in config_section, \
+        "DISCOVERY_FAILOPEN_DEFAULT should be 0 (opt-in only)"
+    assert 'DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT=300' in config_section, \
+        "DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT should be 300 seconds"
+    assert 'ENVIRONMENT' not in config_section, \
+        "Fail-open defaults should not branch on ENVIRONMENT"
 
 
 def test_failopen_uses_environment_variable() -> None:
