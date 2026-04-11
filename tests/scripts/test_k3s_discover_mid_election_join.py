@@ -319,6 +319,9 @@ def test_join_when_server_advertises_during_election(tmp_path: Path) -> None:
         else:
             stderr = stderr_data
         tail = "\n".join(stderr.strip().splitlines()[-8:])
+        # TODO: Remove this skip fallback once the mocked join path exits deterministically in CI.
+        # Root cause: Mock timing/process scheduling can occasionally prevent the script from exiting before the safety timeout.
+        # Estimated fix: Replace timing-sensitive shell mocks with deterministic synchronization and assert completion without skip.
         pytest.skip(
             "k3s-discover did not exit within 15s in this mocked environment; "
             f"skipping to avoid CI hang. stderr tail:\n{tail}"
