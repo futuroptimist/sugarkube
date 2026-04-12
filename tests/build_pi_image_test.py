@@ -871,7 +871,7 @@ def test_installs_ssd_clone_service(tmp_path):
     assert not (tmp_path / "sugarkube.img.xz.xz").exists()
 
 
-def test_installs_path_units_for_kube_artifacts(tmp_path):
+def test_installs_but_does_not_enable_path_units_for_kube_artifacts(tmp_path):
     env = _setup_build_env(tmp_path)
     env["KEEP_WORK_DIR"] = "1"
 
@@ -898,7 +898,7 @@ def test_installs_path_units_for_kube_artifacts(tmp_path):
         "sugarkube-export-kubeconfig.path",
         "sugarkube-export-node-token.path",
     ):
-        assert (wants_dir / unit_name).exists(), f"{unit_name} not enabled"
+        assert not (wants_dir / unit_name).exists(), f"{unit_name} should be opt-in"
 
     shutil.rmtree(work_dir)
     assert not (tmp_path / "sugarkube.img.xz.xz").exists()
