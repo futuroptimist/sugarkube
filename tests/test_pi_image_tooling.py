@@ -674,6 +674,15 @@ def test_pi_image_workflow_clones_existing_dspace_ref():
     assert "--branch v3 https://github.com/democratizedspace/dspace.git" not in content
 
 
+def test_pi_image_workflow_passes_git_sha_build_args_to_dspace_build():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert '--build-arg VITE_GIT_SHA="${GITHUB_SHA}"' in content
+    assert '--build-arg GIT_SHA="${GITHUB_SHA}"' in content
+    assert '--build-arg DSPACE_GIT_SHA="${GITHUB_SHA}"' in content
+
+
 def test_pi_image_workflow_pull_request_paths_include_oci_signals():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
