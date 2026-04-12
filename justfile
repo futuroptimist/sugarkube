@@ -1584,7 +1584,7 @@ tokenplace-oci-redeploy tag='':
       chart='./apps/tokenplace-relay' \
       values='apps/tokenplace-relay/values.dev.yaml,apps/tokenplace-relay/values.staging.yaml' \
       version_file='' \
-      tag='{{ tag }}' default_tag='main'
+      tag='{{ tag }}' default_tag='sha-684fd7f'
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then

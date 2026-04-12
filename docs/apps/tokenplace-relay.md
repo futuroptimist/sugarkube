@@ -27,8 +27,8 @@ The Helm release runs in the `tokenplace` namespace with release name `tokenplac
 ## Container image and Helm chart
 
 - Image repository: `ghcr.io/democratizedspace/tokenplace-relay`
-  - Tags: `main` (latest build) or immutable `sha-<shortsha>` builds from the CI publisher.
-  - Default staging tag: `main` (set via `default_tag` in the helper); prefer `tag=sha-<sha>` for promoted releases.
+  - Tags: immutable `sha-<shortsha>` builds from the CI publisher (recommended) and `main` (mutable).
+  - Default staging tag: `sha-684fd7f` (set via `default_tag` in the helper); override with `tag=sha-<sha>` for promotions.
 - Helm chart: `./apps/tokenplace-relay`
   - Release: `tokenplace-relay`
   - Namespace: `tokenplace`
@@ -38,7 +38,7 @@ Example values snippet:
 ```yaml
 image:
   repository: ghcr.io/democratizedspace/tokenplace-relay
-  tag: main
+  tag: sha-684fd7f
 ingress:
   className: traefik
   annotations:
@@ -60,7 +60,7 @@ probes:
 
 ```bash
 # Install or upgrade the relay with staging ingress + TLS (wraps helm upgrade --install)
-just tokenplace-oci-redeploy tag=main
+just tokenplace-oci-redeploy
 
 # Print ingress + pod status
 just tokenplace-status
@@ -69,7 +69,7 @@ just tokenplace-status
 just tokenplace-oci-redeploy tag=sha-<shortsha>
 ```
 
-- The `default_tag` keeps staging pinned to the latest validated `main` build; pass `tag=sha-<new>`
+- The `default_tag` keeps staging pinned to a vetted immutable SHA tag; pass `tag=sha-<new>`
   when promoting a fresh image.
 - Health probes default to `/healthz` (readiness) and `/livez` (liveness) on the `http` port
   (`containerPort: 5010`). Override `probes.port`, `probes.readiness.path`, or `probes.liveness.path`
@@ -103,7 +103,7 @@ just tokenplace-oci-redeploy tag=sha-<shortsha>
 
 ## Operational helpers
 
-- Deploy or roll forward: `just tokenplace-oci-redeploy tag=<main|sha-...>` (release `tokenplace-relay`
+- Deploy or roll forward: `just tokenplace-oci-redeploy [tag=sha-...]` (release `tokenplace-relay`
   in namespace `tokenplace`, values from `apps/tokenplace-relay/values.*.yaml`)
 - Check status: `just tokenplace-status` (prints pods/ingress and the public URL)
 - Tail logs: `just tokenplace-logs`
