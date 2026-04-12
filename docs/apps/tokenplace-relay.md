@@ -28,7 +28,7 @@ The Helm release runs in the `tokenplace` namespace with release name `tokenplac
 
 - Image repository: `ghcr.io/democratizedspace/tokenplace-relay`
   - Tags: immutable `sha-<shortsha>` builds from the CI publisher (recommended) and `main` (mutable).
-  - Default staging tag: `sha-684fd7f` (set via `default_tag` in the helper); override with `tag=sha-<sha>` for promotions.
+  - Default staging tag: `sha-684fd7f` (set via `default_tag` in the helper); override with `tag=sha-<shortsha>` for promotions.
 - Helm chart: `./apps/tokenplace-relay`
   - Release: `tokenplace-relay`
   - Namespace: `tokenplace`
@@ -69,7 +69,7 @@ just tokenplace-status
 just tokenplace-oci-redeploy tag=sha-<shortsha>
 ```
 
-- The `default_tag` keeps staging pinned to a vetted immutable SHA tag; pass `tag=sha-<new>`
+- The `default_tag` keeps staging pinned to a vetted immutable SHA tag; pass `tag=sha-<shortsha>`
   when promoting a fresh image.
 - Health probes default to `/healthz` (readiness) and `/livez` (liveness) on the `http` port
   (`containerPort: 5010`). Override `probes.port`, `probes.readiness.path`, or `probes.liveness.path`

@@ -1571,7 +1571,7 @@ dspace-debug-logs-env env='staging' namespace='dspace':
     just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
 # Fast redeploy of token.place relay from GHCR.
-# The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
+# The default tag pins staging to a vetted immutable SHA build; pass tag=sha-<shortsha>
 # after promoting a fresh image.
 
 # See docs/apps/tokenplace-relay.md for relay-specific operations.
