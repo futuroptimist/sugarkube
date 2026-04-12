@@ -3,7 +3,7 @@
 # commands in the justfile.
 image:
   repository: ghcr.io/democratizedspace/tokenplace-relay
-  tag: main
+  tag: sha-684fd7f
 
 ingress:
   enabled: true
