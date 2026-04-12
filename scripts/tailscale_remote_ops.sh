@@ -14,6 +14,7 @@ Commands:
 Environment:
   SUGARKUBE_TAILSCALE_AUTH_KEY   Optional auth key used by `up`.
   SUGARKUBE_TAILSCALE_INSTALL_URL Override install script URL.
+  SUGARKUBE_TAILSCALE_INSTALL_SHA256 Required SHA-256 checksum for install script.
 USAGE
 }
 
@@ -63,15 +64,32 @@ install_tailscale() {
   require_cmd curl
   require_cmd sh
   require_cmd mktemp
+  require_cmd sha256sum
 
   local install_url="${SUGARKUBE_TAILSCALE_INSTALL_URL:-https://tailscale.com/install.sh}"
+  local expected_sha256="${SUGARKUBE_TAILSCALE_INSTALL_SHA256:-}"
+  local actual_sha256
   local tmp_script
   validate_install_url "$install_url"
+  if [[ ! "$expected_sha256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    cat >&2 <<'EOF'
+missing or invalid SUGARKUBE_TAILSCALE_INSTALL_SHA256 (expected 64 hex chars).
+Refusing to execute a downloaded installer script without integrity verification.
+EOF
+    exit 1
+  fi
+
   tmp_script="$(mktemp)"
   trap 'rm -f "${tmp_script:-}"' RETURN
 
   log "installing tailscale from ${install_url}"
   curl -fsSL --output "$tmp_script" "$install_url"
+  actual_sha256="$(sha256sum "$tmp_script" | awk '{print $1}')"
+  if [ "$actual_sha256" != "${expected_sha256,,}" ]; then
+    printf 'tailscale install script checksum mismatch (expected %s, got %s)\n' \
+      "${expected_sha256,,}" "$actual_sha256" >&2
+    exit 1
+  fi
   run_as_root sh "$tmp_script"
   log 'install complete'
 }

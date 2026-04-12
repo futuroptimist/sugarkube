@@ -73,7 +73,7 @@ If you operate the cluster remotely, follow the dedicated Tailscale design guide
 High-level operator flow (canonical commands):
 
 ```bash
-just tailscale-install
+SUGARKUBE_TAILSCALE_INSTALL_SHA256='<sha256-for-install.sh>' just tailscale-install
 just tailscale-up
 just tailscale-status
 just tailscale-ssh-check target='<operator>@sugarkube0'

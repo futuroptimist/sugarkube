@@ -118,14 +118,15 @@ then validate with `just status` and `just cluster-status`.
 
 This repository now includes helper recipes for the node-local Tailscale setup flow:
 
-- `just tailscale-install` installs the upstream Tailscale package.
+- `just tailscale-install` installs the upstream Tailscale package after verifying
+  `SUGARKUBE_TAILSCALE_INSTALL_SHA256`.
 - `just tailscale-up` brings the node online with your local auth flow.
 - `just tailscale-status` verifies enrollment state.
 
 Example (placeholder-only) usage:
 
 ```bash
-just tailscale-install
+SUGARKUBE_TAILSCALE_INSTALL_SHA256='<sha256-for-install.sh>' just tailscale-install
 just tailscale-up
 just tailscale-status
 ```
@@ -206,7 +207,7 @@ Do not rewire existing cluster networking during rollout.
 The Tailscale remote-operations design is now implemented with dedicated automation in:
 
 - `scripts/tailscale_remote_ops.sh` for install/up/status/SSH probes.
-- `just tailscale-install`
+- `just tailscale-install` (requires `SUGARKUBE_TAILSCALE_INSTALL_SHA256`)
 - `just tailscale-up`
 - `just tailscale-status`
 - `just tailscale-ssh-check`
@@ -223,7 +224,7 @@ Use this sequence on each `sugarkube<n>` node after base cluster setup:
 
 ```bash
 # 1) Install Tailscale
-just tailscale-install
+SUGARKUBE_TAILSCALE_INSTALL_SHA256='<sha256-for-install.sh>' just tailscale-install
 
 # 2) Bring node online (interactive auth)
 just tailscale-up
