@@ -243,4 +243,3 @@ exit 99
     assert result.returncode != 0
     assert "checksum mismatch" in result.stderr
     assert not tmp_script.exists()
-

@@ -1571,7 +1571,7 @@ dspace-debug-logs-env env='staging' namespace='dspace':
     just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
 # Fast redeploy of token.place relay from GHCR.
-# The default tag pins staging to the last validated `main` build; pass tag=sha-<new>
+# The default tag pins staging to a vetted immutable SHA build; pass tag=sha-<shortsha>
 # after promoting a fresh image.
 
 # See docs/apps/tokenplace-relay.md for relay-specific operations.
@@ -1584,7 +1584,7 @@ tokenplace-oci-redeploy tag='':
       chart='./apps/tokenplace-relay' \
       values='apps/tokenplace-relay/values.dev.yaml,apps/tokenplace-relay/values.staging.yaml' \
       version_file='' \
-      tag='{{ tag }}' default_tag='main'
+      tag='{{ tag }}' default_tag='sha-684fd7f'
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then
