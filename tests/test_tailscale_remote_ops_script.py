@@ -175,6 +175,7 @@ exit 0
     )
 
     assert result.returncode == 0, result.stderr
+    assert calls.exists(), "fake ssh was never invoked — ssh_check() did not call ssh"
     logged = calls.read_text(encoding="utf-8")
     assert "StrictHostKeyChecking=yes" in logged
     assert "StrictHostKeyChecking=accept-new" not in logged
