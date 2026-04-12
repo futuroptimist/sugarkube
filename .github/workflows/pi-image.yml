@@ -78,9 +78,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name != github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
       CLONE_DSPACE: ${{ github.event.inputs.clone_dspace }}
@@ -103,21 +101,9 @@ jobs:
               - 'platform/**'
 
       - name: Checkout repository
-        if: >-
-          (github.event_name != 'pull_request_target') &&
-          (github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true')
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
         uses: actions/checkout@v5
         with:
-          fetch-depth: 1
-
-      - name: Checkout pull request head
-        if: >-
-          (github.event_name == 'pull_request_target') &&
-          (github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true')
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
       - name: Set up QEMU for arm64

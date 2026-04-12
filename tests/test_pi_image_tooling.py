@@ -617,6 +617,9 @@ def test_pi_image_workflow_covers_preset_and_download_scripts():
 def test_pi_image_workflow_has_oci_parity_guardrails():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
+    oci_job_content = content.split("oci-parity-smoke:", maxsplit=1)[1].split(
+        "\n  unit:", maxsplit=1
+    )[0]
 
     assert "oci-parity-smoke" in content
     assert "docker/setup-buildx-action@v3" in content
@@ -628,6 +631,8 @@ def test_pi_image_workflow_has_oci_parity_guardrails():
         "dCarbon represents the amount of carbon dioxide produced by a player" in content
     )
     assert "to close CI/prod gaps by testing the shipped OCI image directly" in content
+    assert "github.event_name == 'pull_request_target'" not in oci_job_content
+    assert "Checkout pull request head" not in oci_job_content
 
 
 def test_pi_image_workflow_pull_request_paths_include_oci_signals():
