@@ -243,9 +243,13 @@ SUGARKUBE_TAILSCALE_AUTH_KEY="$TS_AUTH_KEY" just tailscale-up
 unset TS_AUTH_KEY
 ```
 
-`just tailscale-ssh-check` uses SSH `StrictHostKeyChecking=accept-new` for first-connection
-convenience. This is a trust-on-first-use trade-off: run the first probe from a trusted network and
-prefer pre-provisioned host keys if your environment requires strict anti-MITM guarantees.
+`just tailscale-ssh-check` uses SSH `StrictHostKeyChecking=yes`, so operators must verify host keys
+before first connection (or pre-seed `known_hosts`) to prevent trust-on-first-use MITM risk.
+For example, after validating the fingerprint out-of-band, you can pre-seed:
+
+```bash
+ssh-keyscan sugarkube0 >> ~/.ssh/known_hosts
+```
 
 ## Failure modes and remediation
 

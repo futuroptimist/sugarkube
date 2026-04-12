@@ -126,7 +126,7 @@ ssh_check() {
   log "probing ssh to ${target}"
   ssh \
     -o BatchMode=yes \
-    -o StrictHostKeyChecking=accept-new \
+    -o StrictHostKeyChecking=yes \
     -o ConnectTimeout=8 \
     "$target" true
 }
