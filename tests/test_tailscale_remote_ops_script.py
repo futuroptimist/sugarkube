@@ -147,3 +147,34 @@ exit 0
 
     assert result.returncode != 0
     assert "contains unsafe characters" in result.stderr
+
+
+def test_ssh_check_enforces_strict_host_key_checking(tmp_path: Path) -> None:
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    calls = tmp_path / "ssh_calls.log"
+
+    _write_executable(
+        fakebin / "ssh",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" > "{calls}"
+exit 0
+""",
+    )
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fakebin}:{env.get('PATH', '')}"
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "ssh-check", "pi@sugarkube0"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    logged = calls.read_text(encoding="utf-8")
+    assert "StrictHostKeyChecking=yes" in logged
+    assert "StrictHostKeyChecking=accept-new" not in logged
