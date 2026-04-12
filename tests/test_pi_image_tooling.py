@@ -666,6 +666,14 @@ def test_pi_image_workflow_unit_job_has_fork_guardrails():
     assert "Checkout pull request head" not in unit_job_content
 
 
+def test_pi_image_workflow_clones_existing_dspace_ref():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert "--branch v3.0.0" in content
+    assert "--branch v3 https://github.com/democratizedspace/dspace.git" not in content
+
+
 def test_pi_image_workflow_pull_request_paths_include_oci_signals():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
