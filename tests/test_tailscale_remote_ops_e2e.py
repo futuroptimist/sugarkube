@@ -72,6 +72,9 @@ printf 'tailscale %s\n' "$*" >> "{calls}"
     env = os.environ.copy()
     env["PATH"] = f"{fakebin}:{env.get('PATH', '')}"
     env["SUGARKUBE_TAILSCALE_AUTH_KEY"] = "tskey-test"
+    env["SUGARKUBE_TAILSCALE_INSTALL_SHA256"] = (
+        "fb99eae951f1adc14d1a4a9a186c21930db2786b3208c94c7d9af382bd1048e5"
+    )
 
     install = subprocess.run(
         [just_bin, "tailscale-install"],
