@@ -149,16 +149,21 @@ exit 0
     assert "contains unsafe characters" in result.stderr
 
 
-def test_ssh_check_enforces_strict_host_key_checking(tmp_path: Path) -> None:
+def test_install_requires_expected_checksum_env_var(tmp_path: Path) -> None:
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
-    calls = tmp_path / "ssh_calls.log"
 
     _write_executable(
-        fakebin / "ssh",
-        f"""#!/usr/bin/env bash
+        fakebin / "curl",
+        """#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\\n' "$*" > "{calls}"
+exit 0
+""",
+    )
+    _write_executable(
+        fakebin / "sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
 exit 0
 """,
     )
@@ -167,15 +172,74 @@ exit 0
     env["PATH"] = f"{fakebin}:{env.get('PATH', '')}"
 
     result = subprocess.run(
-        ["bash", str(SCRIPT), "ssh-check", "pi@sugarkube0"],
+        ["bash", str(SCRIPT), "install"],
         env=env,
         capture_output=True,
         text=True,
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
-    assert calls.exists(), "fake ssh was never invoked — ssh_check() did not call ssh"
-    logged = calls.read_text(encoding="utf-8")
-    assert "StrictHostKeyChecking=yes" in logged
-    assert "StrictHostKeyChecking=accept-new" not in logged
+    assert result.returncode != 0
+    assert "missing or invalid SUGARKUBE_TAILSCALE_INSTALL_SHA256" in result.stderr
+
+
+def test_install_rejects_checksum_mismatch_and_cleans_tmp_file(tmp_path: Path) -> None:
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    tmp_script = tmp_path / "installer.sh"
+
+    _write_executable(
+        fakebin / "mktemp",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "{tmp_script}"
+""",
+    )
+    _write_executable(
+        fakebin / "curl",
+        """#!/usr/bin/env bash
+set -euo pipefail
+outfile=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    outfile="$2"
+    shift 2
+    continue
+  fi
+  shift
+done
+printf '%s\\n' '#!/usr/bin/env bash' 'echo from-fake-installer' > "$outfile"
+""",
+    )
+    _write_executable(
+        fakebin / "sha256sum",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s  %s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$1"
+""",
+    )
+    _write_executable(
+        fakebin / "sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+exit 99
+""",
+    )
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fakebin}:{env.get('PATH', '')}"
+    env["SUGARKUBE_TAILSCALE_INSTALL_SHA256"] = (
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    )
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "install"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "checksum mismatch" in result.stderr
+    assert not tmp_script.exists()
