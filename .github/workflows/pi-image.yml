@@ -13,7 +13,7 @@ on:
         type: boolean
         default: false
       clone_dspace:
-        description: "Clone democratizedspace/dspace v3 repo into image"
+        description: "Clone democratizedspace/dspace v3.0.0 tag into image"
         type: boolean
         default: false
   # Also run the lightweight unit tests automatically when relevant bits change
@@ -78,9 +78,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name != github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
       CLONE_DSPACE: ${{ github.event.inputs.clone_dspace }}
@@ -103,21 +101,9 @@ jobs:
               - 'platform/**'
 
       - name: Checkout repository
-        if: >-
-          (github.event_name != 'pull_request_target') &&
-          (github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true')
+        if: github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true'
         uses: actions/checkout@v5
         with:
-          fetch-depth: 1
-
-      - name: Checkout pull request head
-        if: >-
-          (github.event_name == 'pull_request_target') &&
-          (github.event_name == 'workflow_dispatch' || steps.oci-filter.outputs.oci == 'true')
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
       - name: Set up QEMU for arm64
@@ -147,7 +133,7 @@ jobs:
             target_dir="$(mktemp -d)"
           fi
 
-          git clone --depth=1 --branch v3 https://github.com/democratizedspace/dspace.git "${target_dir}"
+          git clone --depth=1 --branch v3.0.0 https://github.com/democratizedspace/dspace.git "${target_dir}"
           echo "path=${target_dir}" >>"${GITHUB_OUTPUT}"
 
       - name: Build dspace OCI images (amd64 + arm64)
@@ -163,6 +149,10 @@ jobs:
               --platform "${platform}" \
               --tag "${tag}" \
               --build-arg DSPACE_VERSION="ci-${GITHUB_SHA}" \
+              --build-arg GITHUB_SHA="${GITHUB_SHA}" \
+              --build-arg VITE_GIT_SHA="${GITHUB_SHA}" \
+              --build-arg GIT_SHA="${GITHUB_SHA}" \
+              --build-arg DSPACE_GIT_SHA="${GITHUB_SHA}" \
               --file "${DSPACE_DIR}/Dockerfile" \
               "${DSPACE_DIR}" \
               --load
@@ -257,22 +247,12 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name != github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        if: github.event_name != 'pull_request_target'
         uses: actions/checkout@v5
         with:
-          fetch-depth: 1
-      - name: Checkout pull request head
-        if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Install collector dependencies
         run: |

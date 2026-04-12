@@ -68,6 +68,30 @@ def _extract_pull_request_paths(workflow_text: str) -> list[str]:
     return paths
 
 
+def _extract_job_block(workflow_text: str, job_name: str) -> str:
+    """Return the YAML block content for a top-level workflow job."""
+
+    lines = workflow_text.splitlines()
+    header = f"  {job_name}:"
+
+    start_index: int | None = None
+    for idx, line in enumerate(lines):
+        if line == header:
+            start_index = idx + 1
+            break
+
+    assert start_index is not None, f"{job_name} job not found"
+
+    end_index = len(lines)
+    for idx in range(start_index, len(lines)):
+        line = lines[idx]
+        if line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":"):
+            end_index = idx
+            break
+
+    return "\n".join(lines[start_index:end_index])
+
+
 def _extract_work_dir(stdout: str) -> Path:
     match = re.search(r"leaving work dir: (?P<path>\S+)", stdout)
     assert match, stdout
@@ -617,6 +641,7 @@ def test_pi_image_workflow_covers_preset_and_download_scripts():
 def test_pi_image_workflow_has_oci_parity_guardrails():
     workflow_path = Path(".github/workflows/pi-image.yml")
     content = workflow_path.read_text()
+    oci_job_content = _extract_job_block(content, "oci-parity-smoke")
 
     assert "oci-parity-smoke" in content
     assert "docker/setup-buildx-action@v3" in content
@@ -628,6 +653,34 @@ def test_pi_image_workflow_has_oci_parity_guardrails():
         "dCarbon represents the amount of carbon dioxide produced by a player" in content
     )
     assert "to close CI/prod gaps by testing the shipped OCI image directly" in content
+    assert "github.event_name == 'pull_request_target'" not in oci_job_content
+    assert "Checkout pull request head" not in oci_job_content
+
+
+def test_pi_image_workflow_unit_job_has_fork_guardrails():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+    unit_job_content = _extract_job_block(content, "unit")
+
+    assert "github.event_name == 'pull_request_target'" not in unit_job_content
+    assert "Checkout pull request head" not in unit_job_content
+
+
+def test_pi_image_workflow_clones_existing_dspace_ref():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert "--branch v3.0.0" in content
+    assert "--branch v3 https://github.com/democratizedspace/dspace.git" not in content
+
+
+def test_pi_image_workflow_passes_git_sha_build_args_to_dspace_build():
+    workflow_path = Path(".github/workflows/pi-image.yml")
+    content = workflow_path.read_text()
+
+    assert '--build-arg VITE_GIT_SHA="${GITHUB_SHA}"' in content
+    assert '--build-arg GIT_SHA="${GITHUB_SHA}"' in content
+    assert '--build-arg DSPACE_GIT_SHA="${GITHUB_SHA}"' in content
 
 
 def test_pi_image_workflow_pull_request_paths_include_oci_signals():
