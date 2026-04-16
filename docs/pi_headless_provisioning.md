@@ -41,11 +41,10 @@ Recommended options:
 - Configure Wi-Fi credentials using `wifis`.
 - Inject optional environment variables for services like Cloudflare Tunnels or token.place secrets.
 
-The base image now writes sanitized and full kubeconfigs (`/boot/sugarkube-kubeconfig*`) plus the
-k3s node token (`/boot/sugarkube-node-token`) once k3s is online, so you can collect cluster
-credentials without SSH. The baked-in `sugarkube-export-kubeconfig.path` and
-`sugarkube-export-node-token.path` units re-run the exporters whenever the kubeconfig or node token
-appears later in the boot process, replacing any `*(pending)` placeholders automatically. The
+The base image ships the kubeconfig and node-token export scripts and companion systemd units, but
+the path units are **not enabled by default**. This avoids automatically writing full credentials
+to `/boot` on every change. If you accept that risk for your environment, you can manually enable
+`sugarkube-export-kubeconfig.path` and `sugarkube-export-node-token.path` after first boot. The
 default template still seeds `/boot/sugarkube/` with placeholders for bootstrap tokens or
 additional secrets you may want to mirror on first boot.
 
