@@ -232,6 +232,8 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN="${SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN:-0}"
+SUGARKUBE_SERVER_URL_PREFER_IP="${SUGARKUBE_SERVER_URL_PREFER_IP:-0}"
 # Phase 2: Absence Gate Control
 # SUGARKUBE_SKIP_ABSENCE_GATE=1 bypasses the absence gate entirely
 # Default: 1 (absence gate skipped; set to 0 for legacy restart behavior)
@@ -3920,6 +3922,10 @@ detect_node_primary_ipv4() {
   return 0
 }
 
+should_include_node_ip_tls_san() {
+  [ "${SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN}" = "1" ]
+}
+
 failopen_resolve_candidate() {
   local candidate="$1"
   if [ -z "${candidate}" ]; then
@@ -4192,7 +4198,7 @@ install_server_single() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
+    if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
       install_args+=(--tls-san "${node_ip}")
     fi
     install_args+=(
@@ -4275,7 +4281,7 @@ install_server_cluster_init() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
+    if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
       install_args+=(--tls-san "${node_ip}")
     fi
     install_args+=(
@@ -4488,7 +4494,7 @@ install_server_join() {
   # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
   # Keep hostname in TLS SANs for certificate verification
   local server_url_target="${server}"
-  if [ -n "${ip_hint}" ]; then
+  if [ -n "${ip_hint}" ] && [ "${SUGARKUBE_SERVER_URL_PREFER_IP}" = "1" ]; then
     server_url_target="${ip_hint}"
     log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
@@ -4521,7 +4527,7 @@ install_server_join() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
+    if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
       install_args+=(--tls-san "${node_ip}")
     fi
     install_args+=(
