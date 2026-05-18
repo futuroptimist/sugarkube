@@ -40,6 +40,30 @@ def _render_install(tmp_path: Path, mode: str, **env_overrides: str) -> tuple[li
         """,
     )
 
+    _write_stub(
+        bin_dir / "getent",
+        f"""
+        #!/usr/bin/env bash
+        set -euo pipefail
+        if [ "${{SUGARKUBE_TEST_GETENT_MODE:-resolve}}" = "fail" ]; then
+          exit 2
+        fi
+        if [ "$#" -ge 2 ] && [ "$2" = "{SERVER_HOST}" ]; then
+          case "$1" in
+            hosts)
+              echo "{NODE_IP} {SERVER_HOST}"
+              exit 0
+              ;;
+            ahostsv4)
+              echo "{NODE_IP} STREAM {SERVER_HOST}"
+              exit 0
+              ;;
+          esac
+        fi
+        exit 2
+        """,
+    )
+
     env = os.environ.copy()
     env.update(
         {
@@ -125,6 +149,17 @@ def test_join_ip_preference_opt_in_uses_ip_hint_for_k3s_url(tmp_path: Path) -> N
     assert _tls_san_values(args) == [SERVER_HOST, MDNS_HOST, SHORT_HOST]
 
 
+def test_join_falls_back_to_ip_hint_when_hostname_is_not_durable_resolvable(
+    tmp_path: Path,
+) -> None:
+    env_lines, args = _render_install(tmp_path, "join", SUGARKUBE_TEST_GETENT_MODE="fail")
+
+    assert f"K3S_URL=https://{NODE_IP}:6443" in env_lines
+    assert f"SERVER_IP={NODE_IP}" in env_lines
+    assert args[:3] == ["server", "--server", f"https://{NODE_IP}:6443"]
+    assert _tls_san_values(args) == [SERVER_HOST, MDNS_HOST, SHORT_HOST]
+
+
 def test_agent_join_uses_hostname_url_by_default_and_ip_hint_only_when_opted_in(
     tmp_path: Path,
 ) -> None:
@@ -137,6 +172,16 @@ def test_agent_join_uses_hostname_url_by_default_and_ip_hint_only_when_opted_in(
     assert ip_args[0] == "agent"
     assert f"K3S_URL=https://{NODE_IP}:6443" in ip_env
     assert f"SERVER_IP={NODE_IP}" in ip_env
+
+
+def test_agent_join_falls_back_to_ip_hint_when_hostname_is_not_durable_resolvable(
+    tmp_path: Path,
+) -> None:
+    env_lines, args = _render_install(tmp_path, "agent", SUGARKUBE_TEST_GETENT_MODE="fail")
+
+    assert args[0] == "agent"
+    assert f"K3S_URL=https://{NODE_IP}:6443" in env_lines
+    assert f"SERVER_IP={NODE_IP}" in env_lines
 
 
 def _run_join_url_guard(

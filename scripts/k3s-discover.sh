@@ -3929,12 +3929,29 @@ build_agent_install_args() {
 select_join_server_url_target() {
   local server="$1"
   local ip_hint="${2:-}"
+  local phase="${3:-join_url}"
 
   if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
     printf '%s' "${ip_hint}"
-  else
-    printf '%s' "${server}"
+    return 0
   fi
+  if [ -z "${server}" ] || is_ip_address_literal "${server}"; then
+    printf '%s' "${server}"
+    return 0
+  fi
+  if mdns_lookup_nss_ip "${server}" >/dev/null 2>&1; then
+    printf '%s' "${server}"
+    return 0
+  fi
+  if [ -n "${ip_hint}" ]; then
+    log_warn_msg discover \
+      "Selected hostname join URL is not resolvable via NSS; falling back to discovered IP hint for the durable k3s service URL" \
+      "phase=${phase}" "server_url=${server}" "ip_hint=${ip_hint}" \
+      "remediation=fix mDNS/NSS hostname resolution to use durable hostname identity, or set SUGARKUBE_SERVER_URL_PREFER_IP=1 to make the IP URL fallback explicit"
+    printf '%s' "${ip_hint}"
+    return 0
+  fi
+  printf '%s' "${server}"
 }
 
 append_join_env_assignments() {
@@ -3982,7 +3999,7 @@ render_k3s_install_test() {
         fi
       fi
       local server_url_target
-      server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
+      server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}" render_k3s_install)"
       append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
       if [ "${mode}" = "join" ]; then
         node_ip="$(detect_node_ip_tls_san install_join || true)"
@@ -4683,12 +4700,13 @@ install_server_join() {
     log_info discover event=join outcome=fast_path host="${MDNS_HOST_RAW}" server="${server}" mode=fast >&2
     return 0
   fi
-  # Persist the discovered hostname in k3s join URLs by default so durable
-  # configuration follows stable host identity; IP-first URLs remain an explicit
-  # opt-in for environments where systemd cannot resolve the hostname reliably.
+  # Persist the discovered hostname in k3s join URLs when NSS can resolve it so
+  # durable configuration follows stable host identity. Use an IP URL only when
+  # explicitly requested or when the selected hostname would not be resolvable
+  # by the eventual systemd k3s service and discovery supplied a reachable hint.
   local server_url_target
-  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
-  if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
+  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}" install_join)"
+  if [ -n "${ip_hint}" ] && [ "${server_url_target}" = "${ip_hint}" ]; then
     log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
@@ -4832,12 +4850,13 @@ install_agent() {
     agent_log_args+=("discovered_server=${discovered_server}")
   fi
   log_info discover "${agent_log_args[@]}" >&2
-  # Persist the discovered hostname in k3s agent URLs by default so durable
-  # configuration follows stable host identity; IP-first URLs remain an explicit
-  # opt-in for environments where systemd cannot resolve the hostname reliably.
+  # Persist the discovered hostname in k3s agent URLs when NSS can resolve it so
+  # durable configuration follows stable host identity. Use an IP URL only when
+  # explicitly requested or when the selected hostname would not be resolvable
+  # by the eventual systemd k3s service and discovery supplied a reachable hint.
   local server_url_target
-  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
-  if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
+  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}" install_agent)"
+  if [ -n "${ip_hint}" ] && [ "${server_url_target}" = "${ip_hint}" ]; then
     log_info discover event=install_agent server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2

@@ -224,8 +224,8 @@ if [ ! -s "${API_READY_LOG_COPY}" ]; then
   exit 1
 fi
 
-if ! grep -q 'K3S_URL=https://sugarkube0.local:6443' "${INSTALL_LOG_COPY}"; then
-  echo "K3S_URL was not configured with hostname" >&2
+if ! grep -q 'K3S_URL=https://198.51.100.10:6443' "${INSTALL_LOG_COPY}"; then
+  echo "K3S_URL did not fall back to durable TXT IP when NSS cannot resolve hostname" >&2
   exit 1
 fi
 
