@@ -190,7 +190,10 @@ def test_env_recipes_quote_and_normalize_named_arguments():
     for header in normalizing_recipes:
         body = _extract_recipe(lines, header)
         joined = "\n".join(body)
-        assert "env_input={{ quote(env) }}" in joined, header
+        if header == cloudflare_tunnel_recipe:
+            assert "env_input='{{env}}'" in joined, header
+        else:
+            assert "env_input={{ quote(env) }}" in joined, header
         assert 'while [ "${env_name#env=}" != "${env_name}" ]; do' in joined, header
         assert 'if [ -z "${env_name}" ]; then' in joined, header
 

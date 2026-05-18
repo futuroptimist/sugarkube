@@ -519,7 +519,7 @@ cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input={{ quote(env) }}
+    env_input='{{env}}'
     env_name="${env_input}"
     while [ "${env_name#env=}" != "${env_name}" ]; do
         env_name="${env_name#env=}"
