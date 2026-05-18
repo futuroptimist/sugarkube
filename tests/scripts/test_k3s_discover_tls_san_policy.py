@@ -137,3 +137,53 @@ def test_agent_join_uses_hostname_url_by_default_and_ip_hint_only_when_opted_in(
     assert ip_args[0] == "agent"
     assert f"K3S_URL=https://{NODE_IP}:6443" in ip_env
     assert f"SERVER_IP={NODE_IP}" in ip_env
+
+
+def _run_join_url_guard(
+    tmp_path: Path,
+    target: str,
+    ip_hint: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    _write_stub(
+        bin_dir / "getent",
+        """
+        #!/usr/bin/env bash
+        exit 2
+        """,
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+            "ALLOW_NON_ROOT": "1",
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_HOSTNAME": SHORT_HOST,
+            "SUGARKUBE_MDNS_HOST": MDNS_HOST,
+        }
+    )
+    command = ["bash", str(SCRIPT), "--test-ensure-join-url-target", target]
+    if ip_hint is not None:
+        command.append(ip_hint)
+    return subprocess.run(command, capture_output=True, text=True, env=env, check=False)
+
+
+def test_hostname_join_url_guard_allows_validated_txt_ip_hint_when_nss_fails(
+    tmp_path: Path,
+) -> None:
+    result = _run_join_url_guard(tmp_path, SERVER_HOST, NODE_IP)
+
+    assert result.returncode == 0, result.stderr
+    assert "reachable IP hint" in result.stderr
+    assert f"server_url={SERVER_HOST}" in result.stderr
+    assert f"ip_hint={NODE_IP}" in result.stderr
+
+
+def test_hostname_join_url_guard_still_fails_without_nss_or_ip_hint(tmp_path: Path) -> None:
+    result = _run_join_url_guard(tmp_path, SERVER_HOST)
+
+    assert result.returncode == 1
+    assert "no discovery IP hint is available" in result.stderr
+    assert f"server_url={SERVER_HOST}" in result.stderr

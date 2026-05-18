@@ -413,6 +413,9 @@ TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
 TEST_RENDER_K3S_INSTALL=0
 TEST_RENDER_K3S_INSTALL_MODE=""
+TEST_ENSURE_JOIN_URL_TARGET=0
+TEST_ENSURE_JOIN_URL_VALUE=""
+TEST_ENSURE_JOIN_URL_IP_HINT=""
 declare -a TEST_RENDER_ARGS=()
 PRINT_SERVER_HOSTS=0
 
@@ -460,6 +463,19 @@ while [ "$#" -gt 0 ]; do
       fi
       TEST_RENDER_K3S_INSTALL=1
       TEST_RENDER_K3S_INSTALL_MODE="$2"
+      shift
+      ;;
+    --test-ensure-join-url-target)
+      if [ "$#" -lt 2 ]; then
+        echo "--test-ensure-join-url-target requires a target" >&2
+        exit 2
+      fi
+      TEST_ENSURE_JOIN_URL_TARGET=1
+      TEST_ENSURE_JOIN_URL_VALUE="$2"
+      TEST_ENSURE_JOIN_URL_IP_HINT="${3:-}"
+      if [ "$#" -ge 3 ]; then
+        shift
+      fi
       shift
       ;;
     --print-server-hosts)
@@ -4107,14 +4123,22 @@ PY
 ensure_join_url_target_resolvable() {
   local target="${1:-}"
   local phase="${2:-join_url}"
-  if [ -z "${target}" ] || is_ip_address_literal "${target}"; then
+  local ip_hint="${3:-}"
+  if [ -z "${target}" ] || is_ip_address_literal "${target}" ]; then
     return 0
   fi
   if mdns_lookup_nss_ip "${target}" >/dev/null 2>&1; then
     return 0
   fi
+  if [ -n "${ip_hint}" ]; then
+    log_warn_msg discover \
+      "Selected hostname join URL is not resolvable via NSS, but discovery supplied a reachable IP hint; continuing with hostname URL for durable identity" \
+      "phase=${phase}" "server_url=${target}" "ip_hint=${ip_hint}" \
+      "remediation=fix mDNS/NSS hostname resolution, or set SUGARKUBE_SERVER_URL_PREFER_IP=1 to opt into an IP URL"
+    return 0
+  fi
   log_error_msg discover \
-    "Selected hostname join URL is not resolvable via NSS; refusing to persist a systemd k3s URL that may fail after install" \
+    "Selected hostname join URL is not resolvable via NSS and no discovery IP hint is available; refusing to persist a systemd k3s URL that may fail after install" \
     "phase=${phase}" "server_url=${target}" \
     "remediation=set SUGARKUBE_SERVER_URL_PREFER_IP=1 or fix mDNS/NSS hostname resolution"
   return 1
@@ -4664,7 +4688,7 @@ install_server_join() {
   local node_ip=""
   node_ip="$(detect_node_ip_tls_san install_join || true)"
 
-  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_join"; then
+  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_join" "${ip_hint}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -4812,7 +4836,7 @@ install_agent() {
   else
     log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
   fi
-  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_agent"; then
+  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_agent" "${ip_hint}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
       elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
@@ -5100,6 +5124,11 @@ fi
 
 if [ "${TEST_RENDER_K3S_INSTALL:-0}" -eq 1 ]; then
   render_k3s_install_test "${TEST_RENDER_K3S_INSTALL_MODE}"
+  exit $?
+fi
+
+if [ "${TEST_ENSURE_JOIN_URL_TARGET:-0}" -eq 1 ]; then
+  ensure_join_url_target_resolvable "${TEST_ENSURE_JOIN_URL_VALUE}" test_join_url "${TEST_ENSURE_JOIN_URL_IP_HINT}"
   exit $?
 fi
 
