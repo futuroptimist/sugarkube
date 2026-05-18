@@ -27,11 +27,15 @@ up env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
     while [ "${env_name#env=}" != "${env_name}" ]; do
         env_name="${env_name#env=}"
     done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
     if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
@@ -280,7 +284,7 @@ cluster-status:
 
 # Run twice per server during initial bring-up to build a 3-node HA control plane.
 ha3 env='dev':
-    SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
+    SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ quote(env) }}
 
 ha3-dev:
     just --justfile "{{ justfile_directory() }}/justfile" ha3 env=dev
@@ -370,7 +374,7 @@ ha3-untaint-control-plane:
 
 # Capture sanitized logs to logs/up/ during cluster bring-up (useful for troubleshooting and documentation).
 save-logs env='dev':
-    SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
+    SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ quote(env) }}
 
 save-logs-dev:
     just --justfile "{{ justfile_directory() }}/justfile" save-logs env=dev
@@ -392,9 +396,16 @@ mdns-selfcheck env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
@@ -423,11 +434,18 @@ mdns-reset:
 kubeconfig env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     if [ -n "${env_input}" ]; then
-        env_name="${env_input#env=}"
+        env_name="${env_input}"
+        while [ "${env_name#env=}" != "${env_name}" ]; do
+            env_name="${env_name#env=}"
+        done
+        if [ -z "${env_name}" ]; then
+            printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+            exit 1
+        fi
         printf 'WARNING: `just kubeconfig env=...` is deprecated; use `just kubeconfig-env env=%s`.\n' "${env_name}" >&2
-        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
+        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
         exit 0
     fi
     export SUGARKUBE_KUBECONFIG_USER="$(id -un)"
@@ -447,8 +465,15 @@ kubeconfig-user:
 kubeconfig-env env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
-    env_input="{{ env }}"
-    env_name="${env_input#env=}"
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
     if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
@@ -459,7 +484,7 @@ kubeconfig-env env='dev':
     sudo chown -R "$user":"$user" ~/.kube
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name#env=}"
+    scope_name="sugar-${env_name}"
     python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
 
 kubeconfig-dev:
@@ -494,9 +519,16 @@ cf-tunnel-install env='dev' token='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
@@ -1303,9 +1335,16 @@ dspace-oci-deploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+      exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
       printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
       env_name="staging"
     fi
@@ -1453,9 +1492,16 @@ dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+      exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
       printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
       env_name="staging"
     fi
@@ -1560,8 +1606,15 @@ dspace-debug-logs-env env='staging' namespace='dspace':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
-    env_name="${env_input#env=}"
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
     if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
@@ -1570,7 +1623,7 @@ dspace-debug-logs-env env='staging' namespace='dspace':
     # Force the canonical kubeconfig path so this wrapper cannot inherit a
     # different cluster selection from an existing shell-level KUBECONFIG.
     export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env="${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
 # Fast redeploy of token.place relay from GHCR.
@@ -2150,9 +2203,16 @@ flux-bootstrap env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
@@ -2163,9 +2223,16 @@ platform-apply env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
@@ -2178,9 +2245,16 @@ seal-secrets env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
@@ -2191,10 +2265,17 @@ platform-bootstrap env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input="{{ env }}"
+    env_input={{ quote(env) }}
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
+    fi
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi
-    just flux-bootstrap env=${env_name}
+    just --justfile "{{ justfile_directory() }}/justfile" flux-bootstrap "${env_name}"
