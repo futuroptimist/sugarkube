@@ -414,6 +414,7 @@ TEST_CLAIM_BOOTSTRAP=0
 TEST_RENDER_K3S_INSTALL=0
 TEST_RENDER_K3S_INSTALL_MODE=""
 TEST_ENSURE_JOIN_URL_TARGET=0
+TEST_CHECK_REMOTE_TLS_SAN=0
 TEST_ENSURE_JOIN_URL_VALUE=""
 TEST_ENSURE_JOIN_URL_IP_HINT=""
 declare -a TEST_RENDER_ARGS=()
@@ -476,6 +477,15 @@ while [ "$#" -gt 0 ]; do
       if [ "$#" -ge 3 ]; then
         shift
       fi
+      shift
+      ;;
+    --test-check-remote-tls-san)
+      if [ "$#" -lt 2 ]; then
+        echo "--test-check-remote-tls-san requires a target" >&2
+        exit 2
+      fi
+      TEST_CHECK_REMOTE_TLS_SAN=1
+      TEST_CHECK_REMOTE_TLS_SAN_VALUE="$2"
       shift
       ;;
     --print-server-hosts)
@@ -4279,12 +4289,14 @@ wait_for_node_token() {
 
 check_remote_server_tls_sans() {
   local server_host="$1"
+  local phase="${2:-tls_san_check}"
+  local require_match="${3:-0}"
   if [ -z "${server_host}" ]; then
     return 0
   fi
   if ! command -v openssl >/dev/null 2>&1; then
     log_warn_msg discover "openssl missing; skipping SAN validation" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
     return 0
   fi
 
@@ -4303,7 +4315,7 @@ check_remote_server_tls_sans() {
   )
   if ! curl "${curl_args[@]}" >"${cacert_path}"; then
     log_warn_msg discover "Failed to download server CA bundle" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
     rm -rf "${tmpdir}"
     return 0
   fi
@@ -4315,7 +4327,7 @@ check_remote_server_tls_sans() {
       | openssl x509 -noout -ext subjectAltName 2>/dev/null
   )"; then
     log_warn_msg discover "Failed to inspect server certificate SANs" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
     rm -rf "${tmpdir}"
     return 0
   fi
@@ -4324,7 +4336,10 @@ check_remote_server_tls_sans() {
 
   if [ -z "${san_output}" ]; then
     log_warn_msg discover "Server certificate missing subjectAltName" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
@@ -4340,7 +4355,10 @@ check_remote_server_tls_sans() {
     compact_sans="$(printf '%s' "${san_output}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
     log_warn_msg discover "Server certificate SANs miss join host" \
       "server=${server_host}" "hostname=${server_host}" \
-      "sans=$(escape_log_value "${compact_sans}")" "phase=tls_san_check"
+      "sans=$(escape_log_value "${compact_sans}")" "phase=${phase}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
   fi
 
   return 0
@@ -4660,7 +4678,7 @@ install_server_join() {
     fi
     exit 1
   fi
-  check_remote_server_tls_sans "${server}"
+  check_remote_server_tls_sans "${server}" tls_san_check 0
   if [ "${DISABLE_JOIN_GATE}" = "1" ]; then
     log_info discover event=join_gate action=skip reason=disabled >&2
   else
@@ -4714,6 +4732,22 @@ install_server_join() {
 
   local node_ip=""
   node_ip="$(detect_node_ip_tls_san install_join || true)"
+
+  if is_ip_address_literal "${server_url_target}"; then
+    if ! check_remote_server_tls_sans "${server_url_target}" install_join_url_tls_san 1; then
+      log_error_msg discover "Selected IP join URL is not present in the remote server certificate SANs; refusing a durable URL that k3s cannot verify" \
+        "phase=install_join" "server_url=${server_url_target}" "hostname=${server}" \
+        "remediation=fix mDNS/NSS hostname resolution, rotate the server certificate with an explicit IP SAN, or set SUGARKUBE_SERVER_URL_PREFER_IP=0 after hostname resolution works"
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=join-url-tls-san elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
+    fi
+  fi
 
   if ! ensure_join_url_target_resolvable "${server_url_target}" "install_join" "${ip_hint}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -4861,6 +4895,22 @@ install_agent() {
   else
     log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
   fi
+  if is_ip_address_literal "${server_url_target}"; then
+    if ! check_remote_server_tls_sans "${server_url_target}" install_agent_url_tls_san 1; then
+      log_error_msg discover "Selected IP join URL is not present in the remote server certificate SANs; refusing a durable URL that k3s cannot verify" \
+        "phase=install_agent" "server_url=${server_url_target}" "hostname=${server}" \
+        "remediation=fix mDNS/NSS hostname resolution, rotate the server certificate with an explicit IP SAN, or set SUGARKUBE_SERVER_URL_PREFER_IP=0 after hostname resolution works"
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=join-url-tls-san elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
+    fi
+  fi
+
   if ! ensure_join_url_target_resolvable "${server_url_target}" "install_agent" "${ip_hint}"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
       local elapsed_ms
@@ -5151,6 +5201,11 @@ fi
 
 if [ "${TEST_ENSURE_JOIN_URL_TARGET:-0}" -eq 1 ]; then
   ensure_join_url_target_resolvable "${TEST_ENSURE_JOIN_URL_VALUE}" test_join_url "${TEST_ENSURE_JOIN_URL_IP_HINT}"
+  exit $?
+fi
+
+if [ "${TEST_CHECK_REMOTE_TLS_SAN:-0}" -eq 1 ]; then
+  check_remote_server_tls_sans "${TEST_CHECK_REMOTE_TLS_SAN_VALUE}" test_remote_tls_san 1
   exit $?
 fi
 

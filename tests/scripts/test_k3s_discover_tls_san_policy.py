@@ -232,3 +232,80 @@ def test_hostname_join_url_guard_still_fails_without_nss_or_ip_hint(tmp_path: Pa
     assert result.returncode == 1
     assert "no discovery IP hint is available" in result.stderr
     assert f"server_url={SERVER_HOST}" in result.stderr
+
+
+def _run_remote_tls_san_check(
+    tmp_path: Path,
+    target: str,
+    san_output: str,
+) -> subprocess.CompletedProcess[str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    _write_stub(
+        bin_dir / "curl",
+        """
+        #!/usr/bin/env bash
+        printf '%s\n' 'fake-ca'
+        """,
+    )
+    _write_stub(
+        bin_dir / "openssl",
+        """
+        #!/usr/bin/env bash
+        set -euo pipefail
+        case "${1:-}" in
+          s_client)
+            printf '%s\n' 'fake-certificate'
+            ;;
+          x509)
+            printf '%s\n' "${SUGARKUBE_TEST_SAN_OUTPUT}"
+            ;;
+          *)
+            echo "Unsupported openssl invocation: $*" >&2
+            exit 2
+            ;;
+        esac
+        """,
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
+            "ALLOW_NON_ROOT": "1",
+            "SUGARKUBE_CLUSTER": "sugar",
+            "SUGARKUBE_ENV": "dev",
+            "SUGARKUBE_HOSTNAME": SHORT_HOST,
+            "SUGARKUBE_MDNS_HOST": MDNS_HOST,
+            "SUGARKUBE_TEST_SAN_OUTPUT": san_output,
+        }
+    )
+    return subprocess.run(
+        ["bash", str(SCRIPT), "--test-check-remote-tls-san", target],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+def test_ip_join_url_tls_guard_rejects_hostname_only_remote_certificate(
+    tmp_path: Path,
+) -> None:
+    san_output = f"X509v3 Subject Alternative Name:\n    DNS:{SERVER_HOST}, DNS:sugarkube0"
+
+    result = _run_remote_tls_san_check(tmp_path, NODE_IP, san_output)
+
+    assert result.returncode == 1
+    assert "Server certificate SANs miss join host" in result.stderr
+    assert f"server={NODE_IP}" in result.stderr
+
+
+def test_ip_join_url_tls_guard_accepts_matching_remote_ip_san(tmp_path: Path) -> None:
+    san_output = (
+        "X509v3 Subject Alternative Name:\n"
+        f"    DNS:{SERVER_HOST}, DNS:sugarkube0, IP Address:{NODE_IP}"
+    )
+
+    result = _run_remote_tls_san_check(tmp_path, NODE_IP, san_output)
+
+    assert result.returncode == 0, result.stderr
