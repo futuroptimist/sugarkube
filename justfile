@@ -27,12 +27,24 @@ up env='dev':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    normalize_env_name() {
+        local value="$1"
+
+        value="$(echo "${value}" | xargs)"
+        while [[ "${value}" == env=* ]]; do
+            value="${value#env=}"
+        done
+
+        if [ "${value}" = "int" ]; then
+            printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+            value="staging"
+        fi
+
+        printf '%s' "${value}"
+    }
+
     env_input="{{ env }}"
-    env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
-        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-        env_name="staging"
-    fi
+    env_name="$(normalize_env_name "${env_input}")"
 
     # Select per-environment token if available
     if [ "${env_name}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV-}" ]; then
