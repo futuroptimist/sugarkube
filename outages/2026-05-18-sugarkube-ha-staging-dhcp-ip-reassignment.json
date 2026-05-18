@@ -1,0 +1,19 @@
+{
+  "id": "2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment",
+  "date": "2026-05-18",
+  "component": "k3s-discover / HA staging control-plane",
+  "longForm": "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md",
+  "rootCause": "Durable k3s install/discovery identity included DHCP-derived raw LAN IP context (for example raw IP TLS SANs) rather than defaulting to stable hostname-based identity, so post-outage lease churn left stale address coupling.",
+  "resolution": "Rotated expired GHCR PAT, then fully rebuilt the three-node HA staging control plane (sugarkube3/4/5.local) using positional environment commands, repaired malformed Avahi artifacts from env=staging parsing, reinstalled ingress/tunnel components, and redeployed staging via initial helm OCI install path.",
+  "references": [
+    "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md",
+    "scripts/k3s-discover.sh",
+    "justfile"
+  ],
+  "dateRanges": [
+    {
+      "start": "2026-05-18",
+      "end": "2026-05-18"
+    }
+  ]
+}

@@ -3893,6 +3893,16 @@ resolve_server_ip_hint() {
   return 1
 }
 
+
+should_include_node_ip_tls_san() {
+  # Stable node identity should remain hostname-based by default.
+  # Opt-in is available for environments that explicitly require IPv4 SANs.
+  case "${SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN:-0}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;&
+    *) return 1 ;;&
+  esac
+}
+
 detect_node_primary_ipv4() {
   # Detect the primary IPv4 address of this node on the primary interface
   # Used for adding IP address to TLS SANs during k3s installation
@@ -4172,12 +4182,13 @@ install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_single
+  if should_include_node_ip_tls_san; then
+    if node_ip="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
+    else
+      log_warn_msg discover "Failed to detect node IP for opt-in TLS SAN" phase=install_single
+    fi
   fi
 
   local env_assignments
@@ -4254,12 +4265,13 @@ install_server_cluster_init() {
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_cluster_init
+  if should_include_node_ip_tls_san; then
+    if node_ip="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
+    else
+      log_warn_msg discover "Failed to detect node IP for opt-in TLS SAN" phase=install_cluster_init
+    fi
   fi
 
   local env_assignments
@@ -4495,12 +4507,13 @@ install_server_join() {
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_join
+  if should_include_node_ip_tls_san; then
+    if node_ip="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
+    else
+      log_warn_msg discover "Failed to detect node IP for opt-in TLS SAN" phase=install_join
+    fi
   fi
 
   local env_assignments
