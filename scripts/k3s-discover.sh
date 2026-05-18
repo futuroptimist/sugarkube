@@ -4160,7 +4160,10 @@ ensure_join_url_target_resolvable() {
   local target="${1:-}"
   local phase="${2:-join_url}"
   local ip_hint="${3:-}"
-  if [ -z "${target}" ] || is_ip_address_literal "${target}" ]; then
+  if [ -z "${target}" ]; then
+    return 0
+  fi
+  if is_ip_address_literal "${target}"; then
     return 0
   fi
   if mdns_lookup_nss_ip "${target}" >/dev/null 2>&1; then
@@ -4317,6 +4320,9 @@ check_remote_server_tls_sans() {
     log_warn_msg discover "Failed to download server CA bundle" \
       "server=${server_host}" "phase=${phase}"
     rm -rf "${tmpdir}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
@@ -4329,6 +4335,9 @@ check_remote_server_tls_sans() {
     log_warn_msg discover "Failed to inspect server certificate SANs" \
       "server=${server_host}" "phase=${phase}"
     rm -rf "${tmpdir}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 

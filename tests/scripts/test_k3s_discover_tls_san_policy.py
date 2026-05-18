@@ -238,6 +238,10 @@ def _run_remote_tls_san_check(
     tmp_path: Path,
     target: str,
     san_output: str,
+    *,
+    curl_exit: int = 0,
+    openssl_s_client_exit: int = 0,
+    openssl_x509_exit: int = 0,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -245,6 +249,10 @@ def _run_remote_tls_san_check(
         bin_dir / "curl",
         """
         #!/usr/bin/env bash
+        exit_code="${SUGARKUBE_TEST_CURL_EXIT:-0}"
+        if [ "${exit_code}" != "0" ]; then
+          exit "${exit_code}"
+        fi
         printf '%s\n' 'fake-ca'
         """,
     )
@@ -255,9 +263,17 @@ def _run_remote_tls_san_check(
         set -euo pipefail
         case "${1:-}" in
           s_client)
+            exit_code="${SUGARKUBE_TEST_OPENSSL_S_CLIENT_EXIT:-0}"
+            if [ "${exit_code}" != "0" ]; then
+              exit "${exit_code}"
+            fi
             printf '%s\n' 'fake-certificate'
             ;;
           x509)
+            exit_code="${SUGARKUBE_TEST_OPENSSL_X509_EXIT:-0}"
+            if [ "${exit_code}" != "0" ]; then
+              exit "${exit_code}"
+            fi
             printf '%s\n' "${SUGARKUBE_TEST_SAN_OUTPUT}"
             ;;
           *)
@@ -277,6 +293,9 @@ def _run_remote_tls_san_check(
             "SUGARKUBE_HOSTNAME": SHORT_HOST,
             "SUGARKUBE_MDNS_HOST": MDNS_HOST,
             "SUGARKUBE_TEST_SAN_OUTPUT": san_output,
+            "SUGARKUBE_TEST_CURL_EXIT": str(curl_exit),
+            "SUGARKUBE_TEST_OPENSSL_S_CLIENT_EXIT": str(openssl_s_client_exit),
+            "SUGARKUBE_TEST_OPENSSL_X509_EXIT": str(openssl_x509_exit),
         }
     )
     return subprocess.run(
@@ -309,3 +328,23 @@ def test_ip_join_url_tls_guard_accepts_matching_remote_ip_san(tmp_path: Path) ->
     result = _run_remote_tls_san_check(tmp_path, NODE_IP, san_output)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_strict_ip_join_url_tls_guard_fails_closed_when_ca_fetch_fails(
+    tmp_path: Path,
+) -> None:
+    result = _run_remote_tls_san_check(tmp_path, NODE_IP, "", curl_exit=7)
+
+    assert result.returncode == 1
+    assert "Failed to download server CA bundle" in result.stderr
+    assert f"server={NODE_IP}" in result.stderr
+
+
+def test_strict_ip_join_url_tls_guard_fails_closed_when_certificate_inspection_fails(
+    tmp_path: Path,
+) -> None:
+    result = _run_remote_tls_san_check(tmp_path, NODE_IP, "", openssl_x509_exit=1)
+
+    assert result.returncode == 1
+    assert "Failed to inspect server certificate SANs" in result.stderr
+    assert f"server={NODE_IP}" in result.stderr
