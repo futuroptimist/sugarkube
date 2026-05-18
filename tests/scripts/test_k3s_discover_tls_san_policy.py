@@ -104,7 +104,7 @@ def test_join_rendered_args_use_hostname_sans_and_hostname_url_by_default(tmp_pa
     env_lines, args = _render_install(tmp_path, "join")
 
     assert f"K3S_URL=https://{SERVER_HOST}:6443" in env_lines
-    assert f"SERVER_IP={NODE_IP}" not in env_lines
+    assert f"SERVER_IP={NODE_IP}" in env_lines
     assert args[:3] == ["server", "--server", f"https://{SERVER_HOST}:6443"]
     assert _tls_san_values(args) == [SERVER_HOST, MDNS_HOST, SHORT_HOST]
     assert NODE_IP not in _tls_san_values(args)
@@ -133,7 +133,7 @@ def test_agent_join_uses_hostname_url_by_default_and_ip_hint_only_when_opted_in(
 
     assert default_args[0] == "agent"
     assert f"K3S_URL=https://{SERVER_HOST}:6443" in default_env
-    assert f"SERVER_IP={NODE_IP}" not in default_env
+    assert f"SERVER_IP={NODE_IP}" in default_env
     assert ip_args[0] == "agent"
     assert f"K3S_URL=https://{NODE_IP}:6443" in ip_env
     assert f"SERVER_IP={NODE_IP}" in ip_env

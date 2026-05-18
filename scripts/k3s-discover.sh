@@ -3937,6 +3937,18 @@ select_join_server_url_target() {
   fi
 }
 
+append_join_env_assignments() {
+  local -n _join_env_assignments=$1
+  local server_url_target="$2"
+  local selected_port="$3"
+  local ip_hint="${4:-}"
+
+  _join_env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
+  if [ -n "${ip_hint}" ]; then
+    _join_env_assignments+=("SERVER_IP=${ip_hint}")
+  fi
+}
+
 render_k3s_install_test() {
   local mode="$1"
   local node_ip=""
@@ -3971,10 +3983,7 @@ render_k3s_install_test() {
       fi
       local server_url_target
       server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
-      env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-      if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
-        env_assignments+=("SERVER_IP=${ip_hint}")
-      fi
+      append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
       if [ "${mode}" = "join" ]; then
         node_ip="$(detect_node_ip_tls_san install_join || true)"
         build_server_join_install_args install_args "${server_url_target}" "${selected_port}" "${server}" "${node_ip}"
@@ -4701,10 +4710,7 @@ install_server_join() {
 
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-  if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
-    env_assignments+=("SERVER_IP=${ip_hint}")
-  fi
+  append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
@@ -4849,10 +4855,7 @@ install_agent() {
 
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-  if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
-    env_assignments+=("SERVER_IP=${ip_hint}")
-  fi
+  append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
