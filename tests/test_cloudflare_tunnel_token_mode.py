@@ -145,6 +145,7 @@ def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: b
 
 
 def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
+    rendered_body = cf_recipe_body.replace("{{ quote(env) }}", "'${env}'")
     script = textwrap.dedent(
         """#!/usr/bin/env bash
         set -euo pipefail
@@ -159,7 +160,7 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
         kubectl() { :; }
 
         """
-    ) + cf_recipe_body + "\n"
+    ) + rendered_body + "\n"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write(script)
