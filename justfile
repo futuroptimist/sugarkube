@@ -29,7 +29,10 @@ up env='dev':
 
     env_input="{{ env }}"
     env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ "${env_name}" = "int" ]; then
         printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
         env_name="staging"
     fi

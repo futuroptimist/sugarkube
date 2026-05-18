@@ -55,7 +55,9 @@ def main() -> None:
         if capture:
             path = pathlib.Path(capture)
             path.write_text(
-                "SUGARKUBE_KUBECONFIG_USER="
+                "SUGARKUBE_ENV="
+                + os.environ.get("SUGARKUBE_ENV", "")
+                + "\\nSUGARKUBE_KUBECONFIG_USER="
                 + os.environ.get("SUGARKUBE_KUBECONFIG_USER", "")
                 + "\\nSUGARKUBE_KUBECONFIG_HOME="
                 + os.environ.get("SUGARKUBE_KUBECONFIG_HOME", "")
@@ -107,3 +109,53 @@ def test_up_recipe_forwards_sudo_caller_kubeconfig_user_to_discovery(tmp_path: P
     captured = capture.read_text(encoding="utf-8").splitlines()
     assert "SUGARKUBE_KUBECONFIG_USER=alice" in captured
     assert "SUGARKUBE_KUBECONFIG_HOME=" in captured
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+@pytest.mark.parametrize(
+    ("recipe_args", "expected_env"),
+    [
+        (["up", "staging"], "staging"),
+        (["up", "env=staging"], "staging"),
+        (["up", "env=env=staging"], "staging"),
+        (["up", "int"], "staging"),
+        (["up", "dev"], "dev"),
+        (["up", "prod"], "prod"),
+        (["save-logs", "staging"], "staging"),
+        (["save-logs", "env=staging"], "staging"),
+        (["ha3", "env=staging"], "staging"),
+    ],
+)
+def test_up_recipe_normalizes_named_env_arguments(
+    tmp_path: Path, recipe_args: list[str], expected_env: str
+):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_sudo(bin_dir)
+
+    capture = tmp_path / "captured.env"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "TEST_CAPTURE_ENV_FILE": str(capture),
+            "SUGARKUBE_SUMMARY_LIB": "/nonexistent/summary.sh",
+            "SUGARKUBE_LOG_FILTER": "/nonexistent/filter_debug_log.py",
+        }
+    )
+
+    result = subprocess.run(
+        ["just", "--justfile", "justfile", *recipe_args],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    captured = capture.read_text(encoding="utf-8").splitlines()
+    assert f"SUGARKUBE_ENV={expected_env}" in captured
+    assert "SUGARKUBE_ENV=env=staging" not in captured
+    # Regression for the DSPACE outage where `just up env=staging` previously fed
+    # `_k3s-sugar-env=staging._tcp` and k3s-sugar-env=staging.service downstream.
+    assert "env=env=staging" not in captured
