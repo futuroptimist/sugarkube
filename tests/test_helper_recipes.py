@@ -47,8 +47,8 @@ def test_ha3_recipe_has_correct_purpose(justfile_text: str) -> None:
         ha3_start = justfile_text.find("ha3:")
     assert ha3_start != -1, "ha3 recipe not found"
 
-    # Get the recipe body (next ~300 characters after the recipe declaration)
-    ha3_section = justfile_text[ha3_start : ha3_start + 300]
+    # Get the recipe body (next ~600 characters after the recipe declaration)
+    ha3_section = justfile_text[ha3_start : ha3_start + 600]
 
     assert "SUGARKUBE_SERVERS=3" in ha3_section
     assert "just" in ha3_section and "up" in ha3_section
@@ -66,11 +66,31 @@ def test_save_logs_recipe_has_correct_purpose(justfile_text: str) -> None:
         save_logs_start = justfile_text.find("save-logs:")
     assert save_logs_start != -1, "save-logs recipe not found"
 
-    # Get the recipe body (next ~300 characters after the recipe declaration)
-    save_logs_section = justfile_text[save_logs_start : save_logs_start + 300]
+    # Get the recipe body (next ~600 characters after the recipe declaration)
+    save_logs_section = justfile_text[save_logs_start : save_logs_start + 600]
 
     assert "SAVE_DEBUG_LOGS=1" in save_logs_section
     assert "just" in save_logs_section and "up" in save_logs_section
+
+
+def test_ha3_recipe_normalizes_named_env_before_delegating(justfile_text: str) -> None:
+    """The ha3 wrapper should not pass env=env=staging into just up."""
+    ha3_start = justfile_text.find("ha3 env='dev':")
+    assert ha3_start != -1, "ha3 recipe not found"
+    ha3_section = justfile_text[ha3_start : ha3_start + 600]
+
+    assert "sugarkube_normalize_env" in ha3_section
+    assert 'up "${env_name}"' in ha3_section
+
+
+def test_save_logs_recipe_normalizes_named_env_before_delegating(justfile_text: str) -> None:
+    """The save-logs wrapper should follow the same env path as just up."""
+    save_logs_start = justfile_text.find("save-logs env='dev':")
+    assert save_logs_start != -1, "save-logs recipe not found"
+    save_logs_section = justfile_text[save_logs_start : save_logs_start + 600]
+
+    assert "sugarkube_normalize_env" in save_logs_section
+    assert 'up "${env_name}"' in save_logs_section
 
 
 def test_cat_node_token_recipe_exists(justfile_text: str) -> None:

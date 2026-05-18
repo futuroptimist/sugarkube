@@ -28,11 +28,32 @@ up env='dev':
     set -Eeuo pipefail
 
     env_input="{{ env }}"
-    env_name="${env_input}"
-    if [ "${env_input}" = "int" ]; then
-        printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-        env_name="staging"
+    if [ -z "${SUGARKUBE_ENV_LIB:-}" ] && [ -f "{{ invocation_directory() }}/scripts/lib/env.sh" ]; then
+        SUGARKUBE_ENV_LIB="{{ invocation_directory() }}/scripts/lib/env.sh"
     fi
+    : "${SUGARKUBE_ENV_LIB:=/home/pi/sugarkube/scripts/lib/env.sh}"
+    if [ ! -f "${SUGARKUBE_ENV_LIB}" ] && [ -f "/home/pi/sugarkube/scripts/lib/env.sh" ]; then
+        SUGARKUBE_ENV_LIB="/home/pi/sugarkube/scripts/lib/env.sh"
+    fi
+    if [ -f "${SUGARKUBE_ENV_LIB}" ]; then
+        # shellcheck disable=SC1090
+        source "${SUGARKUBE_ENV_LIB}"
+    else
+        sugarkube_normalize_env() {
+            local env_name="${1:-dev}"
+            env_name="$(printf '%s' "${env_name}" | xargs)"
+            while [[ "${env_name}" == env=* ]]; do
+                env_name="${env_name#env=}"
+            done
+            if [ "${env_name}" = "int" ]; then
+                printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
+                env_name="staging"
+            fi
+            printf '%s\n' "${env_name}"
+        }
+    fi
+    env_name="$(sugarkube_normalize_env "${env_input}")"
+    export SUGARKUBE_ENV_LIB
 
     # Select per-environment token if available
     if [ "${env_name}" = "dev" ] && [ -n "${SUGARKUBE_TOKEN_DEV-}" ]; then
@@ -277,7 +298,14 @@ cluster-status:
 
 # Run twice per server during initial bring-up to build a 3-node HA control plane.
 ha3 env='dev':
-    SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    # shellcheck disable=SC1091
+    source "{{ justfile_directory() }}/scripts/lib/env.sh"
+    env_name="$(sugarkube_normalize_env "${env_input}")"
+    SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up "${env_name}"
 
 ha3-dev:
     just --justfile "{{ justfile_directory() }}/justfile" ha3 env=dev
@@ -367,7 +395,14 @@ ha3-untaint-control-plane:
 
 # Capture sanitized logs to logs/up/ during cluster bring-up (useful for troubleshooting and documentation).
 save-logs env='dev':
-    SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up {{ env }}
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input="{{ env }}"
+    # shellcheck disable=SC1091
+    source "{{ justfile_directory() }}/scripts/lib/env.sh"
+    env_name="$(sugarkube_normalize_env "${env_input}")"
+    SAVE_DEBUG_LOGS=1 just --justfile "{{ justfile_directory() }}/justfile" up "${env_name}"
 
 save-logs-dev:
     just --justfile "{{ justfile_directory() }}/justfile" save-logs env=dev
