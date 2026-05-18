@@ -3893,6 +3893,8 @@ resolve_server_ip_hint() {
   return 1
 }
 
+TLS_SAN_INCLUDE_NODE_IP="${SUGARKUBE_TLS_SAN_INCLUDE_NODE_IP:-0}"
+
 detect_node_primary_ipv4() {
   # Detect the primary IPv4 address of this node on the primary interface
   # Used for adding IP address to TLS SANs during k3s installation
@@ -4172,14 +4174,6 @@ install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
 
-  # Detect node IP for TLS SAN
-  local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_single
-  fi
-
   local env_assignments
   build_install_env env_assignments
   (
@@ -4192,8 +4186,14 @@ install_server_single() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
-      install_args+=(--tls-san "${node_ip}")
+    if [ "${TLS_SAN_INCLUDE_NODE_IP}" = "1" ]; then
+      local node_ip=""
+      if node_ip="$(detect_node_primary_ipv4)"; then
+        install_args+=(--tls-san "${node_ip}")
+        log_info discover event=node_ip_tls_san_opt_in ip="${node_ip}" phase=install_single >&2
+      else
+        log_warn_msg discover "Opt-in node IP TLS SAN requested but IPv4 detection failed" phase=install_single
+      fi
     fi
     install_args+=(
       --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
@@ -4254,14 +4254,6 @@ install_server_cluster_init() {
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
 
-  # Detect node IP for TLS SAN
-  local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_cluster_init
-  fi
-
   local env_assignments
   build_install_env env_assignments
   (
@@ -4275,8 +4267,14 @@ install_server_cluster_init() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
-      install_args+=(--tls-san "${node_ip}")
+    if [ "${TLS_SAN_INCLUDE_NODE_IP}" = "1" ]; then
+      local node_ip=""
+      if node_ip="$(detect_node_primary_ipv4)"; then
+        install_args+=(--tls-san "${node_ip}")
+        log_info discover event=node_ip_tls_san_opt_in ip="${node_ip}" phase=install_cluster_init >&2
+      else
+        log_warn_msg discover "Opt-in node IP TLS SAN requested but IPv4 detection failed" phase=install_cluster_init
+      fi
     fi
     install_args+=(
       --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
@@ -4495,14 +4493,6 @@ install_server_join() {
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
 
-  # Detect node IP for TLS SAN
-  local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_join
-  fi
-
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
@@ -4521,8 +4511,14 @@ install_server_join() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
-      install_args+=(--tls-san "${node_ip}")
+    if [ "${TLS_SAN_INCLUDE_NODE_IP}" = "1" ]; then
+      local node_ip=""
+      if node_ip="$(detect_node_primary_ipv4)"; then
+        install_args+=(--tls-san "${node_ip}")
+        log_info discover event=node_ip_tls_san_opt_in ip="${node_ip}" phase=install_join >&2
+      else
+        log_warn_msg discover "Opt-in node IP TLS SAN requested but IPv4 detection failed" phase=install_join
+      fi
     fi
     install_args+=(
       --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"

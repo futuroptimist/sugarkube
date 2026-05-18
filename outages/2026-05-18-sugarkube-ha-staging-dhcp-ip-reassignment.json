@@ -1,0 +1,14 @@
+{
+  "id": "2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment",
+  "date": "2026-05-18",
+  "component": "sugarkube k3s HA install/discovery",
+  "longForm": "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md",
+  "rootCause": "A power outage triggered DHCP reassignment for sugarkube3/4/5, exposing that Sugarkube persisted raw LAN IPs into durable k3s identity inputs (including TLS SAN-related install args) instead of primarily using stable .local hostnames. A separate operator hazard (`just up env=staging` parsed literally) also generated malformed Avahi discovery state that had to be cleaned up.",
+  "resolution": "Rotated expired GHCR PAT, validated chart pull, then wiped/rebuilt k3s across all three HA servers using positional env invocation (`just up staging`). Removed stale malformed Avahi service file and restarted avahi-daemon, untainted control-plane nodes, and restored Traefik + Cloudflare tunnel. Updated Sugarkube internals so hostname-based TLS SAN identity is default and raw node IP TLS SAN is opt-in only, reducing stale DHCP-IP coupling.",
+  "references": [
+    "democratizedspace/dspace outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md",
+    "democratizedspace/dspace outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json",
+    "scripts/k3s-discover.sh",
+    "scripts/configure_k3s_node_ip.sh"
+  ]
+}
