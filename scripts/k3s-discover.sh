@@ -3926,6 +3926,42 @@ should_include_node_ip_tls_san() {
   [ "${SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN}" = "1" ]
 }
 
+should_prefer_ip_server_url() {
+  [ "${SUGARKUBE_SERVER_URL_PREFER_IP}" = "1" ]
+}
+
+is_ip_address_literal() {
+  local candidate="${1:-}"
+  [ -n "${candidate}" ] || return 1
+  CANDIDATE_HOST="${candidate}" python3 - <<'PY'
+import ipaddress
+import os
+import sys
+
+try:
+    ipaddress.ip_address(os.environ.get("CANDIDATE_HOST", ""))
+except ValueError:
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+ensure_join_url_target_resolvable() {
+  local target="${1:-}"
+  local phase="${2:-join_url}"
+  if [ -z "${target}" ] || is_ip_address_literal "${target}"; then
+    return 0
+  fi
+  if mdns_lookup_nss_ip "${target}" >/dev/null 2>&1; then
+    return 0
+  fi
+  log_error_msg discover \
+    "Selected hostname join URL is not resolvable via NSS; refusing to persist a systemd k3s URL that may fail after install" \
+    "phase=${phase}" "server_url=${target}" \
+    "remediation=set SUGARKUBE_SERVER_URL_PREFER_IP=1 or fix mDNS/NSS hostname resolution"
+  return 1
+}
+
 failopen_resolve_candidate() {
   local candidate="$1"
   if [ -z "${candidate}" ]; then
@@ -4178,12 +4214,13 @@ install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_single
+  if should_include_node_ip_tls_san; then
+    if node_ip="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
+    else
+      log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" phase=install_single
+    fi
   fi
 
   local env_assignments
@@ -4260,12 +4297,13 @@ install_server_cluster_init() {
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_cluster_init
+  if should_include_node_ip_tls_san; then
+    if node_ip="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
+    else
+      log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" phase=install_cluster_init
+    fi
   fi
 
   local env_assignments
@@ -4491,28 +4529,41 @@ install_server_join() {
     log_info discover event=join outcome=fast_path host="${MDNS_HOST_RAW}" server="${server}" mode=fast >&2
     return 0
   fi
-  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
-  # Keep hostname in TLS SANs for certificate verification
+  # Persist the discovered hostname in k3s join URLs by default so durable
+  # configuration follows stable host identity; IP-first URLs remain an explicit
+  # opt-in for environments where systemd cannot resolve the hostname reliably.
   local server_url_target="${server}"
-  if [ -n "${ip_hint}" ] && [ "${SUGARKUBE_SERVER_URL_PREFER_IP}" = "1" ]; then
+  if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
     server_url_target="${ip_hint}"
     log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_join
+  if should_include_node_ip_tls_san; then
+    if node_ip="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
+    else
+      log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" phase=install_join
+    fi
+  fi
+
+  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_join"; then
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "k3s install"
+      summary::step FAIL "k3s install" "${summary_note} reason=join-url-resolution elapsed_ms=${elapsed_ms}"
+      summary_recorded=1
+    fi
+    exit 1
   fi
 
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
+  if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
     env_assignments+=("SERVER_IP=${ip_hint}")
   fi
   (
@@ -4650,18 +4701,31 @@ install_agent() {
     agent_log_args+=("discovered_server=${discovered_server}")
   fi
   log_info discover "${agent_log_args[@]}" >&2
-  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
+  # Persist the discovered hostname in k3s agent URLs by default so durable
+  # configuration follows stable host identity; IP-first URLs remain an explicit
+  # opt-in for environments where systemd cannot resolve the hostname reliably.
   local server_url_target="${server}"
-  if [ -n "${ip_hint}" ]; then
+  if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
     server_url_target="${ip_hint}"
     log_info discover event=install_agent server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
   fi
+  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_agent"; then
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "k3s install"
+      summary::step FAIL "k3s install" "${summary_note} reason=join-url-resolution elapsed_ms=${elapsed_ms}"
+      summary_recorded=1
+    fi
+    exit 1
+  fi
+
   local env_assignments
   build_install_env env_assignments
   env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
+  if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
     env_assignments+=("SERVER_IP=${ip_hint}")
   fi
   (
