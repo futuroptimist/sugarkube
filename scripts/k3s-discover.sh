@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/log.sh
+# shellcheck source=scripts/log.sh disable=SC1091
 . "${SCRIPT_DIR}/log.sh"
 DEFAULT_SUMMARY_LIB="${SCRIPT_DIR}/lib/summary.sh"
 SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${DEFAULT_SUMMARY_LIB}}"
@@ -411,6 +411,8 @@ TEST_PUBLISH_BOOTSTRAP=0
 TEST_MDNS_FALLBACK=0
 TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
+TEST_RENDER_K3S_INSTALL=0
+TEST_RENDER_K3S_INSTALL_MODE=""
 declare -a TEST_RENDER_ARGS=()
 PRINT_SERVER_HOSTS=0
 
@@ -450,6 +452,15 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-claim-bootstrap)
       TEST_CLAIM_BOOTSTRAP=1
+      ;;
+    --test-render-k3s-install)
+      if [ "$#" -lt 2 ]; then
+        echo "--test-render-k3s-install requires a mode" >&2
+        exit 2
+      fi
+      TEST_RENDER_K3S_INSTALL=1
+      TEST_RENDER_K3S_INSTALL_MODE="$2"
+      shift
       ;;
     --print-server-hosts)
       PRINT_SERVER_HOSTS=1
@@ -3823,6 +3834,153 @@ build_install_env() {
   fi
 }
 
+detect_node_ip_tls_san() {
+  local phase="$1"
+  local _detected=""
+  if should_include_node_ip_tls_san; then
+    if _detected="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${_detected}" phase="${phase}" >&2
+      printf '%s' "${_detected}"
+      return 0
+    fi
+    log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" "phase=${phase}"
+  fi
+  return 1
+}
+
+append_node_ip_tls_san() {
+  local -n _tls_san_args=$1
+  local node_ip="${2:-}"
+  if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
+    _tls_san_args+=(--tls-san "${node_ip}")
+  fi
+}
+
+build_server_install_args() {
+  local -n _server_install_args=$1
+  local mode="$2"
+  local node_ip="${3:-}"
+
+  _server_install_args=(server)
+  if [ "${mode}" = "cluster-init" ]; then
+    _server_install_args+=(--cluster-init)
+  fi
+  _server_install_args+=(
+    --tls-san "${MDNS_HOST}"
+    --tls-san "${HN}"
+  )
+  append_node_ip_tls_san _server_install_args "${node_ip}"
+  _server_install_args+=(
+    --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+    --node-label "sugarkube.cluster=${CLUSTER}"
+    --node-label "sugarkube.env=${ENVIRONMENT}"
+    --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
+}
+
+build_server_join_install_args() {
+  local -n _server_join_install_args=$1
+  local server_url_target="$2"
+  local selected_port="$3"
+  local server="$4"
+  local node_ip="${5:-}"
+
+  _server_join_install_args=(
+    server
+    --server "https://${server_url_target}:${selected_port}"
+    --tls-san "${server}"
+    --tls-san "${MDNS_HOST}"
+    --tls-san "${HN}"
+  )
+  append_node_ip_tls_san _server_join_install_args "${node_ip}"
+  _server_join_install_args+=(
+    --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+    --node-label "sugarkube.cluster=${CLUSTER}"
+    --node-label "sugarkube.env=${ENVIRONMENT}"
+    --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
+}
+
+build_agent_install_args() {
+  local -n _agent_install_args=$1
+  _agent_install_args=(
+    agent
+    --node-label "sugarkube.cluster=${CLUSTER}"
+    --node-label "sugarkube.env=${ENVIRONMENT}"
+  )
+}
+
+select_join_server_url_target() {
+  local server="$1"
+  local ip_hint="${2:-}"
+
+  if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
+    printf '%s' "${ip_hint}"
+  else
+    printf '%s' "${server}"
+  fi
+}
+
+render_k3s_install_test() {
+  local mode="$1"
+  local node_ip=""
+  local selected_port="${MDNS_SELECTED_PORT:-6443}"
+  case "${selected_port}" in
+    ''|*[!0-9]*) selected_port=6443 ;;
+  esac
+
+  local -a env_assignments install_args
+  build_install_env env_assignments
+
+  case "${mode}" in
+    single)
+      node_ip="$(detect_node_ip_tls_san install_single || true)"
+      build_server_install_args install_args single "${node_ip}"
+      ;;
+    cluster-init)
+      node_ip="$(detect_node_ip_tls_san install_cluster_init || true)"
+      build_server_install_args install_args cluster-init "${node_ip}"
+      ;;
+    join|agent)
+      local discovered_server="${SUGARKUBE_TEST_DISCOVERED_SERVER:-sugarkube0.local}"
+      local server
+      server="$(join_target_host "${discovered_server}")"
+      local ip_hint=""
+      local selected_host="${SUGARKUBE_TEST_MDNS_SELECTED_HOST:-${MDNS_SELECTED_HOST}}"
+      local selected_ip="${SUGARKUBE_TEST_MDNS_SELECTED_IP:-${MDNS_SELECTED_IP}}"
+      if [ -z "${API_REGADDR:-}" ] && [ -n "${selected_ip:-}" ] && [ -n "${discovered_server:-}" ]; then
+        if same_host "${selected_host}" "${discovered_server}"; then
+          ip_hint="${selected_ip}"
+        fi
+      fi
+      local server_url_target
+      server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
+      env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
+      if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
+        env_assignments+=("SERVER_IP=${ip_hint}")
+      fi
+      if [ "${mode}" = "join" ]; then
+        node_ip="$(detect_node_ip_tls_san install_join || true)"
+        build_server_join_install_args install_args "${server_url_target}" "${selected_port}" "${server}" "${node_ip}"
+      else
+        build_agent_install_args install_args
+      fi
+      ;;
+    *)
+      echo "unsupported --test-render-k3s-install mode: ${mode}" >&2
+      return 2
+      ;;
+  esac
+
+  local item
+  for item in "${env_assignments[@]}"; do
+    printf 'ENV\t%s\n' "${item}"
+  done
+  for item in "${install_args[@]}"; do
+    printf 'ARG\t%s\n' "${item}"
+  done
+}
+
 acquire_join_gate() {
   if [ ! -x "${JOIN_GATE_BIN}" ]; then
     log_error_msg discover "join gate helper missing" "script=${JOIN_GATE_BIN}"
@@ -4215,13 +4373,7 @@ install_server_single() {
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
 
   local node_ip=""
-  if should_include_node_ip_tls_san; then
-    if node_ip="$(detect_node_primary_ipv4)"; then
-      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
-    else
-      log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" phase=install_single
-    fi
-  fi
+  node_ip="$(detect_node_ip_tls_san install_single || true)"
 
   local env_assignments
   build_install_env env_assignments
@@ -4230,20 +4382,8 @@ install_server_single() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    local -a install_args=(
-      server
-      --tls-san "${MDNS_HOST}"
-      --tls-san "${HN}"
-    )
-    if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
-      install_args+=(--tls-san "${node_ip}")
-    fi
-    install_args+=(
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
-      --node-label "sugarkube.cluster=${CLUSTER}"
-      --node-label "sugarkube.env=${ENVIRONMENT}"
-      --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-    )
+    local -a install_args
+    build_server_install_args install_args single "${node_ip}"
     run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
@@ -4298,13 +4438,7 @@ install_server_cluster_init() {
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
 
   local node_ip=""
-  if should_include_node_ip_tls_san; then
-    if node_ip="$(detect_node_primary_ipv4)"; then
-      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
-    else
-      log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" phase=install_cluster_init
-    fi
-  fi
+  node_ip="$(detect_node_ip_tls_san install_cluster_init || true)"
 
   local env_assignments
   build_install_env env_assignments
@@ -4313,21 +4447,8 @@ install_server_cluster_init() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    local -a install_args=(
-      server
-      --cluster-init
-      --tls-san "${MDNS_HOST}"
-      --tls-san "${HN}"
-    )
-    if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
-      install_args+=(--tls-san "${node_ip}")
-    fi
-    install_args+=(
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
-      --node-label "sugarkube.cluster=${CLUSTER}"
-      --node-label "sugarkube.env=${ENVIRONMENT}"
-      --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-    )
+    local -a install_args
+    build_server_install_args install_args cluster-init "${node_ip}"
     run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
@@ -4532,22 +4653,16 @@ install_server_join() {
   # Persist the discovered hostname in k3s join URLs by default so durable
   # configuration follows stable host identity; IP-first URLs remain an explicit
   # opt-in for environments where systemd cannot resolve the hostname reliably.
-  local server_url_target="${server}"
+  local server_url_target
+  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
   if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
-    server_url_target="${ip_hint}"
     log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
 
   local node_ip=""
-  if should_include_node_ip_tls_san; then
-    if node_ip="$(detect_node_primary_ipv4)"; then
-      log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
-    else
-      log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" phase=install_join
-    fi
-  fi
+  node_ip="$(detect_node_ip_tls_san install_join || true)"
 
   if ! ensure_join_url_target_resolvable "${server_url_target}" "install_join"; then
     if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
@@ -4571,22 +4686,8 @@ install_server_join() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    local -a install_args=(
-      server
-      --server "https://${server_url_target}:${selected_port}"
-      --tls-san "${server}"
-      --tls-san "${MDNS_HOST}"
-      --tls-san "${HN}"
-    )
-    if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
-      install_args+=(--tls-san "${node_ip}")
-    fi
-    install_args+=(
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
-      --node-label "sugarkube.cluster=${CLUSTER}"
-      --node-label "sugarkube.env=${ENVIRONMENT}"
-      --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-    )
+    local -a install_args
+    build_server_join_install_args install_args "${server_url_target}" "${selected_port}" "${server}" "${node_ip}"
     run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
@@ -4704,9 +4805,9 @@ install_agent() {
   # Persist the discovered hostname in k3s agent URLs by default so durable
   # configuration follows stable host identity; IP-first URLs remain an explicit
   # opt-in for environments where systemd cannot resolve the hostname reliably.
-  local server_url_target="${server}"
+  local server_url_target
+  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}")"
   if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
-    server_url_target="${ip_hint}"
     log_info discover event=install_agent server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
@@ -4733,9 +4834,9 @@ install_agent() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    run_k3s_install agent \
-      --node-label "sugarkube.cluster=${CLUSTER}" \
-      --node-label "sugarkube.env=${ENVIRONMENT}"
+    local -a install_args
+    build_agent_install_args install_args
+    run_k3s_install "${install_args[@]}"
   )
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
     local elapsed_ms
@@ -4995,6 +5096,11 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
     printf '%s\n' "${CLAIMED_SERVER_HOST}"
   fi
   exit "${status}"
+fi
+
+if [ "${TEST_RENDER_K3S_INSTALL:-0}" -eq 1 ]; then
+  render_k3s_install_test "${TEST_RENDER_K3S_INSTALL_MODE}"
+  exit $?
 fi
 
 run_configure_avahi
