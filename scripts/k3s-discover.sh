@@ -287,6 +287,7 @@ DISCOVERY_FAILOPEN_DEFAULT=0
 DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT=300
 DISCOVERY_FAILOPEN="${SUGARKUBE_DISCOVERY_FAILOPEN:-${DISCOVERY_FAILOPEN_DEFAULT}}"
 DISCOVERY_FAILOPEN_TIMEOUT_SECS="${SUGARKUBE_DISCOVERY_FAILOPEN_TIMEOUT:-${DISCOVERY_FAILOPEN_TIMEOUT_DEFAULT}}"
+TLS_SAN_INCLUDE_NODE_IP="${SUGARKUBE_TLS_SAN_INCLUDE_NODE_IP:-0}"
 DISCOVERY_FAILOPEN_STARTED=0
 DISCOVERY_FAILOPEN_START_TIME=0
 DISCOVERY_FAILOPEN_USED=0
@@ -4192,7 +4193,7 @@ install_server_single() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
+    if [ "${TLS_SAN_INCLUDE_NODE_IP}" = "1" ] && [ -n "${node_ip}" ]; then
       install_args+=(--tls-san "${node_ip}")
     fi
     install_args+=(
@@ -4275,7 +4276,7 @@ install_server_cluster_init() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
+    if [ "${TLS_SAN_INCLUDE_NODE_IP}" = "1" ] && [ -n "${node_ip}" ]; then
       install_args+=(--tls-san "${node_ip}")
     fi
     install_args+=(
@@ -4485,10 +4486,10 @@ install_server_join() {
     log_info discover event=join outcome=fast_path host="${MDNS_HOST_RAW}" server="${server}" mode=fast >&2
     return 0
   fi
-  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
-  # Keep hostname in TLS SANs for certificate verification
+  # Prefer stable hostname identity for durable join endpoints.
+  # SERVER_IP remains available for runtime checks and diagnostics.
   local server_url_target="${server}"
-  if [ -n "${ip_hint}" ]; then
+  if [ "${SUGARKUBE_SERVER_URL_PREFER_IP:-0}" = "1" ] && [ -n "${ip_hint}" ]; then
     server_url_target="${ip_hint}"
     log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
@@ -4521,7 +4522,7 @@ install_server_join() {
       --tls-san "${MDNS_HOST}"
       --tls-san "${HN}"
     )
-    if [ -n "${node_ip}" ]; then
+    if [ "${TLS_SAN_INCLUDE_NODE_IP}" = "1" ] && [ -n "${node_ip}" ]; then
       install_args+=(--tls-san "${node_ip}")
     fi
     install_args+=(

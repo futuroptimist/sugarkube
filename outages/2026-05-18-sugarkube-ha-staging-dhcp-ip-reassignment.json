@@ -1,0 +1,19 @@
+{
+  "id": "2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment",
+  "date": "2026-05-18",
+  "component": "k3s-discover",
+  "rootCause": "After a home power outage reassigned DHCP leases for sugarkube3/4/5, Sugarkube durable install/config paths still carried avoidable raw IPv4 identity coupling (for example raw-IP TLS SAN), leaving stale values after address churn.",
+  "resolution": "Rotated expired GHCR PAT, then fully rebuilt k3s HA staging across sugarkube3.local, sugarkube4.local, and sugarkube5.local; used positional env invocation (just up staging), removed malformed env=staging Avahi artifacts, restored Traefik/tunnel, and redeployed DSPACE via install path.",
+  "longForm": "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md",
+  "references": [
+    "scripts/k3s-discover.sh",
+    "scripts/configure_k3s_node_ip.sh",
+    "tests/scripts/test_detect_node_ip.py",
+    "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md"
+  ],
+  "affectedNodes": [
+    "sugarkube3.local",
+    "sugarkube4.local",
+    "sugarkube5.local"
+  ]
+}
