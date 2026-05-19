@@ -741,6 +741,44 @@ EOS
   fi
 }
 
+
+@test "discover flow joins existing server with explicit IP URL preference" {
+  stub_common_network_tools
+  create_curl_stub
+  stub_command timeout <<'EOS'
+#!/usr/bin/env bash
+shift
+exec "$@"
+EOS
+
+  api_ready_stub="$(create_api_ready_stub)"
+  k3s_install_stub="$(create_k3s_install_stub)"
+  l4_probe_stub="$(create_l4_probe_stub)"
+  configure_stub="$(create_configure_stub)"
+
+  mdns_stub="${BATS_TEST_TMPDIR}/mdns-selfcheck-smart.sh"
+  cat <<'EOS' > "${mdns_stub}"
+#!/usr/bin/env bash
+echo "host=${SUGARKUBE_EXPECTED_HOST:-stub.local} attempts=1 ms_elapsed=5"
+exit 0
+EOS
+  chmod +x "${mdns_stub}"
+
+  token_path="${BATS_TEST_TMPDIR}/node-token"
+  printf %s\n "demo-token" > "$token_path"
+  mkdir -p "${BATS_TEST_TMPDIR}/avahi/services" "${BATS_TEST_TMPDIR}/run" "${BATS_TEST_TMPDIR}/mdns"
+
+  avahi_conf="${BATS_TEST_TMPDIR}/avahi.conf"
+  cat <<'CONF' >"${avahi_conf}"
+[server]
+CONF
+
+  run env     ALLOW_NON_ROOT=1     SUGARKUBE_CLUSTER=sugar     SUGARKUBE_ENV=dev     SUGARKUBE_SERVER_URL_PREFER_IP=1     SUGARKUBE_MDNS_ABSENCE_GATE=0     SUGARKUBE_CONFIGURE_AVAHI_BIN="${configure_stub}"     SUGARKUBE_MDNS_SELF_CHECK_BIN="${mdns_stub}"     SUGARKUBE_K3S_INSTALL_SCRIPT="${k3s_install_stub}"     SUGARKUBE_L4_PROBE_BIN="${l4_probe_stub}"     SUGARKUBE_TOKEN_DEV="demo-token"     SUGARKUBE_MDNS_ABSENCE_TIMEOUT_MS=500     SUGARKUBE_RUNTIME_DIR="${BATS_TEST_TMPDIR}/run"     AVAHI_CONF_PATH="${avahi_conf}"     SUGARKUBE_AVAHI_SERVICE_DIR="${BATS_TEST_TMPDIR}/avahi/services"     SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/mdns"     SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt"     SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10     SUGARKUBE_SERVERS=3     SUGARKUBE_NODE_TOKEN_PATH="${token_path}"     DISCOVERY_WAIT_SECS=0     ELECTION_HOLDOFF=0     SUGARKUBE_API_READY_TIMEOUT=2     SUGARKUBE_API_READY_CHECK_BIN="${api_ready_stub}"     SUGARKUBE_SIMPLE_DISCOVERY=0     SUGARKUBE_SKIP_SERVICE_ADVERTISEMENT=0     timeout 30 "${BATS_CWD}/scripts/k3s-discover.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ phase=install_join ]]
+}
+
 @test "discover flow elects winner after self-check failure" {
   # Test validates bootstrap election scenario: first node in cluster discovers no servers,
   # runs election, wins, and bootstraps k3s as initial control-plane server.
