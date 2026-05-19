@@ -811,7 +811,17 @@ exit 2
 EOS
   stub_command timeout <<'EOS'
 #!/usr/bin/env bash
-shift
+set -euo pipefail
+# Support common timeout invocation forms used by the script under test:
+#   timeout 30 cmd ...
+#   timeout --foreground 30 cmd ...
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --*) shift ;;
+    ''|*[!0-9smhd.]* ) break ;;
+    * ) shift; break ;;
+  esac
+done
 exec "$@"
 EOS
 
