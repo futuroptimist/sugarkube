@@ -242,6 +242,7 @@ def _run_remote_tls_san_check(
     curl_exit: int = 0,
     openssl_s_client_exit: int = 0,
     openssl_x509_exit: int = 0,
+    include_openssl: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -256,34 +257,46 @@ def _run_remote_tls_san_check(
         printf '%s\n' 'fake-ca'
         """,
     )
-    _write_stub(
-        bin_dir / "openssl",
-        """
-        #!/usr/bin/env bash
-        set -euo pipefail
-        case "${1:-}" in
-          s_client)
-            exit_code="${SUGARKUBE_TEST_OPENSSL_S_CLIENT_EXIT:-0}"
-            if [ "${exit_code}" != "0" ]; then
-              exit "${exit_code}"
-            fi
-            printf '%s\n' 'fake-certificate'
-            ;;
-          x509)
-            exit_code="${SUGARKUBE_TEST_OPENSSL_X509_EXIT:-0}"
-            if [ "${exit_code}" != "0" ]; then
-              exit "${exit_code}"
-            fi
-            printf '%s\n' "${SUGARKUBE_TEST_SAN_OUTPUT}"
-            ;;
-          *)
-            echo "Unsupported openssl invocation: $*" >&2
-            exit 2
-            ;;
-        esac
-        """,
-    )
+    if include_openssl:
+        _write_stub(
+            bin_dir / "openssl",
+            """
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "${1:-}" in
+              s_client)
+                exit_code="${SUGARKUBE_TEST_OPENSSL_S_CLIENT_EXIT:-0}"
+                if [ "${exit_code}" != "0" ]; then
+                  exit "${exit_code}"
+                fi
+                printf '%s\n' 'fake-certificate'
+                ;;
+              x509)
+                exit_code="${SUGARKUBE_TEST_OPENSSL_X509_EXIT:-0}"
+                if [ "${exit_code}" != "0" ]; then
+                  exit "${exit_code}"
+                fi
+                printf '%s\n' "${SUGARKUBE_TEST_SAN_OUTPUT}"
+                ;;
+              *)
+                echo "Unsupported openssl invocation: $*" >&2
+                exit 2
+                ;;
+            esac
+            """,
+        )
     env = os.environ.copy()
+    bash_env = tmp_path / "bash_env"
+    if not include_openssl:
+        bash_env.write_text(
+            "command() {\n"
+            "  if [ \"${1:-}\" = -v ] && [ \"${2:-}\" = openssl ]; then\n"
+            "    return 1\n"
+            "  fi\n"
+            "  builtin command \"$@\"\n"
+            "}\n",
+            encoding="utf-8",
+        )
     env.update(
         {
             "PATH": f"{bin_dir}:{env.get('PATH', '')}",
@@ -298,6 +311,8 @@ def _run_remote_tls_san_check(
             "SUGARKUBE_TEST_OPENSSL_X509_EXIT": str(openssl_x509_exit),
         }
     )
+    if not include_openssl:
+        env["BASH_ENV"] = str(bash_env)
     return subprocess.run(
         ["bash", str(SCRIPT), "--test-check-remote-tls-san", target],
         capture_output=True,
@@ -347,4 +362,19 @@ def test_strict_ip_join_url_tls_guard_fails_closed_when_certificate_inspection_f
 
     assert result.returncode == 1
     assert "Failed to inspect server certificate SANs" in result.stderr
+    assert f"server={NODE_IP}" in result.stderr
+
+
+def test_strict_ip_join_url_tls_guard_fails_closed_when_openssl_is_missing(
+    tmp_path: Path,
+) -> None:
+    result = _run_remote_tls_san_check(
+        tmp_path,
+        NODE_IP,
+        "",
+        include_openssl=False,
+    )
+
+    assert result.returncode == 1
+    assert "openssl missing; skipping SAN validation" in result.stderr
     assert f"server={NODE_IP}" in result.stderr

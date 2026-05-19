@@ -4300,6 +4300,9 @@ check_remote_server_tls_sans() {
   if ! command -v openssl >/dev/null 2>&1; then
     log_warn_msg discover "openssl missing; skipping SAN validation" \
       "server=${server_host}" "phase=${phase}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
