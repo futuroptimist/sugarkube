@@ -622,6 +622,29 @@ echo "unexpected busctl call: $*" >&2
 exit 1
 EOS
 
+  stub_command getent <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 2 ]; then
+  case "$2" in
+    sugarkube0.local) ip="192.168.3.10" ;;
+    sugarkube1.local) ip="192.168.3.11" ;;
+    *) exit 2 ;;
+  esac
+  case "$1" in
+    hosts)
+      printf '%s %s\n' "$ip" "$2"
+      exit 0
+      ;;
+    ahostsv4)
+      printf '%s STREAM %s\n' "$ip" "$2"
+      exit 0
+      ;;
+  esac
+fi
+exit 2
+EOS
+
   api_ready_stub="$(create_api_ready_stub)"
   k3s_install_stub="$(create_k3s_install_stub)"
   l4_probe_stub="$(create_l4_probe_stub)"
