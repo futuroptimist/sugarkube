@@ -745,6 +745,27 @@ EOS
 @test "discover flow joins existing server with explicit IP URL preference" {
   stub_common_network_tools
   create_curl_stub
+  stub_command openssl <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "s_client" ]; then
+  cat <<'CERT'
+-----BEGIN CERTIFICATE-----
+MIIB
+-----END CERTIFICATE-----
+CERT
+  exit 0
+fi
+
+if [ "$1" = "x509" ]; then
+  cat <<'SAN'
+X509v3 Subject Alternative Name:
+    DNS:sugarkube0.local, DNS:sugarkube0, IP Address:192.168.3.10
+SAN
+  exit 0
+fi
+
+exit 0
+EOS
   stub_command timeout <<'EOS'
 #!/usr/bin/env bash
 shift
