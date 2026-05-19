@@ -3910,10 +3910,12 @@ build_server_join_install_args() {
   local selected_port="$3"
   local server="$4"
   local node_ip="${5:-}"
+  local server_url_authority
+  server_url_authority="$(format_url_authority "${server_url_target}")"
 
   _server_join_install_args=(
     server
-    --server "https://${server_url_target}:${selected_port}"
+    --server "https://${server_url_authority}:${selected_port}"
     --tls-san "${server}"
     --tls-san "${MDNS_HOST}"
     --tls-san "${HN}"
@@ -3969,8 +3971,10 @@ append_join_env_assignments() {
   local server_url_target="$2"
   local selected_port="$3"
   local ip_hint="${4:-}"
+  local server_url_authority
+  server_url_authority="$(format_url_authority "${server_url_target}")"
 
-  _join_env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
+  _join_env_assignments+=("K3S_URL=https://${server_url_authority}:${selected_port}")
   if [ -n "${ip_hint}" ]; then
     _join_env_assignments+=("SERVER_IP=${ip_hint}")
   fi
@@ -4156,6 +4160,19 @@ sys.exit(0)
 PY
 }
 
+format_url_authority() {
+  local host="${1:-}"
+  if [ -z "${host}" ]; then
+    printf '%s' "${host}"
+    return 0
+  fi
+  if is_ip_address_literal "${host}" && [[ "${host}" == *:* ]]; then
+    printf '[%s]' "${host}"
+    return 0
+  fi
+  printf '%s' "${host}"
+}
+
 ensure_join_url_target_resolvable() {
   local target="${1:-}"
   local phase="${2:-join_url}"
@@ -4294,9 +4311,13 @@ check_remote_server_tls_sans() {
   local server_host="$1"
   local phase="${2:-tls_san_check}"
   local require_match="${3:-0}"
+  local server_url_authority
+  local server_connect_target
   if [ -z "${server_host}" ]; then
     return 0
   fi
+  server_url_authority="$(format_url_authority "${server_host}")"
+  server_connect_target="${server_url_authority}:6443"
   if ! command -v openssl >/dev/null 2>&1; then
     log_warn_msg discover "openssl missing; skipping SAN validation" \
       "server=${server_host}" "phase=${phase}"
@@ -4317,7 +4338,7 @@ check_remote_server_tls_sans() {
     --connect-timeout "${SUGARKUBE_TLS_SAN_CURL_TIMEOUT:-5}"
     --max-time "${SUGARKUBE_TLS_SAN_CURL_MAX_TIME:-15}"
     --insecure
-    "https://${server_host}:6443/cacerts"
+    "https://${server_url_authority}:6443/cacerts"
   )
   if ! curl "${curl_args[@]}" >"${cacert_path}"; then
     log_warn_msg discover "Failed to download server CA bundle" \
@@ -4331,7 +4352,7 @@ check_remote_server_tls_sans() {
 
   local san_output
   if ! san_output="$(
-    openssl s_client -servername "${server_host}" -connect "${server_host}:6443" \
+    openssl s_client -servername "${server_host}" -connect "${server_connect_target}" \
       -CAfile "${cacert_path}" </dev/null 2>/dev/null \
       | openssl x509 -noout -ext subjectAltName 2>/dev/null
   )"; then

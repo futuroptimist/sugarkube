@@ -9,6 +9,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "k3s-discover.sh"
 NODE_IP = "192.168.50.12"
+NODE_IP_V6 = "2001:db8::10"
 SERVER_HOST = "sugarkube0.local"
 SHORT_HOST = "sugarkube1"
 MDNS_HOST = f"{SHORT_HOST}.local"
@@ -182,6 +183,19 @@ def test_agent_join_falls_back_to_ip_hint_when_hostname_is_not_durable_resolvabl
     assert args[0] == "agent"
     assert f"K3S_URL=https://{NODE_IP}:6443" in env_lines
     assert f"SERVER_IP={NODE_IP}" in env_lines
+
+
+def test_join_ip_fallback_brackets_ipv6_hint_in_urls(tmp_path: Path) -> None:
+    env_lines, args = _render_install(
+        tmp_path,
+        "join",
+        SUGARKUBE_TEST_GETENT_MODE="fail",
+        SUGARKUBE_TEST_MDNS_SELECTED_IP=NODE_IP_V6,
+    )
+
+    assert f"K3S_URL=https://[{NODE_IP_V6}]:6443" in env_lines
+    assert f"SERVER_IP={NODE_IP_V6}" in env_lines
+    assert args[:3] == ["server", "--server", f"https://[{NODE_IP_V6}]:6443"]
 
 
 def _run_join_url_guard(
