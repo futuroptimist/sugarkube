@@ -674,6 +674,29 @@ EOS
 [server]
 CONF
 
+  stub_command getent <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 2 ]; then
+  case "$2" in
+    sugarkube0.local) ip="192.168.3.10" ;;
+    sugarkube1.local) ip="192.168.3.11" ;;
+    *) exit 2 ;;
+  esac
+  case "$1" in
+    hosts)
+      printf '%s %s\n' "$ip" "$2"
+      exit 0
+      ;;
+    ahostsv4)
+      printf '%s STREAM %s\n' "$ip" "$2"
+      exit 0
+      ;;
+  esac
+fi
+exit 2
+EOS
+
   run env \
     ALLOW_NON_ROOT=1 \
     SUGARKUBE_CLUSTER=sugar \
@@ -691,7 +714,6 @@ CONF
     SUGARKUBE_MDNS_RUNTIME_DIR="${BATS_TEST_TMPDIR}/mdns" \
     SUGARKUBE_MDNS_FIXTURE_FILE="${BATS_CWD}/tests/fixtures/avahi_browse_ok.txt" \
     SUGARKUBE_MDNS_PUBLISH_ADDR=192.168.3.10 \
-    SUGARKUBE_SERVER_URL_PREFER_IP=1 \
     SUGARKUBE_SERVERS=3 \
     SUGARKUBE_NODE_TOKEN_PATH="${token_path}" \
     DISCOVERY_WAIT_SECS=0 \
