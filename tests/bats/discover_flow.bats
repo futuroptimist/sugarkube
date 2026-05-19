@@ -780,7 +780,7 @@ fi
 if [ "$1" = "x509" ]; then
   cat <<'SAN'
 X509v3 Subject Alternative Name:
-    DNS:sugarkube0.local, DNS:sugarkube0, IP Address:192.168.3.10
+    DNS:sugarkube0.local, DNS:sugarkube0, IP Address:192.168.3.10, IP Address:192.168.3.11
 SAN
   exit 0
 fi
