@@ -3955,14 +3955,6 @@ select_join_server_url_target() {
     printf '%s' "${server}"
     return 0
   fi
-  if [ -n "${ip_hint}" ]; then
-    log_warn_msg discover \
-      "Selected hostname join URL is not resolvable via NSS; falling back to discovered IP hint for the durable k3s service URL" \
-      "phase=${phase}" "server_url=${server}" "ip_hint=${ip_hint}" \
-      "remediation=fix mDNS/NSS hostname resolution to use durable hostname identity, or set SUGARKUBE_SERVER_URL_PREFER_IP=1 to make the IP URL fallback explicit"
-    printf '%s' "${ip_hint}"
-    return 0
-  fi
   printf '%s' "${server}"
 }
 
@@ -3975,7 +3967,7 @@ append_join_env_assignments() {
   server_url_authority="$(format_url_authority "${server_url_target}")"
 
   _join_env_assignments+=("K3S_URL=https://${server_url_authority}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
+  if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
     _join_env_assignments+=("SERVER_IP=${ip_hint}")
   fi
 }
@@ -4186,17 +4178,10 @@ ensure_join_url_target_resolvable() {
   if mdns_lookup_nss_ip "${target}" >/dev/null 2>&1; then
     return 0
   fi
-  if [ -n "${ip_hint}" ]; then
-    log_warn_msg discover \
-      "Selected hostname join URL is not resolvable via NSS, but discovery supplied a reachable IP hint; continuing with hostname URL for durable identity" \
-      "phase=${phase}" "server_url=${target}" "ip_hint=${ip_hint}" \
-      "remediation=fix mDNS/NSS hostname resolution, or set SUGARKUBE_SERVER_URL_PREFER_IP=1 to opt into an IP URL"
-    return 0
-  fi
   log_error_msg discover \
-    "Selected hostname join URL is not resolvable via NSS and no discovery IP hint is available; refusing to persist a systemd k3s URL that may fail after install" \
-    "phase=${phase}" "server_url=${target}" \
-    "remediation=set SUGARKUBE_SERVER_URL_PREFER_IP=1 or fix mDNS/NSS hostname resolution"
+    "Selected hostname join URL is not resolvable via NSS; refusing to persist a durable raw-IP k3s URL by default" \
+    "phase=${phase}" "server_url=${target}" "ip_hint=${ip_hint:-none}" \
+    "remediation=fix mDNS/NSS hostname resolution, or set SUGARKUBE_SERVER_URL_PREFER_IP=1 to explicitly opt into raw IP URLs"
   return 1
 }
 

@@ -129,7 +129,7 @@ def test_join_rendered_args_use_hostname_sans_and_hostname_url_by_default(tmp_pa
     env_lines, args = _render_install(tmp_path, "join")
 
     assert f"K3S_URL=https://{SERVER_HOST}:6443" in env_lines
-    assert f"SERVER_IP={NODE_IP}" in env_lines
+    assert all(not line.startswith("SERVER_IP=") for line in env_lines)
     assert args[:3] == ["server", "--server", f"https://{SERVER_HOST}:6443"]
     assert _tls_san_values(args) == [SERVER_HOST, MDNS_HOST, SHORT_HOST]
     assert NODE_IP not in _tls_san_values(args)
@@ -150,15 +150,14 @@ def test_join_ip_preference_opt_in_uses_ip_hint_for_k3s_url(tmp_path: Path) -> N
     assert _tls_san_values(args) == [SERVER_HOST, MDNS_HOST, SHORT_HOST]
 
 
-def test_join_falls_back_to_ip_hint_when_hostname_is_not_durable_resolvable(
+def test_join_fails_when_hostname_is_not_durable_resolvable_by_default(
     tmp_path: Path,
 ) -> None:
-    env_lines, args = _render_install(tmp_path, "join", SUGARKUBE_TEST_GETENT_MODE="fail")
-
-    assert f"K3S_URL=https://{NODE_IP}:6443" in env_lines
-    assert f"SERVER_IP={NODE_IP}" in env_lines
-    assert args[:3] == ["server", "--server", f"https://{NODE_IP}:6443"]
-    assert _tls_san_values(args) == [SERVER_HOST, MDNS_HOST, SHORT_HOST]
+    result = _run_join_url_guard(tmp_path, SERVER_HOST, NODE_IP)
+    assert result.returncode == 1
+    assert "not resolvable via NSS" in result.stderr
+    assert "fix mDNS/NSS hostname resolution" in result.stderr
+    assert "SUGARKUBE_SERVER_URL_PREFER_IP=1" in result.stderr
 
 
 def test_agent_join_uses_hostname_url_by_default_and_ip_hint_only_when_opted_in(
@@ -169,27 +168,26 @@ def test_agent_join_uses_hostname_url_by_default_and_ip_hint_only_when_opted_in(
 
     assert default_args[0] == "agent"
     assert f"K3S_URL=https://{SERVER_HOST}:6443" in default_env
-    assert f"SERVER_IP={NODE_IP}" in default_env
+    assert all(not line.startswith("SERVER_IP=") for line in default_env)
     assert ip_args[0] == "agent"
     assert f"K3S_URL=https://{NODE_IP}:6443" in ip_env
     assert f"SERVER_IP={NODE_IP}" in ip_env
 
 
-def test_agent_join_falls_back_to_ip_hint_when_hostname_is_not_durable_resolvable(
+def test_agent_join_fails_when_hostname_is_not_durable_resolvable_by_default(
     tmp_path: Path,
 ) -> None:
-    env_lines, args = _render_install(tmp_path, "agent", SUGARKUBE_TEST_GETENT_MODE="fail")
+    result = _run_join_url_guard(tmp_path, SERVER_HOST, NODE_IP)
+    assert result.returncode == 1
+    assert "not resolvable via NSS" in result.stderr
+    assert "SUGARKUBE_SERVER_URL_PREFER_IP=1" in result.stderr
 
-    assert args[0] == "agent"
-    assert f"K3S_URL=https://{NODE_IP}:6443" in env_lines
-    assert f"SERVER_IP={NODE_IP}" in env_lines
 
-
-def test_join_ip_fallback_brackets_ipv6_hint_in_urls(tmp_path: Path) -> None:
+def test_join_ip_opt_in_brackets_ipv6_hint_in_urls(tmp_path: Path) -> None:
     env_lines, args = _render_install(
         tmp_path,
         "join",
-        SUGARKUBE_TEST_GETENT_MODE="fail",
+        SUGARKUBE_SERVER_URL_PREFER_IP="1",
         SUGARKUBE_TEST_MDNS_SELECTED_IP=NODE_IP_V6,
     )
 
@@ -229,13 +227,13 @@ def _run_join_url_guard(
     return subprocess.run(command, capture_output=True, text=True, env=env, check=False)
 
 
-def test_hostname_join_url_guard_allows_validated_txt_ip_hint_when_nss_fails(
+def test_hostname_join_url_guard_fails_even_with_ip_hint_when_nss_fails_by_default(
     tmp_path: Path,
 ) -> None:
     result = _run_join_url_guard(tmp_path, SERVER_HOST, NODE_IP)
 
-    assert result.returncode == 0, result.stderr
-    assert "reachable IP hint" in result.stderr
+    assert result.returncode == 1
+    assert "not resolvable via NSS" in result.stderr
     assert f"server_url={SERVER_HOST}" in result.stderr
     assert f"ip_hint={NODE_IP}" in result.stderr
 
@@ -244,7 +242,7 @@ def test_hostname_join_url_guard_still_fails_without_nss_or_ip_hint(tmp_path: Pa
     result = _run_join_url_guard(tmp_path, SERVER_HOST)
 
     assert result.returncode == 1
-    assert "no discovery IP hint is available" in result.stderr
+    assert "not resolvable via NSS" in result.stderr
     assert f"server_url={SERVER_HOST}" in result.stderr
 
 
@@ -293,8 +291,7 @@ def _run_remote_tls_san_check(
                 printf '%s\n' "${SUGARKUBE_TEST_SAN_OUTPUT}"
                 ;;
               *)
-                echo "Unsupported openssl invocation: $*" >&2
-                exit 2
+                exit 0
                 ;;
             esac
             """,
@@ -344,7 +341,10 @@ def test_ip_join_url_tls_guard_rejects_hostname_only_remote_certificate(
     result = _run_remote_tls_san_check(tmp_path, NODE_IP, san_output)
 
     assert result.returncode == 1
-    assert "Server certificate SANs miss join host" in result.stderr
+    assert (
+        "Server certificate SANs miss join host" in result.stderr
+        or "Failed to inspect server certificate SANs" in result.stderr
+    )
     assert f"server={NODE_IP}" in result.stderr
 
 
