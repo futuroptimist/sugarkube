@@ -254,6 +254,19 @@ def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_o
     assert "cloudflare-tunnel-config" not in patch_text
 
 
+
+
+def test_cf_tunnel_install_normalizes_named_env_inputs(cf_recipe_body: str) -> None:
+    """Regression: outage recovery used ``env=staging`` and must resolve to ``staging``."""
+
+    assert 'env_input={{ quote(env) }}' in cf_recipe_body
+    assert 'while [ "${env_name#env=}" != "${env_name}" ]; do' in cf_recipe_body
+    assert 'env_name="${env_name#env=}"' in cf_recipe_body
+    assert 'tunnelName:' in cf_recipe_body
+    assert '${CF_TUNNEL_NAME:-sugarkube-${env_name}}' in cf_recipe_body
+    assert '${CF_TUNNEL_NAME:-sugarkube-${env_input}}' not in cf_recipe_body
+    assert 'sugarkube-env=staging' not in cf_recipe_body
+
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
     text = CLOUDFLARE_DOC.read_text(encoding="utf-8")
     for phrase in (
