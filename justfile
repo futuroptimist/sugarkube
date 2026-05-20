@@ -1296,6 +1296,37 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         done
     }
 
+    ensure_upgrade_target_exists() {
+        if [ "${allow_install}" = "true" ]; then
+            return 0
+        fi
+
+        if ! command -v helm >/dev/null 2>&1; then
+            echo "ERROR: helm is not installed; cannot verify existing release before upgrade." >&2
+            return 1
+        fi
+
+        local status_output=""
+        if ! status_output="$(helm -n "${namespace}" status "${release}" 2>&1)"; then
+            cat >&2 <<EOF
+ERROR: helm-oci-upgrade requires an existing deployed release.
+Release '${release}' was not found as a deployed release in namespace '${namespace}'.
+
+Fresh-cluster recovery note: during outage rebuilds (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment),
+you usually need an install-or-upgrade first.
+
+Run this instead:
+  just helm-oci-install release=${release} namespace=${namespace} chart=${chart}
+
+Helm status output:
+  ${status_output}
+EOF
+            return 1
+        fi
+    }
+
+    ensure_upgrade_target_exists
+
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
     if [ "${allow_install}" = "true" ]; then

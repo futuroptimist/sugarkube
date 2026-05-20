@@ -14,6 +14,7 @@ trap 'rm -rf "${tmp_bin}"' EXIT
 helm_log="${tmp_bin}/helm.log"
 kubectl_log="${tmp_bin}/kubectl.log"
 fixture_registry="${tmp_bin}/dspace-0.0.0.tgz"
+status_mode_file="${tmp_bin}/helm-status-mode"
 
 if ! python3 - "${fixture_registry}" <<'PY'
 import io
@@ -55,6 +56,21 @@ fi
 cat >"${tmp_bin}/helm" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+
+status_mode="${HELM_STATUS_MODE:-deployed}"
+if [ -n "${HELM_STATUS_MODE_FILE:-}" ] && [ -f "${HELM_STATUS_MODE_FILE}" ]; then
+    status_mode="$(cat "${HELM_STATUS_MODE_FILE}")"
+fi
+
+if [ "$1" = "-n" ] && [ "$3" = "status" ]; then
+    if [ "${status_mode}" = "missing" ]; then
+        echo "Error: release: not found" >&2
+        exit 1
+    fi
+
+    echo "STATUS: deployed"
+    exit 0
+fi
 
 if [[ "${*}" != *"oci://registry.test/charts/dspace"* ]]; then
     echo "Expected fake OCI chart URL in helm args, got: $*" >&2
@@ -100,6 +116,7 @@ chmod +x "${tmp_bin}/kubectl"
 
 command_output="$(
     PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
+        HELM_STATUS_MODE_FILE="${status_mode_file}" \
         FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
         just helm-oci-install \
         release=dspace namespace=dspace \
@@ -149,4 +166,44 @@ if ! grep -q "rollout status deployment.apps/dspace" "${kubectl_log}"; then
     exit 1
 fi
 
-printf 'helm-oci-install emits normalized chart argument and rollout feedback.\n'
+printf 'deployed' >"${status_mode_file}"
+upgrade_output="$(
+    PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
+        HELM_STATUS_MODE_FILE="${status_mode_file}" \
+        FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
+        just helm-oci-upgrade \
+        release=release=dspace namespace=namespace=dspace \
+        chart=chart=oci://registry.test/charts/dspace \
+        values=values=docs/examples/dspace.values.dev.yaml \
+        version_file=version_file=docs/apps/dspace.version
+)"
+
+if ! grep -q "helm upgrade dspace oci://registry.test/charts/dspace --namespace dspace --reuse-values" <<<"${upgrade_output}"; then
+    printf 'Upgrade path did not preserve expected behavior and argument normalization.\nOutput:\n%s\n' "${upgrade_output}" >&2
+    exit 1
+fi
+
+printf 'missing' >"${status_mode_file}"
+if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
+    HELM_STATUS_MODE_FILE="${status_mode_file}" \
+    FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
+    just helm-oci-upgrade \
+    release=dspace namespace=dspace \
+    chart=oci://registry.test/charts/dspace \
+    values=docs/examples/dspace.values.dev.yaml \
+    version_file=docs/apps/dspace.version >"${tmp_bin}/upgrade-missing.out" 2>&1; then
+    printf 'Expected upgrade-only path to fail when release is missing.\n' >&2
+    exit 1
+fi
+
+if ! grep -q "helm-oci-upgrade requires an existing deployed release" "${tmp_bin}/upgrade-missing.out"; then
+    printf 'Missing fresh-cluster actionable error text.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.out")" >&2
+    exit 1
+fi
+
+if ! grep -q "just helm-oci-install release=dspace namespace=dspace chart=oci://registry.test/charts/dspace" "${tmp_bin}/upgrade-missing.out"; then
+    printf 'Missing install guidance in upgrade-only failure output.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.out")" >&2
+    exit 1
+fi
+
+printf 'helm-oci helpers handle install/upgrade/fresh-cluster paths with actionable messaging.\n'
