@@ -316,6 +316,7 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
     assert 'env_name="staging"' in cf_recipe_body
 
     runtime_cases = {
+        "staging": "staging",
         "env=staging": "staging",
         "env=env=staging": "staging",
         "int": "staging",
