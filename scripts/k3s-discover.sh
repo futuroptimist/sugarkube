@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/log.sh
+# shellcheck source=scripts/log.sh disable=SC1091
 . "${SCRIPT_DIR}/log.sh"
 DEFAULT_SUMMARY_LIB="${SCRIPT_DIR}/lib/summary.sh"
 SUMMARY_LIB="${SUGARKUBE_SUMMARY_LIB:-${DEFAULT_SUMMARY_LIB}}"
@@ -232,6 +232,8 @@ SUGARKUBE_MDNS_BOOT_DELAY="${SUGARKUBE_MDNS_BOOT_DELAY:-${MDNS_SELF_CHECK_DELAY}
 SUGARKUBE_MDNS_SERVER_RETRIES="${SUGARKUBE_MDNS_SERVER_RETRIES:-20}"
 SUGARKUBE_MDNS_SERVER_DELAY="${SUGARKUBE_MDNS_SERVER_DELAY:-0.5}"
 SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH="${SUGARKUBE_MDNS_ALLOW_ADDR_MISMATCH:-1}"
+SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN="${SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN:-0}"
+SUGARKUBE_SERVER_URL_PREFER_IP="${SUGARKUBE_SERVER_URL_PREFER_IP:-0}"
 # Phase 2: Absence Gate Control
 # SUGARKUBE_SKIP_ABSENCE_GATE=1 bypasses the absence gate entirely
 # Default: 1 (absence gate skipped; set to 0 for legacy restart behavior)
@@ -409,6 +411,12 @@ TEST_PUBLISH_BOOTSTRAP=0
 TEST_MDNS_FALLBACK=0
 TEST_BOOTSTRAP_SERVER_FLOW=0
 TEST_CLAIM_BOOTSTRAP=0
+TEST_RENDER_K3S_INSTALL=0
+TEST_RENDER_K3S_INSTALL_MODE=""
+TEST_ENSURE_JOIN_URL_TARGET=0
+TEST_CHECK_REMOTE_TLS_SAN=0
+TEST_ENSURE_JOIN_URL_VALUE=""
+TEST_ENSURE_JOIN_URL_IP_HINT=""
 declare -a TEST_RENDER_ARGS=()
 PRINT_SERVER_HOSTS=0
 
@@ -448,6 +456,37 @@ while [ "$#" -gt 0 ]; do
       ;;
     --test-claim-bootstrap)
       TEST_CLAIM_BOOTSTRAP=1
+      ;;
+    --test-render-k3s-install)
+      if [ "$#" -lt 2 ]; then
+        echo "--test-render-k3s-install requires a mode" >&2
+        exit 2
+      fi
+      TEST_RENDER_K3S_INSTALL=1
+      TEST_RENDER_K3S_INSTALL_MODE="$2"
+      shift
+      ;;
+    --test-ensure-join-url-target)
+      if [ "$#" -lt 2 ]; then
+        echo "--test-ensure-join-url-target requires a target" >&2
+        exit 2
+      fi
+      TEST_ENSURE_JOIN_URL_TARGET=1
+      TEST_ENSURE_JOIN_URL_VALUE="$2"
+      TEST_ENSURE_JOIN_URL_IP_HINT="${3:-}"
+      if [ "$#" -ge 3 ]; then
+        shift
+      fi
+      shift
+      ;;
+    --test-check-remote-tls-san)
+      if [ "$#" -lt 2 ]; then
+        echo "--test-check-remote-tls-san requires a target" >&2
+        exit 2
+      fi
+      TEST_CHECK_REMOTE_TLS_SAN=1
+      TEST_CHECK_REMOTE_TLS_SAN_VALUE="$2"
+      shift
       ;;
     --print-server-hosts)
       PRINT_SERVER_HOSTS=1
@@ -3821,6 +3860,175 @@ build_install_env() {
   fi
 }
 
+detect_node_ip_tls_san() {
+  local phase="$1"
+  local _detected=""
+  if should_include_node_ip_tls_san; then
+    if _detected="$(detect_node_primary_ipv4)"; then
+      log_info discover event=node_ip_detected ip="${_detected}" phase="${phase}" >&2
+      printf '%s' "${_detected}"
+      return 0
+    fi
+    log_warn_msg discover "Node-IP TLS SAN opt-in is enabled, but node IP detection failed; omitting IP SAN" "phase=${phase}"
+  fi
+  return 1
+}
+
+append_node_ip_tls_san() {
+  local -n _tls_san_args=$1
+  local node_ip="${2:-}"
+  if [ -n "${node_ip}" ] && should_include_node_ip_tls_san; then
+    _tls_san_args+=(--tls-san "${node_ip}")
+  fi
+}
+
+build_server_install_args() {
+  local -n _server_install_args=$1
+  local mode="$2"
+  local node_ip="${3:-}"
+
+  _server_install_args=(server)
+  if [ "${mode}" = "cluster-init" ]; then
+    _server_install_args+=(--cluster-init)
+  fi
+  _server_install_args+=(
+    --tls-san "${MDNS_HOST}"
+    --tls-san "${HN}"
+  )
+  append_node_ip_tls_san _server_install_args "${node_ip}"
+  _server_install_args+=(
+    --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+    --node-label "sugarkube.cluster=${CLUSTER}"
+    --node-label "sugarkube.env=${ENVIRONMENT}"
+    --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
+}
+
+build_server_join_install_args() {
+  local -n _server_join_install_args=$1
+  local server_url_target="$2"
+  local selected_port="$3"
+  local server="$4"
+  local node_ip="${5:-}"
+  local server_url_authority
+  server_url_authority="$(format_url_authority "${server_url_target}")"
+
+  _server_join_install_args=(
+    server
+    --server "https://${server_url_authority}:${selected_port}"
+    --tls-san "${server}"
+    --tls-san "${MDNS_HOST}"
+    --tls-san "${HN}"
+  )
+  append_node_ip_tls_san _server_join_install_args "${node_ip}"
+  _server_join_install_args+=(
+    --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
+    --node-label "sugarkube.cluster=${CLUSTER}"
+    --node-label "sugarkube.env=${ENVIRONMENT}"
+    --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
+  )
+}
+
+build_agent_install_args() {
+  local -n _agent_install_args=$1
+  _agent_install_args=(
+    agent
+    --node-label "sugarkube.cluster=${CLUSTER}"
+    --node-label "sugarkube.env=${ENVIRONMENT}"
+  )
+}
+
+select_join_server_url_target() {
+  local server="$1"
+  local ip_hint="${2:-}"
+  local phase="${3:-join_url}"
+
+  if [ -n "${ip_hint}" ] && should_prefer_ip_server_url; then
+    printf '%s' "${ip_hint}"
+    return 0
+  fi
+  if [ -z "${server}" ] || is_ip_address_literal "${server}"; then
+    printf '%s' "${server}"
+    return 0
+  fi
+  if mdns_lookup_nss_ip "${server}" >/dev/null 2>&1; then
+    printf '%s' "${server}"
+    return 0
+  fi
+  printf '%s' "${server}"
+}
+
+append_join_env_assignments() {
+  local -n _join_env_assignments=$1
+  local server_url_target="$2"
+  local selected_port="$3"
+  local ip_hint="${4:-}"
+  local server_url_authority
+  server_url_authority="$(format_url_authority "${server_url_target}")"
+
+  _join_env_assignments+=("K3S_URL=https://${server_url_authority}:${selected_port}")
+  if [ -n "${ip_hint}" ] && is_ip_address_literal "${server_url_target}"; then
+    _join_env_assignments+=("SERVER_IP=${ip_hint}")
+  fi
+}
+
+render_k3s_install_test() {
+  local mode="$1"
+  local node_ip=""
+  local selected_port="${MDNS_SELECTED_PORT:-6443}"
+  case "${selected_port}" in
+    ''|*[!0-9]*) selected_port=6443 ;;
+  esac
+
+  local -a env_assignments install_args
+  build_install_env env_assignments
+
+  case "${mode}" in
+    single)
+      node_ip="$(detect_node_ip_tls_san install_single || true)"
+      build_server_install_args install_args single "${node_ip}"
+      ;;
+    cluster-init)
+      node_ip="$(detect_node_ip_tls_san install_cluster_init || true)"
+      build_server_install_args install_args cluster-init "${node_ip}"
+      ;;
+    join|agent)
+      local discovered_server="${SUGARKUBE_TEST_DISCOVERED_SERVER:-sugarkube0.local}"
+      local server
+      server="$(join_target_host "${discovered_server}")"
+      local ip_hint=""
+      local selected_host="${SUGARKUBE_TEST_MDNS_SELECTED_HOST:-${MDNS_SELECTED_HOST}}"
+      local selected_ip="${SUGARKUBE_TEST_MDNS_SELECTED_IP:-${MDNS_SELECTED_IP}}"
+      if [ -z "${API_REGADDR:-}" ] && [ -n "${selected_ip:-}" ] && [ -n "${discovered_server:-}" ]; then
+        if same_host "${selected_host}" "${discovered_server}"; then
+          ip_hint="${selected_ip}"
+        fi
+      fi
+      local server_url_target
+      server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}" render_k3s_install)"
+      append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
+      if [ "${mode}" = "join" ]; then
+        node_ip="$(detect_node_ip_tls_san install_join || true)"
+        build_server_join_install_args install_args "${server_url_target}" "${selected_port}" "${server}" "${node_ip}"
+      else
+        build_agent_install_args install_args
+      fi
+      ;;
+    *)
+      echo "unsupported --test-render-k3s-install mode: ${mode}" >&2
+      return 2
+      ;;
+  esac
+
+  local item
+  for item in "${env_assignments[@]}"; do
+    printf 'ENV\t%s\n' "${item}"
+  done
+  for item in "${install_args[@]}"; do
+    printf 'ARG\t%s\n' "${item}"
+  done
+}
+
 acquire_join_gate() {
   if [ ! -x "${JOIN_GATE_BIN}" ]; then
     log_error_msg discover "join gate helper missing" "script=${JOIN_GATE_BIN}"
@@ -3918,6 +4126,79 @@ detect_node_primary_ipv4() {
 
   printf '%s' "${ip}"
   return 0
+}
+
+should_include_node_ip_tls_san() {
+  [ "${SUGARKUBE_INCLUDE_NODE_IP_TLS_SAN}" = "1" ]
+}
+
+should_prefer_ip_server_url() {
+  [ "${SUGARKUBE_SERVER_URL_PREFER_IP}" = "1" ]
+}
+
+is_ip_address_literal() {
+  local candidate="${1:-}"
+  [ -n "${candidate}" ] || return 1
+  CANDIDATE_HOST="${candidate}" python3 - <<'PY'
+import ipaddress
+import os
+import sys
+
+try:
+    ipaddress.ip_address(os.environ.get("CANDIDATE_HOST", ""))
+except ValueError:
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+format_url_authority() {
+  local host="${1:-}"
+  if [ -z "${host}" ]; then
+    printf '%s' "${host}"
+    return 0
+  fi
+  if is_ip_address_literal "${host}" && [[ "${host}" == *:* ]]; then
+    printf '[%s]' "${host}"
+    return 0
+  fi
+  printf '%s' "${host}"
+}
+
+normalize_ip_literal() {
+  local candidate="${1:-}"
+  [ -n "${candidate}" ] || return 1
+  CANDIDATE_HOST="${candidate}" python3 - <<'PY'
+import ipaddress
+import os
+import sys
+
+try:
+    value = ipaddress.ip_address(os.environ.get("CANDIDATE_HOST", ""))
+except ValueError:
+    sys.exit(1)
+print(value.compressed.lower())
+PY
+}
+
+ensure_join_url_target_resolvable() {
+  local target="${1:-}"
+  local phase="${2:-join_url}"
+  local ip_hint="${3:-}"
+  if [ -z "${target}" ]; then
+    return 0
+  fi
+  if is_ip_address_literal "${target}"; then
+    return 0
+  fi
+  if mdns_lookup_nss_ip "${target}" >/dev/null 2>&1; then
+    return 0
+  fi
+  log_error_msg discover \
+    "Selected hostname join URL is not resolvable via NSS; refusing to persist a durable raw-IP k3s URL by default" \
+    "phase=${phase}" "server_url=${target}" "ip_hint=${ip_hint:-none}" \
+    "remediation=fix mDNS/NSS hostname resolution, or set SUGARKUBE_SERVER_URL_PREFER_IP=1 to explicitly opt into raw IP URLs"
+  return 1
 }
 
 failopen_resolve_candidate() {
@@ -4029,12 +4310,21 @@ wait_for_node_token() {
 
 check_remote_server_tls_sans() {
   local server_host="$1"
+  local phase="${2:-tls_san_check}"
+  local require_match="${3:-0}"
+  local server_url_authority
+  local server_connect_target
   if [ -z "${server_host}" ]; then
     return 0
   fi
+  server_url_authority="$(format_url_authority "${server_host}")"
+  server_connect_target="${server_url_authority}:6443"
   if ! command -v openssl >/dev/null 2>&1; then
     log_warn_msg discover "openssl missing; skipping SAN validation" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
@@ -4049,24 +4339,30 @@ check_remote_server_tls_sans() {
     --connect-timeout "${SUGARKUBE_TLS_SAN_CURL_TIMEOUT:-5}"
     --max-time "${SUGARKUBE_TLS_SAN_CURL_MAX_TIME:-15}"
     --insecure
-    "https://${server_host}:6443/cacerts"
+    "https://${server_url_authority}:6443/cacerts"
   )
   if ! curl "${curl_args[@]}" >"${cacert_path}"; then
     log_warn_msg discover "Failed to download server CA bundle" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
     rm -rf "${tmpdir}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
   local san_output
   if ! san_output="$(
-    openssl s_client -servername "${server_host}" -connect "${server_host}:6443" \
+    openssl s_client -servername "${server_host}" -connect "${server_connect_target}" \
       -CAfile "${cacert_path}" </dev/null 2>/dev/null \
       | openssl x509 -noout -ext subjectAltName 2>/dev/null
   )"; then
     log_warn_msg discover "Failed to inspect server certificate SANs" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
     rm -rf "${tmpdir}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
@@ -4074,13 +4370,45 @@ check_remote_server_tls_sans() {
 
   if [ -z "${san_output}" ]; then
     log_warn_msg discover "Server certificate missing subjectAltName" \
-      "server=${server_host}" "phase=tls_san_check"
+      "server=${server_host}" "phase=${phase}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
     return 0
   fi
 
   local match_fragment
-  if [[ "${server_host}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
-    match_fragment="IP Address:${server_host}"
+  if is_ip_address_literal "${server_host}"; then
+    local expected_ip
+    if ! expected_ip="$(normalize_ip_literal "${server_host}")"; then
+      expected_ip="${server_host}"
+    fi
+    local san_ip_fragment
+    local san_match=1
+    while IFS= read -r san_ip_fragment; do
+      san_ip_fragment="${san_ip_fragment#IP Address:}"
+      san_ip_fragment="${san_ip_fragment//[[:space:]]/}"
+      [ -n "${san_ip_fragment}" ] || continue
+      local normalized_san_ip
+      if ! normalized_san_ip="$(normalize_ip_literal "${san_ip_fragment}")"; then
+        continue
+      fi
+      if [ "${normalized_san_ip}" = "${expected_ip}" ]; then
+        san_match=0
+        break
+      fi
+    done < <(printf '%s\n' "${san_output}" | grep -Eo 'IP Address:[^,[:space:]]+')
+    if [ "${san_match}" -ne 0 ]; then
+      local compact_sans
+      compact_sans="$(printf '%s' "${san_output}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
+      log_warn_msg discover "Server certificate SANs miss join host" \
+        "server=${server_host}" "hostname=${server_host}" \
+        "sans=$(escape_log_value "${compact_sans}")" "phase=${phase}"
+      if [ "${require_match}" = "1" ]; then
+        return 1
+      fi
+    fi
+    return 0
   else
     match_fragment="DNS:${server_host}"
   fi
@@ -4090,7 +4418,10 @@ check_remote_server_tls_sans() {
     compact_sans="$(printf '%s' "${san_output}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
     log_warn_msg discover "Server certificate SANs miss join host" \
       "server=${server_host}" "hostname=${server_host}" \
-      "sans=$(escape_log_value "${compact_sans}")" "phase=tls_san_check"
+      "sans=$(escape_log_value "${compact_sans}")" "phase=${phase}"
+    if [ "${require_match}" = "1" ]; then
+      return 1
+    fi
   fi
 
   return 0
@@ -4172,13 +4503,8 @@ install_server_single() {
   ensure_iptables_tools
   log_info discover phase=install_single cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=sqlite >&2
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_single >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_single
-  fi
+  node_ip="$(detect_node_ip_tls_san install_single || true)"
 
   local env_assignments
   build_install_env env_assignments
@@ -4187,20 +4513,8 @@ install_server_single() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    local -a install_args=(
-      server
-      --tls-san "${MDNS_HOST}"
-      --tls-san "${HN}"
-    )
-    if [ -n "${node_ip}" ]; then
-      install_args+=(--tls-san "${node_ip}")
-    fi
-    install_args+=(
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
-      --node-label "sugarkube.cluster=${CLUSTER}"
-      --node-label "sugarkube.env=${ENVIRONMENT}"
-      --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-    )
+    local -a install_args
+    build_server_install_args install_args single "${node_ip}"
     run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
@@ -4254,13 +4568,8 @@ install_server_cluster_init() {
   ensure_iptables_tools
   log_info discover phase=install_cluster_init cluster="${CLUSTER}" environment="${ENVIRONMENT}" host="${MDNS_HOST_RAW}" datastore=etcd >&2
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_cluster_init >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_cluster_init
-  fi
+  node_ip="$(detect_node_ip_tls_san install_cluster_init || true)"
 
   local env_assignments
   build_install_env env_assignments
@@ -4269,21 +4578,8 @@ install_server_cluster_init() {
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    local -a install_args=(
-      server
-      --cluster-init
-      --tls-san "${MDNS_HOST}"
-      --tls-san "${HN}"
-    )
-    if [ -n "${node_ip}" ]; then
-      install_args+=(--tls-san "${node_ip}")
-    fi
-    install_args+=(
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
-      --node-label "sugarkube.cluster=${CLUSTER}"
-      --node-label "sugarkube.env=${ENVIRONMENT}"
-      --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-    )
+    local -a install_args
+    build_server_install_args install_args cluster-init "${node_ip}"
     run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
@@ -4445,7 +4741,7 @@ install_server_join() {
     fi
     exit 1
   fi
-  check_remote_server_tls_sans "${server}"
+  check_remote_server_tls_sans "${server}" tls_san_check 0
   if [ "${DISABLE_JOIN_GATE}" = "1" ]; then
     log_info discover event=join_gate action=skip reason=disabled >&2
   else
@@ -4485,51 +4781,58 @@ install_server_join() {
     log_info discover event=join outcome=fast_path host="${MDNS_HOST_RAW}" server="${server}" mode=fast >&2
     return 0
   fi
-  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
-  # Keep hostname in TLS SANs for certificate verification
-  local server_url_target="${server}"
-  if [ -n "${ip_hint}" ]; then
-    server_url_target="${ip_hint}"
+  # Persist the discovered hostname in k3s join URLs when NSS can resolve it so
+  # durable configuration follows stable host identity. Use an IP URL only when
+  # explicitly requested or when the selected hostname would not be resolvable
+  # by the eventual systemd k3s service and discovery supplied a reachable hint.
+  local server_url_target
+  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}" install_join)"
+  if [ -n "${ip_hint}" ] && [ "${server_url_target}" = "${ip_hint}" ]; then
     log_info discover event=install_join server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_join server_url_type=hostname server_url="${server_url_target}" >&2
   fi
 
-  # Detect node IP for TLS SAN
   local node_ip=""
-  if node_ip="$(detect_node_primary_ipv4)"; then
-    log_info discover event=node_ip_detected ip="${node_ip}" phase=install_join >&2
-  else
-    log_warn_msg discover "Failed to detect node IP; TLS certificate will not include IP address" phase=install_join
+  node_ip="$(detect_node_ip_tls_san install_join || true)"
+
+  if is_ip_address_literal "${server_url_target}"; then
+    if ! check_remote_server_tls_sans "${server_url_target}" install_join_url_tls_san 1; then
+      log_error_msg discover "Selected IP join URL is not present in the remote server certificate SANs; refusing a durable URL that k3s cannot verify" \
+        "phase=install_join" "server_url=${server_url_target}" "hostname=${server}" \
+        "remediation=fix mDNS/NSS hostname resolution, rotate the server certificate with an explicit IP SAN, or set SUGARKUBE_SERVER_URL_PREFER_IP=0 after hostname resolution works"
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=join-url-tls-san elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
+    fi
+  fi
+
+  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_join" "${ip_hint}"; then
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "k3s install"
+      summary::step FAIL "k3s install" "${summary_note} reason=join-url-resolution elapsed_ms=${elapsed_ms}"
+      summary_recorded=1
+    fi
+    exit 1
   fi
 
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
-    env_assignments+=("SERVER_IP=${ip_hint}")
-  fi
+  append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    local -a install_args=(
-      server
-      --server "https://${server_url_target}:${selected_port}"
-      --tls-san "${server}"
-      --tls-san "${MDNS_HOST}"
-      --tls-san "${HN}"
-    )
-    if [ -n "${node_ip}" ]; then
-      install_args+=(--tls-san "${node_ip}")
-    fi
-    install_args+=(
-      --kubelet-arg "node-labels=sugarkube.cluster=${CLUSTER},sugarkube.env=${ENVIRONMENT}"
-      --node-label "sugarkube.cluster=${CLUSTER}"
-      --node-label "sugarkube.env=${ENVIRONMENT}"
-      --node-taint "node-role.kubernetes.io/control-plane=true:NoSchedule"
-    )
+    local -a install_args
+    build_server_join_install_args install_args "${server_url_target}" "${selected_port}" "${server}" "${node_ip}"
     run_k3s_install "${install_args[@]}"
   )
   if wait_for_api 1; then
@@ -4644,28 +4947,55 @@ install_agent() {
     agent_log_args+=("discovered_server=${discovered_server}")
   fi
   log_info discover "${agent_log_args[@]}" >&2
-  # Use IP address for server URL when available to avoid mDNS resolution issues in systemd context
-  local server_url_target="${server}"
-  if [ -n "${ip_hint}" ]; then
-    server_url_target="${ip_hint}"
+  # Persist the discovered hostname in k3s agent URLs when NSS can resolve it so
+  # durable configuration follows stable host identity. Use an IP URL only when
+  # explicitly requested or when the selected hostname would not be resolvable
+  # by the eventual systemd k3s service and discovery supplied a reachable hint.
+  local server_url_target
+  server_url_target="$(select_join_server_url_target "${server}" "${ip_hint}" install_agent)"
+  if [ -n "${ip_hint}" ] && [ "${server_url_target}" = "${ip_hint}" ]; then
     log_info discover event=install_agent server_url_type=ip server_url="${server_url_target}" hostname="${server}" >&2
   else
     log_info discover event=install_agent server_url_type=hostname server_url="${server_url_target}" >&2
   fi
+  if is_ip_address_literal "${server_url_target}"; then
+    if ! check_remote_server_tls_sans "${server_url_target}" install_agent_url_tls_san 1; then
+      log_error_msg discover "Selected IP join URL is not present in the remote server certificate SANs; refusing a durable URL that k3s cannot verify" \
+        "phase=install_agent" "server_url=${server_url_target}" "hostname=${server}" \
+        "remediation=fix mDNS/NSS hostname resolution, rotate the server certificate with an explicit IP SAN, or set SUGARKUBE_SERVER_URL_PREFER_IP=0 after hostname resolution works"
+      if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+        local elapsed_ms
+        elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+        summary::section "k3s install"
+        summary::step FAIL "k3s install" "${summary_note} reason=join-url-tls-san elapsed_ms=${elapsed_ms}"
+        summary_recorded=1
+      fi
+      exit 1
+    fi
+  fi
+
+  if ! ensure_join_url_target_resolvable "${server_url_target}" "install_agent" "${ip_hint}"; then
+    if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
+      local elapsed_ms
+      elapsed_ms="$(summary_elapsed_ms "${summary_start}")"
+      summary::section "k3s install"
+      summary::step FAIL "k3s install" "${summary_note} reason=join-url-resolution elapsed_ms=${elapsed_ms}"
+      summary_recorded=1
+    fi
+    exit 1
+  fi
+
   local env_assignments
   build_install_env env_assignments
-  env_assignments+=("K3S_URL=https://${server_url_target}:${selected_port}")
-  if [ -n "${ip_hint}" ]; then
-    env_assignments+=("SERVER_IP=${ip_hint}")
-  fi
+  append_join_env_assignments env_assignments "${server_url_target}" "${selected_port}" "${ip_hint}"
   (
     for _assignment in "${env_assignments[@]}"; do
       # shellcheck disable=SC2163  # We want to export the variable named in $_assignment
       export "$_assignment"
     done
-    run_k3s_install agent \
-      --node-label "sugarkube.cluster=${CLUSTER}" \
-      --node-label "sugarkube.env=${ENVIRONMENT}"
+    local -a install_args
+    build_agent_install_args install_args
+    run_k3s_install "${install_args[@]}"
   )
   if [ "${summary_active}" -eq 1 ] && [ "${summary_recorded}" -eq 0 ]; then
     local elapsed_ms
@@ -4925,6 +5255,21 @@ if [ "${TEST_CLAIM_BOOTSTRAP:-0}" -eq 1 ]; then
     printf '%s\n' "${CLAIMED_SERVER_HOST}"
   fi
   exit "${status}"
+fi
+
+if [ "${TEST_RENDER_K3S_INSTALL:-0}" -eq 1 ]; then
+  render_k3s_install_test "${TEST_RENDER_K3S_INSTALL_MODE}"
+  exit $?
+fi
+
+if [ "${TEST_ENSURE_JOIN_URL_TARGET:-0}" -eq 1 ]; then
+  ensure_join_url_target_resolvable "${TEST_ENSURE_JOIN_URL_VALUE}" test_join_url "${TEST_ENSURE_JOIN_URL_IP_HINT}"
+  exit $?
+fi
+
+if [ "${TEST_CHECK_REMOTE_TLS_SAN:-0}" -eq 1 ]; then
+  check_remote_server_tls_sans "${TEST_CHECK_REMOTE_TLS_SAN_VALUE}" test_remote_tls_san 1
+  exit $?
 fi
 
 run_configure_avahi

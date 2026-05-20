@@ -1,0 +1,15 @@
+{
+  "id": "2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment",
+  "date": "2026-05-18",
+  "component": "scripts/k3s-discover.sh and durable k3s install identity handling",
+  "rootCause": "A home power outage triggered DHCP reassignment for sugarkube3.local/sugarkube4.local/sugarkube5.local. Sugarkube internals persisted raw LAN IP identity in durable install/TLS SAN paths, so stale IP-based identity survived while actual interface addresses changed. Recovery was further complicated by a named-env parsing pitfall where `just up env=staging` could be interpreted literally (`env=staging`) in downstream discovery state.",
+  "resolution": "Added a first-class Sugarkube outage record and changed k3s install/discovery defaults so durable TLS SAN identity is hostname-based (`<hostname>.local` + short hostname) without DHCP raw IP SAN by default. Kept raw-IP SAN and IP-first join URL behaviors as explicit opt-ins. Documented the `just up staging` workaround and stale Avahi cleanup used during incident recovery.",
+  "references": [
+    "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md",
+    "scripts/k3s-discover.sh",
+    "scripts/configure_k3s_node_ip.sh",
+    "tests/scripts/test_detect_node_ip.py",
+    "tests/test_up_recipe_calls.py"
+  ],
+  "longForm": "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md"
+}
