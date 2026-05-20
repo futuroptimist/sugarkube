@@ -175,6 +175,40 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
         Path(path).unlink(missing_ok=True)
 
 
+def _run_cf_tunnel_install_recipe(env: str) -> subprocess.CompletedProcess[str]:
+    rendered_body = _extract_cf_recipe_body().replace("{{ quote(env) }}", json.dumps(env))
+    script = textwrap.dedent(
+        """#!/usr/bin/env bash
+        set -euo pipefail
+
+        export CF_TUNNEL_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature
+        helm() {
+            printf 'HELM:%s\n' "$*"
+            if [ ! -t 0 ]; then
+                sed 's/^/HELM_STDIN:/' <&0
+            fi
+        }
+        kubectl() {
+            printf 'KUBECTL:%s\n' "$*"
+            if [ ! -t 0 ]; then
+                sed 's/^/KUBECTL_STDIN:/' <&0 >/dev/null
+            fi
+            return 0
+        }
+
+        """
+    ) + rendered_body + "\n"
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write(script)
+        path = f.name
+
+    try:
+        return subprocess.run(["bash", path], capture_output=True, text=True)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
     assert "configmap_yaml" not in cf_recipe_body
     assert "kind: ConfigMap" not in cf_recipe_body
@@ -276,6 +310,41 @@ def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
     assert "token_len=" in cf_recipe_body
     assert "appears too short" in cf_recipe_body
     assert "does not look like a JWT" in cf_recipe_body
+
+
+def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -> None:
+    # Outage regression: during 2026-05-18 staging recovery, `env=staging`
+    # was propagated literally into the tunnel name (`sugarkube-env=staging`).
+    assert "env_input={{ quote(env) }}" in cf_recipe_body
+    assert 'while [ "${env_name#env=}" != "${env_name}" ]; do' in cf_recipe_body
+    assert 'env_name="${env_name#env=}"' in cf_recipe_body
+    assert 'if [ "${env_name}" = "int" ]; then' in cf_recipe_body
+    assert 'env_name="staging"' in cf_recipe_body
+
+    runtime_cases = {
+        "staging": "staging",
+        "env=staging": "staging",
+        "env=env=staging": "staging",
+        "int": "staging",
+    }
+
+    for supplied_env, normalized_env in runtime_cases.items():
+        result = _run_cf_tunnel_install_recipe(supplied_env)
+        assert result.returncode == 0, result.stderr
+
+        combined_output = result.stdout + result.stderr
+        assert re.search(
+            r"HELM:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .* --values -",
+            result.stdout,
+        )
+        assert f'HELM_STDIN:  tunnelName: "sugarkube-{normalized_env}"' in combined_output
+        assert f"- Tunnel name: sugarkube-{normalized_env}" in combined_output
+        assert "sugarkube-env=staging" not in combined_output
+        assert "sugarkube-env=env=staging" not in combined_output
+
+    alias_result = _run_cf_tunnel_install_recipe("int")
+    assert alias_result.returncode == 0, alias_result.stderr
+    assert 'WARNING: env name "int" is deprecated; using env=staging.' in alias_result.stderr
 
 
 def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:

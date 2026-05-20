@@ -288,6 +288,9 @@ def _run_remote_tls_san_check(
                 if [ "${exit_code}" != "0" ]; then
                   exit "${exit_code}"
                 fi
+                if [ ! -t 0 ]; then
+                  cat >/dev/null
+                fi
                 printf '%s\n' "${SUGARKUBE_TEST_SAN_OUTPUT}"
                 ;;
               *)
