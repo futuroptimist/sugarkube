@@ -274,7 +274,7 @@ def _run_remote_tls_san_check(
             bin_dir / "openssl",
             """
             #!/usr/bin/env bash
-            set -euo pipefail
+            set -eo pipefail
             case "${1:-}" in
               s_client)
                 exit_code="${SUGARKUBE_TEST_OPENSSL_S_CLIENT_EXIT:-0}"
@@ -362,7 +362,8 @@ def test_ip_join_url_tls_guard_accepts_matching_remote_ip_san(tmp_path: Path) ->
 def test_ip_join_url_tls_guard_accepts_matching_remote_ipv6_san(tmp_path: Path) -> None:
     san_output = (
         "X509v3 Subject Alternative Name:\n"
-        f"    DNS:{SERVER_HOST}, DNS:sugarkube0, IP Address:{NODE_IP_V6}"
+        "    DNS:sugarkube0.local, DNS:sugarkube0, "
+        "IP Address:2001:DB8:0:0:0:0:0:10"
     )
 
     result = _run_remote_tls_san_check(tmp_path, NODE_IP_V6, san_output)

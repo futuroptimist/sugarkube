@@ -4165,6 +4165,22 @@ format_url_authority() {
   printf '%s' "${host}"
 }
 
+normalize_ip_literal() {
+  local candidate="${1:-}"
+  [ -n "${candidate}" ] || return 1
+  CANDIDATE_HOST="${candidate}" python3 - <<'PY'
+import ipaddress
+import os
+import sys
+
+try:
+    value = ipaddress.ip_address(os.environ.get("CANDIDATE_HOST", ""))
+except ValueError:
+    sys.exit(1)
+print(value.compressed.lower())
+PY
+}
+
 ensure_join_url_target_resolvable() {
   local target="${1:-}"
   local phase="${2:-join_url}"
@@ -4363,7 +4379,36 @@ check_remote_server_tls_sans() {
 
   local match_fragment
   if is_ip_address_literal "${server_host}"; then
-    match_fragment="IP Address:${server_host}"
+    local expected_ip
+    if ! expected_ip="$(normalize_ip_literal "${server_host}")"; then
+      expected_ip="${server_host}"
+    fi
+    local san_ip_fragment
+    local san_match=1
+    while IFS= read -r san_ip_fragment; do
+      san_ip_fragment="${san_ip_fragment#IP Address:}"
+      san_ip_fragment="${san_ip_fragment//[[:space:]]/}"
+      [ -n "${san_ip_fragment}" ] || continue
+      local normalized_san_ip
+      if ! normalized_san_ip="$(normalize_ip_literal "${san_ip_fragment}")"; then
+        continue
+      fi
+      if [ "${normalized_san_ip}" = "${expected_ip}" ]; then
+        san_match=0
+        break
+      fi
+    done < <(printf '%s\n' "${san_output}" | grep -Eo 'IP Address:[^,[:space:]]+')
+    if [ "${san_match}" -ne 0 ]; then
+      local compact_sans
+      compact_sans="$(printf '%s' "${san_output}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
+      log_warn_msg discover "Server certificate SANs miss join host" \
+        "server=${server_host}" "hostname=${server_host}" \
+        "sans=$(escape_log_value "${compact_sans}")" "phase=${phase}"
+      if [ "${require_match}" = "1" ]; then
+        return 1
+      fi
+    fi
+    return 0
   else
     match_fragment="DNS:${server_host}"
   fi
