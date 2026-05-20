@@ -313,3 +313,13 @@ def test_debug_recipe_surfaces_origin_cert_guidance(origin_cert_guidance_text: s
     assert "origin_cert_guidance" in debug_body
     assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
     assert 'config_src="cloudflare"' in origin_cert_guidance_text
+
+
+def test_cf_tunnel_install_uses_normalized_env_for_tunnel_name(cf_recipe_body: str) -> None:
+    # Regression for outage recovery path in
+    # outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md:
+    # `just cf-tunnel-install env=staging ...` must not produce `sugarkube-env=staging`.
+    assert '"  tunnelName: \\"${CF_TUNNEL_NAME:-sugarkube-${env_name}}\\""' in cf_recipe_body
+    assert '"- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-${env_name}}"' in cf_recipe_body
+    assert "sugarkube-${env_input}" not in cf_recipe_body
+    assert "sugarkube-env=staging" not in cf_recipe_body
