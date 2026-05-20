@@ -4362,7 +4362,7 @@ check_remote_server_tls_sans() {
   fi
 
   local match_fragment
-  if [[ "${server_host}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+  if is_ip_address_literal "${server_host}"; then
     match_fragment="IP Address:${server_host}"
   else
     match_fragment="DNS:${server_host}"

@@ -359,6 +359,17 @@ def test_ip_join_url_tls_guard_accepts_matching_remote_ip_san(tmp_path: Path) ->
     assert result.returncode == 0, result.stderr
 
 
+def test_ip_join_url_tls_guard_accepts_matching_remote_ipv6_san(tmp_path: Path) -> None:
+    san_output = (
+        "X509v3 Subject Alternative Name:\n"
+        f"    DNS:{SERVER_HOST}, DNS:sugarkube0, IP Address:{NODE_IP_V6}"
+    )
+
+    result = _run_remote_tls_san_check(tmp_path, NODE_IP_V6, san_output)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_strict_ip_join_url_tls_guard_fails_closed_when_ca_fetch_fails(
     tmp_path: Path,
 ) -> None:
