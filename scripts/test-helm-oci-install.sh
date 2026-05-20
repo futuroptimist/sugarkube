@@ -245,13 +245,13 @@ if ! grep -q "is 'failed', not 'deployed'" "${tmp_bin}/upgrade-failed-status.out
     exit 1
 fi
 
-if ! grep -q "values=docs/examples/dspace.values.dev.yaml" "${tmp_bin}/upgrade-failed-status.out"; then
-    printf 'Install guidance did not preserve values argument.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
+if ! grep -q "Do not run helm-oci-install against an existing non-deployed release object" "${tmp_bin}/upgrade-failed-status.out"; then
+    printf 'Missing non-deployed release repair guidance.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
     exit 1
 fi
 
-if ! grep -q "version_file=docs/apps/dspace.version" "${tmp_bin}/upgrade-failed-status.out"; then
-    printf 'Install guidance did not preserve version_file argument.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
+if grep -q "just helm-oci-install" "${tmp_bin}/upgrade-failed-status.out"; then
+    printf 'Non-deployed status should not suggest install recovery.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
     exit 1
 fi
 

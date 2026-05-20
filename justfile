@@ -1363,14 +1363,12 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                 echo "ERROR: helm-oci-upgrade requires an existing deployed release."
                 echo "Release '${release}' in namespace '${namespace}' is '${release_status:-unknown}', not 'deployed'."
                 echo
-                echo "For fresh-cluster recovery, run:"
-                echo "  ${install_hint_shape}"
+                echo "This is not a fresh-cluster missing-release case."
+                echo "Do not run helm-oci-install against an existing non-deployed release object."
                 echo
-                echo "For steady state with an existing deployed release, run:"
+                echo "Repair the existing release first (for example: investigate, rollback, or uninstall cleanup),"
+                echo "then retry steady-state upgrade once the release is healthy/deployed:"
                 echo "  just helm-oci-upgrade release=${release} namespace=${namespace} chart=${chart}"
-                echo
-                echo "Resolved install example with current inputs:"
-                echo "  just helm-oci-install ${install_hint_args[*]}"
                 echo
                 echo "Helm status output:"
                 echo "  ${status_output}"
