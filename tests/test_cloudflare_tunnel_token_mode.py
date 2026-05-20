@@ -278,6 +278,18 @@ def test_cf_tunnel_install_validates_token_shape(cf_recipe_body: str) -> None:
     assert "does not look like a JWT" in cf_recipe_body
 
 
+def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -> None:
+    # Outage regression: during 2026-05-18 staging recovery, `env=staging`
+    # was propagated literally into the tunnel name (`sugarkube-env=staging`).
+    assert "env_input={{ quote(env) }}" in cf_recipe_body
+    assert 'while [ "${env_name#env=}" != "${env_name}" ]; do' in cf_recipe_body
+    assert 'if [ "${env_name}" = "int" ]; then' in cf_recipe_body
+    assert '"  tunnelName: \\"${CF_TUNNEL_NAME:-sugarkube-${env_name}}\\""' in cf_recipe_body
+    assert '"- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-${env_name}}"' in cf_recipe_body
+    assert "sugarkube-${env_input}" not in cf_recipe_body
+    assert "sugarkube-env=staging" not in cf_recipe_body
+
+
 def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
     assert "origin_cert_guidance" in cf_recipe_body
