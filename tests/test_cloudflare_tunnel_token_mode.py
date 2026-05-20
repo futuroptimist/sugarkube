@@ -188,7 +188,13 @@ def _run_cf_tunnel_install_recipe(env: str) -> subprocess.CompletedProcess[str]:
                 sed 's/^/HELM_STDIN:/' <&0
             fi
         }
-        kubectl() { printf 'KUBECTL:%s\n' "$*"; return 0; }
+        kubectl() {
+            printf 'KUBECTL:%s\n' "$*"
+            if [ ! -t 0 ]; then
+                sed 's/^/KUBECTL_STDIN:/' <&0 >/dev/null
+            fi
+            return 0
+        }
 
         """
     ) + rendered_body + "\n"
