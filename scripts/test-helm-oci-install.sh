@@ -216,6 +216,16 @@ if ! grep -q "just helm-oci-install release=dspace namespace=dspace chart=oci://
     exit 1
 fi
 
+if ! grep -q "version_file=..." "${tmp_bin}/upgrade-missing.out"; then
+    printf 'Missing optional placeholder guidance in upgrade-only failure output.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.out")" >&2
+    exit 1
+fi
+
+if ! grep -q "outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment" "${tmp_bin}/upgrade-missing.out"; then
+    printf 'Missing outage reference path in upgrade-only failure output.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.out")" >&2
+    exit 1
+fi
+
 
 printf 'failed' >"${status_mode_file}"
 if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \

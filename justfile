@@ -1326,30 +1326,32 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             install_hint_args+=("default_tag=${default_tag}")
         fi
 
+        local install_hint_shape="just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version=...] [version_file=...] [host=...] [tag=...] [default_tag=...]"
         local status_output=""
         if ! status_output="$(helm -n "${namespace}" status "${release}" 2>&1)"; then
             if grep -qiE '(release:[[:space:]]*not found|not[[:space:]-]*found)' <<< "${status_output}"; then
-                cat >&2 <<EOF
-ERROR: helm-oci-upgrade requires an existing deployed release.
-Release '${release}' was not found in namespace '${namespace}'.
-
-Fresh-cluster recovery note: during outage rebuilds (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment),
-you usually need an install-or-upgrade first.
-
-Run this instead:
-  just helm-oci-install ${install_hint_args[*]}
-
-Helm status output:
-  ${status_output}
-EOF
+                {
+                    echo "ERROR: helm-oci-upgrade requires an existing deployed release."
+                    echo "Release '${release}' was not found in namespace '${namespace}'."
+                    echo
+                    echo "Fresh-cluster recovery note: during outage rebuilds (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment),"
+                    echo "run an equivalent install invocation first:"
+                    echo "  ${install_hint_shape}"
+                    echo
+                    echo "Resolved example with current inputs:"
+                    echo "  just helm-oci-install ${install_hint_args[*]}"
+                    echo
+                    echo "Helm status output:"
+                    echo "  ${status_output}"
+                } >&2
             else
-                cat >&2 <<EOF
-ERROR: helm-oci-upgrade could not verify release '${release}' in namespace '${namespace}'.
-Resolve this Helm/Kubernetes access issue and retry the upgrade.
-
-Helm status output:
-  ${status_output}
-EOF
+                {
+                    echo "ERROR: helm-oci-upgrade could not verify release '${release}' in namespace '${namespace}'."
+                    echo "Resolve this Helm/Kubernetes access issue and retry the upgrade."
+                    echo
+                    echo "Helm status output:"
+                    echo "  ${status_output}"
+                } >&2
             fi
             return 1
         fi
@@ -1357,16 +1359,22 @@ EOF
         local release_status=""
         release_status="$(awk -F': *' '/^STATUS:/ {print tolower($2); exit}' <<< "${status_output}")"
         if [ "${release_status}" != "deployed" ]; then
-            cat >&2 <<EOF
-ERROR: helm-oci-upgrade requires an existing deployed release.
-Release '${release}' in namespace '${namespace}' is '${release_status:-unknown}', not 'deployed'.
-
-Run this instead to perform first-time recovery install:
-  just helm-oci-install ${install_hint_args[*]}
-
-Helm status output:
-  ${status_output}
-EOF
+            {
+                echo "ERROR: helm-oci-upgrade requires an existing deployed release."
+                echo "Release '${release}' in namespace '${namespace}' is '${release_status:-unknown}', not 'deployed'."
+                echo
+                echo "For fresh-cluster recovery, run:"
+                echo "  ${install_hint_shape}"
+                echo
+                echo "For steady state with an existing deployed release, run:"
+                echo "  just helm-oci-upgrade release=${release} namespace=${namespace} chart=${chart}"
+                echo
+                echo "Resolved install example with current inputs:"
+                echo "  just helm-oci-install ${install_hint_args[*]}"
+                echo
+                echo "Helm status output:"
+                echo "  ${status_output}"
+            } >&2
             return 1
         fi
     }
