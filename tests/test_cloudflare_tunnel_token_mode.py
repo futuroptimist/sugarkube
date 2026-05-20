@@ -286,6 +286,27 @@ def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_ce
     assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in origin_cert_guidance_text
 
 
+
+
+def test_cf_tunnel_install_normalizes_named_env_for_tunnel_name(cf_recipe_body: str) -> None:
+    assert 'while [ "${env_name#env=}" != "${env_name}" ]; do' in cf_recipe_body
+    assert 'env_name="${env_name#env=}"' in cf_recipe_body
+    assert 'if [ "${env_name}" = "int" ]; then' in cf_recipe_body
+    assert "tunnelName" in cf_recipe_body
+    assert "sugarkube-${env_name}" in cf_recipe_body
+    assert '"- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-${env_name}}"' in cf_recipe_body
+    assert 'sugarkube-env=staging' not in cf_recipe_body
+
+
+def test_cf_tunnel_install_keeps_outage_regression_context() -> None:
+    outage_text = (
+        REPO_ROOT
+        / "outages"
+        / "2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md"
+    ).read_text(encoding="utf-8")
+    assert "just up env=staging" in outage_text
+    assert "env=staging" in outage_text
+
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     reset_body = _extract_recipe_body("cf-tunnel-reset")
     debug_body = _extract_recipe_body("cf-tunnel-debug")
