@@ -1236,6 +1236,16 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
+    if [ "${allow_install}" != "true" ]; then
+        if ! helm -n "${namespace}" status "${release}" >/dev/null 2>&1; then
+            echo "ERROR: helm-oci-upgrade requires an existing deployed release." >&2
+            echo "Release '${release}' was not found as deployed in namespace '${namespace}'." >&2
+            echo "If this is a fresh cluster recovery (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md), run:" >&2
+            echo "  just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version_file=...] [default_tag=...]" >&2
+            exit 1
+        fi
+    fi
+
     wait_for_rollouts() {
         local rollout_timeout="${SUGARKUBE_HELM_ROLLOUT_TIMEOUT:-180s}"
 

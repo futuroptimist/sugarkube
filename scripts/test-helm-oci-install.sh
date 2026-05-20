@@ -67,6 +67,16 @@ if [ ! -f "${FAKE_HELM_REGISTRY_CHART:-}" ]; then
 fi
 
 echo "helm $*" | tee -a "${HELM_TEST_LOG:-/dev/null}"
+
+if [ "${FAKE_HELM_STATUS_MODE:-deployed}" = "missing" ] && [ "$1" = "-n" ] && [ "$2" = "dspace" ] && [ "$3" = "status" ] && [ "$4" = "dspace" ]; then
+    echo "Error: release: not found" >&2
+    exit 1
+fi
+
+if [ "$1" = "-n" ] && [ "$2" = "dspace" ] && [ "$3" = "status" ] && [ "$4" = "dspace" ]; then
+    echo "STATUS: deployed"
+    exit 0
+fi
 SH
 chmod +x "${tmp_bin}/helm"
 
@@ -98,10 +108,13 @@ exit 0
 SH
 chmod +x "${tmp_bin}/kubectl"
 
-command_output="$(
+run_with_stubbed_tools() {
     PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
-        FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
-        just helm-oci-install \
+        FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" "$@"
+}
+
+command_output="$(
+    run_with_stubbed_tools just helm-oci-install \
         release=dspace namespace=dspace \
         chart=oci://registry.test/charts/dspace \
         values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
@@ -149,4 +162,57 @@ if ! grep -q "rollout status deployment.apps/dspace" "${kubectl_log}"; then
     exit 1
 fi
 
-printf 'helm-oci-install emits normalized chart argument and rollout feedback.\n'
+: >"${helm_log}"
+: >"${kubectl_log}"
+if run_with_stubbed_tools FAKE_HELM_STATUS_MODE=missing just helm-oci-upgrade \
+    release=dspace namespace=dspace \
+    chart=oci://registry.test/charts/dspace \
+    values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+    version_file=docs/apps/dspace.version \
+    default_tag=v3-latest >"${tmp_bin}/upgrade-missing.out" 2>"${tmp_bin}/upgrade-missing.err"; then
+    printf 'Expected helm-oci-upgrade to fail when no deployed release exists.\n' >&2
+    exit 1
+fi
+
+if ! grep -q "fresh cluster" "${tmp_bin}/upgrade-missing.err"; then
+    printf 'Expected actionable fresh-cluster guidance missing.\nStderr:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.err")" >&2
+    exit 1
+fi
+
+if ! grep -q "just helm-oci-install" "${tmp_bin}/upgrade-missing.err"; then
+    printf 'Expected helm-oci-install suggestion missing for no-release upgrade path.\nStderr:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.err")" >&2
+    exit 1
+fi
+
+if grep -q "helm upgrade" "${helm_log}"; then
+    printf 'Upgrade should fail before calling helm upgrade when release is missing.\nLog:\n%s\n' "$(cat "${helm_log}")" >&2
+    exit 1
+fi
+
+: >"${helm_log}"
+: >"${kubectl_log}"
+upgrade_output="$(
+    run_with_stubbed_tools just helm-oci-upgrade \
+        release=release=dspace namespace=namespace=dspace \
+        chart=chart=oci://registry.test/charts/dspace \
+        values=values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+        version_file=version_file=docs/apps/dspace.version \
+        default_tag=default_tag=v3-latest
+)"
+
+if ! grep -q -- "--reuse-values" "${helm_log}"; then
+    printf 'Expected upgrade path to pass --reuse-values.\nLog:\n%s\n' "$(cat "${helm_log}")" >&2
+    exit 1
+fi
+
+if grep -q -- "--install" "${helm_log}"; then
+    printf 'Upgrade path should not pass --install by default.\nLog:\n%s\n' "$(cat "${helm_log}")" >&2
+    exit 1
+fi
+
+if ! grep -q "oci://registry.test/charts/dspace" <<<"${upgrade_output}"; then
+    printf 'Expected normalized chart argument in upgrade output.\nOutput:\n%s\n' "${upgrade_output}" >&2
+    exit 1
+fi
+
+printf 'helm-oci-install/upgrade fresh-cluster and steady-state behavior verified.\n'
