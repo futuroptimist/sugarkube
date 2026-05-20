@@ -1236,6 +1236,35 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
+    ensure_upgrade_target_exists() {
+        if [ "${allow_install}" = "true" ]; then
+            return 0
+        fi
+
+        local release_status=""
+        if ! release_status="$(helm -n "${namespace}" status "${release}" -o json 2>/dev/null || true)"; then
+            release_status=""
+        fi
+
+        if [ -z "${release_status}" ]; then
+            echo "ERROR: Release '${release}' has no deployed revision in namespace '${namespace}'." >&2
+            echo "       This usually happens on fresh-cluster recovery after control-plane rebuilds (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)." >&2
+            echo "       Use install-or-upgrade first:" >&2
+            echo "       just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version=...|version_file=...] [host=...] [tag=...|default_tag=...]" >&2
+            exit 1
+        fi
+
+        local release_state=""
+        release_state="$(printf '%s' "${release_status}" | python3 -c 'import json,sys; data=json.load(sys.stdin); print((data.get("info") or {}).get("status") or "")' 2>/dev/null || true)"
+
+        if [ "${release_state}" != "deployed" ]; then
+            echo "ERROR: Release '${release}' exists in namespace '${namespace}', but status is '${release_state:-unknown}' (expected 'deployed')." >&2
+            echo "       Use install-or-upgrade first:" >&2
+            echo "       just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version=...|version_file=...] [host=...] [tag=...|default_tag=...]" >&2
+            exit 1
+        fi
+    }
+
     wait_for_rollouts() {
         local rollout_timeout="${SUGARKUBE_HELM_ROLLOUT_TIMEOUT:-180s}"
 
@@ -1317,6 +1346,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ ${#version_args[@]} -gt 0 ]; then
         helm_args+=("${version_args[@]}")
     fi
+
+    ensure_upgrade_target_exists
 
     helm "${helm_args[@]}"
     wait_for_rollouts
