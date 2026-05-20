@@ -1236,6 +1236,20 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
+    has_deployed_release() {
+        local status_output=""
+
+        if ! status_output="$(helm -n "${namespace}" status "${release}" -o json 2>&1)"; then
+            return 1
+        fi
+
+        if printf '%s' "${status_output}" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"deployed"'; then
+            return 0
+        fi
+
+        return 1
+    }
+
     wait_for_rollouts() {
         local rollout_timeout="${SUGARKUBE_HELM_ROLLOUT_TIMEOUT:-180s}"
 
@@ -1304,6 +1318,14 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     if [ "${reuse_values}" = "true" ]; then
         helm_args+=(--reuse-values)
+    fi
+
+    if [ "${allow_install}" != "true" ] && ! has_deployed_release; then
+        echo "ERROR: helm-oci-upgrade requires an existing deployed release." >&2
+        echo "Release '${release}' in namespace '${namespace}' is not currently deployed." >&2
+        echo "Fresh-cluster recovery path: run just helm-oci-install with the same release/namespace/chart/values inputs." >&2
+        echo "Outage reference: outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md" >&2
+        exit 1
     fi
 
     if [ ${#value_args[@]} -gt 0 ]; then
