@@ -255,6 +255,11 @@ if grep -q "just helm-oci-install" "${tmp_bin}/upgrade-failed-status.out"; then
     exit 1
 fi
 
+if ! grep -q "just helm-oci-upgrade release=dspace namespace=dspace chart=oci://registry.test/charts/dspace values=docs/examples/dspace.values.dev.yaml version_file=docs/apps/dspace.version" "${tmp_bin}/upgrade-failed-status.out"; then
+    printf 'Non-deployed status guidance should preserve retry arguments.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
+    exit 1
+fi
+
 printf 'error' >"${status_mode_file}"
 if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
     HELM_STATUS_MODE_FILE="${status_mode_file}" \

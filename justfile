@@ -1307,23 +1307,30 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         fi
 
         local install_hint_args=("release=${release}" "namespace=${namespace}" "chart=${chart}")
+        local upgrade_hint_args=("release=${release}" "namespace=${namespace}" "chart=${chart}")
         if [ -n "${values}" ]; then
             install_hint_args+=("values=${values}")
+            upgrade_hint_args+=("values=${values}")
         fi
         if [ -n "${host}" ]; then
             install_hint_args+=("host=${host}")
+            upgrade_hint_args+=("host=${host}")
         fi
         if [ -n "${version}" ]; then
             install_hint_args+=("version=${version}")
+            upgrade_hint_args+=("version=${version}")
         fi
         if [ -n "${version_file}" ]; then
             install_hint_args+=("version_file=${version_file}")
+            upgrade_hint_args+=("version_file=${version_file}")
         fi
         if [ -n "${tag}" ]; then
             install_hint_args+=("tag=${tag}")
+            upgrade_hint_args+=("tag=${tag}")
         fi
         if [ -n "${default_tag}" ]; then
             install_hint_args+=("default_tag=${default_tag}")
+            upgrade_hint_args+=("default_tag=${default_tag}")
         fi
 
         local install_hint_shape="just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version=...] [version_file=...] [host=...] [tag=...] [default_tag=...]"
@@ -1368,7 +1375,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                 echo
                 echo "Repair the existing release first (for example: investigate, rollback, or uninstall cleanup),"
                 echo "then retry steady-state upgrade once the release is healthy/deployed:"
-                echo "  just helm-oci-upgrade release=${release} namespace=${namespace} chart=${chart}"
+                echo "  just helm-oci-upgrade ${upgrade_hint_args[*]}"
                 echo
                 echo "Helm status output:"
                 echo "  ${status_output}"
