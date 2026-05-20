@@ -68,6 +68,16 @@ if [ "$1" = "-n" ] && [ "$3" = "status" ]; then
         exit 1
     fi
 
+    if [ "${status_mode}" = "error" ]; then
+        echo "Error: Kubernetes cluster unreachable" >&2
+        exit 1
+    fi
+
+    if [ "${status_mode}" = "failed" ]; then
+        echo "STATUS: failed"
+        exit 0
+    fi
+
     echo "STATUS: deployed"
     exit 0
 fi
@@ -203,6 +213,56 @@ fi
 
 if ! grep -q "just helm-oci-install release=dspace namespace=dspace chart=oci://registry.test/charts/dspace" "${tmp_bin}/upgrade-missing.out"; then
     printf 'Missing install guidance in upgrade-only failure output.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-missing.out")" >&2
+    exit 1
+fi
+
+
+printf 'failed' >"${status_mode_file}"
+if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
+    HELM_STATUS_MODE_FILE="${status_mode_file}" \
+    FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
+    just helm-oci-upgrade \
+    release=dspace namespace=dspace \
+    chart=oci://registry.test/charts/dspace \
+    values=docs/examples/dspace.values.dev.yaml \
+    version_file=docs/apps/dspace.version >"${tmp_bin}/upgrade-failed-status.out" 2>&1; then
+    printf 'Expected upgrade-only path to fail when release status is not deployed.\n' >&2
+    exit 1
+fi
+
+if ! grep -q "is 'failed', not 'deployed'" "${tmp_bin}/upgrade-failed-status.out"; then
+    printf 'Missing non-deployed status guidance.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
+    exit 1
+fi
+
+if ! grep -q "values=docs/examples/dspace.values.dev.yaml" "${tmp_bin}/upgrade-failed-status.out"; then
+    printf 'Install guidance did not preserve values argument.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
+    exit 1
+fi
+
+if ! grep -q "version_file=docs/apps/dspace.version" "${tmp_bin}/upgrade-failed-status.out"; then
+    printf 'Install guidance did not preserve version_file argument.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
+    exit 1
+fi
+
+printf 'error' >"${status_mode_file}"
+if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
+    HELM_STATUS_MODE_FILE="${status_mode_file}" \
+    FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
+    just helm-oci-upgrade \
+    release=dspace namespace=dspace \
+    chart=oci://registry.test/charts/dspace >"${tmp_bin}/upgrade-status-error.out" 2>&1; then
+    printf 'Expected upgrade-only path to fail on generic helm status error.\n' >&2
+    exit 1
+fi
+
+if ! grep -q "could not verify release 'dspace'" "${tmp_bin}/upgrade-status-error.out"; then
+    printf 'Missing generic status error guidance.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-status-error.out")" >&2
+    exit 1
+fi
+
+if grep -q "just helm-oci-install" "${tmp_bin}/upgrade-status-error.out"; then
+    printf 'Generic status error should not suggest install recovery.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-status-error.out")" >&2
     exit 1
 fi
 

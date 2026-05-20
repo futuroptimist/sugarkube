@@ -1306,17 +1306,63 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             return 1
         fi
 
+        local install_hint_args=("release=${release}" "namespace=${namespace}" "chart=${chart}")
+        if [ -n "${values}" ]; then
+            install_hint_args+=("values=${values}")
+        fi
+        if [ -n "${host}" ]; then
+            install_hint_args+=("host=${host}")
+        fi
+        if [ -n "${version}" ]; then
+            install_hint_args+=("version=${version}")
+        fi
+        if [ -n "${version_file}" ]; then
+            install_hint_args+=("version_file=${version_file}")
+        fi
+        if [ -n "${tag}" ]; then
+            install_hint_args+=("tag=${tag}")
+        fi
+        if [ -n "${default_tag}" ]; then
+            install_hint_args+=("default_tag=${default_tag}")
+        fi
+
         local status_output=""
         if ! status_output="$(helm -n "${namespace}" status "${release}" 2>&1)"; then
-            cat >&2 <<EOF
+            if grep -qiE '(release:[[:space:]]*not found|not[[:space:]-]*found)' <<< "${status_output}"; then
+                cat >&2 <<EOF
 ERROR: helm-oci-upgrade requires an existing deployed release.
-Release '${release}' was not found as a deployed release in namespace '${namespace}'.
+Release '${release}' was not found in namespace '${namespace}'.
 
 Fresh-cluster recovery note: during outage rebuilds (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment),
 you usually need an install-or-upgrade first.
 
 Run this instead:
-  just helm-oci-install release=${release} namespace=${namespace} chart=${chart}
+  just helm-oci-install ${install_hint_args[*]}
+
+Helm status output:
+  ${status_output}
+EOF
+            else
+                cat >&2 <<EOF
+ERROR: helm-oci-upgrade could not verify release '${release}' in namespace '${namespace}'.
+Resolve this Helm/Kubernetes access issue and retry the upgrade.
+
+Helm status output:
+  ${status_output}
+EOF
+            fi
+            return 1
+        fi
+
+        local release_status=""
+        release_status="$(awk -F': *' '/^STATUS:/ {print tolower($2); exit}' <<< "${status_output}")"
+        if [ "${release_status}" != "deployed" ]; then
+            cat >&2 <<EOF
+ERROR: helm-oci-upgrade requires an existing deployed release.
+Release '${release}' in namespace '${namespace}' is '${release_status:-unknown}', not 'deployed'.
+
+Run this instead to perform first-time recovery install:
+  just helm-oci-install ${install_hint_args[*]}
 
 Helm status output:
   ${status_output}
