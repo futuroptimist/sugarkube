@@ -95,6 +95,17 @@ and reboots, second pass bootstraps or joins k3s).
     [raspi_cluster_operations.md](./raspi_cluster_operations.md) for Helm, Traefik ingress, and
     workload deployment.
 
+> **HA rebuild / DHCP churn notes (important):**
+> If a 3-server HA control plane later gets stuck after DHCP/IP churn (for example, `k3s` stays in
+> `activating (start)` with etcd handshake/raft timeouts), use the recovery flow in
+> [raspi_cluster_troubleshooting.md](./raspi_cluster_troubleshooting.md#scenario-8-ha-control-plane-stuck-after-dhcp-ip-churn-k3s-activating-start)
+> and the day-two rebuild checks in
+> [raspi_cluster_operations.md](./raspi_cluster_operations.md#post-rebuild-checklist-traefik-cloudflare-and-helm-oci).
+> Canonical incident record:
+> [`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+> and
+> [`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json).
+
 [pi-image-workflow]: https://github.com/futuroptimist/sugarkube/actions/workflows/pi-image.yml
 
 <a id="happy-path-3-server-dev-cluster-in-two-runs"></a>

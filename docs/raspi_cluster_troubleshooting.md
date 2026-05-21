@@ -716,6 +716,80 @@ response status code 403: denied: denied
 
 ---
 
+### Scenario 8: HA control plane stuck after DHCP/IP churn (`k3s` `activating (start)`)
+
+**Symptom:**
+On a 3-server HA cluster (for example `sugarkube3.local`, `sugarkube4.local`, `sugarkube5.local`)
+after a power/network event, `k3s` never becomes healthy and systemd stays at
+`activating (start)`. Journals often show etcd transport/raft failures such as:
+
+- `transport: authentication handshake failed: context deadline exceeded`
+- `failed to publish local member to cluster through raft`
+- `etcdserver: request timed out`
+
+**Why this can happen:**
+
+- `.local` hostnames are the operator-facing stable identity and should remain the default.
+- k3s/etcd still use concrete runtime IPs internally.
+- If durable install config contains stale raw IP identity (for example old `--tls-san <ip>` data),
+  DHCP reassignment can leave control-plane peers unable to re-form a healthy etcd quorum.
+
+**Historical footgun status (`just up env=staging`):**
+
+- The `just up env=staging` parity issue was fixed in PR #2165.
+- During older runs (pre-fix), malformed env values could leak into Avahi metadata.
+- If you suspect an old malformed run, check for and remove:
+
+  ```bash
+  sudo rm -f /etc/avahi/services/k3s-sugar-env=staging.service
+  sudo systemctl restart avahi-daemon
+  ```
+
+**Recovery when no state must be preserved (recommended outage playbook):**
+
+1. Confirm failure signatures on each server:
+
+   ```bash
+   sudo systemctl status k3s
+   sudo journalctl -u k3s -n 200 --no-pager | grep -Ei "activating|etcd|raft|handshake|timed out"
+   ```
+
+2. Uninstall/wipe k3s on **all three HA servers** (not just one), then reboot/re-run bring-up.
+3. Rebuild the HA cluster using positional environment args (`just up staging`), re-joining all
+   three servers with the correct token flow.
+4. Remove control-plane taints if this homelab schedules workloads on server nodes:
+
+   ```bash
+   just ha3-untaint-control-plane
+   ```
+
+5. Re-verify day-two dependencies:
+
+   ```bash
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   just cf-tunnel-install staging
+   ```
+
+6. For fresh-cluster OCI app deploys, run install first:
+
+   ```bash
+   just helm-oci-install ...
+   # only after a release exists:
+   just helm-oci-upgrade ...
+   ```
+
+7. If GHCR returns `403 denied: denied`, follow Scenario 7 to rotate PAT
+   (`read:packages`), re-login, and validate with `helm show chart ...`.
+
+**Canonical incident record (source of truth):**
+
+- `outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md`
+- `outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json`
+
+---
+
 ## Log Interpretation Quick Reference
 
 ### Structured Log Fields

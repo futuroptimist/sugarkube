@@ -398,7 +398,7 @@ Traefik is available per the section above.
    [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
-   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install dev
    ```
 
 2. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
@@ -419,6 +419,53 @@ Traefik is available per the section above.
 
 5. Iterate new builds using your app's upgrade instructions (e.g., the dspace
    guide covers rolling new `main-<shortsha>` images).
+
+## Post-rebuild checklist (Traefik, Cloudflare, and Helm OCI)
+
+Use this when you performed a clean HA rebuild (for example, after DHCP/IP churn and no state was
+preserved).
+
+1. Verify cluster and ingress baseline:
+
+   ```bash
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   ```
+
+   Only use `just traefik-install` as an advanced override if the default k3s Traefik addon is
+   missing or intentionally disabled.
+
+2. Reinstall or verify Cloudflare Tunnel:
+
+   ```bash
+   just cf-tunnel-install staging
+   ```
+
+   Prefer positional env arguments for now. Use `env=...` form only if you have confirmed the
+   named-env parsing fix is merged for your checkout.
+
+3. Re-authenticate Helm to GHCR if OCI pulls fail (for example `403 denied: denied`), then verify:
+
+   ```bash
+   helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$(cat docs/apps/dspace.version)"
+   ```
+
+   See [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied)
+   for PAT rotation and stale-credential cleanup details.
+
+4. Use install first on a fresh cluster, then upgrade on existing releases:
+
+   ```bash
+   just helm-oci-install ...
+   # later releases on the same cluster:
+   just helm-oci-upgrade ...
+   ```
+
+5. Incident context and root-cause details are documented in:
+   [`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+   and
+   [`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json).
 
 ## Step 1: Verify your 3-node control plane is healthy
 
