@@ -716,6 +716,94 @@ response status code 403: denied: denied
 
 ---
 
+### Scenario 8: HA cluster stuck after DHCP IP reassignment (clean rebuild when no state must be preserved)
+
+**Symptom:**
+A 3-server HA cluster (for example `sugarkube3.local`, `sugarkube4.local`, `sugarkube5.local`) was
+healthy before a LAN/power event, then fails to recover after DHCP lease reassignment. `k3s` can
+remain in `activating (start)` and etcd never stabilizes.
+
+Common log/journal patterns include:
+
+- `transport: authentication handshake failed: context deadline exceeded`
+- `failed to publish local member to cluster through raft`
+- `etcdserver: request timed out`
+- stale config showing old IP SANs (for example `--tls-san 192.168.86.37`)
+
+Canonical incident record (source of truth):
+
+- [`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+- [`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json)
+
+**Context and sharp edges:**
+
+- `.local` hostnames are the intended operator-facing identity, but k3s/etcd still consume
+  concrete IPs internally.
+- If durable k3s config captures stale raw IPs, DHCP churn can break HA startup.
+- `just up env=staging` parity is fixed (PR #2165). Historical malformed `env=staging` artifacts
+  may still exist on nodes from old runs.
+
+**Recovery when no state must be preserved (full 3-server rebuild):**
+
+1. **Confirm this is an HA-etcd startup failure on each server node:**
+
+   ```bash
+   sudo systemctl status k3s
+   sudo journalctl -u k3s -n 200 --no-pager | egrep -i 'activating|handshake|raft|etcdserver|tls-san|timed out'
+   ```
+
+2. **Uninstall k3s on *all three* HA servers** (not just one):
+
+   ```bash
+   sudo /usr/local/bin/k3s-uninstall.sh || true
+   ```
+
+3. **Remove stale malformed Avahi service files left by old named-env parsing bugs** (if present):
+
+   ```bash
+   sudo rm -f /etc/avahi/services/k3s-sugar-env=staging.service
+   ```
+
+4. **Rebuild the HA cluster with positional environment arguments:**
+
+   ```bash
+   export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot
+   just up staging
+   ```
+
+   Join the remaining servers with the staging token and the same positional env form.
+
+5. **Untaint control-plane nodes when you intentionally schedule homelab workloads there.**
+
+6. **Run post-rebuild day-two checks:**
+
+   ```bash
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   just cf-tunnel-install staging
+   ```
+
+7. **Use Helm OCI install/upgrade in the correct order:**
+
+   - Fresh cluster or release absent: `just helm-oci-install ...`
+   - Existing deployed release: `just helm-oci-upgrade ...`
+
+8. **If GHCR OCI pulls fail with `403 denied: denied`:**
+   rotate PAT (`read:packages`), re-run `helm registry login ghcr.io`, and verify with
+   `helm show chart ...` before retrying deploys (see Scenario 7).
+
+**Mitigations to reduce repeat incidents:**
+
+- Keep DHCP reservations for HA nodes where possible.
+- Prefer `.local` hostnames in operator workflows.
+- If symptoms recur after IP churn, assume stale durable node identity and perform a clean
+  full-server rebuild when workload state is disposable.
+
+---
+
 ## Log Interpretation Quick Reference
 
 ### Structured Log Fields

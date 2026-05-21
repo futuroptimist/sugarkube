@@ -22,7 +22,7 @@ clusters.
 - **Ingress verification:** `just traefik-status` lists the Traefik service and pods. Manually,
   run `sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik`. The quick path
   assumes Traefik is installed by k3s and focuses on verification plus CRD diagnostics.
-- **Cloudflare Tunnel:** Run `just cf-tunnel-install env=dev` with your
+- **Cloudflare Tunnel:** Run `just cf-tunnel-install dev` with your
   Cloudflare tunnel token to create the namespace, store the secret, and install
   the Helm chart. The manual path mirrors those steps in §3.
 - **Sanitized bring-up logs:** `just save-logs env=dev` wraps `just up` with the
@@ -204,7 +204,7 @@ but spells out the underlying commands.
    ```bash
    export CF_TUNNEL_NAME="${CF_TUNNEL_NAME:-sugarkube-dev}"   # Optional override to match the dashboard
 
-   just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"
+   just cf-tunnel-install dev
    ```
 
    This patches the Helm deployment to run `cloudflared tunnel --no-autoupdate

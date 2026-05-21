@@ -398,7 +398,7 @@ Traefik is available per the section above.
    [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
-   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install dev
    ```
 
 2. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
@@ -419,6 +419,50 @@ Traefik is available per the section above.
 
 5. Iterate new builds using your app's upgrade instructions (e.g., the dspace
    guide covers rolling new `main-<shortsha>` images).
+
+## Post-rebuild checklist: Traefik, Cloudflare, and Helm OCI
+
+Use this checklist after a **full 3-server HA rebuild** (all control-plane nodes), especially after
+DHCP/IP churn incidents like the May 18, 2026 staging outage documented in
+[`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+and
+[`outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json`](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json).
+
+1. **Verify cluster and ingress health first:**
+
+   ```bash
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   ```
+
+   Use `just traefik-install` only as an advanced override when the default k3s Traefik addon is
+   intentionally disabled or missing.
+
+2. **Reinstall/verify Cloudflare Tunnel using positional env args:**
+
+   ```bash
+   just cf-tunnel-install staging
+   ```
+
+   `just up env=staging` parity was fixed in PR #2165, but until the separate Cloudflare tunnel
+   named-env parsing fix lands, prefer positional env arguments for tunnel install commands.
+
+3. **Use install-first semantics for fresh clusters:**
+
+   - First deploy on a fresh cluster: `just helm-oci-install ...`
+   - Subsequent releases for the same deployed release: `just helm-oci-upgrade ...`
+
+4. **If OCI pulls fail with GHCR auth errors (`403 denied: denied`):** rotate a PAT with
+   `read:packages`, then re-auth and verify before rerunning deploy commands:
+
+   ```bash
+   helm registry login ghcr.io
+   helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version <version>
+   ```
+
+   For the full credential-reset flow, see
+   [Troubleshooting Scenario 7](./raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
 
 ## Step 1: Verify your 3-node control plane is healthy
 
