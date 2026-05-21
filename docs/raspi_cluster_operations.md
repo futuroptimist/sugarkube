@@ -388,6 +388,49 @@ and Traefik is ready before deploying apps like dspace. For the underlying `kube
 commands that this wraps, see the manual operations guide:
 `docs/raspi_cluster_operations_manual.md`.
 
+
+## Post-rebuild checklist: Traefik, Cloudflare, and Helm OCI
+
+Use this sequence after a **full 3-server HA rebuild** when no state was preserved. For incident context, see [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md) and [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json).
+
+1. Verify control-plane and ingress health first:
+
+   ```bash
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   ```
+
+   k3s usually installs Traefik by default. Only run `just traefik-install` as an advanced override if checks show missing/failed Traefik resources.
+
+2. Reinstall Cloudflare tunnel if needed. Prefer positional env arguments for now:
+
+   ```bash
+   just cf-tunnel-install staging
+   ```
+
+   Avoid `just cf-tunnel-install env=staging ...` until the named-env parsing fix lands.
+
+3. Confirm GHCR Helm OCI auth before deploys (especially after PAT rotation):
+
+   ```bash
+   helm registry login ghcr.io
+   helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version <version>
+   ```
+
+   If you hit `403 denied: denied`, rotate the PAT with `read:packages` and follow [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
+
+4. Use install-first semantics on fresh clusters:
+
+   - First deploy on a new cluster: `just helm-oci-install ...`
+   - Subsequent updates to an existing release: `just helm-oci-upgrade ...`
+
+5. If you need to schedule workloads on control-plane nodes in homelab mode, remove taints:
+
+   ```bash
+   just ha3-untaint-control-plane
+   ```
+
 ## Deploy your first app (generic ingress path)
 
 If you want a fast path to your first live app, follow this numbered tutorial.
@@ -398,7 +441,7 @@ Traefik is available per the section above.
    [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
-   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install dev
    ```
 
 2. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to

@@ -228,6 +228,8 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
 
+> **⚠️ HA rebuild / DHCP churn note:** If a 3-server HA cluster fails after LAN DHCP reassignment (for example, k3s stuck in `activating (start)` with etcd handshake/raft timeouts), follow the recovery flow in [Raspberry Pi Cluster Troubleshooting — Scenario 8](raspi_cluster_troubleshooting.md#scenario-8-ha-cluster-stuck-after-dhcp-ip-reassignment-k3s-activating-start) and the day-two checks in [raspi_cluster_operations.md](./raspi_cluster_operations.md#post-rebuild-checklist-traefik-cloudflare-and-helm-oci). Canonical incident details live in [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md).
+
 ## Post-bootstrap: verify ingress
 
 After `just up dev` (or `just ha3 env=dev` for the three-node flow) finishes
