@@ -13,8 +13,8 @@ personas:
 `sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
 
 > **Next step:** When the control plane is stable, continue with
-> [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
-> Helm, ingress (Traefik), and other day-two workflows.
+> [raspi_cluster_operations.md](./raspi_cluster_operations.md) for day-two workflows.
+> For HA DHCP/IP-churn recovery, see [Scenario 8](./raspi_cluster_troubleshooting.md#scenario-8-ha-cluster-stuck-after-dhcp-ip-reassignment-k3s-activating-start).
 
 ## Happy path: 3-server HA cluster in two runs
 

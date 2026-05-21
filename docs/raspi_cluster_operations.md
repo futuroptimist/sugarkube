@@ -403,10 +403,10 @@ Use this sequence after a **full 3-server HA rebuild** when no state was preserv
 
    k3s usually installs Traefik by default. Only run `just traefik-install` as an advanced override if checks show missing/failed Traefik resources.
 
-2. Reinstall Cloudflare tunnel if needed. Prefer positional env arguments for now, and make sure the required Cloudflare credential input is available to the recipe:
+2. Reinstall Cloudflare tunnel if needed. Prefer positional env arguments for now, and make sure the required Cloudflare tunnel token is available to the recipe:
 
    ```bash
-   just cf-tunnel-install staging
+   just cf-tunnel-install staging token="$CF_TUNNEL_TOKEN"
    ```
 
    Avoid `just cf-tunnel-install env=staging ...` until the named-env parsing fix lands.
@@ -437,10 +437,10 @@ It assumes your `env=dev` cluster is online and reachable with kubectl and that
 Traefik is available per the section above.
 
 1. Install Cloudflare Tunnel on a node that can reach the cluster API (see
-   [Cloudflare Tunnel docs](cloudflare_tunnel.md)). Make sure the required Cloudflare credential input is set first:
+   [Cloudflare Tunnel docs](cloudflare_tunnel.md)). Make sure the `CF_TUNNEL_TOKEN` is set first:
 
    ```bash
-   just cf-tunnel-install dev
+   just cf-tunnel-install dev token="$CF_TUNNEL_TOKEN"
    ```
 
 2. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to
