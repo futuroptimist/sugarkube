@@ -403,7 +403,7 @@ Use this sequence after a **full 3-server HA rebuild** when no state was preserv
 
    k3s usually installs Traefik by default. Only run `just traefik-install` as an advanced override if checks show missing/failed Traefik resources.
 
-2. Reinstall Cloudflare tunnel if needed. Prefer positional env arguments for now:
+2. Reinstall Cloudflare tunnel if needed. Prefer positional env arguments for now, and make sure the required Cloudflare credential input is available to the recipe:
 
    ```bash
    just cf-tunnel-install staging
@@ -414,11 +414,10 @@ Use this sequence after a **full 3-server HA rebuild** when no state was preserv
 3. Confirm GHCR Helm OCI auth before deploys (especially after PAT rotation):
 
    ```bash
-   helm registry login ghcr.io
    helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version <version>
    ```
 
-   If you hit `403 denied: denied`, rotate the PAT with `read:packages` and follow [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
+   Before running this check, repeat the full login command sequence from [Authenticate Helm with OCI registries (GHCR for dspace)](#authenticate-helm-with-oci-registries-ghcr-for-dspace) so rotated credentials are definitely applied. If you hit `403 denied: denied`, follow [Troubleshooting Scenario 7](raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
 
 4. Use install-first semantics on fresh clusters:
 
@@ -438,7 +437,7 @@ It assumes your `env=dev` cluster is online and reachable with kubectl and that
 Traefik is available per the section above.
 
 1. Install Cloudflare Tunnel on a node that can reach the cluster API (see
-   [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
+   [Cloudflare Tunnel docs](cloudflare_tunnel.md)). Make sure the required Cloudflare credential input is set first:
 
    ```bash
    just cf-tunnel-install dev

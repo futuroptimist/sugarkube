@@ -22,9 +22,7 @@ clusters.
 - **Ingress verification:** `just traefik-status` lists the Traefik service and pods. Manually,
   run `sudo kubectl -n kube-system get svc,po -l app.kubernetes.io/name=traefik`. The quick path
   assumes Traefik is installed by k3s and focuses on verification plus CRD diagnostics.
-- **Cloudflare Tunnel:** Run `just cf-tunnel-install dev` with your
-  Cloudflare tunnel token to create the namespace, store the secret, and install
-  the Helm chart. The manual path mirrors those steps in §3.
+- **Cloudflare Tunnel:** Run `just cf-tunnel-install dev` with the required Cloudflare credential input to create the namespace, store the secret, and install the Helm chart. The manual path mirrors those steps in §3.
 - **Sanitized bring-up logs:** `just save-logs env=dev` wraps `just up` with the
   log filter. Manually, export `SAVE_DEBUG_LOGS=1`, set `SUGARKUBE_LOG_FILTER`
   to `scripts/filter_debug_log.py`, and run `just up dev`.
@@ -199,7 +197,7 @@ but spells out the underlying commands.
    ```
 
 2. Install the Cloudflare Tunnel connector in remote-managed token mode (same
-   shape as `just cf-tunnel-install`):
+   shape as `just cf-tunnel-install`). Ensure the required Cloudflare credential input is set before running:
 
    ```bash
    export CF_TUNNEL_NAME="${CF_TUNNEL_NAME:-sugarkube-dev}"   # Optional override to match the dashboard

@@ -746,7 +746,7 @@ HA startup even when discovery looks normal.
    sudo systemctl restart avahi-daemon
    ```
 
-3. Rebuild with positional env arguments on each node (run twice per node as usual):
+3. Bootstrap the first control-plane server with positional env arguments (run twice on that node as usual):
 
    ```bash
    export SUGARKUBE_SERVERS=3
@@ -755,13 +755,15 @@ HA startup even when discovery looks normal.
    just up staging
    ```
 
-4. Re-join remaining servers with the current token, then untaint if homelab workloads run on control-plane nodes:
+4. Re-join the second and third servers by following the normal HA join flow in [raspi_cluster_setup.md](raspi_cluster_setup.md#high-availability-3-server-control-plane), including exporting the current `SUGARKUBE_TOKEN_STAGING` value before running `just up staging` on those nodes.
+
+5. If homelab workloads run on control-plane nodes, untaint after all three servers are healthy:
 
    ```bash
    just ha3-untaint-control-plane
    ```
 
-5. Run the post-rebuild day-two checks in [raspi_cluster_operations.md](raspi_cluster_operations.md#post-rebuild-checklist-traefik-cloudflare-and-helm-oci):
+6. Run the post-rebuild day-two checks in [raspi_cluster_operations.md](raspi_cluster_operations.md#post-rebuild-checklist-traefik-cloudflare-and-helm-oci):
    - `just cluster-status`
    - `just traefik-status`
    - `just traefik-crd-doctor`
