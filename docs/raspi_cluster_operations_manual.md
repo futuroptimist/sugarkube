@@ -197,9 +197,10 @@ but spells out the underlying commands.
    ```
 
 2. Install the Cloudflare Tunnel connector in remote-managed token mode (same
-   shape as `just cf-tunnel-install`). Pass your Cloudflare tunnel token explicitly when running:
+   shape as `just cf-tunnel-install`). Export and pass the same Cloudflare tunnel token explicitly when running:
 
    ```bash
+   export CF_TUNNEL_TOKEN="<cloudflare-tunnel-token>"
    export CF_TUNNEL_NAME="${CF_TUNNEL_NAME:-sugarkube-dev}"   # Optional override to match the dashboard
 
    just cf-tunnel-install dev token="$CF_TUNNEL_TOKEN"
