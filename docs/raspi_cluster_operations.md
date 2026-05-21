@@ -65,6 +65,55 @@ Follow this sequence after imaging and booting the Pis:
    [token.place](./pi_token_dspace.md) or [dspace](https://github.com/democratizedspace/dspace)) once
    ingress is healthy.
 
+## Post-rebuild checklist: Traefik, Cloudflare, and Helm OCI
+
+Use this checklist after rebuilding an HA cluster (especially after DHCP/IP churn incidents) when no state was preserved.
+
+1. **Verify control-plane and ingress health first:**
+
+   ```bash
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   ```
+
+   k3s usually installs Traefik by default. Only use `just traefik-install` as an advanced override when addon verification fails.
+
+2. **Cloudflare tunnel install syntax:**
+
+   Prefer positional env form:
+
+   ```bash
+   just cf-tunnel-install dev
+   ```
+
+   Historical note: `just up env=staging` parity was fixed in PR #2165, but until the dedicated Cloudflare named-env parsing fix lands, avoid relying on `just cf-tunnel-install env=...` syntax.
+
+3. **Helm OCI auth and GHCR checks:**
+
+   If you see `403 denied: denied`, rotate the PAT with `read:packages`, run `helm registry login ghcr.io`, and verify pullability with:
+
+   ```bash
+   helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version 3.0.0
+   ```
+
+4. **Fresh cluster deploy semantics:**
+
+   On a fresh cluster, install first, then upgrade later:
+
+   ```bash
+   just helm-oci-install ...
+   # subsequent rollouts once release exists:
+   just helm-oci-upgrade ...
+   ```
+
+   `helm-oci-upgrade` expects an already deployed release.
+
+5. **Read the canonical incident write-up:**
+
+   - [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+   - [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json)
+
 ### Optional (recommended): Tailscale remote-ops access
 
 If you operate the cluster remotely, follow the dedicated Tailscale design guide:
@@ -398,7 +447,7 @@ Traefik is available per the section above.
    [Cloudflare Tunnel docs](cloudflare_tunnel.md)):
 
    ```bash
-   just cf-tunnel-install env=dev token=$CF_TUNNEL_TOKEN
+   just cf-tunnel-install dev
    ```
 
 2. Create a Tunnel route in the Cloudflare dashboard from your chosen FQDN to

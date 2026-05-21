@@ -876,3 +876,78 @@ If you've tried the troubleshooting steps above and still can't resolve your iss
 - [mDNS Troubleshooting Guide](mdns_troubleshooting.md) — Deep dive into mDNS-specific issues
 - [Runbook](runbook.md) — Operational procedures and SRE playbooks
 - [Outage Catalog](outage_catalog.md) — Historical issues and resolutions
+
+
+---
+
+### Scenario 8: HA cluster stuck after DHCP IP reassignment (`k3s` `activating (start)`)
+
+**Symptom:**
+After a power outage or router lease churn, one or more HA server nodes (`sugarkube*.local`) never become healthy. `systemctl status k3s` stays at `activating (start)` and `journalctl -u k3s` includes errors such as:
+
+- `transport: authentication handshake failed: context deadline exceeded`
+- `failed to publish local member to cluster through raft`
+- `etcdserver: request timed out`
+
+This usually indicates stale durable raw IP state (for example old `--tls-san 192.168.x.x`) no longer matches current DHCP assignments.
+
+**Important context:**
+
+- `.local` hostnames improve operator discovery and day-to-day commands.
+- k3s/embedded etcd can still use concrete IPs internally.
+- If durable config still references stale raw IPs, HA startup can fail after DHCP churn.
+
+See canonical incident details:
+
+- [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+- [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json)
+
+**When no cluster state must be preserved (safe clean rebuild):**
+
+1. Confirm the failure signature on each HA server node:
+
+   ```bash
+   sudo systemctl status k3s
+   sudo journalctl -u k3s -n 200 --no-pager
+   ```
+
+2. Uninstall/wipe **all three HA server nodes** (not just one).
+
+3. If older malformed runs were used, remove stale Avahi artifacts (if present):
+
+   ```bash
+   sudo rm -f /etc/avahi/services/k3s-sugar-env=staging.service
+   sudo systemctl restart avahi-daemon
+   ```
+
+4. Rebuild with positional env args on each node:
+
+   ```bash
+   export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot, then run again on each node
+   just up staging
+   ```
+
+5. Re-apply post-bootstrap operational steps:
+
+   ```bash
+   just ha3-untaint-control-plane
+   just cluster-status
+   just traefik-status
+   just traefik-crd-doctor
+   ```
+
+6. Reinstall/verify Cloudflare tunnel and workloads. For fresh Helm OCI clusters, install first:
+
+   ```bash
+   just helm-oci-install ...
+   # then only after a release exists
+   just helm-oci-upgrade ...
+   ```
+
+**Historical syntax note:**
+
+- `just up env=staging` parity was fixed by PR #2165.
+- Until the Cloudflare named-env parser fix merges, prefer positional tunnel invocation:
+  `just cf-tunnel-install staging`.
