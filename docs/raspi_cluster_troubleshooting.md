@@ -716,6 +716,68 @@ response status code 403: denied: denied
 
 ---
 
+
+### Scenario 8: HA cluster stuck after DHCP IP reassignment (`k3s` `activating (start)`)
+
+**Symptom:**
+After a LAN power outage or DHCP lease churn, one or more HA servers never become healthy.
+`systemctl status k3s` stays in `activating (start)` and `journalctl -u k3s` shows errors such as:
+
+- `transport: authentication handshake failed: context deadline exceeded`
+- `failed to publish local member to cluster through raft`
+- `etcdserver: request timed out`
+
+**Likely cause:**
+`.local` hostnames still resolve, but embedded etcd/k3s can retain stale raw-IP durable state
+(for example older `--tls-san 192.168.x.x` install args) after DHCP reassignment. This can break
+HA startup even when discovery looks normal.
+
+**Canonical incident record:**
+- [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md)
+- [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.json)
+
+**Recovery (safe when no state must be preserved):**
+
+1. Treat this as a **full 3-server HA rebuild**: uninstall/wipe `k3s` on **all** HA servers, not just one.
+2. If prior malformed `env=staging` runs existed (historical pre-PR #2165 behavior), remove stale Avahi entries:
+
+   ```bash
+   sudo rm -f /etc/avahi/services/k3s-sugar-env=staging.service
+   sudo systemctl restart avahi-daemon
+   ```
+
+3. Bootstrap the first control-plane server with positional env arguments (run twice on that node as usual):
+
+   ```bash
+   export SUGARKUBE_SERVERS=3
+   just up staging
+   # reconnect after reboot
+   just up staging
+   ```
+
+4. Re-join the second and third servers by following the normal HA join flow in [raspi_cluster_setup.md](raspi_cluster_setup.md#high-availability-3-server-control-plane), including exporting the current `SUGARKUBE_TOKEN_STAGING` value before running `just up staging` on those nodes.
+
+5. If homelab workloads run on control-plane nodes, untaint after all three servers are healthy:
+
+   ```bash
+   just ha3-untaint-control-plane
+   ```
+
+6. Run the post-rebuild day-two checks in [raspi_cluster_operations.md](raspi_cluster_operations.md#post-rebuild-checklist-traefik-cloudflare-and-helm-oci):
+   - `just cluster-status`
+   - `just traefik-status`
+   - `just traefik-crd-doctor`
+   - Cloudflare tunnel reinstall if needed
+   - GHCR login check and Helm OCI install-first flow
+
+**Important status notes:**
+
+- `just up env=staging` parity was fixed by PR #2165; keep historical mention only for stale-artifact cleanup context.
+- Prefer positional `just cf-tunnel-install staging ...` until the named-env tunnel parsing fix merges.
+- On fresh clusters, use `just helm-oci-install ...` first; use `just helm-oci-upgrade ...` only after a release exists.
+
+---
+
 ## Log Interpretation Quick Reference
 
 ### Structured Log Fields

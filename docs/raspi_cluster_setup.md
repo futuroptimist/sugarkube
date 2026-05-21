@@ -13,8 +13,8 @@ personas:
 `sugarkube` makes forming a Raspberry Pi cluster almost effortless: once your Pis boot the standard image and share the same LAN, you can create a per-environment k3s cluster with a single command per node.
 
 > **Next step:** When the control plane is stable, continue with
-> [raspi_cluster_operations.md](./raspi_cluster_operations.md) for log capture,
-> Helm, ingress (Traefik), and other day-two workflows.
+> [raspi_cluster_operations.md](./raspi_cluster_operations.md) for day-two workflows.
+> For HA DHCP/IP-churn recovery, see [Scenario 8](./raspi_cluster_troubleshooting.md#scenario-8-ha-cluster-stuck-after-dhcp-ip-reassignment-k3s-activating-start).
 
 ## Happy path: 3-server HA cluster in two runs
 
@@ -227,6 +227,8 @@ Quick reference for the most common recipes when bringing up a 3-node HA dev clu
   _When to use:_ After bootstrapping the first node, use this to retrieve the token that other nodes need to join the cluster. Copy the output and set it as `SUGARKUBE_TOKEN_DEV` on subsequent nodes.
 
 > **💡 Troubleshooting tip:** If you encounter issues during setup, captured logs can help diagnose problems. See the [Raspberry Pi Cluster Troubleshooting Guide](raspi_cluster_troubleshooting.md) for help interpreting log output and resolving common issues.
+
+> **⚠️ HA rebuild / DHCP churn note:** If a 3-server HA cluster fails after LAN DHCP reassignment (for example, k3s stuck in `activating (start)` with etcd handshake/raft timeouts), follow the recovery flow in [Raspberry Pi Cluster Troubleshooting — Scenario 8](raspi_cluster_troubleshooting.md#scenario-8-ha-cluster-stuck-after-dhcp-ip-reassignment-k3s-activating-start) and the day-two checks in [raspi_cluster_operations.md](./raspi_cluster_operations.md#post-rebuild-checklist-traefik-cloudflare-and-helm-oci). Canonical incident details live in [outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md](../outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment.md).
 
 ## Post-bootstrap: verify ingress
 
