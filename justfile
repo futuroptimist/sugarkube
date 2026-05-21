@@ -1296,6 +1296,96 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         done
     }
 
+    ensure_upgrade_target_exists() {
+        if [ "${allow_install}" = "true" ]; then
+            return 0
+        fi
+
+        if ! command -v helm >/dev/null 2>&1; then
+            echo "ERROR: helm is not installed; cannot verify existing release before upgrade." >&2
+            return 1
+        fi
+
+        local install_hint_args=("release=${release}" "namespace=${namespace}" "chart=${chart}")
+        local upgrade_hint_args=("release=${release}" "namespace=${namespace}" "chart=${chart}")
+        if [ -n "${values}" ]; then
+            install_hint_args+=("values=${values}")
+            upgrade_hint_args+=("values=${values}")
+        fi
+        if [ -n "${host}" ]; then
+            install_hint_args+=("host=${host}")
+            upgrade_hint_args+=("host=${host}")
+        fi
+        if [ -n "${version}" ]; then
+            install_hint_args+=("version=${version}")
+            upgrade_hint_args+=("version=${version}")
+        fi
+        if [ -n "${version_file}" ]; then
+            install_hint_args+=("version_file=${version_file}")
+            upgrade_hint_args+=("version_file=${version_file}")
+        fi
+        if [ -n "${tag}" ]; then
+            install_hint_args+=("tag=${tag}")
+            upgrade_hint_args+=("tag=${tag}")
+        fi
+        if [ -n "${default_tag}" ]; then
+            install_hint_args+=("default_tag=${default_tag}")
+            upgrade_hint_args+=("default_tag=${default_tag}")
+        fi
+
+        local install_hint_shape="just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version=...] [version_file=...] [host=...] [tag=...] [default_tag=...]"
+        local status_output=""
+        if ! status_output="$(helm -n "${namespace}" status "${release}" 2>&1)"; then
+            if grep -qiE '(release:[[:space:]]*not found|not[[:space:]-]*found)' <<< "${status_output}"; then
+                {
+                    echo "ERROR: helm-oci-upgrade requires an existing deployed release."
+                    echo "Release '${release}' was not found in namespace '${namespace}'."
+                    echo
+                    echo "Fresh-cluster recovery note: during outage rebuilds (see outages/2026-05-18-sugarkube-ha-staging-dhcp-ip-reassignment),"
+                    echo "run an equivalent install invocation first:"
+                    echo "  ${install_hint_shape}"
+                    echo
+                    echo "Resolved example with current inputs:"
+                    echo "  just helm-oci-install ${install_hint_args[*]}"
+                    echo
+                    echo "Helm status output:"
+                    echo "  ${status_output}"
+                } >&2
+            else
+                {
+                    echo "ERROR: helm-oci-upgrade could not verify release '${release}' in namespace '${namespace}'."
+                    echo "Resolve this Helm/Kubernetes access issue and retry the upgrade."
+                    echo
+                    echo "Helm status output:"
+                    echo "  ${status_output}"
+                } >&2
+            fi
+            return 1
+        fi
+
+        local release_status=""
+        release_status="$(awk -F': *' '/^STATUS:/ {print tolower($2); exit}' <<< "${status_output}")"
+        if [ "${release_status}" != "deployed" ]; then
+            {
+                echo "ERROR: helm-oci-upgrade requires an existing deployed release."
+                echo "Release '${release}' in namespace '${namespace}' is '${release_status:-unknown}', not 'deployed'."
+                echo
+                echo "This is not a fresh-cluster missing-release case."
+                echo "Do not run helm-oci-install against an existing non-deployed release object."
+                echo
+                echo "Repair the existing release first (for example: investigate, rollback, or uninstall cleanup),"
+                echo "then retry steady-state upgrade once the release is healthy/deployed:"
+                echo "  just helm-oci-upgrade ${upgrade_hint_args[*]}"
+                echo
+                echo "Helm status output:"
+                echo "  ${status_output}"
+            } >&2
+            return 1
+        fi
+    }
+
+    ensure_upgrade_target_exists
+
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
     if [ "${allow_install}" = "true" ]; then
