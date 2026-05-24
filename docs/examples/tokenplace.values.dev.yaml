@@ -1,0 +1,18 @@
+# Shared/base values for token.place relay deployments.
+# Layer this file with environment overlays (for example, staging/prod) to set hostnames and
+# public environment metadata.
+environment: dev
+replicaCount: 1
+
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+
+env:
+  RELAY_WORKERS: "1"
+  TOKENPLACE_FRONTEND_MODE: production
+  TOKENPLACE_RELAY_REQUIRE_UPSTREAM_HEALTH: "0"
