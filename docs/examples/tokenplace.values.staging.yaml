@@ -1,0 +1,11 @@
+# Staging overlay values layered on top of tokenplace.values.dev.yaml.
+environment: staging
+
+ingress:
+  enabled: true
+  className: traefik
+  host: staging.token.place
+
+env:
+  TOKEN_PLACE_ENV: staging
+  TOKENPLACE_RELAY_PUBLIC_URL: https://staging.token.place
