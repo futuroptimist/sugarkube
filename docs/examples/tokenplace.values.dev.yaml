@@ -1,0 +1,17 @@
+# Shared token.place relay defaults for Sugarkube. Compose this with an env-specific
+# overlay (staging/prod) using the generic Helm OCI helpers.
+environment: dev
+replicaCount: 1
+
+image:
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+
+env:
+  RELAY_WORKERS: "1"
+  TOKENPLACE_FRONTEND_MODE: production
+  TOKENPLACE_RELAY_REQUIRE_UPSTREAM_HEALTH: "0"
