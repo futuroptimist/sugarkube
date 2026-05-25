@@ -4,12 +4,7 @@ environment: staging
 ingress:
   enabled: true
   className: traefik
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
   host: staging.token.place
-  tls:
-    enabled: true
-    secretName: staging-tokenplace-tls
 
 env:
   TOKEN_PLACE_ENV: staging

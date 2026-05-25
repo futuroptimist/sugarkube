@@ -6,11 +6,11 @@ image:
   repository: ghcr.io/futuroptimist/tokenplace-relay
 
 ingress:
-  enabled: false
+  enabled: true
   className: traefik
   annotations: {}
 
 env:
   RELAY_WORKERS: "1"
   TOKENPLACE_FRONTEND_MODE: production
-  TOKEN_PLACE_ENV: dev
+  TOKENPLACE_RELAY_REQUIRE_UPSTREAM_HEALTH: "0"
