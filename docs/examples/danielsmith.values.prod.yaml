@@ -5,3 +5,7 @@ ingress:
   enabled: true
   className: traefik
   host: danielsmith.io
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    secretName: danielsmith-prod-tls
