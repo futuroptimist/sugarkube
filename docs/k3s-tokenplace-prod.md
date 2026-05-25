@@ -1,71 +1,106 @@
 # k3s token.place runbook (prod)
 
-Use this runbook for `prod` token.place deployments on Sugarkube.
+Use this runbook for relay-only token.place production deployments on Sugarkube.
 
-## Purpose
+## Topology and scope
 
-- Safe production deployment, validation, and rollback.
-- Preserve availability with explicit promotion and incident-response workflow.
+- Sugarkube runs only token.place relay (`relay.py`).
+- No in-cluster backend/GPU service is required.
+- Compute nodes remain external (`server.py`, Tauri desktop app, Windows PCs, Apple Silicon Macs,
+  Raspberry Pi compute nodes, etc.).
+- Runtime model is single replica + single worker + in-memory state.
+- In-memory state loss on pod restart is accepted for now.
 
-## Topology intent (prod)
+## Artifact and values contract
 
-- Sugarkube hosts production ingress/API-facing token.place services.
-- External compute nodes execute heavy workloads and are reached through secured API v1 links.
-- Public hostnames route through Cloudflare to Traefik ingress.
+- Chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
+- Image: `ghcr.io/futuroptimist/tokenplace-relay`
+- Release: `tokenplace`
+- Namespace: `tokenplace`
+- Version pin file: `docs/apps/tokenplace.version`
+- Approved prod tag file: `docs/apps/tokenplace.prod.tag`
+- Values: `docs/examples/tokenplace.values.dev.yaml` + `docs/examples/tokenplace.values.prod.yaml`
+- Default production host: `token.place`
 
-## Prerequisites
-
-- Staging validation completed for the target immutable tag.
-- Production values overlays and secrets approved.
-- Rollback revision identified before upgrade begins.
-
-## Deploy / upgrade / rollback
-
-```bash
-just tokenplace-deploy \
-  release=<release> namespace=<namespace> chart=<chart-ref> \
-  values=<base-values>,<prod-values> version_file=<optional-version-file> \
-  tag=<approved-immutable-tag>
-```
+## Promotion after staging sign-off
 
 ```bash
-just tokenplace-upgrade \
-  release=<release> namespace=<namespace> chart=<chart-ref> \
-  values=<base-values>,<prod-values> version_file=<optional-version-file> \
-  tag=<approved-immutable-tag>
+TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
+
+## Generic production upgrade
+
+Select the production kube context first (or use the wrapper above):
 
 ```bash
-# List history first, then rollback if needed.
-helm -n <namespace> history <release>
-just tokenplace-rollback release=<release> namespace=<namespace> revision=<known-good-revision>
+just kubeconfig-env prod
 ```
 
-## Validation checks
+Then run the generic OCI helper:
 
 ```bash
-just tokenplace-status namespace=<namespace> release=<release>
-just tokenplace-validate namespace=<namespace> release=<release> health_url=https://<prod-host>/<health>
+TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
+
+## Validation
 
 ```bash
-just tokenplace-logs namespace=<namespace> selector=<label-selector>
+kubectl -n tokenplace get deploy,po,svc,ingress
+kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+curl -fsS https://token.place/livez
+curl -fsS https://token.place/healthz
+curl -fsS https://token.place/
 ```
 
-## Cloudflare / ingress expectations
+## Rollback options
 
-- Production hostname and TLS secret names are stable and documented.
-- Cloudflare tunnel routes only expected production hosts.
-- Any emergency DNS/ingress change is logged in outage documentation.
+Rollback by immutable tag:
 
-## Secrets/config guidance
+```bash
+just kubeconfig-env prod
+TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
+```
 
-- Use production-scoped credentials only; never reuse lower-environment keys.
-- Keep secret rotation cadence aligned with Sugarkube security checklist.
-- Apply least-privilege API tokens for DNS/tunnel automation.
+Rollback by Helm revision:
 
-## Operator notes and caveats
+```bash
+just kubeconfig-env prod
+TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
+```
 
-- Avoid mutable tags in production.
-- Keep a known-good rollback revision and artifact digest recorded for each deploy.
-- If rollout behavior diverges from staging, pause further promotions and capture diagnostics.
+## Cloudflare tunnel routing (external to Helm)
+
+Cloudflare routes are configured outside the chart. Route `token.place` to Traefik,
+typically `http://traefik.kube-system.svc.cluster.local:80`.
+
+```bash
+just cf-tunnel-route host=token.place
+```
+
+## Troubleshooting
+
+GHCR auth/chart checks:
+
+```bash
+echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+```
+
+App status/logs:
+
+```bash
+just tokenplace-status
+just tokenplace-debug-logs-env env=prod
+```
+
+Ingress/tunnel checks:
+
+```bash
+just cluster-status
+just traefik-status
+just cf-tunnel-debug
+```

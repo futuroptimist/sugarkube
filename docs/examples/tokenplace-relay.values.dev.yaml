@@ -1,8 +1,9 @@
 # Base values for deploying the token.place relay via Helm (see
 # apps/tokenplace-relay/values.dev.yaml for the operator defaults).
 image:
-  repository: ghcr.io/democratizedspace/tokenplace-relay
-  tag: sha-684fd7f
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  # Set image.tag to an immutable value (example: main-deadbee) before deploy.
+  tag: ""
 
 ingress:
   enabled: true
