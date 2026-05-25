@@ -2,7 +2,8 @@
 # apps/tokenplace-relay/values.dev.yaml for the operator defaults).
 image:
   repository: ghcr.io/futuroptimist/tokenplace-relay
-  tag: main-REPLACE_SHORTSHA
+  # Set image.tag to an immutable value (example: main-deadbee) before deploy.
+  tag: ""
 
 ingress:
   enabled: true

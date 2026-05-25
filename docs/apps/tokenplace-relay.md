@@ -35,19 +35,19 @@ Defaults:
 First install:
 
 ```bash
-just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_SHORTSHA
+just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<7+hexsha>
 ```
 
 Existing release upgrade:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_SHORTSHA
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<7+hexsha>
 ```
 
 Preferred wrapper:
 
 ```bash
-just tokenplace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA
+just tokenplace-oci-deploy env=staging tag=main-<7+hexsha>
 ```
 
 ## Staging validation
@@ -65,19 +65,19 @@ curl -fsS https://staging.token.place/
 Promote approved staging image tag:
 
 ```bash
-just tokenplace-oci-promote-prod tag=main-REPLACE_APPROVED_SHORTSHA
+just tokenplace-oci-promote-prod tag=main-<approved-7+hexsha>
 ```
 
 Generic production upgrade with prod overlay:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_APPROVED_SHORTSHA
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<approved-7+hexsha>
 ```
 
 Rollback using previous immutable tag:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_PREVIOUS_SHORTSHA
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<previous-7+hexsha>
 ```
 
 Rollback to previous Helm revision:
@@ -117,7 +117,7 @@ just cf-tunnel-route host=token.place
 GHCR auth and chart visibility:
 
 ```bash
-helm registry login ghcr.io
+echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
 ```
 

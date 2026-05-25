@@ -5,6 +5,10 @@ ingress:
   enabled: true
   className: traefik
   host: token.place
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    secretName: tokenplace-prod-tls
 
 env:
   TOKEN_PLACE_ENV: production

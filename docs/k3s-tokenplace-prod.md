@@ -25,13 +25,21 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 ## Promotion after staging sign-off
 
 ```bash
-just tokenplace-oci-promote-prod tag=main-REPLACE_APPROVED_SHORTSHA
+just tokenplace-oci-promote-prod tag=main-<approved-7+hexsha>
 ```
 
 ## Generic production upgrade
 
+Select the production kube context first (or use the wrapper above):
+
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_APPROVED_SHORTSHA
+just kubeconfig-env prod
+```
+
+Then run the generic OCI helper:
+
+```bash
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<approved-7+hexsha>
 ```
 
 ## Validation
@@ -49,7 +57,7 @@ curl -fsS https://token.place/
 Rollback by immutable tag:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_PREVIOUS_SHORTSHA
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<previous-7+hexsha>
 ```
 
 Rollback by Helm revision:
@@ -72,7 +80,7 @@ just cf-tunnel-route host=token.place
 GHCR auth/chart checks:
 
 ```bash
-helm registry login ghcr.io
+echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
 ```
 
@@ -80,7 +88,6 @@ App status/logs:
 
 ```bash
 just tokenplace-status
-just tokenplace-debug-logs-env env=staging
 just tokenplace-debug-logs-env env=prod
 ```
 
