@@ -1480,7 +1480,7 @@ dspace-oci-deploy env='staging' tag='':
     fi
 
     export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "prod"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
