@@ -1,0 +1,11 @@
+# Production overlay values layered on top of tokenplace.values.dev.yaml.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: token.place
+
+env:
+  TOKEN_PLACE_ENV: production
+  TOKENPLACE_RELAY_PUBLIC_URL: https://token.place
