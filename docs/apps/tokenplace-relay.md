@@ -75,6 +75,7 @@ just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 Generic production upgrade with prod overlay:
 
 ```bash
+just kubeconfig-env prod
 TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
@@ -82,6 +83,7 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 Rollback using previous immutable tag:
 
 ```bash
+just kubeconfig-env prod
 TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
@@ -89,7 +91,8 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 Rollback to previous Helm revision:
 
 ```bash
-just tokenplace-rollback release=tokenplace namespace=tokenplace revision=<known-good-revision>
+TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
 ```
 
 Production validation:

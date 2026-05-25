@@ -64,7 +64,8 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 Rollback by Helm revision:
 
 ```bash
-just tokenplace-rollback release=tokenplace namespace=tokenplace revision=<known-good-revision>
+TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
 ```
 
 ## Cloudflare tunnel routing (external to Helm)
