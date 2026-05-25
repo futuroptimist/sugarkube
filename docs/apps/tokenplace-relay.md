@@ -82,7 +82,7 @@ just tokenplace-oci-redeploy tag=sha-<shortsha>
     --namespace tokenplace --create-namespace \
     -f docs/examples/tokenplace.values.dev.yaml \
     -f docs/examples/tokenplace.values.staging.yaml \
-    --version "$(cat docs/apps/tokenplace.version)"
+    --version "$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n1 | tr -d '[:space:]')"
   ```
 
 ## Ingress, TLS, and Cloudflare

@@ -1725,7 +1725,7 @@ tokenplace-oci-redeploy tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
       chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
       values='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml' \
@@ -1749,7 +1749,7 @@ tokenplace-oci-redeploy tag='':
 # Override namespace/release/host_key per environment until onboarding locks chart naming.
 
 # See docs/tokenplace_sugarkube_onboarding.md and docs/apps/tokenplace.md.
-tokenplace-status namespace='tokenplace' release='tokenplace-relay' host_key='ingress.host':
+tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.host':
     @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
 
 # Install-or-upgrade token.place via configurable Helm OCI wiring.
@@ -1818,7 +1818,7 @@ tokenplace-rollback release='' namespace='' revision='':
       kubectl -n "${ns}" rollout status "${workload}" --timeout=180s
     done <<< "${workloads}"
 
-tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenplace-relay' tail='200':
+tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/instance=tokenplace' tail='200':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1869,7 +1869,7 @@ tokenplace-validate namespace='tokenplace' release='tokenplace-relay' health_url
 # Port-forward helper uses placeholder defaults for convenience; override service/ports for real app components.
 
 # Keep this recipe generic while token.place release/service naming is still being finalized.
-tokenplace-port-forward namespace='tokenplace' service='tokenplace-relay' local_port='5010' remote_port='80':
+tokenplace-port-forward namespace='tokenplace' service='tokenplace' local_port='5010' remote_port='80':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
