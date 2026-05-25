@@ -1,103 +1,82 @@
 # token.place on Sugarkube
 
-This guide describes the intended token.place deployment model on Sugarkube once token.place
-release artifacts are ready for formal onboarding.
+This is the canonical Sugarkube operations guide for token.place relay-only deployments.
 
-For onboarding sequence and ownership boundaries, start with
+For onboarding + environment runbooks, start with
 [`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md).
 
-## Intended topology
+## Current supported topology (relay-only)
 
-token.place on Sugarkube is expected to use a split model:
+Sugarkube currently runs only `relay.py` for token.place.
 
-- **In-cluster (Sugarkube):** edge/API-facing components, ingress, relay-facing services,
-  environment configuration, and operational controls.
-- **External compute nodes:** heavier execution workloads that do not need to run on the Pi cluster.
+- **In-cluster (Sugarkube):** one relay deployment behind Traefik ingress.
+- **Out-of-cluster compute:** `server.py`, desktop Tauri app, Windows PCs, Apple Silicon Macs,
+  Raspberry Pi compute nodes, and other compute workers.
+- **No in-cluster backend/GPU service:** this is intentional for the current rollout.
+- **Single replica / single worker / in-memory state:** accepted for now.
+- **Pod death can drop relay state:** accepted for now.
+- **Out of scope for this phase:** multi-replica relay and in-memory database architectures.
 
-This keeps Sugarkube focused on durable control-plane and ingress responsibilities while allowing
-compute capacity to scale independently.
+## Canonical artifact model
 
-## Component placement guidance
+Use these fixed identifiers for staging and production operations:
 
-Place on Sugarkube when a component:
+- Image: `ghcr.io/futuroptimist/tokenplace-relay`
+- Chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
+- Release: `tokenplace`
+- Namespace: `tokenplace`
+- Chart version pin: `docs/apps/tokenplace.version`
+- Production-approved image tag pin: `docs/apps/tokenplace.prod.tag`
 
-- terminates external traffic,
-- requires tight integration with k3s ingress/secrets,
-- benefits from near-cluster observability and rollout controls.
+## Values model
 
-Prefer external compute when a component:
+Layer values in this order:
 
-- is CPU/GPU intensive,
-- has bursty runtime needs,
-- can tolerate network hop separation from the relay/API plane.
+1. Base shared defaults: `docs/examples/tokenplace.values.dev.yaml`
+2. Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
+3. Production overlay: `docs/examples/tokenplace.values.prod.yaml`
 
-## Post-API-v1 secure deployment model
+Default ingress hosts:
 
-Expected steady state after API v1 convergence:
+- Staging: `staging.token.place`
+- Production: `token.place`
 
-- all component-to-component communication uses authenticated API v1 paths,
-- secrets are supplied via Kubernetes Secrets (or SOPS/Flux-managed equivalents),
-- ingress is fronted by Cloudflare + Traefik,
-- environment-specific values control hostnames, auth endpoints, and upstream compute routing.
+## Deployment workflow (OCI chart/image)
 
-## Prerequisites
+Preferred deployment wrappers:
 
-- Sugarkube k3s cluster healthy for target environment (`dev`, `staging`, or `prod`).
-- Cloudflare tunnel + DNS entries prepared for target token.place hostnames.
-- Token.place chart and image artifacts available and documented.
-- Environment values files prepared and reviewed.
+- Staging deploy: `just tokenplace-oci-deploy env=staging tag=<immutable-tag>`
+- Production promote/deploy: `just tokenplace-oci-promote-prod tag=<immutable-tag>`
+- Debug logs by env:
+  - `just tokenplace-debug-logs-env env=staging`
+  - `just tokenplace-debug-logs-env env=prod`
 
-## Core operational workflow
+Generic Helm OCI helpers are still available as secondary references, but token.place operations
+should default to the tokenplace-specific wrappers above.
 
-Use parameterized `just` recipes so unreconciled naming can be supplied at runtime:
+## Cloudflare + ingress model
 
-1. Deploy/install:
+Cloudflare Tunnel routes are configured **outside Helm**.
 
-   ```bash
-   just tokenplace-deploy release=<release> namespace=<namespace> chart=<chart-ref> values=<base>,<env> tag=<tag>
-   ```
+- Cloudflare routes should point app hostnames to Traefik, typically:
+  `http://traefik.kube-system.svc.cluster.local:80`
+- Helm deploys Kubernetes resources only; it does not create Cloudflare routes.
+- Common helper commands:
+  - `just cf-tunnel-route host=staging.token.place`
+  - `just cf-tunnel-route host=token.place`
 
-2. Upgrade:
+## Validation and troubleshooting quick reference
 
-   ```bash
-   just tokenplace-upgrade release=<release> namespace=<namespace> chart=<chart-ref> values=<base>,<env> tag=<tag>
-   ```
+- App status: `just tokenplace-status`
+- Cluster/ingress status:
+  - `just cluster-status`
+  - `just traefik-status`
+  - `just cf-tunnel-debug`
+- GHCR auth / chart verify:
+  - `helm registry login ghcr.io`
+  - `helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"`
 
-3. Rollback:
+For step-by-step commands, use:
 
-   ```bash
-   just tokenplace-rollback release=<release> namespace=<namespace> revision=<revision>
-   ```
-
-4. Validate:
-
-   ```bash
-   just tokenplace-validate namespace=<namespace> release=<release> health_url=https://<host>/<health-path>
-   ```
-
-5. Inspect and debug:
-
-   ```bash
-   just tokenplace-status namespace=<namespace> release=<release>
-   just tokenplace-logs namespace=<namespace> selector=<label-selector>
-   just tokenplace-port-forward namespace=<namespace> service=<service> local_port=8080 remote_port=80
-   ```
-
-## Cloudflare and ingress expectations
-
-- Public access should terminate via Cloudflare and forward to Traefik.
-- Hostnames should be environment-specific (`dev`, `staging`, `prod`) and documented in the env
-  runbooks.
-- cert-manager issuer and TLS secret naming should be explicit per environment.
-
-## Secrets and config guidance
-
-- Keep environment-specific secrets out of docs and commit history.
-- Prefer immutable promotion tags for staging/prod.
-- Keep shared defaults separate from env overlays to reduce accidental prod drift.
-
-## Operator notes
-
-- Do not assume namespace/release/chart naming until token.place onboarding finalizes.
-- Keep recipes parameterized and runbooks explicit about what is fixed vs configurable.
-- Use relay-specific guide ([`docs/apps/tokenplace-relay.md`](./tokenplace-relay.md)) for current relay-only operations.
+- [`docs/k3s-tokenplace-staging.md`](../k3s-tokenplace-staging.md)
+- [`docs/k3s-tokenplace-prod.md`](../k3s-tokenplace-prod.md)

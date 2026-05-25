@@ -1,66 +1,76 @@
 # k3s token.place runbook (staging)
 
-Use this runbook for `staging` token.place deployments on Sugarkube.
+Use this runbook to deploy relay-only token.place to staging on Sugarkube.
 
-## Purpose
+## Scope and topology
 
-- Release-candidate validation before production promotion.
-- Full ingress + Cloudflare + TLS + API v1 behavior checks.
+- Release: `tokenplace`
+- Namespace: `tokenplace`
+- Chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
+- Image: `ghcr.io/futuroptimist/tokenplace-relay`
+- Runtime model: single relay replica + single worker + in-memory state.
+- No in-cluster backend/GPU service is required.
 
-## Topology intent (staging)
+## Values and host
 
-- Sugarkube runs ingress/API-facing token.place services and relay integration points.
-- External compute remains out-of-cluster but reachable over secured API v1 paths.
-- Staging should mirror production architecture closely, with lower traffic volume.
+- Base values: `docs/examples/tokenplace.values.dev.yaml`
+- Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
+- Staging host default: `staging.token.place`
 
 ## Prerequisites
 
-- Chart/release wiring is defined for staging.
-- Staging values overlays and secrets are reviewed.
-- Cloudflare hostname routing to Traefik is configured.
+- Cloudflare Tunnel route for `staging.token.place` points to Traefik
+  (`http://traefik.kube-system.svc.cluster.local:80`).
+- GHCR auth is available for Helm OCI pull when required.
 
-## Deploy / upgrade / rollback
-
-```bash
-just tokenplace-deploy \
-  release=<release> namespace=<namespace> chart=<chart-ref> \
-  values=<base-values>,<staging-values> version_file=<optional-version-file> \
-  tag=<immutable-tag>
-```
+## First install
 
 ```bash
-just tokenplace-upgrade \
-  release=<release> namespace=<namespace> chart=<chart-ref> \
-  values=<base-values>,<staging-values> version_file=<optional-version-file> \
-  tag=<immutable-tag>
+just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_SHORTSHA
 ```
+
+## Existing release upgrade
 
 ```bash
-just tokenplace-rollback release=<release> namespace=<namespace> revision=<helm-revision>
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_SHORTSHA
 ```
 
-## Validation checks
+## Preferred wrapper
 
 ```bash
-just tokenplace-status namespace=<namespace> release=<release>
-just tokenplace-validate namespace=<namespace> release=<release> health_url=https://<staging-host>/<health>
+just tokenplace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA
 ```
 
-- Confirm ingress host and TLS certificate are ready.
-- Confirm API v1 auth and external compute connectivity are healthy.
-- Capture logs for relay/API components when validating release candidates.
+## Validation
 
 ```bash
-just tokenplace-logs namespace=<namespace> selector=<label-selector>
+kubectl -n tokenplace get deploy,po,svc,ingress
+kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+curl -fsS https://staging.token.place/livez
+curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/
 ```
 
-## Cloudflare / ingress expectations
+## Troubleshooting
 
-- Staging hostname is distinct from production hostname.
-- Tunnel target points to Traefik (`kube-system` service).
-- DNS records remain proxied in Cloudflare.
+- GHCR auth + chart check:
 
-## Operator caveats
+  ```bash
+  helm registry login ghcr.io
+  helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+  ```
 
-- Treat staging as promotion gate; avoid ad hoc value edits.
-- Prefer immutable tags for reproducible rollback and forensic traceability.
+- App diagnostics:
+
+  ```bash
+  just tokenplace-status
+  just tokenplace-debug-logs-env env=staging
+  ```
+
+- Ingress/Tunnel diagnostics:
+
+  ```bash
+  just cluster-status
+  just traefik-status
+  just cf-tunnel-debug
+  ```
