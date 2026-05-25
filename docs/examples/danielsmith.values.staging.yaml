@@ -1,0 +1,7 @@
+# Staging overlay values layered on top of danielsmith.values.dev.yaml.
+environment: staging
+
+ingress:
+  enabled: true
+  className: traefik
+  host: staging.danielsmith.io

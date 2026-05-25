@@ -1,0 +1,7 @@
+# Production overlay values layered on top of danielsmith.values.dev.yaml.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: danielsmith.io
