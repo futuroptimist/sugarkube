@@ -35,6 +35,7 @@ Defaults:
 First install:
 
 ```bash
+just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
@@ -42,6 +43,7 @@ just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 Existing release upgrade:
 
 ```bash
+just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
@@ -91,6 +93,7 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 Rollback to previous Helm revision:
 
 ```bash
+just kubeconfig-env prod
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
 just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
 ```

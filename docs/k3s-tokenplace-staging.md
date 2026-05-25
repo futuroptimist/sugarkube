@@ -24,6 +24,7 @@ Use this runbook for relay-only token.place staging deployments on Sugarkube.
 ## First install
 
 ```bash
+just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
@@ -31,6 +32,7 @@ just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 ## Existing release upgrade
 
 ```bash
+just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
@@ -57,6 +59,7 @@ curl -fsS https://staging.token.place/
 Rollback by immutable tag:
 
 ```bash
+just kubeconfig-env staging
 TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
@@ -64,6 +67,7 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 Rollback by Helm revision:
 
 ```bash
+just kubeconfig-env staging
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
 just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
 ```
