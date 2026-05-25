@@ -1716,40 +1716,193 @@ dspace-debug-logs-env env='staging' namespace='dspace':
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
-# Fast redeploy of token.place relay from GHCR.
-# The default tag pins staging to a vetted immutable SHA build; pass tag=sha-<shortsha>
-# after promoting a fresh image.
-
-# See docs/apps/tokenplace-relay.md for relay-specific operations.
-tokenplace-oci-redeploy tag='':
+# Deploy token.place from the canonical GHCR OCI chart (install-or-upgrade).
+tokenplace-oci-deploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    case "${env_name}" in
+      dev|staging|prod) ;;
+      *)
+        echo "ERROR: env must be one of dev|staging|prod (got '${env_name}')." >&2
+        exit 1
+        ;;
+    esac
+
+    image_tag='{{ tag }}'
+    if [ -z "${image_tag}" ]; then
+      echo "ERROR: tag is required for immutable OCI deploys." >&2
+      exit 1
+    fi
+    if [[ "${image_tag}" == *latest* ]] || [ "${image_tag}" = "main" ] || [[ "${image_tag}" =~ ^(main|master|staging|dev|develop|prod|production)$ ]] || [[ "${image_tag}" =~ -(main|master|staging|dev|develop|prod|production)$ ]]; then
+      echo "ERROR: mutable tag '${image_tag}' is not allowed for immutable OCI deploys." >&2
+      echo "Use an immutable branch-SHA tag such as main-deadbee." >&2
+      exit 1
+    fi
+
+    values='docs/examples/tokenplace.values.dev.yaml'
+    if [ "${env_name}" = "staging" ]; then
+      values="${values},docs/examples/tokenplace.values.staging.yaml"
+    elif [ "${env_name}" = "prod" ]; then
+      values="${values},docs/examples/tokenplace.values.prod.yaml"
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release='tokenplace' namespace='tokenplace' \
+      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      values="${values}" \
+      version_file='docs/apps/tokenplace.version' \
+      tag="${image_tag}"
+
+    kubectl -n tokenplace get deploy/tokenplace -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}' || true
+    host="$(kubectl -n tokenplace get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
+    if [ -n "${host}" ]; then
+      echo "Post-deploy checks:"
+      echo "  curl -fsS https://${host}/"
+      echo "  curl -fsS https://${host}/livez"
+      echo "  curl -fsS https://${host}/healthz"
+    else
+      echo "Post-deploy checks (host unavailable):"
+      echo "  curl -fsS https://<ingress-host>/"
+      echo "  curl -fsS https://<ingress-host>/livez"
+      echo "  curl -fsS https://<ingress-host>/healthz"
+    fi
+
+# Promote prod using an approved immutable image tag.
+tokenplace-oci-promote-prod tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    image_tag='{{ tag }}'
+    if [ -z "${image_tag}" ]; then
+      image_tag="$(sed -e 's/[[:space:]]*$//' docs/apps/tokenplace.prod.tag | awk 'NF && $1 !~ /^#/{print; exit}')"
+    fi
+    if [ -z "${image_tag}" ]; then
+      echo "ERROR: no tag provided and docs/apps/tokenplace.prod.tag has no non-comment tag." >&2
+      echo "Set docs/apps/tokenplace.prod.tag or pass tag=<immutable-tag>." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-oci-deploy env=prod tag="${image_tag}"
+
+# Upgrade-only token.place OCI path for existing releases.
+tokenplace-oci-redeploy env='staging' tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    case "${env_name}" in
+      dev|staging|prod) ;;
+      *)
+        echo "ERROR: env must be one of dev|staging|prod (got '${env_name}')." >&2
+        exit 1
+        ;;
+    esac
+
+    image_tag='{{ tag }}'
+    default_tag=''
+    if [ "${env_name}" = "prod" ]; then
+      if [ -z "${image_tag}" ]; then
+        image_tag="$(sed -e 's/[[:space:]]*$//' docs/apps/tokenplace.prod.tag | awk 'NF && $1 !~ /^#/{print; exit}')"
+      fi
+      if [ -z "${image_tag}" ]; then
+        echo "ERROR: prod redeploy requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2
+        exit 1
+      fi
+    fi
+
+    values='docs/examples/tokenplace.values.dev.yaml'
+    if [ "${env_name}" = "staging" ]; then
+      values="${values},docs/examples/tokenplace.values.staging.yaml"
+    elif [ "${env_name}" = "prod" ]; then
+      values="${values},docs/examples/tokenplace.values.prod.yaml"
+    fi
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
-      release='tokenplace-relay' namespace='tokenplace' \
-      chart='./apps/tokenplace-relay' \
-      values='apps/tokenplace-relay/values.dev.yaml,apps/tokenplace-relay/values.staging.yaml' \
-      version_file='' \
-      tag='{{ tag }}' default_tag='sha-684fd7f'
+      release='tokenplace' namespace='tokenplace' \
+      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      values="${values}" \
+      version_file='docs/apps/tokenplace.version' \
+      tag="${image_tag}" default_tag="${default_tag}"
 
     scripts/ensure_user_kubeconfig.sh || true
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
-    echo "Waiting for tokenplace-relay rollout to complete (timeout: 120s)..."
-    if ! kubectl -n tokenplace rollout status deploy/tokenplace-relay --timeout=120s; then
-      echo "ERROR: tokenplace-relay rollout did not complete successfully." >&2
+    echo "Waiting for tokenplace rollout to complete (timeout: 180s)..."
+    if ! kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s; then
+      echo "ERROR: tokenplace rollout did not complete successfully." >&2
       exit 1
     fi
 
-    echo "token.place relay available at: https://staging.token.place"
+    echo "token.place deploy/tokenplace rollout complete."
+
+tokenplace-debug-logs namespace='tokenplace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    ns="{{ namespace }}"
+
+    echo "=== token.place pods in namespace ${ns} ==="
+    kubectl get pods -n "${ns}" -o wide
+
+    selector='app.kubernetes.io/name=tokenplace'
+    pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${pods}" ]; then
+      selector='app.kubernetes.io/instance=tokenplace'
+      pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+    fi
+
+    echo
+    echo "=== token.place logs (selector: ${selector}) ==="
+    if [ -z "${pods}" ]; then
+      echo "No pods found for tokenplace labels in namespace ${ns}" >&2
+    else
+      for pod in ${pods}; do
+        echo
+        echo "--- pod: ${pod} ---"
+        kubectl logs -n "${ns}" "${pod}" --tail=200 || true
+      done
+    fi
+
+    echo
+    echo "=== Traefik logs (last 200 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || true
+
+tokenplace-debug-logs-env env='staging' namespace='tokenplace':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    if [ -z "${env_name}" ]; then
+      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+      exit 1
+    fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-debug-logs namespace="{{ namespace }}"
 
 # token.place app status helper (generic/parameterized defaults, not final release wiring).
 # Override namespace/release/host_key per environment until onboarding locks chart naming.
 
 # See docs/tokenplace_sugarkube_onboarding.md and docs/apps/tokenplace.md.
-tokenplace-status namespace='tokenplace' release='tokenplace-relay' host_key='ingress.host':
+tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.host':
     @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
 
 # Install-or-upgrade token.place via configurable Helm OCI wiring.
@@ -1818,7 +1971,7 @@ tokenplace-rollback release='' namespace='' revision='':
       kubectl -n "${ns}" rollout status "${workload}" --timeout=180s
     done <<< "${workloads}"
 
-tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenplace-relay' tail='200':
+tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenplace' tail='200':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1850,7 +2003,7 @@ tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenpla
 # Validation helper keeps generic defaults as placeholders; set selector/release/health_url per deployment.
 
 # Do not treat tokenplace-relay defaults here as final token.place production naming.
-tokenplace-validate namespace='tokenplace' release='tokenplace-relay' health_url='' selector='app.kubernetes.io/name=tokenplace-relay':
+tokenplace-validate namespace='tokenplace' release='tokenplace' health_url='' selector='app.kubernetes.io/name=tokenplace':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1869,7 +2022,7 @@ tokenplace-validate namespace='tokenplace' release='tokenplace-relay' health_url
 # Port-forward helper uses placeholder defaults for convenience; override service/ports for real app components.
 
 # Keep this recipe generic while token.place release/service naming is still being finalized.
-tokenplace-port-forward namespace='tokenplace' service='tokenplace-relay' local_port='5010' remote_port='80':
+tokenplace-port-forward namespace='tokenplace' service='tokenplace' local_port='5010' remote_port='80':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
