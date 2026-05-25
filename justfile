@@ -1608,7 +1608,7 @@ dspace-oci-redeploy env='staging' tag='':
       values_chain="${values_chain},${overlay}"
     fi
 
-    # NOTE: Prompt 7 is tokenplace-scoped; leave existing dspace kubeconfig behavior unchanged here.
+    # NOTE: This tokenplace-scoped change intentionally leaves dspace kubeconfig behavior unchanged here.
     # If dspace needs env-scoped kubeconfig selection before Helm, handle that in a separate DSPACE PR.
     deploy_tag="{{ tag }}"
     default_tag_value=""
