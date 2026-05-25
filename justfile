@@ -1899,7 +1899,7 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
 
     validate_immutable_tag() {
       local candidate="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[^0-9a-f]*$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{1,6}$ ]]; then
+      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || { [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && ! [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]; }; then
         echo "ERROR: mutable tag '$1' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
@@ -1918,7 +1918,7 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag='${resolved_tag}' default_tag='${resolved_default_tag}'
+      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
 
 # Upgrade-only path for existing token.place releases.
 tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
@@ -1927,7 +1927,7 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
 
     validate_immutable_tag() {
       local candidate="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[^0-9a-f]*$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{1,6}$ ]]; then
+      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || { [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && ! [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]; }; then
         echo "ERROR: mutable tag '$1' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
@@ -1946,7 +1946,7 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag='${resolved_tag}' default_tag='${resolved_default_tag}'
+      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
 
 tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
     #!/usr/bin/env bash
