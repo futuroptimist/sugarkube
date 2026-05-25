@@ -2,8 +2,8 @@
 # These defaults mirror the dspace staging pattern and are consumed by helper
 # commands in the justfile.
 image:
-  repository: ghcr.io/democratizedspace/tokenplace-relay
-  tag: sha-684fd7f
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: main-REPLACE_SHORTSHA
 
 ingress:
   enabled: true

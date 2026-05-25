@@ -50,8 +50,7 @@ and supporting services stay healthy.
   [k3s-tokenplace-staging.md](../k3s-tokenplace-staging.md), and
   [k3s-tokenplace-prod.md](../k3s-tokenplace-prod.md) — environment runbooks for day-2
   operations.
-- [apps/tokenplace-relay.md](../apps/tokenplace-relay.md) — Helm ingress/TLS guide for
-  token.place staging relay operations.
+- [apps/tokenplace-relay.md](../apps/tokenplace-relay.md) — relay-only token.place runbook with OCI chart/image flow, validation, and rollback.
 
 ## Developer Workflow
 - [contributor_script_map.md](../contributor_script_map.md) — keep automation docs

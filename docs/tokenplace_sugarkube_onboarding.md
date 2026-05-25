@@ -1,107 +1,46 @@
 # token.place Sugarkube onboarding
 
-This guide prepares Sugarkube to run `token.place` as a first-class workload once token.place
-release artifacts and chart wiring are finalized.
+This onboarding guide is now aligned to the relay-only Sugarkube deployment model.
 
-It is intentionally a **deployment-preparation** runbook: it defines stable interfaces,
-ownership, and operational shape without pretending that chart/release identifiers are immutable
-before the token.place onboarding cutover is complete.
+## Deployment scope now
 
-## Why token.place belongs on Sugarkube
+Sugarkube runs only `token.place` `relay.py` as the in-cluster workload.
 
-- Sugarkube already provides a repeatable k3s + ingress + Cloudflare operating model.
-- token.place already has relay operations on Sugarkube (`docs/apps/tokenplace-relay.md`), so this
-  onboarding extends an existing operational pattern instead of introducing a new stack.
-- Sugarkube gives a consistent operator interface (`just` + runbooks) across `dev`, `staging`, and
-  `prod`, reducing drift during promotion and rollback.
+- No in-cluster backend/GPU service is required.
+- External compute nodes remain external (`server.py`, desktop Tauri app, Windows PCs,
+  Apple Silicon Macs, Raspberry Pi compute nodes, etc.).
+- Relay runtime for Sugarkube is a single replica with one worker and in-memory state.
+- Pod restart state loss is currently accepted.
+- Multi-replica stateful architecture is intentionally out of scope.
 
-## Preconditions before onboarding
+## Canonical release model
 
-Before onboarding the full token.place workload, confirm token.place has completed:
+- Image: `ghcr.io/futuroptimist/tokenplace-relay`
+- Chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
+- Release: `tokenplace`
+- Namespace: `tokenplace`
+- Version pin: `docs/apps/tokenplace.version`
+- Prod tag pin: `docs/apps/tokenplace.prod.tag`
 
-1. Shared desktop/server compute-node runtime.
-2. Desktop parity with `server.py` behavior.
-3. Operationally mature relay service.
-4. Secure API v1 convergence across token.place components.
-5. Release artifact publication (container images + Helm chart) suitable for repeatable deployment.
+## Values model
 
-If any precondition is incomplete, keep using relay-only operations and postpone full onboarding.
+- Base: `docs/examples/tokenplace.values.dev.yaml`
+- Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
+- Prod overlay: `docs/examples/tokenplace.values.prod.yaml`
 
-## Release artifact expectations
+## Runbooks
 
-During onboarding, token.place should provide:
-
-- A Helm chart (OCI or repository path) that supports environment-specific values overlays.
-- Versioned chart metadata (or pinned chart digest/version).
-- Container image tags suitable for promotion (prefer immutable tags).
-- Health endpoints and readiness/liveness semantics documented for operator validation.
-
-## Expected Sugarkube wiring (standardized vs configurable)
-
-Standardized in Sugarkube:
-
-- Task-runner interface (recipes in `justfile`):
-  - `tokenplace-deploy`
-  - `tokenplace-upgrade`
-  - `tokenplace-rollback`
-  - `tokenplace-status`
-  - `tokenplace-logs`
-  - `tokenplace-validate`
-  - `tokenplace-port-forward`
-- Environment runbooks:
-  - `docs/k3s-tokenplace-dev.md`
-  - `docs/k3s-tokenplace-staging.md`
-  - `docs/k3s-tokenplace-prod.md`
-
-Configurable per onboarding cutover:
-
-- Namespace, release name, chart location, values files, chart version pin, and image tag strategy.
-- Ingress hosts and Cloudflare DNS/tunnel mapping.
-- Which token.place components run in-cluster vs on external compute nodes.
-
-## Environment mapping
-
-- `dev`: fast iteration, lower blast radius, relaxed SLOs.
-- `staging`: pre-production integration and release validation.
-- `prod`: public workload, strict rollback and change-control discipline.
-
-Use the environment-specific runbooks for concrete command patterns.
-
-## Ownership boundaries
-
-- **token.place team** owns chart/app semantics, release artifacts, and component-level config.
-- **Sugarkube operators** own cluster lifecycle, ingress/tunnel plumbing, secret distribution,
-  deployment execution, and rollback orchestration.
-- Shared responsibility: production cutover sequencing, health-gate criteria, and incident
-  response.
-
-## App catalog and related docs
-
+- Staging: `docs/k3s-tokenplace-staging.md`
+- Production: `docs/k3s-tokenplace-prod.md`
+- Relay app details: `docs/apps/tokenplace-relay.md`
 - App overview: `docs/apps/tokenplace.md`
-- Relay-specific operations: `docs/apps/tokenplace-relay.md`
-- Environment runbooks:
-  - `docs/k3s-tokenplace-dev.md`
-  - `docs/k3s-tokenplace-staging.md`
-  - `docs/k3s-tokenplace-prod.md`
 
-## Baseline command templates
+## Cloudflare boundary
 
-Set values explicitly per environment to avoid hidden assumptions:
+Cloudflare tunnels/routes are not managed by the Helm chart.
 
-```bash
-just tokenplace-deploy \
-  release=<release> namespace=<namespace> chart=<chart-ref> \
-  values=<base-values>,<env-values> version_file=<optional-version-file> \
-  tag=<image-tag>
-```
-
-```bash
-just tokenplace-upgrade \
-  release=<release> namespace=<namespace> chart=<chart-ref> \
-  values=<base-values>,<env-values> version_file=<optional-version-file> \
-  tag=<image-tag>
-```
-
-```bash
-just tokenplace-rollback release=<release> namespace=<namespace> revision=<helm-revision>
-```
+- Route staging/prod hosts to Traefik (typically
+  `http://traefik.kube-system.svc.cluster.local:80`).
+- Use helpers where available:
+  - `just cf-tunnel-route host=staging.token.place`
+  - `just cf-tunnel-route host=token.place`
