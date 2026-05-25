@@ -2043,6 +2043,192 @@ tokenplace-debug-logs-env env='staging' namespace='tokenplace':
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" tokenplace-debug-logs namespace="{{ namespace }}"
 
+
+
+danielsmith-oci-deploy env='staging' tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    case "${env_name}" in
+      dev|staging|prod) ;;
+      *)
+        echo "ERROR: env must be one of dev|staging|prod." >&2
+        exit 1
+        ;;
+    esac
+
+    validate_immutable_tag() {
+      local candidate="${1}"
+      local tag_lc
+      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${tag_lc}" == *latest* ]]         || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]]         || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]         || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
+        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
+        exit 1
+      fi
+    }
+
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
+    if [ -z "${resolved_tag}" ]; then
+      echo "ERROR: tag is required for immutable deploys." >&2
+      exit 1
+    fi
+    validate_immutable_tag "${resolved_tag}"
+
+    values_chain='docs/examples/danielsmith.values.dev.yaml'
+    if [ "${env_name}" = "staging" ]; then
+      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml'
+    elif [ "${env_name}" = "prod" ]; then
+      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml'
+    fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install       release='danielsmith' namespace='danielsmith'       chart='oci://ghcr.io/futuroptimist/charts/danielsmith'       values="${values_chain}"       version_file='docs/apps/danielsmith.version'       tag="${resolved_tag}"
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    echo
+    echo "Resolved images for deployment/danielsmith:"
+    kubectl -n danielsmith get deploy/danielsmith -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' || true
+
+    ingress_host="$(kubectl -n danielsmith get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
+    if [ -z "${ingress_host}" ]; then
+      ingress_host="<danielsmith-host>"
+    fi
+    echo
+    echo "Post-deploy checks:"
+    echo "  curl -fsS https://${ingress_host}/"
+    echo "  curl -fsS https://${ingress_host}/livez"
+    echo "  curl -fsS https://${ingress_host}/healthz"
+
+danielsmith-oci-promote-prod tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
+
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
+    if [ -z "${resolved_tag}" ]; then
+      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
+    fi
+    if [ -z "${resolved_tag}" ]; then
+      echo "ERROR: provide tag=<immutable-tag> or set docs/apps/danielsmith.prod.tag." >&2
+      exit 1
+    fi
+
+    just --justfile "{{ justfile_directory() }}/justfile" danielsmith-oci-deploy env=prod tag="${resolved_tag}"
+
+danielsmith-oci-redeploy env='staging' tag='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    case "${env_name}" in
+      dev|staging|prod) ;;
+      *)
+        echo "ERROR: env must be one of dev|staging|prod." >&2
+        exit 1
+        ;;
+    esac
+
+    validate_immutable_tag() {
+      local candidate="${1}"
+      local tag_lc
+      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${tag_lc}" == *latest* ]]         || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]]         || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]         || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
+        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
+        exit 1
+      fi
+    }
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
+
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
+    if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
+      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
+      [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/danielsmith.prod.tag." >&2; exit 1; }
+    fi
+    if [ "${env_name}" != "prod" ] && [ -z "${resolved_tag}" ]; then
+      echo "ERROR: env=${env_name} redeploy requires explicit tag=<immutable-tag>." >&2
+      echo "Non-prod redeploy intentionally has no baked-in fallback tag so this path is reproducible and reviewable." >&2
+      exit 1
+    fi
+    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
+
+    values_chain='docs/examples/danielsmith.values.dev.yaml'
+    if [ "${env_name}" = "staging" ]; then
+      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml'
+    elif [ "${env_name}" = "prod" ]; then
+      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml'
+    fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade       release='danielsmith' namespace='danielsmith'       chart='oci://ghcr.io/futuroptimist/charts/danielsmith'       values="${values_chain}"       version_file='docs/apps/danielsmith.version'       tag="${resolved_tag}"
+
+    scripts/ensure_user_kubeconfig.sh || true
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    kubectl -n danielsmith rollout status deploy/danielsmith --timeout=180s
+
+danielsmith-debug-logs namespace='danielsmith':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    ns="{{ namespace }}"
+
+    echo "=== danielsmith pods in namespace ${ns} ==="
+    kubectl get pods -n "${ns}" -o wide || true
+
+    selector='app.kubernetes.io/name=danielsmith'
+    danielsmith_pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${danielsmith_pods}" ]; then
+      selector='app.kubernetes.io/instance=danielsmith'
+      danielsmith_pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+    fi
+
+    echo
+    echo "=== danielsmith logs (last 200 lines per pod, selector: ${selector}) ==="
+    if [ -z "${danielsmith_pods}" ]; then
+      echo "No pods found with supported danielsmith selectors in namespace ${ns}" >&2
+    else
+      for pod in ${danielsmith_pods}; do
+        echo
+        echo "--- pod: ${pod} ---"
+        kubectl logs -n "${ns}" "${pod}" --tail='200' || true
+      done
+    fi
+
+    echo
+    echo "=== Traefik logs (last 200 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200 || true
+
+danielsmith-debug-logs-env env='staging' namespace='danielsmith':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" danielsmith-debug-logs namespace="{{ namespace }}"
+
+danielsmith-status namespace='danielsmith' release='danielsmith' host_key='ingress.host':
+    @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
 tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenplace' tail='200':
     #!/usr/bin/env bash
     set -Eeuo pipefail
