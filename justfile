@@ -1892,32 +1892,60 @@ tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.
 # Prefer tokenplace-oci-deploy/tokenplace-oci-redeploy for env-aware kubeconfig
 # selection; these generic helpers require explicit values + tag/default_tag to
 # avoid active-kubeconfig environment drift.
-tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
+tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if [ -z "{{ values }}" ] || { [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; }; then
+    validate_immutable_tag() {
+      local candidate="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[^0-9a-f]*$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{1,6}$ ]]; then
+        echo "ERROR: mutable tag '$1' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
+        exit 1
+      fi
+    }
+
+    resolved_tag="$(echo "{{ tag }}" | xargs || true)"
+    resolved_default_tag="$(echo "{{ default_tag }}" | xargs || true)"
+
+    if [ -z "{{ values }}" ] || { [ -z "${resolved_tag}" ] && [ -z "${resolved_default_tag}" ]; }; then
       echo "ERROR: tokenplace-deploy requires explicit values=<...> and tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
       exit 1
     fi
 
+    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
+    [ -n "${resolved_default_tag}" ] && validate_immutable_tag "${resolved_default_tag}"
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag='{{ tag }}' default_tag='{{ default_tag }}'
+      version_file='{{ version_file }}' version='{{ version }}' tag='${resolved_tag}' default_tag='${resolved_default_tag}'
 
 # Upgrade-only path for existing token.place releases.
-tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
+tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if [ -z "{{ values }}" ] || { [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; }; then
+    validate_immutable_tag() {
+      local candidate="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[^0-9a-f]*$ ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{1,6}$ ]]; then
+        echo "ERROR: mutable tag '$1' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
+        exit 1
+      fi
+    }
+
+    resolved_tag="$(echo "{{ tag }}" | xargs || true)"
+    resolved_default_tag="$(echo "{{ default_tag }}" | xargs || true)"
+
+    if [ -z "{{ values }}" ] || { [ -z "${resolved_tag}" ] && [ -z "${resolved_default_tag}" ]; }; then
       echo "ERROR: tokenplace-upgrade requires explicit values=<...> and tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
       exit 1
     fi
 
+    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
+    [ -n "${resolved_default_tag}" ] && validate_immutable_tag "${resolved_default_tag}"
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag='{{ tag }}' default_tag='{{ default_tag }}'
+      version_file='{{ version_file }}' version='{{ version }}' tag='${resolved_tag}' default_tag='${resolved_default_tag}'
 
 tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
     #!/usr/bin/env bash
