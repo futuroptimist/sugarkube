@@ -1622,9 +1622,6 @@ dspace-oci-redeploy env='staging' tag='':
       default_tag_value="main-latest"
     fi
 
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
-
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
@@ -1899,7 +1896,15 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
 
     validate_immutable_tag() {
       local candidate="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || { [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && ! [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]; }; then
+      # Branch-prefixed tags are allowed only as branch-<7+ hex SHA>; branch
+      # names or branch-like moving tags stay rejected.
+      if [[ "${candidate}" == *latest* ]] ||
+        [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] ||
+        [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] ||
+        {
+          [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] &&
+            ! [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]
+        }; then
         echo "ERROR: mutable tag '$1' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
@@ -1927,7 +1932,15 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
 
     validate_immutable_tag() {
       local candidate="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${candidate}" == *latest* ]] || [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] || { [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && ! [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]; }; then
+      # Branch-prefixed tags are allowed only as branch-<7+ hex SHA>; branch
+      # names or branch-like moving tags stay rejected.
+      if [[ "${candidate}" == *latest* ]] ||
+        [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] ||
+        [[ "${candidate}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] ||
+        {
+          [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] &&
+            ! [[ "${candidate}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]
+        }; then
         echo "ERROR: mutable tag '$1' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
