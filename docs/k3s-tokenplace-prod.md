@@ -25,7 +25,8 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 ## Promotion after staging sign-off
 
 ```bash
-just tokenplace-oci-promote-prod tag=main-<approved-7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
 ## Generic production upgrade
@@ -39,7 +40,8 @@ just kubeconfig-env prod
 Then run the generic OCI helper:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<approved-7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 ## Validation
@@ -57,7 +59,8 @@ curl -fsS https://token.place/
 Rollback by immutable tag:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<previous-7+hexsha>
+TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
 
 Rollback by Helm revision:

@@ -35,19 +35,22 @@ Defaults:
 First install:
 
 ```bash
-just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
+just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 Existing release upgrade:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 Preferred wrapper:
 
 ```bash
-just tokenplace-oci-deploy env=staging tag=main-<7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
+just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 ```
 
 ## Staging validation
@@ -65,19 +68,22 @@ curl -fsS https://staging.token.place/
 Promote approved staging image tag:
 
 ```bash
-just tokenplace-oci-promote-prod tag=main-<approved-7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
 Generic production upgrade with prod overlay:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<approved-7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 Rollback using previous immutable tag:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag=main-<previous-7+hexsha>
+TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
 
 Rollback to previous Helm revision:

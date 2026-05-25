@@ -24,19 +24,22 @@ Use this runbook for relay-only token.place staging deployments on Sugarkube.
 ## First install
 
 ```bash
-just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
+just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 ## Existing release upgrade
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 Preferred wrapper:
 
 ```bash
-just tokenplace-oci-deploy env=staging tag=main-<7+hexsha>
+TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
+just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 ```
 
 ## Validation
@@ -54,7 +57,8 @@ curl -fsS https://staging.token.place/
 Rollback by immutable tag:
 
 ```bash
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-<previous-7+hexsha>
+TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
 
 Rollback by Helm revision:
