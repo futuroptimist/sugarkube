@@ -1726,10 +1726,10 @@ tokenplace-oci-redeploy tag='':
     set -Eeuo pipefail
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
-      release='tokenplace-relay' namespace='tokenplace' \
-      chart='./apps/tokenplace-relay' \
-      values='apps/tokenplace-relay/values.dev.yaml,apps/tokenplace-relay/values.staging.yaml' \
-      version_file='' \
+      release='tokenplace' namespace='tokenplace' \
+      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      values='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml' \
+      version_file='docs/apps/tokenplace.version' \
       tag='{{ tag }}' default_tag='sha-684fd7f'
 
     scripts/ensure_user_kubeconfig.sh || true
@@ -1737,9 +1737,9 @@ tokenplace-oci-redeploy tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
-    echo "Waiting for tokenplace-relay rollout to complete (timeout: 120s)..."
-    if ! kubectl -n tokenplace rollout status deploy/tokenplace-relay --timeout=120s; then
-      echo "ERROR: tokenplace-relay rollout did not complete successfully." >&2
+    echo "Waiting for tokenplace rollout to complete (timeout: 120s)..."
+    if ! kubectl -n tokenplace rollout status deploy/tokenplace --timeout=120s; then
+      echo "ERROR: tokenplace rollout did not complete successfully." >&2
       exit 1
     fi
 

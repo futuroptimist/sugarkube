@@ -8,14 +8,14 @@ For full token.place onboarding and environment runbooks, see
 [`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md) and [`docs/apps/tokenplace.md`](./tokenplace.md).
 
 Values are split so you can reuse base settings across environments and layer staging-only ingress
-overrides. Operator defaults live alongside the chart; the docs copies remain as examples for
-cut-and-paste use:
+overrides. Operator defaults now live in the docs-owned canonical files:
 
-- `apps/tokenplace-relay/values.dev.yaml`: shared defaults (image repository, annotations).
-- `apps/tokenplace-relay/values.staging.yaml`: staging ingress host + TLS secret.
-- `docs/examples/tokenplace-relay.values.*.yaml`: example mirrors of the operator defaults.
+- `docs/examples/tokenplace.values.dev.yaml`: shared defaults (image repository, ingress baseline, shared env).
+- `docs/examples/tokenplace.values.staging.yaml`: staging ingress host + TLS secret.
+- `docs/examples/tokenplace.values.prod.yaml`: production ingress host + TLS secret.
+- `docs/apps/tokenplace.version`: pinned chart version for deploy wrappers.
 
-The Helm release runs in the `tokenplace` namespace with release name `tokenplace-relay`.
+The Helm release runs in the `tokenplace` namespace with release name `tokenplace`.
 
 ## Prerequisites
 
@@ -26,18 +26,18 @@ The Helm release runs in the `tokenplace` namespace with release name `tokenplac
 
 ## Container image and Helm chart
 
-- Image repository: `ghcr.io/democratizedspace/tokenplace-relay`
+- Image repository: `ghcr.io/futuroptimist/tokenplace-relay`
   - Tags: immutable `sha-<shortsha>` builds from the CI publisher (recommended) and `main` (mutable).
   - Default staging tag: `sha-684fd7f` (set via `default_tag` in the helper); override with `tag=sha-<shortsha>` for promotions.
-- Helm chart: `./apps/tokenplace-relay`
-  - Release: `tokenplace-relay`
+- Helm chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
+  - Release: `tokenplace`
   - Namespace: `tokenplace`
 
 Example values snippet:
 
 ```yaml
 image:
-  repository: ghcr.io/democratizedspace/tokenplace-relay
+  repository: ghcr.io/futuroptimist/tokenplace-relay
   tag: sha-684fd7f
 ingress:
   className: traefik
@@ -78,10 +78,11 @@ just tokenplace-oci-redeploy tag=sha-<shortsha>
 - Manual Helm install uses the operator values:
 
   ```bash
-  helm upgrade --install tokenplace-relay ./apps/tokenplace-relay \
+  helm upgrade --install tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace \
     --namespace tokenplace --create-namespace \
-    -f apps/tokenplace-relay/values.dev.yaml \
-    -f apps/tokenplace-relay/values.staging.yaml
+    -f docs/examples/tokenplace.values.dev.yaml \
+    -f docs/examples/tokenplace.values.staging.yaml \
+    --version "$(cat docs/apps/tokenplace.version)"
   ```
 
 ## Ingress, TLS, and Cloudflare
@@ -103,18 +104,18 @@ just tokenplace-oci-redeploy tag=sha-<shortsha>
 
 ## Operational helpers
 
-- Deploy or roll forward: `just tokenplace-oci-redeploy [tag=sha-...]` (release `tokenplace-relay`
-  in namespace `tokenplace`, values from `apps/tokenplace-relay/values.*.yaml`)
+- Deploy or roll forward: `just tokenplace-oci-redeploy [tag=sha-...]` (release `tokenplace`
+  in namespace `tokenplace`, values from `docs/examples/tokenplace.values.*.yaml`)
 - Check status: `just tokenplace-status` (prints pods/ingress and the public URL)
 - Tail logs: `just tokenplace-logs`
 - Port-forward locally: `just tokenplace-port-forward` then `curl http://127.0.0.1:5010/healthz`
 
 ## Troubleshooting
 
-- Inspect the release: `helm -n tokenplace status tokenplace-relay`
+- Inspect the release: `helm -n tokenplace status tokenplace`
 - Verify ingress + certificate:
   - `kubectl -n tokenplace get ingress`
-  - `kubectl -n tokenplace describe ingress tokenplace-relay`
+  - `kubectl -n tokenplace describe ingress tokenplace`
   - `kubectl -n tokenplace describe certificate staging-tokenplace-relay-tls`
 - Check relay health directly:
   - `just tokenplace-port-forward`
