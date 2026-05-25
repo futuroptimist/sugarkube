@@ -1479,6 +1479,9 @@ dspace-oci-deploy env='staging' tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
@@ -1539,6 +1542,9 @@ dspace-oci-deploy-prod-subdomain tag='':
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
@@ -1621,6 +1627,9 @@ dspace-oci-redeploy env='staging' tag='':
     else
       default_tag_value="main-latest"
     fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='dspace' namespace='dspace' \
@@ -1734,12 +1743,13 @@ tokenplace-oci-deploy env='staging' tag='':
         ;;
     esac
 
-    resolved_tag='{{ tag }}'
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: tag is required for immutable deploys." >&2
       exit 1
     fi
-    if [[ "${resolved_tag}" == *latest* ]] || [ "${resolved_tag}" = "main" ] || [[ "${resolved_tag}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${resolved_tag}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]; then
+    tag_lc="$(echo "${resolved_tag}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${tag_lc}" == *latest* ]] || [ "${tag_lc}" = "main" ] || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]; then
       echo "ERROR: mutable tag '${resolved_tag}' is not allowed. Use an immutable branch-sha tag." >&2
       exit 1
     fi
@@ -1750,6 +1760,9 @@ tokenplace-oci-deploy env='staging' tag='':
     elif [ "${env_name}" = "prod" ]; then
       values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml'
     fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
@@ -1778,9 +1791,9 @@ tokenplace-oci-promote-prod tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    resolved_tag='{{ tag }}'
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
     if [ -z "${resolved_tag}" ]; then
-      resolved_tag="$(awk 'NF && $1 !~ /^#/ {print; exit}' docs/apps/tokenplace.prod.tag 2>/dev/null || true)"
+      resolved_tag="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag 2>/dev/null | head -n1 | xargs || true)"
     fi
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: provide tag=<immutable-tag> or set docs/apps/tokenplace.prod.tag." >&2
@@ -1807,10 +1820,17 @@ tokenplace-oci-redeploy env='staging' tag='':
         ;;
     esac
 
-    resolved_tag='{{ tag }}'
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
     if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
-      resolved_tag="$(awk 'NF && $1 !~ /^#/ {print; exit}' docs/apps/tokenplace.prod.tag 2>/dev/null || true)"
+      resolved_tag="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag 2>/dev/null | head -n1 | xargs || true)"
       [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2; exit 1; }
+    fi
+    if [ -n "${resolved_tag}" ]; then
+      tag_lc="$(echo "${resolved_tag}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${tag_lc}" == *latest* ]] || [ "${tag_lc}" = "main" ] || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]; then
+        echo "ERROR: mutable tag '${resolved_tag}' is not allowed. Use an immutable branch-sha tag." >&2
+        exit 1
+      fi
     fi
 
     values_chain='docs/examples/tokenplace.values.dev.yaml'
@@ -1821,6 +1841,9 @@ tokenplace-oci-redeploy env='staging' tag='':
     elif [ "${env_name}" = "prod" ]; then
       values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml'
     fi
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='tokenplace' namespace='tokenplace' \
@@ -1847,6 +1870,11 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    if [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; then
+      echo "ERROR: tokenplace-deploy requires tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
+      exit 1
+    fi
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
       version_file='{{ version_file }}' version='{{ version }}' tag='{{ tag }}' default_tag='{{ default_tag }}'
@@ -1855,6 +1883,11 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
 tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    if [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; then
+      echo "ERROR: tokenplace-upgrade requires tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
+      exit 1
+    fi
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
@@ -1905,18 +1938,18 @@ tokenplace-debug-logs namespace='tokenplace':
     kubectl get pods -n "${ns}" -o wide || true
 
     selector='app.kubernetes.io/name=tokenplace'
-    relay_pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
-    if [ -z "${relay_pods}" ]; then
+    tokenplace_pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${tokenplace_pods}" ]; then
       selector='app.kubernetes.io/instance=tokenplace'
-      relay_pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+      tokenplace_pods="$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
     fi
 
     echo
     echo "=== token.place logs (last 200 lines per pod, selector: ${selector}) ==="
-    if [ -z "${relay_pods}" ]; then
+    if [ -z "${tokenplace_pods}" ]; then
       echo "No pods found with supported token.place selectors in namespace ${ns}" >&2
     else
-      for pod in ${relay_pods}; do
+      for pod in ${tokenplace_pods}; do
         echo
         echo "--- pod: ${pod} ---"
         kubectl logs -n "${ns}" "${pod}" --tail='200' || true
@@ -1955,12 +1988,12 @@ tokenplace-logs namespace='tokenplace' selector='app.kubernetes.io/name=tokenpla
 
     echo
     echo "=== token.place logs (last {{ tail }} lines per pod, selector: ${selector}) ==="
-    relay_pods=$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    tokenplace_pods=$(kubectl get pods -n "${ns}" -l "${selector}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
 
-    if [ -z "${relay_pods}" ]; then
+    if [ -z "${tokenplace_pods}" ]; then
       echo "No pods found with selector {{ selector }} in namespace ${ns}" >&2
     else
-      for pod in ${relay_pods}; do
+      for pod in ${tokenplace_pods}; do
         echo
         echo "--- pod: ${pod} ---"
         kubectl logs -n "${ns}" "${pod}" --tail='{{ tail }}' || {
