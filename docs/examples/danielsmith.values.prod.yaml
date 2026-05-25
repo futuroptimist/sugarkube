@@ -1,0 +1,12 @@
+# Production overlay values layered on top of danielsmith.values.dev.yaml.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: danielsmith.io
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    enabled: true
+    secretName: danielsmith-prod-tls

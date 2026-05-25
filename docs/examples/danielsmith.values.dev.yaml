@@ -1,0 +1,19 @@
+# Base/shared danielsmith.io values consumed alongside environment overlays.
+environment: dev
+replicaCount: 1
+
+image:
+  repository: ghcr.io/futuroptimist/danielsmith.io
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
