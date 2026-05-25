@@ -1479,9 +1479,6 @@ dspace-oci-deploy env='staging' tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
-
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
@@ -1542,9 +1539,6 @@ dspace-oci-deploy-prod-subdomain tag='':
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
-
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "prod"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
@@ -1743,16 +1737,26 @@ tokenplace-oci-deploy env='staging' tag='':
         ;;
     esac
 
+    # Shared immutable-tag guard for deploy/redeploy paths avoids moving-target tags.
+    validate_immutable_tag() {
+      local candidate="${1}"
+      local tag_lc
+      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${tag_lc}" == *latest* ]] \
+        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
+        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
+        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
+        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
+        exit 1
+      fi
+    }
+
     resolved_tag="$(echo '{{ tag }}' | xargs)"
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: tag is required for immutable deploys." >&2
       exit 1
     fi
-    tag_lc="$(echo "${resolved_tag}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${tag_lc}" == *latest* ]] || [ "${tag_lc}" = "main" ] || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]; then
-      echo "ERROR: mutable tag '${resolved_tag}' is not allowed. Use an immutable branch-sha tag." >&2
-      exit 1
-    fi
+    validate_immutable_tag "${resolved_tag}"
 
     values_chain='docs/examples/tokenplace.values.dev.yaml'
     if [ "${env_name}" = "staging" ]; then
@@ -1761,6 +1765,9 @@ tokenplace-oci-deploy env='staging' tag='':
       values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml'
     fi
 
+    # Intentional: tokenplace OCI wrappers select kubeconfig from env before Helm
+    # so prod/staging values cannot be applied to an unrelated active context.
+    # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
@@ -1791,9 +1798,11 @@ tokenplace-oci-promote-prod tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
+
     resolved_tag="$(echo '{{ tag }}' | xargs)"
     if [ -z "${resolved_tag}" ]; then
-      resolved_tag="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag 2>/dev/null | head -n1 | xargs || true)"
+      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
     fi
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: provide tag=<immutable-tag> or set docs/apps/tokenplace.prod.tag." >&2
@@ -1820,28 +1829,44 @@ tokenplace-oci-redeploy env='staging' tag='':
         ;;
     esac
 
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
-      resolved_tag="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag 2>/dev/null | head -n1 | xargs || true)"
-      [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2; exit 1; }
-    fi
-    if [ -n "${resolved_tag}" ]; then
-      tag_lc="$(echo "${resolved_tag}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] || [ "${tag_lc}" = "main" ] || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]]; then
-        echo "ERROR: mutable tag '${resolved_tag}' is not allowed. Use an immutable branch-sha tag." >&2
+    # Shared immutable-tag guard for deploy/redeploy paths avoids moving-target tags.
+    validate_immutable_tag() {
+      local candidate="${1}"
+      local tag_lc
+      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${tag_lc}" == *latest* ]] \
+        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
+        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
+        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
+        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
+    }
+    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
+
+    resolved_tag="$(echo '{{ tag }}' | xargs)"
+    if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
+      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
+      [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2; exit 1; }
     fi
+    if [ "${env_name}" != "prod" ] && [ -z "${resolved_tag}" ]; then
+      echo "ERROR: env=${env_name} redeploy requires explicit tag=<immutable-tag>." >&2
+      echo "Non-prod redeploy intentionally has no baked-in fallback tag so this path is reproducible and reviewable." >&2
+      exit 1
+    fi
+    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
 
     values_chain='docs/examples/tokenplace.values.dev.yaml'
     default_tag=''
     if [ "${env_name}" = "staging" ]; then
       values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml'
-      default_tag='main-684fd7f'
     elif [ "${env_name}" = "prod" ]; then
       values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml'
     fi
 
+    # Intentional: tokenplace OCI wrappers select kubeconfig from env before Helm
+    # so prod/staging values cannot be applied to an unrelated active context.
+    # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
@@ -1864,14 +1889,15 @@ tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.
     @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
 
 # Install-or-upgrade token.place via configurable Helm OCI wiring.
-
-# Uses helm upgrade --install underneath via the shared helper.
+# Prefer tokenplace-oci-deploy/tokenplace-oci-redeploy for env-aware kubeconfig
+# selection; these generic helpers require explicit values + tag/default_tag to
+# avoid active-kubeconfig environment drift.
 tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; then
-      echo "ERROR: tokenplace-deploy requires tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
+    if [ -z "{{ values }}" ] || { [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; }; then
+      echo "ERROR: tokenplace-deploy requires explicit values=<...> and tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
       exit 1
     fi
 
@@ -1884,8 +1910,8 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; then
-      echo "ERROR: tokenplace-upgrade requires tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
+    if [ -z "{{ values }}" ] || { [ -z "{{ tag }}" ] && [ -z "{{ default_tag }}" ]; }; then
+      echo "ERROR: tokenplace-upgrade requires explicit values=<...> and tag=<immutable-tag> or default_tag=<immutable-tag>." >&2
       exit 1
     fi
 
