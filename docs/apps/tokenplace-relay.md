@@ -1,126 +1,75 @@
 # token.place relay on Sugarkube
 
-Deploy the `token.place` relay (`relay.py`) to the Sugarkube k3s cluster with a Helm chart that
-matches the existing dspace staging patterns. The public staging host for the relay service is
-`staging.token.place`, fronted by Traefik and Cloudflare Tunnel.
+This page documents relay-specific operations for the canonical token.place OCI deployment.
 
-For full token.place onboarding and environment runbooks, see
-[`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md) and [`docs/apps/tokenplace.md`](./tokenplace.md).
+The local `apps/tokenplace-relay` chart is deprecated for steady-state operations. Use the
+OCI chart and values files described below.
 
-Values are split so you can reuse base settings across environments and layer staging-only ingress
-overrides. Operator defaults live alongside the chart; the docs copies remain as examples for
-cut-and-paste use:
+## Relay-only topology (current state)
 
-- `apps/tokenplace-relay/values.dev.yaml`: shared defaults (image repository, annotations).
-- `apps/tokenplace-relay/values.staging.yaml`: staging ingress host + TLS secret.
-- `docs/examples/tokenplace-relay.values.*.yaml`: example mirrors of the operator defaults.
+Sugarkube runs relay-only token.place today:
 
-The Helm release runs in the `tokenplace` namespace with release name `tokenplace-relay`.
+- Runs: `relay.py` in k3s.
+- Does not run: in-cluster backend service or GPU service.
+- External compute remains outside the cluster (`server.py`, desktop Tauri app, Windows PCs,
+  Apple Silicon Macs, Raspberry Pi compute nodes).
+- Deployment is intentionally single-replica, single-worker, in-memory state.
+- Pod restart/state loss is accepted for now.
+- Multi-replica or shared-state architecture is future work and out of scope for this runbook.
 
-## Prerequisites
+## Canonical artifacts and pins
 
-- A working k3s cluster with Traefik installed.
-- cert-manager with the `letsencrypt-production` ClusterIssuer ready (DNS01 via Cloudflare).
-- Cloudflare Tunnel pointing `staging.token.place` at
-  `http://traefik.kube-system.svc.cluster.local:80` (see [Cloudflare Tunnel docs](../cloudflare_tunnel.md)).
+- Image: `ghcr.io/futuroptimist/tokenplace-relay`
+- Chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
+- Release: `tokenplace`
+- Namespace: `tokenplace`
+- Chart version pin: `docs/apps/tokenplace.version`
+- Production approved image tag: `docs/apps/tokenplace.prod.tag`
 
-## Container image and Helm chart
+## Values layering
 
-- Image repository: `ghcr.io/democratizedspace/tokenplace-relay`
-  - Tags: immutable `sha-<shortsha>` builds from the CI publisher (recommended) and `main` (mutable).
-  - Default staging tag: `sha-684fd7f` (set via `default_tag` in the helper); override with `tag=sha-<shortsha>` for promotions.
-- Helm chart: `./apps/tokenplace-relay`
-  - Release: `tokenplace-relay`
-  - Namespace: `tokenplace`
+- Base defaults: `docs/examples/tokenplace.values.dev.yaml`
+- Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
+- Production overlay: `docs/examples/tokenplace.values.prod.yaml`
 
-Example values snippet:
+## Staging deployment quick commands
 
-```yaml
-image:
-  repository: ghcr.io/democratizedspace/tokenplace-relay
-  tag: sha-684fd7f
-ingress:
-  className: traefik
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
-  host: staging.token.place
-  tls:
-    secretName: staging-tokenplace-relay-tls
-env:
-  TOKENPLACE_RELAY_UPSTREAM_URL: http://gpu-server:5015
-probes:
-  port: http
-  readiness:
-    path: /healthz
-  liveness:
-    path: /livez
-```
-
-## Quickstart (staging)
+Prefer wrapper:
 
 ```bash
-# Install or upgrade the relay with staging ingress + TLS (wraps helm upgrade --install)
-just tokenplace-oci-redeploy
-
-# Print ingress + pod status
-just tokenplace-status
-
-# Redeploy a new image tag (sha-<shortsha> from GHCR) after validating a build
-just tokenplace-oci-redeploy tag=sha-<shortsha>
+just tokenplace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA
 ```
 
-- The `default_tag` keeps staging pinned to a vetted immutable SHA tag; pass `tag=sha-<shortsha>`
-  when promoting a fresh image.
-- Health probes default to `/healthz` (readiness) and `/livez` (liveness) on the `http` port
-  (`containerPort: 5010`). Override `probes.port`, `probes.readiness.path`, or `probes.liveness.path`
-  if the relay exposes a different endpoint.
-- Expected public URL: https://staging.token.place
-- Manual Helm install uses the operator values:
+Equivalent explicit commands:
 
-  ```bash
-  helm upgrade --install tokenplace-relay ./apps/tokenplace-relay \
-    --namespace tokenplace --create-namespace \
-    -f apps/tokenplace-relay/values.dev.yaml \
-    -f apps/tokenplace-relay/values.staging.yaml
-  ```
+```bash
+just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_SHORTSHA
+```
 
-## Ingress, TLS, and Cloudflare
+```bash
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag=main-REPLACE_SHORTSHA
+```
 
-- Ingress class: `traefik`
-- Hostname: `staging.token.place`
-- TLS: cert-manager DNS01 via `letsencrypt-production`, secret `staging-tokenplace-relay-tls`
-- Cloudflare DNS:
-  1. Ensure your tunnel routes `staging.token.place` to
-     `http://traefik.kube-system.svc.cluster.local:80` (see [cloudflare_tunnel.md](../cloudflare_tunnel.md)).
-  2. In Cloudflare DNS, create a proxied CNAME for `staging.token.place` pointing at the
-     tunnel’s `<UUID>.cfargotunnel.com` target. Leave Proxy enabled so TLS terminates at Cloudflare
-     before entering Traefik.
-- TLS troubleshooting:
-  - `kubectl -n tokenplace describe certificate staging-tokenplace-relay-tls`
-  - `kubectl -n tokenplace describe challenge` (if certificates stall)
-  - `kubectl -n cert-manager logs deploy/cert-manager`
-  - `kubectl -n kube-system logs -l app.kubernetes.io/name=traefik`
+## Validation commands
 
-## Operational helpers
+```bash
+kubectl -n tokenplace get deploy,po,svc,ingress
+kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+curl -fsS https://staging.token.place/livez
+curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/
+```
 
-- Deploy or roll forward: `just tokenplace-oci-redeploy [tag=sha-...]` (release `tokenplace-relay`
-  in namespace `tokenplace`, values from `apps/tokenplace-relay/values.*.yaml`)
-- Check status: `just tokenplace-status` (prints pods/ingress and the public URL)
-- Tail logs: `just tokenplace-logs`
-- Port-forward locally: `just tokenplace-port-forward` then `curl http://127.0.0.1:5010/healthz`
+## Cloudflare tunnel guidance
 
-## Troubleshooting
+Configure tunnel routes separately from Helm. Route hosts to Traefik service:
+`http://traefik.kube-system.svc.cluster.local:80`.
 
-- Inspect the release: `helm -n tokenplace status tokenplace-relay`
-- Verify ingress + certificate:
-  - `kubectl -n tokenplace get ingress`
-  - `kubectl -n tokenplace describe ingress tokenplace-relay`
-  - `kubectl -n tokenplace describe certificate staging-tokenplace-relay-tls`
-- Check relay health directly:
-  - `just tokenplace-port-forward`
-  - `curl -fsS http://127.0.0.1:5010/healthz`
-- Logs:
-  - `just tokenplace-logs`
-- Cloudflare Tunnel:
-  - Confirm the tunnel routes `staging.token.place` to Traefik (`http://traefik.kube-system.svc.cluster.local:80`)
-  - Validate DNS for `staging.token.place` in Cloudflare.
+Helpful commands when managing routes:
+
+```bash
+just cf-tunnel-route host=staging.token.place
+just cf-tunnel-route host=token.place
+```
+
+See also [`docs/cloudflare_tunnel.md`](../cloudflare_tunnel.md).

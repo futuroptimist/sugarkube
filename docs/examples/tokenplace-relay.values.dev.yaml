@@ -1,8 +1,8 @@
 # Base values for deploying the token.place relay via Helm (see
 # apps/tokenplace-relay/values.dev.yaml for the operator defaults).
 image:
-  repository: ghcr.io/democratizedspace/tokenplace-relay
-  tag: sha-684fd7f
+  repository: ghcr.io/futuroptimist/tokenplace-relay
+  tag: main-REPLACE_SHORTSHA
 
 ingress:
   enabled: true
