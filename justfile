@@ -1891,6 +1891,7 @@ tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.
 # Install-or-upgrade token.place via configurable Helm OCI wiring.
 # Prefer tokenplace-oci-deploy/tokenplace-oci-redeploy for env-aware kubeconfig
 # selection; these generic helpers require explicit values + tag/default_tag to
+
 # avoid active-kubeconfig environment drift.
 tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
     #!/usr/bin/env bash
