@@ -61,6 +61,8 @@ just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr
 
 Rollback by Helm revision:
 
+`tokenplace-rollback` is the repository's existing parameterized Helm rollback helper, even though the recipe name is token.place-scoped.
+
 ```bash
 just kubeconfig-env staging
 DANIELSMITH_REVISION=12 # replace with the known-good Helm revision

@@ -21,6 +21,12 @@ Use this runbook for production deployments of the static `danielsmith.io` site 
 - Values: `docs/examples/danielsmith.values.dev.yaml` + `docs/examples/danielsmith.values.prod.yaml`
 - Default production host: `danielsmith.io`
 
+## First install
+
+```bash
+just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag=main-REPLACE_APPROVED_SHORTSHA
+```
+
 ## Promotion after staging sign-off
 
 ```bash
@@ -54,6 +60,8 @@ just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr
 ```
 
 Rollback by Helm revision:
+
+`tokenplace-rollback` is the repository's existing parameterized Helm rollback helper, even though the recipe name is token.place-scoped.
 
 ```bash
 just kubeconfig-env prod
