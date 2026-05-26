@@ -23,6 +23,8 @@ Use this runbook for production deployments of the static `danielsmith.io` site 
 
 ## First install
 
+Always select the production kube context before running the generic Helm install command.
+
 ```bash
 just kubeconfig-env prod
 DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the immutable GHCR image tag to deploy
