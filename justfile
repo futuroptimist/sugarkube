@@ -2068,7 +2068,8 @@ danielsmith-oci-deploy env='staging' tag='':
       if [[ "${tag_lc}" == *latest* ]] \
         || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
         || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
+        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]) \
+        || ([[ "${tag_lc}" =~ -[0-9a-f]{7,}$ ]] && [[ ! "${tag_lc}" =~ ^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,}$ ]]); then
         echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
@@ -2102,8 +2103,26 @@ danielsmith-oci-deploy env='staging' tag='':
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
     echo
-    echo "Resolved images for deployment/danielsmith:"
-    kubectl -n danielsmith get deploy/danielsmith -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' || true
+    workloads="$(
+      {
+        kubectl -n danielsmith get deploy,statefulset,daemonset \
+          -l 'app.kubernetes.io/instance=danielsmith' \
+          -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}'
+        kubectl -n danielsmith get deploy,statefulset,daemonset \
+          -l 'release=danielsmith' \
+          -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}'
+      } 2>/dev/null | sed '/^$/d' | sort -u
+    )"
+    if [ -z "${workloads}" ]; then
+      echo "No rollout-capable workloads found for release danielsmith in namespace danielsmith" >&2
+    else
+      echo "Resolved images for danielsmith workloads:"
+      while IFS= read -r workload; do
+        [ -n "${workload}" ] || continue
+        echo "--- ${workload} ---"
+        kubectl -n danielsmith get "${workload}" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' || true
+      done <<< "${workloads}"
+    fi
 
     ingress_host="$(kubectl -n danielsmith get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
     if [ -n "${ingress_host}" ]; then
@@ -2156,7 +2175,8 @@ danielsmith-oci-redeploy env='staging' tag='':
       if [[ "${tag_lc}" == *latest* ]] \
         || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
         || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
+        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]) \
+        || ([[ "${tag_lc}" =~ -[0-9a-f]{7,}$ ]] && [[ ! "${tag_lc}" =~ ^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,}$ ]]); then
         echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
         exit 1
       fi
@@ -2195,7 +2215,6 @@ danielsmith-oci-redeploy env='staging' tag='':
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    kubectl -n danielsmith rollout status deploy/danielsmith --timeout=180s
 
 danielsmith-debug-logs namespace='danielsmith':
     #!/usr/bin/env bash
