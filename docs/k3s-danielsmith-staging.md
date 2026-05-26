@@ -24,7 +24,7 @@ Use this runbook for staging deployments of the static `danielsmith.io` site on 
 
 ```bash
 just kubeconfig-env staging
-DANIELSMITH_TAG=<immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
 just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
 ```
 
@@ -32,14 +32,14 @@ just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr
 
 ```bash
 just kubeconfig-env staging
-DANIELSMITH_TAG=<immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
 just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
 ```
 
 Preferred wrapper:
 
 ```bash
-DANIELSMITH_TAG=<immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
 just danielsmith-oci-deploy env=staging tag="$DANIELSMITH_TAG"
 ```
 
@@ -59,7 +59,7 @@ Rollback by immutable tag:
 
 ```bash
 just kubeconfig-env staging
-DANIELSMITH_PREVIOUS_TAG=<previous-immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_PREVIOUS_TAG=main-REPLACE_PREVIOUS_SHORTSHA # replace with the previous immutable GHCR image tag
 just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_PREVIOUS_TAG"
 ```
 

@@ -27,14 +27,14 @@ Always select the production kube context before running the generic Helm instal
 
 ```bash
 just kubeconfig-env prod
-DANIELSMITH_APPROVED_TAG=<immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the approved immutable GHCR image tag
 just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_APPROVED_TAG"
 ```
 
 ## Promotion after staging sign-off
 
 ```bash
-DANIELSMITH_APPROVED_TAG=<immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the approved immutable GHCR image tag
 just danielsmith-oci-promote-prod tag="$DANIELSMITH_APPROVED_TAG"
 ```
 
@@ -42,7 +42,7 @@ just danielsmith-oci-promote-prod tag="$DANIELSMITH_APPROVED_TAG"
 
 ```bash
 just kubeconfig-env prod
-DANIELSMITH_APPROVED_TAG=<immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the approved immutable GHCR image tag
 just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_APPROVED_TAG"
 ```
 
@@ -62,7 +62,7 @@ Rollback by immutable tag:
 
 ```bash
 just kubeconfig-env prod
-DANIELSMITH_PREVIOUS_APPROVED_TAG=<previous-immutable-ghcr-tag> # replace with the immutable GHCR image tag to deploy
+DANIELSMITH_PREVIOUS_APPROVED_TAG=main-REPLACE_PREVIOUS_APPROVED_SHORTSHA # replace with the previous approved immutable GHCR image tag
 just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_PREVIOUS_APPROVED_TAG"
 ```
 
