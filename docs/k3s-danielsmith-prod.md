@@ -24,22 +24,24 @@ Use this runbook for production deployments of the static `danielsmith.io` site 
 ## First install
 
 ```bash
-just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag=main-REPLACE_APPROVED_SHORTSHA
+just kubeconfig-env prod
+DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the immutable GHCR image tag to deploy
+just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_APPROVED_TAG"
 ```
 
 ## Promotion after staging sign-off
 
 ```bash
-DANIELSMITH_TAG=main-deadbee # replace with the approved immutable tag
-just danielsmith-oci-promote-prod tag="$DANIELSMITH_TAG"
+DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the immutable GHCR image tag to deploy
+just danielsmith-oci-promote-prod tag="$DANIELSMITH_APPROVED_TAG"
 ```
 
 ## Generic production upgrade
 
 ```bash
 just kubeconfig-env prod
-DANIELSMITH_TAG=main-deadbee # replace with the approved immutable tag
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
+DANIELSMITH_APPROVED_TAG=main-REPLACE_APPROVED_SHORTSHA # replace with the immutable GHCR image tag to deploy
+just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_APPROVED_TAG"
 ```
 
 ## Validation
@@ -58,8 +60,8 @@ Rollback by immutable tag:
 
 ```bash
 just kubeconfig-env prod
-DANIELSMITH_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_PREVIOUS_TAG"
+DANIELSMITH_PREVIOUS_APPROVED_TAG=main-REPLACE_PREVIOUS_APPROVED_SHORTSHA # replace with the immutable GHCR image tag to deploy
+just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_PREVIOUS_APPROVED_TAG"
 ```
 
 Rollback by Helm revision:
