@@ -38,19 +38,21 @@ Default hosts:
 First install (or install-or-upgrade) with generic helper:
 
 ```bash
-just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag=main-REPLACE_SHORTSHA
+just kubeconfig-env staging
+just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag=main-deadbee
 ```
 
 Existing release upgrade with generic helper:
 
 ```bash
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag=main-REPLACE_SHORTSHA
+just kubeconfig-env staging
+just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag=main-deadbee
 ```
 
 Preferred environment wrapper:
 
 ```bash
-just danielsmith-oci-deploy env=staging tag=main-REPLACE_SHORTSHA
+just danielsmith-oci-deploy env=staging tag=main-deadbee
 ```
 
 ## Validation commands

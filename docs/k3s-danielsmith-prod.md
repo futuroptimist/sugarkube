@@ -24,13 +24,14 @@ Use this runbook for production deployments of the static `danielsmith.io` site 
 ## Promotion after staging sign-off
 
 ```bash
-just danielsmith-oci-promote-prod tag=main-REPLACE_APPROVED_SHORTSHA
+just danielsmith-oci-promote-prod tag=main-deadbee
 ```
 
 ## Generic production upgrade
 
 ```bash
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag=main-REPLACE_APPROVED_SHORTSHA
+just kubeconfig-env prod
+just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag=main-deadbee
 ```
 
 ## Validation
@@ -48,12 +49,14 @@ curl -fsS https://danielsmith.io/
 Rollback by immutable tag:
 
 ```bash
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag=main-REPLACE_PREVIOUS_APPROVED_SHORTSHA
+just kubeconfig-env prod
+just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml version_file=docs/apps/danielsmith.version default_tag=main-deadbee
 ```
 
 Rollback by Helm revision:
 
 ```bash
+just kubeconfig-env prod
 DANIELSMITH_REVISION=12 # replace with the known-good Helm revision
 just tokenplace-rollback release=danielsmith namespace=danielsmith revision="$DANIELSMITH_REVISION"
 ```
@@ -72,7 +75,7 @@ just cf-tunnel-route host=danielsmith.io
 GHCR auth/chart checks:
 
 ```bash
-helm registry login ghcr.io
+echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
 helm show chart oci://ghcr.io/futuroptimist/charts/danielsmith --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/danielsmith.version | head -n1)"
 ```
 
