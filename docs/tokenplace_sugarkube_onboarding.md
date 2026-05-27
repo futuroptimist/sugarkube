@@ -10,7 +10,7 @@ Current scope is **relay-only** on Sugarkube:
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, desktop Tauri app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, and other remote workers).
-- Runtime defaults are one replica and one worker with in-memory state.
+- Runtime defaults are one replica, one Gunicorn worker, and in-memory state; validate the rendered Kubernetes Deployment contract for `spec.strategy.type: Recreate` before rollout.
 - State loss on pod restart is currently accepted.
 - Future multi-replica / in-memory database architecture is out of scope for this runbook.
 
@@ -41,7 +41,17 @@ Host defaults:
 - Staging runbook: `docs/k3s-tokenplace-staging.md`
 - Production runbook: `docs/k3s-tokenplace-prod.md`
 
+
+## 0.1.0 release alignment
+
+- Chart version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
+- Staging candidate image tag: `main-<shortsha>`
+- This PR intentionally does not introduce `0.1.1`.
+
 ## Cloudflare model
 
-Cloudflare tunnels/routes are managed outside Helm. Use route mappings from hostname to Traefik
+Cloudflare tunnels/routes are managed outside Helm, and Helm does not manage Cloudflare hostname routing. Use route mappings from hostname to Traefik
 (typically `http://traefik.kube-system.svc.cluster.local:80`) before deploy/upgrade steps.
