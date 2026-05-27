@@ -148,3 +148,12 @@ just cluster-status
 just traefik-status
 just cf-tunnel-debug
 ```
+
+## 0.1.0 release alignment
+
+- Chart version pin (`docs/apps/tokenplace.version`): `0.1.0`
+- Expected chart `appVersion`: `0.1.0`
+- token.place release tag: `v0.1.0`
+- Production release image tag: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
+- Staging candidate image tags: immutable `main-<shortsha>`
+

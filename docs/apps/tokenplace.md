@@ -75,6 +75,8 @@ For production validation, use the same checks against `https://token.place`.
 
 ## Cloudflare and ingress model
 
+Staging/prod overlays must set `ingress.tls.enabled: true` so Kubernetes Ingress `spec.tls` renders; `secretName` alone is not sufficient on charts that gate TLS blocks with an explicit enabled flag.
+
 Cloudflare Tunnel/DNS configuration is external to Helm.
 
 - Route hostnames to Traefik, typically
@@ -92,3 +94,12 @@ just cf-tunnel-route host=token.place
 - Relay-focused app guide: [`docs/apps/tokenplace-relay.md`](./tokenplace-relay.md)
 - Staging runbook: [`docs/k3s-tokenplace-staging.md`](../k3s-tokenplace-staging.md)
 - Production runbook: [`docs/k3s-tokenplace-prod.md`](../k3s-tokenplace-prod.md)
+
+## 0.1.0 release alignment
+
+- Chart version pin (`docs/apps/tokenplace.version`): `0.1.0`
+- Expected chart `appVersion`: `0.1.0`
+- token.place release tag: `v0.1.0`
+- Production release image tag: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
+- Staging candidate image tags: immutable `main-<shortsha>`
+

@@ -9,6 +9,7 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, etc.).
 - Runtime model is single replica + single worker + in-memory state.
+- Deployments use strict `strategy.type: Recreate` to preserve single-pod relay behavior.
 - In-memory state loss on pod restart is accepted for now.
 
 ## Artifact and values contract
@@ -22,7 +23,21 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 - Values: `docs/examples/tokenplace.values.dev.yaml` + `docs/examples/tokenplace.values.prod.yaml`
 - Default production host: `token.place`
 
+## Pre-flight checks
+
+- `docs/apps/tokenplace.version` is pinned to `0.1.0` and remains the launch chart pin.
+- Verify the `0.1.0` OCI chart exists only after token.place publishes the current chart.
+- If `helm show chart ... --version 0.1.0` succeeds before final token.place chart publish, confirm the chart is not stale before deploying.
+- Cloudflare Tunnel still owns public hostname routing to Traefik; Helm does not manage Cloudflare routes.
+- cert-manager and the referenced ClusterIssuer are assumed to already exist.
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+```
+
 ## Promotion after staging sign-off
+
+After token.place Git tag push (`v0.1.0`), production promotion should use `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`.
 
 ```bash
 TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
@@ -46,12 +61,26 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 
 ## Validation
 
+Render and contract checks before cluster apply:
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
+grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
+grep -n "token.place" /tmp/tokenplace-prod-render.yaml
+grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
+grep -n "type: Recreate" /tmp/tokenplace-prod-render.yaml
+```
+
+Runtime checks after deploy:
+
 ```bash
 kubectl -n tokenplace get deploy,po,svc,ingress
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+kubectl -n tokenplace get ingress tokenplace -o yaml
+curl -vI https://token.place/
 curl -fsS https://token.place/livez
 curl -fsS https://token.place/healthz
-curl -fsS https://token.place/
 ```
 
 ## Rollback options

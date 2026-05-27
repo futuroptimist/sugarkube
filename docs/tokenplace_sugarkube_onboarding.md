@@ -45,3 +45,12 @@ Host defaults:
 
 Cloudflare tunnels/routes are managed outside Helm. Use route mappings from hostname to Traefik
 (typically `http://traefik.kube-system.svc.cluster.local:80`) before deploy/upgrade steps.
+
+## 0.1.0 release alignment
+
+- Chart package version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag: `v0.1.0` (`ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`)
+- Staging candidate image tag before final promotion: `main-<shortsha>`
+
