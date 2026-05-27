@@ -8,7 +8,8 @@ Use this runbook for relay-only token.place staging deployments on Sugarkube.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, etc.).
-- Runtime model is single replica + single worker + in-memory state.
+- Runtime model is single replica + single Gunicorn worker + in-memory state.
+- Deployment strategy is strict `strategy.type: Recreate` (no overlapping old/new pods).
 - In-memory state loss on pod restart is accepted for now.
 
 ## Artifact and values contract
@@ -20,6 +21,18 @@ Use this runbook for relay-only token.place staging deployments on Sugarkube.
 - Version pin file: `docs/apps/tokenplace.version`
 - Values: `docs/examples/tokenplace.values.dev.yaml` + `docs/examples/tokenplace.values.staging.yaml`
 - Default staging host: `staging.token.place`
+
+## Pre-flight (before Step 1)
+
+- `docs/apps/tokenplace.version` stays pinned to `0.1.0`.
+- Verify the OCI chart you intend to deploy is present and current:
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+```
+
+- Only proceed once token.place has published the current `0.1.0` chart artifact.
+- If the command above succeeds before final token.place chart publication, treat it as potentially stale and confirm provenance before deploying.
 
 ## First install
 
@@ -47,11 +60,16 @@ just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 ## Validation
 
 ```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.staging.yaml --set image.tag=main-deadbee > /tmp/tokenplace-staging-render.yaml
+grep -n "spec:" -A40 /tmp/tokenplace-staging-render.yaml | grep -n "tls"
+grep -n "staging.token.place" /tmp/tokenplace-staging-render.yaml
+grep -n "tokenplace-staging-tls" /tmp/tokenplace-staging-render.yaml
+grep -n "type: Recreate" /tmp/tokenplace-staging-render.yaml
 kubectl -n tokenplace get deploy,po,svc,ingress
+kubectl -n tokenplace get ingress tokenplace -o yaml
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
-curl -fsS https://staging.token.place/livez
-curl -fsS https://staging.token.place/healthz
-curl -fsS https://staging.token.place/
+curl -vI https://staging.token.place/
 ```
 
 ## Rollback
@@ -74,7 +92,7 @@ just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKE
 
 ## Cloudflare tunnel routing (external to Helm)
 
-Cloudflare routes are configured outside the chart. Route `staging.token.place` to Traefik,
+Cloudflare routes are configured outside the chart. Helm does not manage Cloudflare hostname routes. Route `staging.token.place` to Traefik,
 typically `http://traefik.kube-system.svc.cluster.local:80`.
 
 ```bash

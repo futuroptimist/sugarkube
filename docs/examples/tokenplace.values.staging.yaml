@@ -8,6 +8,7 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
   tls:
+    enabled: true
     secretName: tokenplace-staging-tls
 
 env:

@@ -8,7 +8,8 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, etc.).
-- Runtime model is single replica + single worker + in-memory state.
+- Runtime model is single replica + single Gunicorn worker + in-memory state.
+- Deployment strategy is strict `strategy.type: Recreate` (no overlapping old/new pods).
 - In-memory state loss on pod restart is accepted for now.
 
 ## Artifact and values contract
@@ -24,8 +25,14 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 
 ## Promotion after staging sign-off
 
+Final production release promotion for v0.1.0 uses the semver image tag after Git tag push:
+
+```text
+ghcr.io/futuroptimist/tokenplace-relay:v0.1.0
+```
+
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
@@ -47,11 +54,16 @@ just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.i
 ## Validation
 
 ```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
+grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
+grep -n "token.place" /tmp/tokenplace-prod-render.yaml
+grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
+grep -n "type: Recreate" /tmp/tokenplace-prod-render.yaml
 kubectl -n tokenplace get deploy,po,svc,ingress
+kubectl -n tokenplace get ingress tokenplace -o yaml
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
-curl -fsS https://token.place/livez
-curl -fsS https://token.place/healthz
-curl -fsS https://token.place/
+curl -vI https://token.place/
 ```
 
 ## Rollback options
@@ -74,7 +86,7 @@ just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKE
 
 ## Cloudflare tunnel routing (external to Helm)
 
-Cloudflare routes are configured outside the chart. Route `token.place` to Traefik,
+Cloudflare routes are configured outside the chart. Helm does not manage Cloudflare hostname routes. Route `token.place` to Traefik,
 typically `http://traefik.kube-system.svc.cluster.local:80`.
 
 ```bash

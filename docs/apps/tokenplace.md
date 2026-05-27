@@ -13,7 +13,7 @@ Sugarkube currently runs **only** the token.place relay service (`relay.py`).
 - **Out-of-cluster compute:** `server.py`, desktop Tauri app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, and other compute workers remain external.
 - **No in-cluster backend/GPU service** is required for steady-state relay operation.
-- **Single replica + single worker** defaults are intentional.
+- **Single replica + single worker** defaults are intentional, with strict `strategy.type: Recreate`.
 - Relay state is currently **in-memory only**; pod restarts lose relay memory/state and this is
   accepted for now.
 - Future in-memory database or multi-replica architecture is **out of scope** for this runbook.
@@ -26,6 +26,14 @@ Sugarkube currently runs **only** the token.place relay service (`relay.py`).
 - Namespace: `tokenplace`
 - Chart version pin file: `docs/apps/tokenplace.version`
 - Production approved tag pin: `docs/apps/tokenplace.prod.tag`
+
+## 0.1.0 release alignment
+
+- Chart package version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag: `v0.1.0` (`ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`)
+- Staging candidate image tag before final tagging: `main-<shortsha>`
 
 ## Values model
 
@@ -74,6 +82,8 @@ curl -fsS https://staging.token.place/
 For production validation, use the same checks against `https://token.place`.
 
 ## Cloudflare and ingress model
+
+Staging/prod overlays render Kubernetes Ingress `spec.tls` (`ingress.tls.enabled: true`) and assume cert-manager plus a ClusterIssuer already exist. Helm manages Kubernetes resources only; Cloudflare public hostname routing remains external.
 
 Cloudflare Tunnel/DNS configuration is external to Helm.
 

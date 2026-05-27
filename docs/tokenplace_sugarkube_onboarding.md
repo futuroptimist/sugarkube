@@ -10,7 +10,7 @@ Current scope is **relay-only** on Sugarkube:
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, desktop Tauri app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, and other remote workers).
-- Runtime defaults are one replica and one worker with in-memory state.
+- Runtime defaults are one replica and one worker with in-memory state, using strict `strategy.type: Recreate`.
 - State loss on pod restart is currently accepted.
 - Future multi-replica / in-memory database architecture is out of scope for this runbook.
 
@@ -45,3 +45,12 @@ Host defaults:
 
 Cloudflare tunnels/routes are managed outside Helm. Use route mappings from hostname to Traefik
 (typically `http://traefik.kube-system.svc.cluster.local:80`) before deploy/upgrade steps.
+
+
+## 0.1.0 release alignment
+
+- Chart version: `0.1.0`
+- Chart appVersion: `0.1.0`
+- Git tag: `v0.1.0`
+- Release image tag: `v0.1.0`
+- Staging candidate tag: `main-<shortsha>`

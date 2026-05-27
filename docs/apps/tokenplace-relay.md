@@ -5,7 +5,7 @@ This guide documents the **relay-only** token.place deployment on Sugarkube.
 - Sugarkube runs only `relay.py`.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows/Apple Silicon/Raspberry Pi nodes, etc.).
-- Runtime is intentionally single replica, single worker, with in-memory state.
+- Runtime is intentionally single replica, single worker, with in-memory state and strict `strategy.type: Recreate`.
 - In-memory state loss on pod restart is accepted at this stage.
 
 For the broader app overview, see [`docs/apps/tokenplace.md`](./tokenplace.md).
@@ -57,6 +57,9 @@ just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 
 ## Staging validation
 
+Use immutable staging tags (`main-<shortsha>`) for candidate validation before release tagging.
+
+
 ```bash
 kubectl -n tokenplace get deploy,po,svc,ingress
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
@@ -67,10 +70,10 @@ curl -fsS https://staging.token.place/
 
 ## Production promotion, deploy, and rollback
 
-Promote approved staging image tag:
+Promote approved staging image tag. For v0.1.0 final promotion after tag push, use `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0` (`TOKENPLACE_TAG=v0.1.0`):
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
@@ -78,7 +81,7 @@ Generic production upgrade with prod overlay:
 
 ```bash
 just kubeconfig-env prod
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
@@ -109,6 +112,8 @@ curl -fsS https://token.place/
 ```
 
 ## Cloudflare tunnel guidance
+
+Staging/prod overlays now render Kubernetes Ingress `spec.tls` and assume cert-manager plus a ClusterIssuer are pre-installed. TLS secret names alone are not sufficient without `ingress.tls.enabled: true`.
 
 Use the same DSPACE-style tunnel model:
 
