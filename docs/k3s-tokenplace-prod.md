@@ -8,7 +8,7 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, etc.).
-- Runtime model is single replica + single Gunicorn worker + in-memory state, deployed with strict `strategy.type: Recreate`.
+- Runtime model is single replica + single Gunicorn worker + in-memory state; verify the rendered Kubernetes Deployment contract includes `spec.strategy.type: Recreate` before rollout.
 - In-memory state loss on pod restart is accepted for now.
 
 ## Artifact and values contract
@@ -64,7 +64,7 @@ helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version
 grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
 grep -n "token.place" /tmp/tokenplace-prod-render.yaml
 grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
-grep -n "type: Recreate" /tmp/tokenplace-prod-render.yaml
+yq eval '. | select(.kind == "Deployment" and .metadata.name == "tokenplace") | .spec.strategy.type' /tmp/tokenplace-prod-render.yaml
 ```
 
 Cluster/runtime checks:

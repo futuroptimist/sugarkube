@@ -5,7 +5,7 @@ This guide documents the **relay-only** token.place deployment on Sugarkube.
 - Sugarkube runs only `relay.py`.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows/Apple Silicon/Raspberry Pi nodes, etc.).
-- Runtime is intentionally one replica, one Gunicorn worker, in-memory state, and strict `strategy.type: Recreate`.
+- Runtime is intentionally one replica, one Gunicorn worker, and in-memory state; verify the rendered Kubernetes Deployment contract includes `spec.strategy.type: Recreate` before rollout.
 - In-memory state loss on pod restart is accepted at this stage.
 
 For the broader app overview, see [`docs/apps/tokenplace.md`](./tokenplace.md).
@@ -67,11 +67,11 @@ curl -fsS https://staging.token.place/
 
 ## Production promotion, deploy, and rollback
 
-Promote approved staging image tag. Final production promotion after token.place Git tag push should use `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`.
+Promote approved staging image tag. Final production promotion after token.place Git tag push should use tag `v0.1.0` (tag only; repository is already set in chart values).
 
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
@@ -79,7 +79,7 @@ Generic production upgrade with prod overlay:
 
 ```bash
 just kubeconfig-env prod
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 

@@ -10,7 +10,7 @@ Current scope is **relay-only** on Sugarkube:
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, desktop Tauri app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, and other remote workers).
-- Runtime defaults are one replica, one Gunicorn worker, in-memory state, and strict `strategy.type: Recreate`.
+- Runtime defaults are one replica, one Gunicorn worker, and in-memory state; validate the rendered Kubernetes Deployment contract for `spec.strategy.type: Recreate` before rollout.
 - State loss on pod restart is currently accepted.
 - Future multi-replica / in-memory database architecture is out of scope for this runbook.
 
