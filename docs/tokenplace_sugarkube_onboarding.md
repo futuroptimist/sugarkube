@@ -34,6 +34,14 @@ Host defaults:
 - Staging: `staging.token.place`
 - Production: `token.place`
 
+## 0.1.0 release alignment
+
+- Helm chart package version: `0.1.0`
+- Helm chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag after tag push: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
+- Staging candidate tag before final tagging: `main-<shortsha>`
+
 ## Environment runbooks
 
 - App overview: `docs/apps/tokenplace.md`
@@ -43,5 +51,4 @@ Host defaults:
 
 ## Cloudflare model
 
-Cloudflare tunnels/routes are managed outside Helm. Use route mappings from hostname to Traefik
-(typically `http://traefik.kube-system.svc.cluster.local:80`) before deploy/upgrade steps.
+Cloudflare Tunnel/DNS routes are managed outside Helm. Helm deploy/upgrade does not configure Cloudflare hostnames; map each hostname to Traefik (typically `http://traefik.kube-system.svc.cluster.local:80`) before deploy/upgrade steps. Staging/prod overlays now explicitly enable `ingress.tls.enabled: true` so Kubernetes Ingress `spec.tls` renders correctly with cert-manager and an existing ClusterIssuer.

@@ -38,6 +38,16 @@ Default hosts:
 - Staging: `staging.token.place`
 - Production: `token.place`
 
+## 0.1.0 release alignment
+
+- Chart package version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag: `v0.1.0` (`ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`)
+- Staging candidate image tag before final tagging: `main-<shortsha>`
+
+All launch versions remain aligned on `0.1.0`.
+
 ## Core deployment commands
 
 Use concrete release/namespace/chart values for token.place relay deployments.

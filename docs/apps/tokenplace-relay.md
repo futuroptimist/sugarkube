@@ -6,6 +6,7 @@ This guide documents the **relay-only** token.place deployment on Sugarkube.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows/Apple Silicon/Raspberry Pi nodes, etc.).
 - Runtime is intentionally single replica, single worker, with in-memory state.
+- Rollout behavior is strict `strategy.type: Recreate`.
 - In-memory state loss on pod restart is accepted at this stage.
 
 For the broader app overview, see [`docs/apps/tokenplace.md`](./tokenplace.md).
@@ -58,11 +59,14 @@ just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 ## Staging validation
 
 ```bash
-kubectl -n tokenplace get deploy,po,svc,ingress
-kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
-curl -fsS https://staging.token.place/livez
-curl -fsS https://staging.token.place/healthz
-curl -fsS https://staging.token.place/
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.staging.yaml --set image.tag=main-<shortsha> > /tmp/tokenplace-staging-render.yaml
+grep -n "tls:" -A8 /tmp/tokenplace-staging-render.yaml
+grep -n "staging.token.place" /tmp/tokenplace-staging-render.yaml
+grep -n "tokenplace-staging-tls" /tmp/tokenplace-staging-render.yaml
+grep -n "type: Recreate" /tmp/tokenplace-staging-render.yaml
+kubectl -n tokenplace get ingress tokenplace -o yaml
+curl -vI https://staging.token.place/
 ```
 
 ## Production promotion, deploy, and rollback
@@ -70,7 +74,7 @@ curl -fsS https://staging.token.place/
 Promote approved staging image tag:
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
@@ -101,11 +105,14 @@ just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKE
 Production validation:
 
 ```bash
-kubectl -n tokenplace get deploy,po,svc,ingress
-kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
-curl -fsS https://token.place/livez
-curl -fsS https://token.place/healthz
-curl -fsS https://token.place/
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
+grep -n "tls:" -A8 /tmp/tokenplace-prod-render.yaml
+grep -n "token.place" /tmp/tokenplace-prod-render.yaml
+grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
+grep -n "type: Recreate" /tmp/tokenplace-prod-render.yaml
+kubectl -n tokenplace get ingress tokenplace -o yaml
+curl -vI https://token.place/
 ```
 
 ## Cloudflare tunnel guidance
@@ -116,6 +123,8 @@ Use the same DSPACE-style tunnel model:
   `http://traefik.kube-system.svc.cluster.local:80`.
 - Staging/prod tunnel and DNS routes are configured outside Helm.
 - The chart deploy does not create Cloudflare routes.
+- Staging/prod overlays render Ingress `spec.tls`; `ingress.tls.secretName` alone is not sufficient without `ingress.tls.enabled: true`.
+- cert-manager and the referenced ClusterIssuer are assumed to already exist.
 
 Helpful commands:
 
