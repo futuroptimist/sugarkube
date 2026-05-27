@@ -101,5 +101,5 @@ just cf-tunnel-route host=token.place
 - Chart version: `0.1.0`
 - Chart `appVersion`: `0.1.0`
 - Git tag: `v0.1.0`
-- Release image tag: `v0.1.0`
+- Release image tag: `v0.1.0` (`ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`)
 - Staging candidate image tag: `main-<shortsha>`

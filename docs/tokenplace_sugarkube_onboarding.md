@@ -41,6 +41,16 @@ Host defaults:
 - Staging runbook: `docs/k3s-tokenplace-staging.md`
 - Production runbook: `docs/k3s-tokenplace-prod.md`
 
+
+## 0.1.0 release alignment
+
+- Chart version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
+- Staging candidate image tag: `main-<shortsha>`
+- This PR intentionally does not introduce `0.1.1`.
+
 ## Cloudflare model
 
 Cloudflare tunnels/routes are managed outside Helm, and Helm does not manage Cloudflare hostname routing. Use route mappings from hostname to Traefik
