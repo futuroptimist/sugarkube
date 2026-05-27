@@ -80,6 +80,8 @@ Cloudflare Tunnel/DNS configuration is external to Helm.
 - Route hostnames to Traefik, typically
   `http://traefik.kube-system.svc.cluster.local:80`.
 - Helm chart deployment does **not** create Cloudflare routes.
+- Staging/prod overlays set `ingress.tls.enabled: true` so rendered Kubernetes Ingress includes `spec.tls`.
+- `cert-manager` and a compatible `ClusterIssuer` are assumed to already exist.
 - Configure routes explicitly:
 
 ```bash
@@ -92,3 +94,12 @@ just cf-tunnel-route host=token.place
 - Relay-focused app guide: [`docs/apps/tokenplace-relay.md`](./tokenplace-relay.md)
 - Staging runbook: [`docs/k3s-tokenplace-staging.md`](../k3s-tokenplace-staging.md)
 - Production runbook: [`docs/k3s-tokenplace-prod.md`](../k3s-tokenplace-prod.md)
+
+
+## 0.1.0 release alignment
+
+- Chart version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- Git tag: `v0.1.0`
+- Release image tag: `v0.1.0`
+- Staging candidate image tag: `main-<shortsha>`

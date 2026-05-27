@@ -8,7 +8,7 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows PCs, Apple Silicon Macs,
   Raspberry Pi compute nodes, etc.).
-- Runtime model is single replica + single worker + in-memory state.
+- Runtime model is single replica + single Gunicorn worker + in-memory state, deployed with strict `strategy.type: Recreate`.
 - In-memory state loss on pod restart is accepted for now.
 
 ## Artifact and values contract
@@ -22,10 +22,20 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 - Values: `docs/examples/tokenplace.values.dev.yaml` + `docs/examples/tokenplace.values.prod.yaml`
 - Default production host: `token.place`
 
+## Pre-flight (before Step 1)
+
+- Verify `docs/apps/tokenplace.version` remains pinned to `0.1.0`.
+- Verify the `0.1.0` OCI chart exists only after token.place publishes the current chart.
+- If `helm show chart ... --version 0.1.0` succeeds before the final token.place chart publish, confirm the chart is not stale before deploying.
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+```
+
 ## Promotion after staging sign-off
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
@@ -40,18 +50,32 @@ just kubeconfig-env prod
 Then run the generic OCI helper:
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
+TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
 ## Validation
 
+Render/contract checks:
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
+helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
+grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
+grep -n "token.place" /tmp/tokenplace-prod-render.yaml
+grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
+grep -n "type: Recreate" /tmp/tokenplace-prod-render.yaml
+```
+
+Cluster/runtime checks:
+
 ```bash
 kubectl -n tokenplace get deploy,po,svc,ingress
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+kubectl -n tokenplace get ingress tokenplace -o yaml
+curl -vI https://token.place/
 curl -fsS https://token.place/livez
 curl -fsS https://token.place/healthz
-curl -fsS https://token.place/
 ```
 
 ## Rollback options
@@ -74,7 +98,7 @@ just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKE
 
 ## Cloudflare tunnel routing (external to Helm)
 
-Cloudflare routes are configured outside the chart. Route `token.place` to Traefik,
+Cloudflare routes are configured outside the chart. Helm does not manage Cloudflare routes. Route `token.place` to Traefik,
 typically `http://traefik.kube-system.svc.cluster.local:80`.
 
 ```bash
@@ -104,3 +128,12 @@ just cluster-status
 just traefik-status
 just cf-tunnel-debug
 ```
+
+
+## 0.1.0 release alignment
+
+- OCI chart package version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- token.place Git tag: `v0.1.0`
+- Release image tag after final tag push: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
+- Staging candidate tag before final tag push: `main-<shortsha>`

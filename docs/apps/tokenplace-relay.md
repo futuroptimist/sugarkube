@@ -5,7 +5,7 @@ This guide documents the **relay-only** token.place deployment on Sugarkube.
 - Sugarkube runs only `relay.py`.
 - No in-cluster backend/GPU service is required.
 - Compute nodes remain external (`server.py`, Tauri desktop app, Windows/Apple Silicon/Raspberry Pi nodes, etc.).
-- Runtime is intentionally single replica, single worker, with in-memory state.
+- Runtime is intentionally one replica, one Gunicorn worker, in-memory state, and strict `strategy.type: Recreate`.
 - In-memory state loss on pod restart is accepted at this stage.
 
 For the broader app overview, see [`docs/apps/tokenplace.md`](./tokenplace.md).
@@ -67,7 +67,8 @@ curl -fsS https://staging.token.place/
 
 ## Production promotion, deploy, and rollback
 
-Promote approved staging image tag:
+Promote approved staging image tag. Final production promotion after token.place Git tag push should use `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`.
+
 
 ```bash
 TOKENPLACE_TAG=main-deadbee # replace with the approved immutable tag
@@ -116,6 +117,8 @@ Use the same DSPACE-style tunnel model:
   `http://traefik.kube-system.svc.cluster.local:80`.
 - Staging/prod tunnel and DNS routes are configured outside Helm.
 - The chart deploy does not create Cloudflare routes.
+- Staging/prod overlays set `ingress.tls.enabled: true` so rendered Kubernetes Ingress includes `spec.tls` (with `tokenplace-staging-tls` and `tokenplace-prod-tls`).
+- `cert-manager` and the referenced `ClusterIssuer` are assumed to already exist.
 
 Helpful commands:
 
@@ -148,3 +151,12 @@ just cluster-status
 just traefik-status
 just cf-tunnel-debug
 ```
+
+
+## 0.1.0 release alignment
+
+- Chart version: `0.1.0`
+- Chart `appVersion`: `0.1.0`
+- Git tag: `v0.1.0`
+- Release image tag: `v0.1.0`
+- Staging candidate image tag: `main-<shortsha>`
