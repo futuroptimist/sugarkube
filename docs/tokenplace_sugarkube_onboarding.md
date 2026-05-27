@@ -49,7 +49,6 @@ Host defaults:
 - token.place Git tag: `v0.1.0`
 - Release image tag: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
 - Staging candidate image tag: `main-<shortsha>`
-- This PR intentionally does not introduce `0.1.1`.
 
 ## Cloudflare model
 
