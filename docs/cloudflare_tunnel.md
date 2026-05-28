@@ -31,6 +31,8 @@ runs inside the cluster.
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
+> `CF_TUNNEL_TOKEN` is only for the Cloudflare Tunnel connector. It is **not** the same credential as the Cloudflare DNS API token used by cert-manager DNS-01 challenges.
+
 ## Prerequisites
 
 - A Cloudflare account.

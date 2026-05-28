@@ -107,6 +107,38 @@ and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` alrea
 just cf-tunnel-route host=staging.token.place
 ```
 
+## cert-manager + Cloudflare DNS-01 (non-Flux clusters)
+
+If your cluster does **not** run Flux, do not apply `platform/cert-manager` with Kustomize as-is. In staging we hit this exact failure mode:
+
+- `kubectl apply -k platform/cert-manager` created the ConfigMap/issuers, then failed because `HelmRelease` was an unknown kind (Flux CRDs absent).
+- The rendered issuer email remained literal `$(CERT_MANAGER_EMAIL)`, causing ACME `invalidContact`.
+
+Use these recipes instead:
+
+```bash
+just cert-manager-install
+just cert-manager-cloudflare-token-secret token="$CF_DNS_API_TOKEN"
+just cert-manager-issuers-apply email="ops@token.place"
+just cert-manager-status
+```
+
+Cloudflare DNS API token scope for cert-manager:
+
+- `Zone -> DNS -> Edit`
+- `Zone -> Zone -> Read`
+- Include only required zones (at minimum `token.place`; include `democratized.space` too if the same token handles shared DSPACE cert issuance).
+
+Validation commands:
+
+```bash
+kubectl get crd | grep cert-manager.io
+kubectl get clusterissuer letsencrypt-staging letsencrypt-production
+kubectl get certificate --all-namespaces
+kubectl -n cert-manager get secret cloudflare-api-token
+kubectl -n cert-manager logs deploy/cert-manager --tail=100
+```
+
 
 ## 0.1.0 release alignment
 

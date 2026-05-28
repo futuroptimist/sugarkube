@@ -106,6 +106,23 @@ and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` alrea
 just cf-tunnel-route host=token.place
 ```
 
+## cert-manager + Cloudflare DNS-01 (non-Flux clusters)
+
+For non-Flux production clusters, use the same manual Helm + issuer flow validated during staging:
+
+```bash
+just cert-manager-install
+just cert-manager-cloudflare-token-secret token="$CF_DNS_API_TOKEN"
+just cert-manager-issuers-apply email="ops@token.place"
+just cert-manager-status
+```
+
+Do not reuse the tunnel token (`CF_TUNNEL_TOKEN`) for DNS-01. cert-manager needs a separate Cloudflare DNS API token scoped to:
+
+- `Zone -> DNS -> Edit`
+- `Zone -> Zone -> Read`
+- specific required zones (`token.place`, and `democratized.space` if shared issuance is in scope).
+
 ## Troubleshooting
 
 GHCR auth/chart checks:
