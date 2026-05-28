@@ -316,6 +316,34 @@ this tunnel/environment and point them to the internal Traefik Service.
 See Cloudflare’s docs for the latest UI steps:
 [Publish an application through Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/#publish-an-application).
 
+
+## Cloudflare 403 triage for token.place API v1
+
+When token.place desktop compute-node registration returns HTTP 403 but synthetic `curl`
+register/poll works, first determine whether the request reached the relay. If relay logs do not show
+a matching API v1 `POST`, treat it as a Cloudflare/pre-app rejection rather than an application
+handler failure.
+
+```bash
+kubectl -n tokenplace logs deploy/tokenplace --since=30m | grep -E 'POST .*/api/v1/.*/(register|poll)'
+```
+
+Triage checklist:
+
+1. Capture the failing response headers from the desktop client and record the `cf-ray` value,
+   timestamp, hostname, path, method, and source network.
+2. Search **Cloudflare Security Events** for that `cf-ray` in the `token.place` zone to identify the
+   product/rule that produced the 403: WAF, bot management, security level, access policy, rate
+   limit, or a custom rule.
+3. Compare a passing synthetic request with the failing desktop request: method, path, `Host`,
+   `User-Agent`, `Origin`, `Referer`, `Content-Type`, `Accept`, auth/debug headers, body shape, and
+   whether the desktop sends an `OPTIONS` preflight.
+4. Keep credentials distinct: `CF_TUNNEL_TOKEN` joins the cluster to a remotely-managed Cloudflare
+   Tunnel; cert-manager DNS-01 uses a separate Cloudflare DNS API token with zone permissions. Do not
+   paste either token into desktop settings, docs, or logs.
+5. After changing Cloudflare policy, confirm relay logs now show desktop register/poll `POST` entries
+   and finish validation with a real E2EE request/response through staging.
+
 ## Step 4 – Verify / create DNS records for published hostnames
 
 The hostnames you published (for example, `staging.democratized.space` and `staging.token.place` for
@@ -374,4 +402,4 @@ for temporary local development. See
   `*.cfargotunnel.com` name.
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
-- The Sugarkube dspace app expects this persistent tunnel setup to be in place. 
+- The Sugarkube dspace app expects this persistent tunnel setup to be in place.

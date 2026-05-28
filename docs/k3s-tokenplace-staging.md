@@ -109,7 +109,126 @@ kubectl -n tokenplace get ingress tokenplace -o yaml
 curl -vI https://staging.token.place/
 curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/relay/diagnostics | jq .
 ```
+
+### Staging validation sequence
+
+Run the checks in this order after each staging candidate rollout. During the incident that prompted
+this runbook update, basic web/TLS checks and synthetic register/poll both passed, but a public
+`/healthz` watch plus Kubernetes probes exposed that `/healthz` was still covered by the public API
+rate limit and could make readiness look broken. Treat high-frequency public health checks as a
+load/rate-limit test, not as the primary readiness monitor, until the relay release under test is
+known to exempt `/livez`, `/healthz`, metrics, diagnostics, and API v1 compute-node heartbeat routes
+from global API rate limits.
+
+1. **Web/TLS smoke:** confirm Cloudflare, tunnel routing, Traefik, ingress, and certificate wiring.
+
+   ```bash
+   curl -vI https://staging.token.place/
+   curl -fsS https://staging.token.place/
+   ```
+
+2. **Low-frequency public health/diagnostics:** call each endpoint once or on a slow cadence. Do not
+   run a tight `watch curl https://staging.token.place/healthz` loop as the readiness source of truth.
+
+   ```bash
+   curl -fsS https://staging.token.place/livez
+   curl -fsS https://staging.token.place/healthz | jq .
+   curl -fsS https://staging.token.place/relay/diagnostics | jq .
+   ```
+
+3. **Readiness without abusing public health endpoints:** use Kubernetes state and relay logs first,
+   then use public diagnostics sparingly.
+
+   ```bash
+   kubectl -n tokenplace get endpoints
+   kubectl -n tokenplace get deploy,po
+   kubectl -n tokenplace logs deploy/tokenplace --tail=200
+   curl -fsS https://staging.token.place/relay/diagnostics | jq .
+   ```
+
+4. **Synthetic API v1 compute-node register/poll:** register a throwaway debug server and then poll
+   with a bounded long-poll timeout. The debug server is in relay memory only and will age out by its
+   normal lease/TTL; do not use production secrets or a real operator key for this synthetic check.
+
+   ```bash
+   DEBUG_KEY="debug-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 6)"
+   DEBUG_SERVER_ID="sugarkube-staging-${DEBUG_KEY}"
+
+   curl -fsS -X POST https://staging.token.place/api/v1/compute/servers/register \
+     -H 'content-type: application/json' \
+     --data @- <<EOF | jq .
+   {
+     "serverId": "${DEBUG_SERVER_ID}",
+     "debugKey": "${DEBUG_KEY}",
+     "models": ["debug/sugarkube-smoke"],
+     "capacity": 1,
+     "metadata": {
+       "source": "sugarkube-staging-runbook",
+       "environment": "staging"
+     }
+   }
+   EOF
+
+   curl -fsS https://staging.token.place/healthz | jq '.knownServers // .servers // .'
+
+   curl -fsS --max-time 20 -X POST https://staging.token.place/api/v1/compute/servers/poll \
+     -H 'content-type: application/json' \
+     --data @- <<EOF | jq .
+   {
+     "serverId": "${DEBUG_SERVER_ID}",
+     "debugKey": "${DEBUG_KEY}"
+   }
+   EOF
+   ```
+
+   If token.place changes the exact debug payload schema, keep the same validation intent: generate a
+   unique `DEBUG_KEY`, register a synthetic server through the API v1 registration route, confirm
+   `knownServers`/server visibility through health or diagnostics, and poll
+   `/api/v1/compute/servers/poll` with `--max-time 20`.
+
+5. **Desktop compute-node registration:** start the desktop/Tauri compute-node client against
+   `https://staging.token.place`, confirm the desktop reports registered, and confirm relay logs show
+   matching API v1 register/poll `POST` requests.
+
+   ```bash
+   kubectl -n tokenplace logs deploy/tokenplace --tail=200 | grep -E 'POST .*/api/v1/.*/(register|poll)'
+   curl -fsS https://staging.token.place/relay/diagnostics | jq '.knownServers // .servers // .'
+   ```
+
+6. **End-to-end encrypted request/response:** before production promotion, send a real desktop or
+   external compute-node E2EE request through staging and verify the encrypted response returns to the
+   requesting client. Synthetic register/poll proves the relay API path works; production signoff
+   additionally requires an external compute-node registration plus a successful E2EE request/response.
+
+### Desktop HTTP 403 / pre-app rejection triage
+
+During staging, the desktop client saw HTTP 403 while synthetic `curl` register/poll succeeded, and
+relay logs did not contain corresponding desktop register/poll `POST` lines. That combination means
+Cloudflare or another pre-app layer likely rejected the request before it reached the relay. Triage in
+this order:
+
+1. Capture the desktop response headers and note the `cf-ray` value, timestamp, method, URL, and
+   source IP/network.
+2. Check relay logs for a matching `POST`. If the relay log entry is absent, debug Cloudflare before
+   changing the app.
+
+   ```bash
+   kubectl -n tokenplace logs deploy/tokenplace --since=30m | grep -E 'POST .*/api/v1/.*/(register|poll)'
+   ```
+
+3. Use the `cf-ray` value in **Cloudflare Security Events** for the `token.place` zone to identify the
+   blocking product/rule: WAF, bot management, security level, access policy, rate limit, or custom
+   rule.
+4. Compare a passing synthetic request with the failing desktop request: method, path, `Host`,
+   `User-Agent`, `Origin`, `Referer`, `Content-Type`, `Accept`, auth/debug headers, request body
+   shape, and whether the desktop performs an `OPTIONS` preflight.
+5. Confirm tunnel and DNS credentials are not mixed up. `CF_TUNNEL_TOKEN` is the token-only
+   Cloudflare Tunnel connector credential; cert-manager DNS-01 uses a separate Cloudflare DNS API
+   token. Neither token should be pasted into desktop settings or committed to Sugarkube docs.
+6. Once Cloudflare allows the desktop request, rerun the desktop registration and confirm relay logs
+   now show register/poll `POST` entries plus a successful E2EE request/response.
 
 ## Rollback
 
@@ -167,6 +286,12 @@ Cloudflare DNS API token scope for cert-manager:
 - `Zone -> DNS -> Edit`
 - `Zone -> Zone -> Read`
 - Include only required zones (at minimum `token.place`; include `democratized.space` too if the same token handles shared DSPACE cert issuance).
+
+If cert-manager logs cleanup errors after issuance, gate release on the Kubernetes Certificate state,
+not on noisy solver cleanup alone: `Ready=True` on the target Certificate means the usable TLS Secret
+was issued. Cleanup failures still deserve follow-up because they can indicate the DNS API token lacks
+`Zone -> Zone -> Read`, the token is scoped to the wrong zone, or Cloudflare zone/resolver lookup is
+behaving unexpectedly.
 
 Validation commands:
 
