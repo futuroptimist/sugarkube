@@ -1756,7 +1756,12 @@ tokenplace-oci-deploy env='staging' tag='':
       exit 1
     fi
     validate_immutable_tag "${resolved_tag}"
-    chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n1 | tr -d '[:space:]')"
+    chart_version=""
+    if [ -f docs/apps/tokenplace.version ]; then
+      chart_version="$(
+        sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version 2>/dev/null | head -n1 | tr -d '[:space:]' || true
+      )"
+    fi
     if [ -z "${chart_version}" ]; then
       echo "ERROR: unable to resolve chart version from docs/apps/tokenplace.version." >&2
       exit 1

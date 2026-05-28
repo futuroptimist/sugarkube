@@ -61,15 +61,31 @@ Render/contract checks:
 ```bash
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
-python3 - <<'PY'
-import collections, yaml
-docs = list(yaml.safe_load_all(open("/tmp/tokenplace-prod-render.yaml")))
-deploy = next(d for d in docs if d and d.get("kind") == "Deployment")
-env = deploy["spec"]["template"]["spec"]["containers"][0]["env"]
-names = [item["name"] for item in env]
-dupes = [name for name, count in collections.Counter(names).items() if count > 1]
-assert not dupes, dupes
-PY
+if ! yq eval 'select(.kind == "Deployment" and .metadata.name == "tokenplace")' /tmp/tokenplace-prod-render.yaml >/dev/null; then
+  echo "ERROR: tokenplace Deployment not found in rendered manifest" >&2
+  exit 1
+fi
+dupes="$(
+  yq eval -r '
+    select(.kind == "Deployment" and .metadata.name == "tokenplace")
+    | (
+        ((.spec.template.spec.initContainers // [])[] | {"type":"init","name":.name,"env":(.env // [])}),
+        ((.spec.template.spec.containers // [])[] | {"type":"app","name":.name,"env":(.env // [])})
+      )
+    | . as $c
+    | ($c.env[]?.name // empty)
+    | [$c.type, $c.name, .]
+    | @tsv
+  ' /tmp/tokenplace-prod-render.yaml \
+  | awk -F '\t' '
+      { key=$1 "\t" $2 "\t" $3; count[key]++ }
+      END {
+        for (k in count) if (count[k] > 1) print k
+      }
+    ' \
+  | sort
+)"
+test -z "${dupes}" || { echo "ERROR: duplicate env names found (type<TAB>container<TAB>env):"; echo "${dupes}"; exit 1; }
 grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
 grep -n "token.place" /tmp/tokenplace-prod-render.yaml
 grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
