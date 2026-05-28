@@ -22,6 +22,12 @@ def _extract_cf_recipe_body() -> str:
     return _extract_recipe_body("cf-tunnel-install")
 
 
+def _extract_cf_tunnel_route_recipe_body() -> str:
+    """Return the full body of the cf-tunnel-route recipe."""
+
+    return _extract_recipe_body("cf-tunnel-route")
+
+
 @pytest.fixture(scope="module")
 def origin_cert_guidance_text() -> str:
     just_text = JUSTFILE.read_text(encoding="utf-8")
@@ -40,19 +46,22 @@ def _extract_recipe_body(name: str) -> str:
     heredoc_end: str | None = None
     for line in lines:
         if capture:
-            body.append(line)
             if heredoc_end:
+                body.append(line)
                 if line.strip() == heredoc_end:
                     heredoc_end = None
                 continue
             if "<<EOF" in line:
+                body.append(line)
                 heredoc_end = "EOF"
                 continue
             if "<<'PATCH'" in line:
+                body.append(line)
                 heredoc_end = "PATCH"
                 continue
             if line and not line[0].isspace() and line.strip() not in {')', 'EOF', 'PATCH'}:
                 break
+            body.append(line)
             continue
         if line.startswith(f"{name} ") or line.startswith(f"{name}:"):
             capture = True
@@ -64,6 +73,36 @@ def _extract_recipe_body(name: str) -> str:
 @pytest.fixture(scope="module")
 def cf_recipe_body() -> str:
     return _extract_cf_recipe_body()
+
+
+@pytest.fixture(scope="module")
+def cf_tunnel_route_recipe_body() -> str:
+    return _extract_cf_tunnel_route_recipe_body()
+
+
+def _run_cf_tunnel_route_recipe(host: str) -> subprocess.CompletedProcess[str]:
+    rendered_body = _extract_cf_tunnel_route_recipe_body().replace("{{ host }}", host)
+    script = textwrap.dedent(
+        """#!/usr/bin/env bash
+        set -euo pipefail
+        """
+    ) + rendered_body + "\n"
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write(script)
+        path = f.name
+
+    try:
+        return subprocess.run(["bash", path], capture_output=True, text=True)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("host_input", ["staging.token.place", "host=staging.token.place"])
+def test_cf_tunnel_route_normalizes_host_prefix(host_input: str) -> None:
+    result = _run_cf_tunnel_route_recipe(host_input)
+    assert result.returncode == 0, result.stderr
+    assert "Hostname: staging.token.place" in result.stdout
 
 
 @pytest.fixture(scope="module")

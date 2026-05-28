@@ -26,9 +26,8 @@ runs inside the cluster.
 - Copy the tunnel token (`eyJ...`) from the **Install and run a connector** panel.
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
-- In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
-  `staging.token.place`, `prod.democratized.space` (optional legacy redirect host), and
-  `democratized.space` →
+- In the tunnel UI, configure only the hostnames for **this environment's tunnel**. For example, a
+  staging tunnel can route `staging.democratized.space` and `staging.token.place` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
@@ -40,8 +39,9 @@ optionally rename the tunnel later to `sugarkube-staging-v3`, but do not block l
 ## Prerequisites
 
 - A Cloudflare account.
-- A domain added as an active zone in Cloudflare and using Cloudflare nameservers (for example,
-  `democratized.space`).
+- Domains for every hostname you plan to publish must be active zones in Cloudflare and use
+  Cloudflare nameservers (for example, both `democratized.space` and `token.place` when publishing
+  `staging.token.place`).
 - `staging.democratized.space`, `prod.democratized.space` (optional legacy redirect host), and
   `democratized.space` (or your preferred rollout hostnames) are managed by Cloudflare DNS.
 - Access to the Cloudflare Zero Trust / Cloudflare One dashboard.
@@ -292,32 +292,34 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
-## Step 3 – Publish application routes (staging + optional prod redirect host + apex)
+## Step 3 – Publish application routes for one environment tunnel
 
-Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
-internal Traefik Service.
+Now that the connector is running in the cluster, configure routes for the hostnames that belong to
+this tunnel/environment and point them to the internal Traefik Service.
 
 1. In the tunnel configuration, open the **Public hostnames**, **Application routes**, or
    **Published applications** section.
-2. Add routes/applications:
+2. Add routes/applications (example for staging tunnel):
    - **Hostname**: `staging.democratized.space`
-   - **Hostname**: `prod.democratized.space` *(optional legacy redirect host)*
-   - **Hostname**: `democratized.space`
+   - **Hostname**: `staging.token.place`
    - **Service type**: `HTTP`
    - **Service URL**: `http://traefik.<namespace>.svc.cluster.local:80`
 
    Replace `<namespace>` with the namespace used by your ingress controller inside the k3s cluster.
+   For production, use a separate production tunnel and publish production hostnames there (for
+   example, `democratized.space` and optional legacy `prod.democratized.space` redirect host).
 3. Save the routes. This sends HTTPS traffic for each hostname through the tunnel into the Traefik
    ClusterIP service in your k3s cluster.
 
 See Cloudflare’s docs for the latest UI steps:
 [Publish an application through Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/#publish-an-application).
 
-## Step 4 – Verify / create DNS records for rollout hostnames
+## Step 4 – Verify / create DNS records for published hostnames
 
-The `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` hostnames are
-managed by Cloudflare DNS. When you publish hostnames through the tunnel UI, Cloudflare **usually**
-creates proxied CNAMEs automatically that point each hostname to your tunnel’s
+The hostnames you published (for example, `staging.democratized.space` and `staging.token.place` for
+staging) must be managed by Cloudflare DNS in their respective zones. When you publish hostnames
+through the tunnel UI, Cloudflare **usually** creates proxied CNAMEs automatically that point each
+hostname to your tunnel’s
 `*.cfargotunnel.com` address.
 
 If you see DNS records for the rollout hostnames pointing at `<UUID>.cfargotunnel.com`, you’re done.
@@ -326,11 +328,13 @@ If you see DNS records for the rollout hostnames pointing at `<UUID>.cfargotunne
 
 Only create this manually if the CNAME is missing:
 
-1. Go to **Cloudflare dashboard → DNS → Records** for `democratized.space`.
+1. Go to **Cloudflare dashboard → DNS → Records** for each relevant zone (for example,
+   `democratized.space` and `token.place`).
 2. Click **Add record**.
-3. Configure records as needed:
+3. Configure records as needed in each zone:
    - **Type**: `CNAME`
-   - **Name**: `staging`, `prod`, or `@` (for apex)
+   - **Name**: hostname label for that zone (for example, `staging` in either zone, `prod`, or `@`
+     for apex)
    - **Target**: `<UUID>.cfargotunnel.com` (the tunnel hostname shown in the dashboard)
    - **Proxy status**: **Proxied** (orange cloud)
 4. Save the record.
@@ -360,9 +364,11 @@ for temporary local development. See
 
 - A named Cloudflare Tunnel exists (for example, `dspace-staging`) with a saved token.
 - `cloudflared` runs inside the k3s cluster via `just cf-tunnel-install` using that token.
-- Routes map `staging.democratized.space`, `prod.democratized.space`, and `democratized.space` to
+- Routes for a given environment tunnel map that environment’s hostnames (for example,
+  `staging.democratized.space` and `staging.token.place`) to
   `http://traefik.<namespace>.svc.cluster.local:80` inside the cluster.
-- Cloudflare DNS has (or auto-created) proxied records pointing rollout hostnames to the tunnel’s
+- Cloudflare DNS has (or auto-created) proxied records in each required zone (for example,
+  `democratized.space` and `token.place`) pointing published hostnames to the tunnel’s
   `*.cfargotunnel.com` name.
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
