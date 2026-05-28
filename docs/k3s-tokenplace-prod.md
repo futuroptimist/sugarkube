@@ -61,11 +61,23 @@ Render/contract checks:
 ```bash
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
+python3 - <<'PY'
+import collections, yaml
+docs = list(yaml.safe_load_all(open("/tmp/tokenplace-prod-render.yaml")))
+deploy = next(d for d in docs if d and d.get("kind") == "Deployment")
+env = deploy["spec"]["template"]["spec"]["containers"][0]["env"]
+names = [item["name"] for item in env]
+dupes = [name for name, count in collections.Counter(names).items() if count > 1]
+assert not dupes, dupes
+PY
 grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
 grep -n "token.place" /tmp/tokenplace-prod-render.yaml
 grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
 yq eval '. | select(.kind == "Deployment" and .metadata.name == "tokenplace") | .spec.strategy.type' /tmp/tokenplace-prod-render.yaml
 ```
+
+Do **not** carry forward manual `--set env.XDG_CACHE_HOME=/tmp --set env.XDG_CONFIG_HOME=/tmp --set env.XDG_DATA_HOME=/tmp`
+overrides used during early staging debugging once Prompt 1 chart defaults are live; keep XDG runtime paths chart-owned.
 
 Cluster/runtime checks:
 

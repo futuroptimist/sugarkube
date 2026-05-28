@@ -32,6 +32,8 @@ Sugarkube currently runs **only** the token.place relay service (`relay.py`).
 - Base: `docs/examples/tokenplace.values.dev.yaml`
 - Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
 - Production overlay: `docs/examples/tokenplace.values.prod.yaml`
+- Keep chart-owned runtime env defaults (for example worker/frontend/relay health and XDG `/tmp` paths) in the
+  token.place chart; Sugarkube values should only carry environment-specific overrides to avoid duplicate env warnings.
 
 Default hosts:
 

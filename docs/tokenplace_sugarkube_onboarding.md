@@ -28,6 +28,8 @@ Current scope is **relay-only** on Sugarkube:
 - Base defaults: `docs/examples/tokenplace.values.dev.yaml`
 - Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
 - Production overlay: `docs/examples/tokenplace.values.prod.yaml`
+- The chart owns hardened runtime defaults (including XDG `/tmp` paths for read-only-root compatibility); avoid manual
+  Helm `--set env.XDG_*` overrides after Prompt 1 lands.
 
 Host defaults:
 

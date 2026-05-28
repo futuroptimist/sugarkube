@@ -1756,6 +1756,12 @@ tokenplace-oci-deploy env='staging' tag='':
       exit 1
     fi
     validate_immutable_tag "${resolved_tag}"
+    chart_ref='oci://ghcr.io/futuroptimist/charts/tokenplace'
+    chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n1 | tr -d '[:space:]')"
+    if [ -z "${chart_version}" ]; then
+      echo "ERROR: docs/apps/tokenplace.version is empty." >&2
+      exit 1
+    fi
 
     values_chain='docs/examples/tokenplace.values.dev.yaml'
     if [ "${env_name}" = "staging" ]; then
@@ -1769,10 +1775,12 @@ tokenplace-oci-deploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    echo "Deploying tokenplace chart=${chart_ref} version=${chart_version} tag=${resolved_tag} env=${env_name}"
+    echo "Values files: ${values_chain}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
-      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      chart="${chart_ref}" \
       values="${values_chain}" \
       version_file='docs/apps/tokenplace.version' \
       tag="${resolved_tag}"

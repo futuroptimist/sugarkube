@@ -62,11 +62,24 @@ Render/contract checks (use immutable staging candidate tag):
 ```bash
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.staging.yaml --set image.tag=main-deadbee > /tmp/tokenplace-staging-render.yaml
+python3 - <<'PY'
+import collections, yaml
+docs = list(yaml.safe_load_all(open("/tmp/tokenplace-staging-render.yaml")))
+deploy = next(d for d in docs if d and d.get("kind") == "Deployment")
+env = deploy["spec"]["template"]["spec"]["containers"][0]["env"]
+names = [item["name"] for item in env]
+dupes = [name for name, count in collections.Counter(names).items() if count > 1]
+assert not dupes, dupes
+PY
 grep -n "spec:" -A40 /tmp/tokenplace-staging-render.yaml | grep -n "tls"
 grep -n "staging.token.place" /tmp/tokenplace-staging-render.yaml
 grep -n "tokenplace-staging-tls" /tmp/tokenplace-staging-render.yaml
 yq eval '. | select(.kind == "Deployment" and .metadata.name == "tokenplace") | .spec.strategy.type' /tmp/tokenplace-staging-render.yaml
 ```
+
+Do **not** keep manual `--set env.XDG_CACHE_HOME=/tmp --set env.XDG_CONFIG_HOME=/tmp --set env.XDG_DATA_HOME=/tmp`
+overrides from early staging bring-up once Prompt 1 chart defaults are published; these are now chart-managed
+runtime defaults and duplicate manual overrides can mask future chart drift.
 
 Cluster/runtime checks:
 
