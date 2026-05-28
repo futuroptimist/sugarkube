@@ -752,6 +752,7 @@ cert-manager-install version='v1.14.4':
         --version "{{ version }}" \
         --set installCRDs=true \
         --set global.leaderElection.namespace=cert-manager \
+        --set-string extraArgs[0]=--dns01-recursive-nameservers-only \
         --wait \
         --timeout 5m
 
@@ -788,10 +789,6 @@ cert-manager-issuers-apply email:
     set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    if ! command -v envsubst >/dev/null 2>&1; then
-        echo "Missing envsubst (gettext). Install gettext and retry." >&2
-        exit 1
-    fi
     email="{{ email }}"
     email="$(printf '%s' "${email}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
     case "${email}" in
@@ -804,7 +801,11 @@ cert-manager-issuers-apply email:
         echo "Pass a valid email, e.g. just cert-manager-issuers-apply email=ops@example.com." >&2
         exit 1
     fi
-    CERT_MANAGER_EMAIL="${email}" envsubst < "{{ justfile_directory() }}/platform/cert-manager/clusterissuers.nonflux.yaml" | kubectl apply -f -
+    python3 -c 'import pathlib, os, sys
+tpl = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+sys.stdout.write(tpl.replace("${CERT_MANAGER_EMAIL}", os.environ["CERT_MANAGER_EMAIL"]))' \
+        "{{ justfile_directory() }}/platform/cert-manager/clusterissuers.nonflux.yaml" \
+        | CERT_MANAGER_EMAIL="${email}" kubectl apply -f -
 
 # Show cert-manager + issuer readiness and useful validation checks.
 cert-manager-status:
