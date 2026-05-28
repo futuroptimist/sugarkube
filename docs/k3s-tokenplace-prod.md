@@ -133,8 +133,14 @@ just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKE
 Cloudflare Tunnel still owns public hostname routing to Traefik; Helm does not manage Cloudflare routes. Route `token.place` to Traefik,
 typically `http://traefik.kube-system.svc.cluster.local:80`. Production overlays render Ingress `spec.tls` because `ingress.tls.enabled: true`; `secretName` alone is not sufficient,
 and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` already exist.
+One tunnel per environment can carry multiple app hostnames by routing them all to Traefik, with
+Traefik selecting the target backend by `Host` header.
+
+`cf-tunnel-route` configures Cloudflare Tunnel hostname routing. It does not configure the
+cert-manager Cloudflare DNS token used for ACME DNS-01.
 
 ```bash
+just cf-tunnel-route token.place
 just cf-tunnel-route host=token.place
 ```
 

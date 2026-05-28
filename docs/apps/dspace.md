@@ -28,6 +28,10 @@ Current/target topology:
   public host `democratized.space`.
 - **dev (planned, non-HA):** `env=dev` on `sugarkube6` (single-node future environment).
 
+Cloudflare Tunnel topology stays one tunnel per environment/cluster, with many hostnames routed to
+Traefik. For staging this means `staging.democratized.space` can share a tunnel with
+`staging.token.place`, and Traefik routes by HTTP `Host` header to the proper Ingress.
+
 ## Tagging model (evergreen releases)
 
 Use tags by purpose:
