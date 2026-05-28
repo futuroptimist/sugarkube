@@ -61,31 +61,33 @@ Render/contract checks:
 ```bash
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.prod.yaml --set image.tag=v0.1.0 > /tmp/tokenplace-prod-render.yaml
-if ! yq eval 'select(.kind == "Deployment" and .metadata.name == "tokenplace")' /tmp/tokenplace-prod-render.yaml >/dev/null; then
-  echo "ERROR: tokenplace Deployment not found in rendered manifest" >&2
-  exit 1
-fi
-dupes="$(
-  yq eval -r '
-    select(.kind == "Deployment" and .metadata.name == "tokenplace")
-    | (
-        ((.spec.template.spec.initContainers // [])[] | {"type":"init","name":.name,"env":(.env // [])}),
-        ((.spec.template.spec.containers // [])[] | {"type":"app","name":.name,"env":(.env // [])})
-      )
-    | . as $c
-    | ($c.env[]?.name // empty)
-    | [$c.type, $c.name, .]
-    | @tsv
-  ' /tmp/tokenplace-prod-render.yaml \
-  | awk -F '\t' '
-      { key=$1 "\t" $2 "\t" $3; count[key]++ }
-      END {
-        for (k in count) if (count[k] > 1) print k
-      }
-    ' \
-  | sort
-)"
-test -z "${dupes}" || { echo "ERROR: duplicate env names found (type<TAB>container<TAB>env):"; echo "${dupes}"; exit 1; }
+python3 - <<'PY'
+import collections
+import sys
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    sys.exit("PyYAML is required for this render validation. Install it with: python3 -m pip install PyYAML")
+
+with open("/tmp/tokenplace-prod-render.yaml", encoding="utf-8") as rendered:
+    docs = list(yaml.safe_load_all(rendered))
+
+try:
+    deploy = next(
+        d
+        for d in docs
+        if d and d.get("kind") == "Deployment" and d.get("metadata", {}).get("name") == "tokenplace"
+    )
+except StopIteration:
+    sys.exit("tokenplace Deployment not found in rendered manifest")
+
+for container in deploy["spec"]["template"]["spec"].get("containers", []):
+    names = [item["name"] for item in container.get("env", []) if "name" in item]
+    dupes = [name for name, count in collections.Counter(names).items() if count > 1]
+    if dupes:
+        sys.exit(f"duplicate env names found: {container.get('name', '<unnamed>')}: {dupes}")
+PY
 grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
 grep -n "token.place" /tmp/tokenplace-prod-render.yaml
 grep -n "tokenplace-prod-tls" /tmp/tokenplace-prod-render.yaml
