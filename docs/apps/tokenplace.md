@@ -90,7 +90,9 @@ Cloudflare Tunnel/DNS configuration is external to Helm.
 - Configure routes explicitly:
 
 ```bash
+just cf-tunnel-route staging.token.place
 just cf-tunnel-route host=staging.token.place
+just cf-tunnel-route token.place
 just cf-tunnel-route host=token.place
 ```
 

@@ -108,6 +108,7 @@ Traefik selecting the target backend by `Host` header.
 cert-manager Cloudflare DNS token used for ACME DNS-01.
 
 ```bash
+just cf-tunnel-route token.place
 just cf-tunnel-route host=token.place
 ```
 

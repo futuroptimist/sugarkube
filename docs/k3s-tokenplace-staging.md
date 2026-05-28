@@ -110,6 +110,7 @@ correct Ingress.
 Cloudflare DNS API token used by cert-manager DNS-01 challenges.
 
 ```bash
+just cf-tunnel-route staging.token.place
 just cf-tunnel-route host=staging.token.place
 ```
 
