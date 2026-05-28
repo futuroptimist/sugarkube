@@ -109,7 +109,107 @@ kubectl -n tokenplace get ingress tokenplace -o yaml
 curl -vI https://staging.token.place/
 curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/relay/diagnostics
 ```
+
+### Staging sign-off sequence
+
+Run the checks in this order so each layer has a clear owner before moving on to real
+external compute-node traffic:
+
+1. **Web/TLS:** confirm Cloudflare, Traefik, Ingress, and cert-manager serve the staging host.
+2. **Liveness/readiness:** call `/livez`, `/healthz`, and `/relay/diagnostics` once or at low
+   frequency. Do **not** use a long-running public `/healthz` watch as the primary readiness
+   monitor until token.place confirms health, liveness, metrics, diagnostics, and API v1
+   compute-node heartbeat routes are exempt from global public API rate limits. In staging, a
+   public `/healthz` watch plus kube-probes showed that rate-limited health checks can distort
+   readiness and create false rollout failures.
+3. **Synthetic API v1 register:** register a throwaway compute-node key against
+   `/api/v1/relay/servers/register`.
+4. **Synthetic API v1 poll:** poll `/api/v1/relay/servers/poll` with `--max-time 20` to verify the
+   long-poll path returns either queued encrypted work or a healthy no-work response.
+5. **Desktop compute-node registration:** start the packaged desktop/compute node against
+   `https://staging.token.place` and confirm the relay logs show matching API v1 register/poll
+   POSTs for that node.
+6. **E2EE request/response:** submit a real encrypted request through the staging client and verify
+   an encrypted response round trip. Synthetic register/poll is necessary, but real production
+   signoff requires an external compute-node registration and an E2EE request/response.
+
+Use Kubernetes state and relay logs for readiness instead of hammering public health endpoints:
+
+```bash
+kubectl -n tokenplace get endpoints
+kubectl -n tokenplace get deploy,po
+kubectl -n tokenplace logs deploy/tokenplace --since=15m --tail=200
+curl -fsS https://staging.token.place/relay/diagnostics
+```
+
+Keep the public diagnostics curl low-frequency (for example, one manual call during validation or
+one scheduled check every few minutes) so the check itself does not trip public API rate-limit traps.
+
+### Synthetic API v1 compute-node register/poll
+
+This synthetic test proves the relay can accept an API v1 compute-node heartbeat without requiring
+a desktop package or GPU host. It does not prove desktop packaging, request routing, or E2EE.
+
+```bash
+BASE_URL=https://staging.token.place
+DEBUG_KEY="debug-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 8)"
+
+# If the relay requires compute-node registration auth, populate RELAY_SERVER_CREDENTIAL
+# from your secret manager before running this block. Do not paste real secrets
+# into shell history, docs, screenshots, or PRs.
+
+RELAY_AUTH_HEADER_NAME="X-Relay-Server-Token"
+AUTH_HEADER=()
+if [ -n "${RELAY_SERVER_CREDENTIAL:-}" ]; then
+  AUTH_HEADER=(-H "${RELAY_AUTH_HEADER_NAME}: ${RELAY_SERVER_CREDENTIAL}")
+fi
+
+curl -fsS -X POST "${BASE_URL}/api/v1/relay/servers/register" \
+  -H 'Content-Type: application/json' \
+  "${AUTH_HEADER[@]}" \
+  --data "{\"server_public_key\":\"${DEBUG_KEY}\"}" | jq .
+
+curl -fsS "${BASE_URL}/healthz" | jq '{status, knownServers, registeredServers}'
+
+curl -fsS --max-time 20 -X POST "${BASE_URL}/api/v1/relay/servers/poll" \
+  -H 'Content-Type: application/json' \
+  "${AUTH_HEADER[@]}" \
+  --data "{\"server_public_key\":\"${DEBUG_KEY}\"}" | jq .
+```
+
+Expected result: register returns wait hints, `/healthz` reports `knownServers` increased while the
+lease is fresh, and poll returns either encrypted work or a `No requests available` response. The
+debug server is ephemeral and will age out automatically after the relay lease if it is not
+refreshed.
+
+### Desktop HTTP 403 / pre-app rejection triage
+
+If the desktop compute-node reports HTTP 403 but synthetic curl succeeds, determine whether the
+request reached Flask/Gunicorn or was rejected before the app:
+
+1. Capture the desktop failure timestamp, request path, response status, and Cloudflare `cf-ray`
+   header from the desktop diagnostics or HTTP trace.
+2. Check relay logs for matching API v1 POSTs around that timestamp:
+
+   ```bash
+   kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 | \
+     grep -E 'api/v1/relay/servers/(register|poll)|server\.(registered|reregister|heartbeat)'
+   ```
+
+3. If there is no corresponding relay log entry, treat it as a Cloudflare/pre-app rejection and
+   search **Cloudflare Security Events** for the `cf-ray` value, client IP, host, path, and user
+   agent.
+4. Compare synthetic curl and desktop request headers: method, host, path, `Content-Type`,
+   `User-Agent`, `Origin`, any desktop-specific headers, and whether `X-Relay-Server-Token` is
+   present when required.
+5. Confirm credentials are not mixed up: `CF_TUNNEL_TOKEN` connects the Cloudflare Tunnel connector
+   to the dashboard tunnel, while the Cloudflare DNS API token is only for cert-manager DNS-01.
+   Neither token should be sent as the API v1 relay server registration token.
+
+A 403 with no relay log line means the application probably never saw the POST. A 403 with a relay
+log line means inspect token.place auth/rate-limit handling and the exact response body.
 
 ## Rollback
 
@@ -167,6 +267,12 @@ Cloudflare DNS API token scope for cert-manager:
 - `Zone -> DNS -> Edit`
 - `Zone -> Zone -> Read`
 - Include only required zones (at minimum `token.place`; include `democratized.space` too if the same token handles shared DSPACE cert issuance).
+
+If cert-manager logs show challenge cleanup errors after a certificate is already issued, use the
+Certificate condition as the release gate: `Ready=True` means TLS issuance succeeded for rollout
+purposes. Cleanup errors are still worth fixing because they usually point to a Cloudflare DNS API
+token without `Zone -> Zone -> Read`, a token scoped to the wrong zone, or resolver/zone lookup
+weirdness that prevents cert-manager from finding the correct Cloudflare zone during cleanup.
 
 Validation commands:
 
