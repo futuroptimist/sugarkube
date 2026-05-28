@@ -102,6 +102,9 @@ Cloudflare Tunnel still owns public hostname routing to Traefik; Helm does not m
 typically `http://traefik.kube-system.svc.cluster.local:80`. Production overlays render Ingress `spec.tls` because `ingress.tls.enabled: true`; `secretName` alone is not sufficient,
 and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` already exist.
 
+One tunnel per environment can serve many hostnames. Route each public hostname to Traefik, then
+Traefik dispatches by Host header to the matching Kubernetes Ingress.
+
 ```bash
 just cf-tunnel-route host=token.place
 ```

@@ -260,6 +260,14 @@ return to a clean token-mode state:
   just cf-tunnel-debug
   ```
 
+  In the logs, look for `Updated to new configuration` and confirm your target hostname appears
+  shortly after route changes. A Cloudflare edge `404` before the app Ingress exists is expected:
+  it means the tunnel is connected but Traefik/Ingress/app routing is not ready yet.
+
+  You may also see `cloudflared` warnings that the deployed image is outdated. Treat image upgrades
+  as separate maintenance work; do not block app deployment if the tunnel is connected and routes are
+  functioning.
+
 - Hard reset the deployment/configmap/pods while preserving the `tunnel-token` Secret:
 
   ```bash
@@ -278,15 +286,21 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
-## Step 3 – Publish application routes (staging + optional prod redirect host + apex)
+## Step 3 – Publish application routes (one tunnel per env, many hostnames)
 
 Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
 internal Traefik Service.
+
+One Cloudflare tunnel per cluster/environment is enough for multiple apps and hostnames. For example,
+the staging tunnel `dspace-staging-v3` can route both `staging.democratized.space` and
+`staging.token.place` to the same in-cluster Traefik Service. Traefik then forwards requests to the
+correct Kubernetes Ingress by **Host** header.
 
 1. In the tunnel configuration, open the **Public hostnames**, **Application routes**, or
    **Published applications** section.
 2. Add routes/applications:
    - **Hostname**: `staging.democratized.space`
+   - **Hostname**: `staging.token.place` *(token.place staging app on the same tunnel)*
    - **Hostname**: `prod.democratized.space` *(optional legacy redirect host)*
    - **Hostname**: `democratized.space`
    - **Service type**: `HTTP`
@@ -353,3 +367,12 @@ for temporary local development. See
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
 - The Sugarkube dspace app expects this persistent tunnel setup to be in place.
+
+## Tunnel vs DNS API token (important distinction)
+
+- **Cloudflare Tunnel token** (`CF_TUNNEL_TOKEN`): connector credential from the tunnel dashboard
+  ("Install and run a connector"). Used by `just cf-tunnel-install` to connect `cloudflared`.
+- **Cloudflare DNS API token** (used by cert-manager): separate token for DNS-01 challenges and TLS
+  cert issuance/renewal. This token does not create Cloudflare Tunnel routes.
+
+Keep these credentials separate and scoped to their jobs.

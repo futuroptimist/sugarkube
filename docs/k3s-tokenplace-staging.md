@@ -103,9 +103,18 @@ Cloudflare Tunnel still owns public hostname routing to Traefik; Helm does not m
 typically `http://traefik.kube-system.svc.cluster.local:80`. Staging overlays render Ingress `spec.tls` because `ingress.tls.enabled: true`; `secretName` alone is not sufficient,
 and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` already exist.
 
+One staging tunnel can serve multiple staging app hostnames. For example, `dspace-staging-v3` can
+route both `staging.democratized.space` and `staging.token.place` to Traefik; Traefik then routes to
+the correct Kubernetes Ingress by Host header. Renaming that tunnel to `sugarkube-staging-v3` is
+optional and can wait until after launch.
+
 ```bash
 just cf-tunnel-route host=staging.token.place
 ```
+
+`just cf-tunnel-route` is a helper for dashboard values; it does not automate route creation.
+Use either `just cf-tunnel-route staging.token.place` or
+`just cf-tunnel-route host=staging.token.place`.
 
 
 ## 0.1.0 release alignment
