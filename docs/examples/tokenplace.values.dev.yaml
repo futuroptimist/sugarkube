@@ -10,7 +10,3 @@ ingress:
   className: traefik
   annotations: {}
 
-env:
-  RELAY_WORKERS: "1"
-  TOKENPLACE_FRONTEND_MODE: production
-  TOKENPLACE_RELAY_REQUIRE_UPSTREAM_HEALTH: "0"

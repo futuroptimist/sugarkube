@@ -34,6 +34,8 @@ Host defaults:
 - Staging: `staging.token.place`
 - Production: `token.place`
 
+Do not carry forward one-off Helm `--set env.XDG_*=/tmp` overrides from the initial staging incident response. XDG `/tmp` behavior is now expected from chart defaults, and Sugarkube overlays should only carry environment-specific values.
+
 ## Environment runbooks
 
 - App overview: `docs/apps/tokenplace.md`
