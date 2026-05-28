@@ -114,7 +114,95 @@ curl -fsS https://token.place/livez
 curl -fsS https://token.place/healthz
 ```
 
+## Promotion blockers
+
+> **Release blocker:** production promotion is blocked until staging proves the actual
+> relay-compute path, and the promoted production deployment then proves its own prod
+> compute-node path. Deployment Ready, TLS Ready, `/livez`, `/healthz`, `/`, `/metrics`, and
+> synthetic register/poll are necessary but not sufficient by themselves.
+
+Before running the prod upgrade, confirm every item from staging sign-off evidence:
+
+- [ ] OCI chart freshness is proven with `helm show chart` plus chart digest evidence for the
+  exact chart version being promoted from staging to prod.
+- [ ] Render validation finds no duplicate environment variables in any init/app container.
+- [ ] Rendered Deployment includes writable XDG `/tmp` defaults from the chart without one-off
+  Sugarkube override drift.
+- [ ] Staging `/healthz` is exempt from token.place global API rate limits.
+- [ ] Synthetic API v1 compute-node register/poll passes against `https://staging.token.place`.
+- [ ] A desktop compute node has `staging.token.place` in `knownServers`/server config, registers
+  to staging, appears in staging `/healthz` and `/relay/diagnostics`, and completes an E2EE
+  request/response through the staging relay.
+- [ ] The prod Cloudflare route for `token.place` is configured to Traefik and checked outside
+  Helm/cert-manager before promotion.
+
+After the prod upgrade, capture separate prod validation evidence before marking the promotion
+complete:
+
+- [ ] Synthetic API v1 compute-node register/poll passes against `https://token.place`.
+- [ ] A desktop compute node has `token.place` in `knownServers`/server config, registers to prod,
+  and does not silently fall back to staging.
+- [ ] That prod-registered compute node appears in prod `/healthz` and `/relay/diagnostics`.
+- [ ] An E2EE request/response succeeds through the prod-registered compute node.
+
+### Release evidence capture
+
+Capture and attach the staging sign-off artifacts plus this separate prod evidence for the prod
+promotion record. For the prod evidence, run the prod synthetic register/poll, confirm prod
+desktop compute-node registration, and complete the prod E2EE request/response before saving
+`/healthz`, `/relay/diagnostics`, or relay logs so those artifacts prove the prod-registered
+desktop compute node is visible after the real prod relay-compute path passes:
+
+```bash
+just kubeconfig-env prod
+TOKENPLACE_TAG=v0.1.0 # replace with the immutable release tag
+TOKENPLACE_HOST=token.place
+TOKENPLACE_CHART_VERSION="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_CHART_VERSION"
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_CHART_VERSION" --destination /tmp
+sha256sum "/tmp/tokenplace-${TOKENPLACE_CHART_VERSION}.tgz" # chart digest evidence
+printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG"
+kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+# First run synthetic register/poll, desktop compute-node registration, and the E2EE flow.
+# Then capture health, diagnostics, and relay logs as post-compute-path evidence:
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
+kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 | tee /tmp/tokenplace-prod-relay-after-compute.log
+```
+
+### Emergency diagnostics
+
+This emergency diagnostics command block is copy-pasteable. Run it when prod web/TLS health is green but compute registration or E2EE is blocked:
+
+```bash
+just kubeconfig-env prod
+TOKENPLACE_HOST=token.place
+
+kubectl -n tokenplace get deployments,replicasets,pods,services,ingress,certificates -o wide
+kubectl -n tokenplace describe deploy/tokenplace
+kubectl -n tokenplace describe ingress/tokenplace
+kubectl -n tokenplace get events --sort-by=.lastTimestamp | tail -n 80
+kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500
+kubectl -n tokenplace logs deploy/tokenplace --previous --tail=500 || true
+curl -vI "https://${TOKENPLACE_HOST}/"
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" || true
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" || true
+just cf-tunnel-debug
+just cert-manager-status
+```
+
+If Cloudflare returns HTTP 403 before the request reaches token.place, check Cloudflare Security
+Events for the hostname, ray ID, source IP, path, and rule that made the decision.
+
 ## Rollback options
+
+Rollback reminders:
+
+- Prefer immutable image tag rollback when the bad rollout is tied to a single image.
+- Use Helm revision rollback when you need to restore the entire rendered release state.
+- Expect a short outage during rollback because token.place is intentionally single-replica and
+  the Deployment strategy is `Recreate`; wait for the replacement pod before retesting relay E2EE.
 
 Rollback by immutable tag:
 

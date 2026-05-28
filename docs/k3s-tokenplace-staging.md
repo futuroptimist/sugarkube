@@ -231,6 +231,13 @@ log line means inspect token.place auth/rate-limit handling and the exact respon
 
 ## Rollback
 
+Rollback reminders:
+
+- Prefer immutable image tag rollback when the bad rollout is tied to a single image.
+- Use Helm revision rollback when you need to restore the entire rendered release state.
+- Expect a short outage during rollback because token.place is intentionally single-replica and
+  the Deployment strategy is `Recreate`; wait for the replacement pod before retesting relay E2EE.
+
 Rollback by immutable tag:
 
 ```bash

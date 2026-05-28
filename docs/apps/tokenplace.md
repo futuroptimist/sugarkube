@@ -82,6 +82,27 @@ low-frequency diagnostics curls for operational readiness. Staging/prod signoff 
 synthetic API v1 register/poll, an external desktop or compute-node registration, and an E2EE
 request/response through the relay; see the staging runbook for the full sequence and curl payloads.
 
+## Promotion blockers
+
+Use the environment runbooks for copy-paste commands, but keep this release-blocker rule in every
+token.place promotion review: **web/TLS health is not relay validation**. A build can only move from
+staging to production after all of these are true:
+
+- [ ] OCI chart freshness and chart digest are captured for the exact version being promoted.
+- [ ] Rendered manifests contain no duplicate env vars.
+- [ ] XDG writable `/tmp` env defaults are present from the chart, not one-off CLI overrides.
+- [ ] `/healthz` is exempt from API rate limiting.
+- [ ] Synthetic API v1 compute-node register/poll passes.
+- [ ] A desktop compute node uses the intended `knownServers`/server entry and registers.
+- [ ] The registered compute node appears in `/healthz` and `/relay/diagnostics`.
+- [ ] An E2EE request/response succeeds through that compute node.
+- [ ] The production Cloudflare route exists and points to Traefik before prod cutover.
+
+Emergency diagnostics and rollback remain environment-specific:
+
+- Staging: [`docs/k3s-tokenplace-staging.md`](../k3s-tokenplace-staging.md)
+- Production: [`docs/k3s-tokenplace-prod.md`](../k3s-tokenplace-prod.md)
+
 ## Cloudflare and ingress model
 
 Cloudflare Tunnel/DNS configuration is external to Helm.
