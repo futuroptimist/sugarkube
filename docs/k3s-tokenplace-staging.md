@@ -126,8 +126,9 @@ external compute-node traffic:
    readiness and create false rollout failures.
 3. **Synthetic API v1 register:** register a throwaway compute-node key against
    `/api/v1/relay/servers/register`.
-4. **Synthetic API v1 poll:** poll `/api/v1/relay/servers/poll` with `--max-time 20` to verify the
-   long-poll path returns either queued encrypted work or a healthy no-work response.
+4. **Synthetic API v1 poll:** poll `/api/v1/relay/servers/poll` with a client timeout that
+   exceeds the relay's server-side long-poll hold plus a small buffer, verifying the path returns
+   either queued encrypted work or a healthy no-work response instead of a client-side timeout.
 5. **Desktop compute-node registration:** start the packaged desktop/compute node against
    `https://staging.token.place` and confirm the relay logs show matching API v1 register/poll
    POSTs for that node.
@@ -154,7 +155,17 @@ a desktop package or GPU host. It does not prove desktop packaging, request rout
 
 ```bash
 BASE_URL=https://staging.token.place
-DEBUG_KEY="debug-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 8)"
+KEY_DIR="$(mktemp -d)"
+trap 'rm -rf "${KEY_DIR}"' EXIT
+
+# Generate real public-key material for the synthetic compute node instead of a debug string.
+# If the desktop client emits a different accepted format, set SYNTHETIC_SERVER_PUBLIC_KEY
+# to a non-secret public key copied from a disposable desktop test node.
+openssl genpkey -algorithm Ed25519 -out "${KEY_DIR}/server.key" >/dev/null 2>&1
+openssl pkey -in "${KEY_DIR}/server.key" -pubout -out "${KEY_DIR}/server.pub" >/dev/null 2>&1
+SERVER_PUBLIC_KEY="${SYNTHETIC_SERVER_PUBLIC_KEY:-$(cat "${KEY_DIR}/server.pub")}"
+REGISTER_BODY="$(jq -n --arg server_public_key "${SERVER_PUBLIC_KEY}" \
+  '{server_public_key: $server_public_key}')"
 
 # If the relay requires compute-node registration auth, populate RELAY_SERVER_CREDENTIAL
 # from your secret manager before running this block. Do not paste real secrets
@@ -169,20 +180,24 @@ fi
 curl -fsS -X POST "${BASE_URL}/api/v1/relay/servers/register" \
   -H 'Content-Type: application/json' \
   "${AUTH_HEADER[@]}" \
-  --data "{\"server_public_key\":\"${DEBUG_KEY}\"}" | jq .
+  --data "${REGISTER_BODY}" | jq .
 
 curl -fsS "${BASE_URL}/healthz" | jq '{status, knownServers, registeredServers}'
 
-curl -fsS --max-time 20 -X POST "${BASE_URL}/api/v1/relay/servers/poll" \
+# Keep this higher than the relay's server-side long-poll hold. The default 65s value
+# leaves buffer for relays that hold empty polls for up to one minute before returning
+# the healthy no-work response; raise it if staging is configured with a longer hold.
+POLL_MAX_TIME="${POLL_MAX_TIME:-65}"
+curl -fsS --max-time "${POLL_MAX_TIME}" -X POST "${BASE_URL}/api/v1/relay/servers/poll" \
   -H 'Content-Type: application/json' \
   "${AUTH_HEADER[@]}" \
-  --data "{\"server_public_key\":\"${DEBUG_KEY}\"}" | jq .
+  --data "${REGISTER_BODY}" | jq .
 ```
 
 Expected result: register returns wait hints, `/healthz` reports `knownServers` increased while the
-lease is fresh, and poll returns either encrypted work or a `No requests available` response. The
-debug server is ephemeral and will age out automatically after the relay lease if it is not
-refreshed.
+lease is fresh, and poll returns either encrypted work or a `No requests available` response before
+`POLL_MAX_TIME` elapses. The synthetic server is ephemeral and will age out automatically after the
+relay lease if it is not refreshed.
 
 ### Desktop HTTP 403 / pre-app rejection triage
 
