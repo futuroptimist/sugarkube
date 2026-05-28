@@ -34,6 +34,31 @@ helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 
 ## Promotion after staging sign-off
 
+Production promotion is blocked until staging proves the actual relay-compute path, not just web
+health or TLS readiness. Deployment Ready `1/1`, certificate Ready, `/livez`, `/healthz`, `/`,
+`/metrics`, and synthetic register/poll checks are necessary but not sufficient.
+
+### Promotion blockers
+
+- [ ] **OCI chart freshness:** chart metadata and the captured chart digest match the intended
+  token.place release candidate.
+- [ ] **No duplicate env vars:** prod render validation exits cleanly with no duplicate env names.
+- [ ] **XDG env present:** prod Deployment env includes chart-owned XDG `/tmp` paths; do not depend
+  on one-off Helm `--set env.XDG_*=/tmp` overrides.
+- [ ] **`/healthz` exempt from rate limit:** repeated `/healthz` probes succeed without consuming or
+  tripping global API rate limits.
+- [ ] **Synthetic register/poll passes:** API v1 synthetic compute-node register/poll succeeds
+  against staging.
+- [ ] **Desktop compute node registers:** a real desktop compute node whose `knownServers` targets
+  staging registers through `https://staging.token.place`.
+- [ ] **Registered compute node is visible:** the node appears in staging `/healthz` and
+  `/relay/diagnostics`.
+- [ ] **E2EE request/response passes:** staging completes an end-to-end encrypted request/response
+  through the registered compute node.
+- [ ] **Prod Cloudflare route configured:** `token.place` routes to Traefik before promotion.
+
+Only after every blocker is checked may production be promoted:
+
 ```bash
 TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
@@ -110,9 +135,50 @@ curl -fsS https://token.place/livez
 curl -fsS https://token.place/healthz
 ```
 
+## Release evidence capture
+
+Capture evidence during the promotion window and attach it to the release notes or incident channel:
+
+```bash
+CHART_VERSION="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+TOKENPLACE_TAG=v0.1.0 # replace with the immutable production tag
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION" \
+  --destination /tmp/tokenplace-chart-evidence
+sha256sum /tmp/tokenplace-chart-evidence/tokenplace-"$CHART_VERSION".tgz # chart digest
+printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG"
+kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+curl -fsS https://token.place/healthz | tee /tmp/tokenplace-prod-healthz.json
+curl -fsS https://token.place/relay/diagnostics | tee /tmp/tokenplace-prod-diagnostics.json
+# Run the desktop compute-node registration and E2EE request/response test now.
+kubectl -n tokenplace logs deploy/tokenplace --tail=200 > /tmp/tokenplace-prod-relay-after-compute.log
+```
+
+## Emergency diagnostics
+
+Copy/paste this block if production web health passes but compute-node registration, diagnostics, or
+E2EE relay traffic fails:
+
+```bash
+just kubeconfig-env prod
+kubectl -n tokenplace get deployments,replicasets,pods,services,ingress,certificates -o wide
+kubectl -n tokenplace describe deploy tokenplace
+kubectl -n tokenplace describe ingress tokenplace
+kubectl -n tokenplace get events --sort-by=.lastTimestamp | tail -n 80
+kubectl -n tokenplace logs deploy/tokenplace --tail=300
+kubectl -n tokenplace logs deploy/tokenplace --previous --tail=300 || true
+just tokenplace-debug-logs-env env=prod
+just cf-tunnel-debug
+just cert-manager-status
+```
+
+Also check Cloudflare Security Events for `token.place` around the failed registration time. A
+Cloudflare WAF/rate-limit/challenge event can reject requests before the relay application logs
+anything.
+
 ## Rollback options
 
-Rollback by immutable tag:
+Rollback by immutable image tag when the prior good container image is known:
 
 ```bash
 just kubeconfig-env prod
@@ -120,13 +186,17 @@ TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
 
-Rollback by Helm revision:
+Rollback by Helm revision when the prior good release revision is known:
 
 ```bash
 just kubeconfig-env prod
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
 just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
 ```
+
+Both rollback paths restart the only relay pod because the Deployment strategy is `Recreate`. Expect
+a short downtime window and loss of in-memory relay registrations while the single replacement pod
+starts.
 
 ## Cloudflare tunnel routing (external to Helm)
 

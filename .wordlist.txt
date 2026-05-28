@@ -253,3 +253,12 @@ yourorg
 
 executables
 pytest
+E2EE
+XDG
+diagnostics
+healthz
+knownServers
+liveness
+livez
+rate-limit
+rate-limited

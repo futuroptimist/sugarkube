@@ -75,6 +75,25 @@ curl -fsS https://staging.token.place/
 
 For production validation, use the same checks against `https://token.place`.
 
+## Promotion blockers
+
+Web and certificate checks are only the start of validation. Do not promote staging to production
+until the release evidence proves the relay-compute path works end to end:
+
+- [ ] OCI chart freshness is confirmed with chart metadata and a chart digest.
+- [ ] Rendered manifests have no duplicate env vars and include chart-owned XDG `/tmp` env.
+- [ ] `/healthz` is exempt from global API rate limits.
+- [ ] Synthetic API v1 compute-node register/poll passes.
+- [ ] A desktop compute node whose `knownServers` points at staging registers successfully.
+- [ ] The registered compute node appears in `/healthz` and `/relay/diagnostics`.
+- [ ] E2EE request/response succeeds through that registered compute node.
+- [ ] The production Cloudflare route for `token.place` is configured to Traefik.
+
+See the staging and production runbooks for copy-pasteable release evidence, emergency diagnostics,
+and rollback commands. Rollbacks use either a Helm revision or a prior immutable image tag; because
+the relay Deployment uses `Recreate`, expect downtime and in-memory registration loss during pod
+replacement.
+
 ## Cloudflare and ingress model
 
 Cloudflare Tunnel/DNS configuration is external to Helm.

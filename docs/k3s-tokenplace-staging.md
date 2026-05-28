@@ -111,9 +111,75 @@ curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
 ```
 
+## Promotion blockers
+
+Treat these checks as release blockers before any staging candidate can be promoted to production.
+Passing web, TLS, `/livez`, `/healthz`, `/`, `/metrics`, or synthetic register/poll probes alone
+does **not** validate the relay release; the actual desktop compute path must pass too.
+
+- [ ] **OCI chart freshness:** `helm show chart` and the captured chart digest match the current
+  token.place release candidate, not an earlier `0.1.0` publish.
+- [ ] **No duplicate env vars:** the render validation above exits cleanly with no duplicate env names.
+- [ ] **XDG env present:** rendered Deployment env includes chart-owned XDG `/tmp` paths without
+  one-off manual Helm overrides.
+- [ ] **`/healthz` exempt from rate limit:** repeated unauthenticated health probes return success
+  and do not consume or trip the global API rate limit.
+- [ ] **Synthetic register/poll passes:** the API v1 synthetic compute-node register/poll smoke test
+  succeeds against `https://staging.token.place`.
+- [ ] **Desktop compute node registers:** a real desktop compute node whose `knownServers` targets
+  staging successfully registers through the public relay path.
+- [ ] **Registered compute node is visible:** the node appears in both `/healthz` and
+  `/relay/diagnostics` after registration.
+- [ ] **E2EE request/response passes:** an end-to-end encrypted request submitted through staging is
+  accepted by the registered compute node and returns an encrypted response to the requester.
+- [ ] **Production Cloudflare route is ready before promotion:** `token.place` is explicitly routed
+  to Traefik with `just cf-tunnel-route host=token.place` before the production upgrade window.
+
+## Release evidence capture
+
+Capture these artifacts in the staging sign-off notes so reviewers can distinguish web health from
+relay-path validation:
+
+```bash
+CHART_VERSION="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+TOKENPLACE_TAG=main-deadbee # replace with the immutable candidate tag
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION" \
+  --destination /tmp/tokenplace-chart-evidence
+sha256sum /tmp/tokenplace-chart-evidence/tokenplace-"$CHART_VERSION".tgz # chart digest
+printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG"
+kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-staging-deployment.yaml
+curl -fsS https://staging.token.place/healthz | tee /tmp/tokenplace-staging-healthz.json
+curl -fsS https://staging.token.place/relay/diagnostics | tee /tmp/tokenplace-staging-diagnostics.json
+# Run the desktop compute-node registration and E2EE request/response test now.
+kubectl -n tokenplace logs deploy/tokenplace --tail=200 > /tmp/tokenplace-staging-relay-after-compute.log
+```
+
+## Emergency diagnostics
+
+Copy/paste this block when staging web health passes but compute-node registration, diagnostics, or
+E2EE relay traffic fails:
+
+```bash
+just kubeconfig-env staging
+kubectl -n tokenplace get deployments,replicasets,pods,services,ingress,certificates -o wide
+kubectl -n tokenplace describe deploy tokenplace
+kubectl -n tokenplace describe ingress tokenplace
+kubectl -n tokenplace get events --sort-by=.lastTimestamp | tail -n 80
+kubectl -n tokenplace logs deploy/tokenplace --tail=300
+kubectl -n tokenplace logs deploy/tokenplace --previous --tail=300 || true
+just tokenplace-debug-logs-env env=staging
+just cf-tunnel-debug
+just cert-manager-status
+```
+
+Also check Cloudflare Security Events for `staging.token.place` and `token.place` around the failed
+registration time. A Cloudflare WAF/rate-limit/challenge event can reject requests before the relay
+application logs anything.
+
 ## Rollback
 
-Rollback by immutable tag:
+Rollback by immutable image tag when the prior good container image is known:
 
 ```bash
 just kubeconfig-env staging
@@ -121,13 +187,17 @@ TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
 ```
 
-Rollback by Helm revision:
+Rollback by Helm revision when the prior good release revision is known:
 
 ```bash
 just kubeconfig-env staging
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
 just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
 ```
+
+Both rollback paths restart the only relay pod because the Deployment strategy is `Recreate`. Expect
+a short downtime window and loss of in-memory relay registrations while the single replacement pod
+starts.
 
 ## Cloudflare tunnel routing (external to Helm)
 
