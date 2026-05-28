@@ -1770,9 +1770,15 @@ tokenplace-oci-deploy env='staging' tag='':
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
+    chart_ref='oci://ghcr.io/futuroptimist/charts/tokenplace'
+    chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n1 | tr -d '[:space:]')"
+    image_repo="$(yq eval -r ' .image.repository ' docs/examples/tokenplace.values.dev.yaml)"
+
+    echo "Deploying token.place chart=${chart_ref} version=${chart_version} tag=${resolved_tag} values=${values_chain}"
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
-      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      chart="${chart_ref}" \
       values="${values_chain}" \
       version_file='docs/apps/tokenplace.version' \
       tag="${resolved_tag}"
@@ -1781,7 +1787,7 @@ tokenplace-oci-deploy env='staging' tag='':
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
     echo
-    echo "Resolved images for deployment/tokenplace:"
+    echo "Resolved image(s) for deployment/tokenplace (expected ${image_repo}:${resolved_tag}):"
     kubectl -n tokenplace get deploy/tokenplace -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' || true
 
     ingress_host="$(kubectl -n tokenplace get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"

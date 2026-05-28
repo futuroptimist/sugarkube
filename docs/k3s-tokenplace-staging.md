@@ -48,6 +48,9 @@ TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
 
+
+> ⚠️ During initial staging bring-up we temporarily used manual Helm `--set env.XDG_CONFIG_HOME=/tmp --set env.XDG_CACHE_HOME=/tmp --set env.XDG_DATA_HOME=/tmp` overrides to get the pod Ready on read-only root filesystems. Remove those manual overrides now that chart defaults manage XDG paths and other runtime env defaults.
+
 Preferred wrapper:
 
 ```bash
@@ -65,6 +68,15 @@ helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version
 grep -n "spec:" -A40 /tmp/tokenplace-staging-render.yaml | grep -n "tls"
 grep -n "staging.token.place" /tmp/tokenplace-staging-render.yaml
 grep -n "tokenplace-staging-tls" /tmp/tokenplace-staging-render.yaml
+python3 - <<'PY'
+import collections, yaml
+docs = list(yaml.safe_load_all(open("/tmp/tokenplace-staging-render.yaml")))
+deploy = next(d for d in docs if d and d.get("kind") == "Deployment")
+env = deploy["spec"]["template"]["spec"]["containers"][0].get("env", [])
+names = [item["name"] for item in env]
+dupes = [name for name, count in collections.Counter(names).items() if count > 1]
+assert not dupes, dupes
+PY
 yq eval '. | select(.kind == "Deployment" and .metadata.name == "tokenplace") | .spec.strategy.type' /tmp/tokenplace-staging-render.yaml
 ```
 

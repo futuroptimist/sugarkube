@@ -33,6 +33,9 @@ Sugarkube currently runs **only** the token.place relay service (`relay.py`).
 - Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
 - Production overlay: `docs/examples/tokenplace.values.prod.yaml`
 
+
+Rely on hardened chart-owned runtime env defaults (`RELAY_WORKERS`, `TOKENPLACE_FRONTEND_MODE`, `TOKENPLACE_RELAY_REQUIRE_UPSTREAM_HEALTH`, and XDG paths for read-only root filesystems) from the token.place chart instead of re-declaring them in Sugarkube values overlays. Keep only environment-specific overrides such as `TOKEN_PLACE_ENV` and `TOKENPLACE_RELAY_PUBLIC_URL`.
+
 Default hosts:
 
 - Staging: `staging.token.place`
@@ -53,6 +56,9 @@ just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
 ```
+
+
+> ⚠️ If you used manual Helm `--set env.XDG_*=/tmp` overrides during initial staging troubleshooting, remove them after pulling these repo updates; chart defaults now own those values.
 
 Preferred env wrapper:
 

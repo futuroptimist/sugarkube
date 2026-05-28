@@ -29,6 +29,9 @@ Current scope is **relay-only** on Sugarkube:
 - Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
 - Production overlay: `docs/examples/tokenplace.values.prod.yaml`
 
+
+Chart-owned runtime env defaults (worker count, frontend mode, relay upstream-health behavior, and XDG temp paths for read-only-root compatibility) should stay in the token.place chart. Sugarkube values should only carry environment-specific overlays like hostname, TLS, `TOKEN_PLACE_ENV`, and `TOKENPLACE_RELAY_PUBLIC_URL`.
+
 Host defaults:
 
 - Staging: `staging.token.place`
