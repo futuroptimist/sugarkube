@@ -67,13 +67,24 @@ just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 
 ```bash
 kubectl -n tokenplace get deploy,po,svc,ingress
+kubectl -n tokenplace get endpoints
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+kubectl -n tokenplace logs deploy/tokenplace --tail=100
 curl -fsS https://staging.token.place/livez
-curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/healthz | jq .
+curl -fsS https://staging.token.place/relay/diagnostics | jq .
 curl -fsS https://staging.token.place/
 ```
 
-For production validation, use the same checks against `https://token.place`.
+For production validation, use the same checks against `https://token.place`. Keep public health and
+diagnostics curls low-frequency; do not use a long-running public `/healthz` watch as the primary
+readiness monitor until health and diagnostics endpoints are confirmed exempt from API rate limits.
+Use Kubernetes Deployment/Pod/Endpoint status and relay logs for continuous monitoring.
+
+Staging signoff must include synthetic API v1 compute-node registration and poll validation, then a
+real external desktop/server compute-node registration and E2EE request/response. The staging
+runbook has the copy-paste commands for `/api/v1/relay/servers/register`,
+`/api/v1/relay/servers/poll --max-time 20`, `/relay/diagnostics`, and HTTP 403/`cf-ray` triage.
 
 ## Cloudflare and ingress model
 

@@ -34,6 +34,12 @@ helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 
 ## Promotion after staging sign-off
 
+Production promotion is blocked until staging has passed the full external relay validation: web/TLS,
+`/livez`, `/healthz`, `/relay/diagnostics`, synthetic API v1
+`/api/v1/relay/servers/register`, synthetic API v1 `/api/v1/relay/servers/poll --max-time 20`,
+desktop compute-node registration, and a real E2EE request/response through an external compute
+node. Basic health/root checks alone do not prove the register/poll/request/response flow.
+
 ```bash
 TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
