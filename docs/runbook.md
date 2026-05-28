@@ -218,6 +218,28 @@ kubectl -n kube-system get daemonset kube-vip
 kubectl -n kube-system get svc traefik
 ```
 
+### cert-manager DNS-01 troubleshooting (non-Flux clusters)
+
+When Flux is not installed, `kubectl apply -k platform/cert-manager` will fail at `HelmRelease` resources. Use `just cert-manager-install` and `just cert-manager-issuers-apply email=<email>` instead.
+
+Common failure modes:
+
+- **Missing cert-manager CRDs** (`no matches for kind "Certificate"` / `"ClusterIssuer"`): reinstall cert-manager with CRDs enabled.
+- **`clusterissuer.cert-manager.io` resource type missing**: controllers/CRDs are not fully installed yet.
+- **Literal `$(CERT_MANAGER_EMAIL)` in ClusterIssuer**: issuer was applied from Flux-era template without replacement; reapply with `just cert-manager-issuers-apply email=<email>`.
+- **Missing `cloudflare-api-token` secret**: create it with `just cert-manager-cloudflare-token-secret token=<token>`.
+- **Challenge cleanup errors after successful issuance**: Cloudflare API token is missing `Zone:Read` and/or is scoped to the wrong zone.
+
+Validation sequence:
+
+```bash
+kubectl get crd | grep cert-manager.io
+kubectl get clusterissuer letsencrypt-staging letsencrypt-production
+kubectl get certificate --all-namespaces
+kubectl -n cert-manager get secret cloudflare-api-token
+kubectl -n cert-manager logs deploy/cert-manager --tail=100
+```
+
 ### Verifier summary block and tests
 
 Successful `pi_node_verifier.sh` runs append a Markdown report to

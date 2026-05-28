@@ -31,6 +31,8 @@ runs inside the cluster.
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
+> `CF_TUNNEL_TOKEN` is only for the Cloudflare Tunnel connector. It is **not** the same credential as the Cloudflare DNS API token used by cert-manager DNS-01 challenges.
+
 One tunnel per cluster/environment can serve many hostnames. For example, the staging tunnel
 `dspace-staging-v3` can serve both `staging.democratized.space` and `staging.token.place`, all
 routed to Traefik; Traefik then selects the right Kubernetes Ingress by HTTP `Host` header. You can
@@ -372,4 +374,4 @@ for temporary local development. See
   `*.cfargotunnel.com` name.
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
-- The Sugarkube dspace app expects this persistent tunnel setup to be in place.
+- The Sugarkube dspace app expects this persistent tunnel setup to be in place. 
