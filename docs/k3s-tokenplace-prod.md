@@ -82,11 +82,16 @@ try:
 except StopIteration:
     sys.exit("tokenplace Deployment not found in rendered manifest")
 
-for container in deploy["spec"]["template"]["spec"].get("containers", []):
-    names = [item["name"] for item in container.get("env", []) if "name" in item]
-    dupes = [name for name, count in collections.Counter(names).items() if count > 1]
-    if dupes:
-        sys.exit(f"duplicate env names found: {container.get('name', '<unnamed>')}: {dupes}")
+pod_spec = deploy["spec"]["template"]["spec"]
+for container_type, containers in (
+    ("init", pod_spec.get("initContainers", [])),
+    ("app", pod_spec.get("containers", [])),
+):
+    for container in containers:
+        names = [item["name"] for item in container.get("env", []) if "name" in item]
+        dupes = [name for name, count in collections.Counter(names).items() if count > 1]
+        if dupes:
+            sys.exit(f"duplicate env names found: {container_type}:{container.get('name', '<unnamed>')}: {dupes}")
 PY
 grep -n "spec:" -A40 /tmp/tokenplace-prod-render.yaml | grep -n "tls"
 grep -n "token.place" /tmp/tokenplace-prod-render.yaml
