@@ -751,7 +751,11 @@ cert-manager-install version='v1.14.4':
         --create-namespace \
         --version "{{ version }}" \
         --set installCRDs=true \
-        --set global.leaderElection.namespace=cert-manager
+        --set global.leaderElection.namespace=cert-manager \
+        --wait \
+        --timeout 5m
+
+    kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
 # Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
 cert-manager-cloudflare-token-secret token='':
@@ -760,6 +764,9 @@ cert-manager-cloudflare-token-secret token='':
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
     : "${token:=${CF_DNS_API_TOKEN:-}}"
+    token_prefix='token'
+    equals_sign='='
+    token="${token#${token_prefix}${equals_sign}}"
     if [ -z "${token}" ]; then
         echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
         exit 1
@@ -776,7 +783,15 @@ cert-manager-issuers-apply email:
     set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    CERT_MANAGER_EMAIL="{{ email }}" envsubst < platform/cert-manager/clusterissuers.nonflux.yaml | kubectl apply -f -
+    if ! command -v envsubst >/dev/null 2>&1; then
+        echo "Missing envsubst (gettext). Install gettext and retry." >&2
+        exit 1
+    fi
+    email="{{ email }}"
+    email_prefix='email'
+    equals_sign='='
+    email="${email#${email_prefix}${equals_sign}}"
+    CERT_MANAGER_EMAIL="${email}" envsubst < platform/cert-manager/clusterissuers.nonflux.yaml | kubectl apply -f -
 
 # Show cert-manager + issuer readiness and useful validation checks.
 cert-manager-status:
