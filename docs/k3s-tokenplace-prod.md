@@ -110,7 +110,81 @@ curl -fsS https://token.place/livez
 curl -fsS https://token.place/healthz
 ```
 
+## Promotion blockers
+
+> **Release blocker:** production promotion is blocked until staging proves the actual
+> relay-compute path. Deployment Ready, TLS Ready, `/livez`, `/healthz`, `/`, `/metrics`, and
+> synthetic register/poll are necessary but not sufficient by themselves.
+
+Before running the prod upgrade, confirm every item from staging evidence:
+
+- [ ] OCI chart freshness is proven with `helm show chart` plus chart digest evidence for the
+  exact chart version used in staging and prod.
+- [ ] Render validation finds no duplicate environment variables in any init/app container.
+- [ ] Rendered Deployment includes writable XDG `/tmp` defaults from the chart without one-off
+  Sugarkube override drift.
+- [ ] `/healthz` is exempt from token.place global API rate limits.
+- [ ] Synthetic API v1 compute-node register/poll passes.
+- [ ] A desktop compute node has the intended hostname in `knownServers`/server config and
+  registers to staging first, not production.
+- [ ] That registered compute node appears in `/healthz` and `/relay/diagnostics`.
+- [ ] An E2EE request/response succeeds through the registered compute node.
+- [ ] The prod Cloudflare route for `token.place` is configured to Traefik and checked outside
+  Helm/cert-manager before promotion.
+
+### Release evidence capture
+
+Capture and attach this evidence for the prod promotion record:
+
+```bash
+just kubeconfig-env prod
+TOKENPLACE_TAG=v0.1.0 # replace with the immutable release tag
+TOKENPLACE_HOST=token.place
+TOKENPLACE_CHART_VERSION="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_CHART_VERSION"
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_CHART_VERSION" --destination /tmp
+sha256sum "/tmp/tokenplace-${TOKENPLACE_CHART_VERSION}.tgz" # chart digest evidence
+printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG"
+kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
+# After the desktop compute-node registration and E2EE flow finish:
+kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 | tee /tmp/tokenplace-prod-relay-after-compute.log
+```
+
+### Emergency diagnostics
+
+This emergency diagnostics command block is copy-pasteable. Run it when prod web/TLS health is green but compute registration or E2EE is blocked:
+
+```bash
+just kubeconfig-env prod
+TOKENPLACE_HOST=token.place
+
+kubectl -n tokenplace get deployments,replicasets,pods,services,ingress,certificates -o wide
+kubectl -n tokenplace describe deploy/tokenplace
+kubectl -n tokenplace describe ingress/tokenplace
+kubectl -n tokenplace get events --sort-by=.lastTimestamp | tail -n 80
+kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500
+kubectl -n tokenplace logs deploy/tokenplace --previous --tail=500 || true
+curl -vI "https://${TOKENPLACE_HOST}/"
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" || true
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" || true
+just cf-tunnel-debug
+just cert-manager-status
+```
+
+If Cloudflare returns HTTP 403 before the request reaches token.place, check Cloudflare Security
+Events for the hostname, ray ID, source IP, path, and rule that made the decision.
+
 ## Rollback options
+
+Rollback reminders:
+
+- Prefer immutable image tag rollback when the bad rollout is tied to a single image.
+- Use Helm revision rollback when you need to restore the entire rendered release state.
+- Expect a short outage during rollback because token.place is intentionally single-replica and
+  the Deployment strategy is `Recreate`; wait for the replacement pod before retesting relay E2EE.
 
 Rollback by immutable tag:
 
