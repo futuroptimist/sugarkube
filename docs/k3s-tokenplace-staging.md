@@ -66,6 +66,45 @@ grep -n "spec:" -A40 /tmp/tokenplace-staging-render.yaml | grep -n "tls"
 grep -n "staging.token.place" /tmp/tokenplace-staging-render.yaml
 grep -n "tokenplace-staging-tls" /tmp/tokenplace-staging-render.yaml
 yq eval '. | select(.kind == "Deployment" and .metadata.name == "tokenplace") | .spec.strategy.type' /tmp/tokenplace-staging-render.yaml
+python3 - <<'PY'
+import collections
+import sys
+
+render_path = "/tmp/tokenplace-staging-render.yaml"
+env_names = []
+in_deployment = False
+in_first_container = False
+in_env = False
+for raw_line in open(render_path, encoding="utf-8"):
+    line = raw_line.rstrip("\n")
+    stripped = line.strip()
+    if stripped.startswith("---"):
+        in_deployment = False
+        in_first_container = False
+        in_env = False
+        continue
+    if stripped == "kind: Deployment":
+        in_deployment = True
+        continue
+    if not in_deployment:
+        continue
+    if stripped == "containers:":
+        in_first_container = True
+        continue
+    if in_first_container and stripped == "env:":
+        in_env = True
+        continue
+    if in_env and stripped.startswith("- name: "):
+        env_names.append(stripped.split(": ", 1)[1])
+        continue
+    if in_env and stripped and not stripped.startswith("-") and not stripped.startswith("name:"):
+        in_env = False
+
+dupes = [name for name, count in collections.Counter(env_names).items() if count > 1]
+if dupes:
+    sys.exit(f"duplicate env names found: {dupes}")
+print("no duplicate env names")
+PY
 ```
 
 Cluster/runtime checks:
@@ -78,6 +117,11 @@ curl -vI https://staging.token.place/
 curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
 ```
+
+## Staging override cleanup note
+
+During initial staging validation we used manual Helm `--set` overrides for XDG runtime paths under a read-only root filesystem.
+Now that chart defaults own those paths, remove any manual XDG `--set` overrides from local scripts/shell history and deploy with only the checked-in values overlays.
 
 ## Rollback
 

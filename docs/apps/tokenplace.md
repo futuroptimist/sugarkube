@@ -61,6 +61,10 @@ TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 ```
 
+> [!WARNING]
+> If you used one-off Helm `--set` overrides for XDG runtime paths during early staging recovery, remove them now.
+> The hardened chart defaults own those values, and duplicate manual overrides can reintroduce duplicate `env` warnings at render/deploy time.
+
 ## Validation commands
 
 ```bash

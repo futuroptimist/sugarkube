@@ -1770,6 +1770,9 @@ tokenplace-oci-deploy env='staging' tag='':
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
+    resolved_chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n1 | tr -d '[:space:]')"
+    echo "Deploying token.place chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${resolved_chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag} env=${env_name} values=${values_chain}"
+
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
       chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \

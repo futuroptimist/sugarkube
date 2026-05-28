@@ -34,6 +34,11 @@ Host defaults:
 - Staging: `staging.token.place`
 - Production: `token.place`
 
+## Override hygiene
+
+Do not carry forward temporary/manual Helm `--set` overrides used during initial staging incident response (for example XDG path overrides for read-only root filesystems).
+Keep deployments values-driven via the checked-in overlays so render checks can catch accidental duplicate `env` names before rollout.
+
 ## Environment runbooks
 
 - App overview: `docs/apps/tokenplace.md`
