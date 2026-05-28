@@ -32,6 +32,65 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 ```
 
+## Promotion blockers
+
+> Release blocker: web/TLS health is necessary but **not sufficient**. Production promotion is
+> blocked until the staging relay-compute path has passed with an external desktop compute node
+> and an end-to-end encrypted request/response.
+
+Confirm every item before running `just tokenplace-oci-promote-prod`:
+
+- [ ] **OCI chart freshness:** `helm show chart` and the recorded chart digest match the freshly
+  published token.place chart for the approved release.
+- [ ] **No duplicate env vars:** rendered production Deployment env validation passes for init and
+  app containers. Duplicate env names are a release blocker.
+- [ ] **XDG env present:** rendered Deployment includes chart-owned `XDG_CACHE_HOME`,
+  `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` values pointing at writable `/tmp` paths.
+- [ ] **`/healthz` exempt from rate limit:** unauthenticated health checks stay below neither app
+  nor edge rate limits and do not return HTTP 429/403.
+- [ ] **Synthetic register/poll passes in staging:** API v1 synthetic registration and poll passed
+  against the exact staging candidate image.
+- [ ] **Desktop compute node registers in staging:** a real desktop compute node configured with
+  staging `knownServers` / relay URL registered through the public staging hostname.
+- [ ] **Registered compute node visible in staging:** the node appeared in `/healthz` and
+  `/relay/diagnostics` safe routing metadata.
+- [ ] **E2EE request/response passes in staging:** a client request completed through the relay and
+  returned a decryptable response from the registered compute node.
+- [ ] **Prod Cloudflare route configured:** `token.place` routes through Cloudflare Tunnel to
+  production Traefik before cutover.
+
+## Release evidence capture
+
+Capture these commands during production promotion. They complement, but do not replace, the
+staging evidence proving desktop compute registration and E2EE flow.
+
+```bash
+export TOKENPLACE_TAG=v0.1.0 # replace with the approved immutable release tag
+export TOKENPLACE_CHART_VERSION="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+export TOKENPLACE_HOST=token.place
+
+# chart digest / chart metadata
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_CHART_VERSION"
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_CHART_VERSION" --destination /tmp/tokenplace-chart
+sha256sum "/tmp/tokenplace-chart/tokenplace-${TOKENPLACE_CHART_VERSION}.tgz"
+
+# image tag and deployed image
+printf 'approved image tag=%s\n' "$TOKENPLACE_TAG"
+kubectl -n tokenplace get deploy/tokenplace -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}'
+
+# deployment YAML, including strategy.type: Recreate and env/XDG checks
+kubectl -n tokenplace get deploy/tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+yq eval '.spec.strategy.type' /tmp/tokenplace-prod-deployment.yaml
+yq eval '.spec.template.spec.containers[].env[] | select(.name | test("^XDG_"))' /tmp/tokenplace-prod-deployment.yaml
+
+# production healthz and diagnostics evidence after smoke validation
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
+
+# relay logs after production smoke test
+kubectl -n tokenplace logs deploy/tokenplace --tail=300 > /tmp/tokenplace-prod-relay-after-smoke.log
+```
+
 ## Promotion after staging sign-off
 
 ```bash
@@ -112,6 +171,14 @@ curl -fsS https://token.place/healthz
 
 ## Rollback options
 
+Rollback reminders for the single-replica relay:
+
+- Prefer rollback by immutable image tag when the chart is healthy but the relay image is bad.
+- Use Helm revision rollback when the chart/rendered values are the suspected regression.
+- Expect brief relay downtime and in-memory state loss during rollback because the Deployment
+  intentionally uses `strategy.type: Recreate`. Existing compute-node registrations may need to
+  reconnect and clients may need to retry.
+
 Rollback by immutable tag:
 
 ```bash
@@ -126,6 +193,40 @@ Rollback by Helm revision:
 just kubeconfig-env prod
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
 just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
+```
+
+## Emergency diagnostics
+
+Use this emergency diagnostics copy-paste block when web health, compute-node registration,
+diagnostics, TLS, or Cloudflare routing looks wrong. Check Cloudflare Security Events separately
+for WAF, bot, rate-limit, or access-rule blocks if the relay logs do not show the rejected request.
+
+```bash
+just kubeconfig-env prod
+export TOKENPLACE_HOST=token.place
+
+# Kubernetes objects and rollout shape
+kubectl -n tokenplace get deploy,rs,po,svc,ingress -o wide
+kubectl -n tokenplace get certificates -o wide
+kubectl -n tokenplace describe deploy/tokenplace
+kubectl -n tokenplace describe ingress/tokenplace
+kubectl -n tokenplace describe certificate --all
+
+# Recent events, newest last
+kubectl -n tokenplace get events --sort-by=.lastTimestamp | tail -n 80
+
+# Relay logs: current and previous container, if a pod restarted
+kubectl -n tokenplace logs deploy/tokenplace --tail=300
+kubectl -n tokenplace logs deploy/tokenplace --previous --tail=300 || true
+
+# Public edge/app probes
+curl -vI "https://${TOKENPLACE_HOST}/"
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" || true
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" || true
+
+# Tunnel/certificate helpers
+just cf-tunnel-debug
+just cert-manager-status
 ```
 
 ## Cloudflare tunnel routing (external to Helm)

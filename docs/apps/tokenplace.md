@@ -40,6 +40,17 @@ Default hosts:
 - Staging: `staging.token.place`
 - Production: `token.place`
 
+## Promotion gate summary
+
+Web/TLS checks (`/livez`, `/healthz`, `/`, and certificate readiness) only prove the public shell is
+reachable. Treat production promotion as blocked until the staging runbook's **Promotion blockers**
+checklist proves the actual relay path: fresh OCI chart digest, no duplicate env vars, XDG `/tmp`
+defaults, rate-limit-exempt `/healthz`, synthetic API v1 register/poll, desktop compute-node
+registration through staging `knownServers`, compute-node visibility in `/healthz` and
+`/relay/diagnostics`, and an E2EE request/response. The production runbook then captures prod
+Cloudflare route readiness, deployment YAML, healthz, diagnostics, and relay logs after smoke
+validation.
+
 ## Core deployment commands
 
 Use concrete release/namespace/chart values for token.place relay deployments.

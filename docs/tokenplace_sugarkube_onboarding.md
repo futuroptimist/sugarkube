@@ -36,6 +36,15 @@ Host defaults:
 
 Do not carry forward one-off Helm `--set env.XDG_*=/tmp` overrides from the initial staging incident response. XDG `/tmp` behavior is now expected from chart defaults, and Sugarkube overlays should only carry environment-specific values.
 
+
+## Promotion gate ownership
+
+Staging sign-off must validate the real relay-compute path, not only web/TLS health. Production is
+blocked until the token.place runbooks record the Promotion blockers checklist: fresh chart digest,
+rendered env/XDG sanity, `/healthz` rate-limit exemption, synthetic API v1 register/poll, desktop
+compute-node registration through staging `knownServers`, `/healthz` and `/relay/diagnostics`
+visibility, E2EE request/response, and the production Cloudflare route.
+
 ## Environment runbooks
 
 - App overview: `docs/apps/tokenplace.md`
