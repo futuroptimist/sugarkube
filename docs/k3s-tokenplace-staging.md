@@ -164,6 +164,7 @@ trap 'rm -rf "${KEY_DIR}"' EXIT
 openssl genpkey -algorithm Ed25519 -out "${KEY_DIR}/server.key" >/dev/null 2>&1
 openssl pkey -in "${KEY_DIR}/server.key" -pubout -out "${KEY_DIR}/server.pub" >/dev/null 2>&1
 SERVER_PUBLIC_KEY="${SYNTHETIC_SERVER_PUBLIC_KEY:-$(cat "${KEY_DIR}/server.pub")}"
+DEBUG_KEY="${SERVER_PUBLIC_KEY}"
 REGISTER_BODY="$(jq -n --arg server_public_key "${SERVER_PUBLIC_KEY}" \
   '{server_public_key: $server_public_key}')"
 
@@ -182,7 +183,8 @@ curl -fsS -X POST "${BASE_URL}/api/v1/relay/servers/register" \
   "${AUTH_HEADER[@]}" \
   --data "${REGISTER_BODY}" | jq .
 
-curl -fsS "${BASE_URL}/healthz" | jq '{status, knownServers, registeredServers}'
+curl -fsS "${BASE_URL}/relay/diagnostics" | jq -e --arg key "${DEBUG_KEY}" \
+  '(.registered_compute_nodes // []) | any(.server_public_key == $key)'
 
 # Keep this higher than the relay's server-side long-poll hold. The default 65s value
 # leaves buffer for relays that hold empty polls for up to one minute before returning
@@ -194,10 +196,11 @@ curl -fsS --max-time "${POLL_MAX_TIME}" -X POST "${BASE_URL}/api/v1/relay/server
   --data "${REGISTER_BODY}" | jq .
 ```
 
-Expected result: register returns wait hints, `/healthz` reports `knownServers` increased while the
-lease is fresh, and poll returns either encrypted work or a `No requests available` response before
-`POLL_MAX_TIME` elapses. The synthetic server is ephemeral and will age out automatically after the
-relay lease if it is not refreshed.
+Expected result: register returns wait hints, `/relay/diagnostics` visibly includes the just-created
+`server_public_key` while the lease is fresh, and poll returns either encrypted work or a
+`No requests available` response before `POLL_MAX_TIME` elapses. Treat a missing debug key as a
+failed synthetic registration even if register returned 2xx. The synthetic server is ephemeral and
+will age out automatically after the relay lease if it is not refreshed.
 
 ### Desktop HTTP 403 / pre-app rejection triage
 

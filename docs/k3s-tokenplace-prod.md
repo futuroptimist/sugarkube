@@ -34,6 +34,10 @@ helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 
 ## Promotion after staging sign-off
 
+Production promotion requires an external desktop or compute-node registration plus a successful
+E2EE request/response; Certificate `Ready=True`, web/TLS checks, or synthetic register/poll alone
+are not sufficient signoff.
+
 ```bash
 TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
