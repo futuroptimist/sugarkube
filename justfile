@@ -1068,7 +1068,10 @@ cf-tunnel-route host='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if [ -z "{{ host }}" ]; then
+    raw_host="{{ host }}"
+    normalized_host="${raw_host#host=}"
+
+    if [ -z "${normalized_host}" ]; then
         echo "Set host=<FQDN> (e.g., dspace-v3.example.com)." >&2
         exit 1
     fi
@@ -1077,8 +1080,11 @@ cf-tunnel-route host='':
 
     printf '%s\n' \
         'Use the Cloudflare dashboard to create a route for:' \
-        "  Hostname: {{ host }}" \
+        "  Hostname: ${normalized_host}" \
         "  Service URL: http://${svc_fqdn}" \
+        '' \
+        'A single tunnel per cluster/environment can route multiple public hostnames to Traefik.' \
+        'Traefik then dispatches to the correct Kubernetes Ingress via the HTTP Host header.' \
         '' \
         'Discover Traefik services:' \
         '  kubectl -n kube-system get svc -l app.kubernetes.io/name=traefik' \

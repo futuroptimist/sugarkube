@@ -15,6 +15,10 @@ The tunnel routes these hostnames to Traefik (or another ingress controller) run
 k3s cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector
 runs inside the cluster.
 
+One tunnel per cluster/environment can serve multiple public app hostnames. For staging, for example,
+a single `dspace-staging-v3` tunnel can route both `staging.democratized.space` and `staging.token.place`
+to Traefik. Traefik then routes to the correct Kubernetes Ingress by HTTP Host header.
+
 > Cloudflare has two big modes for tunnels: **remotely-managed** (token-only, created in the
 > dashboard) and **locally-managed** (requires `cloudflared login` and a `cert.pem`). Sugarkube uses
 > the **remotely-managed, token-based connector mode** only. If you create the tunnel in the
@@ -172,6 +176,8 @@ Run these commands on `sugarkube0` (or whichever node has the Sugarkube checkout
    In normal operation the Kubernetes readiness probe and the Cloudflare dashboard “Connected” state
    are sufficient; this port-forward check is just an extra manual confirmation.
 
+Maintenance note: cloudflared may log warnings that a newer image exists. Treat image upgrades as a separate maintenance task; do not block app deployment when the tunnel is connected and routes resolve correctly.
+
 ### Worked example: dspace staging tunnel on the `dev` Sugarkube env
 
 Below is the full sequence for deploying the `dspace-staging-v3` tunnel on the primary control-plane
@@ -258,6 +264,8 @@ return to a clean token-mode state:
 
   ```bash
   just cf-tunnel-debug
+
+  In recent logs, look for `Updated to new configuration` and confirm the target hostname appears. If the route exists but the app Ingress is not deployed yet, a `404` response is expected until the Ingress/Service is created.
   ```
 
 - Hard reset the deployment/configmap/pods while preserving the `tunnel-token` Secret:
@@ -279,6 +287,8 @@ The installer performs a teardown-and-retry if the first rollout fails, so rerun
 the canonical way to recover a wedged connector without losing the saved token.
 
 ## Step 3 – Publish application routes (staging + optional prod redirect host + apex)
+
+This route configuration is a Cloudflare Tunnel setting (public hostname → service URL). It is separate from the Cloudflare DNS API token used by cert-manager for ACME DNS-01 challenges.
 
 Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
 internal Traefik Service.
