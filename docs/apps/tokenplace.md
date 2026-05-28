@@ -63,6 +63,23 @@ TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
 just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
 ```
 
+## Promotion gate summary
+
+Do not treat web readiness as relay validation. Promotion from staging to production remains blocked
+until the release-blocker checklist in the staging and production runbooks proves the complete
+relay-compute path:
+
+- OCI chart freshness and immutable image tag recorded, including chart digest evidence.
+- Rendered Deployment has no duplicate env vars and includes chart-owned XDG `/tmp` defaults.
+- Health, metrics, relay diagnostics, and API v1 compute-node heartbeat/register/poll routes are not
+  blocked by global API rate limits.
+- Synthetic register/poll passes, then a real desktop compute node registers with `knownServers` or
+  equivalent server settings pointed at the target environment.
+- The compute node appears in `/healthz` and `/relay/diagnostics`.
+- E2EE request/response succeeds through the registered compute node.
+- Cloudflare routes exist for the target hostname before traffic is promoted.
+- Rollback plans account for the single-replica `Recreate` strategy and expected brief downtime.
+
 ## Validation commands
 
 ```bash

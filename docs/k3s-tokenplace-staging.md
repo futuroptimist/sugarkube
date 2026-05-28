@@ -111,7 +111,120 @@ curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
 ```
 
+
+## Promotion blockers before prod
+
+> Release blocker: web/TLS health is necessary but not sufficient. Do **not** promote staging to
+> production until the real relay-compute path below passes and the release evidence is captured.
+
+- [ ] OCI chart freshness is proven for the pinned chart version and candidate immutable image tag.
+- [ ] Rendered manifests contain no duplicate environment variables.
+- [ ] XDG runtime environment is present from chart defaults; do not rely on manual
+      `--set env.XDG_*=/tmp` incident-response overrides.
+- [ ] `/livez`, `/healthz`, `/metrics`, `/relay/diagnostics`, and API v1 compute-node
+      heartbeat/register/poll routes are exempt from global API rate limits; prove `/healthz` does
+      not return HTTP 429 under repeated checks.
+- [ ] Synthetic API v1 register/poll passes against `https://staging.token.place`.
+- [ ] A real desktop compute node registers against staging; desktop `knownServers`/server settings
+      must point at `https://staging.token.place`, not production.
+- [ ] The registered compute node appears in both `/healthz` and `/relay/diagnostics`.
+- [ ] End-to-end encrypted (E2EE) request/response succeeds through the registered compute node.
+- [ ] The production Cloudflare route is configured before prod deploy:
+      `token.place -> http://traefik.kube-system.svc.cluster.local:80`.
+
+### Release evidence capture
+
+Capture this evidence before declaring staging signed off. Keep the files with the release notes or
+incident ticket so reviewers can distinguish "web health passed" from "relay release validated".
+
+```bash
+export TOKENPLACE_ENV=staging
+export TOKENPLACE_HOST=staging.token.place
+export TOKENPLACE_URL="https://${TOKENPLACE_HOST}"
+export TOKENPLACE_TAG=main-deadbee # replace with the immutable staging candidate tag
+export TOKENPLACE_VERSION="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)"
+export TOKENPLACE_EVIDENCE_DIR="artifacts/tokenplace-${TOKENPLACE_ENV}-${TOKENPLACE_TAG}-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "${TOKENPLACE_EVIDENCE_DIR}"
+
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "${TOKENPLACE_VERSION}" \
+  | tee "${TOKENPLACE_EVIDENCE_DIR}/chart.yaml"
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "${TOKENPLACE_VERSION}" \
+  --destination "${TOKENPLACE_EVIDENCE_DIR}"
+sha256sum "${TOKENPLACE_EVIDENCE_DIR}"/tokenplace-"${TOKENPLACE_VERSION}".tgz \
+  | tee "${TOKENPLACE_EVIDENCE_DIR}/chart-digest.txt"
+
+kubectl -n tokenplace get deploy tokenplace \
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}' \
+  | tee "${TOKENPLACE_EVIDENCE_DIR}/image-tag.txt"
+kubectl -n tokenplace get deploy tokenplace -o yaml \
+  | tee "${TOKENPLACE_EVIDENCE_DIR}/deployment.yaml"
+
+curl -fsS "${TOKENPLACE_URL}/healthz" | tee "${TOKENPLACE_EVIDENCE_DIR}/healthz.json"
+curl -fsS "${TOKENPLACE_URL}/relay/diagnostics" \
+  | tee "${TOKENPLACE_EVIDENCE_DIR}/relay-diagnostics.json"
+
+# Run the desktop compute-node registration and E2EE request/response test now, then capture logs.
+kubectl -n tokenplace logs deploy/tokenplace --since=15m --tail=500 \
+  | tee "${TOKENPLACE_EVIDENCE_DIR}/relay-logs-after-compute-test.log"
+```
+
+### Promotion-gate command checklist
+
+```bash
+export TOKENPLACE_URL=https://staging.token.place
+
+# Web/TLS checks: required but not sufficient for promotion.
+curl -fsS "${TOKENPLACE_URL}/livez"
+curl -fsS "${TOKENPLACE_URL}/healthz"
+curl -fsS "${TOKENPLACE_URL}/metrics" >/tmp/tokenplace-staging-metrics.txt
+
+# Rate-limit exemption smoke test for healthz. Any HTTP 429 blocks promotion.
+for i in $(seq 1 20); do
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "${TOKENPLACE_URL}/healthz")"
+  test "${code}" = 200 || { echo "healthz returned ${code} on attempt ${i}" >&2; exit 1; }
+done
+
+# Synthetic API v1 relay-compute checks. Use the current token.place synthetic payload/tooling;
+# this runbook gate is not satisfied by web/TLS checks alone.
+# Expected result: register succeeds, poll succeeds, and the synthetic node is visible in diagnostics.
+
+# Real desktop compute node check. Point desktop knownServers/server settings at staging first.
+curl -fsS "${TOKENPLACE_URL}/healthz" | jq .
+curl -fsS "${TOKENPLACE_URL}/relay/diagnostics" | jq .
+
+# E2EE check. Send a request through the registered desktop compute node and verify the encrypted
+# response is returned to the client without exposing plaintext in relay logs or diagnostics.
+kubectl -n tokenplace logs deploy/tokenplace --since=15m --tail=500
+```
+
+### Emergency diagnostics
+
+This copy-pasteable emergency diagnostics block is for incidents where web health is misleading.
+Use this block when staging looks healthy at `/`/TLS but compute-node registration, diagnostics, or
+E2EE traffic fails. It gathers Kubernetes state, recent events, current and previous relay logs,
+Cloudflare tunnel status, cert-manager status, and a reminder to inspect Cloudflare Security Events
+for WAF/bot/rate-limit blocks before changing app code.
+
+```bash
+just kubeconfig-env staging
+kubectl -n tokenplace get deploy,rs,po,svc,ingress,certificate -o wide
+kubectl -n tokenplace describe deploy/tokenplace
+kubectl -n tokenplace describe ingress/tokenplace
+kubectl -n tokenplace describe certificate --all
+kubectl -n tokenplace get events --sort-by=.lastTimestamp | tail -80
+kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500
+kubectl -n tokenplace logs deploy/tokenplace --previous --tail=500 || true
+just cf-tunnel-debug
+just cert-manager-status
+printf '%s\n' 'Check Cloudflare Security Events for token.place/staging.token.place WAF, bot, access, or rate-limit actions that could reject requests before they reach the app.'
+```
+
 ## Rollback
+
+Because token.place runs as a single replica with `strategy.type: Recreate`, expect a brief relay
+outage during rollback while the old pod stops and the replacement pod starts. In-memory relay state
+is lost. Prefer immutable image tag rollback when the chart is still correct; use Helm revision
+rollback when the rendered release metadata needs to return to a known-good revision.
 
 Rollback by immutable tag:
 
