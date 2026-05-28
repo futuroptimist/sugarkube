@@ -763,10 +763,15 @@ cert-manager-cloudflare-token-secret token='':
     set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    token="{{ token }}"
     : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token_prefix='token'
-    equals_sign='='
-    token="${token#${token_prefix}${equals_sign}}"
+    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    case "${token}" in
+        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
+            token="${token#*=}"
+            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            ;;
+    esac
     if [ -z "${token}" ]; then
         echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
         exit 1
@@ -788,10 +793,18 @@ cert-manager-issuers-apply email:
         exit 1
     fi
     email="{{ email }}"
-    email_prefix='email'
-    equals_sign='='
-    email="${email#${email_prefix}${equals_sign}}"
-    CERT_MANAGER_EMAIL="${email}" envsubst < platform/cert-manager/clusterissuers.nonflux.yaml | kubectl apply -f -
+    email="$(printf '%s' "${email}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    case "${email}" in
+        email=*|CERT_MANAGER_EMAIL=*)
+            email="${email#*=}"
+            email="$(printf '%s' "${email}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            ;;
+    esac
+    if [ -z "${email}" ] || ! printf '%s' "${email}" | grep -Eq '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'; then
+        echo "Pass a valid email, e.g. just cert-manager-issuers-apply email=ops@example.com." >&2
+        exit 1
+    fi
+    CERT_MANAGER_EMAIL="${email}" envsubst < "{{ justfile_directory() }}/platform/cert-manager/clusterissuers.nonflux.yaml" | kubectl apply -f -
 
 # Show cert-manager + issuer readiness and useful validation checks.
 cert-manager-status:
