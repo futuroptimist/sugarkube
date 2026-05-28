@@ -109,7 +109,97 @@ kubectl -n tokenplace get ingress tokenplace -o yaml
 curl -vI https://staging.token.place/
 curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/relay/diagnostics
 ```
+
+### Staging signoff sequence
+
+Run these checks in order after every staging deploy. Basic web/TLS checks are necessary but not
+sufficient; real production signoff requires an external compute node to register through the
+desktop/server client and complete an end-to-end encrypted (E2EE) request/response through the
+relay.
+
+1. **Web/TLS smoke tests:**
+
+   ```bash
+   curl -vI https://staging.token.place/
+   curl -fsS https://staging.token.place/livez
+   curl -fsS https://staging.token.place/healthz
+   curl -fsS https://staging.token.place/relay/diagnostics
+   ```
+
+2. **Inspect readiness without hammering public health endpoints:**
+
+   ```bash
+   kubectl -n tokenplace get endpoints
+   kubectl -n tokenplace get deploy,po
+   kubectl -n tokenplace logs deploy/tokenplace --tail=200
+   curl -fsS https://staging.token.place/relay/diagnostics
+   ```
+
+   Avoid long-running public `/healthz` watches such as `watch curl .../healthz` as a primary
+   readiness monitor until `/healthz`, `/livez`, metrics, diagnostics, and API v1 relay heartbeat
+   routes are confirmed exempt from global API rate limits. During staging, a public `/healthz` watch
+   combined with Kubernetes probes consumed rate-limit budget, caused `429` responses, and made
+   readiness appear unstable even though web/TLS and synthetic API v1 checks were otherwise healthy.
+
+3. **Synthetic API v1 compute-node registration:**
+
+   ```bash
+   DEBUG_KEY="debug-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 8)"
+   export DEBUG_KEY
+
+   curl -fsS -X POST https://staging.token.place/api/v1/servers/register \
+     -H 'content-type: application/json' \
+     --data "{\"serverId\":\"$DEBUG_KEY\",\"publicKey\":\"$DEBUG_KEY\",\"url\":\"debug://$DEBUG_KEY\",\"capacity\":1}"
+   ```
+
+   The debug server is intentionally synthetic and will age out by the relay lease/TTL. Do not reuse
+   the generated `DEBUG_KEY` as a credential.
+
+4. **Confirm registration appears in health output, then poll with a bounded wait:**
+
+   ```bash
+   curl -fsS https://staging.token.place/healthz | jq --arg key "$DEBUG_KEY" '.knownServers? // .servers? // . | tostring | contains($key)'
+
+   curl -fsS --max-time 20 -X POST https://staging.token.place/api/v1/servers/poll \
+     -H 'content-type: application/json' \
+     --data "{\"serverId\":\"$DEBUG_KEY\"}"
+   ```
+
+   A successful empty/no-work poll still validates that the API v1 registration/poll route reaches
+   the relay. Keep `--max-time 20` so a quiet queue cannot hang the runbook.
+
+5. **Desktop compute-node registration:** point the desktop client at
+   `https://staging.token.place`, verify its staging `knownServers`/relay configuration is not using
+   a production URL, and confirm relay logs show the corresponding API v1 `register` or
+   `servers/poll` POST.
+
+6. **E2EE request/response:** submit a real client request to the externally registered compute
+   node and verify the encrypted response returns through staging. The relay must remain blind to
+   plaintext; use only safe routing metadata and ciphertext-level diagnostics in logs.
+
+### Desktop HTTP 403 / pre-app rejection triage
+
+If the desktop client reports HTTP 403 while synthetic `curl` registration/poll succeeds, determine
+whether the request reached the relay before changing application code:
+
+1. Check relay logs for matching desktop POSTs around the failure time:
+
+   ```bash
+   kubectl -n tokenplace logs deploy/tokenplace --since=15m | grep -E 'api/v1|register|servers/poll|403|cf-ray'
+   ```
+
+2. If no matching POST appears, treat the 403 as a pre-app rejection. Capture the `cf-ray` response
+   header from the desktop failure, then inspect **Cloudflare Security Events** for that Ray ID, the
+   client IP, and the user agent.
+3. Compare a successful synthetic curl request and the desktop request headers: method, path
+   (`/api/v1/servers/register` or `/api/v1/servers/poll`), `Host`, `Origin`, `User-Agent`,
+   `Content-Type`, auth/debug headers, and any Cloudflare Access or WAF-triggering headers.
+4. Confirm Cloudflare Tunnel credentials are not being confused with DNS credentials.
+   `CF_TUNNEL_TOKEN` is the connector token for the tunnel route; `CF_DNS_API_TOKEN` is the separate
+   Cloudflare DNS API token used by cert-manager DNS-01. Neither token belongs in desktop client
+   configuration or logs.
 
 ## Rollback
 
@@ -177,6 +267,19 @@ kubectl get certificate --all-namespaces
 kubectl -n cert-manager get secret cloudflare-api-token
 kubectl -n cert-manager logs deploy/cert-manager --tail=100
 ```
+
+For release gating, require the relevant `Certificate` to report `Ready=True`:
+
+```bash
+kubectl -n tokenplace get certificate
+kubectl -n tokenplace describe certificate tokenplace-staging-tls
+```
+
+cert-manager may log DNS-01 challenge cleanup errors after successful issuance. Treat
+`Certificate Ready=True` and a valid served certificate as the staging release gate, but investigate
+cleanup errors before production promotion: they can indicate the Cloudflare DNS API token is missing
+`Zone -> Zone -> Read`, the token is scoped to the wrong zone, or cert-manager/Cloudflare had a
+resolver or zone-lookup mismatch while deleting the temporary `_acme-challenge` record.
 
 > ⚠️ During early staging we used manual Helm `--set env.XDG_CACHE_HOME=/tmp --set env.XDG_CONFIG_HOME=/tmp --set env.XDG_DATA_HOME=/tmp` overrides to pass read-only filesystem startup checks. Remove those manual overrides now that chart defaults own the XDG `/tmp` paths.
 

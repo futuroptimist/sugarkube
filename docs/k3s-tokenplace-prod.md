@@ -108,7 +108,14 @@ kubectl -n tokenplace get ingress tokenplace -o yaml
 curl -vI https://token.place/
 curl -fsS https://token.place/livez
 curl -fsS https://token.place/healthz
+curl -fsS https://token.place/relay/diagnostics
 ```
+
+Do not promote solely on web/TLS or synthetic checks. Production signoff requires an external
+compute node to register against `https://token.place` and complete an E2EE request/response through
+the relay. Avoid long-running public `/healthz` watches as readiness monitors until health endpoints
+and API v1 heartbeat routes are confirmed exempt from global API rate limits; prefer Kubernetes
+endpoints/deployment state, relay logs, and low-frequency diagnostics checks.
 
 ## Rollback options
 

@@ -294,6 +294,23 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
+### HTTP 403 before the app sees a request
+
+For token.place staging, synthetic API v1 register/poll curls succeeded while a desktop compute node
+reported HTTP 403 and relay logs showed no matching `POST /api/v1/servers/register` or
+`POST /api/v1/servers/poll`. Use that pattern to separate Cloudflare/pre-app rejection from relay
+application failures:
+
+1. Check the application logs first. If the relay logged the POST, debug the app response; if it did
+   not, debug Cloudflare/Tunnel/WAF/Access before changing relay code.
+2. Capture the `cf-ray` response header from the failing client and search **Cloudflare Security
+   Events** for that Ray ID, client IP, path, user agent, and rule action.
+3. Compare headers between a successful synthetic curl and the desktop request, especially `Host`,
+   `Origin`, `User-Agent`, `Content-Type`, auth/debug headers, and exact API v1 path.
+4. Keep credential types separate: the `CF_TUNNEL_TOKEN` connects `cloudflared` to the remotely
+   managed tunnel, while the Cloudflare DNS API token is only for cert-manager DNS-01. Neither value
+   should appear in desktop `knownServers` config, application headers, or logs.
+
 ## Step 3 – Publish application routes for one environment tunnel
 
 Now that the connector is running in the cluster, configure routes for the hostnames that belong to
@@ -374,4 +391,4 @@ for temporary local development. See
   `*.cfargotunnel.com` name.
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
-- The Sugarkube dspace app expects this persistent tunnel setup to be in place. 
+- The Sugarkube dspace app expects this persistent tunnel setup to be in place.
