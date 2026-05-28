@@ -24,6 +24,15 @@ Use this runbook for relay-only token.place production deployments on Sugarkube.
 
 ## Pre-flight (before Step 1)
 
+- For non-Flux clusters, install cert-manager/issuers first:
+
+```bash
+just cert-manager-install
+just cert-manager-cloudflare-token-secret token="$CF_DNS_API_TOKEN"
+just cert-manager-issuers-apply email="ops@example.com"
+just cert-manager-status
+```
+
 - Verify `docs/apps/tokenplace.version` remains pinned to `0.1.0`.
 - Verify the `0.1.0` OCI chart exists only after token.place publishes the current chart.
 - If `helm show chart ... --version 0.1.0` succeeds before the final token.place chart publish, confirm the chart is not stale before deploying.

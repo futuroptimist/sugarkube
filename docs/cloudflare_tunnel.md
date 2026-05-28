@@ -353,3 +353,65 @@ for temporary local development. See
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
 - The Sugarkube dspace app expects this persistent tunnel setup to be in place.
+
+## cert-manager DNS-01 (non-Flux clusters)
+
+If your cluster does **not** run Flux, `kubectl apply -k platform/cert-manager` will create some
+resources and then fail on `HelmRelease` because the `helm.toolkit.fluxcd.io` API is absent.
+Use Sugarkube Just recipes instead:
+
+```bash
+just cert-manager-install
+just cert-manager-cloudflare-token-secret token="$CF_DNS_API_TOKEN"
+just cert-manager-issuers-apply email="ops@example.com"
+just cert-manager-status
+```
+
+### Important token distinction
+
+- `CF_TUNNEL_TOKEN` is for the Cloudflare Tunnel connector (`cloudflared`).
+- `CF_DNS_API_TOKEN` is for cert-manager DNS-01 validation against Cloudflare DNS.
+
+Do **not** swap them. The tunnel token cannot solve ACME DNS challenges.
+
+### Required Cloudflare DNS API token permissions
+
+For DNS-01 to work reliably (including cleanup), create a token with:
+
+- **Zone → DNS → Edit**
+- **Zone → Zone → Read**
+- Zone resources: include the specific zone for `token.place`
+- If you issue certificates for `democratized.space` from the same cluster, include that zone too
+
+Without `Zone:Read`, cert-manager may create challenge records but fail zone lookup/cleanup.
+
+### Troubleshooting quick checks
+
+```bash
+# CRDs exist
+kubectl get crd | grep cert-manager.io
+
+# ClusterIssuer type available
+kubectl api-resources | grep -i clusterissuer
+
+# Issuers Ready=True
+kubectl get clusterissuer letsencrypt-staging letsencrypt-production
+
+# cert-manager certificates and secrets
+kubectl get certificate -A
+kubectl -n cert-manager get secret cloudflare-api-token
+
+# cert-manager logs
+kubectl -n cert-manager logs deploy/cert-manager --tail=200
+```
+
+Common failure modes:
+
+- `no matches for kind "HelmRelease"` when applying `platform/cert-manager`: Flux is not installed.
+  Use `just cert-manager-install` instead.
+- `no matches for kind "ClusterIssuer"`: cert-manager CRDs were not installed (`installCRDs=true` missing).
+- ACME `invalidContact` with literal `$(CERT_MANAGER_EMAIL)`: placeholders were applied literally.
+  Reapply with `just cert-manager-issuers-apply email="you@example.com"`.
+- `secret "cloudflare-api-token" not found`: create it with
+  `just cert-manager-cloudflare-token-secret token="$CF_DNS_API_TOKEN"`.
+- Challenge cleanup errors after issuance: usually missing `Zone:Read` permission on the DNS API token.
