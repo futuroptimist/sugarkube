@@ -353,3 +353,19 @@ for temporary local development. See
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
 - The Sugarkube dspace app expects this persistent tunnel setup to be in place.
+
+## Cloudflare Tunnel token vs Cloudflare DNS API token
+
+These are different credentials:
+
+- `CF_TUNNEL_TOKEN` is only for the `cloudflared` connector process. It comes from the tunnel dashboard “Install and run a connector” screen.
+- `CF_DNS_API_TOKEN` (stored in Kubernetes as `cert-manager/cloudflare-api-token`) is for cert-manager DNS-01 ACME challenges.
+
+For DNS-01, create a Cloudflare API token with:
+
+- **Zone → DNS → Edit**
+- **Zone → Zone → Read**
+- Zone resource: **Specific zone** (`token.place`)
+- If one token is shared for democratized.space certs, include **Specific zone** `democratized.space` too.
+
+If `Zone Read` is missing, issuance may succeed but challenge cleanup/zone lookups can fail.

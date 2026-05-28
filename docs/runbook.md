@@ -317,3 +317,48 @@ provisioner becomes the default StorageClass.
 - Keep `scripts/flux-bootstrap.sh` executable and rerun `just flux-bootstrap env=<env>` after Flux
   upgrades.
 - If MetalLB is introduced, follow the comments in the k3s config examples to disable `servicelb`.
+
+
+## Non-Flux cert-manager + Cloudflare DNS-01 (token.place staging/prod)
+
+Use this path on clusters that do **not** run Flux. This avoids the `HelmRelease` dependency in `platform/cert-manager`.
+
+### Why this exists
+
+In staging, `kubectl apply -k platform/cert-manager` applied `ClusterIssuer` objects but then failed because Flux CRDs/controllers were absent (`HelmRelease` kind unknown). A second issue was an unresolved literal `$(CERT_MANAGER_EMAIL)` in the issuer manifest, which produced `invalidContact` from Let's Encrypt.
+
+### Install and configure
+
+```bash
+just cert-manager-install
+export CF_DNS_API_TOKEN="<cloudflare-dns-api-token>"
+just cert-manager-cloudflare-token-secret token="$CF_DNS_API_TOKEN"
+just cert-manager-issuers-apply email="ops@example.com"
+just cert-manager-status
+```
+
+The install recipe uses the successful manual Helm path:
+
+- chart: `jetstack/cert-manager`
+- version: `v1.14.4`
+- namespace: `cert-manager`
+- `installCRDs=true`
+- `global.leaderElection.namespace=cert-manager`
+
+### Validation
+
+```bash
+kubectl get crd | grep cert-manager.io
+kubectl get clusterissuer letsencrypt-staging letsencrypt-production
+kubectl get certificate -A
+kubectl -n cert-manager get secret cloudflare-api-token
+kubectl -n cert-manager logs deploy/cert-manager --tail=80
+```
+
+### Troubleshooting
+
+- **Missing cert-manager CRDs / `clusterissuers.cert-manager.io` not found**: run `just cert-manager-install` and re-check CRDs.
+- **`no matches for kind "ClusterIssuer"`**: cert-manager CRDs are not installed yet; install cert-manager first.
+- **`invalidContact` with literal `$(CERT_MANAGER_EMAIL)`**: re-apply issuers with `just cert-manager-issuers-apply email=...` so the real email is rendered.
+- **`cloudflare-api-token` secret missing**: run `just cert-manager-cloudflare-token-secret token=...`.
+- **Challenge cleanup errors after cert is issued**: confirm Cloudflare token includes both `Zone:Read` and `DNS:Edit` for the target zone(s).

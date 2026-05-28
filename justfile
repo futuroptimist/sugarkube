@@ -736,6 +736,63 @@ cf-tunnel-debug:
         echo "No Cloudflare Tunnel pods to show logs for."
     fi
 
+cert-manager-install version='v1.14.4':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    helm repo add jetstack https://charts.jetstack.io --force-update
+    helm repo update jetstack
+
+    helm upgrade --install cert-manager jetstack/cert-manager \
+      --namespace cert-manager \
+      --create-namespace \
+      --version "{{ version }}" \
+      --set installCRDs=true \
+      --set global.leaderElection.namespace=cert-manager
+
+cert-manager-cloudflare-token-secret token='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    : "${token:=${CF_DNS_API_TOKEN:-}}"
+    if [ -z "${token}" ]; then
+      echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
+      exit 1
+    fi
+
+    kubectl -n cert-manager create secret generic cloudflare-api-token \
+      --from-literal=api-token="${token}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+cert-manager-issuers-apply email='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    : "${email:=${CERT_MANAGER_EMAIL:-}}"
+    if [ -z "${email}" ]; then
+      echo "Set CERT_MANAGER_EMAIL or pass email=<ops@example.com>." >&2
+      exit 1
+    fi
+
+    sed "s|__CERT_MANAGER_EMAIL__|${email}|g" platform/cert-manager/clusterissuers.nonflux.yaml | kubectl apply -f -
+
+cert-manager-status:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+    kubectl get crd | grep -E 'certificates\\.cert-manager\\.io|clusterissuers\\.cert-manager\\.io|certificaterequests\\.cert-manager\\.io'
+    kubectl -n cert-manager get deploy,pods
+    kubectl get clusterissuer letsencrypt-staging letsencrypt-production -o wide
+    kubectl -n cert-manager get secret cloudflare-api-token
+    kubectl get certificate -A
+    kubectl -n cert-manager logs deploy/cert-manager --tail=80
+
 # Install the Helm CLI on the current node (idempotent; safe to re-run).
 
 # Downloads a pinned release archive and verifies checksum before install.
