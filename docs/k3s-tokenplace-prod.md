@@ -144,7 +144,10 @@ complete:
 ### Release evidence capture
 
 Capture and attach the staging sign-off artifacts plus this separate prod evidence for the prod
-promotion record:
+promotion record. For the prod evidence, run the prod synthetic register/poll, confirm prod
+desktop compute-node registration, and complete the prod E2EE request/response before saving
+`/healthz`, `/relay/diagnostics`, or relay logs so those artifacts prove the prod-registered
+desktop compute node is visible after the real prod relay-compute path passes:
 
 ```bash
 just kubeconfig-env prod
@@ -157,9 +160,10 @@ helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_C
 sha256sum "/tmp/tokenplace-${TOKENPLACE_CHART_VERSION}.tgz" # chart digest evidence
 printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG"
 kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+# First run synthetic register/poll, desktop compute-node registration, and the E2EE flow.
+# Then capture health, diagnostics, and relay logs as post-compute-path evidence:
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
-# After the prod desktop compute-node registration and E2EE flow finish:
 kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 | tee /tmp/tokenplace-prod-relay-after-compute.log
 ```
 

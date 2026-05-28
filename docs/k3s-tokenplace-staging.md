@@ -135,7 +135,10 @@ Check every item before approving prod promotion:
 
 ### Release evidence capture
 
-Capture this evidence with the staging candidate tag before promotion review:
+Capture this evidence with the staging candidate tag before promotion review. Run the synthetic
+register/poll, confirm desktop compute-node registration, and complete the E2EE request/response
+before saving `/healthz`, `/relay/diagnostics`, or relay logs so those artifacts prove the
+registered desktop compute node is visible after the real relay-compute path passes:
 
 ```bash
 just kubeconfig-env staging
@@ -148,9 +151,10 @@ helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version "$TOKENPLACE_C
 sha256sum "/tmp/tokenplace-${TOKENPLACE_CHART_VERSION}.tgz" # chart digest evidence
 printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG"
 kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-staging-deployment.yaml
+# First run synthetic register/poll, desktop compute-node registration, and the E2EE flow.
+# Then capture health, diagnostics, and relay logs as post-compute-path evidence:
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-staging-healthz.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-staging-diagnostics.json
-# After the desktop compute-node registration and E2EE flow finish:
 kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 | tee /tmp/tokenplace-staging-relay-after-compute.log
 ```
 
