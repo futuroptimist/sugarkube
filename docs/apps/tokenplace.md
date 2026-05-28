@@ -70,10 +70,17 @@ kubectl -n tokenplace get deploy,po,svc,ingress
 kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
 curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/healthz
+curl -fsS https://staging.token.place/relay/diagnostics
 curl -fsS https://staging.token.place/
 ```
 
-For production validation, use the same checks against `https://token.place`.
+For production validation, use the same checks against `https://token.place`. Avoid long-running
+public `/healthz` watches as readiness monitors until health, liveness, metrics, diagnostics, and
+API v1 compute-node heartbeat routes are confirmed exempt from public API rate limits; prefer
+`kubectl -n tokenplace get endpoints`, `kubectl -n tokenplace get deploy,po`, relay logs, and
+low-frequency diagnostics curls for operational readiness. Staging/prod signoff also requires
+synthetic API v1 register/poll, an external desktop or compute-node registration, and an E2EE
+request/response through the relay; see the staging runbook for the full sequence and curl payloads.
 
 ## Promotion blockers
 

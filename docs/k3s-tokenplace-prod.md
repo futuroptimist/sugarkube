@@ -34,6 +34,10 @@ helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 
 ## Promotion after staging sign-off
 
+Production promotion requires an external desktop or compute-node registration plus a successful
+E2EE request/response; Certificate `Ready=True`, web/TLS checks, or synthetic register/poll alone
+are not sufficient signoff.
+
 ```bash
 TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
@@ -248,6 +252,12 @@ Do not reuse the tunnel token (`CF_TUNNEL_TOKEN`) for DNS-01. cert-manager needs
 - `Zone -> DNS -> Edit`
 - `Zone -> Zone -> Read`
 - specific required zones (`token.place`, and `democratized.space` if shared issuance is in scope).
+
+For production promotion, the cert-manager release gate is the Certificate condition: proceed only
+when the relevant Certificate is `Ready=True`. Challenge cleanup errors after successful issuance do
+not invalidate an already-ready certificate, but they should be investigated because they often mean
+the DNS API token lacks `Zone -> Zone -> Read`, is scoped to the wrong Cloudflare zone, or cert-manager
+is hitting resolver/zone lookup ambiguity during cleanup.
 
 ## Troubleshooting
 
