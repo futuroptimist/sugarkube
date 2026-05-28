@@ -113,28 +113,38 @@ curl -fsS https://token.place/healthz
 ## Promotion blockers
 
 > **Release blocker:** production promotion is blocked until staging proves the actual
-> relay-compute path. Deployment Ready, TLS Ready, `/livez`, `/healthz`, `/`, `/metrics`, and
+> relay-compute path, and the promoted production deployment then proves its own prod
+> compute-node path. Deployment Ready, TLS Ready, `/livez`, `/healthz`, `/`, `/metrics`, and
 > synthetic register/poll are necessary but not sufficient by themselves.
 
-Before running the prod upgrade, confirm every item from staging evidence:
+Before running the prod upgrade, confirm every item from staging sign-off evidence:
 
 - [ ] OCI chart freshness is proven with `helm show chart` plus chart digest evidence for the
-  exact chart version used in staging and prod.
+  exact chart version being promoted from staging to prod.
 - [ ] Render validation finds no duplicate environment variables in any init/app container.
 - [ ] Rendered Deployment includes writable XDG `/tmp` defaults from the chart without one-off
   Sugarkube override drift.
-- [ ] `/healthz` is exempt from token.place global API rate limits.
-- [ ] Synthetic API v1 compute-node register/poll passes.
-- [ ] A desktop compute node has the intended hostname in `knownServers`/server config and
-  registers to staging first, not production.
-- [ ] That registered compute node appears in `/healthz` and `/relay/diagnostics`.
-- [ ] An E2EE request/response succeeds through the registered compute node.
+- [ ] Staging `/healthz` is exempt from token.place global API rate limits.
+- [ ] Synthetic API v1 compute-node register/poll passes against `https://staging.token.place`.
+- [ ] A desktop compute node has `staging.token.place` in `knownServers`/server config, registers
+  to staging, appears in staging `/healthz` and `/relay/diagnostics`, and completes an E2EE
+  request/response through the staging relay.
 - [ ] The prod Cloudflare route for `token.place` is configured to Traefik and checked outside
   Helm/cert-manager before promotion.
 
+After the prod upgrade, capture separate prod validation evidence before marking the promotion
+complete:
+
+- [ ] Synthetic API v1 compute-node register/poll passes against `https://token.place`.
+- [ ] A desktop compute node has `token.place` in `knownServers`/server config, registers to prod,
+  and does not silently fall back to staging.
+- [ ] That prod-registered compute node appears in prod `/healthz` and `/relay/diagnostics`.
+- [ ] An E2EE request/response succeeds through the prod-registered compute node.
+
 ### Release evidence capture
 
-Capture and attach this evidence for the prod promotion record:
+Capture and attach the staging sign-off artifacts plus this separate prod evidence for the prod
+promotion record:
 
 ```bash
 just kubeconfig-env prod
@@ -149,7 +159,7 @@ printf 'image tag: ghcr.io/futuroptimist/tokenplace-relay:%s\n' "$TOKENPLACE_TAG
 kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
-# After the desktop compute-node registration and E2EE flow finish:
+# After the prod desktop compute-node registration and E2EE flow finish:
 kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 | tee /tmp/tokenplace-prod-relay-after-compute.log
 ```
 
