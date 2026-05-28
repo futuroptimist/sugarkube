@@ -62,6 +62,38 @@ Render/contract checks (use immutable staging candidate tag):
 ```bash
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0
 helm template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.0 --namespace tokenplace -f docs/examples/tokenplace.values.dev.yaml -f docs/examples/tokenplace.values.staging.yaml --set image.tag=main-deadbee > /tmp/tokenplace-staging-render.yaml
+python3 - <<'PY'
+import collections
+import sys
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    sys.exit("PyYAML is required for this render validation. Install it with: python3 -m pip install PyYAML")
+
+with open("/tmp/tokenplace-staging-render.yaml", encoding="utf-8") as rendered:
+    docs = list(yaml.safe_load_all(rendered))
+
+try:
+    deploy = next(
+        d
+        for d in docs
+        if d and d.get("kind") == "Deployment" and d.get("metadata", {}).get("name") == "tokenplace"
+    )
+except StopIteration:
+    sys.exit("tokenplace Deployment not found in rendered manifest")
+
+pod_spec = deploy["spec"]["template"]["spec"]
+for container_type, containers in (
+    ("init", pod_spec.get("initContainers", [])),
+    ("app", pod_spec.get("containers", [])),
+):
+    for container in containers:
+        names = [item["name"] for item in container.get("env", []) if "name" in item]
+        dupes = [name for name, count in collections.Counter(names).items() if count > 1]
+        if dupes:
+            sys.exit(f"duplicate env names found: {container_type}:{container.get('name', '<unnamed>')}: {dupes}")
+PY
 grep -n "spec:" -A40 /tmp/tokenplace-staging-render.yaml | grep -n "tls"
 grep -n "staging.token.place" /tmp/tokenplace-staging-render.yaml
 grep -n "tokenplace-staging-tls" /tmp/tokenplace-staging-render.yaml
@@ -102,8 +134,15 @@ just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKE
 Cloudflare Tunnel still owns public hostname routing to Traefik; Helm does not manage Cloudflare routes. Route `staging.token.place` to Traefik,
 typically `http://traefik.kube-system.svc.cluster.local:80`. Staging overlays render Ingress `spec.tls` because `ingress.tls.enabled: true`; `secretName` alone is not sufficient,
 and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` already exist.
+One staging tunnel can serve multiple hostnames (for example `staging.democratized.space` and
+`staging.token.place`) by routing both to Traefik; Traefik dispatches by `Host` header to the
+correct Ingress.
+
+`cf-tunnel-route` is for Cloudflare Tunnel hostname routing only. It is separate from the
+Cloudflare DNS API token used by cert-manager DNS-01 challenges.
 
 ```bash
+just cf-tunnel-route staging.token.place
 just cf-tunnel-route host=staging.token.place
 ```
 
@@ -138,6 +177,8 @@ kubectl get certificate --all-namespaces
 kubectl -n cert-manager get secret cloudflare-api-token
 kubectl -n cert-manager logs deploy/cert-manager --tail=100
 ```
+
+> ⚠️ During early staging we used manual Helm `--set env.XDG_CACHE_HOME=/tmp --set env.XDG_CONFIG_HOME=/tmp --set env.XDG_DATA_HOME=/tmp` overrides to pass read-only filesystem startup checks. Remove those manual overrides now that chart defaults own the XDG `/tmp` paths.
 
 
 ## 0.1.0 release alignment

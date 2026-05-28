@@ -33,6 +33,8 @@ Sugarkube currently runs **only** the token.place relay service (`relay.py`).
 - Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
 - Production overlay: `docs/examples/tokenplace.values.prod.yaml`
 
+Chart-owned runtime env defaults (worker count, frontend mode, relay upstream-health gating, and XDG `/tmp` paths) should remain in the token.place chart. Keep Sugarkube values focused on environment-specific keys like `TOKEN_PLACE_ENV`, `TOKENPLACE_RELAY_PUBLIC_URL`, ingress hosts, and TLS secrets.
+
 Default hosts:
 
 - Staging: `staging.token.place`
@@ -80,12 +82,19 @@ Cloudflare Tunnel/DNS configuration is external to Helm.
 - Route hostnames to Traefik, typically
   `http://traefik.kube-system.svc.cluster.local:80`.
 - Helm chart deployment does **not** create Cloudflare routes.
+- One tunnel per environment can serve multiple app hostnames (for example
+  `staging.democratized.space` and `staging.token.place`) by routing both to Traefik.
+- Traefik chooses the correct Kubernetes Ingress by HTTP `Host` header.
 - Staging/prod overlays set `ingress.tls.enabled: true` so rendered Kubernetes Ingress includes `spec.tls`.
 - `cert-manager` and a compatible `ClusterIssuer` are assumed to already exist.
+- Cloudflare Tunnel routing (`cf-tunnel-route`) is separate from the Cloudflare DNS API token used
+  by cert-manager DNS-01.
 - Configure routes explicitly:
 
 ```bash
+just cf-tunnel-route staging.token.place
 just cf-tunnel-route host=staging.token.place
+just cf-tunnel-route token.place
 just cf-tunnel-route host=token.place
 ```
 
