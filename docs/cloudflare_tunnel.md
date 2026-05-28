@@ -24,6 +24,7 @@ runs inside the cluster.
 
 - Create a remotely-managed tunnel in the Cloudflare dashboard and note its name.
 - Copy the tunnel token (`eyJ...`) from the **Install and run a connector** panel.
+- Create a separate Cloudflare DNS API token for cert-manager DNS-01 challenges (`Zone:DNS:Edit` + `Zone:Zone:Read` on the `token.place` zone, and also `democratized.space` if shared cert issuance uses one token).
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
@@ -42,6 +43,21 @@ runs inside the cluster.
 - A running k3s cluster with Sugarkube and Traefik installed (see the main Sugarkube docs for the
   setup steps).
 - You plan to publish a public HTTP application, not a private-only Zero Trust app.
+
+## Cloudflare Tunnel token vs Cloudflare DNS API token
+
+These are different credentials and are **not interchangeable**:
+
+- **Tunnel token** (`CF_TUNNEL_TOKEN`, starts with `eyJ...`): authenticates the in-cluster `cloudflared` connector to a specific Cloudflare Tunnel.
+- **DNS API token** (stored as `cloudflare-api-token` in `cert-manager`): allows cert-manager to create and clean up `_acme-challenge` TXT records for Let's Encrypt DNS-01.
+
+For the DNS API token used by cert-manager, grant:
+
+- `Zone -> DNS -> Edit`
+- `Zone -> Zone -> Read`
+- Zone scope: specific zone `token.place` (and include `democratized.space` too if you issue both domains from one shared token).
+
+If `Zone -> Zone -> Read` is missing, issuance often succeeds but cleanup or zone lookup can fail with Cloudflare API errors.
 
 Read more in the Cloudflare docs: the
 [Cloudflare Tunnel overview](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/)

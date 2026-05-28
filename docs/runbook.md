@@ -218,6 +218,56 @@ kubectl -n kube-system get daemonset kube-vip
 kubectl -n kube-system get svc traefik
 ```
 
+## Non-Flux cert-manager + Cloudflare DNS-01 runbook
+
+If your cluster does **not** run Flux, do not run `kubectl apply -k platform/cert-manager` directly. That path includes a Flux `HelmRelease`, so non-Flux clusters fail with unknown kind errors and can leave partially-applied manifests.
+
+Use the `just` recipes instead:
+
+```bash
+# 1) Install cert-manager (manual path used in staging)
+just cert-manager-install
+
+# 2) Create/rotate Cloudflare DNS token secret (do not commit token values)
+just cert-manager-cloudflare-token-secret
+
+# 3) Apply both ClusterIssuers with a real email
+just cert-manager-issuers-apply email=ops@example.com
+
+# 4) Check status
+just cert-manager-status
+```
+
+### Validation commands
+
+```bash
+# CRDs exist
+kubectl get crd | grep cert-manager.io
+
+# ClusterIssuers are Ready=True
+kubectl get clusterissuer letsencrypt-staging letsencrypt-production
+kubectl get clusterissuer letsencrypt-staging -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
+kubectl get clusterissuer letsencrypt-production -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
+
+# Certificate and Secret checks
+kubectl get certificate -A
+kubectl get certificate -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" => "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+kubectl -n cert-manager get secret cloudflare-api-token
+
+# cert-manager troubleshooting logs
+kubectl -n cert-manager logs deploy/cert-manager --tail=200
+kubectl -n cert-manager logs deploy/cert-manager-webhook --tail=200
+kubectl -n cert-manager logs deploy/cert-manager-cainjector --tail=200
+```
+
+### Troubleshooting
+
+- **`no matches for kind "HelmRelease"`**: Flux CRDs/controllers are not installed. Use `just cert-manager-install` instead of `kubectl apply -k platform/cert-manager` on non-Flux clusters.
+- **`no matches for kind "ClusterIssuer"`**: cert-manager CRDs are missing. Re-run `just cert-manager-install` and verify CRDs with `kubectl get crd | grep cert-manager.io`.
+- **`invalidContact` with literal `$(CERT_MANAGER_EMAIL)`**: the issuer was applied without rendering the email placeholder. Re-apply with `just cert-manager-issuers-apply email=<real-email>`.
+- **`secret "cloudflare-api-token" not found`**: create the token secret with `just cert-manager-cloudflare-token-secret`.
+- **Challenge cleanup errors after issuance**: ensure the Cloudflare DNS token includes both `Zone:DNS:Edit` and `Zone:Zone:Read` on the target zone(s), then retry.
+
 ### Verifier summary block and tests
 
 Successful `pi_node_verifier.sh` runs append a Markdown report to

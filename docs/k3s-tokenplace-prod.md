@@ -102,6 +102,11 @@ Cloudflare Tunnel still owns public hostname routing to Traefik; Helm does not m
 typically `http://traefik.kube-system.svc.cluster.local:80`. Production overlays render Ingress `spec.tls` because `ingress.tls.enabled: true`; `secretName` alone is not sufficient,
 and this runbook assumes `cert-manager` and the referenced `ClusterIssuer` already exist.
 
+If Flux is not installed on the cluster, do **not** bootstrap cert-manager with
+`kubectl apply -k platform/cert-manager` because the Flux `HelmRelease` resource type is missing.
+Use `just cert-manager-install`, `just cert-manager-cloudflare-token-secret`, and
+`just cert-manager-issuers-apply email=<real-email>` from `docs/runbook.md` instead.
+
 ```bash
 just cf-tunnel-route host=token.place
 ```

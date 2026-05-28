@@ -282,6 +282,55 @@ cluster-status:
         kubectl get ingressclass || echo "No ingress classes found."
     fi
 
+# Install cert-manager on non-Flux clusters via Helm (keeps Flux manifests unchanged).
+cert-manager-install version='v1.14.4':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    helm repo add jetstack https://charts.jetstack.io >/dev/null
+    helm repo update >/dev/null
+    helm upgrade --install cert-manager jetstack/cert-manager \
+      --namespace cert-manager \
+      --create-namespace \
+      --version "{{ version }}" \
+      --set installCRDs=true \
+      --set global.leaderElection.namespace=cert-manager
+
+cert-manager-cloudflare-token-secret cf_api='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cf_token="{{ cf_api }}"
+    if [ -z "${cf_token}" ]; then
+      cf_token="${CF_DNS_API_TOKEN:-${CLOUDFLARE_DNS_API_TOKEN:-}}"
+    fi
+    if [ -z "${cf_token}" ]; then
+      echo "Set token=... or CF_DNS_API_TOKEN/CLOUDFLARE_DNS_API_TOKEN." >&2
+      exit 1
+    fi
+    kubectl -n cert-manager create secret generic cloudflare-api-token \
+      --from-literal=api-token="${cf_token}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+cert-manager-issuers-apply email:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cert_email="{{ email }}"
+    sed "s|\$(CERT_MANAGER_EMAIL)|${cert_email}|g" platform/cert-manager/clusterissuers.yaml | kubectl apply -f -
+
+cert-manager-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== cert-manager pods ==="
+    kubectl -n cert-manager get deploy,po
+    echo
+    echo "=== cert-manager CRDs ==="
+    kubectl get crd | grep -E '^certificates\.cert-manager\.io|^clusterissuers\.cert-manager\.io' || true
+    echo
+    echo "=== cluster issuers ==="
+    kubectl get clusterissuer letsencrypt-staging letsencrypt-production -o wide
+    echo
+    echo "=== cloudflare token secret ==="
+    kubectl -n cert-manager get secret cloudflare-api-token
+
 # Run twice per server during initial bring-up to build a 3-node HA control plane.
 ha3 env='dev':
     SUGARKUBE_SERVERS=3 just --justfile "{{ justfile_directory() }}/justfile" up {{ quote(env) }}
