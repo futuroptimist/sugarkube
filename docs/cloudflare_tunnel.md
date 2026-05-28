@@ -27,9 +27,15 @@ runs inside the cluster.
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
-  `prod.democratized.space` (optional legacy redirect host), and `democratized.space` →
+  `staging.token.place`, `prod.democratized.space` (optional legacy redirect host), and
+  `democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
+
+One tunnel per cluster/environment can serve many hostnames. For example, the staging tunnel
+`dspace-staging-v3` can serve both `staging.democratized.space` and `staging.token.place`, all
+routed to Traefik; Traefik then selects the right Kubernetes Ingress by HTTP `Host` header. You can
+optionally rename the tunnel later to `sugarkube-staging-v3`, but do not block launch on renaming.
 
 ## Prerequisites
 
@@ -55,7 +61,8 @@ and
    current UI).
 3. Click **Create a tunnel**.
 4. Choose **Cloudflared** as the connector type.
-5. Name the tunnel (for example, `dspace-staging-v3`). This can be any unique name.
+5. Name the tunnel (for example, `dspace-staging-v3`). This can be any unique name and can be reused
+   for multiple app hostnames in the same environment.
 6. Click **Save tunnel**. The dashboard opens **Install and run a connector** with OS-specific
    commands. **Ignore the OS install commands and do not run `curl | sudo bash` on your Pi.**
    Sugarkube will run `cloudflared` inside the cluster for you. Your only job here is to copy the
@@ -246,7 +253,7 @@ To fix:
 
 Once `cloudflared` runs with the correct token, Cloudflare links the named tunnel to the cluster so
 requests to your mapped hostnames (for example `staging.democratized.space`,
-optional `prod.democratized.space` redirect host, and `democratized.space`)
+`staging.token.place`, optional `prod.democratized.space` redirect host, and `democratized.space`)
 reach Traefik.
 
 ### Recovery and reset
@@ -259,6 +266,13 @@ return to a clean token-mode state:
   ```bash
   just cf-tunnel-debug
   ```
+
+  In `cf-tunnel-debug` logs, look for `Updated to new configuration` and confirm your target
+  hostname appears. If the tunnel is connected but the Kubernetes app ingress is not created yet,
+  a `404` is expected until that ingress exists.
+
+- If logs warn that the cloudflared image is outdated, treat that as a separate maintenance item.
+  Do not block app deployment when the tunnel is connected and hostname routes work.
 
 - Hard reset the deployment/configmap/pods while preserving the `tunnel-token` Secret:
 
