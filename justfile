@@ -801,11 +801,11 @@ cert-manager-issuers-apply email:
         echo "Pass a valid email, e.g. just cert-manager-issuers-apply email=ops@example.com." >&2
         exit 1
     fi
-    python3 -c 'import pathlib, os, sys
+    CERT_MANAGER_EMAIL="${email}" python3 -c 'import pathlib, os, sys
 tpl = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 sys.stdout.write(tpl.replace("${CERT_MANAGER_EMAIL}", os.environ["CERT_MANAGER_EMAIL"]))' \
         "{{ justfile_directory() }}/platform/cert-manager/clusterissuers.nonflux.yaml" \
-        | CERT_MANAGER_EMAIL="${email}" kubectl apply -f -
+        | kubectl apply -f -
 
 # Show cert-manager + issuer readiness and useful validation checks.
 cert-manager-status:
