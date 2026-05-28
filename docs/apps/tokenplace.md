@@ -77,14 +77,19 @@ For production validation, use the same checks against `https://token.place`.
 
 Cloudflare Tunnel/DNS configuration is external to Helm.
 
+- One tunnel per environment can publish multiple app hostnames (for example `dspace-staging-v3`
+  for both `staging.democratized.space` and `staging.token.place`).
 - Route hostnames to Traefik, typically
   `http://traefik.kube-system.svc.cluster.local:80`.
+- Traefik dispatches traffic by `Host` header to the correct Kubernetes Ingress.
 - Helm chart deployment does **not** create Cloudflare routes.
 - Staging/prod overlays set `ingress.tls.enabled: true` so rendered Kubernetes Ingress includes `spec.tls`.
 - `cert-manager` and a compatible `ClusterIssuer` are assumed to already exist.
+- Cloudflare Tunnel route config and cert-manager Cloudflare DNS tokens are different credentials.
 - Configure routes explicitly:
 
 ```bash
+just cf-tunnel-route staging.token.place
 just cf-tunnel-route host=staging.token.place
 just cf-tunnel-route host=token.place
 ```

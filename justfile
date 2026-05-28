@@ -1068,7 +1068,16 @@ cf-tunnel-route host='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if [ -z "{{ host }}" ]; then
+    host_input='{{ host }}'
+    host_name="${host_input}"
+    while [ "${host_name#host=}" != "${host_name}" ]; do
+        host_name="${host_name#host=}"
+    done
+    while [ "${host_name#HOST=}" != "${host_name}" ]; do
+        host_name="${host_name#HOST=}"
+    done
+
+    if [ -z "${host_name}" ]; then
         echo "Set host=<FQDN> (e.g., dspace-v3.example.com)." >&2
         exit 1
     fi
@@ -1077,7 +1086,7 @@ cf-tunnel-route host='':
 
     printf '%s\n' \
         'Use the Cloudflare dashboard to create a route for:' \
-        "  Hostname: {{ host }}" \
+        "  Hostname: ${host_name}" \
         "  Service URL: http://${svc_fqdn}" \
         '' \
         'Discover Traefik services:' \

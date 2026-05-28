@@ -15,6 +15,10 @@ The tunnel routes these hostnames to Traefik (or another ingress controller) run
 k3s cluster. You do **not** need to install or run `cloudflared` on your workstation; the connector
 runs inside the cluster.
 
+One tunnel per cluster/environment can publish many app hostnames. For example, a single
+`dspace-staging-v3` tunnel can serve both `staging.democratized.space` and
+`staging.token.place`.
+
 > Cloudflare has two big modes for tunnels: **remotely-managed** (token-only, created in the
 > dashboard) and **locally-managed** (requires `cloudflared login` and a `cert.pem`). Sugarkube uses
 > the **remotely-managed, token-based connector mode** only. If you create the tunnel in the
@@ -27,7 +31,8 @@ runs inside the cluster.
 - On `sugarkube0`, export `CF_TUNNEL_TOKEN` and (optionally) `CF_TUNNEL_NAME`, then run:
   `just cf-tunnel-install env=dev token="$CF_TUNNEL_TOKEN"`.
 - In the tunnel UI, configure Public hostnames routing `staging.democratized.space`,
-  `prod.democratized.space` (optional legacy redirect host), and `democratized.space` →
+  `staging.token.place`, `prod.democratized.space` (optional legacy redirect host), and
+  `democratized.space` →
   `http://traefik.<namespace>.svc.cluster.local:80`.
 - Confirm readiness: use the port-forward + curl check shown below to hit `/ready` on port 2000.
 
@@ -260,6 +265,10 @@ return to a clean token-mode state:
   just cf-tunnel-debug
   ```
 
+  Look for `Updated to new configuration` and confirm expected hostnames appear in logs. A `404`
+  before the app Ingress exists is expected and indicates the tunnel is live but app routing is not
+  created yet.
+
 - Hard reset the deployment/configmap/pods while preserving the `tunnel-token` Secret:
 
   ```bash
@@ -278,6 +287,12 @@ return to a clean token-mode state:
 The installer performs a teardown-and-retry if the first rollout fails, so rerunning the recipes is
 the canonical way to recover a wedged connector without losing the saved token.
 
+### Maintenance note: outdated `cloudflared` image warnings
+
+`cloudflared` can log warnings when a newer connector image exists. Treat this as a separate
+maintenance update task. Do not block app deploys on this warning alone when the tunnel is connected
+and route checks succeed.
+
 ## Step 3 – Publish application routes (staging + optional prod redirect host + apex)
 
 Now that the connector is running in the cluster, configure routes from your dspace hostnames to the
@@ -295,6 +310,7 @@ internal Traefik Service.
    Replace `<namespace>` with the namespace used by your ingress controller inside the k3s cluster.
 3. Save the routes. This sends HTTPS traffic for each hostname through the tunnel into the Traefik
    ClusterIP service in your k3s cluster.
+4. Traefik then routes by HTTP `Host` header to the matching Kubernetes Ingress for each app.
 
 See Cloudflare’s docs for the latest UI steps:
 [Publish an application through Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/#publish-an-application).
