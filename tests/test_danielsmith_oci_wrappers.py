@@ -81,11 +81,13 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("tag_arg", ["tag=main-deadbee", "tag=tag=main-deadbee"])
 def test_danielsmith_oci_deploy_normalizes_named_tag(
+    tag_arg: str,
     danielsmith_oci_stub_env: dict[str, str],
 ) -> None:
     result = _run_just(
-        ["danielsmith-oci-deploy", "env=staging", "tag=tag=main-deadbee"],
+        ["danielsmith-oci-deploy", "env=staging", tag_arg],
         danielsmith_oci_stub_env,
     )
 
@@ -114,7 +116,22 @@ def test_danielsmith_oci_redeploy_normalizes_named_tag(
     danielsmith_oci_stub_env: dict[str, str],
 ) -> None:
     result = _run_just(
-        ["danielsmith-oci-redeploy", "env=staging", "tag=tag=main-deadbee"],
+        ["danielsmith-oci-redeploy", "env=staging", "tag=main-deadbee"],
+        danielsmith_oci_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(danielsmith_oci_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--set image.tag=main-deadbee" in helm_log
+    assert "--set image.tag=tag=main-deadbee" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_danielsmith_oci_promote_prod_normalizes_repeated_named_tag(
+    danielsmith_oci_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["danielsmith-oci-promote-prod", "tag=tag=main-deadbee"],
         danielsmith_oci_stub_env,
     )
 
