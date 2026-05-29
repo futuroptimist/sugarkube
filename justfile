@@ -2188,6 +2188,9 @@ danielsmith-oci-deploy env='staging' tag='':
     }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: tag is required for immutable deploys." >&2
       exit 1
@@ -2252,6 +2255,9 @@ danielsmith-oci-promote-prod tag='':
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ]; then
       resolved_tag="$(read_prod_tag 2>/dev/null || true)"
     fi
@@ -2296,6 +2302,9 @@ danielsmith-oci-redeploy env='staging' tag='':
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
       resolved_tag="$(read_prod_tag 2>/dev/null || true)"
       [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/danielsmith.prod.tag." >&2; exit 1; }
