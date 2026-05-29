@@ -45,6 +45,10 @@ jobs:
         run: |
           ./scripts/test-helm-oci-install.sh
 
+      - name: Verify Danielsmith OCI tag normalization
+        run: |
+          ./scripts/test-danielsmith-oci-tag-normalization.sh
+
       - name: Ensure Avahi services are running
         run: |
           sudo systemctl start dbus
