@@ -1,5 +1,8 @@
 # danielsmith.io on Sugarkube
 
+For the cross-app contract that future generic `just app-*` recipes will implement, see
+[`docs/app_deployment_contract.md`](../app_deployment_contract.md).
+
 This is the canonical Sugarkube deployment model for `danielsmith.io`.
 
 ## Topology and scope (static-site only)
