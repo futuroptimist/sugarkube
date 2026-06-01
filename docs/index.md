@@ -43,6 +43,7 @@ Review the safety notes before working with power components.
   and Helm OCI issues, including GHCR `401/403` chart pull failures
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
+- [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and planned generic command contract
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding contract,
   ownership boundaries, and environment mapping for token.place on Sugarkube
 - [apps/tokenplace.md](apps/tokenplace.md) — token.place app topology and operations model on Sugarkube
