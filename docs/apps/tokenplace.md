@@ -2,6 +2,9 @@
 
 This is the canonical Sugarkube deployment model for token.place.
 
+For the cross-app artifact, tag, chart, config, and future generic command contract, see
+[`docs/app_deployment_contract.md`](../app_deployment_contract.md).
+
 For onboarding ownership and environment sequencing, see
 [`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md).
 
