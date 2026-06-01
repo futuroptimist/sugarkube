@@ -3,6 +3,8 @@
 This guide covers **steady-state dspace operations** on Sugarkube: repeatable deploys,
 upgrades, promotions, and rollbacks using immutable image tags.
 
+For the shared artifact, tag, chart, app-config, and planned generic command contract, see [Sugarkube app deployment contract](../app_deployment_contract.md).
+
 The `justfile` exposes both:
 
 - generic Helm OCI helpers (`helm-oci-install`, `helm-oci-upgrade`) for any app; and

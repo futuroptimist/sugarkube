@@ -2,6 +2,8 @@
 
 This is the canonical Sugarkube deployment model for `danielsmith.io`.
 
+For the shared artifact, tag, chart, app-config, and planned generic command contract, see [Sugarkube app deployment contract](../app_deployment_contract.md).
+
 ## Topology and scope (static-site only)
 
 `danielsmith.io` is a static Vite + Three.js site. Sugarkube runs only the static web container.

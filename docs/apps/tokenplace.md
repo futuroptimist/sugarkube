@@ -2,6 +2,8 @@
 
 This is the canonical Sugarkube deployment model for token.place.
 
+For the shared artifact, tag, chart, app-config, and planned generic command contract, see [Sugarkube app deployment contract](../app_deployment_contract.md).
+
 For onboarding ownership and environment sequencing, see
 [`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md).
 
