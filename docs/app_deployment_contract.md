@@ -144,7 +144,7 @@ just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
 just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
 
 # Promote an approved immutable tag to production.
-just app-promote-prod app=dspace tag=v1.2.3
+just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
 
 # Inspect Kubernetes and Helm status for an app environment.
 just app-status app=dspace env=staging

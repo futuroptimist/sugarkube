@@ -39,7 +39,6 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 ## Application runbooks
 
-- **[Sugarkube app deployment contract](docs/app_deployment_contract.md)** — shared artifact, tag, chart, config, and planned generic command model for app deployments.
 - **[token.place onboarding contract](docs/tokenplace_sugarkube_onboarding.md)** — prerequisites,
   ownership boundaries, and environment mapping for first-class token.place operations.
 - **[token.place app operations](docs/apps/tokenplace.md)** — topology and deployment workflow
