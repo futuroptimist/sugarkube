@@ -40,7 +40,7 @@ Each Sugarkube-managed app needs the following deployment coordinates:
 | Release name | Stable Helm release name, normally the app slug. |
 | Namespace | Stable Kubernetes namespace, normally the app slug. |
 | Chart version pin file | A repo file containing the chart version Sugarkube should install or upgrade. |
-| Production tag pin file | Optional repo file containing the production-approved image tag. |
+| Production tag pin file | Required repo file containing the production-approved immutable image tag for production promotion. |
 | Values chain per env | Comma-separated Helm values files, ordered from base to environment overlay. |
 | Validation URLs/paths | Host key plus one or more HTTP paths to check after rollout. |
 
@@ -62,8 +62,11 @@ Acceptable deployment tags:
 - Immutable branch-SHA tags, such as `main-REPLACE_SHORTSHA`.
 - Semver or release tags, such as `v1.2.3`, `3.1.0`, or another documented
   project-specific stable tag.
-- Mutable branch convenience tags, such as `main-latest`, only for explicitly
-  documented non-prod bootstrap or iteration flows.
+- Mutable branch convenience tags, such as `main-latest`, only when an app
+  runbook explicitly documents that a non-prod bootstrap or iteration flow accepts
+  them. They are an app-specific exception, not a shared guarantee; for example,
+  token.place deploy/redeploy wrappers reject every tag containing `latest`,
+  including `main-latest`.
 
 Unacceptable deployment tags:
 
@@ -71,8 +74,11 @@ Unacceptable deployment tags:
 - bare branch names such as `main`, `master`, `develop`, or `release`; and
 - environment names such as `dev`, `staging`, `prod`, or `production`.
 
-Production promotion must use an immutable tag. If a production tag pin file is
-present, it should contain the single immutable image tag approved for production.
+Production promotion must use an immutable tag. The production tag pin file is
+part of the standard app coordinates and must contain the single immutable image
+tag approved for production. Generic production promotion flows should read that
+pin when `tag=` is omitted and should update it only as an explicit approval
+step.
 
 ## Standard chart publishing model
 
