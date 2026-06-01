@@ -39,10 +39,16 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 ## Application runbooks
 
+- **[Sugarkube app deployment contract](docs/app_deployment_contract.md)** — shared artifact,
+  tag, chart, config, and future generic command contract for apps on Sugarkube.
 - **[token.place onboarding contract](docs/tokenplace_sugarkube_onboarding.md)** — prerequisites,
   ownership boundaries, and environment mapping for first-class token.place operations.
 - **[token.place app operations](docs/apps/tokenplace.md)** — topology and deployment workflow
   patterns for token.place on Sugarkube.
+- **[dspace app operations](docs/apps/dspace.md)** — topology and deployment workflow patterns for
+  democratized.space on Sugarkube.
+- **[danielsmith.io app operations](docs/apps/danielsmith.md)** — static-site deployment workflow
+  patterns for danielsmith.io on Sugarkube.
 - **[token.place env runbooks](docs/index.md)** — environment-specific guides for
   [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
   [production](docs/k3s-tokenplace-prod.md) operations.

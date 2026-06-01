@@ -1,5 +1,8 @@
 # danielsmith.io on Sugarkube
 
+This app follows the shared [Sugarkube app deployment contract](../app_deployment_contract.md),
+including the artifact model, immutable tag policy, and future generic `just app-*` command shape.
+
 This is the canonical Sugarkube deployment model for `danielsmith.io`.
 
 ## Topology and scope (static-site only)

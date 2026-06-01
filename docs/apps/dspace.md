@@ -1,5 +1,8 @@
 # democratized.space (dspace) on Sugarkube
 
+This app follows the shared [Sugarkube app deployment contract](../app_deployment_contract.md),
+including the artifact model, immutable tag policy, and future generic `just app-*` command shape.
+
 This guide covers **steady-state dspace operations** on Sugarkube: repeatable deploys,
 upgrades, promotions, and rollbacks using immutable image tags.
 
