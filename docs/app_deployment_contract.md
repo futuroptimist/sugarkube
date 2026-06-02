@@ -30,6 +30,7 @@ Sugarkube owns cluster and environment orchestration:
 Future onboarding examples include wove and jobbot3000, but they should only get
 Sugarkube app configs after their app repositories have published compatible
 images and charts.
+Use the [future-app onboarding guide](app_onboarding.md) for the checklist, minimal config template, and release decision tree.
 
 ## Standard artifact model
 

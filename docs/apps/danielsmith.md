@@ -1,92 +1,202 @@
 # danielsmith.io on Sugarkube
 
-This is the canonical Sugarkube deployment model for `danielsmith.io`.
+This is the canonical runbook for deploying danielsmith.io from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `danielsmith-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
-For the shared artifact, tag, chart, app-config, and planned generic command contract, see [Sugarkube app deployment contract](../app_deployment_contract.md).
+## Artifact model
 
-## Topology and scope (static-site only)
+- App repository responsibilities: build `ghcr.io/futuroptimist/danielsmith.io`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/futuroptimist/charts/danielsmith`.
+- Sugarkube responsibilities: select `dev`, `staging`, or `prod`; load `docs/examples/apps/danielsmith.env` or a local override; select kubeconfig/context; install or upgrade Helm; verify rollout status, logs, and public paths.
+- Cloudflare responsibilities: DNS and Tunnel routes to Traefik are outside Helm and must exist before public verification.
 
-`danielsmith.io` is a static Vite + Three.js site. Sugarkube runs only the static web container.
+| Coordinate | Value |
+| --- | --- |
+| Image | `ghcr.io/futuroptimist/danielsmith.io` |
+| Chart | `oci://ghcr.io/futuroptimist/charts/danielsmith` |
+| Release | `danielsmith` |
+| Namespace | `danielsmith` |
+| App config | `docs/examples/apps/danielsmith.env` |
+| Chart version pin | `docs/apps/danielsmith.version` |
+| Production tag pin | `docs/apps/danielsmith.prod.tag` |
+| Verify paths | `/`, `/livez`, `/healthz` |
 
-- **In-cluster (Sugarkube):** one static web deployment exposed through Traefik ingress.
-- **No in-cluster API/backend/database/queue/GPU/compute node/stateful service** is required.
-- **Public ingress path:** Cloudflare Tunnel fronts Traefik, and Traefik routes to the
-  `danielsmith` Kubernetes Service.
-- **Health/availability endpoints:** `/livez`, `/healthz`.
-- **Root page:** `/`.
+## Environment topology
 
-## Artifact model (canonical)
+- `env=dev`: local/dev defaults using `docs/examples/danielsmith.values.dev.yaml`.
+- `env=staging`: staging host `staging.danielsmith.io` with values `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml`.
+- `env=prod`: production host `danielsmith.io` with values `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml`.
+- The app is a static Vite and Three.js site. Sugarkube runs the static web container only; no in-cluster API, queue, database, GPU, compute node, or stateful service is required.
 
-- Image: `ghcr.io/futuroptimist/danielsmith.io`
-- Chart: `oci://ghcr.io/futuroptimist/charts/danielsmith`
-- Helm release: `danielsmith`
-- Namespace: `danielsmith`
-- Chart version pin file: `docs/apps/danielsmith.version`
-- Production approved tag pin: `docs/apps/danielsmith.prod.tag`
+## Find or publish GHCR image
 
-## Values model
-
-- Base: `docs/examples/danielsmith.values.dev.yaml`
-- Staging overlay: `docs/examples/danielsmith.values.staging.yaml`
-- Production overlay: `docs/examples/danielsmith.values.prod.yaml`
-
-Default hosts:
-
-- Staging: `staging.danielsmith.io`
-- Production: `danielsmith.io`
-
-## Core deployment commands
-
-First install (or install-or-upgrade) with generic helper:
+Find the successful image workflow in the danielsmith.io app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
 
 ```bash
-just kubeconfig-env staging
-DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
-just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
+APP_TAG=main-REPLACE_SHORTSHA
 ```
 
-Existing release upgrade with generic helper:
-
 ```bash
-just kubeconfig-env staging
-DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
+gh run list --repo futuroptimist/danielsmith.io --workflow ci-image.yml --branch main --status success --limit 5
 ```
 
-Preferred environment wrapper:
+If no suitable image exists, publish it from the app repo workflow, then return here with the immutable tag it produced.
 
 ```bash
-DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
-just danielsmith-oci-deploy env=staging tag="$DANIELSMITH_TAG"
+gh workflow run ci-image.yml --repo futuroptimist/danielsmith.io --ref main
 ```
 
-## Validation commands
+## Confirm/publish OCI chart
+
+Sugarkube deploys the chart version pinned in `docs/apps/danielsmith.version`.
 
 ```bash
-kubectl -n danielsmith get deploy,po,svc,ingress
-kubectl -n danielsmith rollout status deploy/danielsmith --timeout=180s
-curl -fsS https://staging.danielsmith.io/livez
+CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.version | head -n 1)
+```
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/danielsmith --version "$CHART_VERSION"
+```
+
+If the chart changed, bump the chart version in the danielsmith.io app repo and publish it there with `ci-helm.yml`; do not republish a different chart under an existing OCI version.
+
+```bash
+gh workflow run ci-helm.yml --repo futuroptimist/danielsmith.io --ref main
+```
+
+## Deploy staging
+
+Preferred generic command:
+
+```bash
+just app-deploy app=danielsmith env=staging tag="$APP_TAG"
+```
+
+Compatibility shim while migration is in progress:
+
+```bash
+just danielsmith-oci-deploy env=staging tag="$APP_TAG"
+```
+
+## Verify staging
+
+```bash
+just app-status app=danielsmith env=staging
+```
+
+```bash
+just app-verify app=danielsmith env=staging
+```
+
+```bash
 curl -fsS https://staging.danielsmith.io/healthz
+```
+
+```bash
+curl -fsS https://staging.danielsmith.io/livez
+```
+
+```bash
 curl -fsS https://staging.danielsmith.io/
 ```
 
-For production validation, use the same checks against `https://danielsmith.io`.
+## Promote production
 
-## Cloudflare Tunnel and ingress model
+Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain and can read `docs/apps/danielsmith.prod.tag` when `tag=` is omitted.
 
-Cloudflare Tunnel/DNS configuration is external to Helm.
+```bash
+just app-promote-prod app=danielsmith tag="$APP_TAG"
+```
 
-- Route hostnames to Traefik, typically
-  `http://traefik.kube-system.svc.cluster.local:80`.
-- Helm chart deployment does **not** create Cloudflare routes.
-- Configure staging and prod routes explicitly:
+Compatibility shim:
+
+```bash
+just danielsmith-oci-promote-prod tag="$APP_TAG"
+```
+
+## Verify production
+
+```bash
+just app-status app=danielsmith env=prod
+```
+
+```bash
+just app-verify app=danielsmith env=prod
+```
+
+```bash
+curl -fsS https://danielsmith.io/healthz
+```
+
+```bash
+curl -fsS https://danielsmith.io/livez
+```
+
+```bash
+curl -fsS https://danielsmith.io/
+```
+
+## Rollback
+
+Rollback by deploying the previous known-good immutable image tag with the generic redeploy command.
+
+```bash
+APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
+```
+
+```bash
+just app-redeploy app=danielsmith env=staging tag="$APP_TAG"
+```
+
+```bash
+just app-redeploy app=danielsmith env=prod tag="$APP_TAG"
+```
+
+Rollback by Helm revision is still available through the existing parameterized helper.
+
+```bash
+HELM_REVISION=12
+```
+
+```bash
+just tokenplace-rollback release=danielsmith namespace=danielsmith revision="$HELM_REVISION"
+```
+
+## Troubleshooting
+
+Check resolved generic config before changing a release.
+
+```bash
+just app-config app=danielsmith env=staging
+```
+
+Check Kubernetes and Helm state.
+
+```bash
+just app-status app=danielsmith env=staging
+```
+
+Review logs with the compatibility debug helper.
+
+```bash
+just danielsmith-debug-logs-env env=staging
+```
+
+Validate GHCR auth if Helm reports `401`, `403`, or `denied`.
+
+```bash
+helm registry login ghcr.io
+```
+
+Cloudflare Tunnel routes are external to Helm. Route public hosts to Traefik, typically `http://traefik.kube-system.svc.cluster.local:80`.
 
 ```bash
 just cf-tunnel-route host=staging.danielsmith.io
+```
+
+```bash
 just cf-tunnel-route host=danielsmith.io
 ```
 
-## Related runbooks
+## App-specific notes
 
-- Staging runbook: [`docs/k3s-danielsmith-staging.md`](../k3s-danielsmith-staging.md)
-- Production runbook: [`docs/k3s-danielsmith-prod.md`](../k3s-danielsmith-prod.md)
+- danielsmith.io is static-site only; a failing rollout is usually an image, chart, ingress, TLS, or Cloudflare issue rather than an in-cluster backend dependency.
+- Verify `/` in addition to health endpoints so static assets and Traefik host routing are exercised before production promotion.
