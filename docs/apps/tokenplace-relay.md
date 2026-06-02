@@ -32,27 +32,24 @@ Defaults:
 
 ## Staging install/upgrade
 
-First install:
+Preferred generic deploy:
 
 ```bash
-just kubeconfig-env staging
-TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+APP_TAG=main-REPLACE_SHORTSHA
 ```
 
-Existing release upgrade:
-
 ```bash
-just kubeconfig-env staging
-TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+just app-deploy app=tokenplace env=staging tag="$APP_TAG"
 ```
 
-Preferred wrapper:
+Compatibility wrapper:
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
+APP_TAG=main-REPLACE_SHORTSHA
+```
+
+```bash
+just tokenplace-oci-deploy env=staging tag="$APP_TAG"
 ```
 
 ## Staging validation
@@ -67,36 +64,44 @@ curl -fsS https://staging.token.place/
 
 ## Production promotion, deploy, and rollback
 
-Promote approved staging image tag. Final production promotion after token.place Git tag push should use tag `v0.1.0` (tag only; repository is already set in chart values).
+Promote only the immutable staging image tag that passed relay validation. Final
+production promotion after a token.place Git tag push may use `v0.1.0` or the
+current approved release tag.
 
+Preferred generic production promotion:
 
 ```bash
-TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
-just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
+APP_TAG=main-REPLACE_SHORTSHA
 ```
 
-Generic production upgrade with prod overlay:
+```bash
+just app-promote-prod app=tokenplace tag="$APP_TAG"
+```
+
+Compatibility wrapper:
 
 ```bash
-just kubeconfig-env prod
-TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+just tokenplace-oci-promote-prod tag="$APP_TAG"
 ```
 
 Rollback using previous immutable tag:
 
 ```bash
-just kubeconfig-env prod
-TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
+APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
+```
+
+```bash
+just app-promote-prod app=tokenplace tag="$APP_TAG"
 ```
 
 Rollback to previous Helm revision:
 
 ```bash
-just kubeconfig-env prod
-TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
-just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
+APP_REVISION=12
+```
+
+```bash
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$APP_REVISION"
 ```
 
 Production validation:
@@ -159,4 +164,4 @@ just cf-tunnel-debug
 - Chart `appVersion`: `0.1.0`
 - Git tag: `v0.1.0`
 - Release image tag: `v0.1.0`
-- Staging candidate image tag: `main-<shortsha>`
+- Staging candidate image tag: `main-REPLACE_SHORTSHA`

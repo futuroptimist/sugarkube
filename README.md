@@ -39,13 +39,12 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 ## Application runbooks
 
-- **[token.place onboarding contract](docs/tokenplace_sugarkube_onboarding.md)** — prerequisites,
-  ownership boundaries, and environment mapping for first-class token.place operations.
-- **[token.place app operations](docs/apps/tokenplace.md)** — topology and deployment workflow
-  patterns for token.place on Sugarkube.
-- **[token.place env runbooks](docs/index.md)** — environment-specific guides for
-  [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
-  [production](docs/k3s-tokenplace-prod.md) operations.
+- **[Generic app deployment contract](docs/app_deployment_contract.md)** — shared artifact, tag, chart, config, and `just app-*` command contract.
+- **[Future app onboarding](docs/app_onboarding.md)** — checklist and decision tree for adding wove, jobbot3000, and later apps.
+- **[DSPACE app operations](docs/apps/dspace.md)** — GHCR-first staging deploy, production promotion, verification, and rollback.
+- **[token.place app operations](docs/apps/tokenplace.md)** — relay topology plus generic staging/prod operations on Sugarkube.
+- **[danielsmith.io app operations](docs/apps/danielsmith.md)** — static-site staging/prod operations on Sugarkube.
+- **Environment runbooks** — token.place [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and [production](docs/k3s-tokenplace-prod.md); danielsmith.io [staging](docs/k3s-danielsmith-staging.md) and [production](docs/k3s-danielsmith-prod.md).
 
 ## Repository layout
 

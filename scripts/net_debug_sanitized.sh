@@ -487,7 +487,7 @@ main() {
   salt="${LOG_SALT:-$(head -c 16 /dev/urandom | xxd -p)}"
 
   START_TIME="$(date +%s)"
-  TOTAL_TIME_BUDGET=15
+  TOTAL_TIME_BUDGET="${NET_DEBUG_TOTAL_TIME_BUDGET:-30}"
   TIME_BUDGET_REMAINING=${TOTAL_TIME_BUDGET}
 
   local timestamp

@@ -1,204 +1,304 @@
 # democratized.space (dspace) on Sugarkube
 
-This guide covers **steady-state dspace operations** on Sugarkube: repeatable deploys,
-upgrades, promotions, and rollbacks using immutable image tags.
+This runbook is the GHCR-first, generic-app deployment path for `dspace`. The app
+repository owns image and chart publishing; Sugarkube owns kubeconfig selection,
+values overlays, Helm deploys, status, verification, rollback, and logs. Cloudflare
+Tunnel/DNS routes are configured outside Helm and must already point the public
+hostnames at Traefik before production cutover.
 
-For the shared artifact, tag, chart, app-config, and planned generic command contract, see [Sugarkube app deployment contract](../app_deployment_contract.md).
+App-specific `just` recipes remain documented as compatibility shims. Prefer the
+generic `just app-* app=dspace` commands for new releases and future app
+onboarding; the wrappers are scheduled for later removal only after the generic
+flow has been exercised across routine releases.
 
-The `justfile` exposes both:
+For the shared contract, tag policy, and config lookup order, see
+[Sugarkube app deployment contract](../app_deployment_contract.md). For future
+apps, see [App onboarding](../app_onboarding.md).
 
-- generic Helm OCI helpers (`helm-oci-install`, `helm-oci-upgrade`) for any app; and
-- dspace-specific helpers for immutable deploys and production promotion
-  (`dspace-oci-deploy`, `dspace-oci-promote-prod`, `dspace-oci-redeploy`).
+## Artifact model
 
-## Environment topology and values overlays
+- App repository: `democratizedspace/dspace`
+- Image: `ghcr.io/democratizedspace/dspace`
+- Chart: `oci://ghcr.io/democratizedspace/charts/dspace`
+- Helm release: `dspace`
+- Kubernetes namespace: `dspace`
+- Sugarkube app config: `docs/examples/apps/dspace.env`
+- Chart version pin: `docs/apps/dspace.version`
+- Production image tag pin: `docs/apps/dspace.prod.tag`
+- Verify paths: `/config.json,/healthz,/livez`
+- Optional production subdomain overlay: `docs/examples/dspace.values.prod-subdomain.yaml` for `prod.democratized.space`.
 
-dspace values are layered so base defaults stay separate from environment routing.
+Responsibilities stay split:
 
-- `docs/examples/dspace.values.dev.yaml`: shared defaults, intended for future `env=dev`
-  deployments.
-- `docs/examples/dspace.values.staging.yaml`: staging ingress host/class overlay.
-- `docs/examples/dspace.values.prod.yaml`: production apex ingress overlay.
-- `docs/examples/dspace.values.prod-subdomain.yaml`: optional legacy subdomain overlay for
-  `prod.democratized.space` when a pre-apex host is explicitly needed.
+- **App repo:** build the container image, publish immutable GHCR tags such as
+  `main-REPLACE_SHORTSHA`, package the Helm chart, and publish immutable OCI chart
+  versions.
+- **Sugarkube:** select `dev`, `staging`, or `prod`; load app config; apply values
+  overlays; run Helm; verify URLs; inspect pods/logs; and perform rollback.
+- **Cloudflare:** maintain DNS and tunnel routes to Traefik. Helm creates
+  Kubernetes Ingress objects, not Cloudflare routes.
 
-Current/target topology:
+## Environment topology
 
-- **staging (live, HA):** `env=staging` on `sugarkube3`, `sugarkube4`, `sugarkube5`,
-  public host `staging.democratized.space`.
-- **prod (live, HA):** `env=prod` on `sugarkube0`, `sugarkube1`, `sugarkube2`,
-  public host `democratized.space`.
-- **dev (planned, non-HA):** `env=dev` on `sugarkube6` (single-node future environment).
+- Staging environment: `env=staging`, host `https://staging.democratized.space`.
+- Production environment: `env=prod`, host `https://democratized.space`.
+- Values overlays:
+  - Base/dev: `docs/examples/dspace.values.dev.yaml`
+  - Staging: `docs/examples/dspace.values.staging.yaml`
+  - Production: `docs/examples/dspace.values.prod.yaml`
 
-Cloudflare Tunnel topology stays one tunnel per environment/cluster, with many hostnames routed to
-Traefik. For staging this means `staging.democratized.space` can share a tunnel with
-`staging.token.place`, and Traefik routes by HTTP `Host` header to the proper Ingress.
+Current target topology is HA staging on `sugarkube3`/`sugarkube4`/`sugarkube5`, HA production on `sugarkube0`/`sugarkube1`/`sugarkube2`, and a planned single-node dev environment on `sugarkube6`.
 
-## Tagging model (evergreen releases)
-
-Use tags by purpose:
-
-- **Convenience/mutable tags** for fast iteration in non-prod (for example `main-latest`).
-- **Immutable deploy tags** for sign-off, promotion, and rollback (for example
-  `main-<shortsha>`, `3.0.1`, `3.1.0`).
-- In this operational guide, `main` is the normal integration line that produces
-  DSPACE-derived image tags (for example `main-<shortsha>`).
-- If the DSPACE repo uses release branches, keep them short-lived stabilization branches,
-  not long-lived environment branches.
-- Keep environment routing (`staging`, optional `prod.` subdomain, apex prod) separate from release
-  lineage; this guide stays main-first for steady-state operations.
-
-Environment overlays (`dev`/`staging`/`prod`) decide host/routing. Image tags decide the
-release version. Keep those concerns separate.
-
-## Quickstart
+Confirm Cloudflare routing separately when a hostname is new or has changed:
 
 ```bash
-# Immutable staging deploy (recommended for release validation)
-just dspace-oci-deploy env=staging tag=main-<shortsha>
-
-# Immutable production deploy (reads docs/apps/dspace.prod.tag if tag is omitted)
-just dspace-oci-promote-prod tag=3.1.0
-
-# Optional prod subdomain endpoint (prod.democratized.space)
-just dspace-oci-deploy-prod-subdomain tag=main-<shortsha>
-
-# Check pods/ingress/status
-just app-status namespace=dspace release=dspace
+just cf-tunnel-route host=staging.democratized.space
 ```
-
-## When to use each helper
-
-- `helm-oci-install`: install-or-upgrade path (uses `helm upgrade --install`), useful when a
-  release may not exist yet.
-- `helm-oci-upgrade`: upgrade-only path with `--reuse-values`, useful for routine bumps on an
-  existing release.
-- `dspace-oci-deploy`: opinionated dspace wrapper that requires an explicit immutable tag,
-  applies the correct values chain for `env=dev|staging|prod`, and waits for rollout.
-- `dspace-oci-promote-prod`: production convenience wrapper around
-  `dspace-oci-deploy env=prod`, reading `docs/apps/dspace.prod.tag` when `tag=` is omitted.
-- `dspace-oci-redeploy`: force-refresh path for already-deployed tags (especially mutable tags)
-  by running a Helm upgrade and rollout restart.
-
-## Generic Helm OCI examples
-
-If `helm pull`, `just helm-oci-install`, or `just helm-oci-upgrade` fails with GHCR `401`/`403`
-errors, use the canonical recovery steps in
-[Raspberry Pi Cluster Troubleshooting — Scenario 7](../raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
 
 ```bash
-# Install-or-upgrade staging with mutable convenience tag
-just helm-oci-install \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-  version_file=docs/apps/dspace.version \
-  default_tag=main-latest
-
-# Upgrade staging to an immutable build
-just helm-oci-upgrade \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
-  version_file=docs/apps/dspace.version \
-  tag=main-<shortsha>
-
-# Upgrade prod directly to a signed-off immutable tag
-just helm-oci-upgrade \
-  release=dspace namespace=dspace \
-  chart=oci://ghcr.io/democratizedspace/charts/dspace \
-  values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml \
-  version_file=docs/apps/dspace.version \
-  tag=3.1.0
+just cf-tunnel-route host=democratized.space
 ```
 
-Notes:
+## Find or publish GHCR image
 
-- `version_file=docs/apps/dspace.version` keeps chart version pinning centralized.
-- For prod, prefer immutable tags and persist the approved one in `docs/apps/dspace.prod.tag`.
-- `dspace-oci-deploy` rejects mutable tags (`latest`, `main`) by design.
+Start from the app repository's image workflow. A successful workflow should push
+an immutable tag, usually `main-REPLACE_SHORTSHA`, plus any app-specific release
+or convenience tags documented by that repository.
 
-## Evergreen release/promotion flow
+```bash
+gh run list --repo democratizedspace/dspace --workflow ci-image.yml --limit 10
+```
 
-1. Build and publish candidate image tags from `main` (for example `main-<shortsha>` plus
-   optional `main-latest`).
-2. Deploy immutable candidate to staging:
+Set the immutable image tag you are about to deploy:
 
-   ```bash
-   just dspace-oci-deploy env=staging tag=main-<shortsha>
-   ```
+```bash
+APP_TAG=main-REPLACE_SHORTSHA
+```
 
-3. Verify staging (`config.json`, `healthz`, `livez`) at
-   `https://staging.democratized.space`.
+Inspect the GHCR image manifest before deploying. If this fails with an auth
+error, login with a GitHub token that can read packages for the app repository.
 
-   ```bash
-   curl -fsS https://staging.democratized.space/config.json | jq .
-   ```
+```bash
+docker manifest inspect ghcr.io/democratizedspace/dspace:$APP_TAG
+```
 
-   ```bash
-   curl -fsS https://staging.democratized.space/healthz | jq .
-   ```
+Do not lead staging or production deployments with local Docker builds. Local
+builds are for app-repo development only; Sugarkube deploys published GHCR
+artifacts.
 
-   ```bash
-   curl -fsS https://staging.democratized.space/livez | jq .
-   ```
+## Confirm/publish OCI chart
 
-4. Promote the approved immutable tag to production apex:
+The app repository owns chart changes and immutable chart publishing. If the chart
+changed, bump the chart version in the app repository before publishing; do not
+republish different chart content at the same version.
 
-   ```bash
-   just dspace-oci-promote-prod tag=main-<shortsha>
-   # or semver tag once released
-   just dspace-oci-promote-prod tag=3.1.0
-   ```
+Read the Sugarkube chart version pin:
 
-   Then verify production apex:
+```bash
+APP_CHART_VERSION=$(grep -E '^[0-9]+[.][0-9]+[.][0-9]+' docs/apps/dspace.version | head -n1)
+```
 
-   ```bash
-   curl -fsS https://democratized.space/config.json | jq .
-   ```
+Confirm the pinned chart is available from GHCR:
 
-   ```bash
-   curl -fsS https://democratized.space/healthz | jq .
-   ```
+```bash
+helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$APP_CHART_VERSION"
+```
 
-   ```bash
-   curl -fsS https://democratized.space/livez | jq .
-   ```
+If the chart was changed but the pinned version is missing or stale, publish it
+from the app repository first, then update `docs/apps/dspace.version` in Sugarkube only
+after the immutable OCI chart exists.
 
-5. Keep rollback simple by redeploying the prior immutable tag.
+## Deploy staging
 
-Optional only: use `dspace-oci-deploy-prod-subdomain` when you explicitly need the
-`https://prod.democratized.space` subdomain before apex promotion. In steady state, this
-subdomain is typically a redirect to `https://democratized.space`, so it is not part of the
-default required deploy/promotion path.
+Preferred generic command:
 
-## Networking via Cloudflare Tunnel
+```bash
+APP_TAG=main-REPLACE_SHORTSHA
+```
 
-This guide assumes public ingress is exposed via Cloudflare Tunnel.
+```bash
+just app-deploy app=dspace env=staging tag="$APP_TAG"
+```
 
-Typical hostnames:
+Compatibility wrapper, kept for existing operators and scripts:
 
-- staging: `https://staging.democratized.space`
-- optional `prod.` subdomain (often redirect): `https://prod.democratized.space`
-- production apex: `https://democratized.space`
+```bash
+APP_TAG=main-REPLACE_SHORTSHA
+```
 
-For tunnel and DNS setup details, see [Cloudflare Tunnel docs](../cloudflare_tunnel.md).
+```bash
+just dspace-oci-deploy env=staging tag="$APP_TAG"
+```
+
+Use `app-redeploy` only when you intentionally need the upgrade-only path for an
+existing release and tag:
+
+```bash
+just app-redeploy app=dspace env=staging tag="$APP_TAG"
+```
+
+Low-level Helm OCI helpers remain available for unusual recovery work, but they
+are no longer the preferred runbook path:
+
+```bash
+just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version tag="$APP_TAG"
+```
+
+```bash
+just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version tag="$APP_TAG"
+```
+
+## Verify staging
+
+Use the generic verifier first. It resolves the host from the Helm release values
+and curls the app config's verify paths.
+
+```bash
+just app-status app=dspace env=staging
+```
+
+```bash
+just app-verify app=dspace env=staging
+```
+
+Manual staging checks:
+
+```bash
+kubectl --context sugar-staging -n dspace get deploy,po,svc,ingress
+```
+
+```bash
+kubectl --context sugar-staging -n dspace rollout status deploy/dspace --timeout=180s
+```
+
+```bash
+curl -fsS https://staging.democratized.space/config.json
+curl -fsS https://staging.democratized.space/healthz
+curl -fsS https://staging.democratized.space/livez
+```
+
+## Promote production
+
+Promote only the exact immutable image tag that passed staging. If `tag=` is
+omitted, the generic production command reads `docs/apps/dspace.prod.tag`; update that pin
+only as an explicit approval step.
+
+Preferred generic command:
+
+```bash
+APP_TAG=main-REPLACE_SHORTSHA
+```
+
+```bash
+just app-promote-prod app=dspace tag="$APP_TAG"
+```
+
+Compatibility wrapper:
+
+```bash
+APP_TAG=main-REPLACE_SHORTSHA
+```
+
+```bash
+just dspace-oci-promote-prod tag="$APP_TAG"
+```
+
+## Verify production
+
+```bash
+just app-status app=dspace env=prod
+```
+
+```bash
+just app-verify app=dspace env=prod
+```
+
+Manual production checks:
+
+```bash
+kubectl --context sugar-prod -n dspace get deploy,po,svc,ingress
+```
+
+```bash
+kubectl --context sugar-prod -n dspace rollout status deploy/dspace --timeout=180s
+```
+
+```bash
+curl -fsS https://democratized.space/config.json
+curl -fsS https://democratized.space/healthz
+curl -fsS https://democratized.space/livez
+```
+
+## Rollback
+
+Rollback by redeploying the previous known-good immutable tag. Prefer this when
+the previous image tag is known and the chart version did not need to change.
+
+```bash
+APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
+```
+
+```bash
+just app-deploy app=dspace env=staging tag="$APP_TAG"
+```
+
+```bash
+just app-promote-prod app=dspace tag="$APP_TAG"
+```
+
+Rollback by Helm revision only when you have confirmed the revision number:
+
+```bash
+APP_REVISION=12
+```
+
+```bash
+just tokenplace-rollback release=dspace namespace=dspace revision="$APP_REVISION"
+```
+
+`tokenplace-rollback` is the repository's existing parameterized Helm rollback
+helper despite its token.place-oriented name.
 
 ## Troubleshooting
 
-- GHCR/OCI auth errors (`401 authentication required` or `403 denied: denied`) for
-  `helm pull`/`helm-oci-*` helpers:
-  [Raspberry Pi Cluster Troubleshooting — Scenario 7](../raspi_cluster_troubleshooting.md#scenario-7-helm-oci-pull-fails-with-ghcr-403-denied-denied).
-- Collect dspace + ingress logs with environment-aware helper:
+GHCR/OCI auth failures usually mean Helm or Docker cannot read the package. Login
+with a GitHub token that has package read access, then retry the chart/image
+inspection commands.
 
-  ```bash
-  just dspace-debug-logs-env env=staging
-  just dspace-debug-logs-env env=prod
-  ```
+```bash
+helm registry login ghcr.io
+```
 
-- Inspect Helm release state:
-  - `helm -n dspace status dspace`
-  - `helm -n dspace get values dspace`
-- Inspect Kubernetes objects:
-  - `kubectl -n dspace get ingress,pods,svc`
-  - `kubectl -n dspace describe ingress dspace`
+```bash
+helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$APP_CHART_VERSION"
+```
+
+Inspect resolved config and cluster state:
+
+```bash
+just app-config app=dspace env=staging
+```
+
+```bash
+just app-status app=dspace env=staging
+```
+
+```bash
+kubectl --context sugar-staging -n dspace logs deploy/dspace --tail=120
+```
+
+Ingress and tunnel checks:
+
+```bash
+just traefik-status
+```
+
+```bash
+just cf-tunnel-debug
+```
+
+## App-specific notes
+
+- DSPACE uses `/config.json`, `/healthz`, and `/livez` as smoke checks.
+- Keep release lineage separate from environment routing: immutable image tags choose the app version; values overlays choose staging vs production hosts.
+- The optional `prod.democratized.space` overlay is not part of the default promotion path; use it only for an explicit pre-apex validation need.
