@@ -154,10 +154,15 @@ just app-redeploy app=dspace env=staging tag="$APP_TAG"
 just app-redeploy app=dspace env=prod tag="$APP_TAG"
 ```
 
-Rollback by Helm revision is still available through the existing parameterized helper.
+Rollback by Helm revision is still available through the existing parameterized helper. Set `ROLLBACK_ENV=staging` instead when intentionally rolling back staging.
 
 ```bash
 HELM_REVISION=12
+```
+
+```bash
+ROLLBACK_ENV=prod
+just kubeconfig-env "$ROLLBACK_ENV"
 ```
 
 ```bash

@@ -61,12 +61,12 @@ Do not mark production healthy on generic checks alone. Capture separate product
 
 ```bash
 TOKENPLACE_HOST=token.place
-kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+kubectl --context sugar-prod -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
 # First run real prod compute-node registration and the prod E2EE
 # request/response. Then capture post-test evidence:
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
-kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
+kubectl --context sugar-prod -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
   | tee /tmp/tokenplace-prod-relay-after-compute.log
 ```
 

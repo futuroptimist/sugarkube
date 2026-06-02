@@ -155,12 +155,12 @@ Do not mark production healthy on generic HTTP checks alone. After promotion, pr
 
 ```bash
 TOKENPLACE_HOST=token.place
-kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+kubectl --context sugar-prod -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
 # First run production desktop or compute-node registration and the
 # production E2EE request/response. Then capture post-test evidence:
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
-kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
+kubectl --context sugar-prod -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
   | tee /tmp/tokenplace-prod-relay-after-compute.log
 ```
 
@@ -180,10 +180,15 @@ just app-redeploy app=tokenplace env=staging tag="$APP_TAG"
 just app-redeploy app=tokenplace env=prod tag="$APP_TAG"
 ```
 
-Rollback by Helm revision is still available through the existing parameterized helper.
+Rollback by Helm revision is still available through the existing parameterized helper. Set `ROLLBACK_ENV=staging` instead when intentionally rolling back staging.
 
 ```bash
 HELM_REVISION=12
+```
+
+```bash
+ROLLBACK_ENV=prod
+just kubeconfig-env "$ROLLBACK_ENV"
 ```
 
 ```bash

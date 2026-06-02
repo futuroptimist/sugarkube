@@ -169,6 +169,11 @@ HELM_REVISION=12
 ```
 
 ```bash
+ROLLBACK_ENV=prod
+just kubeconfig-env "$ROLLBACK_ENV"
+```
+
+```bash
 just tokenplace-rollback release=appslug namespace=appslug revision="$HELM_REVISION"
 ```
 
