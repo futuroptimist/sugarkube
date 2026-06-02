@@ -78,11 +78,11 @@ exit 0
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
-if [ "${{1:-}}" = "get" ] && [ "${{2:-}}" = "values" ]; then
+if [[ "$*" == *"get values"* ]]; then
   printf '{{"ingress":{{"host":"example.test"}}}}\n'
   exit 0
 fi
-if [ "${{1:-}}" = "-n" ] && [ "${{3:-}}" = "status" ]; then
+if [[ "$*" == *" status "* ]]; then
   printf 'STATUS: deployed\n'
 fi
 exit 0
@@ -235,6 +235,10 @@ def test_app_status_does_not_rewrite_kubeconfig_for_read_only_checks(
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert not (Path(generic_app_stub_env["HOME"]) / ".kube" / "config").exists()
+    kubectl_log = Path(generic_app_stub_env["KUBECTL_LOG"]).read_text(encoding="utf-8")
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--context sugar-staging" in kubectl_log
+    assert "--kube-context sugar-staging" in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -245,3 +249,5 @@ def test_app_verify_does_not_rewrite_kubeconfig_for_read_only_checks(
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert not (Path(generic_app_stub_env["HOME"]) / ".kube" / "config").exists()
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--kube-context sugar-staging" in helm_log

@@ -1605,16 +1605,19 @@ app-verify app env='staging' config='':
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
+    kube_context="sugar-${SUGARKUBE_ENV}"
+    kubectl_context_args=(--context "${kube_context}")
+    helm_context_args=(--kube-context "${kube_context}")
 
     host=""
     if command -v helm >/dev/null 2>&1; then
-      host="$(helm get values "${SUGARKUBE_RELEASE}" \
+      host="$(helm "${helm_context_args[@]}" get values "${SUGARKUBE_RELEASE}" \
         --namespace "${SUGARKUBE_NAMESPACE}" \
         --all --output json 2>/dev/null | \
         python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}" || true)"
     fi
     if [ -z "${host}" ] && command -v kubectl >/dev/null 2>&1; then
-      host="$(kubectl -n "${SUGARKUBE_NAMESPACE}" get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
+      host="$(kubectl "${kubectl_context_args[@]}" -n "${SUGARKUBE_NAMESPACE}" get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
     fi
 
     IFS=',' read -r -a paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
@@ -2546,6 +2549,8 @@ app-status app='' env='staging' config='' namespace='' release='' host_key='ingr
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    kubectl_context_args=()
+    helm_context_args=()
     if [ -n {{ quote(app) }} ]; then
         eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
           --app {{ quote(app) }} \
@@ -2554,6 +2559,9 @@ app-status app='' env='staging' config='' namespace='' release='' host_key='ingr
         if [ -z "${KUBECONFIG:-}" ]; then
             export KUBECONFIG="${HOME}/.kube/config"
         fi
+        kube_context="sugar-${SUGARKUBE_ENV}"
+        kubectl_context_args=(--context "${kube_context}")
+        helm_context_args=(--kube-context "${kube_context}")
         namespace="${SUGARKUBE_NAMESPACE}"
         release="${SUGARKUBE_RELEASE}"
         host_key="${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}"
@@ -2576,12 +2584,12 @@ app-status app='' env='staging' config='' namespace='' release='' host_key='ingr
         exit 1
     fi
 
-    kubectl -n "${namespace}" get pods
-    kubectl -n "${namespace}" get ingress
+    kubectl "${kubectl_context_args[@]}" -n "${namespace}" get pods
+    kubectl "${kubectl_context_args[@]}" -n "${namespace}" get ingress
 
     if [ -n "${release}" ] && command -v helm >/dev/null 2>&1; then
         host="$(
-            helm get values "${release}"                 --namespace "${namespace}"                 --all --output json 2>/dev/null |
+            helm "${helm_context_args[@]}" get values "${release}"                 --namespace "${namespace}"                 --all --output json 2>/dev/null |
                 python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${host_key}" || true
         )"
     else
