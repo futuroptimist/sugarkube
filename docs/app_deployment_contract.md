@@ -167,11 +167,15 @@ just app-verify app=dspace env=staging
 just app-config app=dspace env=staging
 ```
 
-Migration note: app-specific commands such as
-`just dspace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA` and
-`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` remain available as
-compatibility shims. Prefer the generic recipes for new runbooks and app
-onboarding, but do not delete the legacy wrapper commands yet.
+Migration/TODO note: the mature `dspace-oci-deploy`/`dspace-oci-redeploy`,
+`tokenplace-oci-deploy`/`tokenplace-oci-redeploy`, and
+`danielsmith-oci-deploy`/`danielsmith-oci-redeploy` compatibility paths
+intentionally remain in place for now. Generic `app-deploy` and `app-redeploy`
+support all three apps, so prefer the generic recipes for new runbooks and app
+onboarding, but thinning the remaining deploy/redeploy wrappers is deferred to a
+follow-up PR. Production promotion wrappers such as
+`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` remain documented as
+thin generic shims over the shared production promotion flow.
 
 ## Current example configs
 

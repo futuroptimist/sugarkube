@@ -49,6 +49,54 @@ def test_config_dir_precedes_example_fallback(
     assert cfg["SUGARKUBE_VALUES"] == "dev.yaml,staging.yaml"
 
 
+def test_explicit_config_path_precedes_config_dir_and_resolves_env_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "custom.env").write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=custom",
+                "SUGARKUBE_RELEASE=from-dir",
+                "SUGARKUBE_NAMESPACE=from-dir",
+                "SUGARKUBE_CHART=oci://example.invalid/charts/from-dir",
+                "SUGARKUBE_VERSION=1.2.3",
+                "SUGARKUBE_VALUES_DEV=dir-dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=dir-dev.yaml,dir-staging.yaml",
+                "SUGARKUBE_VALUES_PROD=dir-dev.yaml,dir-prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    explicit_config = tmp_path / "explicit.env"
+    explicit_config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=custom",
+                "SUGARKUBE_RELEASE=from-explicit",
+                "SUGARKUBE_NAMESPACE=from-explicit",
+                "SUGARKUBE_CHART=oci://example.invalid/charts/from-explicit",
+                "SUGARKUBE_VERSION=4.5.6",
+                "SUGARKUBE_VALUES_DEV=explicit-dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=explicit-dev.yaml,explicit-staging.yaml",
+                "SUGARKUBE_VALUES_PROD=explicit-dev.yaml,explicit-prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUGARKUBE_APP_CONFIG_DIR", str(config_dir))
+
+    cfg = app_config.load_config("custom", "env=staging", str(explicit_config))
+
+    assert cfg["SUGARKUBE_CONFIG_PATH"] == str(explicit_config)
+    assert cfg["SUGARKUBE_RELEASE"] == "from-explicit"
+    assert cfg["SUGARKUBE_NAMESPACE"] == "from-explicit"
+    assert cfg["SUGARKUBE_VALUES"] == "explicit-dev.yaml,explicit-staging.yaml"
+
+
 @pytest.mark.parametrize(
     "tag",
     ["main-deadbee", "v3-deadbee", "feature-x-deadbee", "v0.1.0", "3.0.1", "3.1.0-rc.1"],

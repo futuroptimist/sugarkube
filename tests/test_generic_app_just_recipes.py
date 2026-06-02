@@ -66,7 +66,11 @@ if [[ "$*" == *"get ingress"* && "$*" == *"jsonpath"* ]]; then
   printf 'example.test'
   exit 0
 fi
-if [[ "$*" == *"get deploy/tokenplace"* || "$*" == *"get deploy dspace"* || "$*" == *"get Deployment/danielsmith"* ]]; then
+if [[ "$*" == *"get deploy/tokenplace"* || "$*" == *"get deploy dspace"* ]]; then
+  printf 'app=ghcr.io/example/app:main-deadbee\n'
+  exit 0
+fi
+if [[ "$*" == *"get Deployment/danielsmith"* ]]; then
   printf 'app=ghcr.io/example/app:main-deadbee\n'
   exit 0
 fi
@@ -119,7 +123,7 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
 @pytest.mark.usefixtures("ensure_just_available")
 def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str, str]) -> None:
     result = _run_just(
-        ["app-deploy", "app=danielsmith", "env=staging", "tag=main-deadbee"],
+        ["app-deploy", "app=danielsmith", "env=env=staging", "tag=tag=main-deadbee"],
         generic_app_stub_env,
     )
 
@@ -130,6 +134,7 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
     assert "-f docs/examples/danielsmith.values.dev.yaml" in helm_log
     assert "-f docs/examples/danielsmith.values.staging.yaml" in helm_log
     assert "--set image.tag=main-deadbee" in helm_log
+    assert "--set image.tag=tag=main-deadbee" not in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -140,7 +145,10 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
             "tokenplace",
             "oci://ghcr.io/futuroptimist/charts/tokenplace",
             "tokenplace",
-            ["docs/examples/tokenplace.values.dev.yaml", "docs/examples/tokenplace.values.staging.yaml"],
+            [
+                "docs/examples/tokenplace.values.dev.yaml",
+                "docs/examples/tokenplace.values.staging.yaml",
+            ],
         ),
         (
             "dspace",
@@ -168,6 +176,51 @@ def test_app_deploy_uses_app_release_namespace_chart_values(
     assert f"--namespace {namespace}" in helm_log
     for value in values:
         assert f"-f {value}" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("app", "release", "namespace", "chart"),
+    [
+        (
+            "dspace",
+            "dspace",
+            "dspace",
+            "oci://ghcr.io/democratizedspace/charts/dspace",
+        ),
+        (
+            "tokenplace",
+            "tokenplace",
+            "tokenplace",
+            "oci://ghcr.io/futuroptimist/charts/tokenplace",
+        ),
+        (
+            "danielsmith",
+            "danielsmith",
+            "danielsmith",
+            "oci://ghcr.io/futuroptimist/charts/danielsmith",
+        ),
+    ],
+)
+def test_app_promote_prod_delegates_to_prod_deploy_coordinates(
+    app: str,
+    release: str,
+    namespace: str,
+    chart: str,
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-promote-prod", f"app={app}", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert f"upgrade {release} {chart}" in helm_log
+    assert f"--namespace {namespace}" in helm_log
+    assert f"-f docs/examples/{app}.values.dev.yaml" in helm_log
+    assert f"-f docs/examples/{app}.values.prod.yaml" in helm_log
+    assert "--set image.tag=main-deadbee" in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -209,9 +262,21 @@ def test_existing_app_specific_deploy_wrappers_still_work(
 @pytest.mark.parametrize(
     ("recipe", "image_heading", "check_heading"),
     [
-        ("dspace-oci-promote-prod", "Resolved deployment image(s):", "Post-deploy verification commands"),
-        ("tokenplace-oci-promote-prod", "Resolved images for deployment/tokenplace:", "Post-deploy checks:"),
-        ("danielsmith-oci-promote-prod", "Resolved images for danielsmith workloads:", "Post-deploy checks:"),
+        (
+            "dspace-oci-promote-prod",
+            "Resolved deployment image(s):",
+            "Post-deploy verification commands",
+        ),
+        (
+            "tokenplace-oci-promote-prod",
+            "Resolved images for deployment/tokenplace:",
+            "Post-deploy checks:",
+        ),
+        (
+            "danielsmith-oci-promote-prod",
+            "Resolved images for danielsmith workloads:",
+            "Post-deploy checks:",
+        ),
     ],
 )
 def test_promote_wrappers_preserve_app_specific_output(
@@ -225,6 +290,9 @@ def test_promote_wrappers_preserve_app_specific_output(
     assert result.returncode == 0, result.stderr + result.stdout
     assert image_heading in result.stdout
     assert check_heading in result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--set image.tag=main-deadbee" in helm_log
+    assert "--set image.tag=tag=main-deadbee" not in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
