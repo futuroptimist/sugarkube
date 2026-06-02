@@ -38,12 +38,6 @@ exit 0
 """,
     )
     _write_executable(
-        bin_dir / "python3",
-        """#!/usr/bin/env bash
-exit 0
-""",
-    )
-    _write_executable(
         bin_dir / "kubectl",
         """#!/usr/bin/env bash
 exit 0

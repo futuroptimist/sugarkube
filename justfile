@@ -1518,10 +1518,195 @@ helm-oci-install release='' namespace='' chart='' values='' host='' version='' v
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
+# Print the resolved generic app deployment config for review/debugging.
+app-config app='' env='staging' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_path={{ quote(config) }}
+    config_args=()
+    if [ -n "${config_path}" ]; then
+      config_args+=(--config "${config_path}")
+    fi
+    python3 "{{ justfile_directory() }}/scripts/app_config.py" config \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      "${config_args[@]}"
+
+# Install or upgrade a Sugarkube-managed app from its config-backed OCI chart.
+app-deploy app='' env='staging' tag='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_path={{ quote(config) }}
+    config_args=()
+    if [ -n "${config_path}" ]; then
+      config_args+=(--config "${config_path}")
+    fi
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" config \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      "${config_args[@]}" \
+      --format shell)"
+    deploy_tag="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag {{ quote(tag) }})"
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release="${SUGARKUBE_RELEASE}" namespace="${SUGARKUBE_NAMESPACE}" \
+      chart="${SUGARKUBE_CHART}" \
+      values="${SUGARKUBE_VALUES}" \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
+      tag="${deploy_tag}"
+
+# Upgrade-only redeploy for a Sugarkube-managed app from its config-backed OCI chart.
+app-redeploy app='' env='staging' tag='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_path={{ quote(config) }}
+    config_args=()
+    if [ -n "${config_path}" ]; then
+      config_args+=(--config "${config_path}")
+    fi
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" config \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      "${config_args[@]}" \
+      --format shell)"
+    deploy_tag="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag {{ quote(tag) }})"
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+      release="${SUGARKUBE_RELEASE}" namespace="${SUGARKUBE_NAMESPACE}" \
+      chart="${SUGARKUBE_CHART}" \
+      values="${SUGARKUBE_VALUES}" \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
+      tag="${deploy_tag}"
+
+# Promote a Sugarkube-managed app to prod using an explicit tag or the app prod tag pin file.
+app-promote-prod app='' tag='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_path={{ quote(config) }}
+    config_args=()
+    just_config_args=()
+    if [ -n "${config_path}" ]; then
+      config_args+=(--config "${config_path}")
+      just_config_args+=(config="${config_path}")
+    fi
+    resolved_tag="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" prod-tag \
+      --app {{ quote(app) }} \
+      --env prod \
+      "${config_args[@]}" \
+      --tag {{ quote(tag) }})"
+    if [ -z "${resolved_tag}" ]; then
+      echo "ERROR: provide tag=<immutable-tag> or set the configured SUGARKUBE_PROD_TAG_FILE." >&2
+      exit 1
+    fi
+    just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
+      app={{ quote(app) }} env=prod tag="${resolved_tag}" "${just_config_args[@]}"
+
+# Inspect a Sugarkube-managed app. Also accepts the legacy namespace=/release= form.
+app-status app='' env='staging' config='' namespace='' release='' host_key='ingress.host':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    app_arg={{ quote(app) }}
+    ns={{ quote(namespace) }}
+    rel={{ quote(release) }}
+    host_key_arg={{ quote(host_key) }}
+    if [ -n "${app_arg}" ]; then
+      config_path={{ quote(config) }}
+      config_args=()
+      if [ -n "${config_path}" ]; then
+        config_args+=(--config "${config_path}")
+      fi
+      eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" config \
+        --app "${app_arg}" \
+        --env {{ quote(env) }} \
+        "${config_args[@]}" \
+        --format shell)"
+      ns="${SUGARKUBE_NAMESPACE}"
+      rel="${SUGARKUBE_RELEASE}"
+      host_key_arg="${SUGARKUBE_STATUS_HOST_KEY}"
+      export KUBECONFIG="${HOME}/.kube/config"
+      just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    else
+      export KUBECONFIG="${HOME}/.kube/config"
+    fi
+
+    if [ -z "${ns}" ]; then
+      echo "Set app=<app> env=<dev|staging|prod> or namespace=<namespace> to inspect." >&2
+      exit 1
+    fi
+    if ! command -v kubectl >/dev/null 2>&1; then
+      echo "kubectl is required to check the deployment." >&2
+      exit 1
+    fi
+
+    kubectl -n "${ns}" get pods
+    kubectl -n "${ns}" get ingress
+
+    host=""
+    if [ -n "${rel}" ] && command -v helm >/dev/null 2>&1; then
+      host="$(helm get values "${rel}" --namespace "${ns}" --all --output json 2>/dev/null \
+        | python3 "{{ justfile_directory() }}/scripts/app_config.py" extract-host --host-key "${host_key_arg}" || true)"
+    fi
+    if [ -n "${host}" ]; then
+      printf 'Public URL: https://%s\n' "${host}"
+    else
+      echo "Public URL host not recorded; check the Helm release values."
+    fi
+
+# Verify a Sugarkube-managed app by curling configured HTTP paths from its Helm values host.
+app-verify app='' env='staging' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_path={{ quote(config) }}
+    config_args=()
+    if [ -n "${config_path}" ]; then
+      config_args+=(--config "${config_path}")
+    fi
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" config \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      "${config_args[@]}" \
+      --format shell)"
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+
+    host=""
+    if command -v helm >/dev/null 2>&1; then
+      host="$(helm get values "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" --all --output json 2>/dev/null \
+        | python3 "{{ justfile_directory() }}/scripts/app_config.py" extract-host --host-key "${SUGARKUBE_STATUS_HOST_KEY}" || true)"
+    fi
+    if [ -z "${host}" ]; then
+      host="<${SUGARKUBE_APP}-host>"
+      echo "Unable to discover host from Helm values; copy and edit these commands:" >&2
+    fi
+    IFS=',' read -r -a verify_paths <<< "${SUGARKUBE_VERIFY_PATHS}"
+    for path in "${verify_paths[@]}"; do
+      path="$(printf '%s' "${path}" | xargs)"
+      [ -n "${path}" ] || continue
+      case "${path}" in /*) ;; *) path="/${path}" ;; esac
+      url="https://${host}${path}"
+      printf 'curl -fsS %q\n' "${url}"
+      if [[ "${host}" == \<*\> ]] || ! command -v curl >/dev/null 2>&1; then
+        continue
+      fi
+      curl -fsS "${url}"
+      echo
+    done
+
 # Opinionated immutable-tag dspace deploy with rollout verification.
 #
 
-# Use this for steady-state release validation flows where explicit image pinning matters.
+# Compatibility shim for the generic app deploy recipe.
 dspace-oci-deploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1529,90 +1714,18 @@ dspace-oci-deploy env='staging' tag='':
     env_input={{ quote(env) }}
     env_name="${env_input}"
     while [ "${env_name#env=}" != "${env_name}" ]; do
-      env_name="${env_name#env=}"
+        env_name="${env_name#env=}"
     done
     if [ -z "${env_name}" ]; then
-      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
-      exit 1
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
     fi
     if [ "${env_name}" = "int" ]; then
-      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-      env_name="staging"
+        printf 'WARNING: env name \"int\" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
     fi
+    just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace env="${env_name}" tag={{ quote(tag) }}
 
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *)
-        echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2
-        exit 1
-        ;;
-    esac
-
-    deploy_tag="$(echo "{{ tag }}" | xargs)"
-    if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> (for example main-<shortsha> or 3.1.0) for dspace immutable deploys." >&2
-      exit 1
-    fi
-    tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${tag_lc}" == *"latest"* || "${tag_lc}" == "main" || "${tag_lc}" == *":main" ]]; then
-      echo "Refusing mutable tag '${deploy_tag}'. Use an immutable RC/stable image tag." >&2
-      exit 1
-    fi
-
-    overlay=""
-    if [ "${env_name}" != "dev" ]; then
-      overlay="docs/examples/dspace.values.${env_name}.yaml"
-      if [ ! -f "${overlay}" ]; then
-        echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
-        exit 1
-      fi
-    fi
-
-    values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ -n "${overlay}" ]; then
-      values_chain="${values_chain},${overlay}"
-    fi
-
-    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
-      scripts/ensure_user_kubeconfig.sh || true
-    fi
-    if [ -z "${KUBECONFIG:-}" ]; then
-      export KUBECONFIG="${HOME}/.kube/config"
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
-      release='dspace' namespace='dspace' \
-      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}"
-
-    echo "Resolved deployment image(s):"
-    kubectl -n dspace get deploy dspace \
-      -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
-
-    verify_host="$(kubectl -n dspace get ingress dspace -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
-    if [ -z "${verify_host}" ]; then
-      verify_host="<dspace-host>"
-    fi
-
-    echo
-    echo "Post-deploy verification commands:"
-    if [[ "${verify_host}" == "<"*">" ]]; then
-      echo "  # Replace ${verify_host} with your ingress hostname."
-      echo "  curl -fsS https://${verify_host}/config.json | jq ."
-      echo "  curl -fsS https://${verify_host}/healthz | jq ."
-      echo "  curl -fsS https://${verify_host}/livez | jq ."
-    else
-      echo "  curl -fsS https://${verify_host}/config.json | jq ."
-      echo "  curl -fsS https://${verify_host}/healthz | jq ."
-      echo "  curl -fsS https://${verify_host}/livez | jq ."
-    fi
-
-# Deploy dspace to the optional production preview subdomain (prod.democratized.space).
-#
-
-# Use this for optional canary/smoke testing before or alongside apex promotion workflows.
 dspace-oci-deploy-prod-subdomain tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1660,25 +1773,11 @@ dspace-oci-deploy-prod-subdomain tag='':
 
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
-# If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
+# Compatibility shim for the generic app prod promotion recipe.
 dspace-oci-promote-prod tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    @just app-promote-prod app=dspace tag='{{ tag }}'
 
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    deploy_tag="$(echo "{{ tag }}" | xargs)"
-    if [ -z "${deploy_tag}" ]; then
-      deploy_tag="$(read_prod_tag)"
-    fi
-    if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> or populate docs/apps/dspace.prod.tag." >&2
-      exit 1
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${deploy_tag}"
-
-# Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
+# Compatibility shim for the generic app redeploy recipe.
 dspace-oci-redeploy env='staging' tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1686,70 +1785,18 @@ dspace-oci-redeploy env='staging' tag='':
     env_input={{ quote(env) }}
     env_name="${env_input}"
     while [ "${env_name#env=}" != "${env_name}" ]; do
-      env_name="${env_name#env=}"
+        env_name="${env_name#env=}"
     done
     if [ -z "${env_name}" ]; then
-      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
-      exit 1
+        printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
+        exit 1
     fi
     if [ "${env_name}" = "int" ]; then
-      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-      env_name="staging"
+        printf 'WARNING: env name \"int\" is deprecated; using env=staging.\n' >&2
+        env_name="staging"
     fi
+    just --justfile "{{ justfile_directory() }}/justfile" app-redeploy app=dspace env="${env_name}" tag={{ quote(tag) }}
 
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    overlay="docs/examples/dspace.values.${env_name}.yaml"
-    if [ ! -f "${overlay}" ]; then
-      echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
-      exit 1
-    fi
-    values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ "${env_name}" != "dev" ]; then
-      values_chain="${values_chain},${overlay}"
-    fi
-
-    # NOTE: This tokenplace-scoped change intentionally leaves dspace kubeconfig behavior unchanged here.
-    # If dspace needs env-scoped kubeconfig selection before Helm, handle that in a separate DSPACE PR.
-    deploy_tag="{{ tag }}"
-    default_tag_value=""
-    if [ "${env_name}" = "prod" ]; then
-      if [ -z "${deploy_tag}" ] && [ -f "docs/apps/dspace.prod.tag" ]; then
-        deploy_tag="$(read_prod_tag)"
-      fi
-      if [ -z "${deploy_tag}" ]; then
-        echo "Set tag=<immutable-tag> for prod or populate docs/apps/dspace.prod.tag." >&2
-        exit 1
-      fi
-    else
-      default_tag_value="main-latest"
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
-      release='dspace' namespace='dspace' \
-      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}" default_tag="${default_tag_value}"
-
-    scripts/ensure_user_kubeconfig.sh || true
-    if [ -z "${KUBECONFIG:-}" ]; then
-      export KUBECONFIG="${HOME}/.kube/config"
-    fi
-
-    echo "Forcing rollout restart for dspace deployment..."
-    if ! kubectl -n dspace rollout restart deploy/dspace; then
-      echo "ERROR: Failed to trigger rollout restart for dspace." >&2
-      exit 1
-    fi
-
-    echo "Waiting for dspace rollout to complete (timeout: 120s)..."
-    if ! kubectl -n dspace rollout status deploy/dspace --timeout=120s; then
-      echo "ERROR: dspace rollout did not complete successfully." >&2
-      exit 1
-    fi
-
-# Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':
     #!/usr/bin/env bash
     set -Eeuo pipefail
@@ -1819,183 +1866,18 @@ dspace-debug-logs-env env='staging' namespace='dspace':
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" dspace-debug-logs namespace="{{ namespace }}"
 
-# Install-or-upgrade token.place from OCI chart with immutable tag policy.
+# Compatibility shim for the generic app deploy recipe.
 tokenplace-oci-deploy env='staging' tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    @just app-deploy app=tokenplace env='{{ env }}' tag='{{ tag }}'
 
-    env_input={{ quote(env) }}
-    env_name="${env_input}"
-    while [ "${env_name#env=}" != "${env_name}" ]; do
-        env_name="${env_name#env=}"
-    done
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *)
-        echo "ERROR: env must be one of dev|staging|prod." >&2
-        exit 1
-        ;;
-    esac
-
-    # Shared immutable-tag guard for deploy/redeploy paths avoids moving-target tags.
-    validate_immutable_tag() {
-      local candidate="${1}"
-      local tag_lc
-      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] \
-        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
-        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
-        exit 1
-      fi
-    }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    if [ -z "${resolved_tag}" ]; then
-      echo "ERROR: tag is required for immutable deploys." >&2
-      exit 1
-    fi
-    validate_immutable_tag "${resolved_tag}"
-    chart_version=""
-    if [ -f docs/apps/tokenplace.version ]; then
-      chart_version="$(
-        sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version 2>/dev/null | head -n1 | tr -d '[:space:]' || true
-      )"
-    fi
-    if [ -z "${chart_version}" ]; then
-      echo "ERROR: unable to resolve chart version from docs/apps/tokenplace.version." >&2
-      exit 1
-    fi
-
-    values_chain='docs/examples/tokenplace.values.dev.yaml'
-    if [ "${env_name}" = "staging" ]; then
-      values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml'
-    elif [ "${env_name}" = "prod" ]; then
-      values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml'
-    fi
-
-    # Intentional: tokenplace OCI wrappers select kubeconfig from env before Helm
-    # so prod/staging values cannot be applied to an unrelated active context.
-    # This is tokenplace-scoped; do not copy into DSPACE from this PR.
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
-    echo "Deploying tokenplace env=${env_name} chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag}"
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
-      release='tokenplace' namespace='tokenplace' \
-      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
-      values="${values_chain}" \
-      version_file='docs/apps/tokenplace.version' \
-      tag="${resolved_tag}"
-
-    scripts/ensure_user_kubeconfig.sh || true
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-
-    echo
-    echo "Resolved images for deployment/tokenplace:"
-    kubectl -n tokenplace get deploy/tokenplace -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' || true
-
-    ingress_host="$(kubectl -n tokenplace get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
-    if [ -n "${ingress_host}" ]; then
-      echo
-      echo "Post-deploy checks:"
-      echo "  curl -fsS https://${ingress_host}/"
-      echo "  curl -fsS https://${ingress_host}/livez"
-      echo "  curl -fsS https://${ingress_host}/healthz"
-    fi
-
+# Compatibility shim for the generic app prod promotion recipe.
 tokenplace-oci-promote-prod tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    @just app-promote-prod app=tokenplace tag='{{ tag }}'
 
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    if [ -z "${resolved_tag}" ]; then
-      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
-    fi
-    if [ -z "${resolved_tag}" ]; then
-      echo "ERROR: provide tag=<immutable-tag> or set docs/apps/tokenplace.prod.tag." >&2
-      exit 1
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-oci-deploy env=prod tag="${resolved_tag}"
-
-# Upgrade-only token.place OCI redeploy path.
+# Compatibility shim for the generic app redeploy recipe.
 tokenplace-oci-redeploy env='staging' tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    @just app-redeploy app=tokenplace env='{{ env }}' tag='{{ tag }}'
 
-    env_input={{ quote(env) }}
-    env_name="${env_input}"
-    while [ "${env_name#env=}" != "${env_name}" ]; do
-        env_name="${env_name#env=}"
-    done
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *)
-        echo "ERROR: env must be one of dev|staging|prod." >&2
-        exit 1
-        ;;
-    esac
-
-    # Shared immutable-tag guard for deploy/redeploy paths avoids moving-target tags.
-    validate_immutable_tag() {
-      local candidate="${1}"
-      local tag_lc
-      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] \
-        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
-        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
-        exit 1
-      fi
-    }
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
-      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
-      [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2; exit 1; }
-    fi
-    if [ "${env_name}" != "prod" ] && [ -z "${resolved_tag}" ]; then
-      echo "ERROR: env=${env_name} redeploy requires explicit tag=<immutable-tag>." >&2
-      echo "Non-prod redeploy intentionally has no baked-in fallback tag so this path is reproducible and reviewable." >&2
-      exit 1
-    fi
-    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
-
-    values_chain='docs/examples/tokenplace.values.dev.yaml'
-    default_tag=''
-    if [ "${env_name}" = "staging" ]; then
-      values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml'
-    elif [ "${env_name}" = "prod" ]; then
-      values_chain='docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml'
-    fi
-
-    # Intentional: tokenplace OCI wrappers select kubeconfig from env before Helm
-    # so prod/staging values cannot be applied to an unrelated active context.
-    # This is tokenplace-scoped; do not copy into DSPACE from this PR.
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
-      release='tokenplace' namespace='tokenplace' \
-      chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
-      values="${values_chain}" \
-      version_file='docs/apps/tokenplace.version' \
-      tag="${resolved_tag}" default_tag="${default_tag}"
-
-    scripts/ensure_user_kubeconfig.sh || true
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
-
-# token.place app status helper (generic/parameterized defaults, not final release wiring).
-# Override namespace/release/host_key per environment until onboarding locks chart naming.
-
-# See docs/tokenplace_sugarkube_onboarding.md and docs/apps/tokenplace.md.
 tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.host':
     @just app-status namespace='{{ namespace }}' release='{{ release }}' host_key='{{ host_key }}'
 
@@ -2155,187 +2037,17 @@ tokenplace-debug-logs-env env='staging' namespace='tokenplace':
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" tokenplace-debug-logs namespace="{{ namespace }}"
 
-# Install-or-upgrade danielsmith from OCI chart with immutable tag policy.
+# Compatibility shim for the generic app deploy recipe.
 danielsmith-oci-deploy env='staging' tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    @just app-deploy app=danielsmith env='{{ env }}' tag='{{ tag }}'
 
-    env_input={{ quote(env) }}
-    env_name="${env_input}"
-    while [ "${env_name#env=}" != "${env_name}" ]; do
-        env_name="${env_name#env=}"
-    done
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *)
-        echo "ERROR: env must be one of dev|staging|prod." >&2
-        exit 1
-        ;;
-    esac
-
-    validate_immutable_tag() {
-      local candidate="${1}"
-      local tag_lc
-      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] \
-        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]) \
-        || ([[ "${tag_lc}" =~ -[0-9a-f]{7,}$ ]] && [[ ! "${tag_lc}" =~ ^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,}$ ]]); then
-        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
-        exit 1
-      fi
-    }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
-      resolved_tag="${resolved_tag#tag=}"
-    done
-    if [ -z "${resolved_tag}" ]; then
-      echo "ERROR: tag is required for immutable deploys." >&2
-      exit 1
-    fi
-    validate_immutable_tag "${resolved_tag}"
-
-    values_chain='docs/examples/danielsmith.values.dev.yaml'
-    if [ "${env_name}" = "staging" ]; then
-      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml'
-    elif [ "${env_name}" = "prod" ]; then
-      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml'
-    fi
-
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
-      release='danielsmith' namespace='danielsmith' \
-      chart='oci://ghcr.io/futuroptimist/charts/danielsmith' \
-      values="${values_chain}" \
-      version_file='docs/apps/danielsmith.version' \
-      tag="${resolved_tag}"
-
-    scripts/ensure_user_kubeconfig.sh || true
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-
-    echo
-    workloads="$(
-      {
-        kubectl -n danielsmith get deploy,statefulset,daemonset \
-          -l 'app.kubernetes.io/instance=danielsmith' \
-          -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}'
-        kubectl -n danielsmith get deploy,statefulset,daemonset \
-          -l 'release=danielsmith' \
-          -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}'
-      } 2>/dev/null | sed '/^$/d' | sort -u
-    )"
-    if [ -z "${workloads}" ]; then
-      echo "No rollout-capable workloads found for release danielsmith in namespace danielsmith" >&2
-    else
-      echo "Resolved images for danielsmith workloads:"
-      while IFS= read -r workload; do
-        [ -n "${workload}" ] || continue
-        echo "--- ${workload} ---"
-        kubectl -n danielsmith get "${workload}" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' || true
-      done <<< "${workloads}"
-    fi
-
-    ingress_host="$(kubectl -n danielsmith get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
-    if [ -n "${ingress_host}" ]; then
-      echo
-      echo "Post-deploy checks:"
-      echo "  curl -fsS https://${ingress_host}/"
-      echo "  curl -fsS https://${ingress_host}/livez"
-      echo "  curl -fsS https://${ingress_host}/healthz"
-    fi
-
+# Compatibility shim for the generic app prod promotion recipe.
 danielsmith-oci-promote-prod tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    @just app-promote-prod app=danielsmith tag='{{ tag }}'
 
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
-      resolved_tag="${resolved_tag#tag=}"
-    done
-    if [ -z "${resolved_tag}" ]; then
-      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
-    fi
-    if [ -z "${resolved_tag}" ]; then
-      echo "ERROR: provide tag=<immutable-tag> or set docs/apps/danielsmith.prod.tag." >&2
-      exit 1
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" danielsmith-oci-deploy env=prod tag="${resolved_tag}"
-
-# Upgrade-only danielsmith OCI redeploy path.
+# Compatibility shim for the generic app redeploy recipe.
 danielsmith-oci-redeploy env='staging' tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    env_input={{ quote(env) }}
-    env_name="${env_input}"
-    while [ "${env_name#env=}" != "${env_name}" ]; do
-        env_name="${env_name#env=}"
-    done
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *)
-        echo "ERROR: env must be one of dev|staging|prod." >&2
-        exit 1
-        ;;
-    esac
-
-    validate_immutable_tag() {
-      local candidate="${1}"
-      local tag_lc
-      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] \
-        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]) \
-        || ([[ "${tag_lc}" =~ -[0-9a-f]{7,}$ ]] && [[ ! "${tag_lc}" =~ ^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,}$ ]]); then
-        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
-        exit 1
-      fi
-    }
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
-      resolved_tag="${resolved_tag#tag=}"
-    done
-    if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
-      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
-      [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/danielsmith.prod.tag." >&2; exit 1; }
-    fi
-    if [ "${env_name}" != "prod" ] && [ -z "${resolved_tag}" ]; then
-      echo "ERROR: env=${env_name} redeploy requires explicit tag=<immutable-tag>." >&2
-      echo "Non-prod redeploy intentionally has no baked-in fallback tag so this path is reproducible and reviewable." >&2
-      exit 1
-    fi
-    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
-
-    values_chain='docs/examples/danielsmith.values.dev.yaml'
-    default_tag=''
-    if [ "${env_name}" = "staging" ]; then
-      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml'
-    elif [ "${env_name}" = "prod" ]; then
-      values_chain='docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml'
-    fi
-
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
-      release='danielsmith' namespace='danielsmith' \
-      chart='oci://ghcr.io/futuroptimist/charts/danielsmith' \
-      values="${values_chain}" \
-      version_file='docs/apps/danielsmith.version' \
-      tag="${resolved_tag}" default_tag="${default_tag}"
-
-    scripts/ensure_user_kubeconfig.sh || true
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+    @just app-redeploy app=danielsmith env='{{ env }}' tag='{{ tag }}'
 
 danielsmith-debug-logs namespace='danielsmith':
     #!/usr/bin/env bash
@@ -2446,68 +2158,6 @@ tokenplace-port-forward namespace='tokenplace' service='tokenplace' local_port='
 
     echo "Port-forwarding ${svc} to localhost:{{ local_port }} (Ctrl+C to stop)..."
     kubectl -n '{{ namespace }}' port-forward svc/${svc} {{ local_port }}:{{ remote_port }}
-
-app-status namespace='' release='' host_key='ingress.host':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    export KUBECONFIG="${HOME}/.kube/config"
-
-    if [ -z "{{ namespace }}" ]; then
-        echo "Set namespace to inspect." >&2
-        exit 1
-    fi
-
-    if ! command -v kubectl >/dev/null 2>&1; then
-        echo "kubectl is required to check the deployment." >&2
-        exit 1
-    fi
-
-    kubectl -n "{{ namespace }}" get pods
-    kubectl -n "{{ namespace }}" get ingress
-
-    if [ -n "{{ release }}" ] && command -v helm >/dev/null 2>&1; then
-        host="$(
-            helm get values "{{ release }}" \
-                --namespace "{{ namespace }}" \
-                --all --output json 2>/dev/null |
-                python3 - "{{ host_key }}" <<'PY'
-                import json
-                import sys
-
-                try:
-                    host_key = sys.argv[1]
-                    data = json.load(sys.stdin)
-                except (json.JSONDecodeError, KeyError, IndexError) as e:
-                    sys.stderr.write(f"Error extracting host value: {e}\n")
-                    sys.exit(1)
-                except Exception as e:
-                    sys.stderr.write(f"Unexpected error: {e}\n")
-                    sys.exit(1)
-
-                def get_with_dots(payload, dotted_key):
-                    node = payload
-                    for part in dotted_key.split('.'):
-                        if not isinstance(node, dict):
-                            return None
-                        node = node.get(part)
-                    return node
-
-                if isinstance(data, dict):
-                    host_value = get_with_dots(data, host_key)
-                    if host_value:
-                        print(host_value)
-                PY
-        )"
-    else
-        host=""
-    fi
-
-    if [ -n "${host}" ]; then
-        printf 'Public URL: https://%s\n' "${host}"
-    else
-        echo "Public URL host not recorded; check the Helm release values."
-    fi
 
 wipe:
     #!/usr/bin/env bash
