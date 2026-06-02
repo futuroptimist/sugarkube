@@ -77,7 +77,10 @@ def normalize_env(value: str) -> str:
 def validate_app_name(app: str) -> str:
     app = normalize_named(app, "app")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", app or ""):
-        raise AppConfigError("app must be a non-empty name using letters, numbers, dots, underscores, or dashes.")
+        raise AppConfigError(
+            "app must be a non-empty name using letters, numbers, dots, underscores, "
+            "or dashes."
+        )
     return app
 
 
@@ -102,7 +105,8 @@ def validate_tag(tag: str) -> str:
     if BRANCH_SHA_RE.fullmatch(tag) or SEMVER_RE.fullmatch(tag):
         return tag
     raise AppConfigError(
-        f"invalid tag '{tag}'. Use an immutable branch-SHA tag (main-deadbee) or semver release tag."
+        f"invalid tag '{tag}'. Use an immutable branch-SHA tag (main-deadbee) "
+        "or semver release tag."
     )
 
 
@@ -134,7 +138,9 @@ def parse_dotenv(path: Path) -> dict[str, str]:
         try:
             parts = shlex.split(raw_value, comments=True, posix=True)
         except ValueError as exc:
-            raise AppConfigError(f"{path}:{lineno}: invalid quoted value for {key}: {exc}.") from exc
+            raise AppConfigError(
+                f"{path}:{lineno}: invalid quoted value for {key}: {exc}."
+            ) from exc
         if len(parts) > 1:
             raise AppConfigError(f"{path}:{lineno}: {key} must be a single dotenv value.")
         value = parts[0] if parts else ""
@@ -163,7 +169,8 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
         )
     if not (data.get("SUGARKUBE_VERSION") or data.get("SUGARKUBE_VERSION_FILE")):
         raise AppConfigError(
-            f"{config_path}: missing chart version pin; set SUGARKUBE_VERSION or SUGARKUBE_VERSION_FILE."
+            f"{config_path}: missing chart version pin; set SUGARKUBE_VERSION "
+            "or SUGARKUBE_VERSION_FILE."
         )
     values_key = f"SUGARKUBE_VALUES_{env.upper()}"
     values = data.get(values_key, "")

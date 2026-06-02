@@ -20,7 +20,9 @@ def test_example_config_fallback_resolves_staging_values() -> None:
     )
 
 
-def test_config_dir_precedes_example_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_config_dir_precedes_example_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "custom.env").write_text(
@@ -47,12 +49,30 @@ def test_config_dir_precedes_example_fallback(tmp_path: Path, monkeypatch: pytes
     assert cfg["SUGARKUBE_VALUES"] == "dev.yaml,staging.yaml"
 
 
-@pytest.mark.parametrize("tag", ["main-deadbee", "v3-deadbee", "feature-x-deadbee", "v0.1.0", "3.0.1", "3.1.0-rc.1"])
+@pytest.mark.parametrize(
+    "tag",
+    ["main-deadbee", "v3-deadbee", "feature-x-deadbee", "v0.1.0", "3.0.1", "3.1.0-rc.1"],
+)
 def test_validate_tag_allows_immutable_tags(tag: str) -> None:
     assert app_config.validate_tag(tag) == tag
 
 
-@pytest.mark.parametrize("tag", ["latest", "main", "master", "dev", "develop", "staging", "prod", "production", "release", "staging-blue", "feature-x"])
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "latest",
+        "main",
+        "master",
+        "dev",
+        "develop",
+        "staging",
+        "prod",
+        "production",
+        "release",
+        "staging-blue",
+        "feature-x",
+    ],
+)
 def test_validate_tag_rejects_moving_tags(tag: str) -> None:
     with pytest.raises(app_config.AppConfigError, match="tag"):
         app_config.validate_tag(tag)
