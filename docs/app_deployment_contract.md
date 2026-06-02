@@ -1,12 +1,14 @@
 # Sugarkube app deployment contract
 
-Sugarkube is moving toward a generic app deployment surface where each app is
+Sugarkube now exposes a generic app deployment surface where each app is
 identified by a small local config file and deployed with shared `just` recipes.
-This page is the contract future implementation work will target; it does not
-change current `justfile` deployment behavior.
+This page is the contract implemented by the `app-*` recipes and the app config
+loader in `scripts/app_config.py`.
 
 The existing app-specific recipes for dspace, token.place, and danielsmith.io
-remain compatibility wrappers until the generic recipes are implemented.
+remain compatibility shims during migration. They delegate to the generic recipes
+where practical and will be deprecated in a later PR, but they are not removed by
+this change.
 
 ## Ownership boundary
 
@@ -62,11 +64,9 @@ Acceptable deployment tags:
 - Immutable branch-SHA tags, such as `main-REPLACE_SHORTSHA`.
 - Semver or release tags, such as `v1.2.3`, `3.1.0`, or another documented
   project-specific stable tag.
-- Mutable branch convenience tags, such as `main-latest`, only when an app
-  runbook explicitly documents that a non-prod bootstrap or iteration flow accepts
-  them. They are an app-specific exception, not a shared guarantee; for example,
-  token.place deploy/redeploy wrappers reject every tag containing `latest`,
-  including `main-latest`.
+- Mutable branch convenience tags are not accepted by the generic app recipes.
+  If an app still has an explicitly documented bootstrap-only exception, keep it
+  in an app-specific helper outside the generic production path.
 
 Unacceptable deployment tags:
 
@@ -93,7 +93,7 @@ Helm charts are immutable once published to GHCR OCI:
 
 ## App config file shape
 
-Future generic recipes will load a simple shell/dotenv-style config so they do
+Generic recipes load a simple shell/dotenv-style config so they do
 not require `yq`. Example files live under [`docs/examples/apps/`](examples/apps/)
 and may be copied into a local config directory such as `apps/APP.env`. Operators
 may also set `SUGARKUBE_APP_CONFIG_DIR` to point at another directory.
@@ -106,7 +106,7 @@ Rules for app config files:
 - Keep verify paths comma-separated with leading slashes.
 - Do not store secrets in app config files.
 
-Required keys for the planned generic recipes:
+Required keys for the generic recipes:
 
 | Key | Purpose |
 | --- | --- |
@@ -131,10 +131,21 @@ cp docs/examples/apps/dspace.env apps/dspace.env
 export SUGARKUBE_APP_CONFIG_DIR=apps
 ```
 
-## Planned generic command surface
+Config lookup order:
 
-P5 will implement these command shapes. They are documented here so app repos can
-align their artifacts before Sugarkube changes behavior.
+1. `config=<path>` passed to a generic recipe.
+2. `${SUGARKUBE_APP_CONFIG_DIR}/${app}.env` when `SUGARKUBE_APP_CONFIG_DIR` is set.
+3. `apps/${app}.env` in the local Sugarkube clone.
+4. `docs/examples/apps/${app}.env` for the documented dspace, token.place, and danielsmith.io examples.
+
+Deployment tags are validated centrally before Helm runs. Use immutable branch-SHA
+tags such as `main-deadbee` or release tags such as `v0.1.0`/`3.1.0`; moving tags
+such as `latest`, `main`, `staging`, or `prod` are rejected.
+
+## Generic command surface
+
+These commands are implemented in the `justfile` and work with local app config
+files or the documented examples for dspace, token.place, and danielsmith.io.
 
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
@@ -156,10 +167,11 @@ just app-verify app=dspace env=staging
 just app-config app=dspace env=staging
 ```
 
-The compatibility wrappers will remain during migration. For example,
+The compatibility wrappers remain during migration. For example,
 `just dspace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA` and
-`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` continue to be the
-current operational commands until generic recipes replace their internals.
+`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` continue to work as
+thin shims over the generic flow. Prefer the `app-*` recipes for new runbooks and
+new app onboarding.
 
 ## Current example configs
 
