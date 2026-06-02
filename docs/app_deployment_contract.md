@@ -1,12 +1,14 @@
 # Sugarkube app deployment contract
 
-Sugarkube is moving toward a generic app deployment surface where each app is
+Sugarkube now exposes a generic app deployment surface where each app is
 identified by a small local config file and deployed with shared `just` recipes.
-This page is the contract future implementation work will target; it does not
-change current `justfile` deployment behavior.
+This page is the contract that app repositories and local operator configs should
+follow.
 
 The existing app-specific recipes for dspace, token.place, and danielsmith.io
-remain compatibility wrappers until the generic recipes are implemented.
+remain compatibility shims during migration. They are intentionally not removed
+in this phase and will be deprecated only after downstream runbooks have moved to
+the generic flow.
 
 ## Ownership boundary
 
@@ -93,10 +95,19 @@ Helm charts are immutable once published to GHCR OCI:
 
 ## App config file shape
 
-Future generic recipes will load a simple shell/dotenv-style config so they do
-not require `yq`. Example files live under [`docs/examples/apps/`](examples/apps/)
-and may be copied into a local config directory such as `apps/APP.env`. Operators
-may also set `SUGARKUBE_APP_CONFIG_DIR` to point at another directory.
+Generic recipes load a simple shell/dotenv-style config with
+[`scripts/app_config.py`](../scripts/app_config.py), using only Python stdlib so
+they do not require `yq`. Example files live under
+[`docs/examples/apps/`](examples/apps/) and may be copied into a local config
+directory such as `apps/APP.env`. Operators may also set
+`SUGARKUBE_APP_CONFIG_DIR` to point at another directory.
+
+Config lookup order is:
+
+1. an explicit `config=<path>` passed to a generic recipe;
+2. `${SUGARKUBE_APP_CONFIG_DIR}/${app}.env` when `SUGARKUBE_APP_CONFIG_DIR` is set;
+3. `apps/${app}.env` in the local clone; and
+4. `docs/examples/apps/${app}.env` for the current example apps.
 
 Rules for app config files:
 
@@ -106,7 +117,7 @@ Rules for app config files:
 - Keep verify paths comma-separated with leading slashes.
 - Do not store secrets in app config files.
 
-Required keys for the planned generic recipes:
+Required keys for the generic recipes:
 
 | Key | Purpose |
 | --- | --- |
@@ -131,10 +142,10 @@ cp docs/examples/apps/dspace.env apps/dspace.env
 export SUGARKUBE_APP_CONFIG_DIR=apps
 ```
 
-## Planned generic command surface
+## Generic command surface
 
-P5 will implement these command shapes. They are documented here so app repos can
-align their artifacts before Sugarkube changes behavior.
+These recipes are implemented in the root `justfile` and use the app config
+lookup order above.
 
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
@@ -156,10 +167,15 @@ just app-verify app=dspace env=staging
 just app-config app=dspace env=staging
 ```
 
-The compatibility wrappers will remain during migration. For example,
-`just dspace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA` and
-`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` continue to be the
-current operational commands until generic recipes replace their internals.
+Migration/TODO note: the mature `dspace-oci-deploy`/`dspace-oci-redeploy`,
+`tokenplace-oci-deploy`/`tokenplace-oci-redeploy`, and
+`danielsmith-oci-deploy`/`danielsmith-oci-redeploy` compatibility paths
+intentionally remain in place for now. Generic `app-deploy` and `app-redeploy`
+support all three apps, so prefer the generic recipes for new runbooks and app
+onboarding, but thinning the remaining deploy/redeploy wrappers is deferred to a
+follow-up PR. Production promotion wrappers such as
+`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` remain documented as
+thin generic shims over the shared production promotion flow.
 
 ## Current example configs
 
