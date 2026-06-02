@@ -132,7 +132,7 @@ def parse_dotenv(path: Path) -> dict[str, str]:
         if key not in ALLOWED_KEYS:
             raise AppConfigError(f"{path}:{lineno}: unknown app config key '{key}'.")
         try:
-            parts = shlex.split(raw_value, comments=False, posix=True)
+            parts = shlex.split(raw_value, comments=True, posix=True)
         except ValueError as exc:
             raise AppConfigError(f"{path}:{lineno}: invalid quoted value for {key}: {exc}.") from exc
         if len(parts) > 1:
@@ -160,6 +160,10 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
     if data["SUGARKUBE_APP"] != app:
         raise AppConfigError(
             f"{config_path}: SUGARKUBE_APP={data['SUGARKUBE_APP']!r} does not match app={app!r}."
+        )
+    if not (data.get("SUGARKUBE_VERSION") or data.get("SUGARKUBE_VERSION_FILE")):
+        raise AppConfigError(
+            f"{config_path}: missing chart version pin; set SUGARKUBE_VERSION or SUGARKUBE_VERSION_FILE."
         )
     values_key = f"SUGARKUBE_VALUES_{env.upper()}"
     values = data.get(values_key, "")

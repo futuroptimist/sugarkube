@@ -1602,8 +1602,9 @@ app-verify app env='staging' config='':
       --env {{ quote(env) }} \
       --config {{ quote(config) }})"
 
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    if [ -z "${KUBECONFIG:-}" ]; then
+      export KUBECONFIG="${HOME}/.kube/config"
+    fi
 
     host=""
     if command -v helm >/dev/null 2>&1; then
@@ -1774,7 +1775,16 @@ dspace-oci-deploy-prod-subdomain tag='':
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
 dspace-oci-promote-prod tag='':
-    @just app-promote-prod app=dspace tag='{{ tag }}'
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app dspace \
+      --env prod \
+      --tag {{ quote(tag) }} \
+      --prod-tag-fallback \
+      --require-tag)"
+    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
 dspace-oci-redeploy env='staging' tag='':
@@ -2004,7 +2014,16 @@ tokenplace-oci-deploy env='staging' tag='':
     fi
 
 tokenplace-oci-promote-prod tag='':
-    @just app-promote-prod app=tokenplace tag='{{ tag }}'
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app tokenplace \
+      --env prod \
+      --tag {{ quote(tag) }} \
+      --prod-tag-fallback \
+      --require-tag)"
+    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Upgrade-only token.place OCI redeploy path.
 tokenplace-oci-redeploy env='staging' tag='':
@@ -2333,7 +2352,16 @@ danielsmith-oci-deploy env='staging' tag='':
     fi
 
 danielsmith-oci-promote-prod tag='':
-    @just app-promote-prod app=danielsmith tag='{{ tag }}'
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app danielsmith \
+      --env prod \
+      --tag {{ quote(tag) }} \
+      --prod-tag-fallback \
+      --require-tag)"
+    just --justfile "{{ justfile_directory() }}/justfile" danielsmith-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Upgrade-only danielsmith OCI redeploy path.
 danielsmith-oci-redeploy env='staging' tag='':
@@ -2523,13 +2551,16 @@ app-status app='' env='staging' config='' namespace='' release='' host_key='ingr
           --app {{ quote(app) }} \
           --env {{ quote(env) }} \
           --config {{ quote(config) }})"
-        export KUBECONFIG="${HOME}/.kube/config"
-        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+        if [ -z "${KUBECONFIG:-}" ]; then
+            export KUBECONFIG="${HOME}/.kube/config"
+        fi
         namespace="${SUGARKUBE_NAMESPACE}"
         release="${SUGARKUBE_RELEASE}"
         host_key="${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}"
     else
-        export KUBECONFIG="${HOME}/.kube/config"
+        if [ -z "${KUBECONFIG:-}" ]; then
+            export KUBECONFIG="${HOME}/.kube/config"
+        fi
         namespace={{ quote(namespace) }}
         release={{ quote(release) }}
         host_key={{ quote(host_key) }}

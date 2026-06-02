@@ -30,6 +30,7 @@ def test_config_dir_precedes_example_fallback(tmp_path: Path, monkeypatch: pytes
                 "SUGARKUBE_RELEASE=custom-release",
                 "SUGARKUBE_NAMESPACE=custom-ns",
                 "SUGARKUBE_CHART=oci://example.invalid/charts/custom",
+                "SUGARKUBE_VERSION=1.2.3",
                 "SUGARKUBE_VALUES_DEV=dev.yaml",
                 "SUGARKUBE_VALUES_STAGING=dev.yaml,staging.yaml",
                 "SUGARKUBE_VALUES_PROD=dev.yaml,prod.yaml",
@@ -66,6 +67,7 @@ def test_rejects_unknown_dotenv_keys(tmp_path: Path) -> None:
                 "SUGARKUBE_RELEASE=bad",
                 "SUGARKUBE_NAMESPACE=bad",
                 "SUGARKUBE_CHART=oci://example.invalid/charts/bad",
+                "SUGARKUBE_VERSION=1.2.3",
                 "SUGARKUBE_VALUES_DEV=dev.yaml",
                 "SUGARKUBE_VALUES_STAGING=staging.yaml",
                 "SUGARKUBE_VALUES_PROD=prod.yaml",
@@ -78,3 +80,52 @@ def test_rejects_unknown_dotenv_keys(tmp_path: Path) -> None:
 
     with pytest.raises(app_config.AppConfigError, match="unknown app config key"):
         app_config.load_config("bad", "staging", str(config))
+
+
+def test_dotenv_parser_strips_inline_comments(tmp_path: Path) -> None:
+    config = tmp_path / "commented.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=commented",
+                "SUGARKUBE_RELEASE=commented",
+                "SUGARKUBE_NAMESPACE=commented",
+                "SUGARKUBE_CHART=oci://example.invalid/charts/commented",
+                "SUGARKUBE_VERSION_FILE=docs/apps/commented.version # approved chart pin",
+                "SUGARKUBE_VALUES_DEV=dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=dev.yaml,staging.yaml # staging overlays",
+                "SUGARKUBE_VALUES_PROD=dev.yaml,prod.yaml",
+                "SUGARKUBE_VERIFY_PATHS=/,/healthz # prod checks",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    cfg = app_config.load_config("commented", "staging", str(config))
+
+    assert cfg["SUGARKUBE_VALUES"] == "dev.yaml,staging.yaml"
+    assert cfg["SUGARKUBE_VERIFY_PATHS"] == "/,/healthz"
+    assert cfg["SUGARKUBE_VERSION_FILE"] == "docs/apps/commented.version"
+
+
+def test_requires_chart_version_pin(tmp_path: Path) -> None:
+    config = tmp_path / "unpinned.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=unpinned",
+                "SUGARKUBE_RELEASE=unpinned",
+                "SUGARKUBE_NAMESPACE=unpinned",
+                "SUGARKUBE_CHART=oci://example.invalid/charts/unpinned",
+                "SUGARKUBE_VALUES_DEV=dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=dev.yaml,staging.yaml",
+                "SUGARKUBE_VALUES_PROD=dev.yaml,prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(app_config.AppConfigError, match="missing chart version pin"):
+        app_config.load_config("unpinned", "staging", str(config))

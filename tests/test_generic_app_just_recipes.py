@@ -55,9 +55,19 @@ fi
     )
     _write_executable(
         bin_dir / "kubectl",
-        """#!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
 set -euo pipefail
-if [ "${1:-}" = "-n" ] && [ "${3:-}" = "get" ]; then
+printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
+if [[ "$*" == *"get deploy,statefulset,daemonset"* ]]; then
+  printf 'Deployment/danielsmith\n'
+  exit 0
+fi
+if [[ "$*" == *"get ingress"* && "$*" == *"jsonpath"* ]]; then
+  printf 'example.test'
+  exit 0
+fi
+if [[ "$*" == *"get deploy/tokenplace"* || "$*" == *"get deploy dspace"* || "$*" == *"get Deployment/danielsmith"* ]]; then
+  printf 'app=ghcr.io/example/app:main-deadbee\n'
   exit 0
 fi
 exit 0
@@ -68,17 +78,30 @@ exit 0
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
+if [ "${{1:-}}" = "get" ] && [ "${{2:-}}" = "values" ]; then
+  printf '{{"ingress":{{"host":"example.test"}}}}\n'
+  exit 0
+fi
 if [ "${{1:-}}" = "-n" ] && [ "${{3:-}}" = "status" ]; then
   printf 'STATUS: deployed\n'
 fi
 exit 0
 """,
     )
+    _write_executable(
+        bin_dir / "curl",
+        """#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+""",
+    )
+
     env = os.environ.copy()
     env["HOME"] = str(tmp_path / "home")
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["SUGARKUBE_HELM_ROLLOUT_TIMEOUT"] = "1s"
     env["HELM_LOG"] = str(log_path)
+    env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
     return env
 
 
@@ -180,3 +203,45 @@ def test_existing_app_specific_deploy_wrappers_still_work(
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert f"--namespace {app}" in helm_log
     assert "--set image.tag=main-deadbee" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("recipe", "image_heading", "check_heading"),
+    [
+        ("dspace-oci-promote-prod", "Resolved deployment image(s):", "Post-deploy verification commands"),
+        ("tokenplace-oci-promote-prod", "Resolved images for deployment/tokenplace:", "Post-deploy checks:"),
+        ("danielsmith-oci-promote-prod", "Resolved images for danielsmith workloads:", "Post-deploy checks:"),
+    ],
+)
+def test_promote_wrappers_preserve_app_specific_output(
+    recipe: str,
+    image_heading: str,
+    check_heading: str,
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just([recipe, "tag=main-deadbee"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert image_heading in result.stdout
+    assert check_heading in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_status_does_not_rewrite_kubeconfig_for_read_only_checks(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(["app-status", "app=tokenplace", "env=staging"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert not (Path(generic_app_stub_env["HOME"]) / ".kube" / "config").exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_does_not_rewrite_kubeconfig_for_read_only_checks(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(["app-verify", "app=tokenplace", "env=staging"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert not (Path(generic_app_stub_env["HOME"]) / ".kube" / "config").exists()
