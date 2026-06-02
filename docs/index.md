@@ -43,12 +43,14 @@ Review the safety notes before working with power components.
   and Helm OCI issues, including GHCR `401/403` chart pull failures
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
-- [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and planned generic command contract
+- [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and generic command contract
+- [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist, app config template, and release decision tree
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding contract,
   ownership boundaries, and environment mapping for token.place on Sugarkube
-- [apps/tokenplace.md](apps/tokenplace.md) — token.place app topology and operations model on Sugarkube
-- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place OCI staging/prod operations guide
-- [apps/danielsmith.md](apps/danielsmith.md) — danielsmith.io static-site topology and operations model on Sugarkube
+- [apps/dspace.md](apps/dspace.md) — DSPACE generic app deploy, verify, promote, rollback, and troubleshooting runbook
+- [apps/tokenplace.md](apps/tokenplace.md) — token.place generic app deploy, verify, promote, rollback, and troubleshooting runbook
+- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place historical OCI staging/prod operations guide
+- [apps/danielsmith.md](apps/danielsmith.md) — danielsmith.io generic app deploy, verify, promote, rollback, and troubleshooting runbook
 - [k3s-tokenplace-dev.md](k3s-tokenplace-dev.md) — token.place dev runbook
 - [k3s-tokenplace-staging.md](k3s-tokenplace-staging.md) — token.place staging runbook
 - [k3s-tokenplace-prod.md](k3s-tokenplace-prod.md) — token.place production runbook
