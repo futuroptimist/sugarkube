@@ -44,12 +44,11 @@ curl -fsS https://staging.token.place/relay/diagnostics | jq .
 
 Generic HTTP checks are necessary but do not prove token.place's relay workflow. Do not sign off staging for production promotion until all relay-compute checks pass:
 
-- [ ] Synthetic API v1 compute-node registration succeeds against `https://staging.token.place/api/v1/relay/servers/register`.
-- [ ] Synthetic API v1 compute-node polling succeeds against `https://staging.token.place/api/v1/relay/servers/poll` without a client-side timeout.
-- [ ] A real desktop or compute node points at `staging.token.place`, registers to staging, and appears in `/healthz` and `/relay/diagnostics`.
-- [ ] A real E2EE request/response succeeds through the staging relay.
+- [ ] A real external desktop or compute node points at `staging.token.place`, registers to staging, and appears in `/healthz` and `/relay/diagnostics`.
+- [ ] A real E2EE request/response succeeds through that staging-registered compute node.
+- [ ] Release evidence captures the chart digest, image tag, deployment YAML, health/diagnostics responses, and relay logs from after the staging compute test.
 
-Use the full synthetic register/poll block in [the canonical token.place runbook](apps/tokenplace.md#staging-relay-compute-sign-off), then complete the real desktop or compute-node E2EE test before promotion.
+Use the sign-off wording in [the canonical token.place runbook](apps/tokenplace.md#staging-relay-compute-sign-off) and the onboarding contract; do not invent relay-test commands when the exact desktop or compute-node command is not documented.
 
 ## Rollback staging
 

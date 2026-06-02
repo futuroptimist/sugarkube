@@ -14,9 +14,8 @@ Use this environment runbook for production token.place operations after staging
 Production promotion is blocked until staging proves the actual relay-compute path, not just web/TLS health. Confirm these staging artifacts before running the prod command:
 
 - [ ] `app-status`, `app-verify`, `/healthz`, `/livez`, and `/relay/diagnostics` passed for staging.
-- [ ] Synthetic API v1 compute-node register/poll passed against `https://staging.token.place`.
-- [ ] A real desktop or compute node registered to `staging.token.place` and appeared in staging `/healthz` and `/relay/diagnostics`.
-- [ ] A real E2EE request/response succeeded through the staging relay.
+- [ ] A real external desktop or compute node registered to `staging.token.place` and appeared in staging `/healthz` and `/relay/diagnostics`.
+- [ ] A real E2EE request/response succeeded through that staging-registered compute node.
 - [ ] The `token.place` Cloudflare route points at Traefik before prod cutover.
 
 ## Promote production
@@ -55,8 +54,7 @@ curl -fsS https://token.place/relay/diagnostics | jq .
 
 Do not mark production healthy on generic checks alone. Capture separate production relay evidence after promotion:
 
-- [ ] Synthetic API v1 compute-node register/poll passes against `https://token.place`.
-- [ ] A real desktop or compute node is configured for `token.place`, registers to production, and does not silently fall back to staging.
+- [ ] A real external desktop or compute node is configured for `token.place`, registers to production, and does not silently fall back to staging.
 - [ ] The production-registered compute node appears in prod `/healthz` and `/relay/diagnostics`.
 - [ ] A real E2EE request/response succeeds through the production-registered compute node.
 - [ ] Post-test `/healthz`, `/relay/diagnostics`, and relay logs are captured after the E2EE test.
@@ -64,8 +62,8 @@ Do not mark production healthy on generic checks alone. Capture separate product
 ```bash
 TOKENPLACE_HOST=token.place
 kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
-# First run prod synthetic register/poll, real prod compute-node registration,
-# and the prod E2EE request/response. Then capture post-test evidence:
+# First run real prod compute-node registration and the prod E2EE
+# request/response. Then capture post-test evidence:
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
 kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
