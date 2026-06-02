@@ -253,3 +253,7 @@ yourorg
 
 executables
 pytest
+
+danielsmith
+handoff
+jobbot

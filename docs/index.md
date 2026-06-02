@@ -43,17 +43,18 @@ Review the safety notes before working with power components.
   and Helm OCI issues, including GHCR `401/403` chart pull failures
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
-- [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and planned generic command contract
-- [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — onboarding contract,
-  ownership boundaries, and environment mapping for token.place on Sugarkube
-- [apps/tokenplace.md](apps/tokenplace.md) — token.place app topology and operations model on Sugarkube
-- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place OCI staging/prod operations guide
-- [apps/danielsmith.md](apps/danielsmith.md) — danielsmith.io static-site topology and operations model on Sugarkube
+- [app_deployment_contract.md](app_deployment_contract.md) — generic Sugarkube app deployment contract, config shape, and command migration notes
+- [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist, minimal config template, and release decision tree for wove, jobbot3000, and later apps
+- [apps/dspace.md](apps/dspace.md) — dspace GHCR-first staging/prod deploy, verify, promote, and rollback runbook
+- [apps/tokenplace.md](apps/tokenplace.md) — token.place GHCR-first staging/prod deploy, verify, promote, and rollback runbook
+- [apps/danielsmith.md](apps/danielsmith.md) — danielsmith.io GHCR-first staging/prod deploy, verify, promote, and rollback runbook
+- [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place OCI reference for compatibility-era operations
 - [k3s-tokenplace-dev.md](k3s-tokenplace-dev.md) — token.place dev runbook
-- [k3s-tokenplace-staging.md](k3s-tokenplace-staging.md) — token.place staging runbook
-- [k3s-tokenplace-prod.md](k3s-tokenplace-prod.md) — token.place production runbook
-- [k3s-danielsmith-staging.md](k3s-danielsmith-staging.md) — danielsmith.io staging runbook
-- [k3s-danielsmith-prod.md](k3s-danielsmith-prod.md) — danielsmith.io production runbook
+- [k3s-tokenplace-staging.md](k3s-tokenplace-staging.md) — token.place staging quick checklist
+- [k3s-tokenplace-prod.md](k3s-tokenplace-prod.md) — token.place production quick checklist
+- [k3s-danielsmith-staging.md](k3s-danielsmith-staging.md) — danielsmith.io staging quick checklist
+- [k3s-danielsmith-prod.md](k3s-danielsmith-prod.md) — danielsmith.io production quick checklist
+- [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — legacy token.place-specific onboarding contract and environment mapping
 - [operations/security-checklist.md](operations/security-checklist.md) — track credential rotations and
   verification steps
 - [pi_token_dspace.md](pi_token_dspace.md) — build and expose token.place & dspace via Cloudflare

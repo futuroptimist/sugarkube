@@ -159,4 +159,4 @@ just cf-tunnel-debug
 - Chart `appVersion`: `0.1.0`
 - Git tag: `v0.1.0`
 - Release image tag: `v0.1.0`
-- Staging candidate image tag: `main-<shortsha>`
+- Staging candidate image tag: `main-REPLACE_SHORTSHA`

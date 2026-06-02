@@ -39,13 +39,15 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 ## Application runbooks
 
-- **[token.place onboarding contract](docs/tokenplace_sugarkube_onboarding.md)** — prerequisites,
-  ownership boundaries, and environment mapping for first-class token.place operations.
-- **[token.place app operations](docs/apps/tokenplace.md)** — topology and deployment workflow
-  patterns for token.place on Sugarkube.
-- **[token.place env runbooks](docs/index.md)** — environment-specific guides for
-  [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
-  [production](docs/k3s-tokenplace-prod.md) operations.
+- **[Sugarkube app deployment contract](docs/app_deployment_contract.md)** — shared
+  GHCR image/chart contract and generic `just app-*` command surface.
+- **[Future app onboarding guide](docs/app_onboarding.md)** — checklist and release
+  decision tree for adding apps such as wove and jobbot3000 to the generic flow.
+- **App runbooks:** [dspace](docs/apps/dspace.md), [token.place](docs/apps/tokenplace.md),
+  and [danielsmith.io](docs/apps/danielsmith.md) document staging deploy, production
+  promotion, verification, rollback, and Cloudflare handoff responsibilities.
+- **[token.place onboarding contract](docs/tokenplace_sugarkube_onboarding.md)** — legacy
+  token.place-specific prerequisites and environment mapping.
 
 ## Repository layout
 

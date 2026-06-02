@@ -1,144 +1,241 @@
 # token.place on Sugarkube
 
-This is the canonical Sugarkube deployment model for token.place.
+Use this runbook for GHCR-first token.place relay deploys, promotions,
+verification, and rollback on Sugarkube. The preferred future path is the generic
+app flow backed by `docs/examples/apps/tokenplace.env`; the `tokenplace-*`
+recipes remain compatibility shims until the generic flow has been exercised
+across routine releases.
 
-For the shared artifact, tag, chart, app-config, and planned generic command contract, see [Sugarkube app deployment contract](../app_deployment_contract.md).
+## 1. Artifact model
 
-For onboarding ownership and environment sequencing, see
-[`docs/tokenplace_sugarkube_onboarding.md`](../tokenplace_sugarkube_onboarding.md).
+- App repository responsibility: build and publish
+  `ghcr.io/futuroptimist/tokenplace-relay` images from the token.place
+  repository's CI, including immutable deploy tags such as
+  `main-REPLACE_SHORTSHA`.
+- App repository responsibility: package and publish the Helm chart at
+  `oci://ghcr.io/futuroptimist/charts/tokenplace` with immutable chart versions.
+- Sugarkube responsibility: select kubeconfig/environment, read
+  `docs/examples/apps/tokenplace.env`, pin the chart version from
+  `docs/apps/tokenplace.version`, deploy the selected image tag with Helm, and
+  run status/verify/log helpers.
+- Cloudflare responsibility: DNS and tunnel routes for the public hostnames live
+  outside Helm; the chart only creates Kubernetes resources behind Traefik.
 
-## Relay-only topology (current scope)
+| Coordinate | Value |
+| --- | --- |
+| App config | `docs/examples/apps/tokenplace.env` |
+| Image | `ghcr.io/futuroptimist/tokenplace-relay` |
+| Chart | `oci://ghcr.io/futuroptimist/charts/tokenplace` |
+| Release | `tokenplace` |
+| Namespace | `tokenplace` |
+| Chart pin | `docs/apps/tokenplace.version` |
+| Production tag pin | `docs/apps/tokenplace.prod.tag` |
+| Verify paths | `/`, `/livez`, `/healthz`, `/relay/diagnostics` |
 
-Sugarkube currently runs **only** the token.place relay service (`relay.py`).
+## 2. Environment topology
 
-- **In-cluster (Sugarkube):** one relay deployment exposed through Traefik ingress.
-- **Out-of-cluster compute:** `server.py`, desktop Tauri app, Windows PCs, Apple Silicon Macs,
-  Raspberry Pi compute nodes, and other compute workers remain external.
-- **No in-cluster backend/GPU service** is required for steady-state relay operation.
-- **Single replica + single worker** defaults are intentional.
-- Relay state is currently **in-memory only**; pod restarts lose relay memory/state and this is
-  accepted for now.
-- Future in-memory database or multi-replica architecture is **out of scope** for this runbook.
+- `env=dev`: non-production defaults using
+  `docs/examples/tokenplace.values.dev.yaml`.
+- `env=staging`: staging host `staging.token.place`, values chain
+  `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml`.
+- `env=prod`: production host `token.place`, values chain
+  `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml`.
 
-## Artifact model (canonical)
+## 3. Find or publish GHCR image
 
-- Image: `ghcr.io/futuroptimist/tokenplace-relay`
-- Chart: `oci://ghcr.io/futuroptimist/charts/tokenplace`
-- Helm release: `tokenplace`
-- Namespace: `tokenplace`
-- Chart version pin file: `docs/apps/tokenplace.version`
-- Production approved tag pin: `docs/apps/tokenplace.prod.tag`
-
-## Values model
-
-- Base: `docs/examples/tokenplace.values.dev.yaml`
-- Staging overlay: `docs/examples/tokenplace.values.staging.yaml`
-- Production overlay: `docs/examples/tokenplace.values.prod.yaml`
-
-Chart-owned runtime env defaults (worker count, frontend mode, relay upstream-health gating, and XDG `/tmp` paths) should remain in the token.place chart. Keep Sugarkube values focused on environment-specific keys like `TOKEN_PLACE_ENV`, `TOKENPLACE_RELAY_PUBLIC_URL`, ingress hosts, and TLS secrets.
-
-Default hosts:
-
-- Staging: `staging.token.place`
-- Production: `token.place`
-
-## Core deployment commands
-
-Use concrete release/namespace/chart values for token.place relay deployments.
+Find the latest successful token.place image workflow and copy the immutable tag
+for the relay image.
 
 ```bash
-just kubeconfig-env staging
-TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+APP_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag from token.place CI
 ```
 
 ```bash
-just kubeconfig-env staging
-TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+gh run list --repo futuroptimist/token.place --workflow ci-image.yml --status success --limit 10
 ```
 
-Preferred env wrapper:
+If no usable immutable tag exists, publish one from the token.place repository's
+image workflow before deploying from Sugarkube.
 
 ```bash
-TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just tokenplace-oci-deploy env=staging tag="$TOKENPLACE_TAG"
+gh workflow run ci-image.yml --repo futuroptimist/token.place --ref main
 ```
 
-## Validation commands
+## 4. Confirm/publish OCI chart
+
+Sugarkube reads the chart version from `docs/apps/tokenplace.version`. Confirm
+that GHCR has that chart before deploying.
 
 ```bash
-kubectl -n tokenplace get deploy,po,svc,ingress
-kubectl -n tokenplace rollout status deploy/tokenplace --timeout=180s
+CHART_VERSION=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)
+```
+
+```bash
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
+```
+
+If the chart changed in the token.place repository and GHCR does not have the
+desired version yet, publish it from the chart workflow before updating the
+Sugarkube chart pin.
+
+```bash
+gh workflow run ci-helm.yml --repo futuroptimist/token.place --ref main
+```
+
+## 5. Deploy staging
+
+Preferred generic command:
+
+```bash
+APP_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag from token.place CI
+just app-deploy app=tokenplace env=staging tag="$APP_TAG"
+```
+
+Current compatibility wrapper:
+
+```bash
+APP_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag from token.place CI
+just tokenplace-oci-deploy env=staging tag="$APP_TAG"
+```
+
+## 6. Verify staging
+
+```bash
+just app-status app=tokenplace env=staging
+```
+
+```bash
+just app-verify app=tokenplace env=staging
+```
+
+```bash
 curl -fsS https://staging.token.place/livez
-curl -fsS https://staging.token.place/healthz
-curl -fsS https://staging.token.place/relay/diagnostics
-curl -fsS https://staging.token.place/
 ```
-
-For production validation, use the same checks against `https://token.place`. Avoid long-running
-public `/healthz` watches as readiness monitors until health, liveness, metrics, diagnostics, and
-API v1 compute-node heartbeat routes are confirmed exempt from public API rate limits; prefer
-`kubectl -n tokenplace get endpoints`, `kubectl -n tokenplace get deploy,po`, relay logs, and
-low-frequency diagnostics curls for operational readiness. Staging/prod signoff also requires
-synthetic API v1 register/poll, an external desktop or compute-node registration, and an E2EE
-request/response through the relay; see the staging runbook for the full sequence and curl payloads.
-
-## Promotion blockers
-
-Use the environment runbooks for copy-paste commands, but keep this release-blocker rule in every
-token.place promotion review: **web/TLS health is not relay validation**. A build can only move from
-staging to production after all of these are true:
-
-- [ ] OCI chart freshness and chart digest are captured for the exact version being promoted.
-- [ ] Rendered manifests contain no duplicate env vars.
-- [ ] XDG writable `/tmp` env defaults are present from the chart, not one-off CLI overrides.
-- [ ] `/healthz` is exempt from API rate limiting.
-- [ ] Synthetic API v1 compute-node register/poll passes.
-- [ ] A desktop compute node uses the intended `knownServers`/server entry and registers.
-- [ ] The registered compute node appears in `/healthz` and `/relay/diagnostics`.
-- [ ] An E2EE request/response succeeds through that compute node.
-- [ ] The production Cloudflare route exists and points to Traefik before prod cutover.
-
-Emergency diagnostics and rollback remain environment-specific:
-
-- Staging: [`docs/k3s-tokenplace-staging.md`](../k3s-tokenplace-staging.md)
-- Production: [`docs/k3s-tokenplace-prod.md`](../k3s-tokenplace-prod.md)
-
-## Cloudflare and ingress model
-
-Cloudflare Tunnel/DNS configuration is external to Helm.
-
-- Route hostnames to Traefik, typically
-  `http://traefik.kube-system.svc.cluster.local:80`.
-- Helm chart deployment does **not** create Cloudflare routes.
-- One tunnel per environment can serve multiple app hostnames (for example
-  `staging.democratized.space` and `staging.token.place`) by routing both to Traefik.
-- Traefik chooses the correct Kubernetes Ingress by HTTP `Host` header.
-- Staging/prod overlays set `ingress.tls.enabled: true` so rendered Kubernetes Ingress includes `spec.tls`.
-- `cert-manager` and a compatible `ClusterIssuer` are assumed to already exist.
-- Cloudflare Tunnel routing (`cf-tunnel-route`) is separate from the Cloudflare DNS API token used
-  by cert-manager DNS-01.
-- Configure routes explicitly:
 
 ```bash
-just cf-tunnel-route staging.token.place
-just cf-tunnel-route host=staging.token.place
-just cf-tunnel-route token.place
-just cf-tunnel-route host=token.place
+curl -fsS https://staging.token.place/healthz
 ```
 
-## Related runbooks
+```bash
+curl -fsS https://staging.token.place/relay/diagnostics | jq .
+```
 
-- Relay-focused app guide: [`docs/apps/tokenplace-relay.md`](./tokenplace-relay.md)
-- Staging runbook: [`docs/k3s-tokenplace-staging.md`](../k3s-tokenplace-staging.md)
-- Production runbook: [`docs/k3s-tokenplace-prod.md`](../k3s-tokenplace-prod.md)
+## 7. Promote production
 
+Promote only after staging sign-off. Record the approved immutable tag in your
+release notes and, when appropriate, in `docs/apps/tokenplace.prod.tag`.
 
-## 0.1.0 release alignment
+Preferred generic command:
 
-- Chart version: `0.1.0`
-- Chart `appVersion`: `0.1.0`
-- Git tag: `v0.1.0`
-- Release image tag: `v0.1.0` (`ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`)
-- Staging candidate image tag: `main-<shortsha>`
+```bash
+APP_TAG=main-REPLACE_SHORTSHA # replace with the staging-approved immutable GHCR image tag
+just app-promote-prod app=tokenplace tag="$APP_TAG"
+```
+
+Current compatibility wrapper:
+
+```bash
+APP_TAG=main-REPLACE_SHORTSHA # replace with the staging-approved immutable GHCR image tag
+just tokenplace-oci-promote-prod tag="$APP_TAG"
+```
+
+If `docs/apps/tokenplace.prod.tag` already contains the approved production tag,
+the generic promotion command can read it by omitting `tag=`.
+
+```bash
+just app-promote-prod app=tokenplace
+```
+
+## 8. Verify production
+
+```bash
+just app-status app=tokenplace env=prod
+```
+
+```bash
+just app-verify app=tokenplace env=prod
+```
+
+```bash
+curl -fsS https://token.place/livez
+```
+
+```bash
+curl -fsS https://token.place/healthz
+```
+
+```bash
+curl -fsS https://token.place/relay/diagnostics | jq .
+```
+
+## 9. Rollback
+
+Rollback by immutable tag with the generic redeploy helper:
+
+```bash
+APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA # replace with the previous known-good immutable GHCR image tag
+just app-redeploy app=tokenplace env=prod tag="$APP_TAG"
+```
+
+Rollback staging the same way if the failure is caught before promotion:
+
+```bash
+APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA # replace with the previous known-good immutable GHCR image tag
+just app-redeploy app=tokenplace env=staging tag="$APP_TAG"
+```
+
+Rollback by Helm revision when a revision number is known:
+
+```bash
+TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
+```
+
+## 10. Troubleshooting
+
+GHCR authentication and chart pull failures commonly show up as Helm `401` or
+`403` errors. Log in to GHCR with a package-read credential, then retry the
+chart check.
+
+```bash
+CHART_VERSION=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/tokenplace.version | head -n1)
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
+```
+
+Inspect status, logs, ingress, and tunnel routing:
+
+```bash
+just app-status app=tokenplace env=staging
+```
+
+```bash
+just tokenplace-debug-logs-env env=staging
+```
+
+```bash
+just cluster-status
+```
+
+```bash
+just traefik-status
+```
+
+```bash
+just cf-tunnel-debug
+```
+
+Cloudflare routes are external to Helm. Create or repair routes outside the
+chart when DNS/tunnel routing is the failing layer.
+
+```bash
+just cf-tunnel-route host=staging.token.place
+```
+
+## 11. App-specific notes
+
+- token.place deploys the canonical relay image. Do not deploy stale Docker-first
+  images or duplicate relay variants for staging/prod.
+- Preserve relay-blind behavior: logs, diagnostics, and app status must not expose
+  plaintext message contents or secrets.
+- The `/relay/diagnostics` endpoint is safe for smoke checks because it reports
+  operational metadata, not decrypted relay payloads.

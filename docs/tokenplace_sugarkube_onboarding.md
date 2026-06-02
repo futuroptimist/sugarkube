@@ -57,7 +57,7 @@ image tag, deployment YAML, health/diagnostics responses, and relay logs from af
 - Chart `appVersion`: `0.1.0`
 - token.place Git tag: `v0.1.0`
 - Release image tag: `ghcr.io/futuroptimist/tokenplace-relay:v0.1.0`
-- Staging candidate image tag: `main-<shortsha>`
+- Staging candidate image tag: `main-REPLACE_SHORTSHA`
 
 ## Cloudflare model
 
