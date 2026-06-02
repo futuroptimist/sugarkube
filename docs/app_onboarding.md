@@ -21,9 +21,13 @@ Use this checklist when onboarding the next GHCR-first app to Sugarkube. The goa
 
 ## Minimal app config template
 
-Copy this into `apps/APP.env` for private/local operator config, or add a sanitized example under `docs/examples/apps/APP.env` when the app is ready to be documented in this repo. Do not store secrets in either location.
+Keep private or local operator app config outside the repository. Set `SUGARKUBE_APP_CONFIG_DIR` to an operator-owned directory (for example `../sugarkube-app-config`) and write `APP.env` there, or pass an explicit `config=` path to every generic app command. Only sanitized, non-secret examples belong under `docs/examples/apps/APP.env`. Do not store secrets in either location.
 
-```dotenv
+```bash
+export SUGARKUBE_APP_CONFIG_DIR=../sugarkube-app-config
+mkdir -p "$SUGARKUBE_APP_CONFIG_DIR"
+APP_CONFIG="$SUGARKUBE_APP_CONFIG_DIR/appslug.env"
+cat >"$APP_CONFIG" <<'EOF'
 SUGARKUBE_APP=appslug
 SUGARKUBE_RELEASE=appslug
 SUGARKUBE_NAMESPACE=appslug
@@ -36,12 +40,13 @@ SUGARKUBE_VALUES_PROD=docs/examples/appslug.values.dev.yaml,docs/examples/appslu
 SUGARKUBE_STATUS_HOST_KEY=ingress.host
 SUGARKUBE_VERIFY_PATHS=/healthz,/livez
 SUGARKUBE_DEBUG_SELECTOR=app.kubernetes.io/name=appslug
+EOF
 ```
 
 Check the resolved config before the first deploy.
 
 ```bash
-just app-config app=appslug env=staging config=apps/appslug.env
+just app-config app=appslug env=staging config="$APP_CONFIG"
 ```
 
 Deploy staging with an immutable image tag.
@@ -51,7 +56,7 @@ APP_TAG=main-REPLACE_SHORTSHA
 ```
 
 ```bash
-just app-deploy app=appslug env=staging tag="$APP_TAG" config=apps/appslug.env
+just app-deploy app=appslug env=staging tag="$APP_TAG" config="$APP_CONFIG"
 ```
 
 ## Minimal image workflow checklist
@@ -117,7 +122,7 @@ APP_TAG=main-REPLACE_SHORTSHA
 ```
 
 ```bash
-just app-deploy app=appslug env=staging tag="$APP_TAG" config=apps/appslug.env
+just app-deploy app=appslug env=staging tag="$APP_TAG" config="$APP_CONFIG"
 ```
 
 ### The chart changed; what version do I bump?
@@ -142,7 +147,7 @@ helm show chart oci://ghcr.io/OWNER/charts/CHART --version "$CHART_VERSION"
 - Use the generic production promotion command.
 
 ```bash
-just app-promote-prod app=appslug tag="$APP_TAG" config=apps/appslug.env
+just app-promote-prod app=appslug tag="$APP_TAG" config="$APP_CONFIG"
 ```
 
 ### Prod is bad; how do I roll back?
@@ -156,7 +161,7 @@ APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
 ```
 
 ```bash
-just app-redeploy app=appslug env=prod tag="$APP_TAG" config=apps/appslug.env
+just app-redeploy app=appslug env=prod tag="$APP_TAG" config="$APP_CONFIG"
 ```
 
 ```bash
@@ -172,11 +177,11 @@ just tokenplace-rollback release=appslug namespace=appslug revision="$HELM_REVIS
 Start with generic checks.
 
 ```bash
-just app-status app=appslug env=staging config=apps/appslug.env
+just app-status app=appslug env=staging config="$APP_CONFIG"
 ```
 
 ```bash
-just app-verify app=appslug env=staging config=apps/appslug.env
+just app-verify app=appslug env=staging config="$APP_CONFIG"
 ```
 
 Add app-specific checks only for behavior the generic URL checks cannot validate, such as a login-free API health endpoint, a static asset manifest, a queue worker heartbeat, or a safe diagnostics endpoint.

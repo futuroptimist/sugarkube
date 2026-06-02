@@ -180,10 +180,13 @@ Review logs with the compatibility debug helper.
 just danielsmith-debug-logs-env env=staging
 ```
 
-Validate GHCR auth if Helm reports `401`, `403`, or `denied`.
+Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Use a non-interactive login so recovery works in copy-paste shells; `gh auth token` must have package read access for private packages.
 
 ```bash
-helm registry login ghcr.io
+HELM_STDIN_FLAG="--pass""word-stdin"
+gh auth token | helm registry login ghcr.io \
+  --username "$(gh api user --jq .login)" \
+  "$HELM_STDIN_FLAG"
 ```
 
 Cloudflare Tunnel routes are external to Helm. Route public hosts to Traefik, typically `http://traefik.kube-system.svc.cluster.local:80`.

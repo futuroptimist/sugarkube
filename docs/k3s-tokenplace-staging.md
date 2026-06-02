@@ -40,6 +40,17 @@ just app-verify app=tokenplace env=staging
 curl -fsS https://staging.token.place/relay/diagnostics | jq .
 ```
 
+### Relay-compute sign-off gate
+
+Generic HTTP checks are necessary but do not prove token.place's relay workflow. Do not sign off staging for production promotion until all relay-compute checks pass:
+
+- [ ] Synthetic API v1 compute-node registration succeeds against `https://staging.token.place/api/v1/relay/servers/register`.
+- [ ] Synthetic API v1 compute-node polling succeeds against `https://staging.token.place/api/v1/relay/servers/poll` without a client-side timeout.
+- [ ] A real desktop or compute node points at `staging.token.place`, registers to staging, and appears in `/healthz` and `/relay/diagnostics`.
+- [ ] A real E2EE request/response succeeds through the staging relay.
+
+Use the full synthetic register/poll block in [the canonical token.place runbook](apps/tokenplace.md#staging-relay-compute-sign-off), then complete the real desktop or compute-node E2EE test before promotion.
+
 ## Rollback staging
 
 ```bash

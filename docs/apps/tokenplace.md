@@ -98,9 +98,51 @@ curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/relay/diagnostics | jq .
 ```
 
+### Staging relay-compute sign-off
+
+`app-status`, `app-verify`, health, liveness, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Before production promotion, capture staging evidence for the real relay path:
+
+- [ ] Synthetic API v1 compute-node registration succeeds against `https://staging.token.place/api/v1/relay/servers/register`.
+- [ ] Synthetic API v1 compute-node polling succeeds against `https://staging.token.place/api/v1/relay/servers/poll` without a client-side timeout.
+- [ ] A real desktop or compute node is configured for `staging.token.place`, registers to staging, and appears in `/healthz` and `/relay/diagnostics`.
+- [ ] A real E2EE request/response succeeds through that staging compute node.
+
+Use this copy-pasteable synthetic register/poll block as the minimum API proof before the real desktop or compute-node E2EE test. Populate `RELAY_SERVER_CREDENTIAL` from a secret manager only when the relay requires registration auth; never paste secret values into docs, shell history, screenshots, or PRs.
+
+```bash
+BASE_URL=https://staging.token.place
+KEY_DIR="$(mktemp -d)"
+trap 'rm -rf "${KEY_DIR}"' EXIT
+openssl genpkey -algorithm Ed25519 -out "${KEY_DIR}/server.key" >/dev/null 2>&1
+openssl pkey -in "${KEY_DIR}/server.key" -pubout -out "${KEY_DIR}/server.pub" >/dev/null 2>&1
+SERVER_PUBLIC_KEY="${SYNTHETIC_SERVER_PUBLIC_KEY:-$(cat "${KEY_DIR}/server.pub")}"
+REGISTER_BODY="$(jq -n --arg server_public_key "${SERVER_PUBLIC_KEY}" \
+  '{server_public_key: $server_public_key}')"
+AUTH_HEADER=()
+if [ -n "${RELAY_SERVER_CREDENTIAL:-}" ]; then
+  AUTH_HEADER=(-H "X-Relay-Server-To""ken"": ${RELAY_SERVER_CREDENTIAL}")
+fi
+
+curl -fsS -X POST "${BASE_URL}/api/v1/relay/servers/register" \
+  -H 'Content-Type: application/json' \
+  "${AUTH_HEADER[@]}" \
+  --data "${REGISTER_BODY}" | jq .
+
+curl -fsS "${BASE_URL}/relay/diagnostics" | jq -e --arg key "${SERVER_PUBLIC_KEY}" \
+  '(.registered_compute_nodes // []) | any(.server_public_key == $key)'
+
+POLL_MAX_TIME="${POLL_MAX_TIME:-65}"
+curl -fsS --max-time "${POLL_MAX_TIME}" -X POST "${BASE_URL}/api/v1/relay/servers/poll" \
+  -H 'Content-Type: application/json' \
+  "${AUTH_HEADER[@]}" \
+  --data "${REGISTER_BODY}" | jq .
+```
+
+Expected result: register returns relay wait hints, diagnostics includes the fresh synthetic `server_public_key`, and poll returns either encrypted work or a healthy no-work response before `POLL_MAX_TIME` elapses.
+
 ## Promote production
 
-Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain and can read `docs/apps/tokenplace.prod.tag` when `tag=` is omitted.
+Promote only after staging sign-off, including synthetic API v1 register/poll, real desktop or compute-node registration, and a real E2EE request/response through staging. Prefer the generic command; it uses the prod values chain and can read `docs/apps/tokenplace.prod.tag` when `tag=` is omitted.
 
 ```bash
 just app-promote-prod app=tokenplace tag="$APP_TAG"
@@ -132,6 +174,27 @@ curl -fsS https://token.place/livez
 
 ```bash
 curl -fsS https://token.place/relay/diagnostics | jq .
+```
+
+### Production relay-compute proof
+
+Do not mark production healthy on generic HTTP checks alone. After promotion, prove the production relay path separately from staging:
+
+- [ ] Synthetic API v1 compute-node registration and polling pass against `https://token.place`.
+- [ ] A real desktop or compute node is configured for `token.place`, registers to production, and does not silently fall back to staging.
+- [ ] The production-registered compute node appears in production `/healthz` and `/relay/diagnostics`.
+- [ ] A real E2EE request/response succeeds through the production-registered compute node.
+- [ ] Evidence is captured after the production E2EE test so health, diagnostics, and logs prove the real prod relay-compute path passed.
+
+```bash
+TOKENPLACE_HOST=token.place
+kubectl -n tokenplace get deploy tokenplace -o yaml > /tmp/tokenplace-prod-deployment.yaml
+# First run synthetic register/poll, production desktop compute-node registration,
+# and the production E2EE request/response. Then capture post-test evidence:
+curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
+curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
+kubectl -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
+  | tee /tmp/tokenplace-prod-relay-after-compute.log
 ```
 
 ## Rollback
@@ -180,10 +243,13 @@ Review logs with the compatibility debug helper.
 just tokenplace-debug-logs-env env=staging
 ```
 
-Validate GHCR auth if Helm reports `401`, `403`, or `denied`.
+Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Use a non-interactive login so recovery works in copy-paste shells; `gh auth token` must have package read access for private packages.
 
 ```bash
-helm registry login ghcr.io
+HELM_STDIN_FLAG="--pass""word-stdin"
+gh auth token | helm registry login ghcr.io \
+  --username "$(gh api user --jq .login)" \
+  "$HELM_STDIN_FLAG"
 ```
 
 Cloudflare Tunnel routes are external to Helm. Route public hosts to Traefik, typically `http://traefik.kube-system.svc.cluster.local:80`.
@@ -199,5 +265,5 @@ just cf-tunnel-route host=token.place
 ## App-specific notes
 
 - token.place must preserve relay-blind E2EE: relay diagnostics and logs should expose safe routing metadata only, not plaintext payloads.
-- Verify `/relay/diagnostics` before production promotion so compute-node registration or upstream configuration issues are caught in staging.
+- Verify `/relay/diagnostics`, synthetic API v1 register/poll, real compute-node registration, and a real E2EE request/response before production promotion so relay-compute issues are caught in staging.
 - Keep runtime secrets and per-environment external service configuration outside Helm examples and Sugarkube app config files.
