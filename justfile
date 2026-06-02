@@ -1518,6 +1518,118 @@ helm-oci-install release='' namespace='' chart='' values='' host='' version='' v
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
     @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
 
+# Print resolved Sugarkube app deployment config for an app/environment.
+app-config app env='staging' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    python3 "{{ justfile_directory() }}/scripts/app_config.py" json \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config {{ quote(config) }}
+
+# Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
+app-deploy app env='staging' tag='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config {{ quote(config) }} \
+      --tag {{ quote(tag) }} \
+      --require-tag)"
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
+      release="${SUGARKUBE_RELEASE}" \
+      namespace="${SUGARKUBE_NAMESPACE}" \
+      chart="${SUGARKUBE_CHART}" \
+      values="${SUGARKUBE_VALUES}" \
+      version="${SUGARKUBE_VERSION:-}" \
+      version_file="${SUGARKUBE_VERSION_FILE:-}" \
+      tag="${SUGARKUBE_TAG}"
+
+# Generic upgrade-only app redeploy backed by app config files.
+app-redeploy app env='staging' tag='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config {{ quote(config) }} \
+      --tag {{ quote(tag) }} \
+      --require-tag)"
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
+      release="${SUGARKUBE_RELEASE}" \
+      namespace="${SUGARKUBE_NAMESPACE}" \
+      chart="${SUGARKUBE_CHART}" \
+      values="${SUGARKUBE_VALUES}" \
+      version="${SUGARKUBE_VERSION:-}" \
+      version_file="${SUGARKUBE_VERSION_FILE:-}" \
+      tag="${SUGARKUBE_TAG}"
+
+# Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
+app-promote-prod app tag='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env prod \
+      --config {{ quote(config) }} \
+      --tag {{ quote(tag) }} \
+      --prod-tag-fallback \
+      --require-tag)"
+    just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
+      app="${SUGARKUBE_APP}" \
+      env=prod \
+      tag="${SUGARKUBE_TAG}" \
+      config="${SUGARKUBE_CONFIG_PATH}"
+
+# Verify configured HTTPS paths for a Sugarkube app.
+app-verify app env='staging' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config {{ quote(config) }})"
+
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+
+    host=""
+    if command -v helm >/dev/null 2>&1; then
+      host="$(helm get values "${SUGARKUBE_RELEASE}" \
+        --namespace "${SUGARKUBE_NAMESPACE}" \
+        --all --output json 2>/dev/null | \
+        python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}" || true)"
+    fi
+    if [ -z "${host}" ] && command -v kubectl >/dev/null 2>&1; then
+      host="$(kubectl -n "${SUGARKUBE_NAMESPACE}" get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
+    fi
+
+    IFS=',' read -r -a paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
+    if [ -z "${host}" ]; then
+      echo "Could not derive a host for ${SUGARKUBE_APP}; run these commands after replacing <host>:" >&2
+      for path in "${paths[@]}"; do
+        printf '  curl -fsS https://<host>%s\n' "${path}"
+      done
+      exit 0
+    fi
+
+    for path in "${paths[@]}"; do
+      printf 'curl -fsS https://%s%s\n' "${host}" "${path}"
+      curl -fsS "https://${host}${path}" >/dev/null
+    done
+
 # Opinionated immutable-tag dspace deploy with rollout verification.
 #
 
@@ -1662,21 +1774,7 @@ dspace-oci-deploy-prod-subdomain tag='':
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
 dspace-oci-promote-prod tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    deploy_tag="$(echo "{{ tag }}" | xargs)"
-    if [ -z "${deploy_tag}" ]; then
-      deploy_tag="$(read_prod_tag)"
-    fi
-    if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> or populate docs/apps/dspace.prod.tag." >&2
-      exit 1
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${deploy_tag}"
+    @just app-promote-prod app=dspace tag='{{ tag }}'
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
 dspace-oci-redeploy env='staging' tag='':
@@ -1906,21 +2004,7 @@ tokenplace-oci-deploy env='staging' tag='':
     fi
 
 tokenplace-oci-promote-prod tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    if [ -z "${resolved_tag}" ]; then
-      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
-    fi
-    if [ -z "${resolved_tag}" ]; then
-      echo "ERROR: provide tag=<immutable-tag> or set docs/apps/tokenplace.prod.tag." >&2
-      exit 1
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" tokenplace-oci-deploy env=prod tag="${resolved_tag}"
+    @just app-promote-prod app=tokenplace tag='{{ tag }}'
 
 # Upgrade-only token.place OCI redeploy path.
 tokenplace-oci-redeploy env='staging' tag='':
@@ -2249,24 +2333,7 @@ danielsmith-oci-deploy env='staging' tag='':
     fi
 
 danielsmith-oci-promote-prod tag='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    resolved_tag="$(echo '{{ tag }}' | xargs)"
-    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
-      resolved_tag="${resolved_tag#tag=}"
-    done
-    if [ -z "${resolved_tag}" ]; then
-      resolved_tag="$(read_prod_tag 2>/dev/null || true)"
-    fi
-    if [ -z "${resolved_tag}" ]; then
-      echo "ERROR: provide tag=<immutable-tag> or set docs/apps/danielsmith.prod.tag." >&2
-      exit 1
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" danielsmith-oci-deploy env=prod tag="${resolved_tag}"
+    @just app-promote-prod app=danielsmith tag='{{ tag }}'
 
 # Upgrade-only danielsmith OCI redeploy path.
 danielsmith-oci-redeploy env='staging' tag='':
@@ -2447,14 +2514,29 @@ tokenplace-port-forward namespace='tokenplace' service='tokenplace' local_port='
     echo "Port-forwarding ${svc} to localhost:{{ local_port }} (Ctrl+C to stop)..."
     kubectl -n '{{ namespace }}' port-forward svc/${svc} {{ local_port }}:{{ remote_port }}
 
-app-status namespace='' release='' host_key='ingress.host':
+app-status app='' env='staging' config='' namespace='' release='' host_key='ingress.host':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    export KUBECONFIG="${HOME}/.kube/config"
+    if [ -n {{ quote(app) }} ]; then
+        eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+          --app {{ quote(app) }} \
+          --env {{ quote(env) }} \
+          --config {{ quote(config) }})"
+        export KUBECONFIG="${HOME}/.kube/config"
+        just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+        namespace="${SUGARKUBE_NAMESPACE}"
+        release="${SUGARKUBE_RELEASE}"
+        host_key="${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}"
+    else
+        export KUBECONFIG="${HOME}/.kube/config"
+        namespace={{ quote(namespace) }}
+        release={{ quote(release) }}
+        host_key={{ quote(host_key) }}
+    fi
 
-    if [ -z "{{ namespace }}" ]; then
-        echo "Set namespace to inspect." >&2
+    if [ -z "${namespace}" ]; then
+        echo "Set app=<name> or namespace=<namespace> to inspect." >&2
         exit 1
     fi
 
@@ -2463,41 +2545,13 @@ app-status namespace='' release='' host_key='ingress.host':
         exit 1
     fi
 
-    kubectl -n "{{ namespace }}" get pods
-    kubectl -n "{{ namespace }}" get ingress
+    kubectl -n "${namespace}" get pods
+    kubectl -n "${namespace}" get ingress
 
-    if [ -n "{{ release }}" ] && command -v helm >/dev/null 2>&1; then
+    if [ -n "${release}" ] && command -v helm >/dev/null 2>&1; then
         host="$(
-            helm get values "{{ release }}" \
-                --namespace "{{ namespace }}" \
-                --all --output json 2>/dev/null |
-                python3 - "{{ host_key }}" <<'PY'
-                import json
-                import sys
-
-                try:
-                    host_key = sys.argv[1]
-                    data = json.load(sys.stdin)
-                except (json.JSONDecodeError, KeyError, IndexError) as e:
-                    sys.stderr.write(f"Error extracting host value: {e}\n")
-                    sys.exit(1)
-                except Exception as e:
-                    sys.stderr.write(f"Unexpected error: {e}\n")
-                    sys.exit(1)
-
-                def get_with_dots(payload, dotted_key):
-                    node = payload
-                    for part in dotted_key.split('.'):
-                        if not isinstance(node, dict):
-                            return None
-                        node = node.get(part)
-                    return node
-
-                if isinstance(data, dict):
-                    host_value = get_with_dots(data, host_key)
-                    if host_value:
-                        print(host_value)
-                PY
+            helm get values "${release}"                 --namespace "${namespace}"                 --all --output json 2>/dev/null |
+                python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${host_key}" || true
         )"
     else
         host=""
