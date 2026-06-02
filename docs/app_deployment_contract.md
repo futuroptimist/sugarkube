@@ -2,11 +2,14 @@
 
 Sugarkube is moving toward a generic app deployment surface where each app is
 identified by a small local config file and deployed with shared `just` recipes.
-This page is the contract future implementation work will target; it does not
-change current `justfile` deployment behavior.
+This page is the implemented P5 contract for the generic `just app-*` deployment
+surface and the app config files that back it.
 
 The existing app-specific recipes for dspace, token.place, and danielsmith.io
-remain compatibility wrappers until the generic recipes are implemented.
+now remain as compatibility shims over the generic flow. They are retained for
+current runbooks and muscle memory, but operators should prefer the generic
+commands for new docs and future apps. The shims will be deprecated in a later
+release, not removed in this PR.
 
 ## Ownership boundary
 
@@ -93,7 +96,7 @@ Helm charts are immutable once published to GHCR OCI:
 
 ## App config file shape
 
-Future generic recipes will load a simple shell/dotenv-style config so they do
+Generic recipes load a simple shell/dotenv-style config so they do
 not require `yq`. Example files live under [`docs/examples/apps/`](examples/apps/)
 and may be copied into a local config directory such as `apps/APP.env`. Operators
 may also set `SUGARKUBE_APP_CONFIG_DIR` to point at another directory.
@@ -131,10 +134,11 @@ cp docs/examples/apps/dspace.env apps/dspace.env
 export SUGARKUBE_APP_CONFIG_DIR=apps
 ```
 
-## Planned generic command surface
+## Generic command surface
 
-P5 will implement these command shapes. They are documented here so app repos can
-align their artifacts before Sugarkube changes behavior.
+P5 implements these command shapes. They are backed by `scripts/app_config.py`,
+which searches explicit `config=`, `SUGARKUBE_APP_CONFIG_DIR`, local `apps/`, and
+then `docs/examples/apps/` fallback configs.
 
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
@@ -156,15 +160,16 @@ just app-verify app=dspace env=staging
 just app-config app=dspace env=staging
 ```
 
-The compatibility wrappers will remain during migration. For example,
+The compatibility wrappers remain during migration. For example,
 `just dspace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA` and
-`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` continue to be the
-current operational commands until generic recipes replace their internals.
+`just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` continue to work,
+but they are thin shims over `app-deploy`, `app-redeploy`, or `app-promote-prod`.
+Prefer `just app-deploy app=<app> env=<env> tag=<immutable-tag>` in new runbooks.
 
 ## Current example configs
 
 The example configs in `docs/examples/apps/` intentionally are not platform
-defaults. They are scaffolds for future local configs and tests:
+defaults. They are fallback scaffolds for the current apps, local configs, and tests:
 
 - [`docs/examples/apps/dspace.env`](examples/apps/dspace.env)
 - [`docs/examples/apps/tokenplace.env`](examples/apps/tokenplace.env)

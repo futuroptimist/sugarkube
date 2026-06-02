@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,16 @@ exit 0
     _write_executable(
         bin_dir / "python3",
         """#!/usr/bin/env bash
-exit 0
+set -euo pipefail
+case \"${1:-}\" in
+  */scripts/app_config.py|scripts/app_config.py)
+    exec '/root/.pyenv/versions/3.12.13/bin/python3' \"$@\"
+    ;;
+  *update_kubeconfig_scope.py)
+    exit 0
+    ;;
+esac
+exec '/root/.pyenv/versions/3.12.13/bin/python3' \"$@\"
 """,
     )
     _write_executable(
