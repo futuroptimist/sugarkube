@@ -1610,18 +1610,36 @@ app-verify app env='staging' config='':
     helm_context_args=(--kube-context "${kube_context}")
 
     host=""
+    discovery_errors=()
     if command -v helm >/dev/null 2>&1; then
-      host="$(helm "${helm_context_args[@]}" get values "${SUGARKUBE_RELEASE}" \
+      helm_values=""
+      helm_error="$(mktemp)"
+      if helm_values="$(helm "${helm_context_args[@]}" get values "${SUGARKUBE_RELEASE}" \
         --namespace "${SUGARKUBE_NAMESPACE}" \
-        --all --output json 2>/dev/null | \
-        python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}" || true)"
+        --all --output json 2>"${helm_error}")"; then
+        host="$(printf '%s\n' "${helm_values}" | \
+          python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}")"
+      else
+        discovery_errors+=("helm get values failed for context ${kube_context}: $(tr '\n' ' ' < "${helm_error}")")
+      fi
+      rm -f "${helm_error}"
     fi
     if [ -z "${host}" ] && command -v kubectl >/dev/null 2>&1; then
-      host="$(kubectl "${kubectl_context_args[@]}" -n "${SUGARKUBE_NAMESPACE}" get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true)"
+      kubectl_error="$(mktemp)"
+      if ! host="$(kubectl "${kubectl_context_args[@]}" -n "${SUGARKUBE_NAMESPACE}" get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>"${kubectl_error}")"; then
+        discovery_errors+=("kubectl ingress lookup failed for context ${kube_context}: $(tr '\n' ' ' < "${kubectl_error}")")
+        host=""
+      fi
+      rm -f "${kubectl_error}"
     fi
 
     IFS=',' read -r -a paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
     if [ -z "${host}" ]; then
+      if [ "${#discovery_errors[@]}" -gt 0 ]; then
+        printf 'Could not derive a host for %s using context %s.\n' "${SUGARKUBE_APP}" "${kube_context}" >&2
+        printf '%s\n' "${discovery_errors[@]}" >&2
+        exit 1
+      fi
       echo "Could not derive a host for ${SUGARKUBE_APP}; run these commands after replacing <host>:" >&2
       for path in "${paths[@]}"; do
         printf '  curl -fsS https://<host>%s\n' "${path}"

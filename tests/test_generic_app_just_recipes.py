@@ -63,6 +63,10 @@ if [[ "$*" == *"get deploy,statefulset,daemonset"* ]]; then
   exit 0
 fi
 if [[ "$*" == *"get ingress"* && "$*" == *"jsonpath"* ]]; then
+  if [ "${{SUGARKUBE_STUB_KUBECTL_INGRESS_FAIL:-}}" = "1" ]; then
+    echo 'error: context sugar-staging does not exist' >&2
+    exit 1
+  fi
   printf 'example.test'
   exit 0
 fi
@@ -83,6 +87,10 @@ exit 0
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
 if [[ "$*" == *"get values"* ]]; then
+  if [ "${{SUGARKUBE_STUB_HELM_GET_VALUES_FAIL:-}}" = "1" ]; then
+    echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
+    exit 1
+  fi
   printf '{{"ingress":{{"host":"example.test"}}}}\n'
   exit 0
 fi
@@ -319,3 +327,20 @@ def test_app_verify_does_not_rewrite_kubeconfig_for_read_only_checks(
     assert not (Path(generic_app_stub_env["HOME"]) / ".kube" / "config").exists()
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "--kube-context sugar-staging" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_fails_closed_when_context_host_discovery_fails(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_GET_VALUES_FAIL"] = "1"
+    env["SUGARKUBE_STUB_KUBECTL_INGRESS_FAIL"] = "1"
+
+    result = _run_just(["app-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode != 0
+    assert "Could not derive a host for tokenplace using context sugar-staging" in result.stderr
+    assert "helm get values failed for context sugar-staging" in result.stderr
+    assert "kubectl ingress lookup failed for context sugar-staging" in result.stderr
+    assert "curl -fsS https://<host>" not in result.stdout
