@@ -19,6 +19,22 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 | Production tag pin | `docs/apps/danielsmith.prod.tag` |
 | Verify paths | `/`, `/livez`, `/healthz` |
 
+### Artifact links
+
+Use these links before changing a deployment so the workflow runs, package versions, and source paths all agree.
+
+| Artifact | Link |
+| --- | --- |
+| App repository | [danielsmith.io app repository](https://github.com/futuroptimist/danielsmith.io) |
+| Image workflow | [Recent image workflow runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml) |
+| Successful main image runs | [Successful main image workflow runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) |
+| GHCR image package | [GHCR image package versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/danielsmith.io) |
+| Chart workflow | [Recent chart workflow runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml) |
+| GHCR chart package | [GHCR chart package versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/charts%2Fdanielsmith) |
+| Dockerfile | [Application Dockerfile](https://github.com/futuroptimist/danielsmith.io/blob/main/Dockerfile) |
+| Chart source | [Helm chart source](https://github.com/futuroptimist/danielsmith.io/tree/main/charts/danielsmith) |
+| App release guide | [Sugarkube release guide in the app repo](https://github.com/futuroptimist/danielsmith.io/blob/main/docs/ops/sugarkube-release.md) |
+
 ## Environment topology
 
 - `env=dev`: local/dev defaults using `docs/examples/danielsmith.values.dev.yaml`.
@@ -28,7 +44,13 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the danielsmith.io app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the danielsmith.io app repo and copy the immutable branch-SHA or release tag. The GitHub Actions workflow page is where recent builds are found; the GHCR package page is where published image tags are cross-checked. Do not deploy `latest`, a bare branch name, or an environment name.
+
+Web UI shortcuts:
+
+- Open [recent image workflow runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml) or [successful main image runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess).
+- Open [GHCR image package versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/danielsmith.io).
+- Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -46,7 +68,7 @@ gh workflow run ci-image.yml --repo futuroptimist/danielsmith.io --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/danielsmith.version`.
+Sugarkube deploys the chart version pinned in `docs/apps/danielsmith.version`. Use [recent chart workflow runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml) to find chart publish attempts, [GHCR chart package versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/charts%2Fdanielsmith) to confirm available immutable chart versions, and [the chart source](https://github.com/futuroptimist/danielsmith.io/tree/main/charts/danielsmith) to review the chart content that should match the pinned version.
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.version | head -n 1)
@@ -56,7 +78,7 @@ CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.v
 helm show chart oci://ghcr.io/futuroptimist/charts/danielsmith --version "$CHART_VERSION"
 ```
 
-If the chart changed, bump the chart version in the danielsmith.io app repo and publish it there with `ci-helm.yml`; do not republish a different chart under an existing OCI version.
+If the chart changed, bump the chart version in the danielsmith.io app repo and publish it there with [the chart workflow](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml); do not republish a different chart under an existing OCI version.
 
 ```bash
 gh workflow run ci-helm.yml --repo futuroptimist/danielsmith.io --ref main
