@@ -49,7 +49,7 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
     [image workflow](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml),
     [image package](https://github.com/democratizedspace/dspace/pkgs/container/dspace),
     [chart workflow](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml),
-    [chart package](https://github.com/orgs/democratizedspace/packages/container/package/charts%2Fdspace).
+    [GHCR package listing](https://github.com/orgs/democratizedspace/packages?repo_name=dspace) (chart package page pending).
   - [token.place runbook](docs/apps/tokenplace.md) for `ghcr.io/futuroptimist/tokenplace-relay`:
     [image workflow](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml),
     [image package](https://github.com/futuroptimist/token.place/pkgs/container/tokenplace-relay),

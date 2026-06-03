@@ -9,6 +9,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DSPACE_REPO = "https://github.com/democratizedspace/dspace"
 TOKENPLACE_REPO = "https://github.com/futuroptimist/token.place"
 DANIELSMITH_REPO = "https://github.com/futuroptimist/danielsmith.io"
+DSPACE_GHCR_PACKAGE_LIST = (
+    "https://github.com/orgs/democratizedspace/"
+    "packages?repo_name=dspace"
+)
+BROKEN_DSPACE_CHART_PACKAGE_URL = (
+    "https://github.com/orgs/democratizedspace/packages/"
+    "container/package/charts%2Fdspace"
+)
 
 APP_LINKS = {
     "dspace": {
@@ -20,7 +28,7 @@ APP_LINKS = {
             f"{DSPACE_REPO}/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess",
             f"{DSPACE_REPO}/pkgs/container/dspace",
             f"{DSPACE_REPO}/actions/workflows/ci-helm.yml",
-            "https://github.com/orgs/democratizedspace/packages/container/package/charts%2Fdspace",
+            DSPACE_GHCR_PACKAGE_LIST,
             f"{DSPACE_REPO}/blob/main/Dockerfile",
             f"{DSPACE_REPO}/tree/main/charts/dspace",
             f"{DSPACE_REPO}/blob/main/docs/ops/sugarkube-release.md",
@@ -62,7 +70,7 @@ README_QUICK_LINKS = {
         f"{DSPACE_REPO}/actions/workflows/ci-image.yml",
         f"{DSPACE_REPO}/pkgs/container/dspace",
         f"{DSPACE_REPO}/actions/workflows/ci-helm.yml",
-        "https://github.com/orgs/democratizedspace/packages/container/package/charts%2Fdspace",
+        DSPACE_GHCR_PACKAGE_LIST,
     ],
     "tokenplace": [
         "docs/apps/tokenplace.md",
@@ -110,6 +118,13 @@ def test_readme_application_runbooks_include_quick_artifact_links() -> None:
     for app, urls in README_QUICK_LINKS.items():
         for url in urls:
             assert url in readme, f"README app runbooks section missing {app} link {url}"
+
+
+def test_dspace_docs_do_not_link_missing_chart_package_page() -> None:
+    for relative_path in ("docs/apps/dspace.md", "README.md"):
+        text = _read(relative_path)
+        assert BROKEN_DSPACE_CHART_PACKAGE_URL not in text
+        assert "chart package page pending" in text or "No public package page" in text
 
 
 def test_contract_and_onboarding_require_artifact_discovery_links() -> None:
