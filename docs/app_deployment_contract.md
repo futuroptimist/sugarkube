@@ -47,6 +47,19 @@ Each Sugarkube-managed app needs the following deployment coordinates:
 | Values chain per env | Comma-separated Helm values files, ordered from base to environment overlay. |
 | Validation URLs/paths | Host key plus one or more HTTP paths to check after rollout. |
 
+### Required runbook links
+
+Every app runbook must include an artifact-discovery link set near the top so operators do not have to search GitHub Actions or GHCR manually. Include descriptive Markdown links for:
+
+- the app repository;
+- the image workflow for recent builds;
+- the GHCR image package for published tags;
+- the chart workflow for recent chart publish attempts;
+- the GHCR chart package for published immutable chart versions;
+- the Dockerfile or other source image path;
+- the chart source path; and
+- the app-repo Sugarkube release guide when one exists.
+
 The current apps map to that model as examples:
 
 | App | Image | Chart | Release | Namespace | Version pin | Prod tag pin |

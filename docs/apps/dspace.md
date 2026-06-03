@@ -19,6 +19,20 @@ This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugark
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 
+### Artifact links
+
+| Artifact | Link |
+| --- | --- |
+| App repo | [democratizedspace/dspace app repository](https://github.com/democratizedspace/dspace) |
+| Image workflow | [recent image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml) |
+| Successful main image runs | [successful `main` image builds](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) |
+| GHCR image package | [published image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace) |
+| Chart workflow | [recent chart publish runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) |
+| GHCR chart package | [published chart package versions](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) |
+| Dockerfile | [container build source](https://github.com/democratizedspace/dspace/blob/main/Dockerfile) |
+| Chart source | [Helm chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) |
+| App release guide | [Sugarkube release guide in the app repo](https://github.com/democratizedspace/dspace/blob/main/docs/ops/sugarkube-release.md) |
+
 ## Environment topology
 
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
@@ -28,7 +42,13 @@ This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugark
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the DSPACE app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the DSPACE app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name. The GitHub Actions workflow page is where recent builds are found; GHCR is where published package tags are cross-checked.
+
+Web UI shortcuts:
+
+- Open the [recent image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml).
+- Open the [GHCR image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace).
+- Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -46,7 +66,7 @@ gh workflow run ci-image.yml --repo democratizedspace/dspace --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/dspace.version`.
+Sugarkube deploys the chart version pinned in `docs/apps/dspace.version`. The [chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) show recent chart publish attempts; the [GHCR chart package versions](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) confirm which immutable chart versions are available. Review the [chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) when validating chart changes.
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.version | head -n 1)
