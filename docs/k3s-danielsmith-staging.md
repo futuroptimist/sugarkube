@@ -1,82 +1,58 @@
 # k3s danielsmith.io runbook (staging)
 
-Use this runbook for staging deployments of the static `danielsmith.io` site on Sugarkube.
+Use this environment runbook for staging-only danielsmith.io operations. The full uniform GHCR-first flow lives in [docs/apps/danielsmith.md](apps/danielsmith.md); this page keeps the environment-specific commands copy-pasteable.
 
-## Topology and scope
+## Scope and ownership
 
-- `danielsmith.io` is a static Vite + Three.js workload.
-- Sugarkube runs only the static web container.
-- No in-cluster API/backend/database/queue/GPU/compute node/stateful service is required.
-- Cloudflare Tunnel fronts Traefik; Traefik routes traffic to the `danielsmith` Service.
-- Probe/application endpoints: `/livez`, `/healthz`, and `/`.
+- App repo: publishes `ghcr.io/futuroptimist/danielsmith.io` and `oci://ghcr.io/futuroptimist/charts/danielsmith`.
+- Sugarkube: selects `env=staging`, deploys the pinned chart with the selected immutable image tag, and verifies the release.
+- Cloudflare: routes `staging.danielsmith.io` to Traefik outside Helm.
 
-## Artifact and values contract
-
-- Chart: `oci://ghcr.io/futuroptimist/charts/danielsmith`
-- Image: `ghcr.io/futuroptimist/danielsmith.io`
-- Release: `danielsmith`
-- Namespace: `danielsmith`
-- Version pin file: `docs/apps/danielsmith.version`
-- Values: `docs/examples/danielsmith.values.dev.yaml` + `docs/examples/danielsmith.values.staging.yaml`
-- Default staging host: `staging.danielsmith.io`
-
-## First install
+## Deploy staging
 
 ```bash
-just kubeconfig-env staging
-DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
-just helm-oci-install release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
+APP_TAG=main-REPLACE_SHORTSHA
 ```
 
-## Existing release upgrade
+Preferred generic command:
 
 ```bash
-just kubeconfig-env staging
-DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_TAG"
+just app-deploy app=danielsmith env=staging tag="$APP_TAG"
 ```
 
-Preferred wrapper:
+Compatibility shim while migration is in progress:
 
 ```bash
-DANIELSMITH_TAG=main-REPLACE_SHORTSHA # replace with the immutable GHCR image tag to deploy
-just danielsmith-oci-deploy env=staging tag="$DANIELSMITH_TAG"
+just danielsmith-oci-deploy env=staging tag="$APP_TAG"
 ```
 
-## Validation
+## Verify staging
 
 ```bash
-kubectl -n danielsmith get deploy,po,svc,ingress
-kubectl -n danielsmith rollout status deploy/danielsmith --timeout=180s
-curl -fsS https://staging.danielsmith.io/livez
-curl -fsS https://staging.danielsmith.io/healthz
+just app-status app=danielsmith env=staging
+```
+
+```bash
+just app-verify app=danielsmith env=staging
+```
+
+```bash
 curl -fsS https://staging.danielsmith.io/
 ```
 
-## Rollback
-
-Rollback by immutable tag:
+## Rollback staging
 
 ```bash
-just kubeconfig-env staging
-DANIELSMITH_PREVIOUS_TAG=main-REPLACE_PREVIOUS_SHORTSHA # replace with the previous immutable GHCR image tag
-just helm-oci-upgrade release=danielsmith namespace=danielsmith chart=oci://ghcr.io/futuroptimist/charts/danielsmith values=docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml version_file=docs/apps/danielsmith.version default_tag="$DANIELSMITH_PREVIOUS_TAG"
+APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
 ```
-
-Rollback by Helm revision:
-
-`tokenplace-rollback` is the repository's existing parameterized Helm rollback helper, even though the recipe name is token.place-scoped.
 
 ```bash
-just kubeconfig-env staging
-DANIELSMITH_REVISION=12 # replace with the known-good Helm revision
-just tokenplace-rollback release=danielsmith namespace=danielsmith revision="$DANIELSMITH_REVISION"
+just app-redeploy app=danielsmith env=staging tag="$APP_TAG"
 ```
 
-## Cloudflare tunnel routing (external to Helm)
+## Cloudflare route
 
-Cloudflare routes are configured outside the chart. Route `staging.danielsmith.io` to Traefik,
-typically `http://traefik.kube-system.svc.cluster.local:80`.
+Cloudflare Tunnel routing is external to Helm.
 
 ```bash
 just cf-tunnel-route host=staging.danielsmith.io
@@ -84,24 +60,10 @@ just cf-tunnel-route host=staging.danielsmith.io
 
 ## Troubleshooting
 
-GHCR auth/chart checks:
-
 ```bash
-echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
-helm show chart oci://ghcr.io/futuroptimist/charts/danielsmith --version "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' docs/apps/danielsmith.version | head -n1)"
+just app-config app=danielsmith env=staging
 ```
 
-App status/logs:
-
 ```bash
-just danielsmith-status
 just danielsmith-debug-logs-env env=staging
-```
-
-Ingress/tunnel checks:
-
-```bash
-just cluster-status
-just traefik-status
-just cf-tunnel-debug
 ```

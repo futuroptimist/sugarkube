@@ -251,5 +251,7 @@ yaml
 yml
 yourorg
 
+danielsmith
 executables
+jobbot
 pytest
