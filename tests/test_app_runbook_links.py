@@ -9,9 +9,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DSPACE_REPO = "https://github.com/democratizedspace/dspace"
 TOKENPLACE_REPO = "https://github.com/futuroptimist/token.place"
 DANIELSMITH_REPO = "https://github.com/futuroptimist/danielsmith.io"
-DSPACE_GHCR_PACKAGE_LIST = (
+DSPACE_CHART_PACKAGE_LOOKUP = (
     "https://github.com/orgs/democratizedspace/"
-    "packages?repo_name=dspace"
+    "packages?repo_name=dspace&q=charts%2Fdspace"
 )
 BROKEN_DSPACE_CHART_PACKAGE_URL = (
     "https://github.com/orgs/democratizedspace/packages/"
@@ -28,7 +28,7 @@ APP_LINKS = {
             f"{DSPACE_REPO}/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess",
             f"{DSPACE_REPO}/pkgs/container/dspace",
             f"{DSPACE_REPO}/actions/workflows/ci-helm.yml",
-            DSPACE_GHCR_PACKAGE_LIST,
+            DSPACE_CHART_PACKAGE_LOOKUP,
             f"{DSPACE_REPO}/blob/main/Dockerfile",
             f"{DSPACE_REPO}/tree/main/charts/dspace",
             f"{DSPACE_REPO}/blob/main/docs/ops/sugarkube-release.md",
@@ -70,7 +70,7 @@ README_QUICK_LINKS = {
         f"{DSPACE_REPO}/actions/workflows/ci-image.yml",
         f"{DSPACE_REPO}/pkgs/container/dspace",
         f"{DSPACE_REPO}/actions/workflows/ci-helm.yml",
-        DSPACE_GHCR_PACKAGE_LIST,
+        DSPACE_CHART_PACKAGE_LOOKUP,
     ],
     "tokenplace": [
         "docs/apps/tokenplace.md",
@@ -127,10 +127,26 @@ def test_dspace_docs_do_not_link_missing_chart_package_page() -> None:
         assert "chart package page pending" in text or "No public package page" in text
 
 
-def test_contract_and_onboarding_require_artifact_discovery_links() -> None:
+ONBOARDING_DISCOVERY_FIELDS = [
+    "App repo URL",
+    "Image workflow URL",
+    "GHCR image package URL",
+    "Chart workflow URL",
+    "GHCR chart package URL",
+    "Dockerfile/source image path URL",
+    "Chart source URL",
+    "App-repo release guide URL, when present",
+]
+
+
+def test_contract_requires_artifact_discovery_links() -> None:
     contract = _read("docs/app_deployment_contract.md")
-    onboarding = _read("docs/app_onboarding.md")
-    combined = f"{contract}\n{onboarding}"
     assert "Artifact discovery links" in contract
     for term in REQUIRED_DISCOVERY_TERMS:
-        assert term in combined, f"artifact discovery checklist missing {term!r}"
+        assert term in contract, f"contract artifact discovery list missing {term!r}"
+
+
+def test_onboarding_intake_asserts_artifact_fields_separately() -> None:
+    onboarding = _read("docs/app_onboarding.md")
+    for field in ONBOARDING_DISCOVERY_FIELDS:
+        assert field in onboarding, f"onboarding intake missing {field!r}"

@@ -110,6 +110,9 @@ Do not invent real configs for `wove` or `jobbot3000` until their app repos have
 | Health endpoints | Sets `SUGARKUBE_VERIFY_PATHS` and Kubernetes probes. |
 | Chart workflow URL | Lets operators find recent chart publish attempts. |
 | GHCR chart package URL | Lets operators confirm immutable chart versions before pinning. |
+| Dockerfile/source image path URL | Lets operators review the build context or source image before trusting published tags. |
+| Chart source URL | Lets operators compare the published chart version with the source chart. |
+| App-repo release guide URL, when present | Gives operators app-owned release notes and publish steps without searching the app repo. |
 | Chart name | Sets the OCI chart reference. |
 | Namespace and release | Sets stable Helm/Kubernetes ownership. |
 | Staging and production hostnames | Drives values overlays, ingress, certs, and Cloudflare routes. |

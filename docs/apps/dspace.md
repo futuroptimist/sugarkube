@@ -31,7 +31,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 | Successful v3 image runs | [Successful v3 image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess) |
 | GHCR image package | [GHCR image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace) |
 | Chart workflow | [Recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) |
-| GHCR chart package | No public package page is associated yet; use the [DSPACE GHCR package listing](https://github.com/orgs/democratizedspace/packages?repo_name=dspace) and `helm show chart` below until the chart package appears. |
+| GHCR chart package | No public package page is associated yet; use the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) and `helm show chart` below until the chart package appears. |
 | Dockerfile | [Application Dockerfile](https://github.com/democratizedspace/dspace/blob/main/Dockerfile) |
 | Chart source | [Helm chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) |
 | App release guide | [Sugarkube release guide in the app repo](https://github.com/democratizedspace/dspace/blob/main/docs/ops/sugarkube-release.md) |
@@ -50,6 +50,7 @@ Find the successful image workflow in the DSPACE app repo and copy the immutable
 Web UI shortcuts:
 
 - Open [recent image workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml), [successful main image runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess), or [successful v3 image runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess).
+  Consult `v3` in addition to `main` because the Raspberry Pi bootstrap helper still defaults `DSPACE_BRANCH` to `v3` for current DSPACE clones.
 - Open [GHCR image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace).
 - Copy the immutable tag from a successful workflow summary or package version.
 
@@ -69,7 +70,7 @@ gh workflow run ci-image.yml --repo democratizedspace/dspace --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/dspace.version`. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE GHCR package listing](https://github.com/orgs/democratizedspace/packages?repo_name=dspace) until that package page appears.
+Sugarkube deploys the chart version pinned in `docs/apps/dspace.version`. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) until that package page appears.
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.version | head -n 1)
