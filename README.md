@@ -43,10 +43,20 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
   tag, chart, app-config, and `just app-*` command contract for all Sugarkube apps.
 - **[Future-app onboarding guide](docs/app_onboarding.md)** — checklist and decision tree for
   adding apps such as wove, jobbot3000, and later services.
-- **Current app runbooks:** [DSPACE](docs/apps/dspace.md),
-  [token.place](docs/apps/tokenplace.md), and
-  [danielsmith.io](docs/apps/danielsmith.md) use the same GHCR-first staging,
-  verification, promotion, rollback, and troubleshooting flow.
+- **Current app runbooks** use the same GHCR-first staging, verification, promotion,
+  rollback, and troubleshooting flow:
+  - **[DSPACE](docs/apps/dspace.md):** [image workflow](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml),
+    [image package](https://github.com/democratizedspace/dspace/pkgs/container/dspace),
+    [chart workflow](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml),
+    [chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&ecosystem=container).
+  - **[token.place](docs/apps/tokenplace.md):** [image workflow](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml),
+    [image package](https://github.com/futuroptimist/token.place/pkgs/container/tokenplace-relay),
+    [chart workflow](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml),
+    [chart package](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace).
+  - **[danielsmith.io](docs/apps/danielsmith.md):** [image workflow](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml),
+    [image package](https://github.com/futuroptimist/danielsmith.io/pkgs/container/danielsmith.io),
+    [chart workflow](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml),
+    [chart package](https://github.com/futuroptimist/danielsmith.io/pkgs/container/charts%2Fdanielsmith).
 - **Environment shortcuts:** token.place
   [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
   [production](docs/k3s-tokenplace-prod.md); danielsmith.io

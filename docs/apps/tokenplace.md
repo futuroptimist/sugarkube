@@ -19,6 +19,19 @@ This is the canonical runbook for deploying token.place from GHCR artifacts to S
 | Production tag pin | `docs/apps/tokenplace.prod.tag` |
 | Verify paths | `/`, `/livez`, `/healthz`, `/relay/diagnostics` |
 
+### Artifact links
+
+| Artifact | Link |
+| --- | --- |
+| App repo | [token.place source repository](https://github.com/futuroptimist/token.place) |
+| Image workflow | [recent image builds](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml) and [successful main image runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) |
+| GHCR image package | [published image versions](https://github.com/futuroptimist/token.place/pkgs/container/tokenplace-relay) |
+| Chart workflow | [recent chart publish runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml) |
+| GHCR chart package versions | [published chart versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace) |
+| Dockerfile | [container source Dockerfile](https://github.com/futuroptimist/token.place/blob/main/Dockerfile) |
+| Chart source | [Helm chart directory](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace) |
+| Release guide | [app repo Sugarkube release guide](https://github.com/futuroptimist/token.place/blob/main/docs/ops/sugarkube-release.md) |
+
 ## Environment topology
 
 - `env=dev`: local/dev defaults using `docs/examples/tokenplace.values.dev.yaml`.
@@ -28,7 +41,13 @@ This is the canonical runbook for deploying token.place from GHCR artifacts to S
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the token.place app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the token.place app repo and copy the immutable branch-SHA or release tag. The GitHub Actions workflow page shows recent builds; GHCR is where operators cross-check published package tags. Do not deploy `latest`, a bare branch name, or an environment name.
+
+Web UI shortcuts:
+
+- Open the [image workflow recent runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml).
+- Open the [GHCR image package versions page](https://github.com/futuroptimist/token.place/pkgs/container/tokenplace-relay).
+- Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -46,7 +65,13 @@ gh workflow run ci-image.yml --repo futuroptimist/token.place --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/tokenplace.version`.
+Sugarkube deploys the chart version pinned in `docs/apps/tokenplace.version`. The chart workflow page shows recent publish attempts; the GHCR chart package page confirms available immutable chart versions, and the chart source shows what changed before publication.
+
+Web UI shortcuts:
+
+- Open the [chart workflow recent runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml).
+- Open the [GHCR chart package versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace).
+- Review the [chart source directory](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace).
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n 1)

@@ -19,6 +19,19 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 | Production tag pin | `docs/apps/danielsmith.prod.tag` |
 | Verify paths | `/`, `/livez`, `/healthz` |
 
+### Artifact links
+
+| Artifact | Link |
+| --- | --- |
+| App repo | [danielsmith.io source repository](https://github.com/futuroptimist/danielsmith.io) |
+| Image workflow | [recent image builds](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml) and [successful main image runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) |
+| GHCR image package | [published image versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/danielsmith.io) |
+| Chart workflow | [recent chart publish runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml) |
+| GHCR chart package versions | [published chart versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/charts%2Fdanielsmith) |
+| Dockerfile | [container source Dockerfile](https://github.com/futuroptimist/danielsmith.io/blob/main/Dockerfile) |
+| Chart source | [Helm chart directory](https://github.com/futuroptimist/danielsmith.io/tree/main/charts/danielsmith) |
+| Release guide | [app repo Sugarkube release guide](https://github.com/futuroptimist/danielsmith.io/blob/main/docs/ops/sugarkube-release.md) |
+
 ## Environment topology
 
 - `env=dev`: local/dev defaults using `docs/examples/danielsmith.values.dev.yaml`.
@@ -28,7 +41,13 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the danielsmith.io app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the danielsmith.io app repo and copy the immutable branch-SHA or release tag. The GitHub Actions workflow page shows recent builds; GHCR is where operators cross-check published package tags. Do not deploy `latest`, a bare branch name, or an environment name.
+
+Web UI shortcuts:
+
+- Open the [image workflow recent runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-image.yml).
+- Open the [GHCR image package versions page](https://github.com/futuroptimist/danielsmith.io/pkgs/container/danielsmith.io).
+- Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -46,7 +65,13 @@ gh workflow run ci-image.yml --repo futuroptimist/danielsmith.io --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/danielsmith.version`.
+Sugarkube deploys the chart version pinned in `docs/apps/danielsmith.version`. The chart workflow page shows recent publish attempts; the GHCR chart package page confirms available immutable chart versions, and the chart source shows what changed before publication.
+
+Web UI shortcuts:
+
+- Open the [chart workflow recent runs](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml).
+- Open the [GHCR chart package versions](https://github.com/futuroptimist/danielsmith.io/pkgs/container/charts%2Fdanielsmith).
+- Review the [chart source directory](https://github.com/futuroptimist/danielsmith.io/tree/main/charts/danielsmith).
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/danielsmith.version | head -n 1)

@@ -55,6 +55,22 @@ The current apps map to that model as examples:
 | token.place | `ghcr.io/futuroptimist/tokenplace-relay` | `oci://ghcr.io/futuroptimist/charts/tokenplace` | `tokenplace` | `tokenplace` | `docs/apps/tokenplace.version` | `docs/apps/tokenplace.prod.tag` |
 | danielsmith.io | `ghcr.io/futuroptimist/danielsmith.io` | `oci://ghcr.io/futuroptimist/charts/danielsmith` | `danielsmith` | `danielsmith` | `docs/apps/danielsmith.version` | `docs/apps/danielsmith.prod.tag` |
 
+
+## Artifact discovery links
+
+Every app runbook must make artifacts discoverable without asking operators to
+search GitHub Actions or GHCR manually. Near the top of each runbook, include
+links to:
+
+- the app repo;
+- the image workflow for recent build runs;
+- the GHCR image package for published image tags;
+- the chart workflow for recent chart publish attempts;
+- the GHCR chart package for published immutable chart versions;
+- the Dockerfile or other source image path used by the workflow;
+- the chart source path; and
+- the app-repo release guide when one is present.
+
 ## Standard image tag model
 
 Deployment tags must identify application code and release intent, not mutable

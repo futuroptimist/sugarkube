@@ -16,8 +16,11 @@ Use this checklist when onboarding the next GHCR-first app to Sugarkube. The goa
 4. Add `ci-helm.yml` with immutable OCI chart publishing.
 5. Add or copy a Sugarkube app config.
 6. Add environment values overlays for `dev`, `staging`, and `prod`.
-7. Run the generic Sugarkube deploy.
-8. Add app-specific smoke checks when generic HTTP checks are not enough.
+7. Add the Sugarkube runbook artifact discovery links: app repo, image workflow,
+   GHCR image package, chart workflow, GHCR chart package, Dockerfile/source image
+   path, chart source path, and app-repo release guide when present.
+8. Run the generic Sugarkube deploy.
+9. Add app-specific smoke checks when generic HTTP checks are not enough.
 
 ## Minimal app config template
 
@@ -98,9 +101,14 @@ Do not invent real configs for `wove` or `jobbot3000` until their app repos have
 
 | Question | Why Sugarkube needs it |
 | --- | --- |
+| App repo URL | Gives operators the source-of-truth repository and ownership boundary. |
+| Image workflow URL | Lets operators open recent `ci-image.yml` build runs directly. |
+| GHCR image package URL | Lets operators confirm published immutable image tags. |
 | App image name | Sets `image.repository` and lets operators find GHCR image tags. |
 | Container port | Drives Service and probe wiring in the chart. |
 | Health endpoints | Sets `SUGARKUBE_VERIFY_PATHS` and Kubernetes probes. |
+| Chart workflow URL | Lets operators open recent `ci-helm.yml` chart publish attempts directly. |
+| GHCR chart package URL | Lets operators confirm published immutable OCI chart versions. |
 | Chart name | Sets the OCI chart reference. |
 | Namespace and release | Sets stable Helm/Kubernetes ownership. |
 | Staging and production hostnames | Drives values overlays, ingress, certs, and Cloudflare routes. |
