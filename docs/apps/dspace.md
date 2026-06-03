@@ -8,6 +8,21 @@ This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugark
 - Sugarkube responsibilities: select `dev`, `staging`, or `prod`; load `docs/examples/apps/dspace.env` or a local override; select kubeconfig/context; install or upgrade Helm; verify rollout status, logs, and public paths.
 - Cloudflare responsibilities: DNS and Tunnel routes to Traefik are outside Helm and must exist before public verification.
 
+### Artifact links
+
+| Artifact | Link |
+| --- | --- |
+| App repo | [DSPACE source repository](https://github.com/democratizedspace/dspace) |
+| Image workflow | [DSPACE image workflow recent runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml) and [successful `main` image runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) and [successful `v3` image runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml?query=branch%3Av3+is%3Asuccess) remain useful while DSPACE release work still references the `v3` branch |
+| GHCR image package | [DSPACE image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace) |
+| Chart workflow | [DSPACE chart publish workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) |
+| GHCR chart package | [DSPACE chart package versions](https://github.com/orgs/democratizedspace/packages?ecosystem=container&repo_name=dspace) |
+| Dockerfile | [DSPACE Dockerfile](https://github.com/democratizedspace/dspace/blob/main/Dockerfile) |
+| Chart source | [DSPACE Helm chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) |
+| App release guide | [DSPACE Sugarkube release guide](https://github.com/democratizedspace/dspace/blob/main/docs/ops/sugarkube-release.md) |
+
+The DSPACE chart workflow publishes `oci://ghcr.io/democratizedspace/charts/dspace`; GitHub currently exposes the openable package discovery page as the democratizedspace container package listing filtered to the DSPACE repo.
+
 | Coordinate | Value |
 | --- | --- |
 | Image | `ghcr.io/democratizedspace/dspace` |
@@ -29,6 +44,12 @@ This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugark
 ## Find or publish GHCR image
 
 Find the successful image workflow in the DSPACE app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
+
+Web UI shortcuts before using `gh`:
+
+- Open the [DSPACE image workflow recent runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-image.yml); GitHub Actions is where recent image builds and workflow summaries are found.
+- Open the [DSPACE GHCR image package versions](https://github.com/democratizedspace/dspace/pkgs/container/dspace); GHCR is where published package tags are cross-checked.
+- Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -55,6 +76,12 @@ CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.versio
 ```bash
 helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$CHART_VERSION"
 ```
+
+Chart discovery shortcuts:
+
+- Open the [DSPACE chart publish workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml); GitHub Actions is where recent chart publish attempts and failures are found.
+- Open the [DSPACE GHCR chart package listing](https://github.com/orgs/democratizedspace/packages?ecosystem=container&repo_name=dspace); chart package pages confirm available immutable chart versions for `oci://ghcr.io/democratizedspace/charts/dspace` when GitHub exposes the chart package publicly.
+- Review the [DSPACE Helm chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) before publishing a chart change.
 
 If the chart changed, bump the chart version in the DSPACE app repo and publish it there with `ci-helm.yml`; do not republish a different chart under an existing OCI version.
 

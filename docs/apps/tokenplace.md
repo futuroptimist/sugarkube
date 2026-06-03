@@ -8,6 +8,19 @@ This is the canonical runbook for deploying token.place from GHCR artifacts to S
 - Sugarkube responsibilities: select `dev`, `staging`, or `prod`; load `docs/examples/apps/tokenplace.env` or a local override; select kubeconfig/context; install or upgrade Helm; verify rollout status, logs, and public paths.
 - Cloudflare responsibilities: DNS and Tunnel routes to Traefik are outside Helm and must exist before public verification.
 
+### Artifact links
+
+| Artifact | Link |
+| --- | --- |
+| App repo | [token.place source repository](https://github.com/futuroptimist/token.place) |
+| Image workflow | [token.place image workflow recent runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml) and [successful `main` image runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess) |
+| GHCR image package | [token.place image package versions](https://github.com/futuroptimist/token.place/pkgs/container/tokenplace-relay) |
+| Chart workflow | [token.place chart publish workflow runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml) |
+| GHCR chart package | [token.place chart package versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace) |
+| Dockerfile | [token.place Dockerfile](https://github.com/futuroptimist/token.place/blob/main/Dockerfile) |
+| Chart source | [token.place Helm chart source](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace) |
+| App release guide | [token.place Sugarkube release guide](https://github.com/futuroptimist/token.place/blob/main/docs/ops/sugarkube-release.md) |
+
 | Coordinate | Value |
 | --- | --- |
 | Image | `ghcr.io/futuroptimist/tokenplace-relay` |
@@ -29,6 +42,12 @@ This is the canonical runbook for deploying token.place from GHCR artifacts to S
 ## Find or publish GHCR image
 
 Find the successful image workflow in the token.place app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, a bare branch name, or an environment name.
+
+Web UI shortcuts before using `gh`:
+
+- Open the [token.place image workflow recent runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-image.yml); GitHub Actions is where recent image builds and workflow summaries are found.
+- Open the [token.place GHCR image package versions](https://github.com/futuroptimist/token.place/pkgs/container/tokenplace-relay); GHCR is where published package tags are cross-checked.
+- Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -55,6 +74,12 @@ CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.ve
 ```bash
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
 ```
+
+Chart discovery shortcuts:
+
+- Open the [token.place chart publish workflow runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml); GitHub Actions is where recent chart publish attempts and failures are found.
+- Open the [token.place GHCR chart package versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace); chart package pages confirm available immutable chart versions for `oci://ghcr.io/futuroptimist/charts/tokenplace`.
+- Review the [token.place Helm chart source](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace) before publishing a chart change.
 
 If the chart changed, bump the chart version in the token.place app repo and publish it there with `ci-helm.yml`; do not republish a different chart under an existing OCI version.
 

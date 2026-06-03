@@ -55,6 +55,23 @@ The current apps map to that model as examples:
 | token.place | `ghcr.io/futuroptimist/tokenplace-relay` | `oci://ghcr.io/futuroptimist/charts/tokenplace` | `tokenplace` | `tokenplace` | `docs/apps/tokenplace.version` | `docs/apps/tokenplace.prod.tag` |
 | danielsmith.io | `ghcr.io/futuroptimist/danielsmith.io` | `oci://ghcr.io/futuroptimist/charts/danielsmith` | `danielsmith` | `danielsmith` | `docs/apps/danielsmith.version` | `docs/apps/danielsmith.prod.tag` |
 
+### Required runbook artifact discovery links
+
+Every Sugarkube app runbook must include a compact artifact discovery section so
+operators can move from Sugarkube docs directly to the publishing system without
+searching GitHub Actions or GHCR manually. Link to all of the following before
+an app is considered fully documented:
+
+- the app repository;
+- the image workflow recent runs page, plus a successful default-branch filter
+  when useful;
+- the GHCR image package versions page;
+- the chart publish workflow recent runs page;
+- the GHCR chart package versions page;
+- the Dockerfile or source image build path;
+- the chart source path; and
+- the app-repo Sugarkube release guide when one exists.
+
 ## Standard image tag model
 
 Deployment tags must identify application code and release intent, not mutable
