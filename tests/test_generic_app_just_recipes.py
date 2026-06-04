@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.app_verify import base_url_from_host
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -397,6 +399,18 @@ def test_app_verify_adds_curl_timeouts(
     assert "--connect-timeout 10 --max-time 30" in curl_log
 
 
+@pytest.mark.parametrize(
+    ("host", "expected_base_url"),
+    [
+        ("example.test", "https://example.test"),
+        ("http://example.test", "https://example.test"),
+        ("https://example.test", "https://example.test"),
+    ],
+)
+def test_app_verify_normalizes_hosts_to_https(host: str, expected_base_url: str) -> None:
+    assert base_url_from_host(host) == expected_base_url
+
+
 def test_app_verify_normalizes_http_host_values_to_https(
     generic_app_stub_env: dict[str, str],
 ) -> None:
@@ -453,16 +467,38 @@ def test_app_verify_print_only_prints_commands_without_curl(
     assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
 
 
+@pytest.mark.parametrize("false_env_value", ["0", "false", ""])
 def test_app_verify_print_only_argument_overrides_false_environment_value(
+    generic_app_stub_env: dict[str, str], false_env_value: str
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_VERIFY_PRINT_ONLY"] = false_env_value
+
+    result = _run_just(["app-verify", "app=danielsmith", "env=staging", "print_only=1"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/livez",
+        "curl -fsS https://example.test/healthz",
+    ]
+    assert not Path(env["CURL_LOG"]).exists()
+
+
+def test_app_verify_print_only_environment_prints_commands_without_curl(
     generic_app_stub_env: dict[str, str],
 ) -> None:
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_APP_VERIFY_PRINT_ONLY"] = "0"
+    env["SUGARKUBE_APP_VERIFY_PRINT_ONLY"] = "1"
 
-    result = _run_just(["app-verify", "app=tokenplace", "env=staging", "print_only=1"], env)
+    result = _run_just(["app-verify", "app=danielsmith", "env=staging"], env)
 
     assert result.returncode == 0, result.stderr + result.stdout
-    assert result.stdout.splitlines()[0] == "curl -fsS https://example.test/"
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/livez",
+        "curl -fsS https://example.test/healthz",
+    ]
     assert not Path(env["CURL_LOG"]).exists()
 
 
