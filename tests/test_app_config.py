@@ -359,6 +359,18 @@ def test_main_supports_json_shell_validate_tag_and_host_value(
     assert "export SUGARKUBE_TAG=main-deadbee" in capsys.readouterr().out
 
 
+def test_example_app_configs_preserve_verification_paths() -> None:
+    expected = {
+        "danielsmith": "/,/livez,/healthz",
+        "tokenplace": "/,/livez,/healthz,/relay/diagnostics",
+        "dspace": "/config.json,/healthz,/livez",
+    }
+
+    for app, paths in expected.items():
+        config = app_config.load_config(app, "staging")
+        assert config["SUGARKUBE_VERIFY_PATHS"] == paths
+
+
 def test_main_reports_config_errors(capsys: pytest.CaptureFixture[str]) -> None:
     assert app_config.main(["json", "--app", "missing", "--env", "staging"]) == 2
     assert "ERROR: no config found for app 'missing'" in capsys.readouterr().err

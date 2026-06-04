@@ -146,7 +146,7 @@ Required keys for the generic recipes:
 | `SUGARKUBE_VALUES_STAGING` | Values chain for `env=staging`. |
 | `SUGARKUBE_VALUES_PROD` | Values chain for `env=prod`. |
 | `SUGARKUBE_STATUS_HOST_KEY` | Dotted Helm values key used to discover the public host. |
-| `SUGARKUBE_VERIFY_PATHS` | Comma-separated HTTP paths for post-deploy verification. |
+| `SUGARKUBE_VERIFY_PATHS` | Comma-separated HTTP paths that `just app-verify` executes for post-deploy verification. |
 | `SUGARKUBE_DEBUG_SELECTOR` | Kubernetes label selector for app pod logs/debugging. |
 
 Example local setup:
@@ -175,8 +175,12 @@ just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
 # Inspect Kubernetes and Helm status for an app environment.
 just app-status app=dspace env=staging
 
-# Run HTTP verification paths for an app environment.
+# Execute configured HTTP verification paths for an app environment.
+# This prints a per-path report and exits non-zero if any check fails.
 just app-verify app=dspace env=staging
+
+# Print the curl commands without executing them for docs/debugging.
+just app-verify app=dspace env=staging print_only=1
 
 # Print the resolved app config for review/debugging.
 just app-config app=dspace env=staging

@@ -1593,14 +1593,27 @@ app-promote-prod app tag='' config='':
       config="${SUGARKUBE_CONFIG_PATH}"
 
 # Verify configured HTTPS paths for a Sugarkube app.
-app-verify app env='staging' config='':
+app-verify app env='staging' config='' print_only='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    config_input={{ quote(config) }}
+    print_only_input={{ quote(print_only) }}
+    while [ "${config_input#config=}" != "${config_input}" ]; do
+      config_input="${config_input#config=}"
+    done
+    if [ "${config_input#print_only=}" != "${config_input}" ]; then
+      print_only_input="${config_input}"
+      config_input=""
+    fi
+    while [ "${print_only_input#print_only=}" != "${print_only_input}" ]; do
+      print_only_input="${print_only_input#print_only=}"
+    done
 
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app {{ quote(app) }} \
       --env {{ quote(env) }} \
-      --config {{ quote(config) }})"
+      --config "${config_input}")"
 
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
@@ -1608,6 +1621,10 @@ app-verify app env='staging' config='':
     kube_context="sugar-${SUGARKUBE_ENV}"
     kubectl_context_args=(--context "${kube_context}")
     helm_context_args=(--kube-context "${kube_context}")
+    print_only_mode=0
+    case "${print_only_input:-${SUGARKUBE_APP_VERIFY_PRINT_ONLY:-0}}" in
+      1|true|TRUE|yes|YES|on|ON) print_only_mode=1 ;;
+    esac
 
     host=""
     discovery_errors=()
@@ -1633,24 +1650,36 @@ app-verify app env='staging' config='':
       rm -f "${kubectl_error}"
     fi
 
-    IFS=',' read -r -a paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
     if [ -z "${host}" ]; then
+      printf 'Could not derive a host for %s using context %s.\n' "${SUGARKUBE_APP}" "${kube_context}" >&2
       if [ "${#discovery_errors[@]}" -gt 0 ]; then
-        printf 'Could not derive a host for %s using context %s.\n' "${SUGARKUBE_APP}" "${kube_context}" >&2
         printf '%s\n' "${discovery_errors[@]}" >&2
-        exit 1
       fi
-      echo "Could not derive a host for ${SUGARKUBE_APP}; run these commands after replacing <host>:" >&2
-      for path in "${paths[@]}"; do
-        printf '  curl -fsS https://<host>%s\n' "${path}"
-      done
-      exit 0
+      printf 'Run just app-status app=%s env=%s or just app-config app=%s env=%s for discovery details.\n' \
+        "${SUGARKUBE_APP}" "${SUGARKUBE_ENV}" "${SUGARKUBE_APP}" "${SUGARKUBE_ENV}" >&2
+      printf 'Manual commands after replacing <host>:\n' >&2
+      python3 "{{ justfile_directory() }}/scripts/app_verify.py" \
+        --app "${SUGARKUBE_APP}" \
+        --env "${SUGARKUBE_ENV}" \
+        --host '<host>' \
+        --paths "${SUGARKUBE_VERIFY_PATHS:-/}" \
+        --print-only
+      if [ "${print_only_mode}" = "1" ]; then
+        exit 0
+      fi
+      exit 1
     fi
 
-    for path in "${paths[@]}"; do
-      printf 'curl -fsS https://%s%s\n' "${host}" "${path}"
-      curl -fsS "https://${host}${path}" >/dev/null
-    done
+    verify_args=(
+      --app "${SUGARKUBE_APP}"
+      --env "${SUGARKUBE_ENV}"
+      --host "${host}"
+      --paths "${SUGARKUBE_VERIFY_PATHS:-/}"
+    )
+    if [ "${print_only_mode}" = "1" ]; then
+      verify_args+=(--print-only)
+    fi
+    python3 "{{ justfile_directory() }}/scripts/app_verify.py" "${verify_args[@]}"
 
 # Opinionated immutable-tag dspace deploy with rollout verification.
 #

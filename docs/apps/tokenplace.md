@@ -108,6 +108,10 @@ just app-status app=tokenplace env=staging
 just app-verify app=tokenplace env=staging
 ```
 
+`just app-verify` executes the configured public HTTP checks, prints a per-path URL/status/body preview report, and exits non-zero after attempting every path if any check fails. To print the generated curl commands without executing them, run `just app-verify app=tokenplace env=staging print_only=1`.
+
+Manual public checks are optional fallback/troubleshooting when host discovery, Cloudflare, or cert-manager are suspect.
+
 ```bash
 curl -fsS https://staging.token.place/healthz
 ```
@@ -153,6 +157,10 @@ just app-status app=tokenplace env=prod
 ```bash
 just app-verify app=tokenplace env=prod
 ```
+
+For command generation only, use `just app-verify app=tokenplace env=prod print_only=1`.
+
+Optional manual fallback:
 
 ```bash
 curl -fsS https://token.place/healthz
