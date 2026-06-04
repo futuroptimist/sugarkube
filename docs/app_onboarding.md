@@ -201,4 +201,10 @@ just app-status app=appslug env=staging config="$APP_CONFIG"
 just app-verify app=appslug env=staging config="$APP_CONFIG"
 ```
 
+`just app-verify` executes the configured HTTP checks and exits non-zero after reporting every failed path. To print the generated commands without making network requests, run:
+
+```bash
+just app-verify app=appslug env=staging config="$APP_CONFIG" print_only=1
+```
+
 Add app-specific checks only for behavior the generic URL checks cannot validate, such as a login-free API health endpoint, a static asset manifest, a queue worker heartbeat, or a safe diagnostics endpoint.

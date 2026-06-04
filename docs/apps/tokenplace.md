@@ -100,6 +100,8 @@ just tokenplace-oci-deploy env=staging tag="$APP_TAG"
 
 ## Verify staging
 
+`just app-verify` discovers the public host and executes the configured HTTP checks directly. Use `print_only=1` when you only want to print the equivalent `curl -fsS` commands for docs or debugging.
+
 ```bash
 just app-status app=tokenplace env=staging
 ```
@@ -107,6 +109,12 @@ just app-status app=tokenplace env=staging
 ```bash
 just app-verify app=tokenplace env=staging
 ```
+
+```bash
+just app-verify app=tokenplace env=staging print_only=1
+```
+
+Manual public checks are optional troubleshooting fallbacks when DNS, Cloudflare, or certificates are suspect.
 
 ```bash
 curl -fsS https://staging.token.place/healthz

@@ -102,7 +102,7 @@ just dspace-oci-deploy env=staging tag="$APP_TAG"
 
 ## Verify staging
 
-Generic verification discovers the host from Helm values or Ingress and checks the configured DSPACE paths.
+Generic verification discovers the host from Helm values or Ingress and executes the configured DSPACE HTTP checks directly. Use `print_only=1` when you only want to print the equivalent `curl -fsS` commands for docs or debugging.
 
 ```bash
 just app-status app=dspace env=staging
@@ -112,7 +112,11 @@ just app-status app=dspace env=staging
 just app-verify app=dspace env=staging
 ```
 
-Manual public checks are useful when Cloudflare or cert-manager are suspect.
+```bash
+just app-verify app=dspace env=staging print_only=1
+```
+
+Manual public checks are optional troubleshooting fallbacks when Cloudflare or cert-manager are suspect.
 
 ```bash
 curl -fsS https://staging.democratized.space/config.json | jq .

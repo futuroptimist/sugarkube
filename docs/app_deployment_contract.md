@@ -175,8 +175,11 @@ just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
 # Inspect Kubernetes and Helm status for an app environment.
 just app-status app=dspace env=staging
 
-# Run HTTP verification paths for an app environment.
+# Execute HTTP verification paths for an app environment.
 just app-verify app=dspace env=staging
+
+# Print the equivalent curl commands without executing requests.
+just app-verify app=dspace env=staging print_only=1
 
 # Print the resolved app config for review/debugging.
 just app-config app=dspace env=staging
