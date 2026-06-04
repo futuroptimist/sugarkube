@@ -91,7 +91,7 @@ if [[ "$*" == *"get values"* ]]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
     exit 1
   fi
-  printf '{{"ingress":{{"host":"example.test"}}}}\n'
+  printf '{{"ingress":{{"host":"%s"}}}}\n' "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   exit 0
 fi
 if [[ "$*" == *" status "* ]]; then
@@ -109,15 +109,14 @@ body_file=""
 url=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --connect-timeout|--max-time|-w) shift 2 ;;
     -o) body_file="$2"; shift 2 ;;
-    -w) shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
 done
-path="/${{url#https://example.test/}}
-"
-path="${{path//$'\n'/}}"
+path="${{url#https://example.test}}"
+path="${{path:-/}}"
 status=200
 body='{{"status":"ok"}}'
 case "${{path}}" in
@@ -388,6 +387,31 @@ def test_app_verify_executes_curl_by_default_and_prints_summary(
     assert "Verification passed: 3/3 checks succeeded." in result.stdout
 
 
+def test_app_verify_adds_curl_timeouts(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(["app-verify", "app=danielsmith", "env=staging"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    curl_log = Path(generic_app_stub_env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "--connect-timeout 10 --max-time 30" in curl_log
+
+
+def test_app_verify_normalizes_http_host_values_to_https(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_HOST"] = "http://example.test"
+
+    result = _run_just(["app-verify", "app=danielsmith", "env=staging"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Host: https://example.test" in result.stdout
+    curl_log = Path(env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "https://example.test/livez" in curl_log
+    assert "http://example.test" not in curl_log
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_app_verify_failure_checks_all_paths_and_exits_nonzero(
     generic_app_stub_env: dict[str, str],
@@ -427,6 +451,19 @@ def test_app_verify_print_only_prints_commands_without_curl(
         "curl -fsS https://example.test/relay/diagnostics",
     ]
     assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
+
+
+def test_app_verify_print_only_argument_overrides_false_environment_value(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_VERIFY_PRINT_ONLY"] = "0"
+
+    result = _run_just(["app-verify", "app=tokenplace", "env=staging", "print_only=1"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines()[0] == "curl -fsS https://example.test/"
+    assert not Path(env["CURL_LOG"]).exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

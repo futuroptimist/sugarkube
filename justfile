@@ -1620,7 +1620,7 @@ app-verify app env='staging' config='' print_only='':
       print_only_input="${print_only_input#print_only=}"
     done
     print_only_args=()
-    if [ "${SUGARKUBE_APP_VERIFY_PRINT_ONLY:-${print_only_input}}" = "1" ]; then
+    if [ "${print_only_input:-${SUGARKUBE_APP_VERIFY_PRINT_ONLY:-}}" = "1" ]; then
       print_only_args+=(--print-only)
     fi
 

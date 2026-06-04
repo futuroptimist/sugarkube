@@ -11,8 +11,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
 
 def env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
@@ -108,8 +106,10 @@ def base_url_from_host(host: str) -> str:
     host = host.strip().rstrip("/")
     if not host:
         return ""
-    if host.startswith(("http://", "https://")):
+    if host.startswith("https://"):
         return host
+    if host.startswith("http://"):
+        host = host[len("http://") :]
     return f"https://{host}"
 
 
@@ -149,11 +149,25 @@ def int_env(name: str, default: int) -> int:
 
 
 def run_curl(url: str) -> tuple[int, str, bytes, str]:
+    connect_timeout = int_env("SUGARKUBE_APP_VERIFY_CURL_CONNECT_TIMEOUT", 10)
+    max_time = int_env("SUGARKUBE_APP_VERIFY_CURL_MAX_TIME", 30)
     with tempfile.NamedTemporaryFile(delete=False) as body_tmp:
         body_path = Path(body_tmp.name)
     try:
         curl = subprocess.run(
-            ["curl", "-sS", "-o", str(body_path), "-w", "%{http_code}", url],
+            [
+                "curl",
+                "-sS",
+                "--connect-timeout",
+                str(connect_timeout),
+                "--max-time",
+                str(max_time),
+                "-o",
+                str(body_path),
+                "-w",
+                "%{http_code}",
+                url,
+            ],
             capture_output=True,
             text=True,
             check=False,
