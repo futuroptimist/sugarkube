@@ -102,8 +102,43 @@ exit 0
     )
     _write_executable(
         bin_dir / "curl",
-        """#!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >> {str(tmp_path / "curl.log")!r}
+body_file=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) body_file="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+path="/${{url#https://example.test/}}
+"
+path="${{path//$'\n'/}}"
+status=200
+body='{{"status":"ok"}}'
+case "${{path}}" in
+  /) body=$'<!doctype html>\n<html lang="en">\n<body>ok</body>\n</html>' ;;
+  /config.json) body='{{"publicConfig":true}}' ;;
+  /relay/diagnostics) body='{{"relay":"ok"}}' ;;
+esac
+if [ "${{SUGARKUBE_STUB_CURL_FAIL_PATH:-}}" = "${{path}}" ]; then
+  status=503
+  body='{{"status":"down"}}'
+  echo 'curl: (22) The requested URL returned error: 503' >&2
+fi
+if [ -n "${{body_file}}" ]; then
+  printf '%s\n' "${{body}}" > "${{body_file}}"
+else
+  printf '%s\n' "${{body}}"
+fi
+printf '%s' "${{status}}"
+if [ "${{status}}" -ge 400 ]; then
+  exit 22
+fi
 exit 0
 """,
     )
@@ -114,6 +149,7 @@ exit 0
     env["SUGARKUBE_HELM_ROLLOUT_TIMEOUT"] = "1s"
     env["HELM_LOG"] = str(log_path)
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
+    env["CURL_LOG"] = str(tmp_path / "curl.log")
     return env
 
 
@@ -330,6 +366,114 @@ def test_app_verify_does_not_rewrite_kubeconfig_for_read_only_checks(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_executes_curl_by_default_and_prints_summary(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(["app-verify", "app=danielsmith", "env=staging"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    curl_log = Path(generic_app_stub_env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "https://example.test/" in curl_log
+    assert "https://example.test/livez" in curl_log
+    assert "https://example.test/healthz" in curl_log
+    assert result.stdout.startswith(
+        "Verifying danielsmith env=staging\nHost: https://example.test\n\n"
+    )
+    assert "\n[1/3] GET /\n" in result.stdout
+    assert "\n[2/3] GET /livez\n" in result.stdout
+    assert "\n[3/3] GET /healthz\n" in result.stdout
+    assert "  URL: https://example.test/livez\n" in result.stdout
+    assert "  Status: OK (HTTP 200)" in result.stdout
+    assert '  Body:\n  {"status":"ok"}' in result.stdout
+    assert "Verification passed: 3/3 checks succeeded." in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_failure_checks_all_paths_and_exits_nonzero(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CURL_FAIL_PATH"] = "/livez"
+
+    result = _run_just(["app-verify", "app=danielsmith", "env=staging"], env)
+
+    assert result.returncode != 0
+    curl_log = Path(env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "https://example.test/" in curl_log
+    assert "https://example.test/livez" in curl_log
+    assert "https://example.test/healthz" in curl_log
+    assert "[2/3] GET /livez" in result.stdout
+    assert "Status: FAILED (HTTP 503)" in result.stdout
+    assert "curl exit status: 22" in result.stdout
+    assert '{"status":"down"}' in result.stdout
+    assert "Verification failed: 1/3 checks failed." in result.stderr
+    assert "/livez (https://example.test/livez)" in result.stderr
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_print_only_prints_commands_without_curl(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-verify", "app=tokenplace", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/livez",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/relay/diagnostics",
+    ]
+    assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_VERIFY_SHOW_BODY"] = "0"
+
+    result = _run_just(["app-verify", "app=dspace", "env=staging"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Body:" not in result.stdout
+    assert "https://example.test/config.json" in result.stdout
+    assert "Verification passed: 3/3 checks succeeded." in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("app", "expected_paths"),
+    [
+        ("danielsmith", "/,/livez,/healthz"),
+        ("tokenplace", "/,/livez,/healthz,/relay/diagnostics"),
+        ("dspace", "/config.json,/healthz,/livez"),
+    ],
+)
+def test_example_app_configs_preserve_verify_paths(app: str, expected_paths: str) -> None:
+    result = subprocess.run(
+        [
+            "python3",
+            "scripts/app_config.py",
+            "json",
+            "--app",
+            app,
+            "--env",
+            "staging",
+            "--config",
+            "",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f'"SUGARKUBE_VERIFY_PATHS": "{expected_paths}"' in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_app_verify_fails_closed_when_context_host_discovery_fails(
     generic_app_stub_env: dict[str, str],
 ) -> None:
@@ -343,4 +487,5 @@ def test_app_verify_fails_closed_when_context_host_discovery_fails(
     assert "Could not derive a host for tokenplace using context sugar-staging" in result.stderr
     assert "helm get values failed for context sugar-staging" in result.stderr
     assert "kubectl ingress lookup failed for context sugar-staging" in result.stderr
-    assert "curl -fsS https://<host>" not in result.stdout
+    assert "Suggested next steps: just app-status app=tokenplace env=staging" in result.stderr
+    assert "curl -fsS https://<host>/" in result.stdout

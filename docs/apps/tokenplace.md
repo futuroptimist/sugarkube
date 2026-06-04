@@ -100,6 +100,8 @@ just tokenplace-oci-deploy env=staging tag="$APP_TAG"
 
 ## Verify staging
 
+`just app-verify` discovers the public host, executes the configured HTTP paths, prints a per-path body preview, and exits non-zero if any check fails. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
+
 ```bash
 just app-status app=tokenplace env=staging
 ```
@@ -107,6 +109,12 @@ just app-status app=tokenplace env=staging
 ```bash
 just app-verify app=tokenplace env=staging
 ```
+
+```bash
+just app-verify app=tokenplace env=staging print_only=1
+```
+
+Optional manual fallback:
 
 ```bash
 curl -fsS https://staging.token.place/healthz
@@ -153,6 +161,14 @@ just app-status app=tokenplace env=prod
 ```bash
 just app-verify app=tokenplace env=prod
 ```
+
+Print the generated curl commands without executing them when you need a manual fallback:
+
+```bash
+just app-verify app=tokenplace env=prod print_only=1
+```
+
+Optional manual fallback:
 
 ```bash
 curl -fsS https://token.place/healthz

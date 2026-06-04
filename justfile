@@ -1593,64 +1593,38 @@ app-promote-prod app tag='' config='':
       config="${SUGARKUBE_CONFIG_PATH}"
 
 # Verify configured HTTPS paths for a Sugarkube app.
-app-verify app env='staging' config='':
+app-verify app env='staging' config='' print_only='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    config_input={{ quote(config) }}
+    print_only_input={{ quote(print_only) }}
+    if [ "${config_input#print_only=}" != "${config_input}" ]; then
+      print_only_input="${config_input}"
+      config_input=""
+    fi
+    while [ "${config_input#config=}" != "${config_input}" ]; do
+      config_input="${config_input#config=}"
+    done
 
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app {{ quote(app) }} \
       --env {{ quote(env) }} \
-      --config {{ quote(config) }})"
+      --config "${config_input}")"
 
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
-    kube_context="sugar-${SUGARKUBE_ENV}"
-    kubectl_context_args=(--context "${kube_context}")
-    helm_context_args=(--kube-context "${kube_context}")
 
-    host=""
-    discovery_errors=()
-    if command -v helm >/dev/null 2>&1; then
-      helm_values=""
-      helm_error="$(mktemp)"
-      if helm_values="$(helm "${helm_context_args[@]}" get values "${SUGARKUBE_RELEASE}" \
-        --namespace "${SUGARKUBE_NAMESPACE}" \
-        --all --output json 2>"${helm_error}")"; then
-        host="$(printf '%s\n' "${helm_values}" | \
-          python3 "{{ justfile_directory() }}/scripts/app_config.py" host-value "${SUGARKUBE_STATUS_HOST_KEY:-ingress.host}")"
-      else
-        discovery_errors+=("helm get values failed for context ${kube_context}: $(tr '\n' ' ' < "${helm_error}")")
-      fi
-      rm -f "${helm_error}"
-    fi
-    if [ -z "${host}" ] && command -v kubectl >/dev/null 2>&1; then
-      kubectl_error="$(mktemp)"
-      if ! host="$(kubectl "${kubectl_context_args[@]}" -n "${SUGARKUBE_NAMESPACE}" get ingress -o jsonpath='{.items[0].spec.rules[0].host}' 2>"${kubectl_error}")"; then
-        discovery_errors+=("kubectl ingress lookup failed for context ${kube_context}: $(tr '\n' ' ' < "${kubectl_error}")")
-        host=""
-      fi
-      rm -f "${kubectl_error}"
-    fi
-
-    IFS=',' read -r -a paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
-    if [ -z "${host}" ]; then
-      if [ "${#discovery_errors[@]}" -gt 0 ]; then
-        printf 'Could not derive a host for %s using context %s.\n' "${SUGARKUBE_APP}" "${kube_context}" >&2
-        printf '%s\n' "${discovery_errors[@]}" >&2
-        exit 1
-      fi
-      echo "Could not derive a host for ${SUGARKUBE_APP}; run these commands after replacing <host>:" >&2
-      for path in "${paths[@]}"; do
-        printf '  curl -fsS https://<host>%s\n' "${path}"
-      done
-      exit 0
-    fi
-
-    for path in "${paths[@]}"; do
-      printf 'curl -fsS https://%s%s\n' "${host}" "${path}"
-      curl -fsS "https://${host}${path}" >/dev/null
+    while [ "${print_only_input#print_only=}" != "${print_only_input}" ]; do
+      print_only_input="${print_only_input#print_only=}"
     done
+    print_only_args=()
+    if [ "${SUGARKUBE_APP_VERIFY_PRINT_ONLY:-${print_only_input}}" = "1" ]; then
+      print_only_args+=(--print-only)
+    fi
+
+    python3 "{{ justfile_directory() }}/scripts/app_verify.py" "${print_only_args[@]}"
 
 # Opinionated immutable-tag dspace deploy with rollout verification.
 #
