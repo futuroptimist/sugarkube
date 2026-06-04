@@ -175,8 +175,11 @@ just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
 # Inspect Kubernetes and Helm status for an app environment.
 just app-status app=dspace env=staging
 
-# Run HTTP verification paths for an app environment.
+# Execute configured HTTP verification paths and fail if any path fails.
 just app-verify app=dspace env=staging
+
+# Print the curl commands without executing network requests, for docs/debugging.
+just app-verify app=dspace env=staging print_only=1
 
 # Print the resolved app config for review/debugging.
 just app-config app=dspace env=staging
@@ -191,6 +194,16 @@ onboarding, but thinning the remaining deploy/redeploy wrappers is deferred to a
 follow-up PR. Production promotion wrappers such as
 `just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` remain documented as
 thin generic shims over the shared production promotion flow.
+
+`app-verify` prints the resolved host, one spaced result block per configured path,
+a bounded response-body preview, and a final pass/fail summary. Set
+`SUGARKUBE_APP_VERIFY_SHOW_BODY=0` to hide bodies,
+`SUGARKUBE_APP_VERIFY_BODY_PREVIEW_BYTES` to tune the preview limit, or
+`SUGARKUBE_APP_VERIFY_PRINT_ONLY=1` (equivalent to `print_only=1`) to preserve
+the old command-printing behavior without making HTTP requests. If host
+discovery fails, the recipe prints placeholder `curl -fsS https://<host>/...`
+commands and suggests `app-status`/`app-config`; that fallback exits non-zero
+unless print-only mode was requested.
 
 ## Current example configs
 

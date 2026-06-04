@@ -1593,14 +1593,21 @@ app-promote-prod app tag='' config='':
       config="${SUGARKUBE_CONFIG_PATH}"
 
 # Verify configured HTTPS paths for a Sugarkube app.
-app-verify app env='staging' config='':
+app-verify app env='staging' config='' print_only='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    config_input={{ quote(config) }}
+    print_only_input={{ quote(print_only) }}
+    if [ -z "${print_only_input}" ] && [[ "${config_input}" == print_only=* ]]; then
+      print_only_input="${config_input#print_only=}"
+      config_input=""
+    fi
 
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app {{ quote(app) }} \
       --env {{ quote(env) }} \
-      --config {{ quote(config) }})"
+      --config "${config_input}")"
 
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
@@ -1608,6 +1615,22 @@ app-verify app env='staging' config='':
     kube_context="sugar-${SUGARKUBE_ENV}"
     kubectl_context_args=(--context "${kube_context}")
     helm_context_args=(--kube-context "${kube_context}")
+
+    print_only_mode="${SUGARKUBE_APP_VERIFY_PRINT_ONLY:-${print_only_input}}"
+    while [ "${print_only_mode#print_only=}" != "${print_only_mode}" ]; do
+      print_only_mode="${print_only_mode#print_only=}"
+    done
+    case "${print_only_mode}" in
+      1|true|TRUE|yes|YES|on|ON) print_only_mode="1" ;;
+      *) print_only_mode="0" ;;
+    esac
+
+    show_body="${SUGARKUBE_APP_VERIFY_SHOW_BODY:-1}"
+    preview_bytes="${SUGARKUBE_APP_VERIFY_BODY_PREVIEW_BYTES:-4000}"
+    if ! [[ "${preview_bytes}" =~ ^[0-9]+$ ]] || [ "${preview_bytes}" -lt 1 ]; then
+      printf 'ERROR: SUGARKUBE_APP_VERIFY_BODY_PREVIEW_BYTES must be a positive integer.\n' >&2
+      exit 1
+    fi
 
     host=""
     discovery_errors=()
@@ -1633,24 +1656,128 @@ app-verify app env='staging' config='':
       rm -f "${kubectl_error}"
     fi
 
-    IFS=',' read -r -a paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
-    if [ -z "${host}" ]; then
-      if [ "${#discovery_errors[@]}" -gt 0 ]; then
-        printf 'Could not derive a host for %s using context %s.\n' "${SUGARKUBE_APP}" "${kube_context}" >&2
-        printf '%s\n' "${discovery_errors[@]}" >&2
-        exit 1
+    IFS=',' read -r -a raw_paths <<< "${SUGARKUBE_VERIFY_PATHS:-/}"
+    paths=()
+    for raw_path in "${raw_paths[@]}"; do
+      path="${raw_path#${raw_path%%[![:space:]]*}}"
+      path="${path%${path##*[![:space:]]}}"
+      [ -n "${path}" ] || continue
+      if [[ "${path}" != /* ]]; then
+        path="/${path}"
       fi
-      echo "Could not derive a host for ${SUGARKUBE_APP}; run these commands after replacing <host>:" >&2
+      paths+=("${path}")
+    done
+    if [ "${#paths[@]}" -eq 0 ]; then
+      paths=("/")
+    fi
+
+    scheme="https"
+    host_display="${host}"
+    if [[ "${host}" == http://* ]]; then
+      scheme="http"
+      host_display="${host#http://}"
+    elif [[ "${host}" == https://* ]]; then
+      scheme="https"
+      host_display="${host#https://}"
+    fi
+    host_display="${host_display%/}"
+
+    print_curl_commands() {
+      local command_host="${host_display:-<host>}"
       for path in "${paths[@]}"; do
-        printf '  curl -fsS https://<host>%s\n' "${path}"
+        printf 'curl -fsS %s://%s%s\n' "${scheme}" "${command_host}" "${path}"
       done
+    }
+
+    if [ -z "${host_display}" ]; then
+      printf 'Could not derive a host for %s using context %s.\n' "${SUGARKUBE_APP}" "${kube_context}" >&2
+      if [ "${#discovery_errors[@]}" -gt 0 ]; then
+        printf '%s\n' "${discovery_errors[@]}" >&2
+      fi
+      printf 'Run `just app-status app=%s env=%s` or `just app-config app=%s env=%s` to inspect the deployment, or run these commands after replacing <host>:\n' \
+        "${SUGARKUBE_APP}" "${SUGARKUBE_ENV}" "${SUGARKUBE_APP}" "${SUGARKUBE_ENV}" >&2
+      print_curl_commands
+      if [ "${print_only_mode}" = "1" ]; then
+        exit 0
+      fi
+      exit 1
+    fi
+
+    if [ "${print_only_mode}" = "1" ]; then
+      print_curl_commands
       exit 0
     fi
 
+    total="${#paths[@]}"
+    passed=0
+    failed=0
+    failing_paths=()
+
+    printf 'Verifying %s env=%s\n' "${SUGARKUBE_APP}" "${SUGARKUBE_ENV}"
+    printf 'Host: %s://%s\n' "${scheme}" "${host_display}"
+
+    index=0
     for path in "${paths[@]}"; do
-      printf 'curl -fsS https://%s%s\n' "${host}" "${path}"
-      curl -fsS "https://${host}${path}" >/dev/null
+      index=$((index + 1))
+      url="${scheme}://${host_display}${path}"
+      body_file="$(mktemp)"
+      header_file="$(mktemp)"
+      curl_error="$(mktemp)"
+      http_status="000"
+      curl_status=0
+
+      set +e
+      http_status="$(curl -sS -L -o "${body_file}" -D "${header_file}" -w '%{http_code}' "${url}" 2>"${curl_error}")"
+      curl_status=$?
+      set -e
+      http_status="${http_status//$'\n'/}"
+      if [ -z "${http_status}" ]; then
+        http_status="000"
+      fi
+
+      printf '\n[%s/%s] GET %s\n' "${index}" "${total}" "${path}"
+      printf '  URL: %s\n' "${url}"
+
+      if [ "${curl_status}" -eq 0 ] && [[ "${http_status}" =~ ^[0-9][0-9][0-9]$ ]] && [ "${http_status}" -lt 400 ] && [ "${http_status}" -ge 200 ]; then
+        printf '  Status: OK (HTTP %s)\n' "${http_status}"
+        passed=$((passed + 1))
+      else
+        printf '  Status: FAIL (curl exit %s, HTTP %s)\n' "${curl_status}" "${http_status}"
+        if [ -s "${curl_error}" ]; then
+          printf '  curl error: %s\n' "$(tr '\n' ' ' < "${curl_error}")"
+        fi
+        failed=$((failed + 1))
+        failing_paths+=("${path}")
+      fi
+
+      if [ "${show_body}" != "0" ]; then
+        if [ -s "${body_file}" ]; then
+          body_size="$(wc -c < "${body_file}" | tr -d '[:space:]')"
+          if [ "${body_size}" -le "${preview_bytes}" ]; then
+            printf '  Body:\n'
+            sed 's/^/  /' "${body_file}"
+            printf '\n'
+          else
+            printf '  Body preview (%s of %s bytes):\n' "${preview_bytes}" "${body_size}"
+            head -c "${preview_bytes}" "${body_file}" | sed 's/^/  /'
+            printf '\n  ...\n'
+          fi
+        else
+          printf '  Body: <empty>\n'
+        fi
+      fi
+
+      rm -f "${body_file}" "${header_file}" "${curl_error}"
     done
+
+    if [ "${failed}" -eq 0 ]; then
+      printf '\nVerification passed: %s/%s checks succeeded.\n' "${passed}" "${total}"
+      exit 0
+    fi
+
+    printf '\nVerification failed: %s/%s checks succeeded; %s failed.\n' "${passed}" "${total}" "${failed}" >&2
+    printf 'Failing paths: %s\n' "${failing_paths[*]}" >&2
+    exit 1
 
 # Opinionated immutable-tag dspace deploy with rollout verification.
 #

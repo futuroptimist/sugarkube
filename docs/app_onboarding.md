@@ -191,7 +191,9 @@ just tokenplace-rollback release=appslug namespace=appslug revision="$HELM_REVIS
 
 ## First-run smoke check pattern
 
-Start with generic checks.
+Start with generic checks. `app-verify` executes the configured
+`SUGARKUBE_VERIFY_PATHS` checks directly, prints a per-path report, and exits
+non-zero if any path fails.
 
 ```bash
 just app-status app=appslug env=staging config="$APP_CONFIG"
@@ -199,6 +201,13 @@ just app-status app=appslug env=staging config="$APP_CONFIG"
 
 ```bash
 just app-verify app=appslug env=staging config="$APP_CONFIG"
+```
+
+To print the generated `curl -fsS` commands without executing them while
+drafting docs or debugging host discovery, use print-only mode.
+
+```bash
+just app-verify app=appslug env=staging config="$APP_CONFIG" print_only=1
 ```
 
 Add app-specific checks only for behavior the generic URL checks cannot validate, such as a login-free API health endpoint, a static asset manifest, a queue worker heartbeat, or a safe diagnostics endpoint.

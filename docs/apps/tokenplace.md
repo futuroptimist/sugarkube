@@ -100,6 +100,9 @@ just tokenplace-oci-deploy env=staging tag="$APP_TAG"
 
 ## Verify staging
 
+Generic verification discovers the host from Helm values or Ingress, executes
+the configured HTTP checks, and exits non-zero if any path fails.
+
 ```bash
 just app-status app=tokenplace env=staging
 ```
@@ -107,6 +110,16 @@ just app-status app=tokenplace env=staging
 ```bash
 just app-verify app=tokenplace env=staging
 ```
+
+Print the generated curl commands without executing them when updating docs or
+troubleshooting host discovery.
+
+```bash
+just app-verify app=tokenplace env=staging print_only=1
+```
+
+Manual curl commands are optional fallbacks when Cloudflare, DNS, or
+cert-manager are suspect.
 
 ```bash
 curl -fsS https://staging.token.place/healthz

@@ -362,3 +362,9 @@ def test_main_supports_json_shell_validate_tag_and_host_value(
 def test_main_reports_config_errors(capsys: pytest.CaptureFixture[str]) -> None:
     assert app_config.main(["json", "--app", "missing", "--env", "staging"]) == 2
     assert "ERROR: no config found for app 'missing'" in capsys.readouterr().err
+
+
+def test_example_app_verify_paths_remain_expected() -> None:
+    assert app_config.load_config("danielsmith", "staging")["SUGARKUBE_VERIFY_PATHS"] == "/,/livez,/healthz"
+    assert app_config.load_config("tokenplace", "staging")["SUGARKUBE_VERIFY_PATHS"] == "/,/livez,/healthz,/relay/diagnostics"
+    assert app_config.load_config("dspace", "staging")["SUGARKUBE_VERIFY_PATHS"] == "/config.json,/healthz,/livez"
