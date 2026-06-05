@@ -50,7 +50,7 @@ The current public stars flow does **not** require a GitHub token, Kubernetes Se
 
 The sidecar uses `refreshIntervalSeconds: 3600`. Its `cacheTtlSeconds: 7200` value gives the browser cache enough grace to avoid visible metric churn when one hourly refresh is late, so displayed stars can normally be up to about an hour old and may briefly remain older during GitHub outages or rate-limit windows.
 
-Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing.
+Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing. Because `SUGARKUBE_VERIFY_PATHS` is defined once per app config, `just app-verify app=danielsmith env=dev` still checks `/runtime/github-metrics.json`; dev operators should either enable the cache locally or override the verify paths when testing a dev chart without the sidecar.
 
 ### Verify the runtime cache
 
@@ -73,7 +73,7 @@ curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '.r
 ```
 
 ```bash
-kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics --tail=100
 ```
 
 Production uses the same checks with `https://danielsmith.io/runtime/github-metrics.json` and `--context sugar-prod`.
@@ -259,7 +259,7 @@ just danielsmith-debug-logs-env env=staging
 If `/runtime/github-metrics.json` is missing or returns a non-200 status, first confirm staging/prod were deployed with values that enable `githubMetricsCache.enabled`, then inspect the sidecar logs. The expected staging log command is:
 
 ```bash
-kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics --tail=100
 ```
 
 If logs mention GitHub `403`, `429`, or rate limiting, do not add a token as the first response. The current flow only uses public stars and is intentionally unauthenticated; the sidecar should retry on the next hourly refresh while the browser keeps neutral or stale-safe copy. Confirm the repo list contains only public POI repos and wait for the rate-limit window to reset.

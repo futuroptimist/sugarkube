@@ -70,6 +70,13 @@ def test_danielsmith_docs_explain_no_github_token_or_secret() -> None:
     assert "Do not configure a GitHub token" in docs
 
 
+def test_danielsmith_docs_use_sidecar_container_name_for_logs() -> None:
+    docs = _read("docs/apps/danielsmith.md")
+
+    assert "-c github-metrics --tail=100" in docs
+    assert "-c github-metrics-cache" not in docs
+
+
 def test_danielsmith_app_config_resolves_for_staging_and_prod() -> None:
     for env in ("staging", "prod"):
         result = subprocess.run(
