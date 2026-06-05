@@ -17,7 +17,7 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 | App config | `docs/examples/apps/danielsmith.env` |
 | Chart version pin | `docs/apps/danielsmith.version` |
 | Production tag pin | `docs/apps/danielsmith.prod.tag` |
-| Verify paths | `/`, `/livez`, `/healthz` |
+| Verify paths | `/`, `/livez`, `/healthz`, `/runtime/github-metrics.json` |
 
 ### Artifact links
 
@@ -41,6 +41,42 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: staging host `staging.danielsmith.io` with values `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml`.
 - `env=prod`: production host `danielsmith.io` with values `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml`.
 - The app is a static Vite and Three.js site. Sugarkube runs the static web container only; no in-cluster API, queue, database, GPU, compute node, or stateful service is required.
+
+## Runtime GitHub metrics cache
+
+Staging and production enable the danielsmith.io Helm chart's `githubMetricsCache` sidecar. The main nginx container serves the static portfolio, while the sidecar wakes up about once an hour, calls the unauthenticated public GitHub repository API for the configured public POI repositories, and writes a shared cache file to the pod-local runtime volume. nginx exposes that file to visitors at `/runtime/github-metrics.json`, so browsers read same-origin JSON instead of each visitor spending their own GitHub API rate limit.
+
+The current public stars flow does **not** require a GitHub token, Kubernetes Secret, `envFrom` Secret, or authenticated API path. Keep the cache unauthenticated unless a future feature needs private repository metadata. The configured repo list mirrors only the public POI GitHub star sources from the app repo and intentionally omits private-only sources. The DSPACE POI is marked private in the app copy and stays on neutral fallback copy instead of being configured here.
+
+The sidecar uses `refreshIntervalSeconds: 3600`. Its `cacheTtlSeconds: 7200` value gives the browser cache enough grace to avoid visible metric churn when one hourly refresh is late, so displayed stars can normally be up to about an hour old and may briefly remain older during GitHub outages or rate-limit windows.
+
+Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing.
+
+### Verify the runtime cache
+
+`just app-verify` includes `/runtime/github-metrics.json` in the danielsmith.io path list, which confirms the cache endpoint returns HTTP 200 after staging/prod deploys. Use these staging commands when validating the sidecar content and logs:
+
+```bash
+just app-verify app=danielsmith env=staging
+```
+
+```bash
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json
+```
+
+```bash
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '.schemaVersion == 1 and (.generatedAt | type == "string") and (.repos | type == "object")'
+```
+
+```bash
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '.repos["futuroptimist/danielsmith.io"].stars | type == "number"'
+```
+
+```bash
+kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+```
+
+Production uses the same checks with `https://danielsmith.io/runtime/github-metrics.json` and `--context sugar-prod`.
 
 ## Find or publish GHCR image
 
@@ -120,6 +156,7 @@ Optional manual fallback when debugging DNS, TLS, or Cloudflare behavior:
 curl -fsS https://staging.danielsmith.io/healthz
 curl -fsS https://staging.danielsmith.io/livez
 curl -fsS https://staging.danielsmith.io/
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json
 ```
 
 ## Promote production
@@ -162,6 +199,10 @@ curl -fsS https://danielsmith.io/livez
 
 ```bash
 curl -fsS https://danielsmith.io/
+```
+
+```bash
+curl -fsS https://danielsmith.io/runtime/github-metrics.json
 ```
 
 ## Rollback
@@ -214,6 +255,18 @@ Review logs with the compatibility debug helper.
 ```bash
 just danielsmith-debug-logs-env env=staging
 ```
+
+If `/runtime/github-metrics.json` is missing or returns a non-200 status, first confirm staging/prod were deployed with values that enable `githubMetricsCache.enabled`, then inspect the sidecar logs. The expected staging log command is:
+
+```bash
+kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+```
+
+If logs mention GitHub `403`, `429`, or rate limiting, do not add a token as the first response. The current flow only uses public stars and is intentionally unauthenticated; the sidecar should retry on the next hourly refresh while the browser keeps neutral or stale-safe copy. Confirm the repo list contains only public POI repos and wait for the rate-limit window to reset.
+
+If the cache is stale, compare `generatedAt` and `expiresAt` in the JSON payload. The chart refreshes hourly and keeps a two-hour TTL so one delayed refresh does not make visitors see metric churn. Staleness beyond that points to sidecar crashes, egress/DNS problems, GitHub rate limiting, or a mounted-cache path mismatch.
+
+Do not configure a GitHub token, placeholder token, Kubernetes Secret, or `envFrom` Secret for this public stars cache. Secret-management recipes are out of scope for this flow and should only be added if a future authenticated feature is explicitly approved.
 
 Validate GHCR auth if Helm reports `401`, `403`, or `denied`. Use a non-interactive login so recovery works in copy-paste shells; `gh auth token` must have package read access for private packages.
 

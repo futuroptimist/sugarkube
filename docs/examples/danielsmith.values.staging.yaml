@@ -10,3 +10,30 @@ ingress:
   tls:
     enabled: true
     secretName: danielsmith-staging-tls
+
+githubMetricsCache:
+  enabled: true
+  refreshIntervalSeconds: 3600
+  cacheTtlSeconds: 7200
+  publicPath: /runtime/github-metrics.json
+  repos:
+    - owner: futuroptimist
+      repo: danielsmith.io
+    - owner: futuroptimist
+      repo: token.place
+    - owner: futuroptimist
+      repo: gabriel
+    - owner: futuroptimist
+      repo: flywheel
+    - owner: futuroptimist
+      repo: jobbot3000
+    - owner: futuroptimist
+      repo: gitshelves
+    - owner: futuroptimist
+      repo: f2clipboard
+    - owner: futuroptimist
+      repo: sigma
+    - owner: futuroptimist
+      repo: wove
+    - owner: futuroptimist
+      repo: pr-reaper
