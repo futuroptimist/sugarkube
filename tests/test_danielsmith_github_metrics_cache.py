@@ -74,7 +74,23 @@ def test_danielsmith_docs_use_sidecar_container_name_for_logs() -> None:
     docs = _read("docs/apps/danielsmith.md")
 
     assert "-c github-metrics --tail=100" in docs
-    assert "-c github-metrics-cache" not in docs
+    container_flag = "-c"
+    container_name = "github-metrics"
+    legacy_suffix = "-cache"
+    assert f"{container_flag} {container_name}{legacy_suffix}" not in docs
+
+
+def test_runtime_cache_path_stays_manual_not_shared_verify_path() -> None:
+    app_env = _read("docs/examples/apps/danielsmith.env")
+    contract = _read("docs/app_deployment_contract.md")
+    docs = _read("docs/apps/danielsmith.md")
+
+    assert "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz\n" in app_env
+    assert "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz,/runtime/github-metrics.json" not in app_env
+    assert "| danielsmith.io |" in contract
+    assert "| `/,/livez,/healthz` |" in contract
+    assert "manual staging/prod verification" in contract
+    assert "manual JSON verification path" in docs
 
 
 def test_danielsmith_app_config_resolves_for_staging_and_prod() -> None:
@@ -101,4 +117,4 @@ def test_danielsmith_app_config_resolves_for_staging_and_prod() -> None:
         assert config["SUGARKUBE_VALUES"].endswith(
             f"docs/examples/danielsmith.values.{env}.yaml"
         )
-        assert "/runtime/github-metrics.json" in config["SUGARKUBE_VERIFY_PATHS"]
+        assert config["SUGARKUBE_VERIFY_PATHS"] == "/,/livez,/healthz"

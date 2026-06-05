@@ -17,7 +17,7 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 | App config | `docs/examples/apps/danielsmith.env` |
 | Chart version pin | `docs/apps/danielsmith.version` |
 | Production tag pin | `docs/apps/danielsmith.prod.tag` |
-| Verify paths | `/`, `/livez`, `/healthz`, `/runtime/github-metrics.json` |
+| Verify paths | `/`, `/livez`, `/healthz` |
 
 ### Artifact links
 
@@ -50,11 +50,11 @@ The current public stars flow does **not** require a GitHub token, Kubernetes Se
 
 The sidecar uses `refreshIntervalSeconds: 3600`. Its `cacheTtlSeconds: 7200` value gives the browser cache enough grace to avoid visible metric churn when one hourly refresh is late, so displayed stars can normally be up to about an hour old and may briefly remain older during GitHub outages or rate-limit windows.
 
-Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing. Because `SUGARKUBE_VERIFY_PATHS` is defined once per app config, `just app-verify app=danielsmith env=dev` still checks `/runtime/github-metrics.json`; dev operators should either enable the cache locally or override the verify paths when testing a dev chart without the sidecar.
+Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing. Because `SUGARKUBE_VERIFY_PATHS` is defined once per app config and shared by dev/staging/prod, the generic verify path list intentionally stays at `/`, `/livez`, and `/healthz`. Keep `/runtime/github-metrics.json` as the staging/prod manual JSON verification path instead of adding it to the shared app config.
 
 ### Verify the runtime cache
 
-`just app-verify` includes `/runtime/github-metrics.json` in the danielsmith.io path list, which confirms the cache endpoint returns HTTP 200 after staging/prod deploys. Use these staging commands when validating the sidecar content and logs:
+`just app-verify` confirms the shared HTTP paths after deploy. Use these staging-only manual checks when validating the sidecar content and logs:
 
 ```bash
 just app-verify app=danielsmith env=staging

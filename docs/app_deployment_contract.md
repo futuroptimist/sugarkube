@@ -198,7 +198,11 @@ thin generic shims over the shared production promotion flow.
 ## Current example configs
 
 The example configs in `docs/examples/apps/` intentionally are not platform
-defaults. They are scaffolds for future local configs and tests:
+defaults. They are scaffolds for future local configs and tests. Shared verify
+paths must stay valid for every environment that consumes an app config;
+environment-specific runtime files such as danielsmith.io
+`/runtime/github-metrics.json` belong in manual staging/prod verification
+steps rather than the shared `SUGARKUBE_VERIFY_PATHS` value:
 
 - [`docs/examples/apps/dspace.env`](examples/apps/dspace.env)
 - [`docs/examples/apps/tokenplace.env`](examples/apps/tokenplace.env)
@@ -210,4 +214,4 @@ Current values chains:
 | --- | --- | --- | --- | --- |
 | dspace | `docs/examples/dspace.values.dev.yaml` | `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml` | `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml` | `/config.json,/healthz,/livez` |
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
-| danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz,/runtime/github-metrics.json` |
+| danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
