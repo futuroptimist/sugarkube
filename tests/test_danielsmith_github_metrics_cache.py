@@ -85,12 +85,20 @@ def test_runtime_cache_path_stays_manual_not_shared_verify_path() -> None:
     contract = _read("docs/app_deployment_contract.md")
     docs = _read("docs/apps/danielsmith.md")
 
+    assert "dev disables the GitHub" in app_env
+    assert "metrics cache, so stage/prod must verify /runtime/github-metrics.json" in app_env
+    assert "manual curl/jq/log sidecar checks in docs/apps/danielsmith.md" in app_env
     assert "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz\n" in app_env
     assert "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz,/runtime/github-metrics.json" not in app_env
     assert "| danielsmith.io |" in contract
     assert "| `/,/livez,/healthz` |" in contract
-    assert "manual staging/prod verification" in contract
-    assert "manual JSON verification path" in docs
+    assert "`app-verify` cannot currently express environment-specific runtime JSON files" in contract
+    assert "documented manual" in contract
+    assert "staging/prod curl/jq/log verification steps after `app-verify`" in contract
+    assert "`app-verify` cannot currently express staging/prod-only runtime JSON checks" in docs
+    assert "required manual staging/prod sidecar verification path" in docs
+    assert "sidecar cache is not signed off until the manual curl/jq/log checks" in docs
+    assert "just app-verify app=danielsmith env=prod" in docs
 
 
 def test_danielsmith_app_config_resolves_for_staging_and_prod() -> None:

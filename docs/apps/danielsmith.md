@@ -50,11 +50,11 @@ The current public stars flow does **not** require a GitHub token, Kubernetes Se
 
 The sidecar uses `refreshIntervalSeconds: 3600`. Its `cacheTtlSeconds: 7200` value gives the browser cache enough grace to avoid visible metric churn when one hourly refresh is late, so displayed stars can normally be up to about an hour old and may briefly remain older during GitHub outages or rate-limit windows.
 
-Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing. Because `SUGARKUBE_VERIFY_PATHS` is defined once per app config and shared by dev/staging/prod, the generic verify path list intentionally stays at `/`, `/livez`, and `/healthz`. Keep `/runtime/github-metrics.json` as the staging/prod manual JSON verification path instead of adding it to the shared app config.
+Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing. Because `SUGARKUBE_VERIFY_PATHS` is defined once per app config and shared by dev/staging/prod, the generic verify path list intentionally stays at `/`, `/livez`, and `/healthz`. `app-verify` cannot currently express staging/prod-only runtime JSON checks or optional paths safely, so keep `/runtime/github-metrics.json` as the required manual staging/prod sidecar verification path instead of adding it to the shared app config.
 
 ### Verify the runtime cache
 
-`just app-verify` confirms the shared HTTP paths after deploy. Use these staging-only manual checks when validating the sidecar content and logs:
+`just app-verify` confirms the shared HTTP paths after deploy. The sidecar cache is not signed off until the manual curl/jq/log checks below also pass for staging or production. Run the staging sequence after `just app-verify app=danielsmith env=staging` when validating the sidecar content and logs:
 
 ```bash
 just app-verify app=danielsmith env=staging
@@ -76,7 +76,7 @@ curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '.r
 kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics --tail=100
 ```
 
-Production uses the same checks with `https://danielsmith.io/runtime/github-metrics.json` and `--context sugar-prod`.
+For production sidecar sign-off, run `just app-verify app=danielsmith env=prod`, then repeat the required manual curl/jq/log checks with `https://danielsmith.io/runtime/github-metrics.json` and `--context sugar-prod`.
 
 ## Find or publish GHCR image
 
