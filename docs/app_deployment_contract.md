@@ -210,4 +210,4 @@ Current values chains:
 | --- | --- | --- | --- | --- |
 | dspace | `docs/examples/dspace.values.dev.yaml` | `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml` | `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml` | `/config.json,/healthz,/livez` |
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
-| danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
+| danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz,/runtime/github-metrics.json` |

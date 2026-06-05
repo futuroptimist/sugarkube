@@ -10,3 +10,33 @@ ingress:
   tls:
     enabled: true
     secretName: danielsmith-staging-tls
+
+githubMetricsCache:
+  enabled: true
+  refreshIntervalSeconds: 3600
+  # Keep the browser cache useful if one hourly refresh is late or GitHub is
+  # briefly unavailable, without presenting day-old star counts as fresh.
+  cacheTtlSeconds: 9000
+  repos:
+    - owner: futuroptimist
+      repo: danielsmith.io
+    - owner: futuroptimist
+      repo: token.place
+    - owner: futuroptimist
+      repo: gabriel
+    - owner: futuroptimist
+      repo: flywheel
+    - owner: futuroptimist
+      repo: jobbot3000
+    - owner: futuroptimist
+      repo: gitshelves
+    - owner: futuroptimist
+      repo: f2clipboard
+    - owner: futuroptimist
+      repo: sigma
+    - owner: futuroptimist
+      repo: wove
+    - owner: democratizedspace
+      repo: dspace
+    - owner: futuroptimist
+      repo: pr-reaper

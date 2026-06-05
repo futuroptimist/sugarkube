@@ -17,7 +17,7 @@ This is the canonical runbook for deploying danielsmith.io from GHCR artifacts t
 | App config | `docs/examples/apps/danielsmith.env` |
 | Chart version pin | `docs/apps/danielsmith.version` |
 | Production tag pin | `docs/apps/danielsmith.prod.tag` |
-| Verify paths | `/`, `/livez`, `/healthz` |
+| Verify paths | `/`, `/livez`, `/healthz`, `/runtime/github-metrics.json` |
 
 ### Artifact links
 
@@ -41,6 +41,70 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: staging host `staging.danielsmith.io` with values `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml`.
 - `env=prod`: production host `danielsmith.io` with values `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml`.
 - The app is a static Vite and Three.js site. Sugarkube runs the static web container only; no in-cluster API, queue, database, GPU, compute node, or stateful service is required.
+
+
+## Runtime GitHub metrics cache
+
+Staging and production enable the chart's `githubMetricsCache` sidecar so visitor browsers do not call GitHub directly for project star counts. The pod runs the normal nginx/static-site container plus a small sidecar container named `github-metrics-cache`. Both containers share an `emptyDir` volume: the sidecar refreshes a JSON cache atomically, and nginx serves the file to browsers at `/runtime/github-metrics.json`.
+
+The current portfolio star flow uses only public repository metadata from public GitHub repositories. The sidecar calls the unauthenticated public GitHub REST API and does **not** need a GitHub token, GitHub App credential, Kubernetes Secret, `envFrom` Secret, or any other authenticated API path. Do not add placeholder token values to Sugarkube for this flow; if the public unauthenticated rate limit is hit, treat it as an operations signal to inspect logs and staleness rather than a secret-management task.
+
+Sugarkube pins the sidecar-capable danielsmith chart in `docs/apps/danielsmith.version` and enables the cache from the staging and prod values overlays. The configured repository list intentionally includes public POI repositories only: `futuroptimist/danielsmith.io`, `futuroptimist/token.place`, `futuroptimist/gabriel`, `futuroptimist/flywheel`, `futuroptimist/jobbot3000`, `futuroptimist/gitshelves`, `futuroptimist/f2clipboard`, `futuroptimist/sigma`, `futuroptimist/wove`, `democratizedspace/dspace`, and `futuroptimist/pr-reaper`. Do not add private repositories unless they are publicly fetchable without credentials.
+
+The refresh interval is hourly (`refreshIntervalSeconds: 3600`). The cache TTL is longer than one interval so a single late refresh or brief GitHub outage does not cause visible churn; in normal operation displayed stars can be up to about an hour old. If GitHub is unavailable on startup or a refresh fails, the sidecar should keep or write a valid neutral JSON document so the app avoids presenting fake fallback star counts as facts.
+
+`just app-verify` includes the runtime cache path for danielsmith staging and production so deploy verification confirms nginx can serve the sidecar-backed file. The generic verifier only checks HTTP status and body preview; run the JSON checks below when validating schema details.
+
+### Verify the runtime cache
+
+Staging:
+
+```bash
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json
+```
+
+```bash
+kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+```
+
+```bash
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json \
+  | python3 -m json.tool
+```
+
+```bash
+python3 - <<'PY'
+import json
+import urllib.request
+
+url = 'https://staging.danielsmith.io/runtime/github-metrics.json'
+with urllib.request.urlopen(url, timeout=10) as response:
+    data = json.load(response)
+
+assert data.get('schemaVersion')
+assert data.get('generatedAt')
+repos = data.get('repos')
+assert isinstance(repos, dict)
+for key in (
+    'futuroptimist/danielsmith.io',
+    'futuroptimist/token.place',
+    'futuroptimist/flywheel',
+    'democratizedspace/dspace',
+):
+    assert key in repos, f'missing {key}'
+print(f"schemaVersion={data['schemaVersion']} generatedAt={data['generatedAt']} repos={len(repos)}")
+PY
+```
+
+Production uses the same checks with the production host and context:
+
+```bash
+curl -fsS https://danielsmith.io/runtime/github-metrics.json
+```
+
+```bash
+kubectl --context sugar-prod -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+```
 
 ## Find or publish GHCR image
 
@@ -119,6 +183,7 @@ Optional manual fallback when debugging DNS, TLS, or Cloudflare behavior:
 ```bash
 curl -fsS https://staging.danielsmith.io/healthz
 curl -fsS https://staging.danielsmith.io/livez
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json
 curl -fsS https://staging.danielsmith.io/
 ```
 
@@ -158,6 +223,10 @@ curl -fsS https://danielsmith.io/healthz
 
 ```bash
 curl -fsS https://danielsmith.io/livez
+```
+
+```bash
+curl -fsS https://danielsmith.io/runtime/github-metrics.json
 ```
 
 ```bash
@@ -223,6 +292,19 @@ gh auth token | helm registry login ghcr.io \
   --username "$(gh api user --jq .login)" \
   "$HELM_STDIN_FLAG"
 ```
+
+
+### Runtime GitHub metrics cache
+
+If `/runtime/github-metrics.json` returns `404` or an empty response, confirm the deployed chart version includes the sidecar support, confirm the staging/prod values overlay has `githubMetricsCache.enabled: true`, then inspect the sidecar logs:
+
+```bash
+kubectl --context sugar-staging -n danielsmith logs deploy/danielsmith -c github-metrics-cache --tail=100
+```
+
+If logs mention GitHub rate limiting or transient GitHub failures, do not add a token by default. The current flow intentionally uses unauthenticated public metadata only. Check whether the existing cache remains within its TTL/grace window, retry after the public API limit resets, and only consider a future authenticated design in a separate secret-management change.
+
+If the cache is stale, compare the JSON `generatedAt` and `expiresAt` fields with the current UTC time. One late hourly refresh should not create visible churn because `cacheTtlSeconds` is longer than `refreshIntervalSeconds`; repeated stale values usually mean the sidecar cannot reach GitHub or cannot write the shared cache volume.
 
 Cloudflare Tunnel routes are external to Helm. Route public hosts to Traefik, typically `http://traefik.kube-system.svc.cluster.local:80`.
 

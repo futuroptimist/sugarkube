@@ -377,16 +377,18 @@ def test_app_verify_executes_curl_by_default_and_prints_summary(
     assert "https://example.test/" in curl_log
     assert "https://example.test/livez" in curl_log
     assert "https://example.test/healthz" in curl_log
+    assert "https://example.test/runtime/github-metrics.json" in curl_log
     assert result.stdout.startswith(
         "Verifying danielsmith env=staging\nHost: https://example.test\n\n"
     )
-    assert "\n[1/3] GET /\n" in result.stdout
-    assert "\n[2/3] GET /livez\n" in result.stdout
-    assert "\n[3/3] GET /healthz\n" in result.stdout
+    assert "\n[1/4] GET /\n" in result.stdout
+    assert "\n[2/4] GET /livez\n" in result.stdout
+    assert "\n[3/4] GET /healthz\n" in result.stdout
+    assert "\n[4/4] GET /runtime/github-metrics.json\n" in result.stdout
     assert "  URL: https://example.test/livez\n" in result.stdout
     assert "  Status: OK (HTTP 200)" in result.stdout
     assert '  Body:\n  {"status":"ok"}' in result.stdout
-    assert "Verification passed: 3/3 checks succeeded." in result.stdout
+    assert "Verification passed: 4/4 checks succeeded." in result.stdout
 
 
 def test_app_verify_adds_curl_timeouts(
@@ -440,11 +442,12 @@ def test_app_verify_failure_checks_all_paths_and_exits_nonzero(
     assert "https://example.test/" in curl_log
     assert "https://example.test/livez" in curl_log
     assert "https://example.test/healthz" in curl_log
-    assert "[2/3] GET /livez" in result.stdout
+    assert "https://example.test/runtime/github-metrics.json" in curl_log
+    assert "[2/4] GET /livez" in result.stdout
     assert "Status: FAILED (HTTP 503)" in result.stdout
     assert "curl exit status: 22" in result.stdout
     assert '{"status":"down"}' in result.stdout
-    assert "Verification failed: 1/3 checks failed." in result.stderr
+    assert "Verification failed: 1/4 checks failed." in result.stderr
     assert "/livez (https://example.test/livez)" in result.stderr
 
 
@@ -481,6 +484,7 @@ def test_app_verify_print_only_argument_overrides_false_environment_value(
         "curl -fsS https://example.test/",
         "curl -fsS https://example.test/livez",
         "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/runtime/github-metrics.json",
     ]
     assert not Path(env["CURL_LOG"]).exists()
 
@@ -498,6 +502,7 @@ def test_app_verify_print_only_environment_prints_commands_without_curl(
         "curl -fsS https://example.test/",
         "curl -fsS https://example.test/livez",
         "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/runtime/github-metrics.json",
     ]
     assert not Path(env["CURL_LOG"]).exists()
 
@@ -518,7 +523,7 @@ def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, st
 @pytest.mark.parametrize(
     ("app", "expected_paths"),
     [
-        ("danielsmith", "/,/livez,/healthz"),
+        ("danielsmith", "/,/livez,/healthz,/runtime/github-metrics.json"),
         ("tokenplace", "/,/livez,/healthz,/relay/diagnostics"),
         ("dspace", "/config.json,/healthz,/livez"),
     ],
