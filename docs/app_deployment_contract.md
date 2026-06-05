@@ -198,7 +198,13 @@ thin generic shims over the shared production promotion flow.
 ## Current example configs
 
 The example configs in `docs/examples/apps/` intentionally are not platform
-defaults. They are scaffolds for future local configs and tests:
+defaults. They are scaffolds for future local configs and tests. Shared verify
+paths must stay valid for every environment that consumes an app config.
+`app-verify` cannot currently express environment-specific runtime JSON files
+or optional paths safely, so environment-specific runtime files such as
+danielsmith.io `/runtime/github-metrics.json` belong in documented manual
+staging/prod curl/jq/log verification steps after `app-verify`, not in the
+shared `SUGARKUBE_VERIFY_PATHS` value:
 
 - [`docs/examples/apps/dspace.env`](examples/apps/dspace.env)
 - [`docs/examples/apps/tokenplace.env`](examples/apps/tokenplace.env)

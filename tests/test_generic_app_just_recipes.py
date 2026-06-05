@@ -377,6 +377,7 @@ def test_app_verify_executes_curl_by_default_and_prints_summary(
     assert "https://example.test/" in curl_log
     assert "https://example.test/livez" in curl_log
     assert "https://example.test/healthz" in curl_log
+    assert "https://example.test/runtime/github-metrics.json" not in curl_log
     assert result.stdout.startswith(
         "Verifying danielsmith env=staging\nHost: https://example.test\n\n"
     )
@@ -440,6 +441,7 @@ def test_app_verify_failure_checks_all_paths_and_exits_nonzero(
     assert "https://example.test/" in curl_log
     assert "https://example.test/livez" in curl_log
     assert "https://example.test/healthz" in curl_log
+    assert "https://example.test/runtime/github-metrics.json" not in curl_log
     assert "[2/3] GET /livez" in result.stdout
     assert "Status: FAILED (HTTP 503)" in result.stdout
     assert "curl exit status: 22" in result.stdout
