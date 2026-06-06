@@ -19,6 +19,9 @@ EXPECTED_PUBLIC_REPOS = {
     "futuroptimist/sigma",
     "futuroptimist/wove",
     "futuroptimist/pr-reaper",
+    "democratizedspace/dspace",
+    "futuroptimist/sugarkube",
+    "futuroptimist/axel",
 }
 
 
@@ -53,12 +56,28 @@ def test_staging_and_prod_enable_unauthenticated_github_metrics_cache() -> None:
         assert "refreshIntervalSeconds: 3600" in block
         assert "cacheTtlSeconds: 7200" in block
         assert "publicPath: /runtime/github-metrics.json" in block
-        assert _repo_slugs(block) == EXPECTED_PUBLIC_REPOS
-        assert "democratizedspace/dspace" not in _repo_slugs(block)
+        slugs = _repo_slugs(block)
+        assert slugs == EXPECTED_PUBLIC_REPOS
+        assert "democratizedspace/dspace" in slugs
+        assert "futuroptimist/sugarkube" in slugs
+        assert "futuroptimist/axel" in slugs
+        assert "futuroptimist/dspace" not in slugs
         for forbidden in ("github_token", "github-token", "gh_token", "access_token"):
             assert forbidden not in block.lower()
         assert "secret" not in block.lower()
         assert "envFrom" not in block
+
+
+def test_danielsmith_docs_name_dspace_metrics_repo() -> None:
+    docs = _read("docs/apps/danielsmith.md")
+
+    assert (
+        "DSPACE stars are fetched from the public `democratizedspace/dspace` repository" in docs
+    )
+    assert "futuroptimist/sugarkube" in docs
+    assert "futuroptimist/axel" in docs
+    assert "futuroptimist/dspace" not in docs
+    assert "DSPACE POI is marked private" not in docs
 
 
 def test_danielsmith_docs_explain_no_github_token_or_secret() -> None:
@@ -89,13 +108,19 @@ def test_runtime_cache_path_stays_manual_not_shared_verify_path() -> None:
     assert "metrics cache, so stage/prod must verify /runtime/github-metrics.json" in app_env
     assert "manual curl/jq/log sidecar checks in docs/apps/danielsmith.md" in app_env
     assert "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz\n" in app_env
-    assert "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz,/runtime/github-metrics.json" not in app_env
+    assert (
+        "SUGARKUBE_VERIFY_PATHS=/,/livez,/healthz,/runtime/github-metrics.json" not in app_env
+    )
     assert "| danielsmith.io |" in contract
     assert "| `/,/livez,/healthz` |" in contract
-    assert "`app-verify` cannot currently express environment-specific runtime JSON files" in contract
+    assert (
+        "`app-verify` cannot currently express environment-specific runtime JSON files" in contract
+    )
     assert "documented manual" in contract
     assert "staging/prod curl/jq/log verification steps after `app-verify`" in contract
-    assert "`app-verify` cannot currently express staging/prod-only runtime JSON checks" in docs
+    assert (
+        "`app-verify` cannot currently express staging/prod-only runtime JSON checks" in docs
+    )
     assert "required manual staging/prod sidecar verification path" in docs
     assert "sidecar cache is not signed off until the manual curl/jq/log checks" in docs
     assert "just app-verify app=danielsmith env=prod" in docs
