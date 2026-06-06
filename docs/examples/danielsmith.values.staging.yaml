@@ -37,3 +37,9 @@ githubMetricsCache:
       repo: wove
     - owner: futuroptimist
       repo: pr-reaper
+    - owner: democratizedspace
+      repo: dspace
+    - owner: futuroptimist
+      repo: sugarkube
+    - owner: futuroptimist
+      repo: axel

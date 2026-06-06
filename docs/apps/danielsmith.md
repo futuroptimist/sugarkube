@@ -46,7 +46,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 
 Staging and production enable the danielsmith.io Helm chart's `githubMetricsCache` sidecar. The main nginx container serves the static portfolio, while the sidecar wakes up about once an hour, calls the unauthenticated public GitHub repository API for the configured public POI repositories, and writes a shared cache file to the pod-local runtime volume. nginx exposes that file to visitors at `/runtime/github-metrics.json`, so browsers read same-origin JSON instead of each visitor spending their own GitHub API rate limit.
 
-The current public stars flow does **not** require a GitHub token, Kubernetes Secret, `envFrom` Secret, or authenticated API path. Keep the cache unauthenticated unless a future feature needs private repository metadata. The configured repo list mirrors only the public POI GitHub star sources from the app repo and intentionally omits private-only sources. The DSPACE POI is marked private in the app copy and stays on neutral fallback copy instead of being configured here.
+The current public stars flow does **not** require a GitHub token, Kubernetes Secret, `envFrom` Secret, or authenticated API path. Keep the cache unauthenticated unless a future feature needs private repository metadata. The configured repo list mirrors only the public POI GitHub star sources from the app repo and intentionally omits private-only sources. DSPACE star metrics are public and come from `democratizedspace/dspace`. The same sidecar target list also includes `futuroptimist/sugarkube` and `futuroptimist/axel` so the Sugarkube and Axel POIs read from the runtime cache.
 
 The sidecar uses `refreshIntervalSeconds: 3600`. Its `cacheTtlSeconds: 7200` value gives the browser cache enough grace to avoid visible metric churn when one hourly refresh is late, so displayed stars can normally be up to about an hour old and may briefly remain older during GitHub outages or rate-limit windows.
 
@@ -69,7 +69,7 @@ curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '.s
 ```
 
 ```bash
-curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '.repos["futuroptimist/danielsmith.io"].stars | type == "number"'
+curl -fsS https://staging.danielsmith.io/runtime/github-metrics.json | jq -e '(.repos["futuroptimist/danielsmith.io"].stars | type == "number") and (.repos["democratizedspace/dspace"].stars | type == "number")'
 ```
 
 ```bash

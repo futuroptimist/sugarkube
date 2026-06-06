@@ -19,6 +19,9 @@ EXPECTED_PUBLIC_REPOS = {
     "futuroptimist/sigma",
     "futuroptimist/wove",
     "futuroptimist/pr-reaper",
+    "democratizedspace/dspace",
+    "futuroptimist/sugarkube",
+    "futuroptimist/axel",
 }
 
 
@@ -53,8 +56,12 @@ def test_staging_and_prod_enable_unauthenticated_github_metrics_cache() -> None:
         assert "refreshIntervalSeconds: 3600" in block
         assert "cacheTtlSeconds: 7200" in block
         assert "publicPath: /runtime/github-metrics.json" in block
-        assert _repo_slugs(block) == EXPECTED_PUBLIC_REPOS
-        assert "democratizedspace/dspace" not in _repo_slugs(block)
+        repo_slugs = _repo_slugs(block)
+        assert repo_slugs == EXPECTED_PUBLIC_REPOS
+        assert "democratizedspace/dspace" in repo_slugs
+        assert "futuroptimist/sugarkube" in repo_slugs
+        assert "futuroptimist/axel" in repo_slugs
+        assert "futuroptimist/dspace" not in repo_slugs
         for forbidden in ("github_token", "github-token", "gh_token", "access_token"):
             assert forbidden not in block.lower()
         assert "secret" not in block.lower()
@@ -68,6 +75,16 @@ def test_danielsmith_docs_explain_no_github_token_or_secret() -> None:
     assert "does **not** require a GitHub token" in docs
     assert "Kubernetes Secret" in docs
     assert "Do not configure a GitHub token" in docs
+
+
+def test_danielsmith_docs_name_correct_dspace_metrics_repo() -> None:
+    docs = _read("docs/apps/danielsmith.md")
+
+    assert "DSPACE star metrics" in docs
+    assert "`democratizedspace/dspace`" in docs
+    assert "`futuroptimist/sugarkube`" in docs
+    assert "`futuroptimist/axel`" in docs
+    assert "futuroptimist/dspace" not in docs
 
 
 def test_danielsmith_docs_use_sidecar_container_name_for_logs() -> None:
