@@ -46,11 +46,23 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest --cov=. --cov-report=xml --cov-report=term --maxfail=1 --disable-warnings -q
+      - name: Check Codecov token availability
+        if: >-
+          github.event_name == 'push' &&
+          hashFiles('coverage.xml') != ''
+        env:
+          CODECOV_AUTH: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_AUTH" ]; then
+            echo "CODECOV_UPLOAD=true" >> "$GITHUB_ENV"
+          else
+            echo "Codecov token is not configured; skipping coverage upload."
+          fi
       - name: Upload coverage
         if: >-
           github.event_name == 'push' &&
           hashFiles('coverage.xml') != '' &&
-          secrets.CODECOV_TOKEN != ''
+          env.CODECOV_UPLOAD == 'true'
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
