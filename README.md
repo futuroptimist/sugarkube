@@ -161,12 +161,17 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 ## Pi image releases
 
-The `pi-image-release` workflow builds a fresh Raspberry Pi OS image on every
-push to `main` and once per day. Each run publishes a signed
-`sugarkube.img.xz`, its checksum, a provenance manifest, and the full
-`pi-gen` build log. Release notes summarize stage timings and link directly to
-the manifest so you can verify the build inputs and commit hashes before
- flashing. Run `./scripts/install_sugarkube_image.sh` (or fetch the same helper
+Use the `pi-image` workflow when you need a fresh on-demand workflow artifact
+for reimaging Raspberry Pi nodes; open **Actions → pi-image → Run workflow** (or let the
+cluster bootstrap helper dispatch it) and download the `sugarkube-img` artifact.
+Use `pi-image-release` only when a maintainer intentionally needs to publish the
+latest signed GitHub Release. That manual release-publisher workflow builds the
+image, optionally boots it in QEMU, signs release assets with cosign when
+publishing is enabled, and attaches `sugarkube.img.xz`, its checksum, a
+provenance manifest, and the full `pi-gen` build log to the release. Release
+notes summarize stage timings and link directly to the manifest so you can
+verify the build inputs and commit hashes before flashing. Run
+`./scripts/install_sugarkube_image.sh` (or fetch the same helper
  via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
  download, verify, and expand the latest release. When you prefer a task runner,
 use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev/sdX just flash-pi` to
