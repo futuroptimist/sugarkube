@@ -46,10 +46,23 @@ sync.
     [Pi Image Builder Design](./pi_image_builder_design.md).
   - Related tooling: wrapped by `make download-pi-image`, `just download-pi-image`, and consumed by
     the installer script above.
+- `.github/workflows/pi-image.yml`
+  - Purpose: canonical on-demand workflow for fresh image artifacts used to reimage nodes.
+  - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
+    [Pi Image Builder Design](./pi_image_builder_design.md).
+  - Related tooling: keeps the manual clone toggles, uploads the `sugarkube-img` artifact, and
+    runs lightweight workflow guard tests on relevant pull requests.
+- `.github/workflows/pi-image-release.yml`
+  - Purpose: manual signed-release publisher for validate-only signed run artifacts or explicit
+    GitHub Release publication.
+  - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
+  - Related tooling: runs QEMU smoke testing by default, signs artifacts with cosign, and only
+    publishes when `publish_release` is enabled during manual dispatch.
 - `scripts/collect_pi_image.sh`
   - Purpose: normalize pi-gen output and compress it into the release artifact layout.
   - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: invoked in the CI pipelines that publish release assets.
+  - Related tooling: invoked by the manual image and release workflows before artifacts are
+    uploaded or published.
 - `scripts/create_build_metadata.py` and `scripts/generate_release_manifest.py`
   - Purpose: capture build inputs, pi-gen SHAs, and stage timings, then export a signed manifest for
     releases.

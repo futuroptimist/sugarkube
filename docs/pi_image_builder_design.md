@@ -98,10 +98,15 @@ personas:
   packages. Override to build a full image. An empty value halts the script before
   running pi-gen.
 
-### Release automation
-- `pi-image-release.yml` rebuilds the image on every `main` push and on a nightly
-  schedule. The job reuses the cached `pi-gen` container when possible so daily runs
-  stay within GitHub's time limits.
+### Workflow roles
+- `pi-image.yml` is the canonical on-demand image workflow. It keeps the manual
+  `workflow_dispatch` clone toggles and uploads the `sugarkube-img` artifact that
+  operators use to reimage nodes.
+- `pi-image-release.yml` is a manual signed-release publisher. It no longer runs on
+  every `main` push or a nightly schedule; dispatch it only when validating signed
+  release artifacts or publishing a GitHub Release. Its inputs select the stable or
+  nightly channel, choose clone toggles, decide whether to run the QEMU smoke test,
+  and keep release publication explicit with `publish_release`.
 - `build_pi_image.sh` now writes `sugarkube.img.xz.metadata.json` with the pi-gen
   commit, stage durations parsed from `work/<img>/build.log`, the git ref used for
   the build, and all toggles passed to the script. The log itself is copied to
