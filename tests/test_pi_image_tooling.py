@@ -787,3 +787,33 @@ def test_collect_pi_image_scan_depth_configurable():
 
     assert 'MAX_SCAN_DEPTH="${MAX_SCAN_DEPTH:-6}"' in script_text
     assert 'find "${DEPLOY_ROOT}" -maxdepth "${MAX_SCAN_DEPTH}"' in script_text
+
+
+def test_pi_image_release_workflow_is_manual_only():
+    workflow_path = Path(".github/workflows/pi-image-release.yml")
+    content = workflow_path.read_text()
+
+    assert "workflow_dispatch:" in content
+    assert re.search(r"^  push:", content, re.MULTILINE) is None
+    assert re.search(r"^  schedule:", content, re.MULTILINE) is None
+
+
+def test_pi_image_release_workflow_preserves_node_and_cache_guardrails():
+    workflow_path = Path(".github/workflows/pi-image-release.yml")
+    content = workflow_path.read_text()
+
+    assert "/opt/hostedtoolcache" not in content
+    assert "Verify Node runtime availability" in content
+    assert "scripts/compute_pi_gen_cache_key.sh" in content
+    assert "key=$(bash scripts/compute_pi_gen_cache_key.sh" in content
+
+
+def test_pi_image_release_workflow_keeps_publish_and_qemu_explicit():
+    workflow_path = Path(".github/workflows/pi-image-release.yml")
+    content = workflow_path.read_text()
+
+    assert "publish_release:" in content
+    assert "default: false" in content
+    assert "if: env.PUBLISH_RELEASE == 'true'" in content
+    assert "run_qemu_smoke:" in content
+    assert "if: env.RUN_QEMU_SMOKE == 'true'" in content

@@ -49,7 +49,8 @@ sync.
 - `scripts/collect_pi_image.sh`
   - Purpose: normalize pi-gen output and compress it into the release artifact layout.
   - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: invoked in the CI pipelines that publish release assets.
+  - Related tooling: invoked by the manual `pi-image` artifact workflow and the manual
+    `pi-image-release` publisher that signs and optionally publishes release assets.
 - `scripts/create_build_metadata.py` and `scripts/generate_release_manifest.py`
   - Purpose: capture build inputs, pi-gen SHAs, and stage timings, then export a signed manifest for
     releases.
@@ -196,7 +197,9 @@ trust the published status.
     image.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: triggered manually via shell or by the GitHub Actions release workflow.
+  - Related tooling: triggered manually via shell, by **Actions → pi-image → Run workflow**
+    for fresh reimaging artifacts, or by **Actions → pi-image-release → Run workflow** when
+    maintainers need signed GitHub Release assets.
 - `scripts/checks.sh`
   - Purpose: unify linting, spellcheck, link-check, CAD, and KiCad validations in CI and local
     development.

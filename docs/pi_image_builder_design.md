@@ -98,10 +98,16 @@ personas:
   packages. Override to build a full image. An empty value halts the script before
   running pi-gen.
 
-### Release automation
-- `pi-image-release.yml` rebuilds the image on every `main` push and on a nightly
-  schedule. The job reuses the cached `pi-gen` container when possible so daily runs
-  stay within GitHub's time limits.
+### Workflow roles and release automation
+- `pi-image.yml` is the canonical on-demand image builder. Maintainers and
+  operators dispatch it manually when they need a fresh `sugarkube-img` workflow
+  artifact for reimaging nodes; pull requests only run the lightweight guard jobs.
+- `pi-image-release.yml` is the signed GitHub Release publisher. Maintainers
+  dispatch it manually when they need signed assets or a refreshed latest
+  downloadable release, which keeps unrelated `main` merges and routine nightly
+  windows from surfacing expensive release-build failures. The job reuses the
+  cached `pi-gen` container when possible so intentional release runs stay within
+  GitHub's time limits.
 - `build_pi_image.sh` now writes `sugarkube.img.xz.metadata.json` with the pi-gen
   commit, stage durations parsed from `work/<img>/build.log`, the git ref used for
   the build, and all toggles passed to the script. The log itself is copied to
@@ -114,8 +120,8 @@ personas:
   hashes) so releases document verification evidence inline.
 - Artifacts are signed via GitHub OIDC + cosign. Both the signature and certificate
   are attached to the release for offline verification.
-- After signing, the workflow launches `scripts/qemu_pi_smoke_test.py` to boot the
-  freshly built image inside `qemu-system-aarch64`. The helper swaps in a stub
+- Before signing, the workflow can launch `scripts/qemu_pi_smoke_test.py` to boot the
+  freshly built image inside `qemu-system-aarch64` when `run_qemu_smoke` is enabled. The helper swaps in a stub
   verifier, trims first-boot retry windows, waits for `[first-boot]` success markers
   on the serial console, and then copies `/boot/first-boot-report` plus
   `/var/log/sugarkube` into uploadable artifacts so every release ships with the

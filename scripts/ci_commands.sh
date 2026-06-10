@@ -57,6 +57,7 @@ run_image_e2e_scripts() {
     tests/verify_just_in_logs_test.sh
     tests/no_libraspberrypi_bin_test.sh
     tests/workflow_verify_step_guard_test.sh
+    tests/pi_image_release_workflow_guard_test.sh
   )
 
   local script

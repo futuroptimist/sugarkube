@@ -82,7 +82,7 @@ point.
 
 ## CI integration
 
-The `pi-image-release.yml` workflow now uploads a support bundle after every build when the
+The manual `pi-image-release.yml` publisher uploads a support bundle after each release build when the
 following secrets are configured:
 
 - `SUPPORT_BUNDLE_HOST` — hostname or IP address of the validation Pi.
