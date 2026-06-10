@@ -774,6 +774,36 @@ def test_pi_image_workflow_uses_cache_key_script():
     assert "key=$(bash scripts/compute_pi_gen_cache_key.sh" in content
 
 
+def test_pi_image_release_workflow_is_manual_only():
+    workflow_path = Path(".github/workflows/pi-image-release.yml")
+    content = workflow_path.read_text()
+    assert "workflow_dispatch:" in content
+    assert "release_channel:" in content
+    assert "publish_release:" in content
+    assert "run_qemu_smoke:" in content
+    assert "\n  push:" not in content
+    assert "\n  schedule:" not in content
+
+
+def test_pi_image_release_workflow_preserves_node_runtime():
+    workflow_path = Path(".github/workflows/pi-image-release.yml")
+    content = workflow_path.read_text()
+    assert "/opt/hostedtoolcache" not in content
+    assert "Verify Node runtime availability" in content
+    assert "node --version" in content
+
+
+def test_pi_image_release_workflow_uses_safe_image_artifact_path():
+    workflow_path = Path(".github/workflows/pi-image-release.yml")
+    content = workflow_path.read_text()
+    assert "scripts/compute_pi_gen_cache_key.sh" in content
+    assert "key=$(bash scripts/compute_pi_gen_cache_key.sh" in content
+    assert "fix_pi_image_permissions.sh" in content
+    assert "bash scripts/collect_pi_image.sh deploy ./sugarkube.img.xz" in content
+    assert "sha256sum -c ./sugarkube.img.xz.sha256" in content
+    assert "if: env.PUBLISH_RELEASE == 'true'" in content
+
+
 def test_compute_pi_gen_cache_key_script_has_fallback():
     script_path = Path("scripts/compute_pi_gen_cache_key.sh")
     script_text = script_path.read_text()

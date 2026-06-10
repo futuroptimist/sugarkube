@@ -99,9 +99,15 @@ personas:
   running pi-gen.
 
 ### Release automation
-- `pi-image-release.yml` rebuilds the image on every `main` push and on a nightly
-  schedule. The job reuses the cached `pi-gen` container when possible so daily runs
-  stay within GitHub's time limits.
+- `pi-image.yml` is the canonical on-demand image builder. Operators dispatch it
+  manually when they need a fresh workflow artifact for reimaging nodes, and the
+  pull-request jobs stay lightweight by running only guard/unit checks.
+- `pi-image-release.yml` is a manual signed-release publisher. Dispatch it only
+  when validating or publishing release assets; set `publish_release=true` to update
+  GitHub Releases after the build, artifact verification, QEMU smoke test, manifest
+  generation, and cosign signing pass. The workflow intentionally does not run on
+  every `main` push or on a daily schedule, so unrelated merges cannot fail the
+  expensive release path.
 - `build_pi_image.sh` now writes `sugarkube.img.xz.metadata.json` with the pi-gen
   commit, stage durations parsed from `work/<img>/build.log`, the git ref used for
   the build, and all toggles passed to the script. The log itself is copied to

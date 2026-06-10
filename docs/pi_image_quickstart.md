@@ -116,11 +116,14 @@ sync without modifying the host.
     Regression coverage: `tests/pi_cluster_bootstrap_test.py::test_run_bootstrap_invokes_workflow_and_join`
     verifies the workflow run ID flows into the installer so those markers stay accurate.
    - **Manual:** open **Actions → pi-image → Run workflow**, tick **token.place** and **dspace** to
-     bake those repos into `/opt/projects`, then download `sugarkube.img.xz` once the run succeeds.
-     Need a guided path? Launch the [Sugarkube Flash Helper](./flash-helper/) and paste the workflow
-     URL to receive OS-specific download, verification, and flashing instructions. Prefer the
-     terminal? Run `python scripts/workflow_flash_instructions.py --url <run-url> --os
-     linux|mac|windows` from the repository root to print the same steps.
+     bake those repos into `/opt/projects`, then download the `sugarkube-img` workflow artifact once
+     the run succeeds. This is the normal path for fresh OS images used to reimage nodes. Use
+     **pi-image-release** only when you intentionally need signed GitHub Release assets for the
+     latest downloadable release. Need a guided path? Launch the
+     [Sugarkube Flash Helper](./flash-helper/) and paste the workflow URL to receive OS-specific
+     download, verification, and flashing instructions. Prefer the terminal? Run
+     `python scripts/workflow_flash_instructions.py --url <run-url> --os linux|mac|windows` from the
+     repository root to print the same steps.
    - `./scripts/download_pi_image.sh --output /your/path.img.xz` still resumes partial downloads and
      verifies checksums automatically.
    - Prefer a unified entry point? Run `python -m sugarkube_toolkit pi download --dry-run` from the

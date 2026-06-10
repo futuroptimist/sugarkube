@@ -31,6 +31,22 @@ sync.
 
 ## Automation map
 
+### GitHub Actions workflows
+
+- `.github/workflows/pi-image.yml`
+  - Purpose: canonical on-demand workflow for fresh Raspberry Pi image artifacts used to reimage
+    nodes. It keeps the manual clone toggles for `sugarkube`, `token.place`, and `dspace`, and its
+    pull-request triggers run lightweight guards instead of the expensive image build.
+  - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
+    [Pi Image Builder Design](./pi_image_builder_design.md).
+- `.github/workflows/pi-image-release.yml`
+  - Purpose: manual signed-release publisher for maintainers who need provenance manifests, cosign
+    signatures, QEMU smoke evidence, and optional GitHub Release publication. Leave
+    `publish_release=false` for validate-only runs; set it to `true` only when publishing release
+    assets intentionally.
+  - Primary docs: [README](../README.md),
+    [Pi Image Builder Design](./pi_image_builder_design.md).
+
 ### Download and release helpers
 
 - `scripts/install_sugarkube_image.sh`
@@ -47,9 +63,10 @@ sync.
   - Related tooling: wrapped by `make download-pi-image`, `just download-pi-image`, and consumed by
     the installer script above.
 - `scripts/collect_pi_image.sh`
-  - Purpose: normalize pi-gen output and compress it into the release artifact layout.
+  - Purpose: normalize pi-gen output and compress it into the image artifact layout.
   - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: invoked in the CI pipelines that publish release assets.
+  - Related tooling: invoked by the manual `pi-image.yml` artifact workflow and the manual
+    `pi-image-release.yml` signed-release workflow.
 - `scripts/create_build_metadata.py` and `scripts/generate_release_manifest.py`
   - Purpose: capture build inputs, pi-gen SHAs, and stage timings, then export a signed manifest for
     releases.
@@ -137,8 +154,8 @@ sync.
   - Primary docs: [Pi Support Bundles](./pi_support_bundles.md),
     [Pi Image Quickstart](./pi_image_quickstart.md).
   - Related tooling: invoked via `make support-bundle` / `just support-bundle`, supports
-    `SUPPORT_BUNDLE_ARGS` overrides, and publishes artifacts from `pi-image-release.yml` when
-    bundle secrets are configured.
+    `SUPPORT_BUNDLE_ARGS` overrides, and publishes artifacts from manually dispatched
+    `pi-image-release.yml` runs when bundle secrets are configured.
 - `scripts/update_hardware_boot_badge.py`
   - Purpose: generate shields.io endpoint JSON so the README hardware boot badge reflects the
     latest physical verification run.
@@ -196,7 +213,8 @@ trust the published status.
     image.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: triggered manually via shell or by the GitHub Actions release workflow.
+  - Related tooling: triggered manually via shell, by `pi-image.yml` for fresh workflow artifacts,
+    and by `pi-image-release.yml` when validating or publishing signed GitHub Release assets.
 - `scripts/checks.sh`
   - Purpose: unify linting, spellcheck, link-check, CAD, and KiCad validations in CI and local
     development.

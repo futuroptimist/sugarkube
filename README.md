@@ -161,14 +161,22 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 ## Pi image releases
 
-The `pi-image-release` workflow builds a fresh Raspberry Pi OS image on every
-push to `main` and once per day. Each run publishes a signed
-`sugarkube.img.xz`, its checksum, a provenance manifest, and the full
-`pi-gen` build log. Release notes summarize stage timings and link directly to
-the manifest so you can verify the build inputs and commit hashes before
- flashing. Run `./scripts/install_sugarkube_image.sh` (or fetch the same helper
- via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
- download, verify, and expand the latest release. When you prefer a task runner,
+Use **Actions → pi-image → Run workflow** when you need a fresh on-demand
+workflow artifact for reimaging Raspberry Pi nodes. That manual workflow keeps
+the clone toggles for `sugarkube`, `token.place`, and `dspace`, then uploads the
+`sugarkube-img` artifact for the exact run you dispatched. Use
+**Actions → pi-image-release → Run workflow** only when you intentionally need to
+sign artifacts and, with `publish_release` enabled, publish or update the latest
+downloadable GitHub Release. The release workflow is manual-only so unrelated
+`main` merges and nightly schedules do not trigger expensive Pi image release
+attempts. Published releases include `sugarkube.img.xz`, its checksum, a
+provenance manifest, cosign signatures/certificates, QEMU smoke-test evidence,
+and the full `pi-gen` build log. Release notes summarize stage timings and link
+directly to the manifest so you can verify the build inputs and commit hashes
+before flashing. Run `./scripts/install_sugarkube_image.sh` (or fetch the same
+helper via `curl -fsSL https://raw.githubusercontent.com/futuroptimist/sugarkube/main/scripts/install_sugarkube_image.sh | bash`) to
+download, verify, and expand the latest published release. When you prefer a
+task runner,
 use either `sudo make flash-pi FLASH_DEVICE=/dev/sdX` or `sudo FLASH_DEVICE=/dev/sdX just flash-pi` to
 chain download → verification → flashing with the streaming helper. Prefer go-task? Run
 `sudo task pi:flash FLASH_DEVICE=/dev/sdX` to reach the same helper via the Taskfile. Need to forward
