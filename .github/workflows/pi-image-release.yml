@@ -59,6 +59,13 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Validate release publishing inputs
+        run: |
+          if [ "${PUBLISH_RELEASE}" != "false" ] && [ "${RUN_QEMU_SMOKE}" = "false" ]; then
+            echo "QEMU smoke evidence is required when publish_release=true; set publish_release=false for validate-only runs without QEMU." >&2
+            exit 1
+          fi
+
       - name: Free up disk space
         run: |
           sudo apt-get clean
