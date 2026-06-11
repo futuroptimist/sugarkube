@@ -29,3 +29,11 @@ grep -F "if: env.RUN_QEMU_SMOKE != 'false'" "$wf" >/dev/null
 
 # Reuse the shared cache-key helper rather than duplicating fragile git/date logic.
 grep -F "bash scripts/compute_pi_gen_cache_key.sh" "$wf" >/dev/null
+
+# Ensure pi-image guard jobs trigger when the release workflow changes.
+pi_wf=".github/workflows/pi-image.yml"
+release_path_count=$(grep -Fc "'.github/workflows/pi-image-release.yml'" "$pi_wf")
+if [ "$release_path_count" -lt 2 ]; then
+  echo "pi-image.yml must include pi-image-release.yml in pull_request path filters" >&2
+  exit 1
+fi

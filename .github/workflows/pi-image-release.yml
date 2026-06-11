@@ -142,6 +142,12 @@ jobs:
           sudo TARGET_UID="$(id -u)" TARGET_GID="$(id -g)" \
             bash scripts/fix_pi_image_permissions.sh
 
+      - name: Normalize release checksum filename
+        run: |
+          set -euo pipefail
+          checksum=$(sha256sum sugarkube.img.xz | awk '{print $1}')
+          printf '%s  %s\n' "${checksum}" "sugarkube.img.xz" >sugarkube.img.xz.sha256
+
       - name: Verify image artifacts
         run: |
           set -euo pipefail
