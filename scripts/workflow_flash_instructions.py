@@ -49,7 +49,7 @@ SUPPORTED_OS: dict[str, str] = {
     "windows": "Windows",
 }
 
-_ARTIFACT_NAME = "sugarkube-pi-image"
+_ARTIFACT_NAME = "sugarkube-img"
 _IMAGE_NAME = "sugarkube.img.xz"
 
 _STEP_TEMPLATES: dict[str, tuple[dict[str, Iterable[str]], ...]] = {
@@ -78,10 +78,10 @@ _STEP_TEMPLATES: dict[str, tuple[dict[str, Iterable[str]], ...]] = {
             ),
         },
         {
-            "title": "Download release artifacts",
+            "title": "Download workflow artifacts",
             "body": (
-                "Fetch the {artifact_name} bundle from the workflow run. The helper also works for"
-                " private repositories once gh is authenticated.",
+                "Fetch the {artifact_name} bundle from the pi-image workflow run. "
+                "The helper also works for private repositories once gh is authenticated.",
             ),
             "commands": (
                 "gh run download {run_id} --repo {repository} --name {artifact_name} --dir .",

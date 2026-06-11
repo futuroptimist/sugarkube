@@ -49,12 +49,13 @@ sync.
 - `scripts/collect_pi_image.sh`
   - Purpose: normalize pi-gen output and compress it into the release artifact layout.
   - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: invoked in the CI pipelines that publish release assets.
+  - Related tooling: invoked by the manual `pi-image` artifact workflow and the manual
+    `pi-image-release` publisher.
 - `scripts/create_build_metadata.py` and `scripts/generate_release_manifest.py`
   - Purpose: capture build inputs, pi-gen SHAs, and stage timings, then export a signed manifest for
     releases.
   - Primary docs: [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: referenced from the release workflow and validated by tests under
+  - Related tooling: referenced from the manual release-publisher workflow and validated by tests under
     `tests/test_create_build_metadata.py` and `tests/test_generate_release_manifest.py`. The metadata
     helper also writes `IMG_NAME.img.xz.stage-summary.json`, and
     `tests/test_create_build_metadata.py::test_stage_summary_outputs_timelines` ensures those
@@ -137,8 +138,8 @@ sync.
   - Primary docs: [Pi Support Bundles](./pi_support_bundles.md),
     [Pi Image Quickstart](./pi_image_quickstart.md).
   - Related tooling: invoked via `make support-bundle` / `just support-bundle`, supports
-    `SUPPORT_BUNDLE_ARGS` overrides, and publishes artifacts from `pi-image-release.yml` when
-    bundle secrets are configured.
+    `SUPPORT_BUNDLE_ARGS` overrides, and publishes artifacts from manually dispatched
+    `pi-image-release.yml` runs when bundle secrets are configured.
 - `scripts/update_hardware_boot_badge.py`
   - Purpose: generate shields.io endpoint JSON so the README hardware boot badge reflects the
     latest physical verification run.
@@ -196,13 +197,26 @@ trust the published status.
     image.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [Pi Image Builder Design](./pi_image_builder_design.md).
-  - Related tooling: triggered manually via shell or by the GitHub Actions release workflow.
+  - Related tooling: triggered by **Actions → pi-image → Run workflow** for normal fresh artifacts,
+    by shell wrappers for local builds, and by **Actions → pi-image-release → Run workflow** only
+    when publishing or rehearsing signed GitHub Releases.
 - `scripts/checks.sh`
   - Purpose: unify linting, spellcheck, link-check, CAD, and KiCad validations in CI and local
     development.
   - Primary docs: [Pi Image Quickstart](./pi_image_quickstart.md),
     [README](../README.md), and [CONTRIBUTING](../CONTRIBUTING.md).
   - Related tooling: run via `pre-commit run --all-files` and from `scripts/sugarkube_doctor.sh`.
+
+#### Workflow roles
+
+- `.github/workflows/pi-image.yml` is the user-facing on-demand image builder. Keep its
+  `workflow_dispatch` inputs for cloning `sugarkube`, `token.place`, and `dspace`, and keep its
+  PR/unit guard jobs lightweight so routine changes can validate image tooling without publishing a
+  release.
+- `.github/workflows/pi-image-release.yml` is the maintainer release publisher. Dispatch it manually
+  when you need a signed GitHub Release or a validate-only release rehearsal; it should not regain
+  broad `push` or daily `schedule` triggers unless the heavy build is deliberately path-gated and the
+  docs explain why automatic publishing is back.
 
 When you adjust any helper above, update the referenced docs and regenerate spellcheck/link-check via
 `make docs-verify` to keep the automation story coherent for new contributors.

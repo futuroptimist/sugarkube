@@ -54,6 +54,13 @@ def test_instructions_include_run_id(os_key: str) -> None:
     assert "owner/repo" in MODULE.render_text(os_key, info)
 
 
+def test_instructions_download_pi_image_workflow_artifact() -> None:
+    info = MODULE.WorkflowInfo("owner", "repo", "111")
+    text = MODULE.render_text("linux", info)
+    assert "--name sugarkube-img" in text
+    assert "sugarkube-pi-image" not in text
+
+
 def test_instructions_reject_unknown_os() -> None:
     info = MODULE.WorkflowInfo("owner", "repo", "111")
     with pytest.raises(MODULE.WorkflowFlashError):

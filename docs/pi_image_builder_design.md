@@ -99,9 +99,15 @@ personas:
   running pi-gen.
 
 ### Release automation
-- `pi-image-release.yml` rebuilds the image on every `main` push and on a nightly
-  schedule. The job reuses the cached `pi-gen` container when possible so daily runs
-  stay within GitHub's time limits.
+- `pi-image.yml` is the canonical on-demand build for fresh workflow artifacts used
+  to reimage nodes. It keeps the heavy image build behind `workflow_dispatch` while
+  lightweight guards still run automatically when relevant files change.
+- `pi-image-release.yml` is a manual release-publisher workflow for maintainers who
+  intentionally need a signed GitHub Release or a validate-only release rehearsal. It
+  does not run on unrelated `main` pushes or a daily schedule, so expensive release
+  attempts do not make status dashboards red when no release is being published. The
+  job reuses the cached `pi-gen` container when possible so manual runs stay within
+  GitHub's time limits.
 - `build_pi_image.sh` now writes `sugarkube.img.xz.metadata.json` with the pi-gen
   commit, stage durations parsed from `work/<img>/build.log`, the git ref used for
   the build, and all toggles passed to the script. The log itself is copied to
@@ -114,8 +120,8 @@ personas:
   hashes) so releases document verification evidence inline.
 - Artifacts are signed via GitHub OIDC + cosign. Both the signature and certificate
   are attached to the release for offline verification.
-- After signing, the workflow launches `scripts/qemu_pi_smoke_test.py` to boot the
-  freshly built image inside `qemu-system-aarch64`. The helper swaps in a stub
+- Before publishing, the workflow launches `scripts/qemu_pi_smoke_test.py` when the manual
+  `run_qemu_smoke` input is enabled to boot the freshly built image inside `qemu-system-aarch64`. The helper swaps in a stub
   verifier, trims first-boot retry windows, waits for `[first-boot]` success markers
   on the serial console, and then copies `/boot/first-boot-report` plus
   `/var/log/sugarkube` into uploadable artifacts so every release ships with the
@@ -123,10 +129,12 @@ personas:
 
 ### Local GitHub Actions dry-run
 - Install [act](https://github.com/nektos/act) and run `act workflow-dispatch --workflows
-  .github/workflows/pi-image-release.yml` to exercise the release flow locally. The run
-  uses the same scripts as CI, generates metadata/manifest files under the working
-  directory, and surfaces any regressions in the release tooling without waiting for a
-  hosted runner.
+  .github/workflows/pi-image-release.yml` to exercise the manual release flow locally. Use the
+  workflow inputs to choose `stable` versus `nightly`, toggle repository cloning, run a
+  validate-only rehearsal with `publish_release=false`, or skip QEMU only when you are
+  testing workflow plumbing. The run uses the same scripts as CI, generates
+  metadata/manifest files under the working directory, and surfaces regressions in the
+  release tooling without waiting for a hosted runner.
 
 ## Operations & Recovery
 - If apt stalls: rerun; caches and retries reduce recurrence

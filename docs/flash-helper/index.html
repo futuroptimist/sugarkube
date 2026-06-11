@@ -242,9 +242,9 @@
             commands: ["mkdir -p {images_dir_unix}", "cd {images_dir_unix}"],
           },
           {
-            title: "Download release artifacts",
+            title: "Download workflow artifacts",
             body: [
-              "Fetch the {artifact_name} bundle from the workflow run. The helper also works for private repositories once gh is authenticated.",
+              "Fetch the {artifact_name} bundle from the pi-image workflow run. The helper also works for private repositories once gh is authenticated.",
             ],
             commands: [
               "gh run download {run_id} --repo {repository} --name {artifact_name} --dir .",
@@ -435,7 +435,7 @@
         return {
           repository: info.repository,
           run_id: info.run_id,
-          artifact_name: "sugarkube-pi-image",
+          artifact_name: "sugarkube-img",
           image_name: "sugarkube.img.xz",
           images_dir_unix: imagesDirUnix,
           expanded_image_path_unix: `${imagesDirUnix}/sugarkube.img`,

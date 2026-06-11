@@ -30,6 +30,7 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+      - '.github/workflows/pi-image-release.yml'
       - '**/Dockerfile'
       - '**/Dockerfile.*'
       - '**/package.json'
@@ -52,6 +53,7 @@ on:
       - 'tests/create_build_metadata_e2e.sh'
       - 'tests/**'
       - '.github/workflows/pi-image.yml'
+      - '.github/workflows/pi-image-release.yml'
       - '**/Dockerfile'
       - '**/Dockerfile.*'
       - '**/package.json'
@@ -298,6 +300,9 @@ jobs:
 
       - name: Run OCI parity smoke workflow guard test
         run: bash tests/oci_parity_smoke_guard_test.sh
+
+      - name: Run Pi image release workflow guard test
+        run: bash tests/pi_image_release_workflow_guard_test.sh
 
       - name: Run fix permissions e2e test
         run: bash tests/fix_pi_image_permissions_e2e.sh

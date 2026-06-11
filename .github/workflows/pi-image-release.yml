@@ -1,11 +1,35 @@
 name: pi-image-release
 
-on:
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: '0 6 * * *'
+"on":
+  workflow_dispatch:
+    inputs:
+      release_channel:
+        description: "Release channel for tags and release notes"
+        type: choice
+        options:
+          - stable
+          - nightly
+        default: stable
+      clone_sugarkube:
+        description: "Clone sugarkube repo into image"
+        type: boolean
+        default: true
+      clone_token_place:
+        description: "Clone token.place repo into image"
+        type: boolean
+        default: true
+      clone_dspace:
+        description: "Clone democratizedspace/dspace into image"
+        type: boolean
+        default: true
+      publish_release:
+        description: "Publish a signed GitHub Release; false validates without signing/publishing"
+        type: boolean
+        default: true
+      run_qemu_smoke:
+        description: "Boot the generated image in QEMU before publishing"
+        type: boolean
+        default: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -24,23 +48,39 @@ jobs:
       ARM64: 1
       DEBIAN_FRONTEND: noninteractive
       BUILD_TIMEOUT: 7200
-      RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'nightly' || 'stable' }}
-      CLONE_SUGARKUBE: true
-      CLONE_TOKEN_PLACE: true
-      CLONE_DSPACE: true
+      RELEASE_CHANNEL: ${{ inputs.release_channel || 'stable' }}
+      CLONE_SUGARKUBE: ${{ inputs.clone_sugarkube == false && 'false' || 'true' }}
+      CLONE_TOKEN_PLACE: ${{ inputs.clone_token_place == false && 'false' || 'true' }}
+      CLONE_DSPACE: ${{ inputs.clone_dspace == false && 'false' || 'true' }}
+      PUBLISH_RELEASE: ${{ inputs.publish_release == false && 'false' || 'true' }}
+      RUN_QEMU_SMOKE: ${{ inputs.run_qemu_smoke == false && 'false' || 'true' }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
+      - name: Validate release publishing inputs
+        run: |
+          if [ "${PUBLISH_RELEASE}" != "false" ] && [ "${RUN_QEMU_SMOKE}" = "false" ]; then
+            echo "QEMU smoke evidence is required when publish_release=true; set publish_release=false for validate-only runs without QEMU." >&2
+            exit 1
+          fi
+
       - name: Free up disk space
         run: |
           sudo apt-get clean
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache /usr/local/lib/node_modules \
-            /usr/local/share/boost
+            /usr/local/lib/node_modules /usr/local/share/boost
           docker system prune -af || true
           df -h
+
+      - name: Verify Node runtime availability
+        run: |
+          if ! command -v node >/dev/null 2>&1; then
+            echo "Node.js runtime missing after cleanup" >&2
+            exit 1
+          fi
+          node --version
 
       - name: Install pi-gen dependencies
         run: |
@@ -62,14 +102,16 @@ jobs:
 
       - name: Compute pi-gen cache key
         id: pigen-key
+        env:
+          PI_GEN_BRANCH: bookworm
+          PI_GEN_REMOTE: https://github.com/RPi-Distro/pi-gen.git
         run: |
-          branch=bookworm
-          ref=$(git ls-remote https://github.com/RPi-Distro/pi-gen.git "refs/heads/${branch}" | cut -f1)
-          echo "key=pigen-${RUNNER_OS}-${branch}-${ref}-$(date +'%Y-%m')" >> "$GITHUB_OUTPUT"
+          key=$(bash scripts/compute_pi_gen_cache_key.sh "${PI_GEN_BRANCH}" "${PI_GEN_REMOTE}")
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
 
       - name: Restore pi-gen Docker image
         id: cache-pigen
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: ~/cache/pi-gen.tar
           key: ${{ steps.pigen-key.outputs.key }}
@@ -102,7 +144,34 @@ jobs:
             CLONE_DSPACE="${CLONE_DSPACE}" \
             ./scripts/build_pi_image.sh
 
+      - name: Fix permissions on pi-image artifacts
+        run: |
+          sudo TARGET_UID="$(id -u)" TARGET_GID="$(id -g)" \
+            bash scripts/fix_pi_image_permissions.sh
+
+      - name: Normalize release checksum filename
+        run: |
+          set -euo pipefail
+          checksum=$(sha256sum sugarkube.img.xz | awk '{print $1}')
+          printf '%s  %s\n' "${checksum}" "sugarkube.img.xz" >sugarkube.img.xz.sha256
+
+      - name: Verify image artifacts
+        run: |
+          set -euo pipefail
+          for path in \
+            ./sugarkube.img.xz \
+            ./sugarkube.img.xz.sha256 \
+            ./sugarkube.img.xz.metadata.json \
+            ./sugarkube.img.xz.stage-summary.json; do
+            if [ ! -s "$path" ]; then
+              echo "Missing or empty artifact: $path" >&2
+              exit 1
+            fi
+          done
+          sha256sum -c ./sugarkube.img.xz.sha256
+
       - name: Boot image in QEMU smoke test
+        if: env.RUN_QEMU_SMOKE != 'false'
         run: |
           ./scripts/qemu_pi_smoke_test.py \
             --image sugarkube.img.xz \
@@ -128,21 +197,28 @@ jobs:
       - name: Generate release manifest and notes
         id: manifest
         run: |
-          python3 scripts/generate_release_manifest.py \
-            --metadata "sugarkube.img.xz.metadata.json" \
-            --manifest-output "sugarkube.img.xz.manifest.json" \
-            --notes-output "RELEASE_NOTES.md" \
-            --release-channel "${RELEASE_CHANNEL}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
-            --workflow "${GITHUB_WORKFLOW}" \
-            --qemu-artifacts "qemu-smoke-artifacts"
+          set -euo pipefail
+          args=(
+            --metadata "sugarkube.img.xz.metadata.json"
+            --manifest-output "sugarkube.img.xz.manifest.json"
+            --notes-output "RELEASE_NOTES.md"
+            --release-channel "${RELEASE_CHANNEL}"
+            --repo "${GITHUB_REPOSITORY}"
+            --run-id "${GITHUB_RUN_ID}"
+            --run-attempt "${GITHUB_RUN_ATTEMPT}"
+            --workflow "${GITHUB_WORKFLOW}"
+          )
+          if [ "${RUN_QEMU_SMOKE}" != "false" ]; then
+            args+=(--qemu-artifacts "qemu-smoke-artifacts")
+          fi
+          python3 scripts/generate_release_manifest.py "${args[@]}"
 
       - name: Install cosign
+        if: env.PUBLISH_RELEASE != 'false'
         uses: sigstore/cosign-installer@v3.5.0
 
       - name: Sign release artifacts
+        if: env.PUBLISH_RELEASE != 'false'
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
@@ -156,7 +232,7 @@ jobs:
             sugarkube.img.xz.manifest.json
 
       - name: Upload run artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sugarkube-pi-image
           path: |
@@ -164,16 +240,26 @@ jobs:
             sugarkube.img.xz.sha256
             sugarkube.img.xz.metadata.json
             sugarkube.img.xz.manifest.json
+            sugarkube.img.xz.stage-summary.json
+            sugarkube.build.log
+            RELEASE_NOTES.md
+          if-no-files-found: error
+
+      - name: Upload signed release signatures
+        if: env.PUBLISH_RELEASE != 'false'
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: sugarkube-pi-image-signatures
+          path: |
             sugarkube.img.xz.sig
             sugarkube.img.xz.pem
             sugarkube.img.xz.manifest.json.sig
             sugarkube.img.xz.manifest.json.pem
-            sugarkube.build.log
-            RELEASE_NOTES.md
+          if-no-files-found: error
 
       - name: Upload QEMU smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sugarkube-qemu-smoke
           path: qemu-smoke-artifacts
@@ -203,13 +289,14 @@ jobs:
 
       - name: Upload support bundle
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sugarkube-support-bundle
           path: support-bundles
           if-no-files-found: ignore
 
       - name: Publish GitHub release
+        if: env.PUBLISH_RELEASE != 'false'
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -230,5 +317,6 @@ jobs:
             sugarkube.img.xz.pem
             sugarkube.img.xz.manifest.json.sig
             sugarkube.img.xz.manifest.json.pem
+            sugarkube.img.xz.stage-summary.json
             sugarkube.build.log
             RELEASE_NOTES.md
