@@ -1318,6 +1318,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     echo "chart ref: ${chart}"
     echo "chart version: ${chart_version:-<unversioned>}"
     echo "chart pin: ${version_file:-<inline version>}"
+    echo 'NOTE: chart pins are explicit. `tag=...` changes only the image tag.'
+    printf 'Run `just app-chart-status app=%s` before release deploys to check for newer published chart versions.\n' "${release}"
+    printf 'Use `just app-chart-bump app=%s version=<version>` to intentionally update %s.\n' "${release}" "${version_file:-docs/apps/${release}.version}"
     if [ -n "${chart_version}" ]; then
       helm show chart "${chart}" --version "${chart_version}" >/dev/null
     fi

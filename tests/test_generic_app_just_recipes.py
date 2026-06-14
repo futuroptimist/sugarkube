@@ -233,6 +233,12 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
     )
 
 
+def _assert_chart_pin_reminder(output: str, app: str) -> None:
+    assert "NOTE: chart pins are explicit. `tag=...` changes only the image tag." in output
+    assert f"Run `just app-chart-status app={app}`" in output
+    assert f"Use `just app-chart-bump app={app} version=<version>`" in output
+
+
 def test_app_chart_semver_prefers_final_release_over_matching_prerelease() -> None:
     assert sorted(["1.2.3", "1.2.3-rc.1"], key=app_chart.semver_key)[-1] == "1.2.3"
 
@@ -480,12 +486,45 @@ def test_app_deploy_fails_tokenplace_when_metadata_names_only_in_comments(
 def test_app_deploy_passes_tokenplace_when_manifest_metadata_env_present(
     generic_app_stub_env: dict[str, str],
 ) -> None:
+    pin_path = REPO_ROOT / "docs/apps/tokenplace.version"
+    before_pin = pin_path.read_text(encoding="utf-8")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CHART_LATEST_STUB"] = "9.9.9"
+
     result = _run_just(
-        ["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], generic_app_stub_env
+        ["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "chart pin: docs/apps/tokenplace.version" in result.stdout
+    _assert_chart_pin_reminder(result.stdout, "tokenplace")
+    assert "9.9.9" not in result.stdout
+    assert pin_path.read_text(encoding="utf-8") == before_pin
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--version 0.1.3" in helm_log
+    assert "--version 9.9.9" not in helm_log
+
+
+def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mutation(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    pin_path = REPO_ROOT / "docs/apps/tokenplace.version"
+    before_pin = pin_path.read_text(encoding="utf-8")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CHART_LATEST_STUB"] = "9.9.9"
+
+    result = _run_just(
+        ["app-redeploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    _assert_chart_pin_reminder(result.stdout, "tokenplace")
+    assert "9.9.9" not in result.stdout
+    assert pin_path.read_text(encoding="utf-8") == before_pin
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+    assert "--version 0.1.3" in helm_log
+    assert "--version 9.9.9" not in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -566,6 +605,9 @@ def test_existing_app_specific_deploy_wrappers_still_work(
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert f"--namespace {app}" in helm_log
     assert "--set image.tag=main-deadbee" in helm_log
+    if recipe == "tokenplace-oci-deploy":
+        _assert_chart_pin_reminder(result.stdout, "tokenplace")
+        assert result.stdout.count("NOTE: chart pins are explicit") == 1
 
 
 @pytest.mark.usefixtures("ensure_just_available")
