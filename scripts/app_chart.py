@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
-import argparse, json, os, re, subprocess, sys
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,11 +20,18 @@ REQUIRED_ENVS = {
         "TOKENPLACE_DEPLOY_ENV",
     ]
 }
-SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$")
+
+
+def version_file_path(path: str) -> Path:
+    if not path or not path.strip():
+        raise SystemExit("ERROR: --version-file must not be empty.")
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
 
 
 def read_pin(path: str) -> str:
-    p = REPO_ROOT / path if not Path(path).is_absolute() else Path(path)
+    p = version_file_path(path)
     for line in p.read_text(encoding="utf-8").splitlines():
         value = line.split("#", 1)[0].strip()
         if value:
@@ -45,11 +57,38 @@ def parse_chart_yaml(text: str) -> dict[str, str]:
     return out
 
 
-def semver_key(v: str) -> tuple[int, int, int, str]:
+def semver_key(v: str) -> tuple[int, int, int, int, tuple[object, ...]]:
+    """Return a SemVer precedence key where prereleases sort below final releases."""
     m = SEMVER_RE.match(v)
     if not m:
-        return (-1, -1, -1, v)
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), v)
+        return (-1, -1, -1, 0, (v,))
+    prerelease = m.group(4)
+    if not prerelease:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), 1, ())
+    parts: list[object] = []
+    for part in prerelease.split("."):
+        parts.append((0, int(part)) if part.isdigit() else (1, part))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), 0, tuple(parts))
+
+
+def ghcr_versions_from_api(owner: str, name: str, owner_type: str) -> tuple[list[str], str]:
+    url = (
+        f"https://api.github.com/{owner_type}/{owner}/packages/container/"
+        f"charts%2F{name}/versions?per_page=100"
+    )
+    curl = run(["curl", "-fsS", url])
+    if curl.returncode != 0:
+        return [], curl.stderr or curl.stdout
+    try:
+        payload = json.loads(curl.stdout)
+    except json.JSONDecodeError:
+        return [], "could not parse GitHub/GHCR API response"
+    versions: list[str] = []
+    for item in payload if isinstance(payload, list) else []:
+        meta = item.get("metadata", {}) if isinstance(item, dict) else {}
+        tags = meta.get("container", {}).get("tags", []) if isinstance(meta, dict) else []
+        versions.extend(t for t in tags if SEMVER_RE.match(str(t)))
+    return versions, ""
 
 
 def latest_version(chart: str) -> tuple[str, str]:
@@ -61,22 +100,12 @@ def latest_version(chart: str) -> tuple[str, str]:
     if not m:
         return "", "latest unknown: unsupported chart registry; inspect the chart registry manually"
     owner, name = m.groups()
-    url = f"https://api.github.com/orgs/{owner}/packages/container/charts%2F{name}/versions?per_page=100"
-    curl = run(["curl", "-fsS", url])
-    if curl.returncode != 0:
-        return (
-            "",
-            f"latest unknown: GitHub/GHCR API unavailable; open https://github.com/{owner}?tab=packages and inspect charts/{name}",
-        )
-    try:
-        payload = json.loads(curl.stdout)
-    except json.JSONDecodeError:
-        return "", "latest unknown: could not parse GitHub/GHCR API response"
     versions: list[str] = []
-    for item in payload if isinstance(payload, list) else []:
-        meta = item.get("metadata", {}) if isinstance(item, dict) else {}
-        tags = meta.get("container", {}).get("tags", []) if isinstance(meta, dict) else []
-        versions.extend(t for t in tags if SEMVER_RE.match(str(t)))
+    for owner_type in ("orgs", "users"):
+        found, error = ghcr_versions_from_api(owner, name, owner_type)
+        versions.extend(found)
+        if found:
+            break
     versions = sorted(set(versions), key=semver_key)
     return (
         (versions[-1], "GitHub/GHCR API")
@@ -129,7 +158,7 @@ def cmd_bump(args: argparse.Namespace) -> int:
     if show.returncode != 0:
         print(show.stderr or show.stdout, file=sys.stderr)
         return show.returncode or 1
-    path = REPO_ROOT / args.version_file
+    path = version_file_path(args.version_file)
     lines = path.read_text(encoding="utf-8").splitlines()
     replaced = False
     new = []
@@ -145,7 +174,7 @@ def cmd_bump(args: argparse.Namespace) -> int:
     if not replaced:
         new.append(args.version)
     path.write_text("\n".join(new) + "\n", encoding="utf-8")
-    subprocess.run(["git", "diff", "--", args.version_file], cwd=REPO_ROOT, check=False)
+    subprocess.run(["git", "diff", "--", str(path)], cwd=REPO_ROOT, check=False)
     print("Next steps:")
     print(f"git add {args.version_file}")
     print(f'git commit -m "Bump {args.app} chart pin to {args.version}"')
@@ -182,7 +211,11 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if tmpl.returncode != 0:
         print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
         return tmpl.returncode or 1
-    missing = [name for name in req if name not in tmpl.stdout]
+    missing = [
+        name
+        for name in req
+        if not re.search(rf"(?m)^\s*-\s*name:\s*{re.escape(name)}\s*$", tmpl.stdout)
+    ]
     if missing:
         print(
             "ERROR: rendered token.place manifest is missing required metadata env vars: "

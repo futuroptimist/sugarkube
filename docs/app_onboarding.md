@@ -86,8 +86,8 @@ The app repo's chart and `ci-helm.yml` should answer yes to each item before Sug
 - `ci-helm.yml` publishes `oci://ghcr.io/OWNER/charts/CHART`.
 - Published chart versions are immutable; never republish different content under an existing version.
 - Sugarkube pins the deployed chart version in `docs/apps/APP.version`.
-  Image tags and chart versions are separate coordinates: `just app-deploy
-  tag=...` does not bump or auto-select charts.
+  Image tags and chart versions are separate coordinates: `just app-deploy tag=...`
+  does not bump or auto-select charts.
 
 ## Environment overlay checklist
 

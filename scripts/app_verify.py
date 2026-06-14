@@ -182,9 +182,15 @@ def tokenplace_meta_failure(env: str, raw: bytes) -> str:
     try:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return ""
-    label = str(data.get("label", ""))
-    version = str(data.get("version", ""))
+        return "token.place metadata endpoint must return valid JSON."
+    if not isinstance(data, dict):
+        return "token.place metadata endpoint must return a JSON object."
+    label = data.get("label")
+    version = data.get("version")
+    if not isinstance(label, str) or not label.strip():
+        return "token.place metadata endpoint must include a non-empty label."
+    if not isinstance(version, str) or not version.strip():
+        return "token.place metadata endpoint must include a non-empty version."
     if version == "dev" or label.endswith(" dev"):
         if env == "prod":
             return "token.place prod metadata must not report version=dev."

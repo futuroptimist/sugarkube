@@ -1307,6 +1307,11 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         version_args+=(--version "${chart_version}")
     fi
 
+    image_tag="${tag}"
+    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
+        image_tag="${default_tag}"
+    fi
+
     echo "app: ${release}"
     echo "env: ${SUGARKUBE_ENV:-unknown}"
     echo "image tag: ${image_tag:-<none>}"
@@ -1326,11 +1331,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                 value_args+=(-f "${value_file}")
             fi
         done
-    fi
-
-    image_tag="${tag}"
-    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
-        image_tag="${default_tag}"
     fi
 
     set_args=()

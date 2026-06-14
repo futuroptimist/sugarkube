@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts.app_verify import base_url_from_host
+from scripts import app_chart
+from scripts.app_verify import base_url_from_host, tokenplace_meta_failure
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,6 +104,8 @@ fi
 if [[ "$*" == template* ]]; then
   if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ]; then
     printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: tokenplace\n'
+  elif [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META:-}}" = "1" ]; then
+    printf '# TOKENPLACE_IMAGE_TAG TOKENPLACE_RELEASE_VERSION TOKENPLACE_CHART_VERSION TOKENPLACE_DEPLOY_ENV\nkind: ConfigMap\ndata:\n  TOKENPLACE_IMAGE_TAG: main-deadbee\n'
   else
     printf 'env:\n- name: TOKENPLACE_IMAGE_TAG\n- name: TOKENPLACE_RELEASE_VERSION\n- name: TOKENPLACE_CHART_VERSION\n- name: TOKENPLACE_DEPLOY_ENV\n'
   fi
@@ -133,6 +136,16 @@ path="${{url#https://example.test}}"
 path="${{path:-/}}"
 status=200
 body='{{"status":"ok"}}'
+case "${{url}}" in
+  https://api.github.com/orgs/futuroptimist/packages/container/charts%2Ftokenplace/versions*)
+    status=404
+    body='{{"message":"Not Found"}}'
+    ;;
+  https://api.github.com/users/futuroptimist/packages/container/charts%2Ftokenplace/versions*)
+    status=200
+    body='[{{"metadata":{{"container":{{"tags":["0.1.3","0.1.4-rc.1","0.1.4"]}}}}}}]'
+    ;;
+esac
 case "${{path}}" in
   /) body=$'<!doctype html>\n<html lang="en">\n<body>ok</body>\n</html>' ;;
   /config.json) body='{{"publicConfig":true}}' ;;
@@ -178,6 +191,24 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
     )
 
 
+def test_app_chart_semver_prefers_final_release_over_prerelease() -> None:
+    versions = ["1.2.3-rc.1", "1.2.3", "1.2.4-alpha.1"]
+
+    assert sorted(versions, key=app_chart.semver_key)[-1] == "1.2.4-alpha.1"
+    assert sorted(["1.2.3", "1.2.3-rc.1"], key=app_chart.semver_key)[-1] == "1.2.3"
+
+
+def test_app_chart_read_pin_rejects_empty_version_file_path() -> None:
+    with pytest.raises(SystemExit, match="--version-file must not be empty"):
+        app_chart.read_pin("")
+
+
+def test_tokenplace_meta_failure_rejects_invalid_or_missing_metadata() -> None:
+    assert "valid JSON" in tokenplace_meta_failure("staging", b"<html>ok</html>")
+    assert "non-empty label" in tokenplace_meta_failure("staging", b"{}")
+    assert "non-empty version" in tokenplace_meta_failure("staging", b'{"label":"main-deadbee"}')
+
+
 def test_chart_recipes_are_listed(generic_app_stub_env: dict[str, str]) -> None:
     result = _run_just(["--list"], generic_app_stub_env)
 
@@ -201,6 +232,33 @@ def test_app_chart_status_reports_pin_and_stale_latest(
     assert "chart appVersion: main-deadbee" in result.stdout
     assert "Pinned chart appears stale: 0.1.3 < 9.9.9" in result.stdout
     assert "Run: just app-chart-bump app=tokenplace version=9.9.9" in result.stdout
+
+
+def test_app_chart_latest_version_falls_back_to_user_owned_ghcr_packages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args[-1])
+        if "/orgs/" in args[-1]:
+            return subprocess.CompletedProcess(args, 22, "", "not found")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            '[{"metadata":{"container":{"tags":["0.1.3","0.1.4-rc.1","0.1.4"]}}}]',
+            "",
+        )
+
+    monkeypatch.delenv("SUGARKUBE_APP_CHART_LATEST_STUB", raising=False)
+    monkeypatch.setattr(app_chart, "run", fake_run)
+
+    latest, source = app_chart.latest_version("oci://ghcr.io/futuroptimist/charts/tokenplace")
+
+    assert latest == "0.1.4"
+    assert source == "GitHub/GHCR API"
+    assert "/orgs/futuroptimist/packages/container/charts%2Ftokenplace/versions" in calls[0]
+    assert "/users/futuroptimist/packages/container/charts%2Ftokenplace/versions" in calls[1]
 
 
 def test_app_chart_bump_updates_only_pin_file_in_temp_config(
@@ -325,6 +383,20 @@ def test_app_deploy_fails_tokenplace_when_manifest_metadata_env_missing(
     assert "missing required metadata env vars" in result.stderr
     assert "TOKENPLACE_IMAGE_TAG" in result.stderr
     assert "just app-chart-status app=tokenplace" in result.stderr
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "upgrade tokenplace" not in helm_log
+
+
+def test_app_deploy_fails_tokenplace_when_metadata_names_only_in_comments(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META"] = "1"
+
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert "missing required metadata env vars" in result.stderr
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "upgrade tokenplace" not in helm_log
 
