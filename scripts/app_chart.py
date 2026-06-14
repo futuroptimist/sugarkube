@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+APP_CONTAINER_NAMES = {"tokenplace": {"tokenplace", "relay"}}
 REQUIRED_ENVS = {
     "tokenplace": [
         "TOKENPLACE_IMAGE_TAG",
@@ -98,7 +99,7 @@ def is_prerelease(v: str) -> bool:
 
 def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[str]:
     """Return env var names rendered on the Deployment application container."""
-    candidates = {app, release}
+    candidates = {app, release, *APP_CONTAINER_NAMES.get(app, set())}
     found: set[str] = set()
     for doc in re.split(r"(?m)^---\s*$", manifest):
         if not re.search(r"(?m)^kind:\s*Deployment\s*$", doc):

@@ -140,7 +140,7 @@ spec:
   template:
     spec:
       containers:
-        - name: tokenplace
+        - name: relay
           env:
             - name: TOKENPLACE_IMAGE_TAG
             - name: TOKENPLACE_RELEASE_VERSION
