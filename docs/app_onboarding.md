@@ -142,7 +142,8 @@ just app-deploy app=appslug env=staging tag="$APP_TAG" config="$APP_CONFIG"
 - Bump the app repo chart `version` for any chart content change.
 - Update `appVersion` when the human-facing app version changed.
 - Publish the new OCI chart once.
-- Update Sugarkube's `docs/apps/APP.version` to the new chart version after publication.
+- Check the current chart pin with `just app-chart-status app=APP` before deploying.
+- Update Sugarkube's `docs/apps/APP.version` to the new chart version after publication with `just app-chart-bump app=APP version=X.Y.Z`; image tags and chart versions are separate coordinates, and `app-deploy tag=...` does not bump the chart pin.
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/appslug.version | head -n 1)

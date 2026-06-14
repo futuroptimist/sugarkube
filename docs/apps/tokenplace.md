@@ -84,6 +84,26 @@ If the chart changed, bump the chart version in the token.place app repo and pub
 gh workflow run ci-helm.yml --repo futuroptimist/token.place --ref main
 ```
 
+## Chart pin workflow
+
+Sugarkube treats the token.place image tag and Helm chart version as separate deployment coordinates. `just app-deploy app=tokenplace env=staging tag=<APP_TAG>` changes the relay image tag only; it does **not** chase the newest chart and does **not** edit `docs/apps/tokenplace.version`. The pinned chart is part of the reproducible deployment contract and must be bumped explicitly when token.place publishes chart wiring that new app code depends on.
+
+Before staging or production deploys, inspect the current pin:
+
+```bash
+just app-chart-status app=tokenplace
+```
+
+If GHCR/latest detection is available and the pin is stale, the command prints a warning such as `Pinned chart appears stale: 0.1.0 < 0.1.3` plus the exact bump command. To intentionally move the pin after a chart has been published, run:
+
+```bash
+just app-chart-bump app=tokenplace version=0.1.3
+```
+
+The bump command validates the chart with `helm show chart`, edits only `docs/apps/tokenplace.version`, prints the diff, and stops. Commit the pin bump before or with the release operation; do not rely on `chart=latest`, unpinned overrides, or silent auto-upgrade behavior for production.
+
+Deploy preflight renders the pinned token.place chart with the selected image tag before Helm upgrade. Staging and production deploys fail early if the rendered Deployment is missing `TOKENPLACE_IMAGE_TAG`, `TOKENPLACE_RELEASE_VERSION`, `TOKENPLACE_CHART_VERSION`, or `TOKENPLACE_DEPLOY_ENV`; this catches image/chart mismatches before the cluster is changed.
+
 ## Deploy staging
 
 Preferred generic command:
@@ -108,7 +128,10 @@ just app-status app=tokenplace env=staging
 
 ```bash
 just app-verify app=tokenplace env=staging
+curl -fsS https://staging.token.place/api/v1/meta | jq .
 ```
+
+For staging, the metadata label should include the deployed immutable image tag, for example `staging main-00797df`. Treat `.label` ending in ` dev` or `.version == "dev"` as a failed release verification because it usually means the chart did not inject release metadata.
 
 ```bash
 just app-verify app=tokenplace env=staging print_only=1
@@ -160,7 +183,10 @@ just app-status app=tokenplace env=prod
 
 ```bash
 just app-verify app=tokenplace env=prod
+curl -fsS https://token.place/api/v1/meta | jq .
 ```
+
+For production, metadata should show a finalized release label such as `prod 0.1.1`; `.version == "dev"` is a loud failure signal.
 
 Print the generated curl commands without executing them when you need a manual fallback:
 
@@ -197,6 +223,7 @@ kubectl --context sugar-prod -n tokenplace get deploy tokenplace -o yaml > /tmp/
 # First run production desktop or compute-node registration and the
 # production E2EE request/response. Then capture post-test evidence:
 curl -fsS "https://${TOKENPLACE_HOST}/healthz" | tee /tmp/tokenplace-prod-healthz.json
+curl -fsS "https://${TOKENPLACE_HOST}/api/v1/meta" | jq . | tee /tmp/tokenplace-prod-meta.json
 curl -fsS "https://${TOKENPLACE_HOST}/relay/diagnostics" | tee /tmp/tokenplace-prod-diagnostics.json
 kubectl --context sugar-prod -n tokenplace logs deploy/tokenplace --since=30m --tail=500 \
   | tee /tmp/tokenplace-prod-relay-after-compute.log

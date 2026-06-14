@@ -217,3 +217,23 @@ Current values chains:
 | dspace | `docs/examples/dspace.values.dev.yaml` | `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml` | `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml` | `/config.json,/healthz,/livez` |
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
 | danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
+
+### Chart pins are explicit release coordinates
+
+Every generic app deploy uses the chart version pinned by `docs/apps/<app>.version` or the app config's `SUGARKUBE_VERSION`. Image tags and chart versions move independently: `just app-deploy app=<app> env=<env> tag=<tag>` deploys the requested image tag with the already-pinned chart and must not silently select the newest published chart.
+
+Use the chart status workflow before release operations:
+
+```bash
+just app-chart-status app=tokenplace
+```
+
+When the app repository publishes a new chart that should become part of Sugarkube's deployment contract, bump the pin intentionally:
+
+```bash
+just app-chart-bump app=tokenplace version=0.1.3
+```
+
+The bump validates `helm show chart <chart-ref> --version <version>`, updates only `docs/apps/<app>.version`, and prints the diff plus commit/deploy next steps. Commit chart pin changes before or with release operations. Do not use `chart=latest`, unpinned production overrides, or silent auto-upgrade behavior; reproducible deploys require a reviewed chart pin. Deploy and redeploy preflights print the app, environment, image tag, chart ref, chart version, and chart pin path before Helm upgrade.
+
+App-specific deploy guardrails may render the pinned chart before applying it. token.place requires `TOKENPLACE_IMAGE_TAG`, `TOKENPLACE_RELEASE_VERSION`, `TOKENPLACE_CHART_VERSION`, and `TOKENPLACE_DEPLOY_ENV` in staging/prod rendered manifests so old chart pins fail before rollout.

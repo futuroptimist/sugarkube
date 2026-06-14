@@ -1528,6 +1528,18 @@ app-config app env='staging' config='':
       --env {{ quote(env) }} \
       --config {{ quote(config) }}
 
+# Inspect the pinned Helm chart for a Sugarkube app and report stale pins when detectable.
+app-chart-status app config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" status --app {{ quote(app) }} --config {{ quote(config) }}
+
+# Explicitly bump a Sugarkube app chart pin after validating the chart exists.
+app-chart-bump app version='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" bump --app {{ quote(app) }} --version {{ quote(version) }} --config {{ quote(config) }}
+
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
 app-deploy app env='staging' tag='' config='':
     #!/usr/bin/env bash
@@ -1539,6 +1551,8 @@ app-deploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight --app "${SUGARKUBE_APP}" --env "${SUGARKUBE_ENV}" --tag "${SUGARKUBE_TAG}" --config "${SUGARKUBE_CONFIG_PATH}"
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1562,6 +1576,8 @@ app-redeploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight --app "${SUGARKUBE_APP}" --env "${SUGARKUBE_ENV}" --tag "${SUGARKUBE_TAG}" --config "${SUGARKUBE_CONFIG_PATH}"
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1955,6 +1971,9 @@ tokenplace-oci-deploy env='staging' tag='':
     }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: tag is required for immutable deploys." >&2
       exit 1
@@ -1983,6 +2002,7 @@ tokenplace-oci-deploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight --app tokenplace --env "${env_name}" --tag "${resolved_tag}" --config docs/examples/apps/tokenplace.env
     echo "Deploying tokenplace env=${env_name} chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
@@ -2054,6 +2074,9 @@ tokenplace-oci-redeploy env='staging' tag='':
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
       resolved_tag="$(read_prod_tag 2>/dev/null || true)"
       [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2; exit 1; }
@@ -2078,6 +2101,8 @@ tokenplace-oci-redeploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight --app tokenplace --env "${env_name}" --tag "${resolved_tag}" --config docs/examples/apps/tokenplace.env
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='tokenplace' namespace='tokenplace' \

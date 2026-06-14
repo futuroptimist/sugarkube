@@ -87,13 +87,38 @@ exit 0
         bin_dir / "helm",
         f"""#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >> {str(log_path)!r}
+printf '%s
+' "$*" >> {str(log_path)!r}
+if [[ "$*" == *"show chart"* ]]; then
+  if [ "${{SUGARKUBE_STUB_HELM_SHOW_FAIL:-}}" = "1" ]; then
+    echo 'Error: chart not found' >&2
+    exit 1
+  fi
+  printf 'apiVersion: v2\n'
+  printf 'name: tokenplace\n'
+  printf 'version: 0.1.3\n'
+  printf 'appVersion: 0.1.3\n'
+  printf 'digest: sha256:abc123\n'
+  exit 0
+fi
+if [[ "$*" == *"template"* ]]; then
+  if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_TOKENPLACE_ENV:-}}" = "1" ]; then
+    printf 'apiVersion: apps/v1\nkind: Deployment\n'
+  else
+    printf 'env:\n'
+    printf -- '- name: TOKENPLACE_IMAGE_TAG\n'
+    printf -- '- name: TOKENPLACE_RELEASE_VERSION\n'
+    printf -- '- name: TOKENPLACE_CHART_VERSION\n'
+    printf -- '- name: TOKENPLACE_DEPLOY_ENV\n'
+  fi
+  exit 0
+fi
 if [[ "$*" == *"get values"* ]]; then
   if [ "${{SUGARKUBE_STUB_HELM_GET_VALUES_FAIL:-}}" = "1" ]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
     exit 1
   fi
-  printf '{{"ingress":{{"host":"%s"}}}}\n' "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  printf '{{{{"ingress":{{{{"host":"%s"}}}}}}}}\n' "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   exit 0
 fi
 if [[ "$*" == *" status "* ]]; then
@@ -163,6 +188,148 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
         text=True,
         check=False,
     )
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_chart_recipes_exist(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(["--list"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr
+    assert "app-chart-status" in result.stdout
+    assert "app-chart-bump" in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_deploy_prints_and_uses_pinned_chart_without_latest(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CHART_LATEST"] = "9.9.9"
+
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "app: tokenplace" in result.stdout
+    assert "image tag: main-deadbee" in result.stdout
+    assert "chart ref: oci://ghcr.io/futuroptimist/charts/tokenplace" in result.stdout
+    assert "chart version: 0.1.3" in result.stdout
+    assert "chart pin: docs/apps/tokenplace.version" in result.stdout
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--version 0.1.3" in helm_log
+    assert "9.9.9" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_chart_status_reports_stale_pin(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CHART_LATEST"] = "0.1.4"
+
+    result = _run_just(["app-chart-status", "app=tokenplace"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "pinned version: 0.1.3" in result.stdout
+    assert "chart ref: oci://ghcr.io/futuroptimist/charts/tokenplace" in result.stdout
+    assert "chart appVersion: 0.1.3" in result.stdout
+    assert "WARNING: Pinned chart appears stale: 0.1.3 < 0.1.4" in result.stdout
+    assert "Run: just app-chart-bump app=tokenplace version=0.1.4" in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_chart_bump_refuses_empty_version(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(["app-chart-bump", "app=tokenplace", "version="], generic_app_stub_env)
+
+    assert result.returncode != 0
+    assert "version must not be empty" in result.stderr
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_chart_bump_validates_chart(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_SHOW_FAIL"] = "1"
+
+    result = _run_just(["app-chart-bump", "app=tokenplace", "version=0.1.3"], env)
+
+    assert result.returncode != 0
+    assert "chart not found" in result.stderr
+
+
+def test_app_chart_bump_updates_only_version_file_in_temp_fixture(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    pin = tmp_path / "tokenplace.version"
+    pin.write_text(
+        "# Default tokenplace chart version. Update when new chart releases are published.\n"
+        "0.1.0  # keep this comment\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "tokenplace.env"
+    staging_values = (
+        "docs/examples/tokenplace.values.dev.yaml,"
+        "docs/examples/tokenplace.values.staging.yaml"
+    )
+    prod_values = (
+        "docs/examples/tokenplace.values.dev.yaml,"
+        "docs/examples/tokenplace.values.prod.yaml"
+    )
+    config.write_text(
+        f"""SUGARKUBE_APP=tokenplace
+SUGARKUBE_RELEASE=tokenplace
+SUGARKUBE_NAMESPACE=tokenplace
+SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace
+SUGARKUBE_VERSION_FILE={pin}
+SUGARKUBE_VALUES_DEV=docs/examples/tokenplace.values.dev.yaml
+SUGARKUBE_VALUES_STAGING={staging_values}
+SUGARKUBE_VALUES_PROD={prod_values}
+""",
+        encoding="utf-8",
+    )
+
+    before = {path: path.read_text(encoding="utf-8") for path in (pin, config)}
+    result = _run_just(
+        ["app-chart-bump", "app=tokenplace", "version=0.1.3", f"config={config}"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert pin.read_text(encoding="utf-8").splitlines() == [
+        "# Default tokenplace chart version. Update when new chart releases are published.",
+        "0.1.3  # keep this comment",
+    ]
+    assert config.read_text(encoding="utf-8") == before[config]
+    assert "git add" in result.stdout
+    assert "just app-deploy app=tokenplace env=staging tag=<APP_TAG>" in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_preflight_fails_when_metadata_env_missing(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_TOKENPLACE_ENV"] = "1"
+
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert "missing required metadata env vars" in result.stderr
+    assert "TOKENPLACE_IMAGE_TAG" in result.stderr
+    assert "TOKENPLACE_RELEASE_VERSION" in result.stderr
+    assert "TOKENPLACE_CHART_VERSION" in result.stderr
+    assert "TOKENPLACE_DEPLOY_ENV" in result.stderr
+    assert "just app-chart-status app=tokenplace" in result.stderr
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_preflight_passes_when_metadata_env_present(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
