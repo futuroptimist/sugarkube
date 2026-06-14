@@ -17,7 +17,7 @@ This is the canonical runbook for deploying token.place from GHCR artifacts to S
 | App config | `docs/examples/apps/tokenplace.env` |
 | Chart version pin | `docs/apps/tokenplace.version` |
 | Production tag pin | `docs/apps/tokenplace.prod.tag` |
-| Verify paths | `/`, `/livez`, `/healthz`, `/relay/diagnostics` |
+| Verify paths | `/`, `/livez`, `/healthz`, `/relay/diagnostics`, `/api/v1/meta` |
 
 ### Artifact links
 
@@ -67,6 +67,24 @@ gh workflow run ci-image.yml --repo futuroptimist/token.place --ref main
 ```
 
 ## Confirm/publish OCI chart
+
+The token.place image tag and Helm chart version are independent coordinates. `just app-deploy app=tokenplace tag=...` deploys the requested image tag with the chart version already pinned in `docs/apps/tokenplace.version`; it never silently selects the newest chart. Run the status command before deployment and commit intentional pin bumps when the app repo publishes chart wiring changes.
+
+```bash
+just app-chart-status app=tokenplace
+```
+
+If status reports a stale pin after a new chart is published, bump it explicitly:
+
+```bash
+just app-chart-bump app=tokenplace version=0.1.3
+git add docs/apps/tokenplace.version
+git commit -m "Bump tokenplace chart pin to 0.1.3"
+git push
+```
+
+Prefer this committed pin workflow over unpinned chart overrides, and never use `chart=latest` for production.
+
 
 Sugarkube deploys the chart version pinned in `docs/apps/tokenplace.version`. Use [recent chart workflow runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml) to find chart publish attempts, [GHCR chart package versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace) to confirm available immutable chart versions, and [the chart source](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace) to review the chart content that should match the pinned version.
 
@@ -128,6 +146,12 @@ curl -fsS https://staging.token.place/livez
 curl -fsS https://staging.token.place/relay/diagnostics | jq .
 ```
 
+```bash
+curl -fsS https://staging.token.place/api/v1/meta | jq .
+```
+
+Staging metadata must not report `.version == "dev"` or a `.label` ending in ` dev`; the expected label includes the deployed image tag, for example `staging main-00797df`.
+
 ### Staging relay-compute sign-off
 
 `just app-status`, `just app-verify`, `/livez`, `/healthz`, `/`, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Staging-to-prod promotion is blocked until the real relay-compute path passes, as defined in [the token.place Sugarkube onboarding contract](../tokenplace_sugarkube_onboarding.md#promotion-gate-ownership). Before production promotion, capture staging evidence for the real relay path:
@@ -177,6 +201,12 @@ curl -fsS https://token.place/healthz
 ```bash
 curl -fsS https://token.place/livez
 ```
+
+```bash
+curl -fsS https://token.place/api/v1/meta | jq .
+```
+
+Production metadata must not report `.version == "dev"`; the expected label is a finalized release such as `prod 0.1.1`.
 
 ```bash
 curl -fsS https://token.place/relay/diagnostics | jq .

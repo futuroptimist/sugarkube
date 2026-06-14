@@ -96,6 +96,18 @@ if [[ "$*" == *"get values"* ]]; then
   printf '{{"ingress":{{"host":"%s"}}}}\n' "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   exit 0
 fi
+if [[ "$*" == show\ chart* ]]; then
+  printf 'apiVersion: v2\nname: tokenplace\nversion: 0.1.3\nappVersion: main-deadbee\ndigest: sha256:abc123\n'
+  exit 0
+fi
+if [[ "$*" == template* ]]; then
+  if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ]; then
+    printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: tokenplace\n'
+  else
+    printf 'env:\n- name: TOKENPLACE_IMAGE_TAG\n- name: TOKENPLACE_RELEASE_VERSION\n- name: TOKENPLACE_CHART_VERSION\n- name: TOKENPLACE_DEPLOY_ENV\n'
+  fi
+  exit 0
+fi
 if [[ "$*" == *" status "* ]]; then
   printf 'STATUS: deployed\n'
 fi
@@ -125,6 +137,7 @@ case "${{path}}" in
   /) body=$'<!doctype html>\n<html lang="en">\n<body>ok</body>\n</html>' ;;
   /config.json) body='{{"publicConfig":true}}' ;;
   /relay/diagnostics) body='{{"relay":"ok"}}' ;;
+  /api/v1/meta) body='{{"label":"staging main-deadbee","version":"main-deadbee"}}' ;;
 esac
 if [ "${{SUGARKUBE_STUB_CURL_FAIL_PATH:-}}" = "${{path}}" ]; then
   status=503
@@ -163,6 +176,76 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
         text=True,
         check=False,
     )
+
+
+def test_chart_recipes_are_listed(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(["--list"], generic_app_stub_env)
+
+    assert result.returncode == 0
+    assert "app-chart-status" in result.stdout
+    assert "app-chart-bump" in result.stdout
+
+
+def test_app_chart_status_reports_pin_and_stale_latest(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CHART_LATEST_STUB"] = "9.9.9"
+
+    result = _run_just(["app-chart-status", "app=tokenplace"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "app: tokenplace" in result.stdout
+    assert "chart ref: oci://ghcr.io/futuroptimist/charts/tokenplace" in result.stdout
+    assert "pinned version: 0.1.3" in result.stdout
+    assert "chart appVersion: main-deadbee" in result.stdout
+    assert "Pinned chart appears stale: 0.1.3 < 9.9.9" in result.stdout
+    assert "Run: just app-chart-bump app=tokenplace version=9.9.9" in result.stdout
+
+
+def test_app_chart_bump_updates_only_pin_file_in_temp_config(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    pin = tmp_path / "tokenplace.version"
+    pin.write_text("# Default tokenplace chart version.\n0.1.0\n", encoding="utf-8")
+    config = tmp_path / "tokenplace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=tokenplace",
+                "SUGARKUBE_RELEASE=tokenplace",
+                "SUGARKUBE_NAMESPACE=tokenplace",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
+                f"SUGARKUBE_VERSION_FILE={pin}",
+                "SUGARKUBE_PROD_TAG_FILE=docs/apps/tokenplace.prod.tag",
+                "SUGARKUBE_VALUES_DEV=docs/examples/tokenplace.values.dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml",
+                "SUGARKUBE_VALUES_PROD=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CONFIG_DIR"] = str(tmp_path)
+    result = _run_just(
+        ["app-chart-bump", "app=tokenplace", "version=0.1.3"],
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert pin.read_text(encoding="utf-8") == "# Default tokenplace chart version.\n0.1.3\n"
+    assert "git add" in result.stdout
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+
+
+def test_app_chart_bump_refuses_empty_version(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(["app-chart-bump", "app=tokenplace", "version="], generic_app_stub_env)
+
+    assert result.returncode != 0
+    assert "version must not be empty" in result.stderr
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -221,6 +304,40 @@ def test_app_deploy_uses_app_release_namespace_chart_values(
     assert f"--namespace {namespace}" in helm_log
     for value in values:
         assert f"-f {value}" in helm_log
+    if app == "tokenplace":
+        assert (
+            "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+        )
+        assert "template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+        assert "--version 0.1.3" in helm_log
+        assert "--version 9.9.9" not in helm_log
+
+
+def test_app_deploy_fails_tokenplace_when_manifest_metadata_env_missing(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META"] = "1"
+
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert "missing required metadata env vars" in result.stderr
+    assert "TOKENPLACE_IMAGE_TAG" in result.stderr
+    assert "just app-chart-status app=tokenplace" in result.stderr
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "upgrade tokenplace" not in helm_log
+
+
+def test_app_deploy_passes_tokenplace_when_manifest_metadata_env_present(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], generic_app_stub_env
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "chart pin: docs/apps/tokenplace.version" in result.stdout
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -465,6 +582,7 @@ def test_app_verify_print_only_prints_commands_without_curl(
         "curl -fsS https://example.test/livez",
         "curl -fsS https://example.test/healthz",
         "curl -fsS https://example.test/relay/diagnostics",
+        "curl -fsS https://example.test/api/v1/meta",
     ]
     assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
 
@@ -521,7 +639,7 @@ def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, st
     ("app", "expected_paths"),
     [
         ("danielsmith", "/,/livez,/healthz"),
-        ("tokenplace", "/,/livez,/healthz,/relay/diagnostics"),
+        ("tokenplace", "/,/livez,/healthz,/relay/diagnostics,/api/v1/meta"),
         ("dspace", "/config.json,/healthz,/livez"),
     ],
 )

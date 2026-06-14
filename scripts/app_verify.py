@@ -178,6 +178,20 @@ def run_curl(url: str) -> tuple[int, str, bytes, str]:
         body_path.unlink(missing_ok=True)
 
 
+def tokenplace_meta_failure(env: str, raw: bytes) -> str:
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    label = str(data.get("label", ""))
+    version = str(data.get("version", ""))
+    if version == "dev" or label.endswith(" dev"):
+        if env == "prod":
+            return "token.place prod metadata must not report version=dev."
+        return "token.place staging metadata must include the immutable image tag, not a dev label/version."
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--print-only", action="store_true")
@@ -223,11 +237,19 @@ def main(argv: list[str] | None = None) -> int:
         http_suffix = (
             f" (HTTP {http_status})" if http_status.isdigit() and http_status != "000" else ""
         )
+        meta_error = ""
+        if curl_rc == 0 and app == "tokenplace" and path == "/api/v1/meta":
+            meta_error = tokenplace_meta_failure(env, body)
+            if meta_error:
+                curl_rc = 1
+
         if curl_rc == 0:
             print(f"  Status: OK{http_suffix}")
             passed += 1
         else:
             print(f"  Status: FAILED{http_suffix}")
+            if meta_error:
+                print(f"  metadata error: {meta_error}")
             print(f"  curl exit status: {curl_rc}")
             if curl_stderr:
                 print("  curl stderr:")

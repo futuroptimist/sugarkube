@@ -108,6 +108,30 @@ Helm charts are immutable once published to GHCR OCI:
 - Sugarkube pins the chart version with the app's version file and uses that pin
   for cluster deployment orchestration.
 
+
+## Chart pin status and explicit bump workflow
+
+Image tags and chart versions are separate deployment coordinates. `just app-deploy tag=...` changes only the image tag passed to Helm; it does **not** discover, select, or bump a newer chart. Default deploys stay pinned and reproducible through `docs/apps/<app>.version`.
+
+Before release operations, inspect the committed chart pin:
+
+```bash
+just app-chart-status app=dspace
+```
+
+The status command prints the app name, chart ref, pinned version, chart `appVersion`, best-effort digest, and pin file. When registry metadata is available and the pin is older than the newest published semver chart, it warns loudly and prints the exact `just app-chart-bump` command to run. If registry/latest detection is unavailable because of network, auth, or missing tooling, deploys still use the committed pin and the status command prints a manual inspection hint.
+
+When an app repository publishes a new chart that Sugarkube should consume, bump the pin explicitly:
+
+```bash
+just app-chart-bump app=dspace version=0.1.3
+git add docs/apps/dspace.version
+git commit -m "Bump dspace chart pin to 0.1.3"
+git push
+```
+
+`app-chart-bump` validates the requested chart with `helm show chart <chart-ref> --version <version>`, edits only `docs/apps/<app>.version`, and prints the resulting diff. Do not use `chart=latest` or silent auto-upgrade behavior for production; commit chart pin bumps before or with release operations.
+
 ## App config file shape
 
 Generic recipes load a simple shell/dotenv-style config with
@@ -171,6 +195,10 @@ just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
 
 # Promote an approved immutable tag to production.
 just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
+
+# Inspect and intentionally bump the chart pin.
+just app-chart-status app=dspace
+just app-chart-bump app=dspace version=0.1.3
 
 # Inspect Kubernetes and Helm status for an app environment.
 just app-status app=dspace env=staging
