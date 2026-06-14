@@ -1528,6 +1528,14 @@ app-config app env='staging' config='':
       --env {{ quote(env) }} \
       --config {{ quote(config) }}
 
+# Inspect a pinned app chart version and warn when a newer semver chart is visible.
+app-chart-status app config='':
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" status --app {{ quote(app) }} --config {{ quote(config) }}
+
+# Explicitly bump the chart pin file after validating that the chart version exists.
+app-chart-bump app version='' config='':
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" bump --app {{ quote(app) }} --version {{ quote(version) }} --config {{ quote(config) }}
+
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
 app-deploy app env='staging' tag='' config='':
     #!/usr/bin/env bash
@@ -1539,6 +1547,12 @@ app-deploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app "${SUGARKUBE_APP}" \
+      --env "${SUGARKUBE_ENV}" \
+      --config "${SUGARKUBE_CONFIG_PATH}" \
+      --tag "${SUGARKUBE_TAG}"
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1562,6 +1576,12 @@ app-redeploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app "${SUGARKUBE_APP}" \
+      --env "${SUGARKUBE_ENV}" \
+      --config "${SUGARKUBE_CONFIG_PATH}" \
+      --tag "${SUGARKUBE_TAG}"
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1960,6 +1980,11 @@ tokenplace-oci-deploy env='staging' tag='':
       exit 1
     fi
     validate_immutable_tag "${resolved_tag}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app tokenplace \
+      --env "${env_name}" \
+      --config "" \
+      --tag "${resolved_tag}"
     chart_version=""
     if [ -f docs/apps/tokenplace.version ]; then
       chart_version="$(
@@ -2064,6 +2089,11 @@ tokenplace-oci-redeploy env='staging' tag='':
       exit 1
     fi
     [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app tokenplace \
+      --env "${env_name}" \
+      --config "" \
+      --tag "${resolved_tag}"
 
     values_chain='docs/examples/tokenplace.values.dev.yaml'
     default_tag=''

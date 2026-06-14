@@ -84,6 +84,35 @@ If the chart changed, bump the chart version in the token.place app repo and pub
 gh workflow run ci-helm.yml --repo futuroptimist/token.place --ref main
 ```
 
+
+## Explicit chart pin status and bump flow
+
+The token.place image tag and Helm chart version are separate release coordinates. `just app-deploy app=tokenplace env=staging tag="$APP_TAG"` updates the image tag only; it does not update the pinned chart in `docs/apps/tokenplace.version` and does not bump chart versions or silently select the newest chart.
+
+Check the current pin before deployment:
+
+```bash
+just app-chart-status app=tokenplace
+```
+
+If token.place has published a new chart that is required for the image tag, bump the Sugarkube pin explicitly and commit it before or with the release:
+
+```bash
+just app-chart-bump app=tokenplace version=0.1.3
+git add docs/apps/tokenplace.version
+git commit -m "Bump tokenplace chart pin to 0.1.3"
+```
+
+The deploy preflight renders the pinned chart with the selected image tag and fails before Helm upgrade if the token.place deployment is missing `TOKENPLACE_IMAGE_TAG`, `TOKENPLACE_RELEASE_VERSION`, `TOKENPLACE_CHART_VERSION`, or `TOKENPLACE_DEPLOY_ENV`. Prefer committed pin bumps over temporary overrides; never rely on `chart=latest` or silent chart auto-upgrades for production.
+
+After staging deploy, verify runtime metadata as part of sign-off:
+
+```bash
+curl -fsS https://staging.token.place/api/v1/meta | jq .
+```
+
+Staging metadata should include the deployed image tag, for example `staging main-00797df`; warn loudly if `.label` ends with ` dev` or `.version == "dev"`. Production metadata should report a finalized release label such as `prod 0.1.1` and must not report `.version == "dev"`.
+
 ## Deploy staging
 
 Preferred generic command:

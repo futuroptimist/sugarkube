@@ -108,6 +108,27 @@ Helm charts are immutable once published to GHCR OCI:
 - Sugarkube pins the chart version with the app's version file and uses that pin
   for cluster deployment orchestration.
 
+
+## Chart pin workflow
+
+Chart version and image tag are separate deployment coordinates. `just app-deploy app=<app> env=<env> tag=<tag>` deploys the requested image tag with the chart version pinned by `docs/apps/<app>.version`; it does not bump chart versions, chase `latest`, or silently auto-upgrade charts.
+
+Before release operations, inspect the pin explicitly:
+
+```bash
+just app-chart-status app=tokenplace
+```
+
+When the app repository publishes a new chart, bump the pin intentionally and commit that file before or with the release operation:
+
+```bash
+just app-chart-bump app=tokenplace version=0.1.3
+git add docs/apps/tokenplace.version
+git commit -m "Bump tokenplace chart pin to 0.1.3"
+```
+
+Deploy preflight logs print the app, environment, image tag, chart ref, pinned chart version, and chart pin path before Helm runs. Production flows must remain pinned and reproducible; do not use `chart=latest` or silent auto-upgrade behavior for prod.
+
 ## App config file shape
 
 Generic recipes load a simple shell/dotenv-style config with

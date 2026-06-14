@@ -189,6 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     paths = [
         normalize_path(path) for path in os.environ.get("SUGARKUBE_VERIFY_PATHS", "/").split(",")
     ]
+    if app == "tokenplace" and env in {"staging", "prod"} and "/api/v1/meta" not in paths:
+        paths.append("/api/v1/meta")
     print_only = args.print_only or env_flag("SUGARKUBE_APP_VERIFY_PRINT_ONLY")
 
     host, errors = discover_host(kube_context)
@@ -225,6 +227,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         if curl_rc == 0:
             print(f"  Status: OK{http_suffix}")
+            if app == "tokenplace" and path == "/api/v1/meta":
+                try:
+                    meta = json.loads(body.decode("utf-8"))
+                except json.JSONDecodeError:
+                    meta = {}
+                label = str(meta.get("label", ""))
+                version = str(meta.get("version", ""))
+                if version == "dev" or label.endswith(" dev"):
+                    print("  token.place metadata warning: deployment still reports dev metadata.")
+                    print("  Expected staging labels to include the immutable image tag; prod should use a finalized release version.")
             passed += 1
         else:
             print(f"  Status: FAILED{http_suffix}")
