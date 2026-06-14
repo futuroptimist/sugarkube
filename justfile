@@ -1528,6 +1528,16 @@ app-config app env='staging' config='':
       --env {{ quote(env) }} \
       --config {{ quote(config) }}
 
+app-chart-status app:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" status --app {{ quote(app) }}
+
+app-chart-bump app version='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" bump --app {{ quote(app) }} --version {{ quote(version) }}
+
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
 app-deploy app env='staging' tag='' config='':
     #!/usr/bin/env bash
@@ -1542,6 +1552,10 @@ app-deploy app env='staging' tag='' config='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app "${SUGARKUBE_APP}" \
+      --env "${SUGARKUBE_ENV}" \
+      --tag "${SUGARKUBE_TAG}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
@@ -1565,6 +1579,10 @@ app-redeploy app env='staging' tag='' config='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app "${SUGARKUBE_APP}" \
+      --env "${SUGARKUBE_ENV}" \
+      --tag "${SUGARKUBE_TAG}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
@@ -1983,6 +2001,10 @@ tokenplace-oci-deploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app tokenplace \
+      --env "${env_name}" \
+      --tag "${resolved_tag}"
     echo "Deploying tokenplace env=${env_name} chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
@@ -2078,6 +2100,10 @@ tokenplace-oci-redeploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app tokenplace \
+      --env "${env_name}" \
+      --tag "${resolved_tag}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='tokenplace' namespace='tokenplace' \

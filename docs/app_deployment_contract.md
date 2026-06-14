@@ -163,7 +163,14 @@ These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 
 ```bash
-# Deploy or install a specific immutable candidate into an environment.
+# Inspect the committed chart pin and best-effort published chart freshness.
+just app-chart-status app=dspace
+
+# Explicitly bump the committed chart pin after the app repo publishes a chart.
+just app-chart-bump app=dspace version=0.1.3
+
+# Deploy or install a specific immutable image candidate into an environment.
+# This uses docs/apps/<app>.version and never auto-selects the latest chart.
 just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
 
 # Redeploy an existing release with a specific immutable tag.
@@ -194,6 +201,30 @@ onboarding, but thinning the remaining deploy/redeploy wrappers is deferred to a
 follow-up PR. Production promotion wrappers such as
 `just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` remain documented as
 thin generic shims over the shared production promotion flow.
+
+
+## Chart pin contract
+
+Every app deploy has two independent coordinates: the immutable image tag passed
+as `tag=...` and the Helm chart version pinned by `docs/apps/<app>.version` (or
+`SUGARKUBE_VERSION`). Deploy recipes print the app, environment, image tag, chart
+ref, chart version, and chart pin path before Helm runs. They intentionally do
+not discover or use the latest chart by default, because a committed chart pin is
+part of the reproducible deployment contract.
+
+Use `just app-chart-status app=<app>` before deployment to verify the pinned
+chart exists and to get a best-effort stale-pin warning for OCI/GHCR charts. If
+the app repository publishes a new chart, run `just app-chart-bump app=<app>
+version=<published-version>`, review the single-file diff to
+`docs/apps/<app>.version`, then commit and push that bump before or alongside the
+release operation. Do not use `chart=latest` or silent chart auto-upgrade
+behavior for production.
+
+The shared deploy preflight can also run app-specific rendered-manifest guards.
+For token.place, staging/prod manifests must include `TOKENPLACE_IMAGE_TAG`,
+`TOKENPLACE_RELEASE_VERSION`, `TOKENPLACE_CHART_VERSION`, and
+`TOKENPLACE_DEPLOY_ENV`; missing metadata env vars fail before Helm upgrade and
+point operators to `app-chart-status` and `app-chart-bump`.
 
 ## Current example configs
 

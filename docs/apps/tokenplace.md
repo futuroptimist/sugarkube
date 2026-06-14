@@ -68,15 +68,23 @@ gh workflow run ci-image.yml --repo futuroptimist/token.place --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/tokenplace.version`. Use [recent chart workflow runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml) to find chart publish attempts, [GHCR chart package versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace) to confirm available immutable chart versions, and [the chart source](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace) to review the chart content that should match the pinned version.
+Sugarkube deploys the chart version pinned in `docs/apps/tokenplace.version`. The image tag and chart version are separate release coordinates: `just app-deploy tag=...` changes the container image only and never silently bumps or chases the newest Helm chart. Use [recent chart workflow runs](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml) to find chart publish attempts, [GHCR chart package versions](https://github.com/futuroptimist/token.place/pkgs/container/charts%2Ftokenplace) to confirm available immutable chart versions, and [the chart source](https://github.com/futuroptimist/token.place/tree/main/charts/tokenplace) to review the chart content that should match the pinned version.
+
+Before deploying, inspect the current pin and whether a newer semver chart appears to be published:
 
 ```bash
-CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.version | head -n 1)
+just app-chart-status app=tokenplace
 ```
 
+When token.place publishes a new chart that the next image requires, explicitly bump and commit the Sugarkube pin before or with release operations:
+
 ```bash
-helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
+just app-chart-bump app=tokenplace version=0.1.3
+git add docs/apps/tokenplace.version
+git commit -m "Bump tokenplace chart pin to 0.1.3"
 ```
+
+Do not use `chart=latest` or any silent auto-upgrade pattern for production; production deploys should use a reviewed, committed chart pin.
 
 If the chart changed, bump the chart version in the token.place app repo and publish it there with [the chart workflow](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml); do not republish a different chart under an existing OCI version.
 
@@ -112,6 +120,12 @@ just app-verify app=tokenplace env=staging
 
 ```bash
 just app-verify app=tokenplace env=staging print_only=1
+```
+
+Token.place also requires metadata verification after staging deploys. The label should include the deployed image tag, for example `staging main-00797df`; fail or warn loudly if `.label` ends with ` dev` or `.version == "dev"`.
+
+```bash
+curl -fsS https://staging.token.place/api/v1/meta | jq .
 ```
 
 Optional manual fallback:
@@ -160,6 +174,12 @@ just app-status app=tokenplace env=prod
 
 ```bash
 just app-verify app=tokenplace env=prod
+```
+
+Production metadata must report a finalized release label such as `prod 0.1.1`; fail or warn loudly if `.version == "dev"`.
+
+```bash
+curl -fsS https://token.place/api/v1/meta | jq .
 ```
 
 Print the generated curl commands without executing them when you need a manual fallback:
