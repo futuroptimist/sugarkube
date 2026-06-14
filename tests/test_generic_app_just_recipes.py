@@ -103,11 +103,53 @@ if [[ "$*" == show\ chart* ]]; then
 fi
 if [[ "$*" == template* ]]; then
   if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ]; then
-    printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: tokenplace\n'
+    printf 'apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace
+'
   elif [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META:-}}" = "1" ]; then
-    printf '# TOKENPLACE_IMAGE_TAG TOKENPLACE_RELEASE_VERSION TOKENPLACE_CHART_VERSION TOKENPLACE_DEPLOY_ENV\nkind: ConfigMap\ndata:\n  TOKENPLACE_IMAGE_TAG: main-deadbee\n'
+    printf '# TOKENPLACE_IMAGE_TAG TOKENPLACE_RELEASE_VERSION TOKENPLACE_CHART_VERSION TOKENPLACE_DEPLOY_ENV
+kind: ConfigMap
+data:
+  TOKENPLACE_IMAGE_TAG: main-deadbee
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace
+spec:
+  template:
+    spec:
+      containers:
+        - name: tokenplace
+          image: ghcr.io/example/tokenplace:main-deadbee
+        - name: metrics-sidecar
+          env:
+            - name: TOKENPLACE_IMAGE_TAG
+            - name: TOKENPLACE_RELEASE_VERSION
+            - name: TOKENPLACE_CHART_VERSION
+            - name: TOKENPLACE_DEPLOY_ENV
+'
   else
-    printf 'env:\n- name: TOKENPLACE_IMAGE_TAG\n- name: TOKENPLACE_RELEASE_VERSION\n- name: TOKENPLACE_CHART_VERSION\n- name: TOKENPLACE_DEPLOY_ENV\n'
+    printf 'apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace
+spec:
+  template:
+    spec:
+      containers:
+        - name: tokenplace
+          env:
+            - name: TOKENPLACE_IMAGE_TAG
+            - name: TOKENPLACE_RELEASE_VERSION
+            - name: TOKENPLACE_CHART_VERSION
+            - name: TOKENPLACE_DEPLOY_ENV
+        - name: metrics-sidecar
+          env:
+            - name: SIDECAR_ONLY
+'
   fi
   exit 0
 fi
@@ -191,11 +233,28 @@ def _run_just(args: list[str], env: dict[str, str]) -> subprocess.CompletedProce
     )
 
 
-def test_app_chart_semver_prefers_final_release_over_prerelease() -> None:
-    versions = ["1.2.3-rc.1", "1.2.3", "1.2.4-alpha.1"]
-
-    assert sorted(versions, key=app_chart.semver_key)[-1] == "1.2.4-alpha.1"
+def test_app_chart_semver_prefers_final_release_over_matching_prerelease() -> None:
     assert sorted(["1.2.3", "1.2.3-rc.1"], key=app_chart.semver_key)[-1] == "1.2.3"
+
+
+def test_app_chart_latest_version_prefers_production_safe_stable_over_prerelease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            '[{"metadata":{"container":{"tags":["1.0.0","1.0.1-alpha"]}}}]',
+            "",
+        )
+
+    monkeypatch.delenv("SUGARKUBE_APP_CHART_LATEST_STUB", raising=False)
+    monkeypatch.setattr(app_chart, "run", fake_run)
+
+    latest, source = app_chart.latest_version("oci://ghcr.io/futuroptimist/charts/tokenplace")
+
+    assert latest == "1.0.0"
+    assert source == "GitHub/GHCR API"
 
 
 def test_app_chart_read_pin_rejects_empty_version_file_path() -> None:
@@ -203,10 +262,27 @@ def test_app_chart_read_pin_rejects_empty_version_file_path() -> None:
         app_chart.read_pin("")
 
 
-def test_tokenplace_meta_failure_rejects_invalid_or_missing_metadata() -> None:
-    assert "valid JSON" in tokenplace_meta_failure("staging", b"<html>ok</html>")
-    assert "non-empty label" in tokenplace_meta_failure("staging", b"{}")
-    assert "non-empty version" in tokenplace_meta_failure("staging", b'{"label":"main-deadbee"}')
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (b"{}", "non-empty label"),
+        (b"<html>ok</html>", "valid JSON"),
+        (b'{"version":"dev"}', "non-empty label"),
+        (b'{"label":"staging dev"}', "non-empty version"),
+        (
+            b'{"label":"staging main-deadbee","version":"dev"}',
+            "staging metadata must include the immutable image tag",
+        ),
+        (
+            b'{"label":"staging dev","version":"main-deadbee"}',
+            "staging metadata must include the immutable image tag",
+        ),
+    ],
+)
+def test_tokenplace_meta_failure_rejects_invalid_or_missing_metadata(
+    body: bytes, expected: str
+) -> None:
+    assert expected in tokenplace_meta_failure("staging", body)
 
 
 def test_chart_recipes_are_listed(generic_app_stub_env: dict[str, str]) -> None:

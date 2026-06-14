@@ -91,6 +91,72 @@ def ghcr_versions_from_api(owner: str, name: str, owner_type: str) -> tuple[list
     return versions, ""
 
 
+def is_prerelease(v: str) -> bool:
+    m = SEMVER_RE.match(v)
+    return bool(m and m.group(4))
+
+
+def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[str]:
+    """Return env var names rendered on the Deployment application container."""
+    candidates = {app, release}
+    found: set[str] = set()
+    for doc in re.split(r"(?m)^---\s*$", manifest):
+        if not re.search(r"(?m)^kind:\s*Deployment\s*$", doc):
+            continue
+        lines = doc.splitlines()
+        in_containers = False
+        containers_indent = -1
+        current_name = ""
+        current_envs: set[str] = set()
+        container_item_indent = -1
+        in_env = False
+        env_indent = -1
+
+        def flush_current() -> None:
+            if current_name in candidates:
+                found.update(current_envs)
+
+        for line in lines:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if not in_containers:
+                if stripped == "containers:":
+                    in_containers = True
+                    containers_indent = indent
+                continue
+            if indent <= containers_indent and stripped:
+                flush_current()
+                break
+            container_match = re.match(r"^\s*-\s*name:\s*([^#\s]+)", line)
+            if container_match and indent > containers_indent and (
+                container_item_indent == -1 or indent == container_item_indent
+            ):
+                if container_item_indent == -1:
+                    container_item_indent = indent
+                flush_current()
+                current_name = container_match.group(1).strip('"\'')
+                current_envs = set()
+                in_env = False
+                env_indent = -1
+                continue
+            if not current_name:
+                continue
+            if stripped == "env:":
+                in_env = True
+                env_indent = indent
+                continue
+            if in_env and indent <= env_indent and stripped:
+                in_env = False
+            if in_env:
+                env_match = re.match(r"^\s*-\s*name:\s*([^#\s]+)", line)
+                if env_match:
+                    current_envs.add(env_match.group(1).strip('"\''))
+        else:
+            if in_containers:
+                flush_current()
+    return found
+
+
 def latest_version(chart: str) -> tuple[str, str]:
     forced = os.environ.get("SUGARKUBE_APP_CHART_LATEST_STUB", "").strip()
     if forced:
@@ -106,10 +172,12 @@ def latest_version(chart: str) -> tuple[str, str]:
         versions.extend(found)
         if found:
             break
-    versions = sorted(set(versions), key=semver_key)
+    unique_versions = sorted(set(versions), key=semver_key)
+    stable_versions = [version for version in unique_versions if not is_prerelease(version)]
+    production_safe_versions = stable_versions or unique_versions
     return (
-        (versions[-1], "GitHub/GHCR API")
-        if versions
+        (production_safe_versions[-1], "GitHub/GHCR API")
+        if production_safe_versions
         else (
             "",
             f"latest unknown: no semver tags found; run: helm show chart {chart} --version <version>",
@@ -211,11 +279,8 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if tmpl.returncode != 0:
         print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
         return tmpl.returncode or 1
-    missing = [
-        name
-        for name in req
-        if not re.search(rf"(?m)^\s*-\s*name:\s*{re.escape(name)}\s*$", tmpl.stdout)
-    ]
+    app_container_envs = deployment_app_container_envs(tmpl.stdout, args.app, args.release)
+    missing = [name for name in req if name not in app_container_envs]
     if missing:
         print(
             "ERROR: rendered token.place manifest is missing required metadata env vars: "
