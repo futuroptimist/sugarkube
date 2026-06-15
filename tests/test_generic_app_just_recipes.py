@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 from pathlib import Path
@@ -291,6 +292,204 @@ def test_tokenplace_meta_failure_rejects_invalid_or_missing_metadata(
     assert expected in tokenplace_meta_failure("staging", body)
 
 
+def test_app_chart_parse_chart_yaml_strips_quotes_and_ignores_nested_lines() -> None:
+    assert app_chart.parse_chart_yaml(
+        "apiVersion: v2\nname: \"tokenplace\"\n  nested: ignored\ndigest: 'sha256:abc'\n"
+    ) == {
+        "apiVersion": "v2",
+        "name": "tokenplace",
+        "digest": "sha256:abc",
+    }
+
+
+def test_app_chart_latest_version_reports_unsupported_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SUGARKUBE_APP_CHART_LATEST_STUB", raising=False)
+
+    latest, source = app_chart.latest_version("https://charts.example.test/tokenplace")
+
+    assert latest == ""
+    assert "unsupported chart registry" in source
+
+
+def test_app_chart_latest_version_handles_bad_api_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "not json", "")
+
+    monkeypatch.delenv("SUGARKUBE_APP_CHART_LATEST_STUB", raising=False)
+    monkeypatch.setattr(app_chart, "run", fake_run)
+
+    latest, source = app_chart.latest_version("oci://ghcr.io/futuroptimist/charts/tokenplace")
+
+    assert latest == ""
+    assert "no semver tags found" in source
+
+
+def test_app_chart_latest_version_uses_stub_without_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SUGARKUBE_APP_CHART_LATEST_STUB", "2.0.0")
+
+    latest, source = app_chart.latest_version("oci://ghcr.io/futuroptimist/charts/tokenplace")
+
+    assert latest == "2.0.0"
+    assert source == "SUGARKUBE_APP_CHART_LATEST_STUB"
+
+
+def test_app_chart_deployment_env_parser_accepts_quoted_release_container() -> None:
+    manifest = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-release
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: tokenplace
+          env:
+            - name: INIT_ONLY
+      containers:
+        - name: "custom-release"
+          env:
+            - name: "TOKENPLACE_IMAGE_TAG"
+            - name: 'TOKENPLACE_RELEASE_VERSION'
+        - name: metrics-sidecar
+          env:
+            - name: TOKENPLACE_CHART_VERSION
+"""
+
+    envs = app_chart.deployment_app_container_envs(manifest, "tokenplace", "custom-release")
+
+    assert envs == {"TOKENPLACE_IMAGE_TAG", "TOKENPLACE_RELEASE_VERSION"}
+
+
+def test_app_chart_cmd_status_reports_helm_show_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+    )
+    monkeypatch.setattr(app_chart, "read_pin", lambda path: "0.1.3")
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 1, "", "missing chart"),
+    )
+
+    assert app_chart.cmd_status(args) == 1
+    assert "missing chart" in capsys.readouterr().err
+
+
+def test_app_chart_cmd_status_prints_metadata_without_stale_warning(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+    )
+    monkeypatch.setattr(app_chart, "read_pin", lambda path: "0.1.3")
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess(
+            [], 0, "apiVersion: v2\nappVersion: main-deadbee\ndigest: sha256:abc\n", ""
+        ),
+    )
+    monkeypatch.setattr(app_chart, "latest_version", lambda chart: ("0.1.3", "test"))
+
+    assert app_chart.cmd_status(args) == 0
+    out = capsys.readouterr().out
+    assert "chart appVersion: main-deadbee" in out
+    assert "latest version: 0.1.3 (test)" in out
+    assert "Pinned chart appears stale" not in out
+
+
+def test_app_chart_cmd_bump_adds_pin_when_file_has_only_comments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pin = tmp_path / "empty.version"
+    pin.write_text("# comment only\n", encoding="utf-8")
+    args = argparse.Namespace(
+        app="tokenplace",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file=str(pin),
+        version="0.2.0",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+
+    assert app_chart.cmd_bump(args) == 0
+    assert pin.read_text(encoding="utf-8") == "# comment only\n0.2.0\n"
+    assert "just app-deploy app=tokenplace env=staging tag=<APP_TAG>" in capsys.readouterr().out
+
+
+def test_app_chart_cmd_preflight_skips_manifest_render_for_apps_without_required_envs(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="danielsmith",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/danielsmith",
+        version_file="docs/apps/danielsmith.version",
+        version="1.0.0",
+        release="danielsmith",
+        namespace="danielsmith",
+        values="",
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "run",
+        lambda cmd: calls.append(cmd[0]) or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+
+    assert app_chart.cmd_preflight(args) == 0
+    assert calls == []
+    assert "app: danielsmith" in capsys.readouterr().out
+
+
+def test_app_chart_cmd_preflight_reports_template_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="values-a.yaml, values-b.yaml",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "run",
+        lambda cmd: subprocess.CompletedProcess(cmd, 2, "", "render failed"),
+    )
+
+    assert app_chart.cmd_preflight(args) == 2
+    assert "render failed" in capsys.readouterr().err
+
+
 def test_chart_recipes_are_listed(generic_app_stub_env: dict[str, str]) -> None:
     result = _run_just(["--list"], generic_app_stub_env)
 
@@ -491,9 +690,7 @@ def test_app_deploy_passes_tokenplace_when_manifest_metadata_env_present(
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_APP_CHART_LATEST_STUB"] = "9.9.9"
 
-    result = _run_just(
-        ["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env
-    )
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "chart pin: docs/apps/tokenplace.version" in result.stdout
@@ -513,9 +710,7 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_APP_CHART_LATEST_STUB"] = "9.9.9"
 
-    result = _run_just(
-        ["app-redeploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env
-    )
+    result = _run_just(["app-redeploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
 
     assert result.returncode == 0, result.stderr + result.stdout
     _assert_chart_pin_reminder(result.stdout, "tokenplace")
