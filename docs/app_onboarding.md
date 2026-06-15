@@ -86,6 +86,8 @@ The app repo's chart and `ci-helm.yml` should answer yes to each item before Sug
 - `ci-helm.yml` publishes `oci://ghcr.io/OWNER/charts/CHART`.
 - Published chart versions are immutable; never republish different content under an existing version.
 - Sugarkube pins the deployed chart version in `docs/apps/APP.version`.
+  Image tags and chart versions are separate coordinates: `just app-deploy tag=...`
+  does not bump or auto-select charts.
 
 ## Environment overlay checklist
 
@@ -137,19 +139,29 @@ APP_TAG=main-REPLACE_SHORTSHA
 just app-deploy app=appslug env=staging tag="$APP_TAG" config="$APP_CONFIG"
 ```
 
+Before deploying, inspect the current chart pin:
+
+```bash
+just app-chart-status app=appslug config="$APP_CONFIG"
+```
+
 ### The chart changed; what version do I bump?
 
 - Bump the app repo chart `version` for any chart content change.
 - Update `appVersion` when the human-facing app version changed.
 - Publish the new OCI chart once.
-- Update Sugarkube's `docs/apps/APP.version` to the new chart version after publication.
+- Update Sugarkube's `docs/apps/APP.version` to the new chart version after
+  publication with the explicit bump workflow, then commit that pin before or
+  with release operations. Do not use `chart=latest` or silent chart
+  auto-upgrades for production.
 
 ```bash
-CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/appslug.version | head -n 1)
+just app-chart-bump app=appslug version=0.1.3 config="$APP_CONFIG"
 ```
 
 ```bash
-helm show chart oci://ghcr.io/OWNER/charts/CHART --version "$CHART_VERSION"
+git add docs/apps/appslug.version
+git commit -m "Bump appslug chart pin to 0.1.3"
 ```
 
 ### Staging works; how do I promote prod?

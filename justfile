@@ -1307,6 +1307,24 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         version_args+=(--version "${chart_version}")
     fi
 
+    image_tag="${tag}"
+    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
+        image_tag="${default_tag}"
+    fi
+
+    echo "app: ${release}"
+    echo "env: ${SUGARKUBE_ENV:-unknown}"
+    echo "image tag: ${image_tag:-<none>}"
+    echo "chart ref: ${chart}"
+    echo "chart version: ${chart_version:-<unversioned>}"
+    echo "chart pin: ${version_file:-<inline version>}"
+    echo 'NOTE: chart pins are explicit. `tag=...` changes only the image tag.'
+    printf 'Run `just app-chart-status app=%s` before release deploys to check for newer published chart versions.\n' "${release}"
+    printf 'Use `just app-chart-bump app=%s version=<version>` to intentionally update %s.\n' "${release}" "${version_file:-docs/apps/${release}.version}"
+    if [ -n "${chart_version}" ]; then
+      helm show chart "${chart}" --version "${chart_version}" >/dev/null
+    fi
+
     value_args=()
     if [ -n "${values}" ]; then
         IFS=',' read -ra value_files <<< "${values}"
@@ -1316,11 +1334,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                 value_args+=(-f "${value_file}")
             fi
         done
-    fi
-
-    image_tag="${tag}"
-    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
-        image_tag="${default_tag}"
     fi
 
     set_args=()
@@ -1542,6 +1555,16 @@ app-deploy app env='staging' tag='' config='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app "${SUGARKUBE_APP}" \
+      --env "${SUGARKUBE_ENV}" \
+      --tag "${SUGARKUBE_TAG}" \
+      --chart "${SUGARKUBE_CHART}" \
+      --version "${SUGARKUBE_VERSION:-}" \
+      --version-file "${SUGARKUBE_VERSION_FILE:-}" \
+      --values "${SUGARKUBE_VALUES}" \
+      --release "${SUGARKUBE_RELEASE}" \
+      --namespace "${SUGARKUBE_NAMESPACE}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
@@ -1565,6 +1588,16 @@ app-redeploy app env='staging' tag='' config='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app "${SUGARKUBE_APP}" \
+      --env "${SUGARKUBE_ENV}" \
+      --tag "${SUGARKUBE_TAG}" \
+      --chart "${SUGARKUBE_CHART}" \
+      --version "${SUGARKUBE_VERSION:-}" \
+      --version-file "${SUGARKUBE_VERSION_FILE:-}" \
+      --values "${SUGARKUBE_VALUES}" \
+      --release "${SUGARKUBE_RELEASE}" \
+      --namespace "${SUGARKUBE_NAMESPACE}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
@@ -1591,6 +1624,39 @@ app-promote-prod app tag='' config='':
       env=prod \
       tag="${SUGARKUBE_TAG}" \
       config="${SUGARKUBE_CONFIG_PATH}"
+
+# Show the pinned chart version and whether a newer semver chart appears published.
+app-chart-status app env='staging' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config {{ quote(config) }})"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" status \
+      --app "${SUGARKUBE_APP}" \
+      --chart "${SUGARKUBE_CHART}" \
+      --version-file "${SUGARKUBE_VERSION_FILE:-}"
+
+# Explicitly bump a Sugarkube app chart pin after validating the chart exists.
+app-chart-bump app version env='staging' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config {{ quote(config) }})"
+    bump_version={{ quote(version) }}
+    while [ "${bump_version#version=}" != "${bump_version}" ]; do
+      bump_version="${bump_version#version=}"
+    done
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" bump \
+      --app "${SUGARKUBE_APP}" \
+      --chart "${SUGARKUBE_CHART}" \
+      --version-file "${SUGARKUBE_VERSION_FILE:-}" \
+      --version "${bump_version}"
 
 # Verify configured HTTPS paths for a Sugarkube app.
 app-verify app env='staging' config='' print_only='':
@@ -1955,6 +2021,9 @@ tokenplace-oci-deploy env='staging' tag='':
     }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ]; then
       echo "ERROR: tag is required for immutable deploys." >&2
       exit 1
@@ -1984,6 +2053,15 @@ tokenplace-oci-deploy env='staging' tag='':
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     echo "Deploying tokenplace env=${env_name} chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app tokenplace \
+      --env "${env_name}" \
+      --tag "${resolved_tag}" \
+      --chart 'oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      --version-file 'docs/apps/tokenplace.version' \
+      --values "${values_chain}" \
+      --release tokenplace \
+      --namespace tokenplace
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
@@ -2054,6 +2132,9 @@ tokenplace-oci-redeploy env='staging' tag='':
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
+    while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
+      resolved_tag="${resolved_tag#tag=}"
+    done
     if [ -z "${resolved_tag}" ] && [ "${env_name}" = "prod" ]; then
       resolved_tag="$(read_prod_tag 2>/dev/null || true)"
       [ -n "${resolved_tag}" ] || { echo "ERROR: prod requires tag=<immutable-tag> or docs/apps/tokenplace.prod.tag." >&2; exit 1; }
@@ -2078,6 +2159,15 @@ tokenplace-oci-redeploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+      --app tokenplace \
+      --env "${env_name}" \
+      --tag "${resolved_tag}" \
+      --chart 'oci://ghcr.io/futuroptimist/charts/tokenplace' \
+      --version-file 'docs/apps/tokenplace.version' \
+      --values "${values_chain}" \
+      --release tokenplace \
+      --namespace tokenplace
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='tokenplace' namespace='tokenplace' \
