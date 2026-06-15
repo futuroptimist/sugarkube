@@ -97,10 +97,12 @@ def is_prerelease(v: str) -> bool:
     return bool(m and m.group(4))
 
 
-def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[str]:
-    """Return env var names rendered on the Deployment application container."""
+def deployment_app_container_env_sets(
+    manifest: str, app: str, release: str
+) -> list[tuple[str, set[str]]]:
+    """Return env var names for each candidate Deployment application container."""
     candidates = {app, release, *APP_CONTAINER_NAMES.get(app, set())}
-    found: set[str] = set()
+    found: list[tuple[str, set[str]]] = []
     for doc in re.split(r"(?m)^---\s*$", manifest):
         if not re.search(r"(?m)^kind:\s*Deployment\s*$", doc):
             continue
@@ -115,7 +117,7 @@ def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[
 
         def flush_current() -> None:
             if current_name in candidates:
-                found.update(current_envs)
+                found.append((current_name, set(current_envs)))
 
         for line in lines:
             stripped = line.strip()
@@ -129,13 +131,15 @@ def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[
                 flush_current()
                 break
             container_match = re.match(r"^\s*-\s*name:\s*([^#\s]+)", line)
-            if container_match and indent > containers_indent and (
-                container_item_indent == -1 or indent == container_item_indent
+            if (
+                container_match
+                and indent > containers_indent
+                and (container_item_indent == -1 or indent == container_item_indent)
             ):
                 if container_item_indent == -1:
                     container_item_indent = indent
                 flush_current()
-                current_name = container_match.group(1).strip('"\'')
+                current_name = container_match.group(1).strip("\"'")
                 current_envs = set()
                 in_env = False
                 env_indent = -1
@@ -151,11 +155,19 @@ def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[
             if in_env:
                 env_match = re.match(r"^\s*-\s*name:\s*([^#\s]+)", line)
                 if env_match:
-                    current_envs.add(env_match.group(1).strip('"\''))
+                    current_envs.add(env_match.group(1).strip("\"'"))
         else:
             if in_containers:
                 flush_current()
     return found
+
+
+def deployment_app_container_envs(manifest: str, app: str, release: str) -> set[str]:
+    """Return the union of env var names rendered on candidate app containers."""
+    merged: set[str] = set()
+    for _container_name, envs in deployment_app_container_env_sets(manifest, app, release):
+        merged.update(envs)
+    return merged
 
 
 def latest_version(chart: str) -> tuple[str, str]:
@@ -280,12 +292,23 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if tmpl.returncode != 0:
         print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
         return tmpl.returncode or 1
-    app_container_envs = deployment_app_container_envs(tmpl.stdout, args.app, args.release)
-    missing = [name for name in req if name not in app_container_envs]
-    if missing:
+    app_container_env_sets = deployment_app_container_env_sets(tmpl.stdout, args.app, args.release)
+    complete_envs = next(
+        (
+            envs
+            for _container_name, envs in app_container_env_sets
+            if all(name in envs for name in req)
+        ),
+        None,
+    )
+    merged_envs: set[str] = set()
+    for _container_name, envs in app_container_env_sets:
+        merged_envs.update(envs)
+    missing = [name for name in req if name not in (complete_envs or merged_envs)]
+    if complete_envs is None:
         print(
             "ERROR: rendered token.place manifest is missing required metadata env vars: "
-            + ", ".join(missing),
+            + ", ".join(missing or req),
             file=sys.stderr,
         )
         print(f"Pinned chart version: {version} ({args.version_file})", file=sys.stderr)

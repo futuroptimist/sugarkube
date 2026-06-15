@@ -552,6 +552,56 @@ def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
     assert "just app-chart-bump app=tokenplace" in err
 
 
+def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "run",
+        lambda cmd: subprocess.CompletedProcess(
+            cmd,
+            0,
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "spec:\n"
+            "  template:\n"
+            "    spec:\n"
+            "      containers:\n"
+            "        - name: relay\n"
+            "          env:\n"
+            "            - name: TOKENPLACE_IMAGE_TAG\n"
+            "            - name: TOKENPLACE_RELEASE_VERSION\n"
+            "        - name: tokenplace\n"
+            "          env:\n"
+            "            - name: TOKENPLACE_CHART_VERSION\n"
+            "            - name: TOKENPLACE_DEPLOY_ENV\n",
+            "",
+        ),
+    )
+
+    assert app_chart.cmd_preflight(args) == 1
+    err = capsys.readouterr().err
+    assert "missing required metadata env vars" in err
+    assert "TOKENPLACE_IMAGE_TAG" in err
+    assert "TOKENPLACE_DEPLOY_ENV" in err
+
+
 def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
