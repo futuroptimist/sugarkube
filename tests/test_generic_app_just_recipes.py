@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from scripts import app_chart
+from scripts import app_verify
 from scripts.app_verify import base_url_from_host, tokenplace_meta_failure
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -488,6 +489,267 @@ def test_app_chart_cmd_preflight_reports_template_failure(
 
     assert app_chart.cmd_preflight(args) == 2
     assert "render failed" in capsys.readouterr().err
+
+
+def test_app_chart_cmd_preflight_reports_helm_show_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 3, "", "chart missing"),
+    )
+
+    assert app_chart.cmd_preflight(args) == 3
+    assert "chart missing" in capsys.readouterr().err
+
+
+def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="values-a.yaml, values-b.yaml",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "run",
+        lambda cmd: subprocess.CompletedProcess(
+            cmd,
+            0,
+            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n",
+            "",
+        ),
+    )
+
+    assert app_chart.cmd_preflight(args) == 1
+    err = capsys.readouterr().err
+    assert "missing required metadata env vars" in err
+    assert "TOKENPLACE_RELEASE_VERSION" in err
+    assert "just app-chart-bump app=tokenplace" in err
+
+
+def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "run",
+        lambda cmd: subprocess.CompletedProcess(
+            cmd,
+            0,
+            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n            - name: TOKENPLACE_RELEASE_VERSION\n            - name: TOKENPLACE_CHART_VERSION\n            - name: TOKENPLACE_DEPLOY_ENV\n",
+            "",
+        ),
+    )
+
+    assert app_chart.cmd_preflight(args) == 0
+    assert "chart version: 0.1.3" in capsys.readouterr().out
+
+
+def test_app_chart_cmd_bump_reports_empty_version_and_show_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version=" ",
+    )
+    assert app_chart.cmd_bump(args) == 2
+    assert "version must not be empty" in capsys.readouterr().err
+
+    args.version = "0.2.0"
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 4, "", "no such chart"),
+    )
+    assert app_chart.cmd_bump(args) == 4
+    assert "no such chart" in capsys.readouterr().err
+
+
+def test_app_chart_main_dispatches_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_status(args: argparse.Namespace) -> int:
+        seen["app"] = args.app
+        return 7
+
+    monkeypatch.setattr(app_chart, "cmd_status", fake_status)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "app_chart.py",
+            "status",
+            "--app",
+            "tokenplace",
+            "--chart",
+            "oci://example",
+            "--version-file",
+            "docs/apps/tokenplace.version",
+        ],
+    )
+
+    assert app_chart.main() == 7
+    assert seen == {"app": "tokenplace"}
+
+
+def test_app_verify_helpers_cover_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert app_verify.env_flag("MISSING_FLAG", default=True) is True
+    monkeypatch.setenv("BOOL_FLAG", "off")
+    assert app_verify.env_flag("BOOL_FLAG", default=True) is False
+    assert app_verify.normalize_path(" livez ") == "/livez"
+    assert app_verify.normalize_path("   ") == "/"
+    assert app_verify.host_from_values("not json", "ingress.host") == ""
+    assert app_verify.host_from_values('{"ingress":"bad"}', "ingress.host") == ""
+    assert (
+        app_verify.host_from_values('{"ingress":{"host":"example.test"}}', "ingress.host")
+        == "example.test"
+    )
+    assert app_verify.base_url_from_host("") == ""
+    assert app_verify.preview_text(b"one\ntwo\nthree", 7, 1) == (["one"], True)
+    monkeypatch.setenv("INT_FLAG", "not-int")
+    assert app_verify.int_env("INT_FLAG", 12) == 12
+    monkeypatch.setenv("INT_FLAG", "-5")
+    assert app_verify.int_env("INT_FLAG", 12) == 0
+
+
+def test_app_verify_discover_host_uses_kubectl_after_helm_without_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUGARKUBE_RELEASE", "tokenplace")
+    monkeypatch.setenv("SUGARKUBE_NAMESPACE", "tokenplace")
+    monkeypatch.setattr(app_verify, "shutil_which", lambda name: f"/bin/{name}")
+
+    def fake_run_capture(args: list[str]) -> subprocess.CompletedProcess[str]:
+        if args[0] == "helm":
+            return subprocess.CompletedProcess(args, 0, '{"ingress":{}}', "")
+        return subprocess.CompletedProcess(args, 0, "kubectl.example.test", "")
+
+    monkeypatch.setattr(app_verify, "run_capture", fake_run_capture)
+
+    assert app_verify.discover_host("sugar-staging") == ("kubectl.example.test", [])
+
+
+def test_app_verify_run_curl_captures_body_and_stderr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_run(
+        args: list[str], capture_output: bool, text: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        body_path = Path(args[args.index("-o") + 1])
+        body_path.write_text("payload", encoding="utf-8")
+        return subprocess.CompletedProcess(args, 22, "503", "curl failed")
+
+    monkeypatch.setattr(app_verify.subprocess, "run", fake_run)
+
+    assert app_verify.run_curl("https://example.test/") == (22, "503", b"payload", "curl failed")
+
+
+def test_app_verify_main_print_only_and_placeholder_paths(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SUGARKUBE_APP", "tokenplace")
+    monkeypatch.setenv("SUGARKUBE_ENV", "staging")
+    monkeypatch.setenv("SUGARKUBE_VERIFY_PATHS", " , livez")
+    monkeypatch.setattr(app_verify, "discover_host", lambda context: ("", ["no ingress"]))
+
+    assert app_verify.main(["--print-only"]) == 0
+    captured = capsys.readouterr()
+    assert "Could not derive a host for tokenplace" in captured.err
+    assert "curl -fsS https://<host>/livez" in captured.out
+
+    monkeypatch.setattr(app_verify, "discover_host", lambda context: ("example.test", []))
+    assert app_verify.main(["--print-only"]) == 0
+    assert "curl -fsS https://example.test/livez" in capsys.readouterr().out
+
+
+def test_app_verify_main_reports_meta_and_http_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SUGARKUBE_APP", "tokenplace")
+    monkeypatch.setenv("SUGARKUBE_ENV", "staging")
+    monkeypatch.setenv("SUGARKUBE_VERIFY_PATHS", "/api/v1/meta,/down,/empty")
+    monkeypatch.setenv("SUGARKUBE_APP_VERIFY_BODY_PREVIEW_BYTES", "12")
+    monkeypatch.setenv("SUGARKUBE_APP_VERIFY_BODY_PREVIEW_LINES", "1")
+    monkeypatch.setattr(app_verify, "discover_host", lambda context: ("example.test", []))
+
+    def fake_run_curl(url: str) -> tuple[int, str, bytes, str]:
+        if url.endswith("/api/v1/meta"):
+            return 0, "200", b"{}", ""
+        if url.endswith("/down"):
+            return 0, "503", b"line1\nline2", "server said no"
+        return 0, "200", b"", ""
+
+    monkeypatch.setattr(app_verify, "run_curl", fake_run_curl)
+
+    assert app_verify.main([]) == 1
+    captured = capsys.readouterr()
+    assert (
+        "metadata error: token.place metadata endpoint must include a non-empty label"
+        in captured.out
+    )
+    assert "Status: FAILED (HTTP 503)" in captured.out
+    assert "Body preview:" in captured.out
+    assert "Body: <empty>" in captured.out
+    assert "Verification failed: 2/3 checks failed." in captured.err
+
+
+def test_app_verify_main_success_without_body(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SUGARKUBE_APP", "danielsmith")
+    monkeypatch.setenv("SUGARKUBE_ENV", "staging")
+    monkeypatch.setenv("SUGARKUBE_VERIFY_PATHS", "/")
+    monkeypatch.setenv("SUGARKUBE_APP_VERIFY_SHOW_BODY", "false")
+    monkeypatch.setattr(app_verify, "discover_host", lambda context: ("https://example.test", []))
+    monkeypatch.setattr(app_verify, "run_curl", lambda url: (0, "200", b"ok", ""))
+
+    assert app_verify.main([]) == 0
+    out = capsys.readouterr().out
+    assert "Status: OK (HTTP 200)" in out
+    assert "Body:" not in out
+    assert "Verification passed: 1/1 checks succeeded." in out
 
 
 def test_chart_recipes_are_listed(generic_app_stub_env: dict[str, str]) -> None:
