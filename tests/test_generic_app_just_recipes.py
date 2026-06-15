@@ -666,6 +666,35 @@ spec:
     ]
 
 
+def test_deployment_app_container_env_sets_handles_env_before_container_name() -> None:
+    manifest = """apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - env:
+            - name: TOKENPLACE_IMAGE_TAG
+            - name: TOKENPLACE_RELEASE_VERSION
+            - name: TOKENPLACE_CHART_VERSION
+            - name: TOKENPLACE_DEPLOY_ENV
+          image: ghcr.io/example/tokenplace:main-deadbee
+          name: relay
+"""
+
+    assert app_chart.deployment_app_container_env_sets(manifest, "tokenplace", "tokenplace") == [
+        (
+            "relay",
+            {
+                "TOKENPLACE_IMAGE_TAG",
+                "TOKENPLACE_RELEASE_VERSION",
+                "TOKENPLACE_CHART_VERSION",
+                "TOKENPLACE_DEPLOY_ENV",
+            },
+        )
+    ]
+
+
 def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

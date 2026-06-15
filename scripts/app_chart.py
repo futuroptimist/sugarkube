@@ -119,6 +119,8 @@ def deployment_app_container_env_sets(
             indent = len(line) - len(line.lstrip(" "))
             if in_env and indent <= env_indent and stripped:
                 in_env = False
+            if in_env and indent == field_indent and re.match(r"^[A-Za-z0-9_.-]+:\s*", stripped):
+                in_env = False
             item_name_match = re.match(r"^\s*-\s*name:\s*(.+)$", line)
             field_name_match = re.match(r"^\s*name:\s*(.+)$", line)
             if not in_env and not container_name:
@@ -128,7 +130,9 @@ def deployment_app_container_env_sets(
                 if field_name_match and indent == field_indent:
                     container_name = scalar_value(field_name_match.group(1))
                     continue
-            if stripped == "env:" and indent == field_indent:
+            if (stripped == "env:" and indent == field_indent) or (
+                stripped == "- env:" and indent == item_indent
+            ):
                 in_env = True
                 env_indent = indent
                 continue
