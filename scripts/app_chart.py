@@ -103,48 +103,21 @@ def deployment_app_container_env_sets(
     """Return env var names for each candidate Deployment application container."""
     candidates = {app, release, *APP_CONTAINER_NAMES.get(app, set())}
     found: list[tuple[str, set[str]]] = []
-    for doc in re.split(r"(?m)^---\s*$", manifest):
-        if not re.search(r"(?m)^kind:\s*Deployment\s*$", doc):
-            continue
-        lines = doc.splitlines()
-        in_containers = False
-        containers_indent = -1
-        current_name = ""
-        current_envs: set[str] = set()
-        container_item_indent = -1
+
+    def scalar_value(value: str) -> str:
+        return value.split("#", 1)[0].strip().strip('"\'')
+
+    def parse_container_block(block: list[str]) -> tuple[str, set[str]]:
+        container_name = ""
+        envs: set[str] = set()
         in_env = False
         env_indent = -1
-
-        def flush_current() -> None:
-            if current_name in candidates:
-                found.append((current_name, set(current_envs)))
-
-        for line in lines:
+        for line in block:
             stripped = line.strip()
             indent = len(line) - len(line.lstrip(" "))
-            if not in_containers:
-                if stripped == "containers:":
-                    in_containers = True
-                    containers_indent = indent
-                continue
-            if indent <= containers_indent and stripped:
-                flush_current()
-                break
-            container_match = re.match(r"^\s*-\s*name:\s*([^#\s]+)", line)
-            if (
-                container_match
-                and indent > containers_indent
-                and (container_item_indent == -1 or indent == container_item_indent)
-            ):
-                if container_item_indent == -1:
-                    container_item_indent = indent
-                flush_current()
-                current_name = container_match.group(1).strip("\"'")
-                current_envs = set()
-                in_env = False
-                env_indent = -1
-                continue
-            if not current_name:
+            name_match = re.match(r"^\s*(?:-\s*)?name:\s*(.+)$", line)
+            if name_match and not in_env and not container_name:
+                container_name = scalar_value(name_match.group(1))
                 continue
             if stripped == "env:":
                 in_env = True
@@ -153,12 +126,49 @@ def deployment_app_container_env_sets(
             if in_env and indent <= env_indent and stripped:
                 in_env = False
             if in_env:
-                env_match = re.match(r"^\s*-\s*name:\s*([^#\s]+)", line)
+                env_match = re.match(r"^\s*-\s*name:\s*(.+)$", line)
                 if env_match:
-                    current_envs.add(env_match.group(1).strip("\"'"))
+                    envs.add(scalar_value(env_match.group(1)))
+        return container_name, envs
+
+    def flush_block(block: list[str]) -> None:
+        container_name, envs = parse_container_block(block)
+        if container_name in candidates:
+            found.append((container_name, envs))
+
+    for doc in re.split(r"(?m)^---\s*$", manifest):
+        if not re.search(r"(?m)^kind:\s*Deployment\s*$", doc):
+            continue
+        in_containers = False
+        containers_indent = -1
+        container_item_indent = -1
+        current_block: list[str] = []
+        for line in doc.splitlines():
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if not in_containers:
+                if stripped == "containers:":
+                    in_containers = True
+                    containers_indent = indent
+                continue
+            if indent <= containers_indent and stripped:
+                if current_block:
+                    flush_block(current_block)
+                break
+            item_match = re.match(r"^\s*-\s+", line)
+            if item_match and indent > containers_indent:
+                if container_item_indent == -1:
+                    container_item_indent = indent
+                if indent == container_item_indent:
+                    if current_block:
+                        flush_block(current_block)
+                    current_block = [line]
+                    continue
+            if current_block:
+                current_block.append(line)
         else:
-            if in_containers:
-                flush_current()
+            if current_block:
+                flush_block(current_block)
     return found
 
 

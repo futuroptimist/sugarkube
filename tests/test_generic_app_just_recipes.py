@@ -602,6 +602,35 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
     assert "TOKENPLACE_DEPLOY_ENV" in err
 
 
+def test_deployment_app_container_env_sets_handles_container_name_after_image() -> None:
+    manifest = """apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - image: ghcr.io/example/tokenplace:main-deadbee
+          name: relay
+          env:
+            - name: "TOKENPLACE_IMAGE_TAG"
+            - name: TOKENPLACE_RELEASE_VERSION
+            - name: TOKENPLACE_CHART_VERSION
+            - name: TOKENPLACE_DEPLOY_ENV
+"""
+
+    assert app_chart.deployment_app_container_env_sets(manifest, "tokenplace", "tokenplace") == [
+        (
+            "relay",
+            {
+                "TOKENPLACE_IMAGE_TAG",
+                "TOKENPLACE_RELEASE_VERSION",
+                "TOKENPLACE_CHART_VERSION",
+                "TOKENPLACE_DEPLOY_ENV",
+            },
+        )
+    ]
+
+
 def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
