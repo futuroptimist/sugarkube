@@ -105,29 +105,36 @@ def deployment_app_container_env_sets(
     found: list[tuple[str, set[str]]] = []
 
     def scalar_value(value: str) -> str:
-        return value.split("#", 1)[0].strip().strip('"\'')
+        return value.split("#", 1)[0].strip().strip("\"'")
 
     def parse_container_block(block: list[str]) -> tuple[str, set[str]]:
         container_name = ""
         envs: set[str] = set()
         in_env = False
         env_indent = -1
+        item_indent = len(block[0]) - len(block[0].lstrip(" ")) if block else -1
+        field_indent = item_indent + 2
         for line in block:
             stripped = line.strip()
             indent = len(line) - len(line.lstrip(" "))
-            name_match = re.match(r"^\s*(?:-\s*)?name:\s*(.+)$", line)
-            if name_match and not in_env and not container_name:
-                container_name = scalar_value(name_match.group(1))
-                continue
-            if stripped == "env:":
+            if in_env and indent <= env_indent and stripped:
+                in_env = False
+            item_name_match = re.match(r"^\s*-\s*name:\s*(.+)$", line)
+            field_name_match = re.match(r"^\s*name:\s*(.+)$", line)
+            if not in_env and not container_name:
+                if item_name_match and indent == item_indent:
+                    container_name = scalar_value(item_name_match.group(1))
+                    continue
+                if field_name_match and indent == field_indent:
+                    container_name = scalar_value(field_name_match.group(1))
+                    continue
+            if stripped == "env:" and indent == field_indent:
                 in_env = True
                 env_indent = indent
                 continue
-            if in_env and indent <= env_indent and stripped:
-                in_env = False
             if in_env:
                 env_match = re.match(r"^\s*-\s*name:\s*(.+)$", line)
-                if env_match:
+                if env_match and indent > env_indent:
                     envs.add(scalar_value(env_match.group(1)))
         return container_name, envs
 

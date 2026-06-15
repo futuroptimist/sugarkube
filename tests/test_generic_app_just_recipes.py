@@ -631,6 +631,41 @@ spec:
     ]
 
 
+def test_deployment_app_container_env_sets_ignores_nested_names_before_container_name() -> None:
+    manifest = """apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - image: ghcr.io/example/tokenplace:main-deadbee
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TOKENPLACE_IMAGE_TAG
+            - name: TOKENPLACE_RELEASE_VERSION
+            - name: TOKENPLACE_CHART_VERSION
+            - name: TOKENPLACE_DEPLOY_ENV
+          name: relay
+"""
+
+    assert app_chart.deployment_app_container_env_sets(manifest, "tokenplace", "tokenplace") == [
+        (
+            "relay",
+            {
+                "TOKENPLACE_IMAGE_TAG",
+                "TOKENPLACE_RELEASE_VERSION",
+                "TOKENPLACE_CHART_VERSION",
+                "TOKENPLACE_DEPLOY_ENV",
+            },
+        )
+    ]
+
+
 def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
