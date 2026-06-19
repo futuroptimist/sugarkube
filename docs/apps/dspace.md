@@ -139,6 +139,30 @@ curl -fsS https://staging.democratized.space/healthz
 curl -fsS https://staging.democratized.space/livez
 ```
 
+
+## Cross-app token.place browser API release sequence
+
+When a DSPACE release depends on browser calls to token.place API v1, keep the producer and consumer rollout ordered so Sugarkube verifies token.place behavior but never becomes the source of CORS response headers:
+
+1. Deploy the token.place image containing wildcard API v1 CORS.
+2. Run token.place public HTTP verification:
+
+   ```bash
+   just app-verify app=tokenplace env=staging
+   ```
+
+3. Run token.place browser CORS verification:
+
+   ```bash
+   just app-cors-verify app=tokenplace env=staging
+   ```
+
+4. Deploy DSPACE with the runtime origin settings from the current environment overlay.
+5. Confirm DSPACE `/config.json` exposes the expected token.place runtime URL for the target environment.
+6. Open `/chat`, send a message, and inspect Browser Network.
+
+For staging, the browser smoke must show DSPACE calling `https://staging.token.place/api/v1/chat/completions`; for production it must show `https://token.place/api/v1/chat/completions`. Confirm the `OPTIONS` preflight succeeds, the `POST` succeeds or returns a readable API-owned error, no `Authorization` header is sent, no token.place credentials are sent, fetch `credentials` are omitted, and the request does not set `stream: true`.
+
 ## Promote production
 
 Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain and can read `docs/apps/dspace.prod.tag` when `tag=` is omitted.
