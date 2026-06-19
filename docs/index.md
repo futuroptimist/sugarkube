@@ -44,6 +44,7 @@ Review the safety notes before working with power components.
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and generic command contract
+- [observability-design.md](observability-design.md) — canonical Prometheus/Grafana observability design for Sugarkube and flagship apps
 - [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist and release decision tree for wove, jobbot3000, and later apps
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — legacy token.place-specific onboarding context
 - [apps/dspace.md](apps/dspace.md) — DSPACE GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook

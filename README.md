@@ -41,6 +41,8 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 
 - **[Generic app deployment contract](docs/app_deployment_contract.md)** — shared artifact,
   tag, chart, app-config, and `just app-*` command contract for all Sugarkube apps.
+- **[Observability design](docs/observability-design.md)** — canonical Prometheus/Grafana
+  learning and production readiness plan for Sugarkube, DSPACE, token.place, and danielsmith.io.
 - **[Future-app onboarding guide](docs/app_onboarding.md)** — checklist and decision tree for
   adding apps such as wove, jobbot3000, and later services.
 - **Current app runbooks** use the same GHCR-first staging, verification,
