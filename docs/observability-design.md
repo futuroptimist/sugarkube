@@ -81,7 +81,7 @@ graph TD
   subgraph Public[Public Internet]
     Users[Users]
     CF[Cloudflare Tunnel and DNS]
-    BBTargets[Public endpoints /, /healthz, /livez, /resume.pdf]
+    BBTargets[Public endpoints /, /healthz, /livez, app-specific optional content probes]
   end
 
   subgraph K3s[Sugarkube k3s cluster]
@@ -139,7 +139,7 @@ graph TD
 - ServiceMonitors should keep the current kube-prometheus-stack release-label convention, such as `release: kube-prometheus-stack`, unless a future runtime PR intentionally migrates Prometheus selector values.
 - A custom selector label, for example `sugarkube.dev/monitor: "true"`, is only a later migration option and would require a platform values change before it becomes the contract.
 - App-owned ServiceMonitors for `dspace`, `tokenplace`, and `danielsmith` should use a `namespaceSelector` that names the corresponding app namespace, or an equivalent platform-owned selector that is explicit about those namespaces.
-- If an app namespace has default-deny ingress or egress NetworkPolicies, include a corresponding scrape allowance from the `monitoring` namespace to the metrics Service/port before treating the target as release-ready.
+- If an app namespace or the `monitoring` namespace has default-deny ingress or egress NetworkPolicies, include both app-side ingress from `monitoring` and monitoring-side egress to the app metrics Service/port before treating the target as release-ready.
 - App charts may render scrape hooks, but Sugarkube decides which environments and namespaces Prometheus discovers.
 - Where app charts cannot yet render ServiceMonitors, use a temporary Sugarkube-owned static scrape config with an explicit follow-up to move hooks into the app repo.
 
