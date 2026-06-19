@@ -2015,3 +2015,158 @@ def test_app_cors_verify_main_print_only_uses_placeholder_when_host_missing(
     assert "helm get values failed" in err
     assert "https://<host>/api/v1/chat/completions" in out
     assert "curl -i -sS" in out
+
+
+def test_app_cors_verify_main_reports_preflight_status_and_header_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[(0, "503", _cors_headers(), b"", "")],
+    )
+
+    assert rc == 1
+    assert "status=503" in err
+    assert "preflight HTTP status must be successful" in err
+
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[(0, "204", {"access-control-allow-origin": ["https://cors-smoke.invalid"]}, b"", "")],
+    )
+
+    assert rc == 1
+    assert "Access-Control-Allow-Origin echoed the test Origin" in err
+
+
+def test_app_cors_verify_main_reports_missing_host_and_preflight_curl_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        host="",
+        errors=["ingress lookup failed"],
+    )
+
+    assert rc == 1
+    assert calls == []
+    assert "ingress lookup failed" in err
+    assert "status=000" in err
+    assert "could not derive public host" in err
+
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[(28, "000", {}, b"", "curl: timed out")],
+    )
+
+    assert rc == 1
+    assert "status=000" in err
+    assert "curl: timed out" in err
+
+
+def test_app_cors_verify_main_reports_actual_cors_and_body_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[
+            (0, "204", _cors_headers(), b"", ""),
+            (0, "400", _cors_headers({"access-control-allow-origin": ["https://evil.test"]}), b'{"error":{}}', ""),
+        ],
+    )
+
+    assert rc == 1
+    assert "Access-Control-Allow-Origin must be literal *" in err
+
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[
+            (0, "204", _cors_headers(), b"", ""),
+            (0, "400", _cors_headers(), b"not json", ""),
+        ],
+    )
+
+    assert rc == 1
+    assert "token.place API error response must be JSON" in err
+
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[
+            (0, "204", _cors_headers(), b"", ""),
+            (0, "400", _cors_headers(), b'{"message":"missing top-level error"}', ""),
+        ],
+    )
+
+    assert rc == 1
+    assert "top-level error object" in err
+
+
+def test_app_cors_verify_main_allows_non_tokenplace_non_json_actual_body(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        env={"SUGARKUBE_APP": "otherapp"},
+        responses=[
+            (0, "204", _cors_headers(), b"", ""),
+            (0, "400", _cors_headers(), b"plain text error", ""),
+        ],
+    )
+
+    assert rc == 0, err + out
+
+
+def test_app_cors_verify_main_rejects_bad_expected_status_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        _run_app_cors_main(
+            monkeypatch,
+            capsys,
+            env={"SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES": "400,nope"},
+        )
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must be comma-separated integers" in captured.err
+
+    with pytest.raises(SystemExit) as excinfo:
+        _run_app_cors_main(
+            monkeypatch,
+            capsys,
+            env={"SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES": " , "},
+        )
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must include at least one integer" in captured.err
+
+
+def test_app_cors_verify_header_parsing_helpers() -> None:
+    from scripts import app_cors_verify
+
+    headers = app_cors_verify.headers_from_bytes(
+        b"HTTP/1.1 100 Continue\r\nIgnored: yes\r\n\r\n"
+        b"HTTP/2 204\r\nAccess-Control-Allow-Origin: *\r\n"
+        b"Access-Control-Allow-Headers: content-type, x-custom\r\n"
+        b"Access-Control-Allow-Credentials: true\r\n\r\n"
+    )
+
+    assert headers["access-control-allow-origin"] == ["*"]
+    assert app_cors_verify.single_header(headers, "Access-Control-Allow-Origin") == ("*", "")
+    assert app_cors_verify.contains_header_value(
+        headers, "Access-Control-Allow-Headers", "X-Custom"
+    )
+    assert app_cors_verify.credentials_enabled(headers)
+    assert app_cors_verify.assert_wildcard(headers, "https://cors-smoke.invalid") == (
+        "Access-Control-Allow-Credentials must be absent or not true"
+    )
+    assert app_cors_verify.curl_quote("two words") == "'two words'"
+    assert app_cors_verify.csv(" a, ,b ") == ["a", "b"]
