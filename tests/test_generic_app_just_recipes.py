@@ -2194,3 +2194,91 @@ def test_app_cors_verify_header_parsing_helpers() -> None:
     )
     assert app_cors_verify.curl_quote("two words") == "'two words'"
     assert app_cors_verify.csv(" a, ,b ") == ["a", "b"]
+
+
+def test_app_cors_verify_run_curl_collects_status_headers_body_and_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import app_cors_verify
+
+    monkeypatch.setenv("SUGARKUBE_APP_VERIFY_CURL_CONNECT_TIMEOUT", "3")
+    monkeypatch.setenv("SUGARKUBE_APP_VERIFY_CURL_MAX_TIME", "7")
+    seen: dict[str, object] = {}
+
+    class Completed:
+        returncode = 18
+        stdout = "400"
+        stderr = "curl: transfer closed"
+
+    def fake_run(
+        cmd: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> Completed:
+        seen["cmd"] = cmd
+        seen["capture_output"] = capture_output
+        seen["text"] = text
+        seen["check"] = check
+        header_path = Path(cmd[cmd.index("-D") + 1])
+        body_path = Path(cmd[cmd.index("-o") + 1])
+        header_path.write_bytes(
+            b"HTTP/1.1 100 Continue\r\nIgnored: yes\r\n\r\n"
+            b"HTTP/2 400\r\nAccess-Control-Allow-Origin: *\r\n"
+            b"Access-Control-Allow-Headers: content-type\r\n\r\n"
+        )
+        body_path.write_bytes(b'{"error":{}}')
+        return Completed()
+
+    monkeypatch.setattr(app_cors_verify.subprocess, "run", fake_run)
+
+    rc, status, headers, body, stderr = app_cors_verify.run_curl(
+        ["-X", "POST", "https://example.test"]
+    )
+
+    assert rc == 18
+    assert status == "400"
+    assert headers["access-control-allow-origin"] == ["*"]
+    assert headers["access-control-allow-headers"] == ["content-type"]
+    assert body == b'{"error":{}}'
+    assert stderr == "curl: transfer closed"
+    cmd = seen["cmd"]
+    assert isinstance(cmd, list)
+    assert cmd[:6] == ["curl", "-sS", "--connect-timeout", "3", "--max-time", "7"]
+    assert cmd[-3:] == ["-X", "POST", "https://example.test"]
+    assert seen == {**seen, "capture_output": True, "text": True, "check": False}
+    assert not Path(cmd[cmd.index("-D") + 1]).exists()
+    assert not Path(cmd[cmd.index("-o") + 1]).exists()
+
+
+def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import app_cors_verify
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(
+        cmd: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> Completed:
+        Path(cmd[cmd.index("-D") + 1]).unlink()
+        Path(cmd[cmd.index("-o") + 1]).unlink()
+        return Completed()
+
+    monkeypatch.setattr(app_cors_verify.subprocess, "run", fake_run)
+
+    rc, status, headers, body, stderr = app_cors_verify.run_curl(["https://example.test"])
+
+    assert rc == 0
+    assert status == "000"
+    assert headers == {}
+    assert body == b""
+    assert stderr == ""
