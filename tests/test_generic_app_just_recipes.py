@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1825,3 +1826,171 @@ def test_app_config_rejects_unknown_app_config_keys(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "unknown app config key 'SUGARKUBE_UNKNOWN'" in result.stderr
+
+
+def _cors_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        "SUGARKUBE_APP": "tokenplace",
+        "SUGARKUBE_ENV": "staging",
+        "SUGARKUBE_CORS_VERIFY_PATH": "/api/v1/chat/completions",
+        "SUGARKUBE_CORS_VERIFY_METHOD": "POST",
+        "SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS": "content-type",
+        "SUGARKUBE_CORS_VERIFY_BODY": "{}",
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES": "400,429",
+    }
+    if overrides:
+        env.update(overrides)
+    return env
+
+
+def _cors_headers(extra: dict[str, list[str]] | None = None) -> dict[str, list[str]]:
+    headers = {
+        "access-control-allow-origin": ["*"],
+        "access-control-allow-methods": ["POST, OPTIONS"],
+        "access-control-allow-headers": ["content-type"],
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def _run_app_cors_main(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    env: dict[str, str] | None = None,
+    responses: list[tuple[int, str, dict[str, list[str]], bytes, str]] | None = None,
+    host: str = "example.test",
+    errors: list[str] | None = None,
+    argv: list[str] | None = None,
+) -> tuple[int, str, str, list[list[str]]]:
+    if str(REPO_ROOT / "scripts") not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from scripts import app_cors_verify
+
+    for key in [
+        "SUGARKUBE_APP",
+        "SUGARKUBE_ENV",
+        "SUGARKUBE_CORS_VERIFY_PATH",
+        "SUGARKUBE_CORS_VERIFY_METHOD",
+        "SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS",
+        "SUGARKUBE_CORS_VERIFY_BODY",
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES",
+        "SUGARKUBE_CORS_VERIFY_PRINT_ONLY",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in _cors_env(env).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(app_cors_verify, "discover_host", lambda kube_context: (host, errors or []))
+    calls: list[list[str]] = []
+    pending = list(
+        responses
+        or [
+            (0, "204", _cors_headers(), b"", ""),
+            (0, "400", _cors_headers(), b'{"error":{"message":"invalid request"}}', ""),
+        ]
+    )
+
+    def fake_run_curl(args: list[str]) -> tuple[int, str, dict[str, list[str]], bytes, str]:
+        calls.append(args)
+        return pending.pop(0)
+
+    monkeypatch.setattr(app_cors_verify, "run_curl", fake_run_curl)
+
+    rc = app_cors_verify.main(argv or [])
+    captured = capsys.readouterr()
+    return rc, captured.out, captured.err, calls
+
+
+def test_app_cors_verify_main_success_exercises_preflight_and_actual(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err, calls = _run_app_cors_main(monkeypatch, capsys)
+
+    assert rc == 0, err + out
+    assert "Verifying CORS for tokenplace env=staging" in out
+    assert "CORS verification passed" in out
+    assert len(calls) == 2
+    assert calls[0][:2] == ["-X", "OPTIONS"]
+    assert calls[1][:2] == ["-X", "POST"]
+    assert "--data-raw" in calls[1]
+
+
+def test_app_cors_verify_main_rejects_authorization_wildcard(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        env={"SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS": "authorization"},
+        responses=[
+            (
+                0,
+                "204",
+                _cors_headers({"access-control-allow-headers": ["*"]}),
+                b"",
+                "",
+            ),
+        ],
+    )
+
+    assert rc == 1
+    assert "Access-Control-Allow-Headers must contain authorization" in err
+    assert "app=tokenplace env=staging host=https://example.test" in err
+
+
+def test_app_cors_verify_main_accepts_non_authorization_wildcard(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        env={"SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS": "x-custom-token"},
+        responses=[
+            (
+                0,
+                "204",
+                _cors_headers({"access-control-allow-headers": ["*"]}),
+                b"",
+                "",
+            ),
+            (0, "400", _cors_headers(), b'{"error":{"message":"invalid request"}}', ""),
+        ],
+    )
+
+    assert rc == 0, err + out
+
+
+def test_app_cors_verify_main_reports_bad_actual_status(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[
+            (0, "204", _cors_headers(), b"", ""),
+            (0, "503", _cors_headers(), b'{"error":{"message":"unavailable"}}', ""),
+        ],
+    )
+
+    assert rc == 1
+    assert "status=503" in err
+    assert "actual status must be one of [400, 429]" in err
+
+
+def test_app_cors_verify_main_print_only_uses_placeholder_when_host_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, out, err, calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        host="",
+        errors=["helm get values failed"],
+        argv=["--print-only"],
+    )
+
+    assert rc == 0
+    assert calls == []
+    assert "helm get values failed" in err
+    assert "https://<host>/api/v1/chat/completions" in out
+    assert "curl -i -sS" in out
