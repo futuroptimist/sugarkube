@@ -1692,6 +1692,33 @@ app-verify app env='staging' config='' print_only='':
 
     python3 "{{ justfile_directory() }}/scripts/app_verify.py" "${print_only_args[@]}"
 
+# Verify an app-owned public CORS contract without mutating ingress or edge resources.
+app-cors-verify app env='staging' config='' origin='' print_only='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_input={{ quote(config) }}
+    origin_input={{ quote(origin) }}
+    print_only_input={{ quote(print_only) }}
+    for value in "$config_input" "$origin_input"; do
+      if [ "${value#print_only=}" != "$value" ]; then print_only_input="$value"; fi
+    done
+    if [ "${config_input#origin=}" != "${config_input}" ]; then origin_input="${config_input}"; config_input=""; fi
+    while [ "${config_input#config=}" != "${config_input}" ]; do config_input="${config_input#config=}"; done
+    while [ "${origin_input#origin=}" != "${origin_input}" ]; do origin_input="${origin_input#origin=}"; done
+    while [ "${print_only_input#print_only=}" != "${print_only_input}" ]; do print_only_input="${print_only_input#print_only=}"; done
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config "${config_input}")"
+
+    if [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG="${HOME}/.kube/config"; fi
+    args=()
+    if [ -n "${origin_input}" ]; then args+=(--origin "${origin_input}"); fi
+    if [ "${print_only_input:-${SUGARKUBE_APP_CORS_VERIFY_PRINT_ONLY:-}}" = "1" ]; then args+=(--print-only); fi
+    python3 "{{ justfile_directory() }}/scripts/app_cors_verify.py" "${args[@]}"
+
 # Opinionated immutable-tag dspace deploy with rollout verification.
 #
 

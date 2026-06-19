@@ -116,6 +116,42 @@ just app-verify app=dspace env=staging
 just app-verify app=dspace env=staging print_only=1
 ```
 
+### Cross-app token.place API v1 browser smoke
+
+DSPACE chat depends on the token.place public API v1 browser CORS contract. Use this order for staging and production releases so DSPACE never points at an app image that still lacks API-owned wildcard CORS:
+
+1. Deploy the token.place image containing wildcard API v1 CORS.
+2. Run token.place `app-verify`.
+3. Run token.place `app-cors-verify`.
+4. Deploy DSPACE with the runtime origin configured by the DSPACE overlay.
+5. Confirm DSPACE `/config.json`.
+6. Open `/chat`, send a message, and inspect Browser Network.
+
+Commands for the token.place side of the staging sequence:
+
+```bash
+just app-verify app=tokenplace env=staging
+just app-cors-verify app=tokenplace env=staging
+```
+
+For production, use:
+
+```bash
+just app-verify app=tokenplace env=prod
+just app-cors-verify app=tokenplace env=prod
+```
+
+The browser Network smoke must verify:
+
+- Staging DSPACE calls `https://staging.token.place/api/v1/chat/completions`.
+- Production DSPACE calls `https://token.place/api/v1/chat/completions`.
+- The `OPTIONS` preflight succeeds.
+- The `POST` succeeds or returns a readable API-owned error.
+- No `Authorization` header is sent.
+- No token.place credentials are sent.
+- Fetch `credentials` are omitted.
+- The request body does not include `stream: true`.
+
 Manual public checks are optional fallbacks when Cloudflare or cert-manager are suspect.
 
 ```bash

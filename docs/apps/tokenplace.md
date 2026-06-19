@@ -132,6 +132,23 @@ just app-verify app=tokenplace env=staging
 just app-verify app=tokenplace env=staging print_only=1
 ```
 
+### Browser CORS verification
+
+Run the generic read-only CORS check after staging verification to confirm the token.place application, not Sugarkube ingress or edge policy, owns the public API v1 CORS contract. The probe uses an intentionally unrelated origin and expects literal wildcard CORS.
+
+```bash
+just app-cors-verify app=tokenplace env=staging
+```
+
+Expected behavior:
+
+- Any browser origin is allowed through literal `Access-Control-Allow-Origin: *`.
+- Credentialed CORS is disabled; `Access-Control-Allow-Credentials: true` must not appear.
+- API v1 remains zero-auth and non-streaming for this browser client flow.
+- CORS applies to public API v1, not API v2.
+- This check is separate from relay-compute E2EE sign-off and does not replace it.
+- If this check fails, deploy a token.place image containing the API-owned wildcard CORS fix; do not add ingress CORS annotations, Traefik Middleware, Cloudflare response-header rules, or duplicate CORS headers at another layer.
+
 Optional manual fallback:
 
 ```bash
@@ -164,7 +181,11 @@ Do not replace this sign-off with synthetic register/poll, web/TLS readiness, he
 
 ## Promote production
 
-Promote only after staging sign-off proves that a real external desktop or compute node registered with staging and completed a real E2EE request/response through the relay. Prefer the generic command; it uses the prod values chain and can read `docs/apps/tokenplace.prod.tag` when `tag=` is omitted.
+Promote only after staging sign-off proves that a real external desktop or compute node registered with staging and completed a real E2EE request/response through the relay. Re-run the production-target CORS recipe before promotion when validating the current production baseline or a release checklist requires pre-promotion prod evidence. Prefer the generic command; it uses the prod values chain and can read `docs/apps/tokenplace.prod.tag` when `tag=` is omitted.
+
+```bash
+just app-cors-verify app=tokenplace env=prod
+```
 
 ```bash
 just app-promote-prod app=tokenplace tag="$APP_TAG"
@@ -184,6 +205,10 @@ just app-status app=tokenplace env=prod
 
 ```bash
 just app-verify app=tokenplace env=prod
+```
+
+```bash
+just app-cors-verify app=tokenplace env=prod
 ```
 
 Print the generated curl commands without executing them when you need a manual fallback:
