@@ -1614,7 +1614,7 @@ def test_app_cors_verify_actual_400_with_wildcard_succeeds(
     assert result.returncode == 0, result.stderr + result.stdout
 
 
-def test_app_cors_verify_accepts_wildcard_methods_and_headers(
+def test_app_cors_verify_rejects_wildcard_methods_but_accepts_wildcard_headers(
     generic_app_stub_env: dict[str, str],
 ) -> None:
     env = generic_app_stub_env.copy()
@@ -1623,7 +1623,8 @@ def test_app_cors_verify_accepts_wildcard_methods_and_headers(
 
     result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
 
-    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.returncode != 0
+    assert "Access-Control-Allow-Methods must contain POST" in result.stderr
 
 
 def test_app_cors_verify_actual_sends_configured_request_headers(
@@ -1915,6 +1916,26 @@ def test_app_cors_verify_main_success_exercises_preflight_and_actual(
     assert calls[1][:2] == ["-X", "POST"]
     assert "--data-raw" in calls[1]
 
+
+def test_app_cors_verify_main_rejects_wildcard_methods(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, _calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        responses=[
+            (
+                0,
+                "204",
+                _cors_headers({"access-control-allow-methods": ["*"]}),
+                b"",
+                "",
+            ),
+        ],
+    )
+
+    assert rc == 1
+    assert "Access-Control-Allow-Methods must contain POST" in err
 
 def test_app_cors_verify_main_rejects_authorization_wildcard(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

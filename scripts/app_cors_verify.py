@@ -51,9 +51,16 @@ def single_header(headers: dict[str, list[str]], name: str) -> tuple[str, str]:
 
 def contains_header_value(headers: dict[str, list[str]], name: str, expected: str) -> bool:
     wanted = expected.lower()
-    for value in headers.get(name.lower(), []):
+    header_name = name.lower()
+    for value in headers.get(header_name, []):
         allowed = {part.strip().lower() for part in value.split(",")}
-        if wanted in allowed or (wanted != "authorization" and "*" in allowed):
+        if wanted in allowed:
+            return True
+        if (
+            header_name == "access-control-allow-headers"
+            and wanted != "authorization"
+            and "*" in allowed
+        ):
             return True
     return False
 
