@@ -14,10 +14,6 @@ TOKEN_PLACE_NAMES = {
     "DSPACE_TOKEN_PLACE_URL",
     "DSPACE_TOKEN_PLACE_CHAT_MODEL",
 }
-FORBIDDEN_RUNTIME_NAMES = {
-    "VITE_TOKEN_PLACE_URL",
-    "VITE_TOKEN_PLACE_CHAT_MODEL",
-}
 FORBIDDEN_SECRET_PATTERNS = (
     re.compile(r"Authorization", re.IGNORECASE),
     re.compile("api" + "Key", re.IGNORECASE),
@@ -64,7 +60,8 @@ def test_dspace_deployment_overlays_have_no_vite_runtime_env() -> None:
     for path in OVERLAYS.values():
         env = _runtime_env(path)
         assert TOKEN_PLACE_NAMES <= env.keys()
-        assert FORBIDDEN_RUNTIME_NAMES.isdisjoint(env.keys())
+        vite_names = sorted(name for name in env if name.startswith("VITE_"))
+        assert vite_names == []
 
 
 def test_dspace_deployment_overlays_do_not_carry_token_place_credentials() -> None:

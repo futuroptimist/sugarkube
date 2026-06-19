@@ -107,7 +107,7 @@ just dspace-oci-deploy env=staging tag="$APP_TAG"
 
 ## Verify staging
 
-Generic verification discovers the host from Helm values or Ingress, executes the configured DSPACE paths, prints a per-path body preview, and exits non-zero if any check fails. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
+Generic verification discovers the host from Helm values or Ingress, executes the configured DSPACE paths, prints a per-path body preview, and exits non-zero if any HTTP check fails. It does not validate the `/config.json` body, so staging sign-off also requires the explicit `curl | jq` routing gate below. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
 
 ```bash
 just app-status app=dspace env=staging
@@ -121,7 +121,7 @@ just app-verify app=dspace env=staging
 just app-verify app=dspace env=staging print_only=1
 ```
 
-Manual public checks are optional fallbacks when Cloudflare or cert-manager are suspect. The runtime config check must pass before opening `/chat`; browser Network must show staging DSPACE calling staging token.place. A staging request to production token.place is a stop-ship routing failure. CORS is owned by token.place and verified separately in the generic CORS recipe.
+The runtime config check is a required routing gate, not an optional fallback: it must return the staging token.place origin before production promotion and before opening `/chat`. Browser Network must show staging DSPACE calling staging token.place; a staging request to production token.place is a stop-ship routing failure. If `/chat` fails after `/config.json` is correct, capture the browser CORS error plus the token.place response headers and escalate to the token.place operator; do not change DSPACE values to work around token.place CORS policy.
 
 ```bash
 curl -fsS https://staging.democratized.space/config.json \
@@ -169,7 +169,7 @@ Print the generated curl commands without executing them when you need a manual 
 just app-verify app=dspace env=prod print_only=1
 ```
 
-Optional manual fallback. The runtime config check must pass before opening `/chat`; browser Network should show production DSPACE calling production token.place. The immutable DSPACE image remains environment-neutral, and this production overlay selects the production token.place origin without rebuilding the image. CORS is owned by token.place and verified separately in the generic CORS recipe.
+The runtime config check is a required production routing gate before opening `/chat`; browser Network should show production DSPACE calling production token.place. The immutable DSPACE image remains environment-neutral, and this production overlay selects the production token.place origin without rebuilding the image. If `/chat` fails after `/config.json` is correct, capture the browser CORS error plus the token.place response headers and escalate to the token.place operator; do not change DSPACE values to work around token.place CORS policy.
 
 ```bash
 curl -fsS https://democratized.space/config.json \
