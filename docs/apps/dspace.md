@@ -130,6 +130,48 @@ curl -fsS https://staging.democratized.space/healthz
 curl -fsS https://staging.democratized.space/livez
 ```
 
+
+## Cross-app token.place CORS deployment sequence
+
+DSPACE `/chat` uses token.place public API v1 at runtime, so release validation spans both apps:
+
+1. Deploy the token.place image containing wildcard API v1 CORS.
+2. Run token.place generic HTTP verification:
+
+   ```bash
+   just app-verify app=tokenplace env=staging
+   ```
+
+3. Run token.place CORS verification:
+
+   ```bash
+   just app-cors-verify app=tokenplace env=staging
+   ```
+
+4. Deploy DSPACE with the runtime origin configured by the Sugarkube overlay for the target environment.
+5. Confirm DSPACE `/config.json` before opening the browser:
+
+   ```bash
+   curl -fsS https://staging.democratized.space/config.json | jq .
+   ```
+
+6. Open `/chat`, send a message, and inspect Browser Network.
+
+For production, repeat the token.place checks with `env=prod`, deploy DSPACE production, and inspect `https://democratized.space/config.json`.
+
+The browser Network smoke must verify:
+
+- Staging DSPACE calls `https://staging.token.place/api/v1/chat/completions`.
+- Production DSPACE calls `https://token.place/api/v1/chat/completions`.
+- The browser `OPTIONS` preflight succeeds.
+- The `POST` succeeds or returns a readable API-owned error.
+- No `Authorization` header is sent.
+- No token.place credentials are sent.
+- Fetch `credentials` are omitted.
+- The request body does not set `stream: true`.
+
+Do not fix CORS for this flow by adding Sugarkube ingress CORS annotations, Traefik Middleware, or Cloudflare response-header rules; token.place owns the `Access-Control-Allow-*` contract and Sugarkube only deploys and verifies it.
+
 ## Promote production
 
 Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain and can read `docs/apps/dspace.prod.tag` when `tag=` is omitted.

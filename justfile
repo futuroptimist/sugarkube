@@ -1658,6 +1658,44 @@ app-chart-bump app version env='staging' config='':
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
       --version "${bump_version}"
 
+
+# Verify an app-owned public API CORS contract for a Sugarkube app.
+app-cors-verify app env='staging' config='' origin='' print_only='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    config_input={{ quote(config) }}
+    origin_input={{ quote(origin) }}
+    print_only_input={{ quote(print_only) }}
+    if [ "${config_input#origin=}" != "${config_input}" ]; then
+      origin_input="${config_input}"
+      config_input=""
+    fi
+    if [ "${config_input#print_only=}" != "${config_input}" ]; then
+      print_only_input="${config_input}"
+      config_input=""
+    fi
+    if [ "${origin_input#print_only=}" != "${origin_input}" ]; then
+      print_only_input="${origin_input}"
+      origin_input=""
+    fi
+    while [ "${config_input#config=}" != "${config_input}" ]; do config_input="${config_input#config=}"; done
+    while [ "${origin_input#origin=}" != "${origin_input}" ]; do origin_input="${origin_input#origin=}"; done
+    while [ "${print_only_input#print_only=}" != "${print_only_input}" ]; do print_only_input="${print_only_input#print_only=}"; done
+
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+      --app {{ quote(app) }} \
+      --env {{ quote(env) }} \
+      --config "${config_input}")"
+
+    if [ -z "${KUBECONFIG:-}" ]; then
+      export KUBECONFIG="${HOME}/.kube/config"
+    fi
+    args=()
+    if [ -n "${origin_input}" ]; then args+=(--origin "${origin_input}"); fi
+    if [ "${print_only_input:-${SUGARKUBE_APP_CORS_VERIFY_PRINT_ONLY:-}}" = "1" ]; then args+=(--print-only); fi
+    python3 "{{ justfile_directory() }}/scripts/app_cors_verify.py" "${args[@]}"
+
 # Verify configured HTTPS paths for a Sugarkube app.
 app-verify app env='staging' config='' print_only='':
     #!/usr/bin/env bash

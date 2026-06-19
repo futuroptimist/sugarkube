@@ -152,6 +152,31 @@ curl -fsS https://staging.token.place/api/v1/meta | jq .
 
 Staging metadata must not report `.version == "dev"` or a `.label` ending in ` dev`; the expected label includes the deployed image tag, for example `staging main-00797df`.
 
+
+## Browser CORS verification
+
+After staging HTTP verification, run the generic read-only CORS probe against the public API v1 browser contract:
+
+```bash
+just app-cors-verify app=tokenplace env=staging
+```
+
+The check sends an unrelated `Origin` (`https://cors-smoke.invalid` by default) to prove all-origin wildcard behavior. Expected behavior:
+
+- Public API v1 responds with literal `Access-Control-Allow-Origin: *`; token.place owns this header in the application response.
+- Credentialed CORS is disabled; `Access-Control-Allow-Credentials: true` must not be present.
+- API v1 remains zero-auth and non-streaming for this browser contract.
+- CORS applies to public API v1, not API v2.
+- This check is separate from relay-compute E2EE sign-off and does not replace it.
+
+Use a custom unrelated origin only when debugging a browser report:
+
+```bash
+just app-cors-verify app=tokenplace env=staging origin=https://unrelated-client.example
+```
+
+If the check fails, deploy a token.place image containing the application-owned API v1 CORS fix; do not add Sugarkube ingress middleware, ingress annotations, Cloudflare response-header rules, or another CORS layer.
+
 ### Staging relay-compute sign-off
 
 `just app-status`, `just app-verify`, `/livez`, `/healthz`, `/`, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Staging-to-prod promotion is blocked until the real relay-compute path passes, as defined in [the token.place Sugarkube onboarding contract](../tokenplace_sugarkube_onboarding.md#promotion-gate-ownership). Before production promotion, capture staging evidence for the real relay path:
@@ -211,6 +236,15 @@ Production metadata must not report `.version == "dev"`; the expected label is a
 ```bash
 curl -fsS https://token.place/relay/diagnostics | jq .
 ```
+
+
+Run the same API v1 CORS contract check before and after production promotion when validating a release candidate:
+
+```bash
+just app-cors-verify app=tokenplace env=prod
+```
+
+Production must also return literal `Access-Control-Allow-Origin: *`, keep credentialed CORS disabled, and leave CORS ownership in token.place rather than Sugarkube or Cloudflare.
 
 ### Production relay-compute proof
 
