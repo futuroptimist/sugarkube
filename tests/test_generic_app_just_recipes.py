@@ -250,8 +250,8 @@ else
   printf '%s\n' "${{body}}"
 fi
 printf '%s' "${{status}}"
-if [ "${{status}}" -ge 400 ]; then
-  exit 22
+if [ -n "${{SUGARKUBE_STUB_CURL_EXIT:-}}" ]; then
+  exit "${{SUGARKUBE_STUB_CURL_EXIT}}"
 fi
 exit 0
 """,
@@ -1533,7 +1533,7 @@ def test_app_cors_verify_tokenplace_staging_options_and_actual_curl(
     assert "Access-Control-Request-Method: POST" in curl_log
     assert "Access-Control-Request-Headers: content-type" in curl_log
     assert "https://example.test/api/v1/chat/completions" in curl_log
-    assert "--data {}" in curl_log
+    assert "--data-raw {}" in curl_log
 
 
 def test_app_cors_verify_arbitrary_origin_propagates(generic_app_stub_env: dict[str, str]) -> None:
@@ -1610,6 +1610,132 @@ def test_app_cors_verify_actual_400_with_wildcard_succeeds(
     assert result.returncode == 0, result.stderr + result.stdout
 
 
+def test_app_cors_verify_accepts_wildcard_methods_and_headers(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CORS_METHODS"] = "*"
+    env["SUGARKUBE_STUB_CORS_HEADERS"] = "*"
+
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_app_cors_verify_actual_sends_configured_request_headers(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    config = tmp_path / "tokenplace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=tokenplace",
+                "SUGARKUBE_RELEASE=tokenplace",
+                "SUGARKUBE_NAMESPACE=tokenplace",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
+                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VALUES_STAGING=deploy/helm/tokenplace/values.staging.yaml",
+                "SUGARKUBE_CORS_VERIFY_PATH=/api/v1/chat/completions",
+                "SUGARKUBE_CORS_VERIFY_METHOD=POST",
+                "SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS=x-custom-one,x-custom-two",
+                "SUGARKUBE_CORS_VERIFY_BODY={}",
+                "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES=400,429",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CORS_HEADERS"] = "x-custom-one,x-custom-two"
+
+    result = _run_just(
+        ["app-cors-verify", "app=tokenplace", "env=staging", f"config={config}"], env
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    curl_log = Path(generic_app_stub_env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "Access-Control-Request-Headers: x-custom-one,x-custom-two" in curl_log
+    assert "x-custom-one: cors-smoke" in curl_log
+    assert "x-custom-two: cors-smoke" in curl_log
+    assert "Content-Type: application/json" in curl_log
+
+
+def test_app_cors_verify_rejects_any_curl_error(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CURL_EXIT"] = "18"
+
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode != 0
+    assert "CORS verification failed" in result.stderr
+
+
+def test_app_cors_verify_bad_expected_statuses_is_operator_error(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    config = tmp_path / "tokenplace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=tokenplace",
+                "SUGARKUBE_RELEASE=tokenplace",
+                "SUGARKUBE_NAMESPACE=tokenplace",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
+                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VALUES_STAGING=deploy/helm/tokenplace/values.staging.yaml",
+                "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES=400,abc",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_just(
+        ["app-cors-verify", "app=tokenplace", "env=staging", f"config={config}"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "must be comma-separated integers" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_app_cors_verify_config_third_argument_remains_config(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    config = tmp_path / "tokenplace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=tokenplace",
+                "SUGARKUBE_RELEASE=tokenplace",
+                "SUGARKUBE_NAMESPACE=tokenplace",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
+                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VALUES_STAGING=deploy/helm/tokenplace/values.staging.yaml",
+                "SUGARKUBE_CORS_VERIFY_PATH=/custom-cors",
+                "SUGARKUBE_CORS_VERIFY_METHOD=POST",
+                "SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS=content-type",
+                "SUGARKUBE_CORS_VERIFY_BODY={}",
+                "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES=200",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_just(
+        ["app-cors-verify", "app=tokenplace", "env=staging", f"config={config}", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "https://example.test/custom-cors" in result.stdout
+    assert "Origin: https://cors-smoke.invalid" in result.stdout
+
+
 def test_app_cors_verify_print_only_performs_no_network_calls(
     generic_app_stub_env: dict[str, str],
 ) -> None:
@@ -1622,7 +1748,7 @@ def test_app_cors_verify_print_only_performs_no_network_calls(
     assert "curl -i -sS -X OPTIONS" in result.stdout
     assert "Access-Control-Request-Headers: content-type" in result.stdout
     assert "curl -i -sS -X POST" in result.stdout
-    assert "--data '{}'" in result.stdout
+    assert "--data-raw '{}'" in result.stdout
     assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
 
 

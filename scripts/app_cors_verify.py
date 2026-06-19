@@ -52,7 +52,7 @@ def single_header(headers: dict[str, list[str]], name: str) -> tuple[str, str]:
 def contains_header_value(headers: dict[str, list[str]], name: str, expected: str) -> bool:
     wanted = expected.lower()
     for value in headers.get(name.lower(), []):
-        if any(part.strip().lower() == wanted for part in value.split(",")):
+        if any(part.strip().lower() in {wanted, "*"} for part in value.split(",")):
             return True
     return False
 
@@ -155,9 +155,18 @@ def main(argv: list[str] | None = None) -> int:
     method = os.environ.get("SUGARKUBE_CORS_VERIFY_METHOD", "POST").upper()
     request_headers = os.environ.get("SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS", "content-type")
     body = os.environ.get("SUGARKUBE_CORS_VERIFY_BODY", "{}")
-    expected_statuses = {
-        int(v) for v in csv(os.environ.get("SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES", "400,429"))
-    }
+    try:
+        expected_statuses = {
+            int(v)
+            for v in csv(os.environ.get("SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES", "400,429"))
+        }
+    except ValueError as exc:
+        parser.error(
+            "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must be comma-separated integers: "
+            f"{exc}"
+        )
+    if not expected_statuses:
+        parser.error("SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must include at least one integer")
     print_only = args.print_only or env_flag("SUGARKUBE_CORS_VERIFY_PRINT_ONLY")
 
     host, errors = discover_host(kube_context)
@@ -180,12 +189,16 @@ def main(argv: list[str] | None = None) -> int:
         method,
         "-H",
         f"Origin: {args.origin}",
-        "-H",
-        "Content-Type: application/json",
-        "--data",
-        body,
-        url,
     ]
+    actual_header_names = {header.lower() for header in csv(request_headers)}
+    if "content-type" not in actual_header_names:
+        actual_args.extend(["-H", "Content-Type: application/json"])
+    for header in csv(request_headers):
+        if header.lower() == "content-type":
+            actual_args.extend(["-H", "Content-Type: application/json"])
+        else:
+            actual_args.extend(["-H", f"{header}: cors-smoke"])
+    actual_args.extend(["--data-raw", body, url])
 
     if print_only:
         if not base_url:
@@ -212,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Origin: {args.origin}")
 
     rc, status, headers, _body, stderr = run_curl(preflight_args)
-    if rc != 0 and status == "000":
+    if rc != 0:
         print_failure_context(
             app, env, base_url, path, args.origin, status, stderr or "network request failed"
         )
@@ -239,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     rc, status, headers, actual_body, stderr = run_curl(actual_args)
-    if rc != 0 and status == "000":
+    if rc != 0:
         print_failure_context(
             app, env, base_url, path, args.origin, status, stderr or "network request failed"
         )

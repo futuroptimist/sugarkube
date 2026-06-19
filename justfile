@@ -1693,7 +1693,7 @@ app-verify app env='staging' config='' print_only='':
     python3 "{{ justfile_directory() }}/scripts/app_verify.py" "${print_only_args[@]}"
 
 # Verify app-owned public CORS headers for a Sugarkube app without mutating ingress or edge resources.
-app-cors-verify app env='staging' origin='https://cors-smoke.invalid' config='' print_only='':
+app-cors-verify app env='staging' config='' origin='https://cors-smoke.invalid' print_only='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1707,6 +1707,14 @@ app-cors-verify app env='staging' origin='https://cors-smoke.invalid' config='' 
     if [ "${origin_input#print_only=}" != "${origin_input}" ]; then
       print_only_input="${origin_input}"
       origin_input="https://cors-smoke.invalid"
+    fi
+    if [ "${origin_input#config=}" != "${origin_input}" ]; then
+      config_input="${origin_input}"
+      origin_input="https://cors-smoke.invalid"
+    fi
+    if [ "${config_input#origin=}" != "${config_input}" ]; then
+      origin_input="${config_input}"
+      config_input=""
     fi
     while [ "${config_input#config=}" != "${config_input}" ]; do
       config_input="${config_input#config=}"
