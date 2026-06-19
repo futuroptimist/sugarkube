@@ -5,3 +5,10 @@ ingress:
   enabled: true
   className: traefik
   host: staging.democratized.space
+
+# Runtime token.place routing for the immutable DSPACE image.
+env:
+  - name: DSPACE_TOKEN_PLACE_URL
+    value: https://staging.token.place
+  - name: DSPACE_TOKEN_PLACE_CHAT_MODEL
+    value: gpt-5-chat-latest
