@@ -39,6 +39,11 @@ ALLOWED_KEYS = {
     "SUGARKUBE_STATUS_HOST_KEY",
     "SUGARKUBE_VERIFY_PATHS",
     "SUGARKUBE_DEBUG_SELECTOR",
+    "SUGARKUBE_CORS_VERIFY_PATH",
+    "SUGARKUBE_CORS_VERIFY_METHOD",
+    "SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS",
+    "SUGARKUBE_CORS_VERIFY_BODY",
+    "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES",
 }
 REQUIRED_KEYS = {
     "SUGARKUBE_APP",
@@ -78,8 +83,7 @@ def validate_app_name(app: str) -> str:
     app = normalize_named(app, "app")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", app or ""):
         raise AppConfigError(
-            "app must be a non-empty name using letters, numbers, dots, underscores, "
-            "or dashes."
+            "app must be a non-empty name using letters, numbers, dots, underscores, " "or dashes."
         )
     return app
 
@@ -182,6 +186,11 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
     resolved["SUGARKUBE_CONFIG_PATH"] = str(config_path)
     resolved.setdefault("SUGARKUBE_STATUS_HOST_KEY", "ingress.host")
     resolved.setdefault("SUGARKUBE_VERIFY_PATHS", "/")
+    resolved.setdefault("SUGARKUBE_CORS_VERIFY_PATH", "/")
+    resolved.setdefault("SUGARKUBE_CORS_VERIFY_METHOD", "POST")
+    resolved.setdefault("SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS", "content-type")
+    resolved.setdefault("SUGARKUBE_CORS_VERIFY_BODY", "{}")
+    resolved.setdefault("SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES", "400,429")
     return resolved
 
 
@@ -216,6 +225,11 @@ def shell_emit(config: dict[str, str]) -> str:
         "SUGARKUBE_STATUS_HOST_KEY",
         "SUGARKUBE_VERIFY_PATHS",
         "SUGARKUBE_DEBUG_SELECTOR",
+        "SUGARKUBE_CORS_VERIFY_PATH",
+        "SUGARKUBE_CORS_VERIFY_METHOD",
+        "SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS",
+        "SUGARKUBE_CORS_VERIFY_BODY",
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES",
         "SUGARKUBE_CONFIG_PATH",
         "SUGARKUBE_TAG",
     ]

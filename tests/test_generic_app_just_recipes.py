@@ -167,11 +167,23 @@ exit 0
 set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "curl.log")!r}
 body_file=""
+header_file=""
 url=""
+method="GET"
+origin=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --connect-timeout|--max-time|-w) shift 2 ;;
     -o) body_file="$2"; shift 2 ;;
+    -D) header_file="$2"; shift 2 ;;
+    -X) method="$2"; shift 2 ;;
+    -H)
+      case "$2" in
+        Origin:*) origin="${{2#Origin: }}" ;;
+      esac
+      shift 2
+      ;;
+    --data|--data-raw) shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
@@ -180,6 +192,7 @@ path="${{url#https://example.test}}"
 path="${{path:-/}}"
 status=200
 body='{{"status":"ok"}}'
+headers=$'HTTP/2 200\r\ncontent-type: application/json\r\n'
 case "${{url}}" in
   https://api.github.com/orgs/futuroptimist/packages/container/charts%2Ftokenplace/versions*)
     status=404
@@ -190,16 +203,46 @@ case "${{url}}" in
     body='[{{"metadata":{{"container":{{"tags":["0.1.3","0.1.4-rc.1","0.1.4"]}}}}}}]'
     ;;
 esac
+if [ "${{method}}" = "OPTIONS" ]; then
+  status="${{SUGARKUBE_STUB_CORS_PREFLIGHT_STATUS:-204}}"
+  acao="${{SUGARKUBE_STUB_CORS_ACAO-*}}"
+  methods="${{SUGARKUBE_STUB_CORS_METHODS:-POST, OPTIONS}}"
+  allow_headers="${{SUGARKUBE_STUB_CORS_HEADERS:-content-type}}"
+  credentials="${{SUGARKUBE_STUB_CORS_CREDENTIALS:-}}"
+  if [ "${{acao}}" = "__origin__" ]; then acao="${{origin}}"; fi
+  headers="HTTP/2 ${{status}}"$'\r\n'
+  if [ "${{acao}}" != "__missing__" ]; then headers+="Access-Control-Allow-Origin: ${{acao}}"$'\r\n'; fi
+  headers+="Access-Control-Allow-Methods: ${{methods}}"$'\r\n'
+  headers+="Access-Control-Allow-Headers: ${{allow_headers}}"$'\r\n'
+  if [ -n "${{credentials}}" ]; then headers+="Access-Control-Allow-Credentials: ${{credentials}}"$'\r\n'; fi
+  body=''
+fi
 case "${{path}}" in
   /) body=$'<!doctype html>\n<html lang="en">\n<body>ok</body>\n</html>' ;;
   /config.json) body='{{"publicConfig":true}}' ;;
   /relay/diagnostics) body='{{"relay":"ok"}}' ;;
   /api/v1/meta) body='{{"label":"staging main-deadbee","version":"main-deadbee"}}' ;;
+  /api/v1/chat/completions)
+    if [ "${{method}}" != "OPTIONS" ]; then
+      status="${{SUGARKUBE_STUB_CORS_ACTUAL_STATUS:-400}}"
+      body='{{"error":{{"message":"invalid request"}}}}'
+      acao="${{SUGARKUBE_STUB_CORS_ACTUAL_ACAO-${{SUGARKUBE_STUB_CORS_ACAO-*}}}}"
+      credentials="${{SUGARKUBE_STUB_CORS_CREDENTIALS:-}}"
+      if [ "${{acao}}" = "__origin__" ]; then acao="${{origin}}"; fi
+      headers="HTTP/2 ${{status}}"$'\r\n'
+      if [ "${{acao}}" != "__missing__" ]; then headers+="Access-Control-Allow-Origin: ${{acao}}"$'\r\n'; fi
+      headers+=$'content-type: application/json\r\n'
+      if [ -n "${{credentials}}" ]; then headers+="Access-Control-Allow-Credentials: ${{credentials}}"$'\r\n'; fi
+    fi
+    ;;
 esac
 if [ "${{SUGARKUBE_STUB_CURL_FAIL_PATH:-}}" = "${{path}}" ]; then
   status=503
   body='{{"status":"down"}}'
   echo 'curl: (22) The requested URL returned error: 503' >&2
+fi
+if [ -n "${{header_file}}" ]; then
+  printf '%s\r\n' "${{headers}}" > "${{header_file}}"
 fi
 if [ -n "${{body_file}}" ]; then
   printf '%s\n' "${{body}}" > "${{body_file}}"
@@ -1472,3 +1515,166 @@ def test_app_verify_fails_closed_when_context_host_discovery_fails(
     assert "kubectl ingress lookup failed for context sugar-staging" in result.stderr
     assert "Suggested next steps: just app-status app=tokenplace env=staging" in result.stderr
     assert "curl -fsS https://<host>/" in result.stdout
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_cors_verify_tokenplace_staging_options_and_actual_curl(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "CORS verification passed" in result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--kube-context sugar-staging" in helm_log
+    curl_log = Path(generic_app_stub_env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "-X OPTIONS" in curl_log
+    assert "Origin: https://cors-smoke.invalid" in curl_log
+    assert "Access-Control-Request-Method: POST" in curl_log
+    assert "Access-Control-Request-Headers: content-type" in curl_log
+    assert "https://example.test/api/v1/chat/completions" in curl_log
+    assert "--data {}" in curl_log
+
+
+def test_app_cors_verify_arbitrary_origin_propagates(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(
+        [
+            "app-cors-verify",
+            "app=tokenplace",
+            "env=staging",
+            "origin=https://unrelated-client.example",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    curl_log = Path(generic_app_stub_env["CURL_LOG"]).read_text(encoding="utf-8")
+    assert "Origin: https://unrelated-client.example" in curl_log
+
+
+@pytest.mark.parametrize(
+    ("env_key", "env_value", "message"),
+    [
+        ("SUGARKUBE_STUB_CORS_ACAO", "__missing__", "missing Access-Control-Allow-Origin"),
+        ("SUGARKUBE_STUB_CORS_ACAO", "__origin__", "echoed the test Origin"),
+        ("SUGARKUBE_STUB_CORS_CREDENTIALS", "true", "Access-Control-Allow-Credentials"),
+        (
+            "SUGARKUBE_STUB_CORS_METHODS",
+            "GET, OPTIONS",
+            "Access-Control-Allow-Methods must contain POST",
+        ),
+        (
+            "SUGARKUBE_STUB_CORS_HEADERS",
+            "authorization",
+            "Access-Control-Allow-Headers must contain content-type",
+        ),
+    ],
+)
+def test_app_cors_verify_preflight_failures(
+    generic_app_stub_env: dict[str, str], env_key: str, env_value: str, message: str
+) -> None:
+    env = generic_app_stub_env.copy()
+    env[env_key] = env_value
+
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert "just app-status app=tokenplace env=staging" in result.stderr
+    assert "intended immutable image tag" in result.stderr
+
+
+@pytest.mark.parametrize("status", ["403", "404", "405", "500", "503"])
+def test_app_cors_verify_actual_rejects_forbidden_missing_method_and_5xx(
+    generic_app_stub_env: dict[str, str], status: str
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CORS_ACTUAL_STATUS"] = status
+
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode != 0
+    assert f"status={status}" in result.stderr
+    assert "actual status must be one of [400, 429]" in result.stderr
+
+
+def test_app_cors_verify_actual_400_with_wildcard_succeeds(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CORS_ACTUAL_STATUS"] = "400"
+    env["SUGARKUBE_STUB_CORS_ACAO"] = "*"
+
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_app_cors_verify_print_only_performs_no_network_calls(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-cors-verify", "app=tokenplace", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "curl -i -sS -X OPTIONS" in result.stdout
+    assert "Access-Control-Request-Headers: content-type" in result.stdout
+    assert "curl -i -sS -X POST" in result.stdout
+    assert "--data '{}'" in result.stdout
+    assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
+
+
+def test_app_config_emits_generic_cors_fields_safely() -> None:
+    result = subprocess.run(
+        [
+            "python3",
+            "scripts/app_config.py",
+            "shell",
+            "--app",
+            "tokenplace",
+            "--env",
+            "staging",
+            "--config",
+            "",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "export SUGARKUBE_CORS_VERIFY_PATH=/api/v1/chat/completions" in result.stdout
+    assert "export SUGARKUBE_CORS_VERIFY_BODY='{}'" in result.stdout
+    assert "export SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES=400,429" in result.stdout
+
+
+def test_app_config_rejects_unknown_app_config_keys(tmp_path: Path) -> None:
+    config = tmp_path / "bad.env"
+    config.write_text(
+        "SUGARKUBE_APP=bad\nSUGARKUBE_RELEASE=bad\nSUGARKUBE_NAMESPACE=bad\nSUGARKUBE_CHART=oci://example/bad\nSUGARKUBE_VERSION=0.1.0\nSUGARKUBE_VALUES_STAGING=values.yaml\nSUGARKUBE_UNKNOWN=1\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "python3",
+            "scripts/app_config.py",
+            "json",
+            "--app",
+            "bad",
+            "--env",
+            "staging",
+            "--config",
+            str(config),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "unknown app config key 'SUGARKUBE_UNKNOWN'" in result.stderr

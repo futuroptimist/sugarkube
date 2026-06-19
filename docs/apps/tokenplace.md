@@ -152,6 +152,16 @@ curl -fsS https://staging.token.place/api/v1/meta | jq .
 
 Staging metadata must not report `.version == "dev"` or a `.label` ending in ` dev`; the expected label includes the deployed image tag, for example `staging main-00797df`.
 
+### Browser CORS verification
+
+After staging HTTP verification, confirm the application-owned public API v1 CORS contract from an unrelated origin:
+
+```bash
+just app-cors-verify app=tokenplace env=staging
+```
+
+The check sends an `OPTIONS` preflight and an intentionally invalid API v1 `POST` to `/api/v1/chat/completions`. It expects token.place itself to return a literal `Access-Control-Allow-Origin: *`, to keep credentialed CORS disabled, and to expose a readable API-owned JSON error such as validation or rate-limit status. API v1 remains zero-auth and non-streaming for this browser path; the CORS contract applies to public API v1, not API v2. This is separate from relay-compute E2EE sign-off and does not replace it.
+
 ### Staging relay-compute sign-off
 
 `just app-status`, `just app-verify`, `/livez`, `/healthz`, `/`, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Staging-to-prod promotion is blocked until the real relay-compute path passes, as defined in [the token.place Sugarkube onboarding contract](../tokenplace_sugarkube_onboarding.md#promotion-gate-ownership). Before production promotion, capture staging evidence for the real relay path:
@@ -184,6 +194,12 @@ just app-status app=tokenplace env=prod
 
 ```bash
 just app-verify app=tokenplace env=prod
+```
+
+Before and after production promotion, verify the same browser CORS contract against production:
+
+```bash
+just app-cors-verify app=tokenplace env=prod
 ```
 
 Print the generated curl commands without executing them when you need a manual fallback:
