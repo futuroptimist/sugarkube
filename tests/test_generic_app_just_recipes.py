@@ -241,6 +241,12 @@ if [ "${{SUGARKUBE_STUB_CURL_FAIL_PATH:-}}" = "${{path}}" ]; then
   body='{{"status":"down"}}'
   echo 'curl: (22) The requested URL returned error: 503' >&2
 fi
+if [ "${{method}}" != "OPTIONS" ] && [ -n "${{SUGARKUBE_STUB_CORS_ACTUAL_CURL_EXIT:-}}" ]; then
+  echo 'curl: (18) transfer closed with outstanding read data remaining' >&2
+  curl_exit="${{SUGARKUBE_STUB_CORS_ACTUAL_CURL_EXIT}}"
+else
+  curl_exit="${{SUGARKUBE_STUB_CURL_EXIT:-0}}"
+fi
 if [ -n "${{header_file}}" ]; then
   printf '%s\r\n' "${{headers}}" > "${{header_file}}"
 fi
@@ -250,10 +256,7 @@ else
   printf '%s\n' "${{body}}"
 fi
 printf '%s' "${{status}}"
-if [ -n "${{SUGARKUBE_STUB_CURL_EXIT:-}}" ]; then
-  exit "${{SUGARKUBE_STUB_CURL_EXIT}}"
-fi
-exit 0
+exit "${{curl_exit}}"
 """,
     )
 
@@ -1670,6 +1673,24 @@ def test_app_cors_verify_rejects_any_curl_error(
 
     assert result.returncode != 0
     assert "CORS verification failed" in result.stderr
+
+
+def test_app_cors_verify_actual_rejects_nonzero_curl_with_expected_response(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CORS_ACTUAL_STATUS"] = "400"
+    env["SUGARKUBE_STUB_CORS_ACTUAL_ACAO"] = "*"
+    env["SUGARKUBE_STUB_CORS_ACTUAL_CURL_EXIT"] = "18"
+
+    result = _run_just(["app-cors-verify", "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode != 0
+    assert "CORS verification failed" in result.stderr
+    assert "app=tokenplace env=staging host=https://example.test" in result.stderr
+    assert "path=/api/v1/chat/completions" in result.stderr
+    assert "origin=https://cors-smoke.invalid status=400" in result.stderr
+    assert "transfer closed with outstanding read data remaining" in result.stderr
 
 
 def test_app_cors_verify_bad_expected_statuses_is_operator_error(

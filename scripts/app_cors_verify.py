@@ -117,6 +117,10 @@ def print_failure_context(
     )
 
 
+def curl_failure_detail(stderr: str) -> str:
+    return stderr or "network request failed"
+
+
 def assert_wildcard(headers: dict[str, list[str]], origin: str) -> str:
     acao, error = single_header(headers, "Access-Control-Allow-Origin")
     if error:
@@ -227,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     rc, status, headers, _body, stderr = run_curl(preflight_args)
     if rc != 0:
         print_failure_context(
-            app, env, base_url, path, args.origin, status, stderr or "network request failed"
+            app, env, base_url, path, args.origin, status, curl_failure_detail(stderr)
         )
         return 1
     if not status.isdigit() or not (200 <= int(status) < 300):
@@ -254,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     rc, status, headers, actual_body, stderr = run_curl(actual_args)
     if rc != 0:
         print_failure_context(
-            app, env, base_url, path, args.origin, status, stderr or "network request failed"
+            app, env, base_url, path, args.origin, status, curl_failure_detail(stderr)
         )
         return 1
     status_int = int(status) if status.isdigit() else 0
