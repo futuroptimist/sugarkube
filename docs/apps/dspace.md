@@ -39,9 +39,33 @@ Use these links before changing a deployment so the workflow runs, package versi
 ## Environment topology
 
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
-- `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
-- `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
+  The dev base intentionally does not choose a token.place origin; developers who need one should
+  copy the app config outside the repo or pass a local values overlay that sets
+  `DSPACE_TOKEN_PLACE_URL` and `DSPACE_TOKEN_PLACE_CHAT_MODEL`.
+- `env=staging`: HA staging on the staging Sugarkube cluster with host
+  `staging.democratized.space` and values
+  `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`; the overlay
+  routes DSPACE to `https://staging.token.place`.
+- `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space`
+  and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`; the
+  overlay routes DSPACE to `https://token.place`.
 - Optional legacy/canary host `prod.democratized.space` still has `docs/examples/dspace.values.prod-subdomain.yaml`, but the generic app flow uses the production apex overlay unless a local app config intentionally overrides it.
+
+
+## Runtime token.place routing
+
+Sugarkube keeps the DSPACE image tag immutable and environment-neutral. Deploy the new immutable
+DSPACE image after this change merges, then promote that same image tag through staging and
+production; environment overlays, not image names or rebuilds, select the token.place origin. The
+staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and the production
+overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place`; both set
+`DSPACE_TOKEN_PLACE_CHAT_MODEL=gpt-5-chat-latest`.
+
+Do not add `VITE_TOKEN_PLACE_URL` or `VITE_TOKEN_PLACE_CHAT_MODEL` to Kubernetes runtime values.
+Those names are build-time compatibility fallbacks for the browser bundle and cannot fix an
+already-built image. Do not add token.place API keys, credentials, Authorization headers, proxy
+settings, or ingress CORS logic to DSPACE values. CORS is owned by token.place and is verified
+separately in the generic CORS recipe.
 
 ## Find or publish GHCR image
 
@@ -121,6 +145,20 @@ Manual public checks are optional fallbacks when Cloudflare or cert-manager are 
 ```bash
 curl -fsS https://staging.democratized.space/config.json | jq .
 ```
+The runtime routing check must pass before opening `/chat`:
+
+```bash
+curl -fsS https://staging.democratized.space/config.json \
+  | jq -e '
+      .tokenPlace.url == "https://staging.token.place"
+      and .tokenPlace.model == "gpt-5-chat-latest"
+    '
+```
+
+After the JSON check passes, open `/chat` and use Browser Network to confirm staging DSPACE calls
+staging token.place. A staging request to production token.place is a stop-ship routing failure;
+stop the rollout and inspect the values chain before continuing.
+
 
 ```bash
 curl -fsS https://staging.democratized.space/healthz
@@ -165,6 +203,20 @@ Optional manual fallback:
 ```bash
 curl -fsS https://democratized.space/config.json | jq .
 ```
+The runtime routing check must pass before opening `/chat`:
+
+```bash
+curl -fsS https://democratized.space/config.json \
+  | jq -e '
+      .tokenPlace.url == "https://token.place"
+      and .tokenPlace.model == "gpt-5-chat-latest"
+    '
+```
+
+After the JSON check passes, open `/chat` and use Browser Network to confirm production DSPACE
+calls production token.place. If a production rollout unexpectedly calls the staging origin, stop
+and correct the production overlay before sign-off.
+
 
 ```bash
 curl -fsS https://democratized.space/healthz
