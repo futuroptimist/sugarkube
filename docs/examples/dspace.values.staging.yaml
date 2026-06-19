@@ -1,6 +1,12 @@
 # Example values overlay for staging HA deploys (staging.democratized.space).
 environment: staging
 
+env:
+  - name: DSPACE_TOKEN_PLACE_URL
+    value: https://staging.token.place
+  - name: DSPACE_TOKEN_PLACE_CHAT_MODEL
+    value: gpt-5-chat-latest
+
 ingress:
   enabled: true
   className: traefik

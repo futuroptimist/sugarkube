@@ -39,8 +39,16 @@ Use these links before changing a deployment so the workflow runs, package versi
 ## Environment topology
 
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
-- `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
-- `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
+  The dev base intentionally does not choose a token.place origin; developers who need one should copy
+  the example app config locally and point its values chain at a private overlay that sets
+  `DSPACE_TOKEN_PLACE_URL` and `DSPACE_TOKEN_PLACE_CHAT_MODEL`.
+- `env=staging`: HA staging on the staging Sugarkube cluster with host
+  `staging.democratized.space` and values
+  `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`. The staging overlay
+  routes browser chat runtime config to `https://staging.token.place`.
+- `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space`
+  and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`. The
+  production overlay routes browser chat runtime config to `https://token.place`.
 - Optional legacy/canary host `prod.democratized.space` still has `docs/examples/dspace.values.prod-subdomain.yaml`, but the generic app flow uses the production apex overlay unless a local app config intentionally overrides it.
 
 ## Find or publish GHCR image
@@ -112,6 +120,20 @@ just app-status app=dspace env=staging
 just app-verify app=dspace env=staging
 ```
 
+The runtime routing check must pass before opening `/chat`:
+
+```bash
+curl -fsS https://staging.democratized.space/config.json \
+  | jq -e '
+      .tokenPlace.url == "https://staging.token.place"
+      and .tokenPlace.model == "gpt-5-chat-latest"
+    '
+```
+
+After the config check passes, open `/chat` and confirm Browser Network shows staging DSPACE
+calling staging token.place. A staging request to production token.place is a stop-ship routing failure.
+CORS is owned by token.place and verified separately by the generic CORS recipe.
+
 ```bash
 just app-verify app=dspace env=staging print_only=1
 ```
@@ -153,6 +175,20 @@ just app-status app=dspace env=prod
 ```bash
 just app-verify app=dspace env=prod
 ```
+
+The runtime routing check must pass before opening `/chat`:
+
+```bash
+curl -fsS https://democratized.space/config.json \
+  | jq -e '
+      .tokenPlace.url == "https://token.place"
+      and .tokenPlace.model == "gpt-5-chat-latest"
+    '
+```
+
+After the config check passes, open `/chat` and confirm Browser Network shows production DSPACE
+calling production token.place. CORS is owned by token.place and verified separately by the generic
+CORS recipe.
 
 Print the generated curl commands without executing them when you need a manual fallback:
 
@@ -246,7 +282,12 @@ just cf-tunnel-route host=democratized.space
 
 ## App-specific notes
 
-- DSPACE serves `/config.json`; verify it with `jq` before production promotion.
+- DSPACE serves `/config.json`; verify it with `jq` before production promotion and before opening `/chat`.
+- Deploy the new immutable DSPACE image after merging this Sugarkube change; do not deploy
+  automatically from tests or pull requests.
+- The DSPACE image tag remains immutable and environment-neutral, so the same DSPACE image can be
+  promoted between staging and production.
+- Environment overlays, not image names, select the token.place origin.
 - Keep release lineage separate from environment routing: image tags identify app code, values overlays identify `staging` or `prod` hostnames.
 - The optional `prod.democratized.space` overlay is not the default production path in the generic config.
 
