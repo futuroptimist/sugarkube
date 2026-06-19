@@ -39,8 +39,11 @@ Use these links before changing a deployment so the workflow runs, package versi
 ## Environment topology
 
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
+  The dev overlay intentionally does not choose a token.place origin; developers who need local runtime routing can copy `docs/examples/apps/dspace.env` to a local app config and add chart-supported `env` entries to their private values file.
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
+  The staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=gpt-5-chat-latest`.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=gpt-5-chat-latest`.
 - Optional legacy/canary host `prod.democratized.space` still has `docs/examples/dspace.values.prod-subdomain.yaml`, but the generic app flow uses the production apex overlay unless a local app config intentionally overrides it.
 
 ## Find or publish GHCR image
@@ -88,6 +91,8 @@ gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 
 ## Deploy staging
 
+After this repository change is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
+
 Preferred generic command:
 
 ```bash
@@ -102,7 +107,7 @@ just dspace-oci-deploy env=staging tag="$APP_TAG"
 
 ## Verify staging
 
-Generic verification discovers the host from Helm values or Ingress, executes the configured DSPACE paths, prints a per-path body preview, and exits non-zero if any check fails. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
+Generic verification discovers the host from Helm values or Ingress, executes the configured DSPACE paths, prints a per-path body preview, and exits non-zero if any HTTP check fails. It does not validate the `/config.json` body, so staging sign-off also requires the explicit `curl | jq` routing gate below. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
 
 ```bash
 just app-status app=dspace env=staging
@@ -116,10 +121,14 @@ just app-verify app=dspace env=staging
 just app-verify app=dspace env=staging print_only=1
 ```
 
-Manual public checks are optional fallbacks when Cloudflare or cert-manager are suspect.
+The runtime config check is a required routing gate, not an optional fallback: it must return the staging token.place origin before production promotion and before opening `/chat`. Browser Network must show staging DSPACE calling staging token.place; a staging request to production token.place is a stop-ship routing failure. If `/chat` fails after `/config.json` is correct, capture the browser CORS error plus the token.place response headers and escalate to the token.place operator; do not change DSPACE values to work around token.place CORS policy.
 
 ```bash
-curl -fsS https://staging.democratized.space/config.json | jq .
+curl -fsS https://staging.democratized.space/config.json \
+  | jq -e '
+      .tokenPlace.url == "https://staging.token.place"
+      and .tokenPlace.model == "gpt-5-chat-latest"
+    '
 ```
 
 ```bash
@@ -160,10 +169,14 @@ Print the generated curl commands without executing them when you need a manual 
 just app-verify app=dspace env=prod print_only=1
 ```
 
-Optional manual fallback:
+The runtime config check is a required production routing gate before opening `/chat`; browser Network should show production DSPACE calling production token.place. The immutable DSPACE image remains environment-neutral, and this production overlay selects the production token.place origin without rebuilding the image. If `/chat` fails after `/config.json` is correct, capture the browser CORS error plus the token.place response headers and escalate to the token.place operator; do not change DSPACE values to work around token.place CORS policy.
 
 ```bash
-curl -fsS https://democratized.space/config.json | jq .
+curl -fsS https://democratized.space/config.json \
+  | jq -e '
+      .tokenPlace.url == "https://token.place"
+      and .tokenPlace.model == "gpt-5-chat-latest"
+    '
 ```
 
 ```bash
@@ -246,8 +259,8 @@ just cf-tunnel-route host=democratized.space
 
 ## App-specific notes
 
-- DSPACE serves `/config.json`; verify it with `jq` before production promotion.
-- Keep release lineage separate from environment routing: image tags identify app code, values overlays identify `staging` or `prod` hostnames.
+- DSPACE serves `/config.json`; verify it with `jq` before production promotion and before opening `/chat`.
+- Keep release lineage separate from environment routing: image tags identify app code, values overlays identify `staging` or `prod` hostnames and token.place origins.
 - The optional `prod.democratized.space` overlay is not the default production path in the generic config.
 
 ### Legacy Helm helper reference
