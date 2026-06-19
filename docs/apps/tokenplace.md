@@ -152,6 +152,18 @@ curl -fsS https://staging.token.place/api/v1/meta | jq .
 
 Staging metadata must not report `.version == "dev"` or a `.label` ending in ` dev`; the expected label includes the deployed image tag, for example `staging main-00797df`.
 
+### Browser CORS verification
+
+Verify the public API v1 browser contract after staging HTTP verification:
+
+```bash
+just app-cors-verify app=tokenplace env=staging
+```
+
+The check sends an unrelated `Origin` and expects token.place itself to return a literal `Access-Control-Allow-Origin: *` on both the API v1 preflight and the deliberately invalid API v1 response. Credentialed CORS must remain disabled (`Access-Control-Allow-Credentials` absent or not `true`). API v1 remains zero-auth and non-streaming; this CORS contract applies to public API v1, not API v2.
+
+This check is separate from relay-compute E2EE sign-off and does not replace it. If it fails, deploy a token.place image containing the API-owned CORS fix rather than adding ingress, Traefik, or Cloudflare response-header mutations.
+
 ### Staging relay-compute sign-off
 
 `just app-status`, `just app-verify`, `/livez`, `/healthz`, `/`, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Staging-to-prod promotion is blocked until the real relay-compute path passes, as defined in [the token.place Sugarkube onboarding contract](../tokenplace_sugarkube_onboarding.md#promotion-gate-ownership). Before production promotion, capture staging evidence for the real relay path:
@@ -165,6 +177,12 @@ Do not replace this sign-off with synthetic register/poll, web/TLS readiness, he
 ## Promote production
 
 Promote only after staging sign-off proves that a real external desktop or compute node registered with staging and completed a real E2EE request/response through the relay. Prefer the generic command; it uses the prod values chain and can read `docs/apps/tokenplace.prod.tag` when `tag=` is omitted.
+
+Before promotion, confirm the production target will satisfy the same API-owned browser contract once deployed:
+
+```bash
+just app-cors-verify app=tokenplace env=prod print_only=1
+```
 
 ```bash
 just app-promote-prod app=tokenplace tag="$APP_TAG"
@@ -184,6 +202,10 @@ just app-status app=tokenplace env=prod
 
 ```bash
 just app-verify app=tokenplace env=prod
+```
+
+```bash
+just app-cors-verify app=tokenplace env=prod
 ```
 
 Print the generated curl commands without executing them when you need a manual fallback:

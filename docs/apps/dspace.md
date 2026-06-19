@@ -174,6 +174,29 @@ curl -fsS https://democratized.space/healthz
 curl -fsS https://democratized.space/livez
 ```
 
+
+## Cross-app token.place browser smoke
+
+DSPACE browser chat depends on token.place API v1 CORS being owned by the token.place application image, not by Sugarkube ingress or Cloudflare header rules. Use this order for staging and production releases that change either side of the integration:
+
+1. Deploy the token.place image containing wildcard API v1 CORS.
+2. Run `just app-verify app=tokenplace env=<staging|prod>`.
+3. Run `just app-cors-verify app=tokenplace env=<staging|prod>`.
+4. Deploy DSPACE with the runtime origin overlay for the same environment.
+5. Confirm DSPACE `/config.json` exposes the expected token.place API v1 URL.
+6. Open `/chat`, send a message, and inspect the browser Network panel.
+
+The browser smoke must verify:
+
+- Staging DSPACE calls `https://staging.token.place/api/v1/chat/completions`.
+- Production DSPACE calls `https://token.place/api/v1/chat/completions`.
+- The browser OPTIONS preflight succeeds.
+- The browser POST succeeds or returns a readable API-owned error.
+- No `Authorization` header is sent.
+- No token.place credentials or cookies are sent.
+- Fetch credentials are omitted.
+- The request body does not include `stream: true`.
+
 ## Rollback
 
 Rollback by deploying the previous known-good immutable image tag with the generic redeploy command.
