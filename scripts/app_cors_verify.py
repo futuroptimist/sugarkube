@@ -165,7 +165,13 @@ def main(argv: list[str] | None = None) -> int:
     kube_context = f"sugar-{env}"
     path = normalize_path(os.environ.get("SUGARKUBE_CORS_VERIFY_PATH", "/"))
     method = os.environ.get("SUGARKUBE_CORS_VERIFY_METHOD", "POST").upper()
-    request_headers = os.environ.get("SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS", "content-type")
+    configured_request_headers = csv(
+        os.environ.get("SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS", "content-type")
+    )
+    effective_request_headers = [*configured_request_headers]
+    if "content-type" not in {header.lower() for header in effective_request_headers}:
+        effective_request_headers.append("content-type")
+    request_headers = ",".join(effective_request_headers)
     body = os.environ.get("SUGARKUBE_CORS_VERIFY_BODY", "{}")
     try:
         expected_statuses = {
@@ -202,10 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         "-H",
         f"Origin: {args.origin}",
     ]
-    actual_header_names = {header.lower() for header in csv(request_headers)}
-    if "content-type" not in actual_header_names:
-        actual_args.extend(["-H", "Content-Type: application/json"])
-    for header in csv(request_headers):
+    for header in effective_request_headers:
         if header.lower() == "content-type":
             actual_args.extend(["-H", "Content-Type: application/json"])
         else:
@@ -256,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     error = assert_wildcard(headers, args.origin)
     if not error and not contains_header_value(headers, "Access-Control-Allow-Methods", method):
         error = f"Access-Control-Allow-Methods must contain {method}"
-    for header in csv(request_headers):
+    for header in effective_request_headers:
         if not error and not contains_header_value(headers, "Access-Control-Allow-Headers", header):
             error = f"Access-Control-Allow-Headers must contain {header}"
     if error:

@@ -1651,7 +1651,7 @@ def test_app_cors_verify_actual_sends_configured_request_headers(
         encoding="utf-8",
     )
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_CORS_HEADERS"] = "x-custom-one,x-custom-two"
+    env["SUGARKUBE_STUB_CORS_HEADERS"] = "x-custom-one,x-custom-two,content-type"
 
     result = _run_just(
         ["app-cors-verify", "app=tokenplace", "env=staging", f"config={config}"], env
@@ -1659,7 +1659,7 @@ def test_app_cors_verify_actual_sends_configured_request_headers(
 
     assert result.returncode == 0, result.stderr + result.stdout
     curl_log = Path(generic_app_stub_env["CURL_LOG"]).read_text(encoding="utf-8")
-    assert "Access-Control-Request-Headers: x-custom-one,x-custom-two" in curl_log
+    assert "Access-Control-Request-Headers: x-custom-one,x-custom-two,content-type" in curl_log
     assert "x-custom-one: cors-smoke" in curl_log
     assert "x-custom-two: cors-smoke" in curl_log
     assert "Content-Type: application/json" in curl_log
@@ -1936,6 +1936,30 @@ def test_app_cors_verify_main_rejects_wildcard_methods(
 
     assert rc == 1
     assert "Access-Control-Allow-Methods must contain POST" in err
+
+
+def test_app_cors_verify_main_requires_content_type_with_configured_headers(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _out, err, calls = _run_app_cors_main(
+        monkeypatch,
+        capsys,
+        env={"SUGARKUBE_CORS_VERIFY_REQUEST_HEADERS": "x-custom-token"},
+        responses=[
+            (
+                0,
+                "204",
+                _cors_headers({"access-control-allow-headers": ["x-custom-token"]}),
+                b"",
+                "",
+            ),
+        ],
+    )
+
+    assert rc == 1
+    assert "Access-Control-Allow-Headers must contain content-type" in err
+    assert "Access-Control-Request-Headers: x-custom-token,content-type" in calls[0]
+
 
 def test_app_cors_verify_main_rejects_authorization_wildcard(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
