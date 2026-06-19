@@ -31,6 +31,7 @@ Review the safety notes before working with power components.
   they inform
 - [pi_support_bundles.md](pi_support_bundles.md) — collect diagnostics into shareable archives
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
+- [observability-design.md](observability-design.md) — canonical Prometheus, Grafana, metrics, dashboard, alert, and app integration design
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
