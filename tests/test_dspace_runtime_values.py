@@ -60,14 +60,14 @@ def test_dspace_staging_overlay_points_to_staging_token_place() -> None:
     env = _runtime_env(OVERLAYS["staging"])
 
     assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
-    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["gpt-5-chat-latest"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3-8b-instruct"]
 
 
 def test_dspace_prod_overlay_points_to_prod_token_place() -> None:
     env = _runtime_env(OVERLAYS["prod"])
 
     assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://token.place"]
-    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["gpt-5-chat-latest"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3-8b-instruct"]
 
 
 def test_dspace_deployment_overlays_have_no_vite_runtime_env() -> None:
