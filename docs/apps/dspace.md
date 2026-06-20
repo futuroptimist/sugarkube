@@ -41,9 +41,9 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
   The dev overlay intentionally does not choose a token.place origin; developers who need local runtime routing can copy `docs/examples/apps/dspace.env` to a local app config and add chart-supported `env` entries to their private values file.
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
-  The staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=gpt-5-chat-latest`.
+  The staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3-8b-instruct`.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=gpt-5-chat-latest`.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3-8b-instruct`.
 - Optional legacy/canary host `prod.democratized.space` still has `docs/examples/dspace.values.prod-subdomain.yaml`, but the generic app flow uses the production apex overlay unless a local app config intentionally overrides it.
 
 ## Find or publish GHCR image
@@ -127,7 +127,7 @@ The runtime config check is a required routing gate, not an optional fallback: i
 curl -fsS https://staging.democratized.space/config.json \
   | jq -e '
       .tokenPlace.url == "https://staging.token.place"
-      and .tokenPlace.model == "gpt-5-chat-latest"
+      and .tokenPlace.model == "llama-3-8b-instruct"
     '
 ```
 
@@ -199,7 +199,7 @@ The runtime config check is a required production routing gate before opening `/
 curl -fsS https://democratized.space/config.json \
   | jq -e '
       .tokenPlace.url == "https://token.place"
-      and .tokenPlace.model == "gpt-5-chat-latest"
+      and .tokenPlace.model == "llama-3-8b-instruct"
     '
 ```
 
