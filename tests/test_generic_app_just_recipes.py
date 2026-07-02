@@ -2282,3 +2282,94 @@ def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
     assert headers == {}
     assert body == b""
     assert stderr == ""
+
+
+def _read_simple_yaml(path: Path) -> dict[str, object]:
+    loaded: dict[str, object] = {}
+    parents: list[tuple[int, dict[str, object]]] = [(-1, loaded)]
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        key, separator, raw_value = raw_line.strip().partition(":")
+        assert separator, f"{path}: expected key/value line: {raw_line!r}"
+        while parents and indent <= parents[-1][0]:
+            parents.pop()
+        current = parents[-1][1]
+        value = raw_value.strip()
+        if not value:
+            nested: dict[str, object] = {}
+            current[key] = nested
+            parents.append((indent, nested))
+        elif value in {"true", "false"}:
+            current[key] = value == "true"
+        elif value.isdigit():
+            current[key] = int(value)
+        else:
+            current[key] = value
+    return loaded
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_jobbot3000_example_config_resolves_for_all_envs(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    for env_name in ("dev", "staging", "prod"):
+        result = _run_just(
+            ["app-config", "app=jobbot3000", f"env={env_name}"], generic_app_stub_env
+        )
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        import json
+
+        resolved = json.loads(result.stdout)
+        assert resolved["SUGARKUBE_APP"] == "jobbot3000"
+        assert resolved["SUGARKUBE_CHART"] == "oci://ghcr.io/futuroptimist/charts/jobbot3000"
+        assert resolved["SUGARKUBE_VERIFY_PATHS"] == "/,/healthz,/livez"
+
+
+def test_jobbot3000_values_are_loadable_static_and_persistence_free() -> None:
+    values_paths = [
+        REPO_ROOT / "docs/examples/jobbot3000.values.dev.yaml",
+        REPO_ROOT / "docs/examples/jobbot3000.values.staging.yaml",
+        REPO_ROOT / "docs/examples/jobbot3000.values.prod.yaml",
+    ]
+    for path in values_paths:
+        values = _read_simple_yaml(path)
+        serialized = path.read_text(encoding="utf-8").lower()
+        assert "persistentvolumeclaim" not in serialized
+        assert "persistence:" not in serialized
+        assert "secret:" not in serialized
+        assert "configmap" not in serialized
+        assert "applications" not in serialized
+        assert "outreach" not in serialized
+        assert "interviews" not in serialized
+        assert "offers" not in serialized
+        assert "csv" not in serialized
+        assert "ndjson" not in serialized
+        assert isinstance(values, dict)
+
+    dev_values = _read_simple_yaml(values_paths[0])
+    assert dev_values["image"]["repository"] == "ghcr.io/futuroptimist/jobbot3000"
+    assert dev_values["image"]["tag"] == "main-REPLACE_SHORTSHA"
+    assert dev_values["image"]["tag"] not in {"latest", "main-latest"}
+    assert dev_values["service"]["port"] == 8080
+    assert dev_values["containerPort"] == 8080
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_jobbot3000_verify_print_only_includes_public_static_paths(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-verify", "app=jobbot3000", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
+    assert not Path(generic_app_stub_env["CURL_LOG"]).exists()

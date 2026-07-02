@@ -1,0 +1,12 @@
+# Staging overlay values layered on top of jobbot3000.values.dev.yaml.
+environment: staging
+
+ingress:
+  enabled: true
+  className: traefik
+  host: staging.jobbot3000.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    enabled: true
+    secretName: jobbot3000-staging-tls

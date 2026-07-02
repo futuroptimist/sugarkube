@@ -1,0 +1,28 @@
+# Base/shared jobbot3000 values consumed alongside environment overlays.
+# jobbot3000 is a static browser-local tracker: do not add PVCs, Secrets,
+# runtime fixtures containing real application data to these examples.
+environment: dev
+replicaCount: 1
+
+image:
+  repository: ghcr.io/futuroptimist/jobbot3000
+  # Replace with an immutable image tag that passed CI, for example main-deadbee.
+  tag: main-REPLACE_SHORTSHA
+
+service:
+  port: 8080
+
+containerPort: 8080
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
