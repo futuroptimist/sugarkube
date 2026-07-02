@@ -76,6 +76,7 @@ APP_LINKS = {
             f"{JOBBOT3000_REPO}/tree/main/charts/jobbot3000",
             f"{JOBBOT3000_REPO}/blob/main/docs/release-ghcr.md",
             f"{JOBBOT3000_REPO}/blob/main/docs/release-helm.md",
+            f"{JOBBOT3000_REPO}/tree/main/docs",
         ],
     },
 }
