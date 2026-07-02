@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DSPACE_REPO = "https://github.com/democratizedspace/dspace"
 TOKENPLACE_REPO = "https://github.com/futuroptimist/token.place"
 DANIELSMITH_REPO = "https://github.com/futuroptimist/danielsmith.io"
+JOBBOT3000_REPO = "https://github.com/futuroptimist/jobbot3000"
 DSPACE_CHART_PACKAGE_LOOKUP = (
     "https://github.com/orgs/democratizedspace/"
     "packages?repo_name=dspace&q=charts%2Fdspace"
@@ -60,6 +61,20 @@ APP_LINKS = {
             f"{DANIELSMITH_REPO}/blob/main/Dockerfile",
             f"{DANIELSMITH_REPO}/tree/main/charts/danielsmith",
             f"{DANIELSMITH_REPO}/blob/main/docs/ops/sugarkube-release.md",
+        ],
+    },
+    "jobbot3000": {
+        "runbook": "docs/apps/jobbot3000.md",
+        "urls": [
+            JOBBOT3000_REPO,
+            f"{JOBBOT3000_REPO}/actions/workflows/ci-image.yml",
+            f"{JOBBOT3000_REPO}/pkgs/container/jobbot3000",
+            f"{JOBBOT3000_REPO}/actions/workflows/ci-helm.yml",
+            f"{JOBBOT3000_REPO}/pkgs/container/charts%2Fjobbot3000",
+            f"{JOBBOT3000_REPO}/blob/main/Dockerfile",
+            f"{JOBBOT3000_REPO}/tree/main/charts/jobbot3000",
+            f"{JOBBOT3000_REPO}/blob/main/docs/release-ghcr.md",
+            f"{JOBBOT3000_REPO}/blob/main/docs/release-helm.md",
         ],
     },
 }

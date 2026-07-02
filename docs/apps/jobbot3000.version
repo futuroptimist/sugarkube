@@ -1,0 +1,6 @@
+# Default jobbot3000 chart version. Update when new chart releases are published.
+# Source chart version observed in futuroptimist/jobbot3000 charts/jobbot3000/Chart.yaml.
+# If GHCR validation is unavailable, run `just app-chart-status app=jobbot3000`
+# or `helm show chart oci://ghcr.io/futuroptimist/charts/jobbot3000 --version 0.1.0`
+# before first deploy.
+0.1.0

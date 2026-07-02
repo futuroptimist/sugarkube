@@ -30,15 +30,39 @@ def _write_config(path: Path, app: str = "custom", **overrides: str) -> Path:
     return path
 
 
-def test_example_config_fallback_resolves_staging_values() -> None:
-    cfg = app_config.load_config("tokenplace", "staging")
+@pytest.mark.parametrize(
+    ("app", "env", "values"),
+    [
+        (
+            "tokenplace",
+            "staging",
+            "docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml",
+        ),
+        ("jobbot3000", "dev", "docs/examples/jobbot3000.values.dev.yaml"),
+        (
+            "jobbot3000",
+            "staging",
+            "docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml",
+        ),
+        (
+            "jobbot3000",
+            "prod",
+            "docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml",
+        ),
+    ],
+)
+def test_example_config_fallback_resolves_env_values(
+    app: str, env: str, values: str
+) -> None:
+    cfg = app_config.load_config(app, env)
 
-    assert cfg["SUGARKUBE_CONFIG_PATH"].endswith("docs/examples/apps/tokenplace.env")
-    assert cfg["SUGARKUBE_RELEASE"] == "tokenplace"
-    assert cfg["SUGARKUBE_NAMESPACE"] == "tokenplace"
-    assert cfg["SUGARKUBE_VALUES"] == (
-        "docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml"
-    )
+    assert cfg["SUGARKUBE_CONFIG_PATH"].endswith(f"docs/examples/apps/{app}.env")
+    assert cfg["SUGARKUBE_RELEASE"] == app
+    assert cfg["SUGARKUBE_NAMESPACE"] == app
+    assert cfg["SUGARKUBE_VALUES"] == values
+    if app == "jobbot3000":
+        assert cfg["SUGARKUBE_CHART"] == "oci://ghcr.io/futuroptimist/charts/jobbot3000"
+        assert cfg["SUGARKUBE_VERIFY_PATHS"] == "/,/healthz,/livez"
 
 
 def test_config_dir_precedes_example_fallback(

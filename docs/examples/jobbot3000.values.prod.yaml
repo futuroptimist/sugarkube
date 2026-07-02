@@ -1,0 +1,12 @@
+# Production overlay values layered on top of jobbot3000.values.dev.yaml.
+environment: prod
+
+ingress:
+  enabled: true
+  className: traefik
+  host: jobbot3000.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    enabled: true
+    secretName: jobbot3000-prod-tls

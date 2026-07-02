@@ -2282,3 +2282,74 @@ def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
     assert headers == {}
     assert body == b""
     assert stderr == ""
+
+
+def _jobbot3000_values_text(env: str) -> str:
+    return (REPO_ROOT / f"docs/examples/jobbot3000.values.{env}.yaml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_jobbot3000_example_values_are_static_app_safe() -> None:
+    combined = "\n".join(
+        _jobbot3000_values_text(env) for env in ("dev", "staging", "prod")
+    )
+
+    assert "repository: ghcr.io/futuroptimist/jobbot3000" in combined
+    assert "tag: main-REPLACE_SHORTSHA" in combined
+    assert "latest" not in combined.lower()
+    assert "main-latest" not in combined.lower()
+    assert "port: 8080" in combined
+    assert "containerPort: 8080" in combined
+    assert "host: staging.jobbot3000.example.com" in combined
+    assert "host: jobbot3000.example.com" in combined
+    assert "resources:" in combined
+    for forbidden in (
+        "persistentVolumeClaim",
+        "persistence:",
+        "volumeClaimTemplates",
+        "existingSecret",
+        "secretKeyRef",
+        "configMapKeyRef",
+        "kind: Secret",
+        "kind: ConfigMap",
+    ):
+        assert forbidden not in combined
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_jobbot3000_app_deploy_uses_generic_coordinates(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-deploy", "app=jobbot3000", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert (
+        "upgrade jobbot3000 oci://ghcr.io/futuroptimist/charts/jobbot3000" in helm_log
+    )
+    assert "--namespace jobbot3000" in helm_log
+    assert "-f docs/examples/jobbot3000.values.dev.yaml" in helm_log
+    assert "-f docs/examples/jobbot3000.values.staging.yaml" in helm_log
+    assert "--set image.tag=main-deadbee" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_jobbot3000_app_verify_print_only_includes_static_paths(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-verify", "app=jobbot3000", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
+    assert not Path(generic_app_stub_env["CURL_LOG"]).exists()

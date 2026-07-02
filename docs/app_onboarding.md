@@ -1,6 +1,6 @@
 # Sugarkube future-app onboarding guide
 
-Use this checklist when onboarding the next GHCR-first app to Sugarkube. The goal is that `wove`, `jobbot3000`, and later apps can reuse the same app repository release contract and the same Sugarkube `just app-*` operations without asking for bespoke deployment instructions.
+Use this checklist when onboarding the next GHCR-first app to Sugarkube. The goal is that `wove` and later apps can reuse the same app repository release contract and the same Sugarkube `just app-*` operations without asking for bespoke deployment instructions.
 
 ## Ownership boundaries
 
@@ -98,9 +98,9 @@ Create a base values file plus one overlay per environment.
 - `docs/examples/APP.values.prod.yaml`: production host, TLS secret, production env vars, and production-only settings.
 - Secrets must be referenced through Kubernetes Secret names or external secret tooling; never place secret values in docs or app configs.
 
-## Questions before onboarding wove or jobbot3000
+## Questions before onboarding future apps
 
-Do not invent real configs for `wove` or `jobbot3000` until their app repos have the required image and chart details. Capture these answers first:
+Do not invent real configs for future apps until their app repos have the required image and chart details. Capture these answers first:
 
 | Question | Why Sugarkube needs it |
 | --- | --- |
