@@ -1075,6 +1075,15 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
             "dspace",
             ["docs/examples/dspace.values.dev.yaml", "docs/examples/dspace.values.staging.yaml"],
         ),
+        (
+            "jobbot3000",
+            "oci://ghcr.io/futuroptimist/charts/jobbot3000",
+            "jobbot3000",
+            [
+                "docs/examples/jobbot3000.values.dev.yaml",
+                "docs/examples/jobbot3000.values.staging.yaml",
+            ],
+        ),
     ],
 )
 def test_app_deploy_uses_app_release_namespace_chart_values(
@@ -1195,6 +1204,12 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
             "danielsmith",
             "danielsmith",
             "oci://ghcr.io/futuroptimist/charts/danielsmith",
+        ),
+        (
+            "jobbot3000",
+            "jobbot3000",
+            "jobbot3000",
+            "oci://ghcr.io/futuroptimist/charts/jobbot3000",
         ),
     ],
 )
@@ -1478,6 +1493,7 @@ def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, st
         ("danielsmith", "/,/livez,/healthz"),
         ("tokenplace", "/,/livez,/healthz,/relay/diagnostics,/api/v1/meta"),
         ("dspace", "/config.json,/healthz,/livez"),
+        ("jobbot3000", "/,/healthz,/livez"),
     ],
 )
 def test_example_app_configs_preserve_verify_paths(app: str, expected_paths: str) -> None:
@@ -1501,6 +1517,88 @@ def test_example_app_configs_preserve_verify_paths(app: str, expected_paths: str
 
     assert result.returncode == 0, result.stderr
     assert f'"SUGARKUBE_VERIFY_PATHS": "{expected_paths}"' in result.stdout
+
+
+def test_jobbot3000_example_config_resolves_all_env_values() -> None:
+    expected_values = {
+        "dev": "docs/examples/jobbot3000.values.dev.yaml",
+        "staging": (
+            "docs/examples/jobbot3000.values.dev.yaml,"
+            "docs/examples/jobbot3000.values.staging.yaml"
+        ),
+        "prod": (
+            "docs/examples/jobbot3000.values.dev.yaml,"
+            "docs/examples/jobbot3000.values.prod.yaml"
+        ),
+    }
+
+    for env, values in expected_values.items():
+        result = subprocess.run(
+            [
+                "python3",
+                "scripts/app_config.py",
+                "json",
+                "--app",
+                "jobbot3000",
+                "--env",
+                env,
+                "--config",
+                "",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert '"SUGARKUBE_CHART": "oci://ghcr.io/futuroptimist/charts/jobbot3000"' in result.stdout
+        assert f'"SUGARKUBE_VALUES": "{values}"' in result.stdout
+
+
+def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> None:
+    values_paths = [
+        REPO_ROOT / "docs/examples/jobbot3000.values.dev.yaml",
+        REPO_ROOT / "docs/examples/jobbot3000.values.staging.yaml",
+        REPO_ROOT / "docs/examples/jobbot3000.values.prod.yaml",
+    ]
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in values_paths)
+    dev_values = values_paths[0].read_text(encoding="utf-8")
+
+    assert "repository: ghcr.io/futuroptimist/jobbot3000" in dev_values
+    assert "tag: main-REPLACE_SHORTSHA" in dev_values
+    assert "tag: latest" not in dev_values
+    assert "tag: main-latest" not in dev_values
+    assert "containerPort: 8080" in dev_values
+    assert "port: 80" in dev_values
+    assert "persistentVolumeClaim" not in combined
+    assert "persistence:" not in combined
+    assert "kind: Secret" not in combined
+    assert "secretKeyRef" not in combined
+    assert "kind: ConfigMap" not in combined
+    assert "configMapKeyRef" not in combined
+    assert "applications:" not in combined
+    assert "outreach" not in combined
+    assert "interviews" not in combined
+    assert "offers" not in combined
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_print_only_jobbot3000_paths(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-verify", "app=jobbot3000", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
+    assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

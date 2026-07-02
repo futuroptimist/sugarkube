@@ -45,7 +45,7 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
   design, ownership contract, privacy rules, dashboards, alerts, and release gates for Sugarkube,
   DSPACE, token.place, and danielsmith.io.
 - **[Future-app onboarding guide](docs/app_onboarding.md)** — checklist and decision tree for
-  adding apps such as wove, jobbot3000, and later services.
+  adding apps such as wove and later services.
 - **Current app runbooks** use the same GHCR-first staging, verification,
   promotion, rollback, and troubleshooting flow:
   - [DSPACE runbook](docs/apps/dspace.md) for `ghcr.io/democratizedspace/dspace`:
@@ -63,6 +63,11 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
     [image package](https://github.com/futuroptimist/danielsmith.io/pkgs/container/danielsmith.io),
     [chart workflow](https://github.com/futuroptimist/danielsmith.io/actions/workflows/ci-helm.yml),
     [chart package](https://github.com/futuroptimist/danielsmith.io/pkgs/container/charts%2Fdanielsmith).
+  - [jobbot3000 runbook](docs/apps/jobbot3000.md) for `ghcr.io/futuroptimist/jobbot3000`:
+    [image workflow](https://github.com/futuroptimist/jobbot3000/actions/workflows/ci-image.yml),
+    [image package](https://github.com/futuroptimist/jobbot3000/pkgs/container/jobbot3000),
+    [chart workflow](https://github.com/futuroptimist/jobbot3000/actions/workflows/ci-helm.yml),
+    [chart package](https://github.com/futuroptimist/jobbot3000/pkgs/container/charts%2Fjobbot3000).
 - **Environment shortcuts:** token.place
   [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
   [production](docs/k3s-tokenplace-prod.md); danielsmith.io
