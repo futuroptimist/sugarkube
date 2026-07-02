@@ -1,0 +1,4 @@
+# Default jobbot3000 chart version from the app repository chart.
+# Validate before first deploy with `just app-chart-status app=jobbot3000`
+# or `helm show chart oci://ghcr.io/futuroptimist/charts/jobbot3000 --version 0.1.0`.
+0.1.0

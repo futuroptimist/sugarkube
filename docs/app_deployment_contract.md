@@ -27,8 +27,8 @@ Sugarkube owns cluster and environment orchestration:
 - applying the environment values chain; and
 - running status and verification checks against the cluster.
 
-Future onboarding examples include wove and jobbot3000, but they should only get
-Sugarkube app configs after their app repositories have published compatible
+Future onboarding examples include wove, but it should only get
+Sugarkube app configs after its app repository has published compatible
 images and charts.
 Use the [future-app onboarding guide](app_onboarding.md) for the checklist, minimal config template, and release decision tree.
 
@@ -68,6 +68,7 @@ The current apps map to that model as examples:
 | dspace | `ghcr.io/democratizedspace/dspace` | `oci://ghcr.io/democratizedspace/charts/dspace` | `dspace` | `dspace` | `docs/apps/dspace.version` | `docs/apps/dspace.prod.tag` |
 | token.place | `ghcr.io/futuroptimist/tokenplace-relay` | `oci://ghcr.io/futuroptimist/charts/tokenplace` | `tokenplace` | `tokenplace` | `docs/apps/tokenplace.version` | `docs/apps/tokenplace.prod.tag` |
 | danielsmith.io | `ghcr.io/futuroptimist/danielsmith.io` | `oci://ghcr.io/futuroptimist/charts/danielsmith` | `danielsmith` | `danielsmith` | `docs/apps/danielsmith.version` | `docs/apps/danielsmith.prod.tag` |
+| jobbot3000 | `ghcr.io/futuroptimist/jobbot3000` | `oci://ghcr.io/futuroptimist/charts/jobbot3000` | `jobbot3000` | `jobbot3000` | `docs/apps/jobbot3000.version` | `docs/apps/jobbot3000.prod.tag` |
 
 ## Standard image tag model
 

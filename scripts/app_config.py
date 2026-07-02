@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 SUPPORTED_ENVS = {"dev", "staging", "prod"}
-EXAMPLE_FALLBACK_APPS = {"danielsmith", "dspace", "tokenplace"}
+EXAMPLE_FALLBACK_APPS = {"danielsmith", "dspace", "jobbot3000", "tokenplace"}
 MOVING_TAGS = {
     "latest",
     "main",

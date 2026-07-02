@@ -1,0 +1,30 @@
+# Base/shared jobbot3000 values consumed alongside environment overlays.
+# jobbot3000 is a static browser-local tracker: private application data lives
+# in browser IndexedDB and is imported/exported through the app UI, not Kubernetes.
+environment: dev
+replicaCount: 1
+
+image:
+  repository: ghcr.io/futuroptimist/jobbot3000
+  tag: main-REPLACE_SHORTSHA
+
+service:
+  port: 8080
+
+containerPort: 8080
+
+ingress:
+  enabled: false
+  className: traefik
+  host: jobbot3000.localhost
+  annotations: {}
+  tls:
+    enabled: false
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 48Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -1344,6 +1345,86 @@ def test_app_verify_executes_curl_by_default_and_prints_summary(
     assert "Verification passed: 3/3 checks succeeded." in result.stdout
 
 
+def _app_config_json(app: str, env: str = "staging") -> dict[str, str]:
+    result = subprocess.run(
+        [
+            "python3",
+            "scripts/app_config.py",
+            "json",
+            "--app",
+            app,
+            "--env",
+            env,
+            "--config",
+            "",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def _read_values(path: str) -> str:
+    return (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def test_jobbot3000_example_config_resolves_all_envs_and_values() -> None:
+    for env in ("dev", "staging", "prod"):
+        config = _app_config_json("jobbot3000", env)
+        assert config["SUGARKUBE_APP"] == "jobbot3000"
+        assert config["SUGARKUBE_CHART"] == "oci://ghcr.io/futuroptimist/charts/jobbot3000"
+        assert config["SUGARKUBE_VERIFY_PATHS"] == "/,/healthz,/livez"
+        for values_path in config["SUGARKUBE_VALUES"].split(","):
+            values = _read_values(values_path)
+            assert values.strip(), values_path
+            assert "environment:" in values
+
+
+def test_jobbot3000_values_use_static_image_and_no_server_persistence() -> None:
+    config = _app_config_json("jobbot3000", "prod")
+    values_text = "\n---\n".join(
+        _read_values(path) for path in config["SUGARKUBE_VALUES"].split(",")
+    )
+
+    assert "repository: ghcr.io/futuroptimist/jobbot3000" in values_text
+    assert "tag: main-REPLACE_SHORTSHA" in values_text
+    assert "latest" not in values_text.lower()
+    assert "main-latest" not in values_text.lower()
+    assert "containerPort: 8080" in values_text
+    assert "port: 8080" in values_text
+    forbidden = (
+        "persistentVolume",
+        "persistence:",
+        "PersistentVolumeClaim",
+        "claimName",
+        "secretKeyRef",
+        "configMapKeyRef",
+    )
+    for token in forbidden:
+        assert token not in values_text
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_jobbot3000_print_only_includes_expected_paths(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-verify", "app=jobbot3000", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
+    assert not Path(generic_app_stub_env["CURL_LOG"]).exists()
+
+
 def test_app_verify_adds_curl_timeouts(
     generic_app_stub_env: dict[str, str],
 ) -> None:
@@ -1478,6 +1559,7 @@ def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, st
         ("danielsmith", "/,/livez,/healthz"),
         ("tokenplace", "/,/livez,/healthz,/relay/diagnostics,/api/v1/meta"),
         ("dspace", "/config.json,/healthz,/livez"),
+        ("jobbot3000", "/,/healthz,/livez"),
     ],
 )
 def test_example_app_configs_preserve_verify_paths(app: str, expected_paths: str) -> None:
@@ -2057,7 +2139,9 @@ def test_app_cors_verify_main_reports_preflight_status_and_header_failures(
     rc, _out, err, _calls = _run_app_cors_main(
         monkeypatch,
         capsys,
-        responses=[(0, "204", {"access-control-allow-origin": ["https://cors-smoke.invalid"]}, b"", "")],
+        responses=[
+            (0, "204", {"access-control-allow-origin": ["https://cors-smoke.invalid"]}, b"", "")
+        ],
     )
 
     assert rc == 1
@@ -2099,7 +2183,13 @@ def test_app_cors_verify_main_reports_actual_cors_and_body_failures(
         capsys,
         responses=[
             (0, "204", _cors_headers(), b"", ""),
-            (0, "400", _cors_headers({"access-control-allow-origin": ["https://evil.test"]}), b'{"error":{}}', ""),
+            (
+                0,
+                "400",
+                _cors_headers({"access-control-allow-origin": ["https://evil.test"]}),
+                b'{"error":{}}',
+                "",
+            ),
         ],
     )
 
@@ -2159,7 +2249,9 @@ def test_app_cors_verify_main_rejects_bad_expected_status_config(
 
     assert excinfo.value.code == 2
     captured = capsys.readouterr()
-    assert "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must be comma-separated integers" in captured.err
+    assert (
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must be comma-separated integers" in captured.err
+    )
 
     with pytest.raises(SystemExit) as excinfo:
         _run_app_cors_main(
@@ -2170,7 +2262,9 @@ def test_app_cors_verify_main_rejects_bad_expected_status_config(
 
     assert excinfo.value.code == 2
     captured = capsys.readouterr()
-    assert "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must include at least one integer" in captured.err
+    assert (
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must include at least one integer" in captured.err
+    )
 
 
 def test_app_cors_verify_header_parsing_helpers() -> None:
