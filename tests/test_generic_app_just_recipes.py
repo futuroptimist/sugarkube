@@ -1599,9 +1599,13 @@ def test_jobbot3000_runbook_troubleshooting_pins_staging_context() -> None:
     assert "kubectl --context sugar-staging get certificate,challenge,order" in runbook
     assert "kubectl --context sugar-staging describe certificate" in runbook
     assert "kubectl --context sugar-staging logs -n cert-manager" in runbook
-    assert "helm --kube-context sugar-staging get values" in runbook
+    assert "helm --kube-context sugar-staging -n jobbot3000 get values jobbot3000" in runbook
+    assert "helm --kube-context sugar-staging -n jobbot3000 status jobbot3000" in runbook
     assert "kubectl --context sugar-staging get deploy" in runbook
     assert "kubectl get ingress -n jobbot3000" not in runbook
+    assert "kubectl describe ingress -n jobbot3000 jobbot3000" not in runbook
+    assert "kubectl logs -n cert-manager deploy/cert-manager" not in runbook
+    assert "helm get values -n jobbot3000 jobbot3000" not in runbook
     assert "helm get values -n jobbot3000" not in runbook
 
 

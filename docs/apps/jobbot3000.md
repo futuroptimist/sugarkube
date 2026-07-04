@@ -190,7 +190,8 @@ kubectl --context sugar-staging logs -n cert-manager deploy/cert-manager --tail=
 ```bash
 # Confirm GHCR image/chart access and the immutable deployment coordinates.
 helm show chart oci://ghcr.io/futuroptimist/charts/jobbot3000 --version 0.1.0
-helm --kube-context sugar-staging get values -n jobbot3000 jobbot3000
+helm --kube-context sugar-staging -n jobbot3000 get values jobbot3000
+helm --kube-context sugar-staging -n jobbot3000 status jobbot3000
 kubectl --context sugar-staging get deploy -n jobbot3000 jobbot3000 -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}'
 ```
 
