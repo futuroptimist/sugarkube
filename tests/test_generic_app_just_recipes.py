@@ -1556,6 +1556,44 @@ def test_jobbot3000_example_config_resolves_all_env_values() -> None:
         assert f'"SUGARKUBE_VALUES": "{values}"' in result.stdout
 
 
+def test_jobbot3000_staging_overlay_uses_real_first_rollout_host() -> None:
+    staging_values = (REPO_ROOT / "docs/examples/jobbot3000.values.staging.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "host: staging.jobbot3000.tech" in staging_values
+    assert "- staging.jobbot3000.tech" in staging_values
+    assert "staging.jobbot3000.example.test" not in staging_values
+
+
+def test_jobbot3000_verify_paths_stay_exact() -> None:
+    config = (REPO_ROOT / "docs/examples/apps/jobbot3000.env").read_text(encoding="utf-8")
+    assert "SUGARKUBE_VERIFY_PATHS=/,/healthz,/livez" in config
+
+
+def test_jobbot3000_docs_use_immutable_staging_candidate_and_block_prod() -> None:
+    docs = (REPO_ROOT / "docs/apps/jobbot3000.md").read_text(encoding="utf-8")
+    assert "main-b3e6df1a4f68" in docs
+    assert "just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68" in docs
+    assert "Production promotion is explicitly blocked" in docs
+    assert "just app-promote-prod app=jobbot3000 tag=main-b3e6df1a4f68" not in docs
+    assert "tag=latest" not in docs
+    assert "tag=main-latest" not in docs
+    assert "Do not deploy `latest`, `main-latest`" in docs
+
+
+def test_jobbot3000_mutable_deployment_tags_are_rejected() -> None:
+    for tag in ("latest", "main-latest"):
+        result = subprocess.run(
+            ["python3", "scripts/app_config.py", "validate-tag", tag],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "mutable tag" in result.stderr
+
+
 def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> None:
     values_paths = [
         REPO_ROOT / "docs/examples/jobbot3000.values.dev.yaml",

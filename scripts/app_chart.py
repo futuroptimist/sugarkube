@@ -41,7 +41,10 @@ def read_pin(path: str) -> str:
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    try:
+        return subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        return subprocess.CompletedProcess(args, 127, "", f"{exc.filename}: command not found")
 
 
 def helm_show(chart: str, version: str) -> subprocess.CompletedProcess[str]:
@@ -231,16 +234,24 @@ def print_summary(app: str, env: str, tag: str, chart: str, version: str, pin: s
 def cmd_status(args: argparse.Namespace) -> int:
     version = read_pin(args.version_file)
     show = helm_show(args.chart, version)
-    if show.returncode != 0:
+    meta: dict[str, str] = {}
+    helm_unavailable = show.returncode == 127
+    if show.returncode != 0 and not helm_unavailable:
         print(show.stderr or show.stdout, file=sys.stderr)
         return show.returncode or 1
-    meta = parse_chart_yaml(show.stdout)
+    if show.returncode == 0:
+        meta = parse_chart_yaml(show.stdout)
     print(f"app: {args.app}")
     print(f"chart ref: {args.chart}")
     print(f"pinned version: {version}")
     print(f"chart appVersion: {meta.get('appVersion', 'unknown')}")
     print(f"chart digest: {meta.get('digest', 'unknown')}")
     print(f"pin file: {args.version_file}")
+    if helm_unavailable:
+        print(
+            f"helm unavailable; skipped helm show chart validation. Run: helm show chart {args.chart} --version {version}",
+            file=sys.stderr,
+        )
     latest, source = latest_version(args.chart)
     if latest:
         print(f"latest version: {latest} ({source})")

@@ -53,10 +53,10 @@ Do not bake real user data into Docker images, Helm charts, Helm values, Kuberne
 ## Environment topology
 
 - `env=dev`: base values in `docs/examples/jobbot3000.values.dev.yaml`; ingress disabled by default and image tag shown as the immutable placeholder `main-REPLACE_SHORTSHA`.
-- `env=staging`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml`; placeholder host `staging.jobbot3000.example.test`.
+- `env=staging`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml`; real host `staging.jobbot3000.tech`.
 - `env=prod`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml`; placeholder host `jobbot3000.example.test`.
 
-Replace placeholder hosts in a local operator config or overlay before using a real cluster. Keep Cloudflare DNS and Tunnel routing outside Helm.
+The committed staging overlay uses the real first-rollout hostname `staging.jobbot3000.tech`, matching the existing Sugarkube pattern for staging apps. Keep Cloudflare DNS and Tunnel routing outside Helm; for this first staging deployment the Cloudflare Tunnel/Connector route for `staging.jobbot3000.tech` path `*` must point at `http://traefik.kube-system.svc.cluster.local:80`. Production remains placeholder-only until a later explicit promotion approval updates the production overlay and `docs/apps/jobbot3000.prod.tag`.
 
 ## Find or publish GHCR image
 
@@ -69,7 +69,7 @@ Web UI shortcuts:
 - Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
-APP_TAG=main-REPLACE_SHORTSHA
+APP_TAG=main-b3e6df1a4f68
 ```
 
 ## Confirm/publish OCI chart
@@ -78,6 +78,14 @@ Sugarkube deploys the chart version pinned in `docs/apps/jobbot3000.version`. Us
 
 ```bash
 just app-chart-status app=jobbot3000
+```
+
+The initial staging candidate `main-b3e6df1a4f68` was checked against GHCR before being baked into this runbook. Re-check it before deploy if the package visibility or retention policy changes.
+```bash
+python3 scripts/app_config.py validate-tag main-b3e6df1a4f68
+curl -fsSL -H "Authorization: Bearer $(curl -fsSL 'https://ghcr.io/token?service=ghcr.io&scope=repository:futuroptimist/jobbot3000:pull' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')" \
+  -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+  https://ghcr.io/v2/futuroptimist/jobbot3000/manifests/main-b3e6df1a4f68 >/dev/null
 ```
 
 ```bash
@@ -93,8 +101,22 @@ just app-chart-bump app=jobbot3000 version=0.1.1
 
 ## Deploy and verify staging
 
+### First staging rollout command path
+
+The following path is copy-paste-ready for the first real staging deployment at `https://staging.jobbot3000.tech` and preserves the generic `just app-*` deployment surface:
+
 ```bash
-just app-deploy app=jobbot3000 env=staging tag=main-REPLACE_SHORTSHA
+just app-config app=jobbot3000 env=staging
+just app-chart-status app=jobbot3000
+just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
+just app-status app=jobbot3000 env=staging
+just app-verify app=jobbot3000 env=staging
+```
+
+`just app-verify` must continue to verify exactly `/`, `/healthz`, and `/livez`.
+
+```bash
+just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
 ```
 
 ```bash
@@ -116,13 +138,13 @@ just app-verify app=jobbot3000 env=staging print_only=1
 Redeploy staging or production with a specific immutable tag:
 
 ```bash
-just app-redeploy app=jobbot3000 env=staging tag=main-REPLACE_SHORTSHA
+just app-redeploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
 ```
 
-Promote production only after staging sign-off, using the exact immutable image tag that passed staging:
+Production promotion is explicitly blocked until staging is verified and a separate production approval records the approved tag in `docs/apps/jobbot3000.prod.tag`. Do not run this yet; when approval exists, promote using the exact immutable image tag that passed staging:
 
 ```bash
-just app-promote-prod app=jobbot3000 tag=main-REPLACE_SHORTSHA
+just app-promote-prod app=jobbot3000 tag=main-APPROVED_SHORTSHA
 ```
 
 Rollback by redeploying the previous known-good immutable image tag:
@@ -139,4 +161,35 @@ just app-status app=jobbot3000 env=prod
 
 ```bash
 just app-verify app=jobbot3000 env=prod
+```
+
+## Debugging staging failures
+
+Use these commands to separate DNS/Tunnel, Ingress, image, chart, and certificate issues without adding secrets to the repo.
+
+```bash
+# Confirm the public hostname resolves and reaches Cloudflare.
+dig +short staging.jobbot3000.tech
+curl -I https://staging.jobbot3000.tech/
+
+# Confirm the Cloudflare Tunnel route outside Helm points path * at Traefik.
+# In the Cloudflare dashboard, verify staging.jobbot3000.tech -> http://traefik.kube-system.svc.cluster.local:80.
+
+# Inspect Traefik-facing Kubernetes objects and rollout state.
+kubectl -n jobbot3000 get ingress,svc,deploy,pods
+kubectl -n jobbot3000 describe ingress jobbot3000
+kubectl -n jobbot3000 logs deploy/jobbot3000 --tail=100
+
+# Confirm Helm used the pinned chart and immutable image tag.
+helm -n jobbot3000 get values jobbot3000
+helm -n jobbot3000 status jobbot3000
+
+# Confirm GHCR artifacts are reachable from the operator workstation.
+just app-chart-status app=jobbot3000
+python3 scripts/app_config.py validate-tag main-b3e6df1a4f68
+
+# Inspect cert-manager if HTTPS is failing after Ingress exists.
+kubectl -n jobbot3000 get certificate,certificaterequest,order,challenge
+kubectl -n jobbot3000 describe certificate jobbot3000-staging-tls
+kubectl -n cert-manager logs deploy/cert-manager --tail=100
 ```
