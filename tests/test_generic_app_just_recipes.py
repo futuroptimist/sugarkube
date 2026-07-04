@@ -1589,6 +1589,22 @@ def test_jobbot3000_runbook_first_staging_deploy_is_concrete_and_blocks_prod() -
     assert "Production promotion is explicitly blocked until staging is verified" in runbook
 
 
+def test_jobbot3000_runbook_troubleshooting_pins_staging_context() -> None:
+    runbook = (REPO_ROOT / "docs/apps/jobbot3000.md").read_text(encoding="utf-8")
+
+    assert "kubectl --context sugar-staging get ingress" in runbook
+    assert "kubectl --context sugar-staging describe ingress" in runbook
+    assert "kubectl --context sugar-staging get svc,endpoints" in runbook
+    assert "kubectl --context sugar-staging logs -n kube-system" in runbook
+    assert "kubectl --context sugar-staging get certificate,challenge,order" in runbook
+    assert "kubectl --context sugar-staging describe certificate" in runbook
+    assert "kubectl --context sugar-staging logs -n cert-manager" in runbook
+    assert "helm --kube-context sugar-staging get values" in runbook
+    assert "kubectl --context sugar-staging get deploy" in runbook
+    assert "kubectl get ingress -n jobbot3000" not in runbook
+    assert "helm get values -n jobbot3000" not in runbook
+
+
 def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> None:
     values_paths = [
         REPO_ROOT / "docs/examples/jobbot3000.values.dev.yaml",

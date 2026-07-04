@@ -174,24 +174,24 @@ cloudflared tunnel ingress validate
 
 ```bash
 # Confirm Traefik sees the jobbot3000 Ingress and routes to the service.
-kubectl get ingress -n jobbot3000 jobbot3000 -o wide
-kubectl describe ingress -n jobbot3000 jobbot3000
-kubectl get svc,endpoints -n jobbot3000
-kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200
+kubectl --context sugar-staging get ingress -n jobbot3000 jobbot3000 -o wide
+kubectl --context sugar-staging describe ingress -n jobbot3000 jobbot3000
+kubectl --context sugar-staging get svc,endpoints -n jobbot3000
+kubectl --context sugar-staging logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200
 ```
 
 ```bash
 # Confirm cert-manager issued the staging certificate.
-kubectl get certificate,challenge,order -n jobbot3000
-kubectl describe certificate -n jobbot3000 jobbot3000-staging-tls
-kubectl logs -n cert-manager deploy/cert-manager --tail=200
+kubectl --context sugar-staging get certificate,challenge,order -n jobbot3000
+kubectl --context sugar-staging describe certificate -n jobbot3000 jobbot3000-staging-tls
+kubectl --context sugar-staging logs -n cert-manager deploy/cert-manager --tail=200
 ```
 
 ```bash
 # Confirm GHCR image/chart access and the immutable deployment coordinates.
 helm show chart oci://ghcr.io/futuroptimist/charts/jobbot3000 --version 0.1.0
-helm get values -n jobbot3000 jobbot3000
-kubectl get deploy -n jobbot3000 jobbot3000 -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}'
+helm --kube-context sugar-staging get values -n jobbot3000 jobbot3000
+kubectl --context sugar-staging get deploy -n jobbot3000 jobbot3000 -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}'
 ```
 
 ```bash
