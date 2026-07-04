@@ -1235,9 +1235,12 @@ def test_app_promote_prod_delegates_to_prod_deploy_coordinates(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_app_deploy_rejects_mutable_tag_before_helm(generic_app_stub_env: dict[str, str]) -> None:
+@pytest.mark.parametrize("mutable_tag", ["latest", "main-latest"])
+def test_app_deploy_rejects_mutable_tag_before_helm(
+    mutable_tag: str, generic_app_stub_env: dict[str, str]
+) -> None:
     result = _run_just(
-        ["app-deploy", "app=tokenplace", "env=staging", "tag=latest"],
+        ["app-deploy", "app=jobbot3000", "env=staging", f"tag={mutable_tag}"],
         generic_app_stub_env,
     )
 
@@ -1556,6 +1559,33 @@ def test_jobbot3000_example_config_resolves_all_env_values() -> None:
         assert f'"SUGARKUBE_VALUES": "{values}"' in result.stdout
 
 
+def test_jobbot3000_staging_values_use_real_first_rollout_host() -> None:
+    staging_values = (REPO_ROOT / "docs/examples/jobbot3000.values.staging.yaml").read_text(
+        encoding="utf-8"
+    )
+    runbook = (REPO_ROOT / "docs/apps/jobbot3000.md").read_text(encoding="utf-8")
+
+    assert "host: staging.jobbot3000.tech" in staging_values
+    assert "- staging.jobbot3000.tech" in staging_values
+    assert "staging.jobbot3000.example.test" not in staging_values
+    assert "staging.jobbot3000.tech" in runbook
+    assert "http://traefik.kube-system.svc.cluster.local:80" in runbook
+    assert "main-b3e6df1a4f68" in runbook
+
+
+def test_jobbot3000_print_only_verify_can_resolve_staging_host_without_cluster() -> None:
+    from scripts import app_verify
+
+    values = (
+        "docs/examples/jobbot3000.values.dev.yaml,"
+        "docs/examples/jobbot3000.values.staging.yaml"
+    )
+
+    assert app_verify.host_from_configured_values(values, "ingress.host") == (
+        "staging.jobbot3000.tech"
+    )
+
+
 def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> None:
     values_paths = [
         REPO_ROOT / "docs/examples/jobbot3000.values.dev.yaml",
@@ -1567,8 +1597,8 @@ def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> 
 
     assert "repository: ghcr.io/futuroptimist/jobbot3000" in dev_values
     assert "tag: main-REPLACE_SHORTSHA" in dev_values
-    assert "tag: latest" not in dev_values
-    assert "tag: main-latest" not in dev_values
+    assert "tag: latest" not in combined
+    assert "tag: main-latest" not in combined
     assert "containerPort: 8080" in dev_values
     assert "port: 80" in dev_values
     assert "persistentVolumeClaim" not in combined

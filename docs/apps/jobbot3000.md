@@ -53,10 +53,34 @@ Do not bake real user data into Docker images, Helm charts, Helm values, Kuberne
 ## Environment topology
 
 - `env=dev`: base values in `docs/examples/jobbot3000.values.dev.yaml`; ingress disabled by default and image tag shown as the immutable placeholder `main-REPLACE_SHORTSHA`.
-- `env=staging`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml`; placeholder host `staging.jobbot3000.example.test`.
+- `env=staging`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml`; real staging host `staging.jobbot3000.tech`.
 - `env=prod`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml`; placeholder host `jobbot3000.example.test`.
 
-Replace placeholder hosts in a local operator config or overlay before using a real cluster. Keep Cloudflare DNS and Tunnel routing outside Helm.
+The committed staging overlay intentionally uses the real first rollout host, `staging.jobbot3000.tech`, because the existing Sugarkube app examples for dspace, token.place, and danielsmith.io use real staging hosts. Production remains placeholder-only until explicitly approved. Keep Cloudflare DNS and Tunnel routing outside Helm.
+
+## First staging deployment: `staging.jobbot3000.tech`
+
+The first real staging candidate has been verified as a published GHCR image tag:
+`ghcr.io/futuroptimist/jobbot3000:main-b3e6df1a4f68`. The committed staging values resolve
+the public ingress host to `staging.jobbot3000.tech`. Cloudflare is expected to route
+`staging.jobbot3000.tech` path `*` through the existing Tunnel/Connector to
+`http://traefik.kube-system.svc.cluster.local:80`; do not add Cloudflare tokens or Tunnel
+credentials to this repository.
+
+Use the generic Sugarkube app surface for the first staging deploy:
+
+```bash
+just app-config app=jobbot3000 env=staging
+just app-chart-status app=jobbot3000
+just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
+just app-status app=jobbot3000 env=staging
+just app-verify app=jobbot3000 env=staging
+```
+
+`app-verify` must continue to check exactly `/`, `/healthz`, and `/livez`. Production
+promotion is blocked until the staging URL above is manually verified and the exact
+passing immutable tag is approved for production; `docs/apps/jobbot3000.prod.tag` stays
+empty for this staging rollout.
 
 ## Find or publish GHCR image
 
@@ -69,12 +93,12 @@ Web UI shortcuts:
 - Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
-APP_TAG=main-REPLACE_SHORTSHA
+APP_TAG=main-b3e6df1a4f68
 ```
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/jobbot3000.version`. Use [recent chart workflow runs](https://github.com/futuroptimist/jobbot3000/actions/workflows/ci-helm.yml), [GHCR chart package versions](https://github.com/futuroptimist/jobbot3000/pkgs/container/charts%2Fjobbot3000), and [the chart source](https://github.com/futuroptimist/jobbot3000/tree/main/charts/jobbot3000) to confirm the pinned immutable version.
+Sugarkube deploys the chart version pinned in `docs/apps/jobbot3000.version`; `0.1.0` was reachable in GHCR when this runbook was updated. Use [recent chart workflow runs](https://github.com/futuroptimist/jobbot3000/actions/workflows/ci-helm.yml), [GHCR chart package versions](https://github.com/futuroptimist/jobbot3000/pkgs/container/charts%2Fjobbot3000), and [the chart source](https://github.com/futuroptimist/jobbot3000/tree/main/charts/jobbot3000) to confirm the pinned immutable version.
 
 ```bash
 just app-chart-status app=jobbot3000
@@ -94,7 +118,7 @@ just app-chart-bump app=jobbot3000 version=0.1.1
 ## Deploy and verify staging
 
 ```bash
-just app-deploy app=jobbot3000 env=staging tag=main-REPLACE_SHORTSHA
+just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
 ```
 
 ```bash
@@ -111,15 +135,49 @@ Print the generated checks without executing them:
 just app-verify app=jobbot3000 env=staging print_only=1
 ```
 
+## Staging troubleshooting
+
+Use these commands to separate DNS, Tunnel, Ingress, registry, and certificate failures:
+
+```bash
+# DNS should resolve the public staging hostname through Cloudflare.
+dig +short staging.jobbot3000.tech
+
+# Confirm the public edge reaches the app paths after deploy.
+curl -fsS https://staging.jobbot3000.tech/
+curl -fsS https://staging.jobbot3000.tech/healthz
+curl -fsS https://staging.jobbot3000.tech/livez
+
+# Confirm Ingress, Service, EndpointSlice, and pod state in Kubernetes.
+kubectl -n jobbot3000 get ingress,svc,endpointslice,pods -o wide
+kubectl -n jobbot3000 describe ingress jobbot3000
+kubectl -n jobbot3000 logs -l app.kubernetes.io/name=jobbot3000 --tail=100
+
+# Confirm Traefik sees requests from the Cloudflare Tunnel target.
+kubectl -n kube-system logs deploy/traefik --tail=200
+
+# Confirm GHCR artifacts are pullable from the operator workstation.
+helm show chart oci://ghcr.io/futuroptimist/charts/jobbot3000 --version 0.1.0
+docker manifest inspect ghcr.io/futuroptimist/jobbot3000:main-b3e6df1a4f68
+
+# Inspect cert-manager if TLS remains pending or serves the wrong certificate.
+kubectl -n jobbot3000 get certificate,certificaterequest,order,challenge
+kubectl -n cert-manager logs deploy/cert-manager --tail=200
+```
+
+If DNS is correct but HTTPS fails, verify the Cloudflare Tunnel route still targets
+`http://traefik.kube-system.svc.cluster.local:80` for `staging.jobbot3000.tech` path `*`,
+then inspect the jobbot3000 Ingress and Traefik logs above.
+
 ## Redeploy, promote, and rollback
 
 Redeploy staging or production with a specific immutable tag:
 
 ```bash
-just app-redeploy app=jobbot3000 env=staging tag=main-REPLACE_SHORTSHA
+just app-redeploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
 ```
 
-Promote production only after staging sign-off, using the exact immutable image tag that passed staging:
+Production promotion is intentionally blocked for this first staging rollout. Promote production only after staging sign-off, using the exact immutable image tag that passed staging and an explicit production approval:
 
 ```bash
 just app-promote-prod app=jobbot3000 tag=main-REPLACE_SHORTSHA

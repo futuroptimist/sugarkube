@@ -57,9 +57,8 @@ def discover_host(kube_context: str) -> tuple[str, list[str]]:
             if host:
                 return host, errors
         else:
-            errors.append(
-                f"helm get values failed for context {kube_context}: {helm.stderr.replace(chr(10), ' ').strip()}"
-            )
+            stderr = helm.stderr.replace(chr(10), " ").strip()
+            errors.append(f"helm get values failed for context {kube_context}: {stderr}")
 
     if shutil_which("kubectl"):
         kubectl = run_capture(
@@ -78,9 +77,9 @@ def discover_host(kube_context: str) -> tuple[str, list[str]]:
         if kubectl.returncode == 0 and kubectl.stdout.strip():
             return kubectl.stdout.strip(), errors
         if kubectl.returncode != 0:
-            errors.append(
-                f"kubectl ingress lookup failed for context {kube_context}: {kubectl.stderr.replace(chr(10), ' ').strip()}"
-            )
+            stderr = kubectl.stderr.replace(chr(10), " ").strip()
+            errors.append(f"kubectl ingress lookup failed for context {kube_context}: {stderr}")
+
     return "", errors
 
 
@@ -102,6 +101,51 @@ def host_from_values(raw: str, host_key: str) -> str:
     return str(node) if node else ""
 
 
+def host_from_configured_values(values: str, host_key: str) -> str:
+    """Return a dotted host value from simple Helm values overlays.
+
+    This intentionally handles the small YAML subset used by Sugarkube example
+    values so print-only verification can be copy-paste-ready without requiring
+    cluster access or adding a YAML runtime dependency. Later files in the comma
+    separated Helm values chain override earlier files, matching Helm behavior.
+    """
+
+    host = ""
+    for raw_path in values.split(","):
+        path = Path(raw_path.strip())
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        if not path.is_file():
+            continue
+        candidate = host_from_simple_yaml(path.read_text(encoding="utf-8"), host_key)
+        if candidate:
+            host = candidate
+    return host
+
+
+def host_from_simple_yaml(raw: str, host_key: str) -> str:
+    parts = host_key.split(".")
+    stack: list[tuple[int, str]] = []
+    for line in raw.splitlines():
+        content = line.split("#", 1)[0].rstrip()
+        if (
+            not content.strip()
+            or content.lstrip().startswith("-")
+            or ":" not in content
+        ):
+            continue
+        indent = len(content) - len(content.lstrip(" "))
+        key, value = content.strip().split(":", 1)
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        current_path = [item[1] for item in stack] + [key.strip()]
+        if current_path == parts:
+            return value.strip().strip('"\'')
+        if not value.strip():
+            stack.append((indent, key.strip()))
+    return ""
+
+
 def base_url_from_host(host: str) -> str:
     host = host.strip().rstrip("/")
     if not host:
@@ -120,7 +164,8 @@ def print_placeholder_failure(
     for error in errors:
         print(error, file=sys.stderr)
     print(
-        f"Suggested next steps: just app-status app={app} env={env} or just app-config app={app} env={env}.",
+        f"Suggested next steps: just app-status app={app} env={env} "
+        f"or just app-config app={app} env={env}.",
         file=sys.stderr,
     )
     print("Generated verification commands with a placeholder host:", file=sys.stderr)
@@ -194,7 +239,10 @@ def tokenplace_meta_failure(env: str, raw: bytes) -> str:
     if version == "dev" or label.endswith(" dev"):
         if env == "prod":
             return "token.place prod metadata must not report version=dev."
-        return "token.place staging metadata must include the immutable image tag, not a dev label/version."
+        return (
+            "token.place staging metadata must include the immutable image tag, "
+            "not a dev label/version."
+        )
     return ""
 
 
@@ -207,11 +255,17 @@ def main(argv: list[str] | None = None) -> int:
     env = os.environ["SUGARKUBE_ENV"]
     kube_context = f"sugar-{env}"
     paths = [
-        normalize_path(path) for path in os.environ.get("SUGARKUBE_VERIFY_PATHS", "/").split(",")
+        normalize_path(path)
+        for path in os.environ.get("SUGARKUBE_VERIFY_PATHS", "/").split(",")
     ]
     print_only = args.print_only or env_flag("SUGARKUBE_APP_VERIFY_PRINT_ONLY")
 
     host, errors = discover_host(kube_context)
+    if print_only and not host:
+        host = host_from_configured_values(
+            os.environ.get("SUGARKUBE_VALUES", ""),
+            os.environ.get("SUGARKUBE_STATUS_HOST_KEY", "ingress.host"),
+        )
     base_url = base_url_from_host(host)
     if not base_url:
         print_placeholder_failure(app, env, kube_context, paths, errors)
