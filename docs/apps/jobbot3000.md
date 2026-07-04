@@ -53,10 +53,10 @@ Do not bake real user data into Docker images, Helm charts, Helm values, Kuberne
 ## Environment topology
 
 - `env=dev`: base values in `docs/examples/jobbot3000.values.dev.yaml`; ingress disabled by default and image tag shown as the immutable placeholder `main-REPLACE_SHORTSHA`.
-- `env=staging`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml`; placeholder host `staging.jobbot3000.example.test`.
+- `env=staging`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml`; real host `staging.jobbot3000.tech`.
 - `env=prod`: values chain `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml`; placeholder host `jobbot3000.example.test`.
 
-Replace placeholder hosts in a local operator config or overlay before using a real cluster. Keep Cloudflare DNS and Tunnel routing outside Helm.
+The committed staging overlay is intentionally copy-paste-ready for the first real staging rollout at `staging.jobbot3000.tech`, matching the existing Sugarkube pattern used by dspace, token.place, and danielsmith.io staging overlays. Keep Cloudflare credentials outside Helm; DNS and Tunnel routing remain Cloudflare-owned and are only referenced here for operator verification.
 
 ## Find or publish GHCR image
 
@@ -69,7 +69,7 @@ Web UI shortcuts:
 - Copy the immutable tag from a successful workflow summary or package version.
 
 ```bash
-APP_TAG=main-REPLACE_SHORTSHA
+APP_TAG=main-b3e6df1a4f68
 ```
 
 ## Confirm/publish OCI chart
@@ -91,10 +91,26 @@ If registry validation was unavailable when this runbook was last edited, operat
 just app-chart-bump app=jobbot3000 version=0.1.1
 ```
 
-## Deploy and verify staging
+## First staging deploy
+
+The initial staging candidate is `main-b3e6df1a4f68`. Before committing this runbook, that tag was verified as a published GHCR manifest for `ghcr.io/futuroptimist/jobbot3000`, and chart version `0.1.0` was verified as published for `oci://ghcr.io/futuroptimist/charts/jobbot3000`.
+
+The Cloudflare zone for `jobbot3000.tech` is active, and the Cloudflare Tunnel route for `staging.jobbot3000.tech` path `*` must point to Traefik at `http://traefik.kube-system.svc.cluster.local:80`. The Helm chart only creates the Kubernetes Service and Ingress; do not put Cloudflare tokens in Sugarkube values.
+
+Confirm the resolved generic app config and chart pin:
 
 ```bash
-just app-deploy app=jobbot3000 env=staging tag=main-REPLACE_SHORTSHA
+just app-config app=jobbot3000 env=staging
+```
+
+```bash
+just app-chart-status app=jobbot3000
+```
+
+Deploy the immutable candidate to staging:
+
+```bash
+just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
 ```
 
 ```bash
@@ -116,13 +132,13 @@ just app-verify app=jobbot3000 env=staging print_only=1
 Redeploy staging or production with a specific immutable tag:
 
 ```bash
-just app-redeploy app=jobbot3000 env=staging tag=main-REPLACE_SHORTSHA
+just app-redeploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68
 ```
 
-Promote production only after staging sign-off, using the exact immutable image tag that passed staging:
+Production promotion is explicitly blocked until staging is verified and approved. Leave `docs/apps/jobbot3000.prod.tag` empty for this staging-only rollout. After a later production approval, promote using the exact immutable image tag that passed staging:
 
 ```bash
-just app-promote-prod app=jobbot3000 tag=main-REPLACE_SHORTSHA
+just app-promote-prod app=jobbot3000 tag=<APPROVED_IMMUTABLE_TAG>
 ```
 
 Rollback by redeploying the previous known-good immutable image tag:
@@ -139,4 +155,49 @@ just app-status app=jobbot3000 env=prod
 
 ```bash
 just app-verify app=jobbot3000 env=prod
+```
+
+## Staging troubleshooting
+
+Use these focused checks when the first staging rollout fails:
+
+```bash
+# DNS should resolve through Cloudflare for the public hostname.
+dig +short staging.jobbot3000.tech
+```
+
+```bash
+# The Cloudflare Tunnel route should send staging.jobbot3000.tech/* to Traefik.
+cloudflared tunnel route dns --help
+cloudflared tunnel ingress validate
+```
+
+```bash
+# Confirm Traefik sees the jobbot3000 Ingress and routes to the service.
+kubectl --context sugar-staging get ingress -n jobbot3000 jobbot3000 -o wide
+kubectl --context sugar-staging describe ingress -n jobbot3000 jobbot3000
+kubectl --context sugar-staging get svc,endpoints -n jobbot3000
+kubectl --context sugar-staging logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200
+```
+
+```bash
+# Confirm cert-manager issued the staging certificate.
+kubectl --context sugar-staging get certificate,challenge,order -n jobbot3000
+kubectl --context sugar-staging describe certificate -n jobbot3000 jobbot3000-staging-tls
+kubectl --context sugar-staging logs -n cert-manager deploy/cert-manager --tail=200
+```
+
+```bash
+# Confirm GHCR image/chart access and the immutable deployment coordinates.
+helm show chart oci://ghcr.io/futuroptimist/charts/jobbot3000 --version 0.1.0
+helm --kube-context sugar-staging -n jobbot3000 get values jobbot3000
+helm --kube-context sugar-staging -n jobbot3000 status jobbot3000
+kubectl --context sugar-staging get deploy -n jobbot3000 jobbot3000 -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}'
+```
+
+```bash
+# Re-run the public path checks expected by the Sugarkube contract.
+curl -fsS https://staging.jobbot3000.tech/
+curl -fsS https://staging.jobbot3000.tech/healthz
+curl -fsS https://staging.jobbot3000.tech/livez
 ```

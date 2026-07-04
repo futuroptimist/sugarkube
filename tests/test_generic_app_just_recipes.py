@@ -1235,9 +1235,12 @@ def test_app_promote_prod_delegates_to_prod_deploy_coordinates(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_app_deploy_rejects_mutable_tag_before_helm(generic_app_stub_env: dict[str, str]) -> None:
+@pytest.mark.parametrize("mutable_tag", ["latest", "main-latest"])
+def test_app_deploy_rejects_mutable_tag_before_helm(
+    mutable_tag: str, generic_app_stub_env: dict[str, str]
+) -> None:
     result = _run_just(
-        ["app-deploy", "app=tokenplace", "env=staging", "tag=latest"],
+        ["app-deploy", "app=jobbot3000", "env=staging", f"tag={mutable_tag}"],
         generic_app_stub_env,
     )
 
@@ -1554,6 +1557,56 @@ def test_jobbot3000_example_config_resolves_all_env_values() -> None:
         assert result.returncode == 0, result.stderr
         assert '"SUGARKUBE_CHART": "oci://ghcr.io/futuroptimist/charts/jobbot3000"' in result.stdout
         assert f'"SUGARKUBE_VALUES": "{values}"' in result.stdout
+
+
+def test_jobbot3000_staging_values_resolve_real_staging_host() -> None:
+    staging_values = (REPO_ROOT / "docs/examples/jobbot3000.values.staging.yaml").read_text(
+        encoding="utf-8"
+    )
+    app_env = (REPO_ROOT / "docs/examples/apps/jobbot3000.env").read_text(encoding="utf-8")
+
+    assert (
+        "SUGARKUBE_VALUES_STAGING="
+        "docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml"
+    ) in app_env
+    assert "host: staging.jobbot3000.tech" in staging_values
+    assert "- staging.jobbot3000.tech" in staging_values
+    assert "staging.jobbot3000.example.test" not in staging_values
+
+
+def test_jobbot3000_runbook_first_staging_deploy_is_concrete_and_blocks_prod() -> None:
+    runbook = (REPO_ROOT / "docs/apps/jobbot3000.md").read_text(encoding="utf-8")
+
+    assert "staging.jobbot3000.tech" in runbook
+    assert "http://traefik.kube-system.svc.cluster.local:80" in runbook
+    assert "just app-config app=jobbot3000 env=staging" in runbook
+    assert "just app-chart-status app=jobbot3000" in runbook
+    assert (
+        "just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68" in runbook
+    )
+    assert "just app-status app=jobbot3000 env=staging" in runbook
+    assert "just app-verify app=jobbot3000 env=staging" in runbook
+    assert "Production promotion is explicitly blocked until staging is verified" in runbook
+
+
+def test_jobbot3000_runbook_troubleshooting_pins_staging_context() -> None:
+    runbook = (REPO_ROOT / "docs/apps/jobbot3000.md").read_text(encoding="utf-8")
+
+    assert "kubectl --context sugar-staging get ingress" in runbook
+    assert "kubectl --context sugar-staging describe ingress" in runbook
+    assert "kubectl --context sugar-staging get svc,endpoints" in runbook
+    assert "kubectl --context sugar-staging logs -n kube-system" in runbook
+    assert "kubectl --context sugar-staging get certificate,challenge,order" in runbook
+    assert "kubectl --context sugar-staging describe certificate" in runbook
+    assert "kubectl --context sugar-staging logs -n cert-manager" in runbook
+    assert "helm --kube-context sugar-staging -n jobbot3000 get values jobbot3000" in runbook
+    assert "helm --kube-context sugar-staging -n jobbot3000 status jobbot3000" in runbook
+    assert "kubectl --context sugar-staging get deploy" in runbook
+    assert "kubectl get ingress -n jobbot3000" not in runbook
+    assert "kubectl describe ingress -n jobbot3000 jobbot3000" not in runbook
+    assert "kubectl logs -n cert-manager deploy/cert-manager" not in runbook
+    assert "helm get values -n jobbot3000 jobbot3000" not in runbook
+    assert "helm get values -n jobbot3000" not in runbook
 
 
 def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> None:
