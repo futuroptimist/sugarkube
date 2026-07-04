@@ -185,6 +185,9 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
     resolved["SUGARKUBE_VALUES"] = values
     resolved["SUGARKUBE_CONFIG_PATH"] = str(config_path)
     resolved.setdefault("SUGARKUBE_STATUS_HOST_KEY", "ingress.host")
+    host = resolve_values_host(repo_root, values, resolved["SUGARKUBE_STATUS_HOST_KEY"])
+    if host:
+        resolved["SUGARKUBE_HOST"] = host
     resolved.setdefault("SUGARKUBE_VERIFY_PATHS", "/")
     resolved.setdefault("SUGARKUBE_CORS_VERIFY_PATH", "/")
     resolved.setdefault("SUGARKUBE_CORS_VERIFY_METHOD", "POST")
@@ -192,6 +195,55 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
     resolved.setdefault("SUGARKUBE_CORS_VERIFY_BODY", "{}")
     resolved.setdefault("SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES", "400,429")
     return resolved
+
+
+def resolve_values_host(repo_root: Path, values: str, host_key: str) -> str:
+    """Resolve a simple dotted scalar host from the layered values files."""
+
+    host = ""
+    for raw_path in values.split(","):
+        raw_path = raw_path.strip()
+        if not raw_path:
+            continue
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = repo_root / path
+        if path.is_file():
+            host = parse_dotted_yaml_scalar(path, host_key) or host
+    return host
+
+
+def parse_dotted_yaml_scalar(path: Path, dotted_key: str) -> str:
+    """Parse the repo's simple example values YAML enough to read dotted scalars.
+
+    This intentionally avoids adding a runtime dependency on PyYAML for the
+    generic app config path. It supports the plain nested mappings used by
+    docs/examples/*.values.*.yaml and ignores lists/comments.
+    """
+
+    parts = dotted_key.split(".")
+    stack: list[tuple[int, str]] = []
+    values: dict[tuple[str, ...], str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        if raw_line.startswith("-") or raw_line.lstrip().startswith("-"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        line = raw_line.strip()
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.split("#", 1)[0].strip().strip("'\"")
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        current = tuple([item for _, item in stack] + [key])
+        if value:
+            values[current] = value
+        else:
+            stack.append((indent, key))
+    return values.get(tuple(parts), "")
 
 
 def resolve_tag(config: dict[str, str], raw_tag: str, *, prod_fallback: bool) -> str:
@@ -223,6 +275,7 @@ def shell_emit(config: dict[str, str]) -> str:
         "SUGARKUBE_VERSION_FILE",
         "SUGARKUBE_PROD_TAG_FILE",
         "SUGARKUBE_STATUS_HOST_KEY",
+        "SUGARKUBE_HOST",
         "SUGARKUBE_VERIFY_PATHS",
         "SUGARKUBE_DEBUG_SELECTOR",
         "SUGARKUBE_CORS_VERIFY_PATH",

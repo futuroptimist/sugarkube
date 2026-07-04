@@ -1554,6 +1554,31 @@ def test_jobbot3000_example_config_resolves_all_env_values() -> None:
         assert result.returncode == 0, result.stderr
         assert '"SUGARKUBE_CHART": "oci://ghcr.io/futuroptimist/charts/jobbot3000"' in result.stdout
         assert f'"SUGARKUBE_VALUES": "{values}"' in result.stdout
+        if env == "staging":
+            assert '"SUGARKUBE_HOST": "staging.jobbot3000.tech"' in result.stdout
+
+
+def test_jobbot3000_staging_overlay_uses_real_first_rollout_host() -> None:
+    staging = (REPO_ROOT / "docs/examples/jobbot3000.values.staging.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "host: staging.jobbot3000.tech" in staging
+    assert "- staging.jobbot3000.tech" in staging
+    assert "staging.jobbot3000.example.test" not in staging
+
+
+def test_jobbot3000_runbook_documents_copy_paste_ready_staging_deploy() -> None:
+    runbook = (REPO_ROOT / "docs/apps/jobbot3000.md").read_text(encoding="utf-8")
+
+    assert "staging.jobbot3000.tech" in runbook
+    assert "http://traefik.kube-system.svc.cluster.local:80" in runbook
+    assert "just app-chart-status app=jobbot3000" in runbook
+    assert "just app-config app=jobbot3000 env=staging" in runbook
+    assert "just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68" in runbook
+    assert "just app-status app=jobbot3000 env=staging" in runbook
+    assert "just app-verify app=jobbot3000 env=staging" in runbook
+    assert "Production promotion is blocked" in runbook
 
 
 def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> None:
@@ -1569,6 +1594,8 @@ def test_jobbot3000_values_are_static_only_and_use_immutable_image_example() -> 
     assert "tag: main-REPLACE_SHORTSHA" in dev_values
     assert "tag: latest" not in dev_values
     assert "tag: main-latest" not in dev_values
+    assert "tag: latest" not in combined
+    assert "tag: main-latest" not in combined
     assert "containerPort: 8080" in dev_values
     assert "port: 80" in dev_values
     assert "persistentVolumeClaim" not in combined

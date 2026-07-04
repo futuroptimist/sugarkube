@@ -212,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     print_only = args.print_only or env_flag("SUGARKUBE_APP_VERIFY_PRINT_ONLY")
 
     host, errors = discover_host(kube_context)
+    if not host:
+        host = os.environ.get("SUGARKUBE_HOST", "")
     base_url = base_url_from_host(host)
     if not base_url:
         print_placeholder_failure(app, env, kube_context, paths, errors)
