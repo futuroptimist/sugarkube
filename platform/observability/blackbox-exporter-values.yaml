@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-exporter-values
+  namespace: monitoring
+data:
+  values.yaml: |
+    fullnameOverride: prometheus-blackbox-exporter
+    replicaCount: 1
+    image:
+      registry: quay.io
+      repository: prometheus/blackbox-exporter
+      tag: v0.27.0
+    service:
+      type: ClusterIP
+      port: 9115
+    ingress:
+      enabled: false
+    serviceMonitor:
+      enabled: false
+    config:
+      modules:
+        https_2xx:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            preferred_ip_protocol: ip4
+            valid_http_versions:
+              - HTTP/1.1
+              - HTTP/2.0
+            valid_status_codes:
+              - 200
+            fail_if_not_ssl: true
+            fail_if_ssl: false
+            no_follow_redirects: false
+            tls_config:
+              insecure_skip_verify: false
+        https_json_health:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            preferred_ip_protocol: ip4
+            valid_status_codes:
+              - 200
+            fail_if_not_ssl: true
+            no_follow_redirects: false
+            fail_if_body_not_matches_regexp:
+              - '"(status|ok|healthy|live|ready)"[[:space:]]*:[[:space:]]*("?(ok|healthy|true|live|ready)"?|true)'
+            body_size_limit: 65536
+            tls_config:
+              insecure_skip_verify: false
+        https_static_content:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            preferred_ip_protocol: ip4
+            valid_status_codes:
+              - 200
+            fail_if_not_ssl: true
+            no_follow_redirects: false
+            fail_if_body_not_matches_regexp:
+              - '(manifest|resume|config|jobbot3000|DSPACE|token\.place|danielsmith)'
+            body_size_limit: 131072
+            tls_config:
+              insecure_skip_verify: false

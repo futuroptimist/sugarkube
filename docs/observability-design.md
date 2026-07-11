@@ -1,8 +1,8 @@
 # Sugarkube observability design
 
-This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the three flagship applications: DSPACE, token.place, and danielsmith.io. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
+This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the public Sugarkube applications: DSPACE, token.place, danielsmith.io, and jobbot3000. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
 
-This document is design and documentation only. It does not install Prometheus, Grafana, Loki, exporters, dashboards, or runtime components.
+This document is the design contract. The repository now includes Flux-managed observability manifests for kube-prometheus-stack, Loki/Promtail, and a pinned prometheus-blackbox-exporter release plus Prometheus Operator Probe resources; those source manifests are still not live deployment evidence until verified on a real cluster.
 
 ## Audit scope and evidence
 
@@ -35,7 +35,6 @@ Links to external repositories are intentionally file-level or path-level links 
 ### Non-goals
 
 - This document does not claim Daniel has production Prometheus or Grafana operating experience yet.
-- This document does not install, upgrade, or configure runtime components.
 - Loki, Tempo, long-term object storage, multi-cluster federation, public Grafana access, kiosk mode, and a GitHub metrics exporter are later phases unless a future audit proves they are required immediately.
 - GitHub repository statistics are product/content signals and release evidence; they are not substitutes for service health, latency, error, saturation, or dependency observability.
 
@@ -167,6 +166,11 @@ graph TD
 - If Prometheus is down, applications keep serving traffic and app release automation must not rebuild or redeploy merely because dashboards are dark.
 - If Grafana is down, use Prometheus UI or `kubectl`/blackbox runbook commands as fallback.
 - If Alertmanager delivery is down, alerts are visible in Prometheus but notifications may be lost; route only actionable signals once delivery is tested.
+
+
+### Public blackbox monitoring runtime slice
+
+The first runtime slice is implemented in source under [`platform/observability`](../platform/observability/) and [`monitoring/probes`](../monitoring/probes/). It installs `prometheus-blackbox-exporter` as a pinned Flux HelmRelease and defines Prometheus Operator `Probe` resources for committed staging and production public URLs. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the module, label, active-target, omission, PromQL, and troubleshooting contract. These manifests are desired state only; live deployment evidence must come from cluster verification after reconciliation.
 
 ## 5. Metrics and labeling contract
 
@@ -307,6 +311,7 @@ Minimum gate for danielsmith.io v0.1.0:
 | DSPACE | DSPACE owner and Sugarkube operator | Public probes, HTTP latency/errors, dChat outcomes, token.place dependency, pod resources, release | Can players use DSPACE and dChat safely? | DSPACE `/metrics`, blackbox, kube metrics |
 | token.place | token.place owner and Sugarkube operator | API/relay health, queue depth/age, compute nodes, leases, upstream inference, E2EE invariant notes, pod health | Can relay/API v1 complete work without violating privacy? | token.place `/metrics`, blackbox, kube metrics |
 | danielsmith.io | Site owner and Sugarkube operator | Public probes, TLS, static paths, pod/resources, release/image, GitHub metadata cache | Is the portfolio reachable, fast, and serving the intended artifact? | blackbox, kube metrics, optional nginx/app metrics, runtime cache checks |
+| jobbot3000 | Site owner and Sugarkube operator | Staging public probes, static tracker page, pod/resources, release/image | Is the browser-local tracker reachable and serving the intended static app? | blackbox, kube metrics |
 | External availability and TLS | Platform/network operator | Endpoint matrix, DNS/Cloudflare path, TLS expiry, probe latency by region if available | Is the public route broken, expiring, or slow? | blackbox exporter, Cloudflare metrics when enabled |
 
 ## 11. Alerts and runbooks

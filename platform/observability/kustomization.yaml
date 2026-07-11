@@ -3,6 +3,8 @@ kind: Kustomization
 resources:
   - kube-prometheus-stack-values.yaml
   - kube-prometheus-stack.yaml
+  - blackbox-exporter-values.yaml
+  - blackbox-exporter.yaml
   - loki-values.yaml
   - loki.yaml
   - promtail-values.yaml
