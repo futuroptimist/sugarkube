@@ -4,3 +4,4 @@ resources:
   - servicemonitors/traefik.yaml
   - servicemonitors/cloudflared.yaml
   - prometheusrules/app-uptime.yaml
+  - probes/public-blackbox.yaml
