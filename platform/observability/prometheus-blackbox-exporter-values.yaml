@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-blackbox-exporter-values
+  namespace: monitoring
+data:
+  values.yaml: |
+    fullnameOverride: prometheus-blackbox-exporter
+    ingress:
+      enabled: false
+    serviceMonitor:
+      enabled: true
+      defaults:
+        labels:
+          release: kube-prometheus-stack
+    config:
+      modules:
+        http_2xx:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            preferred_ip_protocol: ip4
+            follow_redirects: true
+            fail_if_not_ssl: true
+            fail_if_ssl: false
+            tls_config:
+              insecure_skip_verify: false
+            valid_status_codes:
+              - 200
+        http_json_health:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            preferred_ip_protocol: ip4
+            follow_redirects: true
+            fail_if_not_ssl: true
+            fail_if_ssl: false
+            fail_if_body_not_matches_regexp:
+              - '"(status|ok|healthy|live|ready)"[[:space:]]*:[[:space:]]*(true|"(ok|healthy|live|ready|up)")'
+            body_size_limit: 1048576
+            tls_config:
+              insecure_skip_verify: false
+            valid_status_codes:
+              - 200
+        http_static_content:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            preferred_ip_protocol: ip4
+            follow_redirects: true
+            fail_if_not_ssl: true
+            fail_if_ssl: false
+            fail_if_body_not_matches_regexp:
+              - '(DSPACE|token\.place|Daniel Smith|jobbot3000)'
+            body_size_limit: 1048576
+            tls_config:
+              insecure_skip_verify: false
+            valid_status_codes:
+              - 200

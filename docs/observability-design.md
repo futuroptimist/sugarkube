@@ -1,8 +1,8 @@
 # Sugarkube observability design
 
-This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the three flagship applications: DSPACE, token.place, and danielsmith.io. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
+This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the public applications: DSPACE, token.place, danielsmith.io, and jobbot3000. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
 
-This document is design and documentation only. It does not install Prometheus, Grafana, Loki, exporters, dashboards, or runtime components.
+This document is the design contract. The first runtime slice now adds Flux-managed prometheus-blackbox-exporter source manifests and Prometheus Operator Probe resources; it still does not claim those resources are deployed or healthy until live cluster verification is captured.
 
 ## Audit scope and evidence
 
@@ -130,7 +130,7 @@ graph TD
 ### Namespaces
 
 - `monitoring`: Prometheus, Grafana, Alertmanager, blackbox exporter, kube-state-metrics, node/container metric components, and optional future Loki/Tempo components.
-- `dspace`, `tokenplace`, `danielsmith`: application releases and app-owned Services.
+- `dspace`, `tokenplace`, `danielsmith`, `jobbot3000`: application releases and app-owned Services.
 - `cloudflared`, `cert-manager`, `kube-system`, storage namespaces: platform dependencies scraped or probed by Sugarkube-owned rules.
 
 ### Service discovery
@@ -168,6 +168,11 @@ graph TD
 - If Grafana is down, use Prometheus UI or `kubectl`/blackbox runbook commands as fallback.
 - If Alertmanager delivery is down, alerts are visible in Prometheus but notifications may be lost; route only actionable signals once delivery is tested.
 
+
+### Runtime slice 1: public blackbox probes
+
+The first runtime slice installs `prometheus-blackbox-exporter` through Flux in the `monitoring` namespace and adds Prometheus Operator `Probe` resources for committed staging and production public endpoints. Active probe labels are bounded to `app`, `environment`, `route`, and `criticality`, and discovery uses the existing `release: kube-prometheus-stack` convention. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for active targets, omitted placeholder-backed targets, PromQL examples, and troubleshooting.
+
 ## 5. Metrics and labeling contract
 
 ### Naming
@@ -180,7 +185,7 @@ graph TD
 
 Every application metric exposed to Sugarkube must include, by direct label or Prometheus relabeling:
 
-- `app`: `dspace`, `tokenplace`, or `danielsmith`.
+- `app`: `dspace`, `tokenplace`, `danielsmith`, or `jobbot3000`.
 - `environment`: `dev`, `staging`, or `prod`.
 - `cluster`: stable cluster name, initially `sugarkube` unless environment-specific names are introduced.
 - `namespace`: Kubernetes namespace.
