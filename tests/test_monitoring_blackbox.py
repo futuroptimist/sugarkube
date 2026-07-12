@@ -1,8 +1,7 @@
-from pathlib import Path
+import json
 import re
 import subprocess
-
-import json
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBES = ROOT / "monitoring" / "probes" / "public-apps.yaml"
@@ -145,15 +144,12 @@ def _probe_records():
 
 
 def test_monitoring_and_observability_yaml_documents_parse():
-    result = subprocess.run(
-        "rg --files monitoring platform/observability | rg '\\.ya?ml$'",
-        cwd=ROOT,
-        shell=True,
-        text=True,
-        check=True,
-        capture_output=True,
+    paths = sorted(
+        path
+        for directory in (ROOT / "monitoring", ROOT / "platform" / "observability")
+        for path in directory.rglob("*")
+        if path.suffix in {".yaml", ".yml"}
     )
-    paths = [ROOT / line for line in result.stdout.splitlines() if line]
     assert paths
     for path in paths:
         _yaml_docs(path)
