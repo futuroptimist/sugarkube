@@ -6,7 +6,7 @@ Sugarkube now defines the first Flux-managed runtime slice for public endpoint m
 
 - `platform/observability/prometheus-blackbox-exporter.yaml` installs the pinned `prometheus-community/prometheus-blackbox-exporter` chart at version `11.15.1`.
 - `platform/observability/prometheus-blackbox-exporter.yaml` embeds the values ConfigMap with three deliberately small modules: generic HTTPS 2xx, bounded JSON health, and static content.
-- `monitoring/probes/public-apps.yaml` defines Prometheus Operator `Probe` resources selected by `release: kube-prometheus-stack`.
+- `monitoring/probes/public-apps.yaml` defines Prometheus Operator `Probe` resources selected by `release: kube-prometheus-stack`; `monitoring/probes/kustomization.yaml` is included by the staging and production cluster profiles, not by dev.
 
 ## Labels and ownership
 
@@ -30,7 +30,7 @@ App owners own endpoint semantics and public contracts. Sugarkube owns the black
 
 - jobbot3000 production is omitted because the committed production overlay still uses `jobbot3000.example.test`, which is a placeholder and must never be probed as an active public target.
 - danielsmith `/resume.pdf` is omitted because the stable root resume contract is not yet documented as available; the design keeps it future-gated.
-- No `environment=dev` targets are included. The shared monitoring matrix contains staging/prod targets and is rendered through whichever `clusters/<env>` Flux profile selects the shared monitoring base, so a dev build may still render Probe objects; the omission means those objects must not probe dev routes or carry `environment=dev`.
+- No `environment=dev` targets are included. The public Probe matrix is excluded from the dev cluster profile so dev does not run duplicate staging or production probes; staging and production profiles render the shared matrix for the public staging/prod endpoints only.
 
 ## PromQL examples
 

@@ -251,4 +251,14 @@ def test_documented_omissions_and_wiring_are_intentional():
     assert "probe_duration_seconds_bucket" not in docs
     assert "avg by (app, environment, route) (probe_duration_seconds)" in docs
     shared = (ROOT / "monitoring" / "kustomization.yaml").read_text(encoding="utf-8")
-    assert "probes/public-apps.yaml" in shared
+    probes_kustomization = (ROOT / "monitoring" / "probes" / "kustomization.yaml").read_text(
+        encoding="utf-8"
+    )
+    dev = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(encoding="utf-8")
+    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(encoding="utf-8")
+    prod = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(encoding="utf-8")
+    assert "probes/public-apps.yaml" not in shared
+    assert "public-apps.yaml" in probes_kustomization
+    assert "../../monitoring/probes" not in dev
+    assert "../../monitoring/probes" in staging
+    assert "../../monitoring/probes" in prod
