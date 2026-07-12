@@ -1,6 +1,6 @@
 # Sugarkube observability design
 
-This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the three flagship applications: DSPACE, token.place, and danielsmith.io. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
+This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the four flagship applications: DSPACE, token.place, danielsmith.io, and jobbot3000. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
 
 This document is the design contract. The repository now includes Flux-managed kube-prometheus-stack, Loki/Promtail, and the first blackbox exporter/Probe manifests, but those source files are not live deployment evidence until a cluster is reconciled and verified. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
 
@@ -11,7 +11,7 @@ Local Sugarkube sources audited:
 - [`README.md`](../README.md), [`docs/index.md`](./index.md), [`docs/app_deployment_contract.md`](./app_deployment_contract.md), [`docs/pi_image_telemetry.md`](./pi_image_telemetry.md), and [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md).
 - Existing platform manifests in [`platform/`](../platform/), especially [`platform/observability/`](../platform/observability/) and [`platform/cloudflared/`](../platform/cloudflared/).
 - Pi image compose/cloud-init files in [`scripts/cloud-init/`](../scripts/cloud-init/), especially built-in exporter containers and Grafana Agent Flow config.
-- App runbooks in [`docs/apps/dspace.md`](./apps/dspace.md), [`docs/apps/tokenplace.md`](./apps/tokenplace.md), [`docs/apps/tokenplace-relay.md`](./apps/tokenplace-relay.md), and [`docs/apps/danielsmith.md`](./apps/danielsmith.md).
+- App runbooks in [`docs/apps/dspace.md`](./apps/dspace.md), [`docs/apps/tokenplace.md`](./apps/tokenplace.md), [`docs/apps/tokenplace-relay.md`](./apps/tokenplace-relay.md), [`docs/apps/danielsmith.md`](./apps/danielsmith.md), and [`docs/apps/jobbot3000.md`](./apps/jobbot3000.md).
 
 External public `main` branches audited on 2026-06-19:
 

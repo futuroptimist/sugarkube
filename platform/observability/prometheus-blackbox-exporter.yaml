@@ -52,7 +52,6 @@ data:
             follow_redirects: true
             fail_if_not_ssl: true
             fail_if_ssl: false
-            valid_status_codes: [200]
             preferred_ip_protocol: ip4
             tls_config:
               insecure_skip_verify: false

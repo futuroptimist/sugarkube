@@ -39,7 +39,7 @@ sum by (app, environment, route) (probe_success)
 ```
 
 ```promql
-histogram_quantile(0.95, sum by (le, app, environment, route) (rate(probe_duration_seconds_bucket[5m])))
+avg by (app, environment, route) (probe_duration_seconds)
 ```
 
 ```promql

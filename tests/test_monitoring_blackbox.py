@@ -167,6 +167,13 @@ def test_blackbox_exporter_helmrelease_is_pinned_internal_and_valid():
     assert values["ingress"]["enabled"] is False
     modules = values["config"]["modules"]
     assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx"}
+    https_status_codes = modules["https_2xx"]["http"].get("valid_status_codes")
+    assert https_status_codes in (
+        None,
+        [],
+    ), "https_2xx must use blackbox_exporter's generic 2xx default"
+    assert modules["json_health_2xx"]["http"]["valid_status_codes"] == [200]
+    assert modules["static_content_2xx"]["http"]["valid_status_codes"] == [200]
     for module in modules.values():
         http = module["http"]
         assert http["follow_redirects"] is True
@@ -241,5 +248,7 @@ def test_documented_omissions_and_wiring_are_intentional():
     docs = (ROOT / "docs" / "observability-blackbox.md").read_text(encoding="utf-8")
     assert "jobbot3000.example.test" in docs
     assert "environment=dev" in docs
+    assert "probe_duration_seconds_bucket" not in docs
+    assert "avg by (app, environment, route) (probe_duration_seconds)" in docs
     shared = (ROOT / "monitoring" / "kustomization.yaml").read_text(encoding="utf-8")
     assert "probes/public-apps.yaml" in shared
