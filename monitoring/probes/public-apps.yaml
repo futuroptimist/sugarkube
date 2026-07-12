@@ -1,0 +1,755 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-staging-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: staging
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.democratized.space/
+      labels:
+        app: dspace
+        environment: staging
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-staging-config
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: staging
+    route: config
+    criticality: warning
+spec:
+  interval: 60s
+  module: static_content_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.democratized.space/config.json
+      labels:
+        app: dspace
+        environment: staging
+        route: config
+        criticality: warning
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-staging-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: staging
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.democratized.space/healthz
+      labels:
+        app: dspace
+        environment: staging
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-staging-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: staging
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.democratized.space/livez
+      labels:
+        app: dspace
+        environment: staging
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-prod-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: prod
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://democratized.space/
+      labels:
+        app: dspace
+        environment: prod
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-prod-config
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: prod
+    route: config
+    criticality: warning
+spec:
+  interval: 60s
+  module: static_content_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://democratized.space/config.json
+      labels:
+        app: dspace
+        environment: prod
+        route: config
+        criticality: warning
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-prod-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: prod
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://democratized.space/healthz
+      labels:
+        app: dspace
+        environment: prod
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-dspace-prod-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: dspace
+    environment: prod
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://democratized.space/livez
+      labels:
+        app: dspace
+        environment: prod
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-staging-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: staging
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.token.place/
+      labels:
+        app: tokenplace
+        environment: staging
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-staging-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: staging
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.token.place/healthz
+      labels:
+        app: tokenplace
+        environment: staging
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-staging-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: staging
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.token.place/livez
+      labels:
+        app: tokenplace
+        environment: staging
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-staging-metadata
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: staging
+    route: metadata
+    criticality: warning
+spec:
+  interval: 60s
+  module: static_content_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.token.place/api/v1/meta
+      labels:
+        app: tokenplace
+        environment: staging
+        route: metadata
+        criticality: warning
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-prod-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: prod
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://token.place/
+      labels:
+        app: tokenplace
+        environment: prod
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-prod-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: prod
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://token.place/healthz
+      labels:
+        app: tokenplace
+        environment: prod
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-prod-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: prod
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://token.place/livez
+      labels:
+        app: tokenplace
+        environment: prod
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-tokenplace-prod-metadata
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: tokenplace
+    environment: prod
+    route: metadata
+    criticality: warning
+spec:
+  interval: 60s
+  module: static_content_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://token.place/api/v1/meta
+      labels:
+        app: tokenplace
+        environment: prod
+        route: metadata
+        criticality: warning
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-danielsmith-staging-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: danielsmith
+    environment: staging
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.danielsmith.io/
+      labels:
+        app: danielsmith
+        environment: staging
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-danielsmith-staging-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: danielsmith
+    environment: staging
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.danielsmith.io/healthz
+      labels:
+        app: danielsmith
+        environment: staging
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-danielsmith-staging-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: danielsmith
+    environment: staging
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.danielsmith.io/livez
+      labels:
+        app: danielsmith
+        environment: staging
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-danielsmith-prod-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: danielsmith
+    environment: prod
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://danielsmith.io/
+      labels:
+        app: danielsmith
+        environment: prod
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-danielsmith-prod-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: danielsmith
+    environment: prod
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://danielsmith.io/healthz
+      labels:
+        app: danielsmith
+        environment: prod
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-danielsmith-prod-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: danielsmith
+    environment: prod
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://danielsmith.io/livez
+      labels:
+        app: danielsmith
+        environment: prod
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-jobbot3000-staging-root
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: jobbot3000
+    environment: staging
+    route: root
+    criticality: critical
+spec:
+  interval: 60s
+  module: https_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.jobbot3000.tech/
+      labels:
+        app: jobbot3000
+        environment: staging
+        route: root
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-jobbot3000-staging-healthz
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: jobbot3000
+    environment: staging
+    route: healthz
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.jobbot3000.tech/healthz
+      labels:
+        app: jobbot3000
+        environment: staging
+        route: healthz
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-jobbot3000-staging-livez
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: jobbot3000
+    environment: staging
+    route: livez
+    criticality: critical
+spec:
+  interval: 60s
+  module: json_health_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.jobbot3000.tech/livez
+      labels:
+        app: jobbot3000
+        environment: staging
+        route: livez
+        criticality: critical
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-jobbot3000-staging-tracker
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: jobbot3000
+    environment: staging
+    route: tracker
+    criticality: warning
+spec:
+  interval: 60s
+  module: static_content_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.jobbot3000.tech/tracker
+      labels:
+        app: jobbot3000
+        environment: staging
+        route: tracker
+        criticality: warning
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: blackbox-jobbot3000-staging-manifest
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app: jobbot3000
+    environment: staging
+    route: manifest
+    criticality: warning
+spec:
+  interval: 60s
+  module: static_content_2xx
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://staging.jobbot3000.tech/manifest.webmanifest
+      labels:
+        app: jobbot3000
+        environment: staging
+        route: manifest
+        criticality: warning
