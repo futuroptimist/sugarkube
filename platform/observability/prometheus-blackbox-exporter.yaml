@@ -24,3 +24,81 @@ spec:
     - kind: ConfigMap
       name: prometheus-blackbox-exporter-values
       valuesKey: values.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-blackbox-exporter-values
+  namespace: monitoring
+data:
+  values.yaml: |
+    fullnameOverride: prometheus-blackbox-exporter
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: false
+    serviceMonitor:
+      enabled: true
+      defaults:
+        labels:
+          release: kube-prometheus-stack
+    config:
+      modules:
+        https_2xx:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            follow_redirects: true
+            fail_if_not_ssl: true
+            fail_if_ssl: false
+            valid_status_codes: [200]
+            preferred_ip_protocol: ip4
+            tls_config:
+              insecure_skip_verify: false
+        json_health_2xx:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            follow_redirects: true
+            fail_if_not_ssl: true
+            valid_status_codes: [200]
+            body_size_limit: 1MiB
+            fail_if_body_not_matches_regexp:
+              - '"status"[[:space:]]*:[[:space:]]*"(ok|ready|alive)"'
+            preferred_ip_protocol: ip4
+            tls_config:
+              insecure_skip_verify: false
+        static_content_2xx:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            follow_redirects: true
+            fail_if_not_ssl: true
+            valid_status_codes: [200]
+            body_size_limit: 1MiB
+            fail_if_body_not_matches_regexp:
+              - '(offlineWorker|"environment"|"version"|jobbot3000)'
+            preferred_ip_protocol: ip4
+            tls_config:
+              insecure_skip_verify: false
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-blackbox-exporter-monitoring-egress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
+      ports:
+        - protocol: TCP
+          port: 9115

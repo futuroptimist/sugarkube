@@ -319,7 +319,7 @@ metadata:
     criticality: warning
 spec:
   interval: 60s
-  module: json_health_2xx
+  module: static_content_2xx
   prober:
     url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
     scheme: http
@@ -431,7 +431,7 @@ metadata:
     criticality: warning
 spec:
   interval: 60s
-  module: json_health_2xx
+  module: static_content_2xx
   prober:
     url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
     scheme: http

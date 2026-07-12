@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   - ../../platform
   - ../../monitoring
-  - ../../monitoring/probes
   - secrets
 patchesStrategicMerge:
   - patches/kube-vip-values.yaml
@@ -11,6 +10,5 @@ patchesStrategicMerge:
   - patches/cert-manager-settings.yaml
   - patches/longhorn-values.yaml
   - patches/kube-prometheus-stack-values.yaml
-  - patches/external-dns-activation.yaml
 configurations:
   - kustomizeconfig.yaml
