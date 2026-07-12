@@ -719,7 +719,7 @@ spec:
   targets:
     staticConfig:
       static:
-        - https://staging.jobbot3000.tech/
+        - https://staging.jobbot3000.tech/tracker
       labels:
         app: jobbot3000
         environment: staging

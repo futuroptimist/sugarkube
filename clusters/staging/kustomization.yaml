@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - ../../platform
   - ../../monitoring
+  - ../../monitoring/probes
   - secrets
 patchesStrategicMerge:
   - patches/kube-vip-values.yaml

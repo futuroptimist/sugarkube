@@ -34,7 +34,7 @@ data:
             fail_if_not_ssl: true
             valid_status_codes: [200]
             fail_if_body_not_matches_regexp:
-              - '^[[:space:]]*\\{.{0,2048}\\}[[:space:]]*$'
+              - '(?s)^[[:space:]]*\{.{0,1000}\}[[:space:]]*$'
             preferred_ip_protocol: ip4
             tls_config:
               insecure_skip_verify: false
@@ -47,7 +47,7 @@ data:
             fail_if_not_ssl: true
             valid_status_codes: [200]
             fail_if_body_not_matches_regexp:
-              - '.{1,8192}'
+              - '(?s).{1,1000}'
             preferred_ip_protocol: ip4
             tls_config:
               insecure_skip_verify: false
