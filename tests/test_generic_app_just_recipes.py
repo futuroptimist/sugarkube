@@ -2445,6 +2445,76 @@ def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
     assert stderr == ""
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+def test_direct_helm_oci_helpers_require_requested_env_before_helm(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env.copy()
+    env.pop("SUGARKUBE_ENV", None)
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version_file=docs/apps/tokenplace.version",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "env is required for helm-oci-install/helm-oci-upgrade" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_direct_helm_oci_helper_mismatch_fails_before_any_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+    result = _run_just(
+        [
+            "helm-oci-install",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version_file=docs/apps/tokenplace.version",
+            "env=prod",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_direct_helm_oci_helper_matching_env_succeeds(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        [
+            "helm-oci-install",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version_file=docs/apps/tokenplace.version",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+    assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_app_deploy_guard_mismatch_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "staging"

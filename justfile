@@ -1316,16 +1316,19 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ -z "${requested_env}" ] && [ -n "${SUGARKUBE_ENV:-}" ]; then
       requested_env="${SUGARKUBE_ENV}"
     fi
-    if [ -n "${requested_env}" ]; then
-      if [ "${requested_env}" = "int" ]; then
-        requested_env="staging"
-      fi
-      case "${requested_env}" in
-        dev|staging|prod) ;;
-        *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
-      esac
-      export SUGARKUBE_ENV="${requested_env}"
+    if [ -z "${requested_env}" ]; then
+      echo "ERROR: env is required for helm-oci-install/helm-oci-upgrade." >&2
+      echo "Pass env=<dev|staging|prod> or deliberately export SUGARKUBE_ENV before invoking this Helm helper." >&2
+      exit 1
     fi
+    if [ "${requested_env}" = "int" ]; then
+      requested_env="staging"
+    fi
+    case "${requested_env}" in
+      dev|staging|prod) ;;
+      *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
+    esac
+    export SUGARKUBE_ENV="${requested_env}"
 
     allow_install="$(normalize_prefixed_value allow_install "{{ allow_install }}")"
     reuse_values="$(normalize_prefixed_value reuse_values "{{ reuse_values }}")"
@@ -1334,6 +1337,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
     fi
+
+    python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
     chart_version="${version}"
     if [ -z "${chart_version}" ] && [ -n "${version_file}" ] && [ -f "${version_file}" ]; then
@@ -1489,8 +1494,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             install_hint_args+=("default_tag=${default_tag}")
             upgrade_hint_args+=("default_tag=${default_tag}")
         fi
+        install_hint_args+=("env=${requested_env}")
+        upgrade_hint_args+=("env=${requested_env}")
 
-        local install_hint_shape="just helm-oci-install release=${release} namespace=${namespace} chart=${chart} [values=...] [version=...] [version_file=...] [host=...] [tag=...] [default_tag=...]"
+        local install_hint_shape="just helm-oci-install release=${release} namespace=${namespace} chart=${chart} env=${requested_env} [values=...] [version=...] [version_file=...] [host=...] [tag=...] [default_tag=...]"
         local status_output=""
         if ! status_output="$(helm -n "${namespace}" status "${release}" 2>&1)"; then
             if grep -qiE '(release:[[:space:]]*not found|not[[:space:]-]*found)' <<< "${status_output}"; then
@@ -1565,9 +1572,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         helm_args+=("${version_args[@]}")
     fi
 
-    if [ -n "${requested_env}" ]; then
-      python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
-    fi
     helm "${helm_args[@]}"
     wait_for_rollouts
 

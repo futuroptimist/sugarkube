@@ -780,7 +780,7 @@ just helm-oci-upgrade \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
-  default_tag=main-latest
+  default_tag=main-latest env=staging
 ```
 
 For production preview (optional canary), this guide intentionally switches from the generic
