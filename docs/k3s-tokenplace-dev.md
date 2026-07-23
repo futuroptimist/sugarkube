@@ -26,18 +26,18 @@ Use this runbook for `dev` token.place deployments on Sugarkube.
 just tokenplace-deploy \
   release=<release> namespace=<namespace> chart=<chart-ref> \
   values=<base-values>,<dev-values> version_file=<optional-version-file> \
-  tag=<tag>
+  tag=<tag> env=dev
 ```
 
 ```bash
 just tokenplace-upgrade \
   release=<release> namespace=<namespace> chart=<chart-ref> \
   values=<base-values>,<dev-values> version_file=<optional-version-file> \
-  tag=<tag>
+  tag=<tag> env=dev
 ```
 
 ```bash
-just tokenplace-rollback release=<release> namespace=<namespace> revision=<helm-revision>
+just tokenplace-rollback release=<release> namespace=<namespace> revision=<helm-revision> env=dev
 ```
 
 ## Validation

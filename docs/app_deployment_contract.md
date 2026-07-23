@@ -187,6 +187,17 @@ export SUGARKUBE_APP_CONFIG_DIR=apps
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 
+Environment-scoped mutating recipes (`app-deploy`, `app-redeploy`,
+`app-promote-prod`, and the compatibility deploy/redeploy/promote wrappers) guard
+Helm with the connected cluster's Kubernetes-reported identity. The source of
+truth is the `sugarkube.env` node label assigned during cluster formation, not
+the kubeconfig context name, hostname, or ingress hostname. Every node must have
+a nonempty environment label, all normalized labels must agree, and the detected
+environment must match the requested `env=` before Helm can install, upgrade, or
+roll back a release. Use `just cluster-env-detect` to inspect the current
+read-only identity. `app-chart-bump` remains cluster-independent because it only
+validates a public OCI chart and edits the repository pin.
+
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
 just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA

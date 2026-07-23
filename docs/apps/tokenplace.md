@@ -276,7 +276,7 @@ just kubeconfig-env "$ROLLBACK_ENV"
 ```
 
 ```bash
-just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$HELM_REVISION"
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$HELM_REVISION" env="$ROLLBACK_ENV"
 ```
 
 ## Troubleshooting

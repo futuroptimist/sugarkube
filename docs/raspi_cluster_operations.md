@@ -512,7 +512,25 @@ just kubeconfig-env env=dev
 ```
 
 **What you should see:** This creates `~/.kube/config` with the context renamed to
-`sugar-dev`, allowing you to run kubectl commands from your local machine.
+`sugar-dev`, allowing you to run kubectl commands from your local machine. The
+context name is only a display/scoping convenience: Sugarkube treats Kubernetes
+node labels as the authoritative environment identity. `just kubeconfig-env`
+queries the connected API for `sugarkube.env` and `sugarkube.cluster` labels on
+every node before persisting the copied kubeconfig, normalizes the legacy `int`
+environment to `staging`, and refuses to overwrite a working kubeconfig when the
+requested `env=` does not match the labels.
+
+Inspect the connected cluster identity without mutating anything:
+
+```bash
+just cluster-env-detect
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,CLUSTER:.metadata.labels.sugarkube\.cluster,ENV:.metadata.labels.sugarkube\.env'
+```
+
+Mutating app commands fail closed when the API cannot be queried, no nodes are
+returned, any node lacks `sugarkube.env`, node labels contain mixed environments,
+or the requested `env=` differs from the single normalized environment reported
+by the nodes.
 
 Verify workloads across all namespaces:
 
@@ -539,6 +557,7 @@ Quick reference for the most common recipes when operating your cluster:
 |--------|--------------|-------------|
 | `just status` | Display cluster nodes with `kubectl get nodes -o wide` | Check overall cluster health and node readiness. Guards against running before k3s is installed. |
 | `just kubeconfig-env env=dev` | Copy k3s kubeconfig to `~/.kube/config` with context renamed to `sugar-dev` | Set up kubectl access from your workstation or after re-imaging a node. |
+| `just cluster-env-detect` | Print the connected cluster environment from node labels | Confirm which physical cluster the current kubeconfig reaches before mutating workloads. |
 | `just save-logs env=dev` | Run cluster bring-up with `SAVE_DEBUG_LOGS=1` into `logs/up/` | Capture sanitized logs for troubleshooting, documenting cluster changes, or sharing with the community. |
 | `just cat-node-token` | Print the k3s node token for joining nodes | Retrieve the token when adding new nodes or switching to a different shell session. |
 | `just wipe` | Clean up k3s and mDNS state on a node | Recover from a failed bootstrap/join or remove a node that joined the wrong cluster. Re-run `just ha3 env=dev` afterward. |
@@ -761,7 +780,7 @@ just helm-oci-upgrade \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
-  default_tag=main-latest
+  default_tag=main-latest env=staging
 ```
 
 For production preview (optional canary), this guide intentionally switches from the generic

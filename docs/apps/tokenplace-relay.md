@@ -37,7 +37,7 @@ First install:
 ```bash
 just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+just helm-oci-install release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG" env=staging
 ```
 
 Existing release upgrade:
@@ -45,7 +45,7 @@ Existing release upgrade:
 ```bash
 just kubeconfig-env staging
 TOKENPLACE_TAG=main-deadbee # replace with the immutable tag you want to deploy
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG" env=staging
 ```
 
 Preferred wrapper:
@@ -80,7 +80,7 @@ Generic production upgrade with prod overlay:
 ```bash
 just kubeconfig-env prod
 TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG"
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG" env=prod
 ```
 
 Rollback using previous immutable tag:
@@ -88,7 +88,7 @@ Rollback using previous immutable tag:
 ```bash
 just kubeconfig-env prod
 TOKENPLACE_PREVIOUS_TAG=main-deadbee # replace with the prior immutable tag
-just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG"
+just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_PREVIOUS_TAG" env=prod
 ```
 
 Rollback to previous Helm revision:
@@ -96,7 +96,7 @@ Rollback to previous Helm revision:
 ```bash
 just kubeconfig-env prod
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
-just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION" env=prod
 ```
 
 Production validation:
