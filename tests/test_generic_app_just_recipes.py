@@ -64,6 +64,25 @@ fi
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
+if [[ "$*" == *"config current-context"* ]]; then
+  printf 'sugar-${{SUGARKUBE_STUB_CONTEXT_ENV:-${{SUGARKUBE_ENV:-staging}}}}\n'
+  exit 0
+fi
+if [[ "$*" == *"config view"* ]]; then
+  printf 'https://127.0.0.1:6443\n'
+  exit 0
+fi
+if [[ "$*" == *"get"* && "$*" == *"nodes"* && "$*" == *"-o"* && "$*" == *"json"* ]]; then
+  case "${{SUGARKUBE_STUB_NODE_MODE:-${{SUGARKUBE_ENV:-staging}}}}" in
+    none) printf '{{"items":[]}}\n' ;;
+    fail) echo 'api unavailable' >&2; exit 42 ;;
+    missing) printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar"}}}}}}]}}\n' ;;
+    mixed) printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"staging"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"prod"}}}}}}]}}\n' ;;
+    int) printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"int"}}}}}}]}}\n' ;;
+    *) env_label="${{SUGARKUBE_STUB_NODE_MODE:-${{SUGARKUBE_ENV:-staging}}}}"; printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}}}}]}}\n' "$env_label" "$env_label" ;;
+  esac
+  exit 0
+fi
 if [[ "$*" == *"get deploy,statefulset,daemonset"* ]]; then
   printf 'Deployment/danielsmith\n'
   exit 0
@@ -2433,3 +2452,85 @@ def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
     assert headers == {}
     assert body == b""
     assert stderr == ""
+
+
+def _helm_log_text(env: dict[str, str]) -> str:
+    path = Path(env["HELM_LOG"])
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("requested", "detected"),
+    [("prod", "staging"), ("staging", "prod")],
+)
+def test_app_deploy_env_mismatch_fails_before_helm(
+    requested: str, detected: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = detected
+    env["SUGARKUBE_STUB_CONTEXT_ENV"] = requested
+    result = _run_just(["app-deploy", "app=tokenplace", f"env={requested}", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert f"requested env={requested}" in result.stderr
+    assert "Refusing to run a mutating command" in result.stderr
+    assert "upgrade tokenplace" not in _helm_log_text(env)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_deploy_matching_env_succeeds(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = "staging"
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "upgrade tokenplace" in _helm_log_text(env)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_legacy_int_detected_normalizes_to_staging(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = "int"
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "upgrade tokenplace" in _helm_log_text(env)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("mode", ["none", "fail", "missing", "mixed"])
+def test_cluster_identity_failures_fail_closed_before_helm(mode: str, generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = mode
+    result = _run_just(["app-deploy", "app=tokenplace", "env=staging", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert "Refusing to run a mutating command" in result.stderr
+    assert "upgrade tokenplace" not in _helm_log_text(env)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_context_name_cannot_override_node_identity(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = "staging"
+    env["SUGARKUBE_STUB_CONTEXT_ENV"] = "prod"
+    result = _run_just(["app-deploy", "app=tokenplace", "env=prod", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert "identifies as env=staging" in result.stderr
+    assert "upgrade tokenplace" not in _helm_log_text(env)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_promote_prod_path_cannot_bypass_cluster_guard(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = "staging"
+    result = _run_just(["app-promote-prod", "app=tokenplace", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    assert "upgrade tokenplace" not in _helm_log_text(env)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_chart_bump_remains_cluster_independent(generic_app_stub_env: dict[str, str], tmp_path: Path) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_MODE"] = "fail"
+    result = _run_just(["app-chart-bump", "app=tokenplace", "version=0.1.3"], env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in _helm_log_text(env)

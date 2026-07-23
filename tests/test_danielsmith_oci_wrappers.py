@@ -40,6 +40,14 @@ exit 0
     _write_executable(
         bin_dir / "kubectl",
         """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"config current-context"* ]]; then printf 'sugar-${SUGARKUBE_STUB_CONTEXT_ENV:-staging}\n'; exit 0; fi
+if [[ "$*" == *"config view"* ]]; then printf 'https://127.0.0.1:6443\n'; exit 0; fi
+if [[ "$*" == *"get"*"nodes"* && "$*" == *"-o"*"json"* ]]; then
+  env_label="${SUGARKUBE_STUB_NODE_ENV:-${SUGARKUBE_ENV:-staging}}"
+  printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}]}\n' "$env_label"
+  exit 0
+fi
 exit 0
 """,
     )
@@ -150,3 +158,16 @@ def test_danielsmith_oci_deploy_rejects_mutable_named_tags(
     assert "mutable tag" in result.stderr
     helm_log_path = Path(danielsmith_oci_stub_env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_danielsmith_compat_wrapper_cannot_bypass_cluster_guard(
+    danielsmith_oci_stub_env: dict[str, str],
+) -> None:
+    env = danielsmith_oci_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+    result = _run_just(["danielsmith-oci-promote-prod", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or "upgrade danielsmith" not in helm_log_path.read_text(encoding="utf-8")
