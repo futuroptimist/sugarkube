@@ -198,7 +198,7 @@ just kubeconfig-env "$ROLLBACK_ENV"
 ```
 
 ```bash
-just tokenplace-rollback release=appslug namespace=appslug revision="$HELM_REVISION"
+just tokenplace-rollback release=appslug namespace=appslug revision="$HELM_REVISION" env="$ROLLBACK_ENV"
 ```
 
 ## First-run smoke check pattern

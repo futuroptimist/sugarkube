@@ -2311,7 +2311,7 @@ tokenplace-status namespace='tokenplace' release='tokenplace' host_key='ingress.
 # selection; these generic helpers require explicit values + tag/default_tag to
 
 # avoid active-kubeconfig environment drift.
-tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
+tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='' env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2344,10 +2344,10 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}" env="${SUGARKUBE_ENV:-}"
+      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}" env='{{ env }}'
 
 # Upgrade-only path for existing token.place releases.
-tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
+tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='' env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2380,7 +2380,7 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}" env="${SUGARKUBE_ENV:-}"
+      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}" env='{{ env }}'
 
 tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='':
     #!/usr/bin/env bash
@@ -2404,20 +2404,15 @@ tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env=
     fi
     export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
     if [ -z "${env_name}" ]; then
-      detect_output="$(python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" detect --kubeconfig "${KUBECONFIG}")"
-      env_name="$(awk -F': ' '/^Environment:/ {print $2; exit}' <<< "${detect_output}")"
-      if [ -z "${env_name}" ]; then
-        echo "ERROR: unable to determine connected cluster environment for rollback." >&2
-        echo "${detect_output}" >&2
-        exit 1
-      fi
-    else
-      case "${env_name}" in
-        dev|staging|prod) ;;
-        *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
-      esac
-      just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
+      echo "ERROR: tokenplace-rollback requires a requested environment." >&2
+      echo "Pass env=<dev|staging|prod> or deliberately export SUGARKUBE_ENV before invoking rollback." >&2
+      exit 1
     fi
+    case "${env_name}" in
+      dev|staging|prod) ;;
+      *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
+    esac
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
     export SUGARKUBE_ENV="${env_name}"
 
     helm -n "${ns}" rollback "${release}" '{{ revision }}'

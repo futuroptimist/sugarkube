@@ -96,7 +96,7 @@ Rollback to previous Helm revision:
 ```bash
 just kubeconfig-env prod
 TOKENPLACE_REVISION=12 # replace with the known-good Helm revision
-just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION"
+just tokenplace-rollback release=tokenplace namespace=tokenplace revision="$TOKENPLACE_REVISION" env=prod
 ```
 
 Production validation:

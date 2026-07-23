@@ -76,6 +76,10 @@ if [[ "$*" == *"get deploy,statefulset,daemonset"* ]]; then
   printf 'Deployment/danielsmith\n'
   exit 0
 fi
+if [[ "$*" == *"get deploy,statefulset"* ]]; then
+  printf 'Deployment/tokenplace\n'
+  exit 0
+fi
 if [[ "$*" == *"get ingress"* && "$*" == *"jsonpath"* ]]; then
   if [ "${{SUGARKUBE_STUB_KUBECTL_INGRESS_FAIL:-}}" = "1" ]; then
     echo 'error: context sugar-staging does not exist' >&2
@@ -2513,6 +2517,110 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
 
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["tokenplace-deploy", "tokenplace-upgrade"])
+def test_tokenplace_compat_wrappers_propagate_explicit_matching_env(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [
+            recipe,
+            "tokenplace",
+            "tokenplace",
+            "oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "docs/examples/tokenplace.values.dev.yaml",
+            "docs/apps/tokenplace.version",
+            "",
+            "main-deadbee",
+            "",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_rollback_without_requested_env_fails_before_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env.pop("SUGARKUBE_ENV", None)
+    result = _run_just(
+        ["tokenplace-rollback", "tokenplace", "tokenplace", "12"],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "tokenplace-rollback requires a requested environment" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_rollback_mismatch_fails_before_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+    result = _run_just(
+        [
+            "tokenplace-rollback",
+            "tokenplace",
+            "tokenplace",
+            "12",
+            "env=prod",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_rollback_matching_env_succeeds(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        [
+            "tokenplace-rollback",
+            "tokenplace",
+            "tokenplace",
+            "12",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "-n tokenplace rollback tokenplace 12" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_rollback_sugarkube_env_invocation_remains_guarded(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_ENV"] = "prod"
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+    result = _run_just(
+        ["tokenplace-rollback", "tokenplace", "tokenplace", "12"],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
 @pytest.mark.usefixtures("ensure_just_available")
 def test_app_deploy_guard_mismatch_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
