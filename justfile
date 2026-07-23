@@ -508,11 +508,16 @@ cluster-env-detect kubeconfig='':
 assert-cluster-env env kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
     kubeconfig_path={{ quote(kubeconfig) }}
     if [ -z "${kubeconfig_path}" ]; then
       kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
     fi
-    python3 scripts/cluster_identity.py assert --kubeconfig "${kubeconfig_path}" --env {{ quote(env) }}
+    python3 scripts/cluster_identity.py assert --kubeconfig "${kubeconfig_path}" --env "${env_name}"
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
