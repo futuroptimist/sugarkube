@@ -150,3 +150,92 @@ def test_kubeconfig_env_mismatch_does_not_persist_false_context(tmp_path: Path) 
     assert result.returncode != 0
     assert "requested env=prod" in result.stderr
     assert existing.read_text(encoding="utf-8") == "current-context: sugar-staging\n"
+
+
+def _run_assert_cluster_env_recipe(
+    tmp_path: Path, requested: str, detected: str
+) -> subprocess.CompletedProcess[str]:
+    home = tmp_path / "home-assert"
+    home.mkdir(exist_ok=True)
+    kubeconfig = tmp_path / "assert-kubeconfig.yaml"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin-assert"
+    bin_dir.mkdir(exist_ok=True)
+    _write_fake_kubectl(bin_dir)
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "KUBECONFIG": str(kubeconfig),
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "SUGARKUBE_STUB_NODE_ENV": detected,
+        }
+    )
+    return subprocess.run(
+        [
+            "just",
+            "--justfile",
+            str(JUSTFILE),
+            "assert-cluster-env",
+            requested,
+            str(kubeconfig),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+@pytest.mark.parametrize(
+    ("positional", "keyed", "detected"),
+    [("prod", "env=prod", "prod"), ("staging", "env=staging", "staging")],
+)
+def test_assert_cluster_env_normalizes_positional_and_env_prefix_forms(
+    tmp_path: Path, positional: str, keyed: str, detected: str
+) -> None:
+    positional_result = _run_assert_cluster_env_recipe(tmp_path, positional, detected)
+    keyed_result = _run_assert_cluster_env_recipe(tmp_path, keyed, detected)
+
+    assert positional_result.returncode == 0, positional_result.stderr
+    assert keyed_result.returncode == 0, keyed_result.stderr
+    assert positional_result.stdout == keyed_result.stdout == f"{detected}\n"
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_assert_cluster_env_prefixed_mismatch_fails_closed(tmp_path: Path) -> None:
+    result = _run_assert_cluster_env_recipe(tmp_path, "env=prod", "staging")
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    assert "env=staging" in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+@pytest.mark.parametrize(
+    ("requested", "expected_error"),
+    [
+        ("env=qa", "env must be one of dev|staging|prod"),
+        ("env=", "assert requires --env dev|staging|prod"),
+    ],
+)
+def test_assert_cluster_env_prefixed_invalid_value_remains_rejected(
+    tmp_path: Path, requested: str, expected_error: str
+) -> None:
+    result = _run_assert_cluster_env_recipe(tmp_path, requested, "prod")
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_assert_cluster_env_legacy_int_prefix_still_normalizes_to_staging(
+    tmp_path: Path,
+) -> None:
+    result = _run_assert_cluster_env_recipe(tmp_path, "env=int", "staging")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "staging\n"
