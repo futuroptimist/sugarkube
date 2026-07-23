@@ -45,6 +45,36 @@ if __name__ == "__main__":
     script.chmod(0o755)
 
 
+def _write_fake_kubectl(bin_dir: Path) -> None:
+    script = bin_dir / "kubectl"
+    script.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"config view"* ]]; then
+  printf '{"current-context":"PLACEHOLDER-CONTEXT","clusters":[{"cluster":{"server":"https://127.0.0.1:6443"}}]}\n'
+  exit 0
+fi
+if [[ "$*" == *"get nodes"* ]]; then
+  env_label="${TEST_NODE_ENV:-dev}"
+  cluster_label="${TEST_NODE_CLUSTER:-sugar}"
+  if [ "${TEST_ZERO_NODES:-0}" = "1" ]; then
+    printf '{"items":[]}\n'
+  elif [ "${TEST_MISSING_NODE_ENV:-0}" = "1" ]; then
+    printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"%s"}}}]}\n' "${cluster_label}"
+  elif [ "${TEST_MIXED_NODE_ENV:-0}" = "1" ]; then
+    printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"%s","sugarkube.env":"staging"}}},{"metadata":{"name":"sugarkube4","labels":{"sugarkube.cluster":"%s","sugarkube.env":"prod"}}}]}\n' "${cluster_label}" "${cluster_label}"
+  else
+    printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"%s","sugarkube.env":"%s"}}},{"metadata":{"name":"sugarkube4","labels":{"sugarkube.cluster":"%s","sugarkube.env":"%s"}}}]}\n' "${cluster_label}" "${env_label}" "${cluster_label}" "${env_label}"
+  fi
+  exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+
 @pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
 def test_kubeconfig_recipe_scopes_context(tmp_path: Path) -> None:
     home = tmp_path / "home"
@@ -78,6 +108,7 @@ users:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_sudo(bin_dir)
+    _write_fake_kubectl(bin_dir)
 
     env = os.environ.copy()
     env.update(
@@ -109,3 +140,40 @@ users:
     assert "sugar-dev" in contents
     assert "current-context: sugar-dev" in contents
     assert "PLACEHOLDER" not in contents
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_kubeconfig_env_mismatch_does_not_persist_false_context(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    kube_dir = home / ".kube"
+    kube_dir.mkdir(parents=True)
+    existing = kube_dir / "config"
+    existing.write_text("current-context: sugar-staging\n", encoding="utf-8")
+    source_config = tmp_path / "k3s.yaml"
+    source_config.write_text("apiVersion: v1\nclusters: []\ncontexts: []\nusers: []\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_sudo(bin_dir)
+    _write_fake_kubectl(bin_dir)
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "TEST_K3S_SOURCE": str(source_config),
+            "TEST_SKIP_CHOWN": "1",
+            "TEST_NODE_ENV": "staging",
+        }
+    )
+
+    result = subprocess.run(
+        ["just", "--justfile", str(JUSTFILE), "kubeconfig-env", "env=prod"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    assert existing.read_text(encoding="utf-8") == "current-context: sugar-staging\n"

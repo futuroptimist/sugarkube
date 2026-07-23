@@ -40,6 +40,16 @@ exit 0
     _write_executable(
         bin_dir / "kubectl",
         """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"config view"* ]]; then
+  printf '{"current-context":"sugar-staging","clusters":[{"cluster":{"server":"https://127.0.0.1:6443"}}]}\n'
+  exit 0
+fi
+if [[ "$*" == *"get nodes"* ]]; then
+  node_env="${SUGARKUBE_STUB_NODE_ENV:-${SUGARKUBE_ENV:-staging}}"
+  printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}]}\n' "$node_env"
+  exit 0
+fi
 exit 0
 """,
     )
