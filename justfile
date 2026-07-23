@@ -480,12 +480,19 @@ kubeconfig-env env='dev':
     fi
     user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
+    tmp_config="$(mktemp "${HOME}/.kube/config.candidate.XXXXXX")"
+    cleanup() { rm -f "${tmp_config}" 2>/dev/null || true; }
+    trap cleanup EXIT
+    sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
+    sudo chown "$user":"$user" "${tmp_config}" 2>/dev/null || true
     chmod 700 ~/.kube
-    chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+    chmod 600 "${tmp_config}"
+    detected_env="$(python3 scripts/cluster_identity.py --kubeconfig "${tmp_config}" --requested-env "${env_name}" --assert-match --mutating)"
+    scope_name="sugar-${detected_env}"
+    python3 scripts/update_kubeconfig_scope.py "${tmp_config}" "${scope_name}"
+    mv "${tmp_config}" "${HOME}/.kube/config"
+    trap - EXIT
+    cleanup
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
@@ -495,6 +502,16 @@ kubeconfig-staging:
 
 kubeconfig-prod:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=prod
+
+# Read-only: detect authoritative cluster identity from Kubernetes node labels.
+cluster-env-detect kubeconfig='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    kubeconfig_path={{ quote(kubeconfig) }}
+    if [ -z "${kubeconfig_path}" ]; then
+      kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
+    fi
+    python3 scripts/cluster_identity.py --kubeconfig "${kubeconfig_path}"
 
 origin_cert_guidance := """
   NOTE: cloudflared is still behaving like a locally-managed tunnel (looking for cert.pem / credentials.json).
@@ -1290,6 +1307,14 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
+    fi
+
+    if [ -n "${SUGARKUBE_ENV:-}" ]; then
+        python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" \
+          --kubeconfig "${KUBECONFIG}" \
+          --requested-env "${SUGARKUBE_ENV}" \
+          --assert-match \
+          --mutating >/dev/null
     fi
 
     chart_version="${version}"
@@ -2315,7 +2340,7 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
       version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
 
-tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
+tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2325,6 +2350,19 @@ tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
     fi
     ns='{{ namespace }}'
     release='{{ release }}'
+    env_name='{{ env }}'
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    if [ -n "${env_name}" ]; then
+      [ "${env_name}" = "int" ] && env_name="staging"
+      export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+      python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" \
+        --kubeconfig "${KUBECONFIG}" \
+        --requested-env "${env_name}" \
+        --assert-match \
+        --mutating >/dev/null
+    fi
 
     helm -n "${ns}" rollback "${release}" '{{ revision }}'
 

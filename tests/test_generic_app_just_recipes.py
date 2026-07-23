@@ -68,6 +68,31 @@ if [[ "$*" == *"get deploy,statefulset,daemonset"* ]]; then
   printf 'Deployment/danielsmith\n'
   exit 0
 fi
+if [[ "$*" == *"config view"* ]]; then
+  printf '{{"current-context":"sugar-${{SUGARKUBE_CONTEXT_ENV:-staging}}","clusters":[{{"cluster":{{"server":"https://127.0.0.1:6443"}}}}]}}\n'
+  exit 0
+fi
+if [[ "$*" == *"get nodes"* ]]; then
+  if [ "${{SUGARKUBE_STUB_KUBECTL_NODE_FAIL:-}}" = "1" ]; then
+    echo 'api down' >&2
+    exit 1
+  fi
+  if [ "${{SUGARKUBE_STUB_ZERO_NODES:-}}" = "1" ]; then
+    printf '{{"items":[]}}\n'
+    exit 0
+  fi
+  if [ "${{SUGARKUBE_STUB_MISSING_ENV:-}}" = "1" ]; then
+    printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar"}}}}}}]}}\n'
+    exit 0
+  fi
+  if [ "${{SUGARKUBE_STUB_MIXED_ENV:-}}" = "1" ]; then
+    printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"staging"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"prod"}}}}}}]}}\n'
+    exit 0
+  fi
+  node_env="${{SUGARKUBE_STUB_NODE_ENV:-${{SUGARKUBE_ENV:-staging}}}}"
+  printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}}}}]}}\n' "$node_env" "$node_env"
+  exit 0
+fi
 if [[ "$*" == *"get ingress"* && "$*" == *"jsonpath"* ]]; then
   if [ "${{SUGARKUBE_STUB_KUBECTL_INGRESS_FAIL:-}}" = "1" ]; then
     echo 'error: context sugar-staging does not exist' >&2
@@ -1030,6 +1055,10 @@ def test_app_chart_bump_updates_only_pin_file_in_temp_config(
     assert "git add" in result.stdout
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+    kubectl_log_path = Path(env["KUBECTL_LOG"])
+    assert not kubectl_log_path.exists() or "get nodes" not in kubectl_log_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_app_chart_bump_refuses_empty_version(generic_app_stub_env: dict[str, str]) -> None:
@@ -1054,6 +1083,81 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
     assert "-f docs/examples/danielsmith.values.staging.yaml" in helm_log
     assert "--set image.tag=main-deadbee" in helm_log
     assert "--set image.tag=tag=main-deadbee" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("requested", "detected"),
+    [("prod", "staging"), ("staging", "prod")],
+)
+def test_app_deploy_cluster_env_mismatch_fails_before_helm(
+    requested: str, detected: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = detected
+    env["SUGARKUBE_CONTEXT_ENV"] = requested
+
+    result = _run_just(["app-deploy", "app=danielsmith", f"env={requested}", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert f"requested env={requested}" in result.stderr
+    assert f"env={detected}" in result.stderr
+    assert "Refusing to run a mutating command" in result.stderr
+    assert "sugarkube3, sugarkube4" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        ("SUGARKUBE_STUB_ZERO_NODES", "zero nodes"),
+        ("SUGARKUBE_STUB_KUBECTL_NODE_FAIL", "query failed"),
+        ("SUGARKUBE_STUB_MISSING_ENV", "missing required sugarkube.env"),
+        ("SUGARKUBE_STUB_MIXED_ENV", "mixed environment"),
+    ],
+)
+def test_app_deploy_cluster_identity_fail_closed_cases(
+    flag: str, expected: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env.copy()
+    env[flag] = "1"
+
+    result = _run_just(["app-deploy", "app=danielsmith", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert expected in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_deploy_context_name_cannot_override_node_identity(
+    generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_CONTEXT_ENV"] = "prod"
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+
+    result = _run_just(["app-deploy", "app=danielsmith", "env=prod", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert "Context:" in result.stderr
+    assert "env=staging" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_deploy_legacy_int_node_env_normalizes_to_staging(
+    generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "int"
+
+    result = _run_just(["app-deploy", "app=danielsmith", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "upgrade danielsmith" in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")

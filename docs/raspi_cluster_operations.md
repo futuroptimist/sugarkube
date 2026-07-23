@@ -512,7 +512,22 @@ just kubeconfig-env env=dev
 ```
 
 **What you should see:** This creates `~/.kube/config` with the context renamed to
-`sugar-dev`, allowing you to run kubectl commands from your local machine.
+`sugar-dev`, allowing you to run kubectl commands from your local machine. The
+context name is only a display/scoping convenience: Sugarkube treats the
+`sugarkube.env` labels on Kubernetes nodes as the authoritative environment
+identity, not the requested `env=`, kubeconfig context, hostname, or ingress
+hostname. `just kubeconfig-env` validates the copied kubeconfig against those
+node labels before replacing an existing `~/.kube/config`, and mutating Helm
+deployment, promotion, redeploy, and environment-scoped rollback commands fail
+closed when node labels are missing, mixed, malformed, or do not match the
+requested environment.
+
+Inspect the connected cluster identity without mutating anything:
+
+```bash
+just cluster-env-detect
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,CLUSTER:.metadata.labels.sugarkube\.cluster,ENV:.metadata.labels.sugarkube\.env'
+```
 
 Verify workloads across all namespaces:
 
