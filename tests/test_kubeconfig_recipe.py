@@ -150,3 +150,119 @@ def test_kubeconfig_env_mismatch_does_not_persist_false_context(tmp_path: Path) 
     assert result.returncode != 0
     assert "requested env=prod" in result.stderr
     assert existing.read_text(encoding="utf-8") == "current-context: sugar-staging\n"
+
+
+def _write_cluster_identity_recorder(bin_dir: Path, log_path: Path) -> None:
+    script = bin_dir / "python3"
+    script.write_text(
+        textwrap.dedent(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "scripts/cluster_identity.py" && "${{2:-}}" == "assert" ]]; then
+  env_value=""
+  kubeconfig_value=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --env)
+        env_value="$2"
+        shift 2
+        ;;
+      --kubeconfig)
+        kubeconfig_value="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  printf '%s|%s\n' "$env_value" "$kubeconfig_value" >> {str(log_path)!r}
+  case "$env_value" in
+    dev|staging|prod) printf '%s\n' "$env_value"; exit 0 ;;
+    *) printf 'unsupported env=%s\n' "$env_value" >&2; exit 2 ;;
+  esac
+fi
+exec /usr/bin/python3 "$@"
+"""
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+@pytest.mark.parametrize(
+    ("requested", "normalized"),
+    [
+        ("prod", "prod"),
+        ("env=prod", "prod"),
+        ("staging", "staging"),
+        ("env=staging", "staging"),
+        ("int", "staging"),
+        ("env=int", "staging"),
+    ],
+)
+def test_assert_cluster_env_normalizes_invocation_forms(
+    tmp_path: Path, requested: str, normalized: str
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "cluster_identity_calls.log"
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    _write_cluster_identity_recorder(bin_dir, log_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+
+    result = subprocess.run(
+        [
+            "just",
+            "--justfile",
+            str(JUSTFILE),
+            "assert-cluster-env",
+            requested,
+            str(kubeconfig),
+        ],
+        cwd=JUSTFILE.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert log_path.read_text(encoding="utf-8") == f"{normalized}|{kubeconfig}\n"
+    if requested.endswith("int"):
+        assert 'env name "int" is deprecated' in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_assert_cluster_env_rejects_invalid_normalized_value(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "cluster_identity_calls.log"
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    _write_cluster_identity_recorder(bin_dir, log_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+
+    result = subprocess.run(
+        [
+            "just",
+            "--justfile",
+            str(JUSTFILE),
+            "assert-cluster-env",
+            "env=production",
+            str(kubeconfig),
+        ],
+        cwd=JUSTFILE.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "unsupported env=production" in result.stderr
+    assert log_path.read_text(encoding="utf-8") == f"production|{kubeconfig}\n"
