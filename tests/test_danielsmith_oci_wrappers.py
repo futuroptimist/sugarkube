@@ -42,7 +42,7 @@ exit 0
         """#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$*" == *"get nodes -o json"* ]]; then
-  env_label="${SUGARKUBE_STUB_NODE_ENV:-${SUGARKUBE_REQUESTED_ENV:-${SUGARKUBE_ENV:-staging}}}"
+  env_label="${SUGARKUBE_STUB_NODE_ENV:-staging}"
   printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"%s","sugarkube.cluster":"sugarkube"}}}]}\n' "$env_label"
   exit 0
 fi
@@ -132,6 +132,7 @@ def test_danielsmith_oci_redeploy_normalizes_named_tag(
 def test_danielsmith_oci_promote_prod_normalizes_repeated_named_tag(
     danielsmith_oci_stub_env: dict[str, str],
 ) -> None:
+    danielsmith_oci_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     result = _run_just(
         ["danielsmith-oci-promote-prod", "tag=tag=main-deadbee"],
         danielsmith_oci_stub_env,

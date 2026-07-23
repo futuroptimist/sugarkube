@@ -21,7 +21,7 @@ def norm_env(value: str) -> str:
 def run_kubectl(kubeconfig: str, args: list[str]) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["KUBECONFIG"] = kubeconfig
-    return subprocess.run(["kubectl", *args], env=env, text=True, capture_output=True, check=False)
+    return subprocess.run(["kubectl", "--kubeconfig", kubeconfig, *args], env=env, text=True, capture_output=True, check=False)
 
 
 def safe_info(kubeconfig: str) -> tuple[str, str]:
@@ -71,6 +71,8 @@ def load_identity(kubeconfig: str, requested: str | None = None) -> tuple[int, s
         name = str(meta.get("name") or "<unnamed>")
         nodes.append(name)
         labels = meta.get("labels", {}) if isinstance(meta, dict) else {}
+        if not isinstance(labels, dict):
+            labels = {}
         raw_env = str(labels.get("sugarkube.env") or "").strip()
         raw_cluster = str(labels.get("sugarkube.cluster") or "").strip()
         if raw_cluster:
@@ -122,7 +124,17 @@ def main() -> int:
     assert detected is not None
     if args.command == "assert" and requested != detected:
         return fail(f"requested env={requested}, but the connected Kubernetes cluster identifies as env={detected}.\nRefusing to run a mutating command.", requested=requested, detected={detected}, clusters=LAST_DETAILS["clusters"], nodes=LAST_DETAILS["nodes"], kubeconfig=kubeconfig)
-    print(detected)
+    if args.command == "detect":
+        context, server = safe_info(kubeconfig)
+        clusters = sorted(LAST_DETAILS["clusters"])
+        nodes = LAST_DETAILS["nodes"]
+        print(f"Environment: {detected}")
+        print(f"Cluster: {clusters[0] if clusters else '<none>'}")
+        print(f"Nodes: {', '.join(nodes) if nodes else '<none>'}")
+        print(f"Context: {context}")
+        print(f"Server: {server}")
+    else:
+        print(detected)
     return 0
 
 if __name__ == "__main__":

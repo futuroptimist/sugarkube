@@ -65,7 +65,7 @@ fi
 set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
 if [[ "$*" == *"get nodes -o json"* ]]; then
-  env_label="${{SUGARKUBE_STUB_NODE_ENV:-${{SUGARKUBE_REQUESTED_ENV:-${{SUGARKUBE_ENV:-staging}}}}}}"
+  env_label="${{SUGARKUBE_STUB_NODE_ENV:-staging}}"
   cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugarkube}}"
   printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}}]}}\n' "$env_label" "$cluster_label" "$env_label" "$cluster_label"
   exit 0
@@ -1228,6 +1228,7 @@ def test_app_promote_prod_delegates_to_prod_deploy_coordinates(
     chart: str,
     generic_app_stub_env: dict[str, str],
 ) -> None:
+    generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     result = _run_just(
         ["app-promote-prod", f"app={app}", "tag=main-deadbee"],
         generic_app_stub_env,
@@ -1310,6 +1311,7 @@ def test_promote_wrappers_preserve_app_specific_output(
     check_heading: str,
     generic_app_stub_env: dict[str, str],
 ) -> None:
+    generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     result = _run_just([recipe, "tag=main-deadbee"], generic_app_stub_env)
 
     assert result.returncode == 0, result.stderr + result.stdout

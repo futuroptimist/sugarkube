@@ -486,9 +486,7 @@ kubeconfig-env env='dev':
     sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
     sudo chown "$user":"$user" "${tmp_config}"
     chmod 600 "${tmp_config}"
-    export SUGARKUBE_REQUESTED_ENV="${env_name}"
     detected_env="$(python3 scripts/cluster_identity.py assert --kubeconfig "${tmp_config}" --env "${env_name}")"
-    unset SUGARKUBE_REQUESTED_ENV
     scope_name="sugar-${detected_env}"
     python3 scripts/update_kubeconfig_scope.py "${tmp_config}" "${scope_name}"
     mv "${tmp_config}" "${HOME}/.kube/config"
@@ -1215,7 +1213,7 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' allow_install='false' reuse_values='false':
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1232,13 +1230,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
-    if [ -n "${SUGARKUBE_ENV:-}" ]; then
-      python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${SUGARKUBE_ENV}" >/dev/null
-    fi
-
     raw_args=(
         "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
-        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}"
+        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}"
     )
 
     release=""
@@ -1250,6 +1244,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     version_file=""
     tag=""
     default_tag=""
+    requested_env=""
 
     normalize_prefixed_value() {
         local key="${1}"
@@ -1290,6 +1285,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             version_file=*) version_file="${raw_arg#version_file=}" ;;
             tag=*) tag="${raw_arg#tag=}" ;;
             default_tag=*) default_tag="${raw_arg#default_tag=}" ;;
+            env=*) requested_env="${raw_arg#env=}" ;;
             *)
                 case "${raw_index}" in
                     0) assign_if_empty release "${raw_arg}" ;;
@@ -1301,6 +1297,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                     6) assign_if_empty version_file "${raw_arg}" ;;
                     7) assign_if_empty tag "${raw_arg}" ;;
                     8) assign_if_empty default_tag "${raw_arg}" ;;
+                    9) assign_if_empty requested_env "${raw_arg}" ;;
                 esac
                 ;;
         esac
@@ -1315,6 +1312,20 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     version_file="$(normalize_prefixed_value version_file "${version_file}")"
     tag="$(normalize_prefixed_value tag "${tag}")"
     default_tag="$(normalize_prefixed_value default_tag "${default_tag}")"
+    requested_env="$(normalize_prefixed_value env "${requested_env}")"
+    if [ -z "${requested_env}" ] && [ -n "${SUGARKUBE_ENV:-}" ]; then
+      requested_env="${SUGARKUBE_ENV}"
+    fi
+    if [ -n "${requested_env}" ]; then
+      if [ "${requested_env}" = "int" ]; then
+        requested_env="staging"
+      fi
+      case "${requested_env}" in
+        dev|staging|prod) ;;
+        *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
+      esac
+      export SUGARKUBE_ENV="${requested_env}"
+    fi
 
     allow_install="$(normalize_prefixed_value allow_install "{{ allow_install }}")"
     reuse_values="$(normalize_prefixed_value reuse_values "{{ reuse_values }}")"
@@ -1554,14 +1565,17 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         helm_args+=("${version_args[@]}")
     fi
 
+    if [ -n "${requested_env}" ]; then
+      python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
+    fi
     helm "${helm_args[@]}"
     wait_for_rollouts
 
-helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='true' reuse_values='false'
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' allow_install='true' reuse_values='false'
 
-helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' allow_install='false' reuse_values='true'
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' allow_install='false' reuse_values='true'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
@@ -1605,7 +1619,8 @@ app-deploy app env='staging' tag='' config='':
       values="${SUGARKUBE_VALUES}" \
       version="${SUGARKUBE_VERSION:-}" \
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
-      tag="${SUGARKUBE_TAG}"
+      tag="${SUGARKUBE_TAG}" \
+      env="${SUGARKUBE_ENV}"
 
 # Generic upgrade-only app redeploy backed by app config files.
 app-redeploy app env='staging' tag='' config='':
@@ -1639,7 +1654,8 @@ app-redeploy app env='staging' tag='' config='':
       values="${SUGARKUBE_VALUES}" \
       version="${SUGARKUBE_VERSION:-}" \
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
-      tag="${SUGARKUBE_TAG}"
+      tag="${SUGARKUBE_TAG}" \
+      env="${SUGARKUBE_ENV}"
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
 app-promote-prod app tag='' config='':
@@ -1847,7 +1863,8 @@ dspace-oci-deploy env='staging' tag='':
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}"
+      tag="${deploy_tag}" \
+      env="${env_name}"
 
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \
@@ -1910,7 +1927,8 @@ dspace-oci-deploy-prod-subdomain tag='':
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}"
+      tag="${deploy_tag}" \
+      env="prod"
 
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \
@@ -1996,7 +2014,8 @@ dspace-oci-redeploy env='staging' tag='':
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
-      tag="${deploy_tag}" default_tag="${default_tag_value}"
+      tag="${deploy_tag}" \
+      env="${env_name}" default_tag="${default_tag_value}"
 
     echo "Forcing rollout restart for dspace deployment..."
     if ! kubectl -n dspace rollout restart deploy/dspace; then
@@ -2161,7 +2180,8 @@ tokenplace-oci-deploy env='staging' tag='':
       chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
       values="${values_chain}" \
       version_file='docs/apps/tokenplace.version' \
-      tag="${resolved_tag}"
+      tag="${resolved_tag}" \
+      env="${env_name}"
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
@@ -2268,7 +2288,8 @@ tokenplace-oci-redeploy env='staging' tag='':
       chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
       values="${values_chain}" \
       version_file='docs/apps/tokenplace.version' \
-      tag="${resolved_tag}" default_tag="${default_tag}"
+      tag="${resolved_tag}" \
+      env="${env_name}" default_tag="${default_tag}"
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
@@ -2319,7 +2340,7 @@ tokenplace-deploy release='tokenplace' namespace='tokenplace' chart='oci://ghcr.
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
+      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}" env="${SUGARKUBE_ENV:-}"
 
 # Upgrade-only path for existing token.place releases.
 tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr.io/futuroptimist/charts/tokenplace' values='' version_file='docs/apps/tokenplace.version' version='' tag='' default_tag='':
@@ -2355,14 +2376,14 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
-      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
+      version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}" env="${SUGARKUBE_ENV:-}"
 
 tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     if [ -z '{{ release }}' ] || [ -z '{{ namespace }}' ] || [ -z '{{ revision }}' ]; then
-      echo "Usage: just tokenplace-rollback release=<name> namespace=<ns> revision=<helm_revision> env=<dev|staging|prod>" >&2
+      echo "Usage: just tokenplace-rollback release=<name> namespace=<ns> revision=<helm_revision> [env=<dev|staging|prod>]" >&2
       exit 1
     fi
     ns='{{ namespace }}'
@@ -2371,21 +2392,29 @@ tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env=
     while [ "${env_name#env=}" != "${env_name}" ]; do
       env_name="${env_name#env=}"
     done
-    if [ -z "${env_name}" ]; then
-      echo "ERROR: env is required for tokenplace-rollback. Use env=dev|staging|prod." >&2
-      exit 1
+    if [ -z "${env_name}" ] && [ -n "${SUGARKUBE_ENV:-}" ]; then
+      env_name="${SUGARKUBE_ENV}"
     fi
     if [ "${env_name}" = "int" ]; then
       env_name="staging"
     fi
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
-    esac
-    export KUBECONFIG="${HOME}/.kube/config"
-    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+    if [ -z "${env_name}" ]; then
+      detect_output="$(python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" detect --kubeconfig "${KUBECONFIG}")"
+      env_name="$(awk -F': ' '/^Environment:/ {print $2; exit}' <<< "${detect_output}")"
+      if [ -z "${env_name}" ]; then
+        echo "ERROR: unable to determine connected cluster environment for rollback." >&2
+        echo "${detect_output}" >&2
+        exit 1
+      fi
+    else
+      case "${env_name}" in
+        dev|staging|prod) ;;
+        *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
+      esac
+      just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
+    fi
     export SUGARKUBE_ENV="${env_name}"
-    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     helm -n "${ns}" rollback "${release}" '{{ revision }}'
 
@@ -2514,7 +2543,8 @@ danielsmith-oci-deploy env='staging' tag='':
       chart='oci://ghcr.io/futuroptimist/charts/danielsmith' \
       values="${values_chain}" \
       version_file='docs/apps/danielsmith.version' \
-      tag="${resolved_tag}"
+      tag="${resolved_tag}" \
+      env="${env_name}"
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
@@ -2627,7 +2657,8 @@ danielsmith-oci-redeploy env='staging' tag='':
       chart='oci://ghcr.io/futuroptimist/charts/danielsmith' \
       values="${values_chain}" \
       version_file='docs/apps/danielsmith.version' \
-      tag="${resolved_tag}" default_tag="${default_tag}"
+      tag="${resolved_tag}" \
+      env="${env_name}" default_tag="${default_tag}"
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"

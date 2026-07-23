@@ -17,6 +17,8 @@ def _kubectl(bin_dir: Path) -> Path:
             """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+if len(args) >= 2 and args[0] == "--kubeconfig":
+    args = args[2:]
 if args[:2] == ["config", "current-context"]:
     print(os.environ.get("STUB_CONTEXT", "sugar-prod")); raise SystemExit(0)
 if args[:2] == ["config", "view"]:
@@ -33,6 +35,8 @@ if args == ["get", "nodes", "-o", "json"]:
         print(json.dumps({"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"staging"}}}]})); raise SystemExit(0)
     if mode == "mixed-cluster":
         print(json.dumps({"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"staging","sugarkube.cluster":"cube-a"}}},{"metadata":{"name":"sugarkube4","labels":{"sugarkube.env":"staging","sugarkube.cluster":"cube-b"}}}]})); raise SystemExit(0)
+    if mode == "malformed-labels":
+        print(json.dumps({"items":[{"metadata":{"name":"sugarkube3","labels":[]}}]})); raise SystemExit(0)
     if mode == "mixed":
         envs = ["staging", "prod"]
     else:
@@ -118,6 +122,39 @@ def test_cluster_identity_mixed_cluster_labels_fail_closed(tmp_path: Path) -> No
     result = _run(tmp_path, "staging", "mixed-cluster")
     assert result.returncode != 0
     assert "mixed or ambiguous sugarkube.cluster" in result.stderr
+
+
+def test_cluster_identity_malformed_label_structure_fails_without_traceback(tmp_path: Path) -> None:
+    result = _run(tmp_path, "staging", "malformed-labels")
+    assert result.returncode != 0
+    assert "missing sugarkube.env" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cluster_identity_detect_prints_details(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["STUB_NODES"] = "prod"
+    env["STUB_CONTEXT"] = "sugar-prod"
+    result = subprocess.run(
+        ["python3", str(SCRIPT), "detect", "--kubeconfig", str(kubeconfig)],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "Environment: prod" in result.stdout
+    assert "Cluster: cube" in result.stdout
+    assert "Nodes: sugarkube3, sugarkube4" in result.stdout
+    assert "Context: sugar-prod" in result.stdout
+    assert "Server: https://127.0.0.1:6443" in result.stdout
 
 
 def test_cluster_identity_assert_requires_env(tmp_path: Path) -> None:
