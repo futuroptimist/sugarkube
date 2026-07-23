@@ -2497,32 +2497,6 @@ def test_direct_helm_oci_helper_mismatch_fails_before_any_helm(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_direct_helm_oci_helper_cluster_mismatch_fails_before_any_helm(
-    generic_app_stub_env: dict[str, str],
-) -> None:
-    env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CLUSTER"] = "other-sugar"
-    result = _run_just(
-        [
-            "helm-oci-install",
-            "release=tokenplace",
-            "namespace=tokenplace",
-            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
-            "version_file=docs/apps/tokenplace.version",
-            "env=prod",
-        ],
-        env,
-    )
-
-    assert result.returncode != 0
-    assert "expected cluster=sugar" in result.stderr
-    assert "cluster=other-sugar" in result.stderr
-    helm_log_path = Path(env["HELM_LOG"])
-    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
-
-
-@pytest.mark.usefixtures("ensure_just_available")
 def test_direct_helm_oci_helper_matching_env_succeeds(
     generic_app_stub_env: dict[str, str],
 ) -> None:

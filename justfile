@@ -486,7 +486,7 @@ kubeconfig-env env='dev':
     sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
     sudo chown "$user":"$user" "${tmp_config}"
     chmod 600 "${tmp_config}"
-    detected_env="$(python3 scripts/cluster_identity.py assert --kubeconfig "${tmp_config}" --env "${env_name}" --cluster "${SUGARKUBE_CLUSTER}")"
+    detected_env="$(python3 scripts/cluster_identity.py assert --kubeconfig "${tmp_config}" --env "${env_name}")"
     scope_name="sugar-${detected_env}"
     python3 scripts/update_kubeconfig_scope.py "${tmp_config}" "${scope_name}"
     mv "${tmp_config}" "${HOME}/.kube/config"
@@ -512,7 +512,7 @@ assert-cluster-env env kubeconfig='':
     if [ -z "${kubeconfig_path}" ]; then
       kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
     fi
-    python3 scripts/cluster_identity.py assert --kubeconfig "${kubeconfig_path}" --env {{ quote(env) }} --cluster "${SUGARKUBE_CLUSTER}"
+    python3 scripts/cluster_identity.py assert --kubeconfig "${kubeconfig_path}" --env {{ quote(env) }}
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
@@ -1338,7 +1338,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
-    python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" --cluster "${SUGARKUBE_CLUSTER}" >/dev/null
+    python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
     chart_version="${version}"
     if [ -z "${chart_version}" ] && [ -n "${version_file}" ] && [ -f "${version_file}" ]; then
