@@ -43,7 +43,7 @@ exit 0
 set -euo pipefail
 if [[ "$*" == *"get nodes -o json"* ]]; then
   env_label="${SUGARKUBE_STUB_NODE_ENV:-staging}"
-  printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"%s","sugarkube.cluster":"sugarkube"}}}]}\n' "$env_label"
+  printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"%s","sugarkube.cluster":"sugar"}}}]}\n' "$env_label"
   exit 0
 fi
 if [[ "$*" == *"config current-context"* ]]; then printf 'sugar-prod\n'; exit 0; fi

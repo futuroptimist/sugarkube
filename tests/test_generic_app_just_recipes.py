@@ -66,7 +66,7 @@ set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
 if [[ "$*" == *"get nodes -o json"* ]]; then
   env_label="${{SUGARKUBE_STUB_NODE_ENV:-staging}}"
-  cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugarkube}}"
+  cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugar}}"
   printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}}]}}\n' "$env_label" "$cluster_label" "$env_label" "$cluster_label"
   exit 0
 fi
@@ -2492,6 +2492,32 @@ def test_direct_helm_oci_helper_mismatch_fails_before_any_helm(
 
     assert result.returncode != 0
     assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_direct_helm_oci_helper_cluster_mismatch_fails_before_any_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    env["SUGARKUBE_STUB_CLUSTER"] = "other-sugar"
+    result = _run_just(
+        [
+            "helm-oci-install",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version_file=docs/apps/tokenplace.version",
+            "env=prod",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "expected cluster=sugar" in result.stderr
+    assert "cluster=other-sugar" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 

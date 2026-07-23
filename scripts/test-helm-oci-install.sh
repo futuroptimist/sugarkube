@@ -103,7 +103,7 @@ set -euo pipefail
 echo "kubectl $*" >> "${KUBECTL_TEST_LOG:-/dev/null}"
 
 if [[ "$*" == *"get nodes -o json"* ]]; then
-    printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugarkube"}}},{"metadata":{"name":"sugarkube4","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugarkube"}}}]}\n'
+    printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar"}}},{"metadata":{"name":"sugarkube4","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar"}}}]}\n'
     exit 0
 fi
 

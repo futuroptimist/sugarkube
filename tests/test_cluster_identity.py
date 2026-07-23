@@ -62,7 +62,7 @@ def _run(tmp_path: Path, requested: str, mode: str) -> subprocess.CompletedProce
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     env["STUB_NODES"] = mode
     return subprocess.run(
-        ["python3", str(SCRIPT), "assert", "--kubeconfig", str(kubeconfig), "--env", requested],
+        ["python3", str(SCRIPT), "assert", "--kubeconfig", str(kubeconfig), "--env", requested, "--cluster", "cube"],
         cwd=REPO_ROOT,
         env=env,
         text=True,
@@ -124,6 +124,28 @@ def test_cluster_identity_mixed_cluster_labels_fail_closed(tmp_path: Path) -> No
     assert "mixed or ambiguous sugarkube.cluster" in result.stderr
 
 
+def test_cluster_identity_unexpected_cluster_label_fails_closed(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["STUB_NODES"] = "staging"
+    result = subprocess.run(
+        ["python3", str(SCRIPT), "assert", "--kubeconfig", str(kubeconfig), "--env", "staging", "--cluster", "other-cube"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "expected cluster=other-cube" in result.stderr
+    assert "cluster=cube" in result.stderr
+
+
 def test_cluster_identity_malformed_label_structure_fails_without_traceback(tmp_path: Path) -> None:
     result = _run(tmp_path, "staging", "malformed-labels")
     assert result.returncode != 0
@@ -155,6 +177,26 @@ def test_cluster_identity_detect_prints_details(tmp_path: Path) -> None:
     assert "Nodes: sugarkube3, sugarkube4" in result.stdout
     assert "Context: sugar-prod" in result.stdout
     assert "Server: https://127.0.0.1:6443" in result.stdout
+
+
+def test_cluster_identity_assert_requires_cluster(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        ["python3", str(SCRIPT), "assert", "--kubeconfig", str(kubeconfig), "--env", "staging"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "assert requires --cluster" in result.stderr
 
 
 def test_cluster_identity_assert_requires_env(tmp_path: Path) -> None:

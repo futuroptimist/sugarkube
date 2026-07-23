@@ -53,7 +53,7 @@ def _write_fake_kubectl(bin_dir: Path) -> None:
 set -euo pipefail
 if [[ "$*" == *"get nodes -o json"* ]]; then
   env_label="${SUGARKUBE_STUB_NODE_ENV:-dev}"
-  printf '{"items":[{"metadata":{"name":"sugarkube1","labels":{"sugarkube.env":"%s","sugarkube.cluster":"sugarkube"}}}]}\n' "$env_label"
+  printf '{"items":[{"metadata":{"name":"sugarkube1","labels":{"sugarkube.env":"%s","sugarkube.cluster":"sugar"}}}]}\n' "$env_label"
   exit 0
 fi
 if [[ "$*" == *"config current-context"* ]]; then printf 'PLACEHOLDER-CONTEXT\n'; exit 0; fi
