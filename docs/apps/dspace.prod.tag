@@ -1,3 +1,3 @@
 # Default immutable image tag for production dspace deploys.
-# Override with a newer pinned tag when promoting releases.
-v3.0.0
+# Override with a newer pinned tag only after staging validation and promotion approval.
+main-1a31a56
