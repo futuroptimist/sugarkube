@@ -461,7 +461,20 @@ kubeconfig env='':
 kubeconfig-user:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
-# Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
+# Show the Kubernetes-reported Sugarkube environment identity from node labels.
+cluster-env-detect kubeconfig='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    kubeconfig_input={{ quote(kubeconfig) }}
+    while [ "${kubeconfig_input#kubeconfig=}" != "${kubeconfig_input}" ]; do
+      kubeconfig_input="${kubeconfig_input#kubeconfig=}"
+    done
+    if [ -z "${kubeconfig_input}" ]; then
+      kubeconfig_input="${KUBECONFIG:-${HOME}/.kube/config}"
+    fi
+    python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" --kubeconfig "${kubeconfig_input}"
+
+# Copy k3s kubeconfig to ~/.kube/config and rename context for the verified environment.
 kubeconfig-env env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -480,12 +493,23 @@ kubeconfig-env env='dev':
     fi
     user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
+    tmp_config="$(mktemp "${HOME}/.kube/config.candidate.XXXXXX")"
+    cleanup() { rm -f "${tmp_config}"; }
+    trap cleanup EXIT
+    sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
+    sudo chown "$user":"$user" "${tmp_config}" 2>/dev/null || true
     chmod 700 ~/.kube
-    chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+    chmod 600 "${tmp_config}"
+    detect_output="$(python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" --kubeconfig "${tmp_config}" --request-env "${env_name}" --assert-env)"
+    detected_env="$(echo "${detect_output}" | sed -n "s/^env=//p" | head -n 1)"
+    if [ -z "${detected_env}" ]; then
+      echo "ERROR: cluster identity detector did not return an environment." >&2
+      exit 1
+    fi
+    scope_name="sugar-${detected_env}"
+    python3 "{{ justfile_directory() }}/scripts/update_kubeconfig_scope.py" "${tmp_config}" "${scope_name}"
+    mv "${tmp_config}" "${HOME}/.kube/config"
+    trap - EXIT
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
@@ -1321,6 +1345,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     echo 'NOTE: chart pins are explicit. `tag=...` changes only the image tag.'
     printf 'Run `just app-chart-status app=%s` before release deploys to check for newer published chart versions.\n' "${release}"
     printf 'Use `just app-chart-bump app=%s version=<version>` to intentionally update %s.\n' "${release}" "${version_file:-docs/apps/${release}.version}"
+    if [ -n "${SUGARKUBE_ENV:-}" ]; then
+      python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" --kubeconfig "${KUBECONFIG}" --request-env "${SUGARKUBE_ENV}" --assert-env >/dev/null
+    fi
+
     if [ -n "${chart_version}" ]; then
       helm show chart "${chart}" --version "${chart_version}" >/dev/null
     fi
@@ -1806,6 +1834,7 @@ dspace-oci-deploy env='staging' tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
 
+    export SUGARKUBE_ENV="${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
@@ -2447,6 +2476,7 @@ danielsmith-oci-deploy env='staging' tag='':
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
+    export SUGARKUBE_ENV="${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='danielsmith' namespace='danielsmith' \
       chart='oci://ghcr.io/futuroptimist/charts/danielsmith' \
@@ -2559,6 +2589,7 @@ danielsmith-oci-redeploy env='staging' tag='':
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
 
+    export SUGARKUBE_ENV="${env_name}"
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='danielsmith' namespace='danielsmith' \
       chart='oci://ghcr.io/futuroptimist/charts/danielsmith' \

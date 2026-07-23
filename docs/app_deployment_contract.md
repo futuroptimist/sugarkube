@@ -70,6 +70,37 @@ The current apps map to that model as examples:
 | danielsmith.io | `ghcr.io/futuroptimist/danielsmith.io` | `oci://ghcr.io/futuroptimist/charts/danielsmith` | `danielsmith` | `danielsmith` | `docs/apps/danielsmith.version` | `docs/apps/danielsmith.prod.tag` |
 | jobbot3000 | `ghcr.io/futuroptimist/jobbot3000` | `oci://ghcr.io/futuroptimist/charts/jobbot3000` | `jobbot3000` | `jobbot3000` | `docs/apps/jobbot3000.version` | `docs/apps/jobbot3000.prod.tag` |
 
+
+## Cluster environment identity guard
+
+Sugarkube treats Kubernetes node labels as the authoritative identity for a
+connected physical cluster. Every node returned by the Kubernetes API must carry
+a nonempty `sugarkube.env` label (`dev`, `staging`, or `prod`; legacy `int` is
+normalized to `staging`) and all nodes must agree on one normalized environment.
+The companion `sugarkube.cluster` labels are included in diagnostics so operators
+can confirm which cube they are touching.
+
+Kubeconfig context names such as `sugar-prod` are display and scoping
+conveniences only. They are never trusted as proof that the connected cluster is
+production, and hostname or ingress naming is not used for identity. Before
+`kubeconfig-env` persists a renamed kubeconfig, and immediately before shared
+Helm install/upgrade paths mutate an environment-scoped release, Sugarkube reads
+the node labels from the supplied kubeconfig and fails closed if the API cannot
+be queried, returns zero nodes, has missing or malformed labels, reports mixed
+environments, or reports an environment different from the requested `env=`.
+
+Operators can inspect the detected identity without mutating the cluster with:
+
+```bash
+just cluster-env-detect
+```
+
+The equivalent raw Kubernetes query is:
+
+```bash
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,CLUSTER:.metadata.labels.sugarkube\.cluster,ENV:.metadata.labels.sugarkube\.env'
+```
+
 ## Standard image tag model
 
 Deployment tags must identify application code and release intent, not mutable

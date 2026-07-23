@@ -40,6 +40,14 @@ exit 0
     _write_executable(
         bin_dir / "kubectl",
         """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"config current-context"* ]]; then printf 'sugar-staging\n'; exit 0; fi
+if [[ "$*" == *"config view"* ]]; then printf 'https://127.0.0.1:6443'; exit 0; fi
+if [[ "$*" == *"get nodes"* ]]; then
+  env_label="${SUGARKUBE_STUB_NODE_ENV:-staging}"
+  printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}]}\n' "$env_label"
+  exit 0
+fi
 exit 0
 """,
     )
@@ -124,13 +132,15 @@ def test_danielsmith_oci_redeploy_normalizes_named_tag(
 def test_danielsmith_oci_promote_prod_normalizes_repeated_named_tag(
     danielsmith_oci_stub_env: dict[str, str],
 ) -> None:
+    env = danielsmith_oci_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     result = _run_just(
         ["danielsmith-oci-promote-prod", "tag=tag=main-deadbee"],
-        danielsmith_oci_stub_env,
+        env,
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
-    helm_log = Path(danielsmith_oci_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "--set image.tag=main-deadbee" in helm_log
     assert "--set image.tag=tag=main-deadbee" not in helm_log
 
