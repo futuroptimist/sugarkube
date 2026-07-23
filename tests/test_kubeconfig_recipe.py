@@ -214,11 +214,20 @@ def test_assert_cluster_env_prefixed_mismatch_fails_closed(tmp_path: Path) -> No
 
 
 @pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
-def test_assert_cluster_env_prefixed_invalid_value_remains_rejected(tmp_path: Path) -> None:
-    result = _run_assert_cluster_env_recipe(tmp_path, "env=qa", "prod")
+@pytest.mark.parametrize(
+    ("requested", "expected_error"),
+    [
+        ("env=qa", "env must be one of dev|staging|prod"),
+        ("env=", "assert requires --env dev|staging|prod"),
+    ],
+)
+def test_assert_cluster_env_prefixed_invalid_value_remains_rejected(
+    tmp_path: Path, requested: str, expected_error: str
+) -> None:
+    result = _run_assert_cluster_env_recipe(tmp_path, requested, "prod")
 
     assert result.returncode != 0
-    assert "env must be one of dev|staging|prod" in result.stderr
+    assert expected_error in result.stderr
     assert result.stdout == ""
 
 
