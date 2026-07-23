@@ -2472,3 +2472,17 @@ def test_app_chart_bump_remains_cluster_independent(generic_app_stub_env: dict[s
     assert result.returncode == 0, result.stderr + result.stdout
     kubectl_log = Path(env["HOME"]).parent / "kubectl.log"
     assert not kubectl_log.exists() or "get nodes" not in kubectl_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+    result = _run_just(["dspace-oci-promote-prod", "tag=main-deadbee"], env)
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""

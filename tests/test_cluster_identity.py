@@ -29,6 +29,10 @@ if args == ["get", "nodes", "-o", "json"]:
         print('{"items": []}'); raise SystemExit(0)
     if mode == "missing":
         print(json.dumps({"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"cube"}}}]})); raise SystemExit(0)
+    if mode == "missing-cluster":
+        print(json.dumps({"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"staging"}}}]})); raise SystemExit(0)
+    if mode == "mixed-cluster":
+        print(json.dumps({"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.env":"staging","sugarkube.cluster":"cube-a"}}},{"metadata":{"name":"sugarkube4","labels":{"sugarkube.env":"staging","sugarkube.cluster":"cube-b"}}}]})); raise SystemExit(0)
     if mode == "mixed":
         envs = ["staging", "prod"]
     else:
@@ -102,3 +106,35 @@ def test_cluster_identity_missing_env_label_fails_closed(tmp_path: Path) -> None
 
 def test_cluster_identity_mixed_env_labels_fail_closed(tmp_path: Path) -> None:
     assert "mixed or ambiguous" in _run(tmp_path, "prod", "mixed").stderr
+
+
+def test_cluster_identity_missing_cluster_label_fails_closed(tmp_path: Path) -> None:
+    result = _run(tmp_path, "staging", "missing-cluster")
+    assert result.returncode != 0
+    assert "missing sugarkube.cluster" in result.stderr
+
+
+def test_cluster_identity_mixed_cluster_labels_fail_closed(tmp_path: Path) -> None:
+    result = _run(tmp_path, "staging", "mixed-cluster")
+    assert result.returncode != 0
+    assert "mixed or ambiguous sugarkube.cluster" in result.stderr
+
+
+def test_cluster_identity_assert_requires_env(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        ["python3", str(SCRIPT), "assert", "--kubeconfig", str(kubeconfig)],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "assert requires --env" in result.stderr

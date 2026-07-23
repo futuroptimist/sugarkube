@@ -63,7 +63,8 @@ def load_identity(kubeconfig: str, requested: str | None = None) -> tuple[int, s
     nodes: list[str] = []
     envs: set[str] = set()
     clusters: set[str] = set()
-    missing: list[str] = []
+    missing_env: list[str] = []
+    missing_cluster: list[str] = []
     malformed: list[str] = []
     for item in items:
         meta = item.get("metadata", {}) if isinstance(item, dict) else {}
@@ -74,21 +75,27 @@ def load_identity(kubeconfig: str, requested: str | None = None) -> tuple[int, s
         raw_cluster = str(labels.get("sugarkube.cluster") or "").strip()
         if raw_cluster:
             clusters.add(raw_cluster)
+        else:
+            missing_cluster.append(name)
         if not raw_env:
-            missing.append(name)
+            missing_env.append(name)
             continue
         env = norm_env(raw_env)
         if env not in VALID_ENVS:
             malformed.append(f"{name}={raw_env}")
         envs.add(env)
 
-    if missing:
-        return fail(f"one or more nodes are missing sugarkube.env labels: {', '.join(missing)}.", requested=requested, detected=envs, clusters=clusters, nodes=nodes, kubeconfig=kubeconfig), None
+    if missing_env:
+        return fail(f"one or more nodes are missing sugarkube.env labels: {', '.join(missing_env)}.", requested=requested, detected=envs, clusters=clusters, nodes=nodes, kubeconfig=kubeconfig), None
+    if missing_cluster:
+        return fail(f"one or more nodes are missing sugarkube.cluster labels: {', '.join(missing_cluster)}.", requested=requested, detected=envs, clusters=clusters, nodes=nodes, kubeconfig=kubeconfig), None
     if malformed:
         return fail(f"one or more nodes have malformed sugarkube.env labels: {', '.join(malformed)}.", requested=requested, detected=envs, clusters=clusters, nodes=nodes, kubeconfig=kubeconfig), None
     LAST_DETAILS["envs"] = set(envs)
     LAST_DETAILS["clusters"] = set(clusters)
     LAST_DETAILS["nodes"] = list(nodes)
+    if len(clusters) != 1:
+        return fail("mixed or ambiguous sugarkube.cluster labels detected; refusing to run a mutating command.", requested=requested, detected=envs, clusters=clusters, nodes=nodes, kubeconfig=kubeconfig), None
     if len(envs) != 1:
         return fail("mixed or ambiguous sugarkube.env labels detected; refusing to run a mutating command.", requested=requested, detected=envs, clusters=clusters, nodes=nodes, kubeconfig=kubeconfig), None
     detected = next(iter(envs))
@@ -103,6 +110,9 @@ def main() -> int:
     args = parser.parse_args()
     kubeconfig = str(Path(args.kubeconfig).expanduser())
     requested = norm_env(args.env) if args.env else None
+    if args.command == "assert" and not requested:
+        print("ERROR: assert requires --env dev|staging|prod (legacy int normalizes to staging).", file=sys.stderr)
+        return 1
     if requested and requested not in VALID_ENVS:
         print("ERROR: env must be one of dev|staging|prod (legacy int normalizes to staging).", file=sys.stderr)
         return 1

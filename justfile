@@ -484,7 +484,7 @@ kubeconfig-env env='dev':
     cleanup() { rm -f "${tmp_config}"; }
     trap cleanup EXIT
     sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
-    sudo chown "$user":"$user" "${tmp_config}" || true
+    sudo chown "$user":"$user" "${tmp_config}"
     chmod 600 "${tmp_config}"
     export SUGARKUBE_REQUESTED_ENV="${env_name}"
     detected_env="$(python3 scripts/cluster_identity.py assert --kubeconfig "${tmp_config}" --env "${env_name}")"
@@ -1839,6 +1839,8 @@ dspace-oci-deploy env='staging' tag='':
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
+    export SUGARKUBE_ENV="${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
@@ -1900,6 +1902,8 @@ dspace-oci-deploy-prod-subdomain tag='':
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
+    export SUGARKUBE_ENV="prod"
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "prod" "${KUBECONFIG}" >/dev/null
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
@@ -1964,8 +1968,15 @@ dspace-oci-redeploy env='staging' tag='':
       values_chain="${values_chain},${overlay}"
     fi
 
-    # NOTE: This tokenplace-scoped change intentionally leaves dspace kubeconfig behavior unchanged here.
-    # If dspace needs env-scoped kubeconfig selection before Helm, handle that in a separate DSPACE PR.
+    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
+      scripts/ensure_user_kubeconfig.sh || true
+    fi
+    if [ -z "${KUBECONFIG:-}" ]; then
+      export KUBECONFIG="${HOME}/.kube/config"
+    fi
+    export SUGARKUBE_ENV="${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
+
     deploy_tag="{{ tag }}"
     default_tag_value=""
     if [ "${env_name}" = "prod" ]; then
@@ -1986,11 +1997,6 @@ dspace-oci-redeploy env='staging' tag='':
       values="${values_chain}" \
       version_file='docs/apps/dspace.version' \
       tag="${deploy_tag}" default_tag="${default_tag_value}"
-
-    scripts/ensure_user_kubeconfig.sh || true
-    if [ -z "${KUBECONFIG:-}" ]; then
-      export KUBECONFIG="${HOME}/.kube/config"
-    fi
 
     echo "Forcing rollout restart for dspace deployment..."
     if ! kubectl -n dspace rollout restart deploy/dspace; then
@@ -2351,12 +2357,12 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
       version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
 
-tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='staging':
+tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     if [ -z '{{ release }}' ] || [ -z '{{ namespace }}' ] || [ -z '{{ revision }}' ]; then
-      echo "Usage: just tokenplace-rollback release=<name> namespace=<ns> revision=<helm_revision>" >&2
+      echo "Usage: just tokenplace-rollback release=<name> namespace=<ns> revision=<helm_revision> env=<dev|staging|prod>" >&2
       exit 1
     fi
     ns='{{ namespace }}'
@@ -2365,6 +2371,10 @@ tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env=
     while [ "${env_name#env=}" != "${env_name}" ]; do
       env_name="${env_name#env=}"
     done
+    if [ -z "${env_name}" ]; then
+      echo "ERROR: env is required for tokenplace-rollback. Use env=dev|staging|prod." >&2
+      exit 1
+    fi
     if [ "${env_name}" = "int" ]; then
       env_name="staging"
     fi
