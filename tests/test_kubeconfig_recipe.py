@@ -150,3 +150,122 @@ def test_kubeconfig_env_mismatch_does_not_persist_false_context(tmp_path: Path) 
     assert result.returncode != 0
     assert "requested env=prod" in result.stderr
     assert existing.read_text(encoding="utf-8") == "current-context: sugar-staging\n"
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+@pytest.mark.parametrize("requested", ["prod", "env=prod", "staging", "env=staging"])
+def test_assert_cluster_env_accepts_positional_and_env_prefix(
+    tmp_path: Path, requested: str
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    expected_env = requested.removeprefix("env=")
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "KUBECONFIG": str(kubeconfig),
+            "SUGARKUBE_STUB_NODE_ENV": expected_env,
+        }
+    )
+
+    result = subprocess.run(
+        ["just", "--justfile", str(JUSTFILE), "assert-cluster-env", requested],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected_env
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_assert_cluster_env_prefixed_mismatch_fails_closed(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "KUBECONFIG": str(kubeconfig),
+            "SUGARKUBE_STUB_NODE_ENV": "staging",
+        }
+    )
+
+    result = subprocess.run(
+        ["just", "--justfile", str(JUSTFILE), "assert-cluster-env", "env=prod"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    assert "env=staging" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+@pytest.mark.parametrize("requested", ["qa", "env=qa", "env="])
+def test_assert_cluster_env_invalid_values_remain_rejected(
+    tmp_path: Path, requested: str
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {"PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "KUBECONFIG": str(kubeconfig)}
+    )
+
+    result = subprocess.run(
+        ["just", "--justfile", str(JUSTFILE), "assert-cluster-env", requested],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "env must" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_assert_cluster_env_legacy_int_normalization_remains_supported(
+    tmp_path: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_kubectl(bin_dir)
+    kubeconfig = tmp_path / "config"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "KUBECONFIG": str(kubeconfig),
+            "SUGARKUBE_STUB_NODE_ENV": "staging",
+        }
+    )
+
+    result = subprocess.run(
+        ["just", "--justfile", str(JUSTFILE), "assert-cluster-env", "int"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "staging"
+    assert 'env name "int" is deprecated' in result.stderr
