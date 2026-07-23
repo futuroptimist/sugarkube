@@ -480,12 +480,41 @@ kubeconfig-env env='dev':
     fi
     user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
+    tmp_config="$(mktemp "${HOME}/.kube/config.candidate.XXXXXX")"
+    cleanup() { rm -f "${tmp_config}"; }
+    trap cleanup EXIT
+    sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
+    sudo chown "$user":"$user" "${tmp_config}" || true
+    chmod 600 "${tmp_config}"
+    export SUGARKUBE_REQUESTED_ENV="${env_name}"
+    detected_env="$(python3 scripts/cluster_identity.py assert --kubeconfig "${tmp_config}" --env "${env_name}")"
+    unset SUGARKUBE_REQUESTED_ENV
+    scope_name="sugar-${detected_env}"
+    python3 scripts/update_kubeconfig_scope.py "${tmp_config}" "${scope_name}"
+    mv "${tmp_config}" "${HOME}/.kube/config"
+    trap - EXIT
     chmod 700 ~/.kube
     chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+
+# Read-only cluster identity detector based on Kubernetes node labels.
+cluster-env-detect kubeconfig='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    kubeconfig_path={{ quote(kubeconfig) }}
+    if [ -z "${kubeconfig_path}" ]; then
+      kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
+    fi
+    python3 scripts/cluster_identity.py detect --kubeconfig "${kubeconfig_path}"
+
+# Fail closed unless the connected cluster's node labels match env.
+assert-cluster-env env kubeconfig='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    kubeconfig_path={{ quote(kubeconfig) }}
+    if [ -z "${kubeconfig_path}" ]; then
+      kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
+    fi
+    python3 scripts/cluster_identity.py assert --kubeconfig "${kubeconfig_path}" --env {{ quote(env) }}
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
@@ -1203,6 +1232,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
     fi
+    if [ -n "${SUGARKUBE_ENV:-}" ]; then
+      python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${SUGARKUBE_ENV}" >/dev/null
+    fi
 
     raw_args=(
         "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
@@ -1555,6 +1587,7 @@ app-deploy app env='staging' tag='' config='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${SUGARKUBE_ENV}" "${KUBECONFIG}" >/dev/null
     python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
@@ -1588,6 +1621,7 @@ app-redeploy app env='staging' tag='' config='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${SUGARKUBE_ENV}" "${KUBECONFIG}" >/dev/null
     python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
@@ -2104,6 +2138,7 @@ tokenplace-oci-deploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    export SUGARKUBE_ENV="${env_name}"
     echo "Deploying tokenplace env=${env_name} chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag}"
     python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
       --app tokenplace \
@@ -2211,6 +2246,7 @@ tokenplace-oci-redeploy env='staging' tag='':
     # This is tokenplace-scoped; do not copy into DSPACE from this PR.
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    export SUGARKUBE_ENV="${env_name}"
     python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
       --app tokenplace \
       --env "${env_name}" \
@@ -2315,7 +2351,7 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
       version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
 
-tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
+tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='staging':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2325,6 +2361,21 @@ tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
     fi
     ns='{{ namespace }}'
     release='{{ release }}'
+    env_name='{{ env }}'
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+      env_name="${env_name#env=}"
+    done
+    if [ "${env_name}" = "int" ]; then
+      env_name="staging"
+    fi
+    case "${env_name}" in
+      dev|staging|prod) ;;
+      *) echo "ERROR: env must be one of dev|staging|prod." >&2; exit 1 ;;
+    esac
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    export SUGARKUBE_ENV="${env_name}"
+    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     helm -n "${ns}" rollback "${release}" '{{ revision }}'
 
@@ -2446,6 +2497,7 @@ danielsmith-oci-deploy env='staging' tag='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    export SUGARKUBE_ENV="${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='danielsmith' namespace='danielsmith' \
@@ -2558,6 +2610,7 @@ danielsmith-oci-redeploy env='staging' tag='':
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
+    export SUGARKUBE_ENV="${env_name}"
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='danielsmith' namespace='danielsmith' \

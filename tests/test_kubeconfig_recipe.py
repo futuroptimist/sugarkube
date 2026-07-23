@@ -45,6 +45,27 @@ if __name__ == "__main__":
     script.chmod(0o755)
 
 
+def _write_fake_kubectl(bin_dir: Path) -> None:
+    script = bin_dir / "kubectl"
+    script.write_text(
+        textwrap.dedent(
+            """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"get nodes -o json"* ]]; then
+  env_label="${SUGARKUBE_STUB_NODE_ENV:-dev}"
+  printf '{"items":[{"metadata":{"name":"sugarkube1","labels":{"sugarkube.env":"%s","sugarkube.cluster":"sugarkube"}}}]}\n' "$env_label"
+  exit 0
+fi
+if [[ "$*" == *"config current-context"* ]]; then printf 'PLACEHOLDER-CONTEXT\n'; exit 0; fi
+if [[ "$*" == *"config view"* ]]; then printf 'https://127.0.0.1:6443'; exit 0; fi
+exit 1
+"""
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+
 @pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
 def test_kubeconfig_recipe_scopes_context(tmp_path: Path) -> None:
     home = tmp_path / "home"
@@ -78,6 +99,7 @@ users:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_sudo(bin_dir)
+    _write_fake_kubectl(bin_dir)
 
     env = os.environ.copy()
     env.update(
@@ -109,3 +131,22 @@ users:
     assert "sugar-dev" in contents
     assert "current-context: sugar-dev" in contents
     assert "PLACEHOLDER" not in contents
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_kubeconfig_env_mismatch_does_not_persist_false_context(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / ".kube").mkdir(parents=True)
+    existing = home / ".kube" / "config"
+    existing.write_text("current-context: sugar-staging\n", encoding="utf-8")
+    source_config = tmp_path / "k3s.yaml"
+    source_config.write_text("apiVersion: v1\nclusters: []\ncontexts: []\nusers: []\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_sudo(bin_dir)
+    _write_fake_kubectl(bin_dir)
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "TEST_K3S_SOURCE": str(source_config), "TEST_SKIP_CHOWN": "1", "SUGARKUBE_STUB_NODE_ENV": "staging"})
+    result = subprocess.run(["just", "--justfile", str(JUSTFILE), "kubeconfig-env", "env=prod"], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    assert existing.read_text(encoding="utf-8") == "current-context: sugar-staging\n"

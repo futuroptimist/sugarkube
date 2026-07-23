@@ -64,6 +64,14 @@ fi
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
+if [[ "$*" == *"get nodes -o json"* ]]; then
+  env_label="${{SUGARKUBE_STUB_NODE_ENV:-${{SUGARKUBE_REQUESTED_ENV:-${{SUGARKUBE_ENV:-staging}}}}}}"
+  cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugarkube}}"
+  printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}}]}}\n' "$env_label" "$cluster_label" "$env_label" "$cluster_label"
+  exit 0
+fi
+if [[ "$*" == *"config current-context"* ]]; then printf 'sugar-prod\n'; exit 0; fi
+if [[ "$*" == *"config view"* ]]; then printf 'https://127.0.0.1:6443'; exit 0; fi
 if [[ "$*" == *"get deploy,statefulset,daemonset"* ]]; then
   printf 'Deployment/danielsmith\n'
   exit 0
@@ -2433,3 +2441,34 @@ def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
     assert headers == {}
     assert body == b""
     assert stderr == ""
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_deploy_guard_mismatch_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "staging"
+    result = _run_just(["app-deploy", "app=jobbot3000", "env=prod", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_redeploy_guard_staging_requested_prod_detected_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    result = _run_just(["app-redeploy", "app=jobbot3000", "env=staging", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    assert "requested env=staging" in result.stderr
+    helm_log_path = Path(env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_chart_bump_remains_cluster_independent(generic_app_stub_env: dict[str, str]) -> None:
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    result = _run_just(["app-chart-bump", "app=tokenplace", "version=0.1.3"], env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    kubectl_log = Path(env["HOME"]).parent / "kubectl.log"
+    assert not kubectl_log.exists() or "get nodes" not in kubectl_log.read_text(encoding="utf-8")
