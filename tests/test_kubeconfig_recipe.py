@@ -78,6 +78,24 @@ users:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_sudo(bin_dir)
+    kubectl = bin_dir / "kubectl"
+    kubectl.write_text(
+        textwrap.dedent(
+            """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"config current-context"* ]]; then printf 'PLACEHOLDER-CONTEXT\n'; exit 0; fi
+if [[ "$*" == *"config view"* ]]; then printf 'https://127.0.0.1:6443\n'; exit 0; fi
+if [[ "$*" == *"get"*"nodes"* && "$*" == *"-o"*"json"* ]]; then
+  env_label="${SUGARKUBE_STUB_NODE_ENV:-dev}"
+  printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"sugar","sugarkube.env":"%s"}}}]}\n' "$env_label"
+  exit 0
+fi
+exit 0
+"""
+        ),
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
 
     env = os.environ.copy()
     env.update(
@@ -109,3 +127,52 @@ users:
     assert "sugar-dev" in contents
     assert "current-context: sugar-dev" in contents
     assert "PLACEHOLDER" not in contents
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_kubeconfig_env_mismatch_does_not_persist_false_context(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    kube_dir = home / ".kube"
+    kube_dir.mkdir(parents=True)
+    existing = kube_dir / "config"
+    existing.write_text("current-context: sugar-staging\n", encoding="utf-8")
+    source_config = tmp_path / "k3s.yaml"
+    source_config.write_text(
+        """apiVersion: v1
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: default
+contexts:
+- context:
+    cluster: default
+    user: default
+  name: default
+current-context: sugar-prod
+users:
+- name: default
+  user: {}
+""",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_sudo(bin_dir)
+    kubectl = bin_dir / "kubectl"
+    kubectl.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"config current-context"* ]]; then printf 'sugar-prod\n'; exit 0; fi
+if [[ "$*" == *"config view"* ]]; then printf 'https://127.0.0.1:6443\n'; exit 0; fi
+if [[ "$*" == *"get"*"nodes"* && "$*" == *"-o"*"json"* ]]; then printf '{"items":[{"metadata":{"name":"sugarkube3","labels":{"sugarkube.cluster":"sugar","sugarkube.env":"staging"}}}]}\n'; exit 0; fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}", "TEST_K3S_SOURCE": str(source_config), "TEST_SKIP_CHOWN": "1"})
+    result = subprocess.run(["just", "--justfile", str(JUSTFILE), "kubeconfig-env", "env=prod"], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert "requested env=prod" in result.stderr
+    assert existing.read_text(encoding="utf-8") == "current-context: sugar-staging\n"

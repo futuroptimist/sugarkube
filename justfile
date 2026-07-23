@@ -461,7 +461,25 @@ kubeconfig env='':
 kubeconfig-user:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig
 
-# Copy k3s kubeconfig to ~/.kube/config and rename context for the specified environment.
+cluster-env-detect:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+    python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" --kubeconfig "${KUBECONFIG}"
+
+cluster-env-assert env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env_input={{ quote(env) }}
+    env_name="${env_input}"
+    while [ "${env_name#env=}" != "${env_name}" ]; do
+        env_name="${env_name#env=}"
+    done
+    if [ "${env_name}" = "int" ]; then env_name="staging"; fi
+    export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+    python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" --kubeconfig "${KUBECONFIG}" --env "${env_name}" --assert-env >/dev/null
+
+# Copy k3s kubeconfig to ~/.kube/config and rename context for the validated environment.
 kubeconfig-env env='dev':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -480,12 +498,22 @@ kubeconfig-env env='dev':
     fi
     user="${USER:-$(id -un)}"
     mkdir -p ~/.kube
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-    sudo chown -R "$user":"$user" ~/.kube
+    tmp_config="$(mktemp "${HOME}/.kube/config.candidate.XXXXXX")"
+    cleanup() { rm -f "${tmp_config}"; }
+    trap cleanup EXIT
+    sudo cp /etc/rancher/k3s/k3s.yaml "${tmp_config}"
+    sudo chown "$user":"$user" "${tmp_config}" || true
     chmod 700 ~/.kube
-    chmod 600 ~/.kube/config
-    scope_name="sugar-${env_name}"
-    python3 scripts/update_kubeconfig_scope.py "${HOME}/.kube/config" "${scope_name}"
+    chmod 600 "${tmp_config}"
+    detected_output="$(python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" --kubeconfig "${tmp_config}" --env "${env_name}" --assert-env)"
+    detected_env="$(printf '%s\n' "${detected_output}" | sed -n 's/^env=//p' | head -n1)"
+    [ -n "${detected_env}" ] || detected_env="${env_name}"
+    scope_name="sugar-${detected_env}"
+    python3 scripts/update_kubeconfig_scope.py "${tmp_config}" "${scope_name}"
+    mv -f "${tmp_config}" "${HOME}/.kube/config"
+    sudo chown -R "$user":"$user" ~/.kube
+    chmod 600 "${HOME}/.kube/config"
+    trap - EXIT
 
 kubeconfig-dev:
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env env=dev
@@ -1202,6 +1230,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     if [ -z "${KUBECONFIG:-}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
+    fi
+    if [ -n "${SUGARKUBE_ENV:-}" ]; then
+      just --justfile "{{ justfile_directory() }}/justfile" cluster-env-assert "${SUGARKUBE_ENV}"
     fi
 
     raw_args=(
@@ -2315,7 +2346,7 @@ tokenplace-upgrade release='tokenplace' namespace='tokenplace' chart='oci://ghcr
       release='{{ release }}' namespace='{{ namespace }}' chart='{{ chart }}' values='{{ values }}' \
       version_file='{{ version_file }}' version='{{ version }}' tag="${resolved_tag}" default_tag="${resolved_default_tag}"
 
-tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
+tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='' env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2325,6 +2356,17 @@ tokenplace-rollback release='tokenplace' namespace='tokenplace' revision='':
     fi
     ns='{{ namespace }}'
     release='{{ release }}'
+    rollback_env='{{ env }}'
+    while [ "${rollback_env#env=}" != "${rollback_env}" ]; do
+      rollback_env="${rollback_env#env=}"
+    done
+    if [ -z "${rollback_env}" ]; then
+      rollback_env="${SUGARKUBE_ENV:-}"
+    fi
+    if [ -n "${rollback_env}" ]; then
+      export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+      just --justfile "{{ justfile_directory() }}/justfile" cluster-env-assert "${rollback_env}"
+    fi
 
     helm -n "${ns}" rollback "${release}" '{{ revision }}'
 

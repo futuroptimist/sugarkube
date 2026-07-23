@@ -63,6 +63,28 @@ APP_TAG=main-REPLACE_SHORTSHA
 just app-deploy app=appslug env=staging tag="$APP_TAG" config="$APP_CONFIG"
 ```
 
+Sugarkube treats Kubernetes node labels as the authoritative cluster identity for
+environment-scoped mutations. `sugarkube.env` must be present and consistent on every
+node (`dev`, `staging`, or `prod`; legacy `int` is normalized to `staging`), and
+`sugarkube.cluster` is reported in diagnostics. Kubeconfig context names such as
+`sugar-prod` are display/scoping conveniences only; they cannot override the
+identity reported by the connected Kubernetes API. Before Helm install, upgrade,
+promote, redeploy, or environment-scoped rollback paths mutate a cluster, Sugarkube
+fails closed if the requested `env=` is missing, mixed across nodes, unreadable, or
+different from the node labels.
+
+Inspect the connected cluster identity without mutating anything:
+
+```bash
+just cluster-env-detect
+```
+
+Equivalent raw query:
+
+```bash
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,CLUSTER:.metadata.labels.sugarkube\.cluster,ENV:.metadata.labels.sugarkube\.env'
+```
+
 ## Minimal image workflow checklist
 
 The app repo's `ci-image.yml` should answer yes to each item before Sugarkube starts using it.

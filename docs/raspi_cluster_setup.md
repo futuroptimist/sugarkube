@@ -277,7 +277,9 @@ kubectl get nodes
 
 After this, `kubectl` (and `k3s kubectl`) reads `~/.kube/config` for `pi` and no longer needs
 `sudo` on that node. On your workstation, `just kubeconfig-env env=dev` remains the recommended way
-to download the kubeconfig from the cluster.
+to download the kubeconfig from the cluster. `just kubeconfig-env` validates the copied kubeconfig against the connected
+cluster's `sugarkube.env` node labels before it persists a renamed context; the final context name
+reflects the validated environment rather than an untrusted argument.
 
 ## How Discovery Works
 
