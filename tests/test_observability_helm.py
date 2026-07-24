@@ -10,6 +10,7 @@ COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.v
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 JUSTFILE = ROOT / "justfile"
+FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
 LEGACY = [
     ROOT / "platform" / "observability" / "kube-prometheus-stack.yaml",
     ROOT / "platform" / "observability" / "kube-prometheus-stack-values.yaml",
@@ -181,6 +182,19 @@ def test_legacy_flux_resources_are_absent_from_reconciliation_graph():
     assert "kube-prometheus-stack-values.yaml" not in platform
     assert "patches/kube-prometheus-stack-values.yaml" not in staging
     assert "patches/kube-prometheus-stack-values.yaml" not in production
+    assert "no Flux CRDs" in platform
+    assert "never established Flux ownership" in platform
+
+
+def test_flux_health_checks_exclude_manually_managed_observability():
+    text = FLUX_SYNC.read_text(encoding="utf-8")
+    health_checks = text.split("  healthChecks:\n", 1)[1].split("  sourceRef:\n", 1)[0]
+    names = set(re.findall(r"^      name: (.+)$", health_checks, re.M))
+    assert "kube-prometheus-stack-prometheus" not in names
+    assert "kube-prometheus-stack-alertmanager" not in names
+    assert names == {"traefik", "cloudflared", "longhorn-driver-deployer"}
+    assert "manually managed" in text
+    assert "just observability-verify" in text
 
 
 def run_helper(tmp_path: Path, command: str, *, helm_mode="absent", context="sugar-staging", kubectl_mode="healthy"):

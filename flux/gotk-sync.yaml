@@ -20,6 +20,7 @@ spec:
   interval: 5m
   prune: true
   wait: true
+  # kube-prometheus-stack is manually managed; verify it separately with `just observability-verify`.
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
@@ -29,14 +30,6 @@ spec:
       kind: Deployment
       name: cloudflared
       namespace: cloudflared
-    - apiVersion: apps/v1
-      kind: StatefulSet
-      name: kube-prometheus-stack-prometheus
-      namespace: monitoring
-    - apiVersion: apps/v1
-      kind: StatefulSet
-      name: kube-prometheus-stack-alertmanager
-      namespace: monitoring
     - apiVersion: apps/v1
       kind: Deployment
       name: longhorn-driver-deployer
