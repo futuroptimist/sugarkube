@@ -89,3 +89,46 @@ def test_dspace_values_chains_resolve_expected_deployment_overlays() -> None:
     for env, expected_values in EXPECTED_VALUES_CHAINS.items():
         config = load_config("dspace", env)
         assert config["SUGARKUBE_VALUES"] == expected_values
+
+
+def _first_version(path: Path) -> str:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        version = line.split("#", 1)[0].strip()
+        if version:
+            return version
+    raise AssertionError(f"no version in {path}")
+
+
+def test_dspace_environment_chart_pins_and_prod_tag_are_fixed() -> None:
+    staging = load_config("dspace", "staging")
+    prod = load_config("dspace", "prod")
+
+    assert staging["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.staging.version"
+    assert staging["SUGARKUBE_RESOLVED_VERSION"] == "3.1.0"
+    assert _first_version(REPO_ROOT / "docs/apps/dspace.staging.version") == "3.1.0"
+    assert prod["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.prod.version"
+    assert prod["SUGARKUBE_RESOLVED_VERSION"] == "3.0.1"
+    assert _first_version(REPO_ROOT / "docs/apps/dspace.prod.version") == "3.0.1"
+    assert _first_version(REPO_ROOT / "docs/apps/dspace.version") == "3.0.1"
+    assert _first_version(REPO_ROOT / "docs/apps/dspace.prod.tag") == "main-1a31a56"
+
+
+def test_dspace_staging_values_enable_authenticated_metrics_servicemonitor() -> None:
+    text = OVERLAYS["staging"].read_text(encoding="utf-8")
+
+    assert text.count("serviceMonitor:") == 1
+    assert "metrics:\n  enabled: true" in text
+    assert "existingSecret: dspace-staging-metrics-token" in text
+    assert "secretKey: token" in text
+    assert "serviceMonitor:\n  enabled: true" in text
+    assert "release: kube-prometheus-stack" in text
+    assert "cluster: sugarkube-int" in text
+    assert "bearer" not in text.lower()
+
+
+def test_dspace_prod_values_do_not_enable_metrics_or_servicemonitor() -> None:
+    text = OVERLAYS["prod"].read_text(encoding="utf-8")
+
+    assert "serviceMonitor:" not in text
+    assert "metrics:" not in text
+    assert "dspace-staging-metrics-token" not in text

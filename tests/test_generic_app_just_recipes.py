@@ -2666,3 +2666,82 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert "requested env=prod" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_app_deploy_uses_staging_chart_pin(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(
+        ["app-deploy", "app=dspace", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "show chart oci://ghcr.io/democratizedspace/charts/dspace --version 3.1.0" in helm_log
+    assert "--version 3.1.0" in helm_log
+    assert "--version 3.0.1" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_promote_prod_uses_prod_chart_pin_and_default_image(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    result = _run_just(["app-promote-prod", "app=dspace"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "show chart oci://ghcr.io/democratizedspace/charts/dspace --version 3.0.1" in helm_log
+    assert "--version 3.0.1" in helm_log
+    assert "--version 3.1.0" not in helm_log
+    assert "--set image.tag=main-1a31a56" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [(None, "missing"), ("# blank\n", "empty"), ("bad-version\n", "malformed")],
+)
+def test_app_deploy_rejects_selected_version_file_before_helm(
+    tmp_path: Path,
+    contents: str | None,
+    message: str,
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    shared = tmp_path / "shared.version"
+    selected = tmp_path / "selected.version"
+    shared.write_text("1.0.0\n", encoding="utf-8")
+    if contents is not None:
+        selected.write_text(contents, encoding="utf-8")
+    config = tmp_path / "custom.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=custom",
+                "SUGARKUBE_RELEASE=custom",
+                "SUGARKUBE_NAMESPACE=custom",
+                "SUGARKUBE_CHART=oci://example.invalid/charts/custom",
+                f"SUGARKUBE_VERSION_FILE={shared}",
+                f"SUGARKUBE_VERSION_FILE_STAGING={selected}",
+                "SUGARKUBE_VALUES_DEV=dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=dev.yaml,staging.yaml",
+                "SUGARKUBE_VALUES_PROD=dev.yaml,prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CONFIG_DIR"] = str(tmp_path)
+    result = _run_just(
+        ["app-deploy", "app=custom", "env=staging", "tag=main-deadbee"],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert "env=staging" in result.stderr
+    assert str(selected) in result.stderr
+    helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""

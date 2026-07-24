@@ -1346,12 +1346,21 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
     chart_version="${version}"
-    if [ -z "${chart_version}" ] && [ -n "${version_file}" ] && [ -f "${version_file}" ]; then
+    if [ -z "${chart_version}" ] && [ -n "${version_file}" ]; then
+        if [ ! -f "${version_file}" ]; then
+            echo "ERROR: resolved chart version file for env=${requested_env} is missing: ${version_file}." >&2
+            exit 1
+        fi
         chart_version="$(
             sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${version_file}" | head -n1 | tr -d '[:space:]' || true
         )"
         if [ -z "${chart_version}" ]; then
-            echo "Warning: version_file '${version_file}' did not contain a valid version" >&2
+            echo "ERROR: resolved chart version file for env=${requested_env} is empty: ${version_file}." >&2
+            exit 1
+        fi
+        if [[ ! "${chart_version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "ERROR: resolved chart version file for env=${requested_env} has malformed version at ${version_file}: ${chart_version}. Use a semver chart version such as 3.1.0." >&2
+            exit 1
         fi
     fi
 
@@ -1833,6 +1842,8 @@ dspace-oci-deploy env='staging' tag='':
         ;;
     esac
 
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
+
     deploy_tag="$(echo "{{ tag }}" | xargs)"
     if [ -z "${deploy_tag}" ]; then
       echo "Set tag=<immutable-tag> (for example main-<shortsha> or 3.1.0) for dspace immutable deploys." >&2
@@ -1853,10 +1864,7 @@ dspace-oci-deploy env='staging' tag='':
       fi
     fi
 
-    values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ -n "${overlay}" ]; then
-      values_chain="${values_chain},${overlay}"
-    fi
+    values_chain="${SUGARKUBE_VALUES}"
 
     if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
       scripts/ensure_user_kubeconfig.sh || true
@@ -1871,7 +1879,7 @@ dspace-oci-deploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE:-docs/apps/dspace.version}" \
       tag="${deploy_tag}" \
       env="${env_name}"
 
@@ -1916,6 +1924,8 @@ dspace-oci-deploy-prod-subdomain tag='':
       exit 1
     fi
 
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env prod)"
+
     values_chain="docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml"
     if [ ! -f "docs/examples/dspace.values.prod-subdomain.yaml" ]; then
       echo "Missing values overlay: docs/examples/dspace.values.prod-subdomain.yaml" >&2
@@ -1935,7 +1945,7 @@ dspace-oci-deploy-prod-subdomain tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE:-docs/apps/dspace.version}" \
       tag="${deploy_tag}" \
       env="prod"
 
@@ -1985,15 +1995,14 @@ dspace-oci-redeploy env='staging' tag='':
 
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
+
     overlay="docs/examples/dspace.values.${env_name}.yaml"
     if [ ! -f "${overlay}" ]; then
       echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
       exit 1
     fi
-    values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ "${env_name}" != "dev" ]; then
-      values_chain="${values_chain},${overlay}"
-    fi
+    values_chain="${SUGARKUBE_VALUES}"
 
     if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
       scripts/ensure_user_kubeconfig.sh || true
@@ -2022,7 +2031,7 @@ dspace-oci-redeploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE:-docs/apps/dspace.version}" \
       tag="${deploy_tag}" \
       env="${env_name}" default_tag="${default_tag_value}"
 
