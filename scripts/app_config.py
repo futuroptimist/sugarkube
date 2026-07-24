@@ -159,7 +159,14 @@ def parse_dotenv(path: Path) -> dict[str, str]:
 
 def resolve_version_file(config_path: Path, data: dict[str, str], env: str) -> str:
     env_key = f"SUGARKUBE_VERSION_FILE_{env.upper()}"
-    version_file = data.get(env_key) or data.get("SUGARKUBE_VERSION_FILE", "")
+    if env_key in data:
+        version_file = data[env_key]
+        if not version_file:
+            raise AppConfigError(
+                f"{config_path}: {env_key} is empty for env={env}; set it to a chart version file or remove it to use SUGARKUBE_VERSION_FILE."
+            )
+    else:
+        version_file = data.get("SUGARKUBE_VERSION_FILE", "")
     if not version_file:
         return ""
     path = Path(version_file)

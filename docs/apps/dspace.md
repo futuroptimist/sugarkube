@@ -76,12 +76,16 @@ gh workflow run ci-image.yml --repo democratizedspace/dspace --ref main
 Sugarkube deploys the chart version resolved from `docs/examples/apps/dspace.env`: `SUGARKUBE_VERSION_FILE_<ENV>` for the requested environment when present, otherwise the shared `docs/apps/dspace.version` fallback. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) until that package page appears.
 
 ```bash
-CHART_PIN=$(python3 scripts/app_config.py json --app dspace --env staging | jq -r .SUGARKUBE_VERSION_FILE)
-CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "$CHART_PIN" | head -n 1)
+STAGING_CHART_PIN=$(python3 scripts/app_config.py json --app dspace --env staging | jq -r .SUGARKUBE_VERSION_FILE)
+STAGING_CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "$STAGING_CHART_PIN" | head -n 1)
 ```
 
 ```bash
-helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$CHART_VERSION"
+helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$STAGING_CHART_VERSION"
+
+PROD_CHART_PIN=$(python3 scripts/app_config.py json --app dspace --env prod | jq -r .SUGARKUBE_VERSION_FILE)
+PROD_CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "$PROD_CHART_PIN" | head -n 1)
+helm show chart oci://ghcr.io/democratizedspace/charts/dspace --version "$PROD_CHART_VERSION"
 ```
 
 If the chart changed, bump the chart version in the DSPACE app repo and publish it there with [the chart workflow](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml); do not republish a different chart under an existing OCI version.
@@ -293,9 +297,9 @@ just cf-tunnel-route host=democratized.space
 The generic app commands above should be the normal operator path. Keep these lower-level helpers available for compatibility with existing tests and older runbooks when debugging raw Helm parameters.
 
 ```bash
-just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version tag="$APP_TAG" env=staging
+just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
 
 ```bash
-just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version tag="$APP_TAG" env=staging
+just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```

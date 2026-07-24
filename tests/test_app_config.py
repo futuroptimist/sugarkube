@@ -384,6 +384,36 @@ def test_shared_version_file_remains_default_for_all_envs(tmp_path: Path) -> Non
         assert cfg["SUGARKUBE_VERSION_FILE"] == str(pin)
 
 
+def test_direct_version_pin_skips_unused_version_file_validation(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path / "inline.env",
+        SUGARKUBE_VERSION="9.8.7",
+        SUGARKUBE_VERSION_FILE=str(tmp_path / "missing.version"),
+    )
+
+    cfg = app_config.load_config("custom", "staging", str(config))
+
+    assert cfg["SUGARKUBE_VERSION"] == "9.8.7"
+    assert cfg["SUGARKUBE_VERSION_FILE"] == str(tmp_path / "missing.version")
+
+
+def test_blank_env_specific_version_file_does_not_fall_back(tmp_path: Path) -> None:
+    shared = tmp_path / "shared.version"
+    shared.write_text("1.2.3\n", encoding="utf-8")
+    config = _write_config(
+        tmp_path / "blank-env-pin.env",
+        SUGARKUBE_VERSION="",
+        SUGARKUBE_VERSION_FILE=str(shared),
+        SUGARKUBE_VERSION_FILE_STAGING="",
+    )
+
+    with pytest.raises(
+        app_config.AppConfigError,
+        match="SUGARKUBE_VERSION_FILE_STAGING is empty for env=staging",
+    ):
+        app_config.load_config("custom", "staging", str(config))
+
+
 def test_env_specific_version_file_overrides_only_matching_env(tmp_path: Path) -> None:
     shared = tmp_path / "shared.version"
     staging = tmp_path / "staging.version"
