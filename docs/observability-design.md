@@ -4,6 +4,9 @@ This is the canonical, implementation-ready design for Sugarkube observability a
 
 This document is the design contract. The repository now includes Flux-managed kube-prometheus-stack, Loki/Promtail, and the first blackbox exporter/Probe manifests, but those source files are not live deployment evidence until a cluster is reconciled and verified. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
 
+
+> Current live staging note: [`docs/observability-operations.md`](./observability-operations.md) is the canonical guarded non-Flux Helm lifecycle for the live staging `kube-prometheus-stack` release. The Flux/Longhorn manifests described in this design are inactive, unvalidated future/legacy configuration and must not be applied to staging or production as currently written. Operators must not combine both lifecycle paths for the same release.
+
 ## Audit scope and evidence
 
 Local Sugarkube sources audited:

@@ -1,0 +1,14 @@
+# Staging-only additions verified against the manually installed sugar-staging baseline.
+prometheus:
+  prometheusSpec:
+    externalLabels:
+      cluster: sugarkube-int
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi

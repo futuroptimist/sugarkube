@@ -1,0 +1,56 @@
+# Canonical non-Flux Helm values for the live staging observability lifecycle.
+# Do not apply the legacy Flux/Longhorn manifests for this release at the same time.
+fullnameOverride: kube-prometheus-stack
+prometheus:
+  service:
+    type: ClusterIP
+  prometheusSpec:
+    replicas: 1
+    retention: 7d
+    retentionSize: 15GB
+    enableAdminAPI: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    probeSelectorNilUsesHelmValues: false
+alertmanager:
+  service:
+    type: ClusterIP
+  alertmanagerSpec:
+    replicas: 1
+  config:
+    route:
+      receiver: "null"
+    receivers:
+      - name: "null"
+grafana:
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: false
+  ingress:
+    enabled: false
+  service:
+    type: NodePort
+    nodePort: 30300
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false

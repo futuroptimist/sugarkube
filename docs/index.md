@@ -33,6 +33,7 @@ Review the safety notes before working with power components.
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
 - [observability-design.md](observability-design.md) — canonical Prometheus/Grafana observability
   design across Sugarkube, DSPACE, token.place, and danielsmith.io
+- [observability-operations.md](observability-operations.md) — guarded non-Flux staging Prometheus/Grafana Helm lifecycle
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels

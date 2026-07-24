@@ -1,3 +1,4 @@
+# LEGACY/FUTURE ONLY: inactive Flux/Longhorn observability design. Do not apply to staging or production as currently written; use the non-Flux Helm lifecycle in scripts/observability_helm.sh for the live staging kube-prometheus-stack release. Do not combine both lifecycle paths for the same release.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
